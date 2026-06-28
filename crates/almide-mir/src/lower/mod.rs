@@ -509,16 +509,20 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
     out
 }
 
-/// A record field whose flat `rc_dec` of its handle would LEAK nested heap (so the record needs a
-/// generated recursive `$__drop_<R>`): a `Map`/`Value`/record/`List[heap]` field. A plain `String`
-/// (its `rc_dec` IS its full free), a scalar, or a `List[scalar]` (the block frees flat) does NOT.
+/// Does a record carrying a field of type `ty` need a generated recursive `$__drop_<R>` (rather than
+/// a flat one-level `rc_dec` of its block)? ANY heap field does: a flat `rc_dec` of the record block
+/// frees only the block, leaking every owned heap SLOT (a `String` handle, a `List`/`Map`/`Value`
+/// handle, a nested record). This was historically `false` for `String` / `List[scalar]` because the
+/// DIRECT-drop path masks those slots (`record_masks` → `DropListStr`); but a record so classified
+/// gets NO `$__drop_<R>`, so when it is NESTED as a field of ANOTHER recursive record the outer's
+/// per-field free (`record_drop_field_frees`) has no routine to call and falls back to a flat
+/// `rc_dec` that LEAKS the inner slot (the porta `Parser = { bytes: List[Int], pos: Int }` nested in
+/// `{ val, next: Parser }` — its `bytes` list leaked). Generating `$__drop_<R>` for every heap-field
+/// record closes that: for an already-direct-dropped record the generated body frees the SAME slots
+/// as the mask (`String`/`List[scalar]` → one `rc_dec` each), so the output is byte-identical and the
+/// ownership cert stays a single `d`; the only delta is that the routine now EXISTS for nesting.
 pub fn record_field_needs_recursive_drop(ty: &Ty) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    match ty {
-        Ty::String => false,
-        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => is_heap_ty(&a[0]),
-        _ => is_heap_ty(ty),
-    }
+    is_heap_ty(ty)
 }
 
 /// The set of RECORD type names whose drop must be the recursive `$__drop_<R>` (any field
