@@ -429,6 +429,107 @@ fn user_module_fn_name(module: &str, func: &str) -> String {
     format!("almide_rt_{}_{}", module.replace('.', "_"), func.replace('.', "_"))
 }
 
+/// Build the set of NATIVE-FFI function keys over the LINKED IR: functions that TRANSITIVELY
+/// reach a STRUCTURAL native root — a root being EITHER an `@extern(rust/rs)` declaration (no
+/// wasm form: porta `wasm_rt.almd` `wt_*`, almide-sqlite `native_*`) OR a DIRECT call to a
+/// permanently-no-wasm stdlib effect (`net.*`, `process.exec/exit/run`, `http.request`). Such a
+/// function can NEVER lower to wasm; its wall is STRUCTURAL, not a v1 lowering gap, so it must be
+/// EXCLUDED from the wall=0 metric exactly like the already-excluded `@extern(wasm)` WASI imports
+/// (those lower via `extern_wasm_target` and never wall — they are not roots here).
+///
+/// SOUNDNESS (do-NOT-over-exclude): ONLY those two root shapes seed the set. A function that walls
+/// on a PURE lowering gap (heap-result return, etc.) and never transitively reaches a root stays
+/// REAL — its gap is NOT hidden. `process.args` is deliberately EXCLUDED from roots (WASI
+/// `args_get` exists ⇒ uncertain ⇒ conservative REAL). `CallTarget::Method`/`Computed` are
+/// unresolved ⇒ no edge, no root (conservative REAL). Bare `FnRef`/`ClosureCreate` references are
+/// NOT root contributions.
+///
+/// Keys match the edge names `resolve_user_module_calls` produced: file functions (`ir.functions`)
+/// by plain name; module functions (`ir.modules[].functions`) by `user_module_fn_name(module, func)`
+/// — exactly the `CallTarget::Named` a resolved user-module call carries, so edges resolve.
+fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
+    use almide_ir::CallTarget;
+    // 1) NODE KEYS over BOTH function sets, paired with the body to scan for edges/roots.
+    let mut nodes: Vec<(String, &almide_ir::IrFunction)> = Vec::new();
+    for f in &ir.functions {
+        nodes.push((f.name.as_str().to_string(), f));
+    }
+    for m in &ir.modules {
+        for f in &m.functions {
+            nodes.push((user_module_fn_name(m.name.as_str(), f.name.as_str()), f));
+        }
+    }
+    // Root-(a): an `@extern` decl whose target is `rust`/`rs` (NOT `wasm`/`ts` — those lower to a
+    // WASI/browser import via `extern_wasm_target` and never wall; this exclusion is the precedent).
+    let is_native_extern = |f: &almide_ir::IrFunction| {
+        f.extern_attrs.iter().any(|a| matches!(a.target.as_str(), "rust" | "rs"))
+    };
+    // Per-body collector: forward `Named` call edges + whether the body DIRECTLY calls an
+    // enumerated permanently-no-wasm stdlib effect (root-(b)). A remaining `CallTarget::Module`
+    // is ALWAYS a stdlib call here (user modules were already rewritten to `Named` by
+    // `resolve_user_module_calls`), so this matches only the genuine stdlib effect roots.
+    struct Collector {
+        edges: Vec<String>,
+        native_call: bool,
+    }
+    impl almide_ir::visit::IrVisitor for Collector {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            use almide_ir::IrExprKind::{Call, TailCall};
+            let target = match &e.kind {
+                Call { target, .. } | TailCall { target, .. } => Some(target),
+                _ => None,
+            };
+            if let Some(t) = target {
+                match t {
+                    CallTarget::Named { name } => self.edges.push(name.as_str().to_string()),
+                    CallTarget::Module { module, func, .. } => {
+                        let (m, fname) = (module.as_str(), func.as_str());
+                        // net.* (any func) / process.exec|exit|run / http.request — the tight,
+                        // enumerated no-wasm set. process.args is EXCLUDED (WASI args_get exists).
+                        if m == "net"
+                            || (m == "process" && matches!(fname, "exec" | "exit" | "run"))
+                            || (m == "http" && fname == "request")
+                        {
+                            self.native_call = true;
+                        }
+                    }
+                    // Method / Computed: unresolved → no edge, no root (conservative REAL).
+                    _ => {}
+                }
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    // 2/3) Seed roots + record forward edges.
+    let mut native: HashSet<String> = HashSet::new();
+    let mut fwd: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (key, f) in &nodes {
+        let mut c = Collector { edges: Vec::new(), native_call: false };
+        almide_ir::visit::IrVisitor::visit_expr(&mut c, &f.body);
+        if is_native_extern(f) || c.native_call {
+            native.insert(key.clone());
+        }
+        fwd.insert(key.clone(), c.edges);
+    }
+    // 4) PROPAGATE callee→caller to a fixpoint: a caller of a native fn is itself native.
+    loop {
+        let mut changed = false;
+        for (caller, callees) in &fwd {
+            if native.contains(caller) {
+                continue;
+            }
+            if callees.iter().any(|c| native.contains(c)) {
+                native.insert(caller.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    native
+}
+
 /// Resolve a USER-package/-module call (`bindgen.get_str` via `import self as bindgen`,
 /// `self.classifier.classify`) to a real user `CallFn` (`CallTarget::Module` → `Named`,
 /// `almide_rt_<m>_<f>`). The MIR lowering then treats it as an ordinary user call instead of
@@ -639,6 +740,15 @@ struct Tally {
     functions: usize,
     in_profile: usize,
     unsupported: BTreeMap<String, usize>,
+    /// Walled functions split by category (the honest wall=0 end state):
+    ///   - `walled_real`: a pure/WASI-able function the v1 compiler cannot YET lower — THIS is the
+    ///     number the lowering-wall=0 goal drives to 0.
+    ///   - `walled_native_ffi`: a function that transitively reaches a STRUCTURAL native root
+    ///     (`@extern(rust/rs)` or a no-wasm stdlib effect) — can NEVER lower to wasm; EXCLUDED from
+    ///     the wall=0 metric (like the `@extern(wasm)` WASI imports already are). NOT a lowering bug.
+    /// Their sum equals the total `unsupported` count.
+    walled_real: usize,
+    walled_native_ffi: usize,
     lower_panics: Vec<String>,
     /// Functions whose certificate has an UNBACKED `+1` (the borrow-by-default
     /// soundness gate). Must stay empty — a non-empty list is a wall breach.
@@ -790,6 +900,12 @@ fn main() {
                 continue;
             }
         };
+
+        // The NATIVE-FFI closure over the linked IR (transitive over `@extern(rust/rs)` + the
+        // enumerated no-wasm stdlib effects). A WALLED function in this set is a STRUCTURAL wall
+        // (no wasm host equivalent), tagged NATIVE-FFI and excluded from the wall=0 metric; every
+        // other wall is a REAL lowering gap. Computed once per file before the lowering loop.
+        let native_ffi_set = compute_native_ffi_set(&ir);
 
         // Variant constructors of this program are PURE data builders (no host
         // effect), so a `CallFn` to one is Stdout-free — collected for the
@@ -1003,8 +1119,24 @@ fn main() {
                     }
                 }
                 Ok(Err(almide_mir::lower::LowerError::Unsupported(reason))) => {
+                    // Categorize the wall: NATIVE-FFI (structural, excluded) iff this function is
+                    // in the transitive native-FFI closure; else REAL (a lowering gap to close).
+                    // A name absent from the node map (an inline_mutual_tail_recursion-synthesized
+                    // aux) defaults REAL (conservative — never over-excludes a real gap).
+                    let is_native = native_ffi_set.contains(func.name.as_str());
+                    if is_native {
+                        t.walled_native_ffi += 1;
+                    } else {
+                        t.walled_real += 1;
+                    }
                     if std::env::var("WALL_NAMES").is_ok() {
-                        eprintln!("WALLED {} :: {} :: {}", file.display(), func.name.as_str(), reason);
+                        let tag = if is_native { "NATIVE-FFI" } else { "REAL" };
+                        eprintln!(
+                            "WALLED {tag} {} :: {} :: {}",
+                            file.display(),
+                            func.name.as_str(),
+                            reason
+                        );
                     }
                     *t.unsupported.entry(reason_key(&reason)).or_insert(0) += 1;
                     // INTERP COVERAGE (b): every interp site inside a WALLED function is
@@ -1111,6 +1243,14 @@ fn main() {
     );
     let walled: usize = t.unsupported.values().sum();
     eprintln!("  walled (Unsupported) : {walled}");
+    eprintln!(
+        "    walled real (lowering)   : {}  <- the wall=0 metric (pure/WASI-able gaps to close)",
+        t.walled_real
+    );
+    eprintln!(
+        "    walled native-FFI (excl) : {}  <- structural (@extern rust/rs + no-wasm stdlib effect); excluded",
+        t.walled_native_ffi
+    );
     for (reason, n) in &t.unsupported {
         eprintln!("      {n:>4}  {reason}");
     }
