@@ -105,17 +105,50 @@ impl LowerCtx {
         // `elem_flat_variant` arm of the List-LITERAL builder (binds.rs). A variant carrying a
         // `String`/nested/`List` field is NOT flat (`is_flat_variant_ty` = false) and stays walled.
         let flat_variant_elem = self.variant_layouts.is_flat_variant_ty(&elem_ty);
+        // A RICH (recursive-drop) variant ELEMENT (`acc + [instr_r.val]` where `instr_r.val: Instr` —
+        // the wasm bytecode instruction accumulator). `__list_concat_rc` rc-incs each element handle
+        // (the new list co-owns each block); the scope-end / teardown `$__drop_list_<V>` frees each
+        // element RECURSIVELY via `$__drop_<V>` (a flat `rc_dec` would leak each Instr's nested
+        // `List[Instr]`). Routed via `variant_drop_handles="list_<V>"`, like the record case.
+        let rich_variant_elem = self.variant_layouts.is_rich_variant_ty(&elem_ty);
         if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && !str_str_elem
-            && !int_str_elem && !flat_variant_elem && record_elem.is_none()
+            && !int_str_elem && !flat_variant_elem && rich_variant_elem.is_none()
+            && record_elem.is_none()
         {
             return None;
         }
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
         let arg_exprs = [(**left).clone(), (**right).clone()];
-        let args = match self.lower_call_args(&arg_exprs) {
-            Ok(a) => a,
-            Err(_) => {
+        // A RECORD-element concat (`acc + [{...}]`, the wasm section-parser append): a `[{record
+        // literal}]` operand infers a STRUCTURAL element type, so the generic `lower_call_args` →
+        // `try_lower_record_list_literal` declines it. Lower a list-LITERAL operand via the forced
+        // helper with the concat's NAMED element type (`elem_ty`) so it materializes + registers its
+        // drop with the SAME declared layout the concat result uses (`list_<Named>`). Other operands
+        // (the `acc` Var / a nested concat) lower generically.
+        let args = if record_elem.is_some() {
+            let mut out: Vec<CallArg> = Vec::with_capacity(arg_exprs.len());
+            let mut ok = true;
+            for a in &arg_exprs {
+                if matches!(a.kind, IrExprKind::List { .. }) {
+                    match self.try_lower_record_list_literal_as(a, Some(&elem_ty)) {
+                        Some(d) => out.push(CallArg::Handle(d)),
+                        None => { ok = false; break; }
+                    }
+                } else {
+                    match self.lower_call_args(std::slice::from_ref(a)) {
+                        Ok(mut la) => out.append(&mut la),
+                        Err(_) => { ok = false; break; }
+                    }
+                }
+            }
+            if ok { Some(out) } else { None }
+        } else {
+            self.lower_call_args(&arg_exprs).ok()
+        };
+        let args = match args {
+            Some(a) => a,
+            None => {
                 self.ops.truncate(ops_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 return None;
@@ -151,6 +184,9 @@ impl LowerCtx {
             self.variant_drop_handles.insert(dst, "list_int_str".to_string());
         } else if list_str_elem {
             self.list_list_str_lists.insert(dst);
+        } else if let Some(vname) = rich_variant_elem {
+            // RECURSIVE per-element drop via `$__drop_list_<V>` (the generated variant list drop).
+            self.variant_drop_handles.insert(dst, format!("list_{vname}"));
         } else if let Some(rname) = record_elem {
             self.variant_drop_handles.insert(dst, format!("list_{rname}"));
         }

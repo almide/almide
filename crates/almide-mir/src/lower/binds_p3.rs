@@ -424,15 +424,37 @@ impl LowerCtx {
     /// must be a record needing the recursive drop (`record_drop_type_name` Some), so `$__drop_list_<R>`
     /// exists; otherwise `None` (the caller keeps the scalar / wall path). Empty lists handled elsewhere.
     pub(crate) fn try_lower_record_list_literal(&mut self, value: &IrExpr) -> Option<ValueId> {
+        self.try_lower_record_list_literal_as(value, None)
+    }
+
+    /// As [`Self::try_lower_record_list_literal`], but with an AUTHORITATIVE element type override.
+    /// A `[{...}]` record LITERAL infers its element type STRUCTURALLY (`Ty::Record{fields}`) — never
+    /// the NAMED record (the type checker leaves a record literal structural). So `record_drop_type_name`
+    /// returns `None` and the literal declines. But the CONTEXT (a concat `acc + [{...}]` whose result is
+    /// `List[Local]`) knows the element is the NAMED record. Threading that Named type makes BOTH the
+    /// element MATERIALIZATION (by-name into the declared layout — `try_lower_record_construct` resolves
+    /// `aggregate_field_tys(Named)` to the DECLARED field order) AND the list drop registration
+    /// (`list_<Named>` → the generated `$__drop_list_<Named>`) use ONE consistent layout — no
+    /// structural-vs-declared field-order mismatch (the soundness crux: a structural literal's field
+    /// order need not equal the declared order, so freeing it via the declared `$__drop_<R>` would
+    /// corrupt). `forced_elem = None` keeps the original structural-derived behavior.
+    pub(crate) fn try_lower_record_list_literal_as(
+        &mut self,
+        value: &IrExpr,
+        forced_elem: Option<&Ty>,
+    ) -> Option<ValueId> {
         use crate::{IntOp, PrimKind};
         use almide_lang::types::constructor::TypeConstructorId;
         let IrExprKind::List { elements } = &value.kind else { return None };
         if elements.is_empty() {
             return None;
         }
-        let elem_ty = match &value.ty {
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
-            _ => return None,
+        let elem_ty = match forced_elem {
+            Some(t) => t.clone(),
+            None => match &value.ty {
+                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
+                _ => return None,
+            },
         };
         // The element's drop kind: a recursive-drop record (`$__drop_list_<R>`) OR a `(String,String)`
         // tuple (`Op::DropListStrStr` — the map.entries / `[(k,v), …]` literal shape). Anything else
@@ -454,7 +476,19 @@ impl LowerCtx {
         // must not interleave with the store sequence).
         let mut objs: Vec<ValueId> = Vec::with_capacity(elements.len());
         for e in elements {
-            objs.push(self.lower_owned_heap_field(e)?);
+            // When the element type is forced (a structural record LITERAL in a `List[Named]` context),
+            // materialize the element AS the Named type so `try_lower_record_construct` lays it out by
+            // the DECLARED field order (matching the `$__drop_list_<Named>` teardown). Field-by-name
+            // assignment makes this order-correct regardless of the literal's source field order.
+            let forced_e;
+            let e_ref = match forced_elem {
+                Some(ft) if matches!(e.kind, IrExprKind::Record { .. }) => {
+                    forced_e = IrExpr { ty: ft.clone(), ..e.clone() };
+                    &forced_e
+                }
+                _ => e,
+            };
+            objs.push(self.lower_owned_heap_field(e_ref)?);
         }
         let n = elements.len();
         let len = self.fresh_value();

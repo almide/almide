@@ -197,23 +197,18 @@ fn count_ir_calls(
             // (tuple/record) still DEFERS (no MIR call, no count). `mir_calls <= ir_calls` holds BY
             // CONSTRUCTION. Both concat runtimes are pure (prim memory ops, no Stdout).
             if let almide_ir::IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } = &e.kind {
-                let lowered = matches!(
-                    &e.ty,
-                    almide_lang::types::Ty::Applied(
-                        almide_lang::types::constructor::TypeConstructorId::List,
-                        a,
-                    ) if a.len() == 1
-                        && (!almide_mir::lower::is_heap_ty(&a[0])
-                            || matches!(a[0], almide_lang::types::Ty::String)
-                            || almide_mir::lower::is_value_ty(&a[0])
-                            // A FLAT-variant element (`acc + [r.val]`, `acc: List[ValType]`) also lowers
-                            // to ONE `__list_concat_rc` (rc-incrementing copy), so count its NODE too —
-                            // keeps `mir_calls <= ir_calls` by construction. `__list_concat_rc` is pure.
-                            || self.variant_layouts.is_flat_variant_ty(&a[0]))
-                );
-                if lowered {
-                    self.n += 1;
-                }
+                // `try_lower_concat_list` emits AT MOST ONE synthetic `__list_concat`/`__list_concat_rc`
+                // per ConcatList node (its operands materialize without their own concat call), and a
+                // ConcatList it cannot lower WALLS the enclosing function (so that function is not
+                // caps-checked). Therefore counting EVERY ConcatList node as one ir_call keeps
+                // `mir_calls <= ir_calls` BY CONSTRUCTION for EVERY admitted element shape — scalar,
+                // String/Value, the (String,String)/(Int,String)/(String,Value) tuples, List[List[String]],
+                // a flat OR rich custom-variant element, and a recursive-drop RECORD element (the wasm
+                // `acc + [{record}]` / `acc + [instr_r.val]` section-parser appends). A non-lowering
+                // ConcatList just leaves mir < ir (honest caps taint), never the mir > ir over-count
+                // that would falsely caps-verify a fn. Both concat runtimes are pure (no Stdout).
+                let _ = (&self.registry, &self.variant_layouts);
+                self.n += 1;
             }
             // The `**` OPERATOR (BinOp::PowFloat / PowInt) lowers to ONE synthetic CallFn —
             // `math.fpow` (the bit-exact libm pow) for Float, `math.pow` (int squaring) for Int.

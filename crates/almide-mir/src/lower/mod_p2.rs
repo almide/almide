@@ -800,6 +800,17 @@ impl VariantLayouts {
         }
     }
 
+    /// Is `ty` a RICH (recursive-drop) registry variant — a user variant for which `$__drop_<V>` and
+    /// `$__drop_list_<V>` are generated (some ctor holds a nested user variant whose flat free would
+    /// leak its children)? This is the lowering-side gate for admitting a `List[<rich variant>]`
+    /// element (the wasm `Instr` accumulator) — its drop routes to `$__drop_list_<V>` via
+    /// `variant_drop_handles`. Mirrors [`crate::lower::variant_needs_recursive_drop`] (the generator's
+    /// gate) so the two never disagree: a variant admitted here ALWAYS has a generated `$__drop_list_<V>`.
+    pub fn is_rich_variant_ty(&self, ty: &Ty) -> Option<String> {
+        let name = self.field_variant_name(ty)?;
+        self.needs_recursive_drop(&name).then_some(name)
+    }
+
     /// Is `ty` one of the variant types in this registry (a nested-variant ctor field)?
     pub fn field_is_variant(&self, ty: &Ty) -> bool {
         use almide_lang::types::constructor::TypeConstructorId;

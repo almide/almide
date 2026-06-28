@@ -158,8 +158,18 @@ impl LowerCtx {
         let elem_flat_variant = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && self.variant_layouts.is_flat_variant_ty(&a[0]));
+        // A RICH (recursive-drop) variant element (`[instr_r.val]` — the `acc + [instr_r.val]` singleton
+        // operand, `instr_r.val: Instr`). Each element is a fresh OWNED ref (Dup of the borrowed field /
+        // Var); the list's `$__drop_list_<V>` frees each RECURSIVELY via `$__drop_<V>` — a flat per-slot
+        // `rc_dec` (`DropListStr`) would leak each element's nested `List[Instr]`.
+        let elem_rich_variant: Option<String> = match &value.ty {
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+                self.variant_layouts.is_rich_variant_ty(&a[0])
+            }
+            _ => None,
+        };
         if (!elem_str && !elem_scalar_aggregate && !elem_value && !elem_str_value && !elem_list_str
-            && !elem_int_str && !elem_flat_variant)
+            && !elem_int_str && !elem_flat_variant && elem_rich_variant.is_none())
             || elements.is_empty()
         {
             return None;
@@ -188,7 +198,7 @@ impl LowerCtx {
             // fails mid-build (which would leak partial ops). Mirrors `try_lower_heap_field_borrow`'s
             // container gate so the two never disagree.
             IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-                if elem_flat_variant && is_heap_ty(&e.ty) =>
+                if (elem_flat_variant || elem_rich_variant.is_some()) && is_heap_ty(&e.ty) =>
             {
                 self.heap_field_container_tracked(object)
             }
@@ -219,6 +229,9 @@ impl LowerCtx {
             self.variant_drop_handles.insert(list, "list_int_str".to_string());
         } else if elem_list_str {
             self.list_list_str_lists.insert(list);
+        } else if let Some(vname) = &elem_rich_variant {
+            // RECURSIVE per-element drop via the generated `$__drop_list_<V>`.
+            self.variant_drop_handles.insert(list, format!("list_{vname}"));
         } else {
             self.heap_elem_lists.insert(list);
         }
@@ -295,7 +308,9 @@ impl LowerCtx {
                 // variant block owns no inner handle so `rc_dec` is its full free — no double-free
                 // (rc-aware). Cert-identical to the `Var` element case (the extra `LoadHandle` is a
                 // cert-neutral prim load): `Dup` = `a`, `Consume` = the move into the list `i…m`.
-                IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } if elem_flat_variant => {
+                IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+                    if elem_flat_variant || elem_rich_variant.is_some() =>
+                {
                     let borrowed = self.try_lower_heap_field_borrow(elem)?;
                     let dup = self.fresh_value();
                     self.ops.push(Op::Dup { dst: dup, src: borrowed });
