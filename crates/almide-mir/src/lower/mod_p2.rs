@@ -777,6 +777,29 @@ impl VariantLayouts {
         })
     }
 
+    /// Is `ty` a registry variant ALL of whose constructors have ONLY scalar fields — i.e. a FLAT
+    /// tag-block with NO heap slot (a nullary enum like `Capability`, or a scalar-payload variant)?
+    /// Such a block is a single allocation freed by one `prim.rc_dec`, so a `List[flat-variant]`
+    /// drops correctly via the per-element-`rc_dec` `__drop_list_str` (each element + the list block),
+    /// the SAME flat shape as a `List[String]`. A variant carrying a `String`/nested/`List` field is
+    /// NOT flat (its block owns an inner handle a flat `rc_dec` would leak) → `false` (stays walled).
+    pub fn is_flat_variant_ty(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let n = match ty {
+            Ty::Named(n, _) => n.as_str(),
+            Ty::Variant { name, .. } => name.as_str(),
+            Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.as_str(),
+            _ => return false,
+        };
+        match self.by_type.get(n) {
+            Some(layout) => layout
+                .cases
+                .iter()
+                .all(|c| c.fields.iter().all(|(_, fty)| !is_heap_ty(fty))),
+            None => false,
+        }
+    }
+
     /// Is `ty` one of the variant types in this registry (a nested-variant ctor field)?
     pub fn field_is_variant(&self, ty: &Ty) -> bool {
         use almide_lang::types::constructor::TypeConstructorId;

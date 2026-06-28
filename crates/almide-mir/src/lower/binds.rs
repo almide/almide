@@ -149,8 +149,17 @@ impl LowerCtx {
         let elem_int_str = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
                 Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)));
+        // A `List[V]` whose element `V` is a FLAT custom variant (every ctor scalar-only — a nullary
+        // enum like `Capability = | CapIO | CapProcess`, or a scalar-payload variant): each element is
+        // a fresh OWNED tag-block (`try_lower_variant_ctor`, cert `i`) moved into the slot; the list's
+        // scope-end `DropListStr` `rc_dec`s each element + the block (a flat variant block owns no inner
+        // handle, so `rc_dec` is its full free — the SAME proven `List[String]` cert). A variant with a
+        // `String`/nested/`List` field is NOT flat (`is_flat_variant_ty` = false) and stays walled.
+        let elem_flat_variant = matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a)
+                if a.len() == 1 && self.variant_layouts.is_flat_variant_ty(&a[0]));
         if (!elem_str && !elem_scalar_aggregate && !elem_value && !elem_str_value && !elem_list_str
-            && !elem_int_str)
+            && !elem_int_str && !elem_flat_variant)
             || elements.is_empty()
         {
             return None;
@@ -167,6 +176,13 @@ impl LowerCtx {
             IrExprKind::Var { id } => self.value_of.contains_key(id),
             IrExprKind::Record { .. } => elem_scalar_aggregate,
             IrExprKind::Tuple { .. } => elem_scalar_aggregate || elem_str_value || elem_int_str,
+            // A FLAT-variant CONSTRUCTOR element (`[CapIO, CapProcess]`) — a Named call whose name is a
+            // registered constructor, materialized via `try_lower_variant_ctor` below.
+            IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                if elem_flat_variant && self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+            {
+                true
+            }
             IrExprKind::Call { target: CallTarget::Named { .. } | CallTarget::Module { .. }, .. } => {
                 // A Value-returning ctor call (elem_value), OR — for a List[String] — a String-returning
                 // call element (`[string.slice(s,a,b)]` in `acc + [string.slice(…)]`, the dominant yaml
@@ -252,6 +268,14 @@ impl LowerCtx {
                         result: Some(repr),
                     });
                     obj
+                }
+                // A FLAT-variant CONSTRUCTOR element (`CapIO`) — materialize the fresh OWNED tag-block
+                // (`try_lower_variant_ctor`, cert `i`) and move it into the slot. The block owns no
+                // inner handle (flat), so the list's `DropListStr` `rc_dec` is its full free.
+                IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if elem_flat_variant && self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                {
+                    self.try_lower_variant_ctor(elem)?
                 }
                 // A `${...}` interpolation element → a fresh owned String via the interp concat chain.
                 IrExprKind::StringInterp { parts } => self.try_lower_string_interp(parts)?,

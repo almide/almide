@@ -386,6 +386,34 @@ pub fn variant_needs_recursive_drop(
     })
 }
 
+/// The set of FLAT variant type names — every constructor scalar-only, so the block owns NO inner
+/// handle (a nullary enum like `Capability`, or a scalar-payload variant). A `List[flat-variant]`
+/// record/anon field is freed per-element by `__drop_list_str` (`rc_dec` of each flat element block +
+/// the list block); a variant carrying a `String`/nested/`List` field is NOT flat (its block owns an
+/// inner handle) and is excluded — its `List` field stays on the existing flat-block `rc_dec` (the
+/// materializer also walls a non-flat-variant list, so such a field is never built). The drop-side
+/// mirror of [`crate::lower::VariantLayouts::is_flat_variant_ty`].
+pub fn flat_variant_type_names(
+    type_decls: &[almide_ir::IrTypeDecl],
+) -> std::collections::HashSet<String> {
+    use almide_ir::{IrTypeDeclKind, IrVariantKind};
+    type_decls
+        .iter()
+        .filter_map(|d| {
+            let IrTypeDeclKind::Variant { cases, .. } = &d.kind else { return None };
+            let flat = cases.iter().all(|c| {
+                let tys: Vec<&Ty> = match &c.kind {
+                    IrVariantKind::Unit => vec![],
+                    IrVariantKind::Tuple { fields } => fields.iter().collect(),
+                    IrVariantKind::Record { fields } => fields.iter().map(|f| &f.ty).collect(),
+                };
+                tys.iter().all(|t| !is_heap_ty(t))
+            });
+            flat.then(|| d.name.as_str().to_string())
+        })
+        .collect()
+}
+
 /// The set of all user-variant type names in `type_decls` — the lookup `variant_field_name` uses.
 pub fn variant_type_names(
     type_decls: &[almide_ir::IrTypeDecl],
@@ -604,6 +632,7 @@ pub(crate) fn anon_record_needs_recursive_drop(fields: &[(almide_lang::intern::S
 fn record_drop_field_frees(
     field_tys: &[Ty],
     rec_names: &std::collections::HashSet<String>,
+    flat_variant_names: &std::collections::HashSet<String>,
     list_drops: &mut std::collections::BTreeSet<String>,
     need_map_ss: &mut bool,
     need_list_str: &mut bool,
@@ -623,7 +652,12 @@ fn record_drop_field_frees(
                     frees.push_str(&format!(
                         "    let f{i}: List[{rn}] = prim.load_handle(h + {off})\n    __drop_list_{rn_fn}(f{i})\n"
                     ));
-                } else if matches!(a[0], Ty::String) {
+                } else if matches!(a[0], Ty::String) || is_flat_variant_elem(&a[0], flat_variant_names) {
+                    // `List[String]` OR `List[flat-variant]` (a nullary/scalar-only enum like
+                    // `Capability`): each element is a single FLAT block, so `__drop_list_str` frees
+                    // them per-element (`rc_dec` of each element handle + the list block). The flat
+                    // variant element holds no inner handle, so the byte-identical String-list drop is
+                    // its full free — a flat `rc_dec` of just the list block would LEAK each element.
                     *need_list_str = true;
                     frees.push_str(&format!(
                         "    let f{i}: List[String] = prim.load_handle(h + {off})\n    __drop_list_str(f{i})\n"
@@ -662,6 +696,18 @@ fn record_drop_field_frees(
         }
     }
     frees
+}
+
+/// Is `ty` a FLAT custom variant (in `flat_variant_names`) — a `List[ty]` element that frees as a
+/// single block? `Named`/`UserDefined` only; `List`/`Map`/`Value`/record types never qualify.
+fn is_flat_variant_elem(ty: &Ty, flat_variant_names: &std::collections::HashSet<String>) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let n = match ty {
+        Ty::Named(n, _) => n.as_str(),
+        Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.as_str(),
+        _ => return false,
+    };
+    flat_variant_names.contains(n)
 }
 
 /// The ALMIDE SOURCE TYPE for a recursive-aggregate field (the `let fN: <ty> =` binding type in a
@@ -813,6 +859,7 @@ pub fn generate_record_drop_sources(
 ) -> String {
     use almide_ir::IrTypeDeclKind;
     let rec_names = recursive_record_drop_names(type_decls);
+    let flat_variant_names = flat_variant_type_names(type_decls);
     let mut out = String::new();
     let mut list_drops: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut need_map_ss = false;
@@ -831,6 +878,7 @@ pub fn generate_record_drop_sources(
         out.push_str(&record_drop_field_frees(
             &field_tys,
             &rec_names,
+            &flat_variant_names,
             &mut list_drops,
             &mut need_map_ss,
             &mut need_list_str,
@@ -864,6 +912,7 @@ pub fn generate_record_drop_sources(
         out.push_str(&record_drop_field_frees(
             &field_tys,
             &rec_names,
+            &flat_variant_names,
             &mut list_drops,
             &mut need_map_ss,
             &mut need_list_str,
