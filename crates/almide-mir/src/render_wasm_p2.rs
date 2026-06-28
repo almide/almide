@@ -640,6 +640,20 @@ fn render_op(
                 PrimKind::RandomGet => {
                     format!("(i64.extend_i32_u (call $random_get {} {}))", w(0), w(1))
                 }
+                // clock_time_get(clock_id, precision, time_ptr) — the WASI wall-clock floor; writes
+                // the current clock value (ns) as an i64 at time_ptr, returns an i32 errno that
+                // zero-extends back to the i64-uniform dst. NOTE the WASI `precision` param is i64
+                // (the requested resolution), so it is passed RAW (the i64-uniform local), NOT
+                // i32-wrapped like clock_id / time_ptr — the generic scalar path's blanket
+                // `i32.wrap_i64` on every arg would corrupt it, hence this custom arm.
+                PrimKind::ClockTimeGet => {
+                    format!(
+                        "(i64.extend_i32_u (call $clock_time_get {} (local.get {}) {}))",
+                        w(0),
+                        local(args[1]),
+                        w(2)
+                    )
+                }
                 // args_get_list() — the WASI CLI-args floor; builds a fresh owned
                 // `List[String]` of argv[1..] in the preamble helper. dst is a heap Ptr
                 // (i32 handle, value_reprs_wasm), so the call result sets the local DIRECTLY
@@ -671,6 +685,14 @@ fn render_op(
                         local(args[0]),
                         local(args[1])
                     )
+                }
+                // make_dir(path) — the WASI directory-CREATE floor; recursive
+                // path_create_directory, then builds a fresh owned `Result[Unit, String]`
+                // (Ok(()) / Err) in the preamble helper. The path arg is a heap Ptr local (i32
+                // handle), passed DIRECTLY (no i32.wrap). dst is a heap Ptr (value_reprs_wasm), so
+                // the call result sets the local directly (no i64 extend) — mirror WriteTextFile.
+                PrimKind::MakeDir => {
+                    format!("(call $make_dir (local.get {}))", local(args[0]))
                 }
                 // RAW refcount ops (the self-host drop/copy mechanism) — reuse the proven $rc_dec/
                 // $rc_inc on the i32-wrapped handle. dst is None (Unit), so the `match dst` below

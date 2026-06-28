@@ -49,6 +49,11 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // The Ok arm has NO @12 payload (Unit), so `ok(_)` discards a null handle (never used);
             // the flat DropListStr frees nothing on Ok, the @12 msg on Err — exact for both arms.
             | ("fs", "write")
+            // `fs.mkdir_p` returns the SAME cap-as-tag `Result[Unit, String]` shape as fs.write
+            // ($make_dir builds it identically — Ok with len@4=0 + @12=0 + tag@16=0, Err with
+            // len@4=1 + @12=msg + tag@16=1). So a `match`/`!` over it reads tag @16, exactly like
+            // fs.write — same Ok-has-no-payload discipline, same flat DropListStr for both arms.
+            | ("fs", "mkdir_p")
     )
 }
 

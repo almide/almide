@@ -498,6 +498,15 @@ pub enum PrimKind {
     /// cap_witness counts it exactly like `FdWrite` → Stdout), so a function using it is
     /// caps-verified ONLY if it declares Entropy — never accept-but-unsafe.
     RandomGet,
+    /// The `clock_time_get` WASI host call — `args = [clock_id, precision, time_ptr]`, dst =
+    /// the i64 errno; writes the current clock value (nanoseconds) as an i64 at `time_ptr`.
+    /// A SCALAR-dst sandbox exit (like [`RandomGet`] — NO heap result, NO ownership event),
+    /// reached only by the self-hosted `env.unix_timestamp` (which reads `time_ptr` and
+    /// divides by 1e9 to seconds). Carries [`Capability::Clock`] — a DISTINCT capability
+    /// (a clock read is neither a filesystem nor an entropy effect; the cap_witness counts
+    /// it exactly like `RandomGet` → Entropy), so a function using it is caps-verified ONLY
+    /// if it declares Clock — never accept-but-unsafe. NON-DETERMINISTIC (no byte-match).
+    ClockTimeGet,
     /// The `args_sizes_get` + `args_get` WASI host calls, packaged as ONE high-level
     /// HEAP-RESULT prim — no args, dst = a fresh OWNED `List[String]` of the program
     /// arguments `argv[1..]` (SKIP argv[0], matching native `env.args`). Each element
@@ -565,6 +574,20 @@ pub enum PrimKind {
     /// so the ownership certificate emits an `i` (alloc) for it, balanced by the caller's scope-end
     /// flat `DropListStr` (sound for BOTH arms given the `len@4 = 0` Ok convention above).
     WriteTextFile,
+    /// The WASI `path_create_directory` recursive-mkdir sequence, packaged as ONE high-level
+    /// HEAP-RESULT prim — `args = [path]` (a BORROWED `String` handle, the caller still owns
+    /// it), dst = a fresh OWNED `Result[Unit, String]`. Creates the directory at `path`
+    /// (relative to the first preopened dir, leading `/` stripped — the same resolution
+    /// [`WriteTextFile`] uses), creating each missing parent segment (so `a/b/c` makes all
+    /// three); an existing dir (errno EEXIST = 20) counts as success. On success builds
+    /// `Ok(())` (the `len@4 = 0` `materialize_result_ok` convention, IDENTICAL to
+    /// [`WriteTextFile`]'s Ok arm), on a `path_create_directory` error builds
+    /// `Err(<message>)` (`len@4 = 1`, `@12 = msg`, `@16 tag = 1`). A mkdir IS a filesystem
+    /// WRITE, so it REUSES [`Capability::FsWrite`] (NOT a new capability — that would be a
+    /// false distinction); counted in cap_witness exactly like [`WriteTextFile`]. Its dst is
+    /// a heap Ptr, so the ownership certificate emits an `i` (alloc), balanced by the
+    /// caller's scope-end flat `DropListStr` (sound for BOTH arms given the `len@4 = 0` Ok).
+    MakeDir,
     /// Release one reference of a RAW heap handle (`(call $rc_dec …)`), the inverse of [`RcInc`].
     /// The MECHANISM the self-hosted recursive `value.__drop_value` frees a dynamic Value tree with
     /// (the §4.1-compliant alternative to a hand-written WAT drop): it operates on raw Int handles,
@@ -750,6 +773,14 @@ pub enum Capability {
     /// declares ∅ and so can NEVER write a file un-witnessed (the checker REJECTS
     /// `used ⊄ allowed`); only an `effect fn` (which declares the host caps) may.
     FsWrite,
+    /// Reading the host WALL CLOCK — the WASI `clock_time_get` floor
+    /// ([`PrimKind::ClockTimeGet`]), reached by the self-hosted `env.unix_timestamp`. The
+    /// sixth sandbox exit. A clock read is neither a filesystem effect nor an entropy draw,
+    /// so it is a DISTINCT capability with its own id — never aliased to FsRead/FsWrite or
+    /// Entropy. Accounted exactly like Entropy/FsRead: a pure `fn` declares ∅ and so can
+    /// NEVER read the clock un-witnessed (the checker REJECTS `used ⊄ allowed`); only an
+    /// `effect fn` (which declares the host caps) may.
+    Clock,
 }
 
 impl Capability {
@@ -757,7 +788,7 @@ impl Capability {
     /// proofs/CapabilityBound.v's checker is GENERIC over `list nat` (a `subset_check`,
     /// no per-capability enumeration), so it needs no edit to admit a new id — only
     /// this mapping must stay injective + stable (Stdout = 0, Entropy = 1, CliArgs = 2,
-    /// FsRead = 3, FsWrite = 4).
+    /// FsRead = 3, FsWrite = 4, Clock = 5).
     pub const fn id(self) -> u32 {
         match self {
             Capability::Stdout => 0,
@@ -765,6 +796,7 @@ impl Capability {
             Capability::CliArgs => 2,
             Capability::FsRead => 3,
             Capability::FsWrite => 4,
+            Capability::Clock => 5,
         }
     }
 }

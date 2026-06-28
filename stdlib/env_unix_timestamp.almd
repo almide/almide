@@ -1,0 +1,19 @@
+// env_unix_timestamp — SELF-HOSTED `env.unix_timestamp()` over the WASI wall-clock floor
+// (prim.clock_time_get), the v1 trust-spine realization of the effectful `env.unix_timestamp`.
+// Returns the current Unix time in SECONDS (matching native `as_secs()`). It allocs an 8-byte
+// scratch Bytes, fills it with the host clock value (nanoseconds) via prim.clock_time_get
+// (clock_id 0 = CLOCK_REALTIME, precision 0), reads it as an i64, and divides by 1e9 to seconds.
+// The scratch Bytes is a heap local dropped at scope end (no leak). Because this body reaches
+// prim.clock_time_get, its cap_witness carries Capability::Clock — a DISTINCT capability (a
+// clock read is neither a filesystem nor an entropy effect) — so a caller is caps-verified ONLY
+// if it declares Clock (an `effect fn`); a pure `fn` reaching it is a frontend error AND would
+// REJECT at the gate. A PLAIN `fn` (NOT `effect fn`, like random_int) so the bare i64 scalar
+// return is not effect-monad/Result wrapped — `env.unix_timestamp` callers expect a raw Int.
+// NON-DETERMINISTIC (reads the wall clock): no byte-match across runs.
+fn env_unix_timestamp() -> Int = {
+  let buf = prim.alloc_bytes(8)
+  let p = prim.handle(buf) + 12
+  let _e = prim.clock_time_get(0, 0, p)
+  let ns = prim.load64(p)
+  ns / 1000000000
+}

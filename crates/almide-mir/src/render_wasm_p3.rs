@@ -21,6 +21,10 @@ pub(crate) fn preamble() -> String {
     (func $fd_filestat_get (param i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "fd_readdir"
     (func $fd_readdir (param i32 i32 i32 i64 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "path_create_directory"
+    (func $path_create_directory (param i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "clock_time_get"
+    (func $clock_time_get (param i32 i64 i32) (result i32)))
   (memory (export "memory") 1)
   ;; the fs.read_text path_open error message — a CONST byte run the Err arm copies.
   (data (i32.const {RTF_NOTFOUND_ADDR}) "file not found")
@@ -28,6 +32,8 @@ pub(crate) fn preamble() -> String {
   (data (i32.const {RDIR_ERR_ADDR}) "directory not found")
   ;; the fs.write path_open/fd_write error message — a CONST byte run the Err arm copies.
   (data (i32.const {WRITE_ERR_ADDR}) "write failed")
+  ;; the fs.mkdir_p path_create_directory error message — a CONST byte run the Err arm copies.
+  (data (i32.const {MKDIR_ERR_ADDR}) "mkdir failed")
   (global $bump (mut i32) (i32.const {HEAP_BASE}))
   ;; the free-list head (0 = empty) — physical reclamation (A1.2-render), the
   ;; realization of proofs/FreeList.v. A freed block is pushed here; $alloc reuses
@@ -460,6 +466,58 @@ pub(crate) fn preamble() -> String {
         (i64.store (i32.add (local.get $obj) (i32.const {LIST_HEADER})) (i64.const 0))
         (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
         (local.get $obj))))
+
+  ;; fs.mkdir_p(path) — the WASI directory-CREATE floor. $path is a BORROWED canonical String.
+  ;; Creates the directory at $path RECURSIVELY (each '/'-delimited prefix in turn, so `a/b/c`
+  ;; makes all three), relative to preopen fd 3 (leading '/' stripped — same resolution as
+  ;; $write_text_file). An already-existing dir (errno 20 = EEXIST) counts as success. Builds a
+  ;; fresh OWNED `Result[Unit, String]`: Ok(()) as a 1-slot block with len@4=0 + @12=0 + tag@16=0
+  ;; (the `materialize_result_ok` convention, IDENTICAL to $write_text_file — the scope-end flat
+  ;; $drop_list_str frees nothing at @12), or Err("mkdir failed") via $rtf_result on a
+  ;; path_create_directory error (len@4=1, @12=msg, tag@16=1). A mkdir IS a filesystem write
+  ;; (Capability::FsWrite — the SAME cap as fs.write). The result is an owned heap handle the
+  ;; caller's scope-end DropListStr balances.
+  (func $make_dir (param $path i32) (result i32)
+    (local $pdata i32) (local $plen i32) (local $seg i32) (local $errno i32)
+    (local $obj i32) (local $msg i32)
+    ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.
+    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
+    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
+    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
+                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
+      (then
+        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
+        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    ;; Create each '/'-delimited prefix. Walk $seg; at each '/' (or the end) create
+    ;; path[0..seg] and IGNORE its errno (a missing parent is made by an earlier iteration; an
+    ;; existing one returns EEXIST). The full path is created here too (when $seg reaches $plen).
+    (local.set $seg (i32.const 0))
+    (block $souter (loop $louter
+      (br_if $souter (i32.ge_u (local.get $seg) (local.get $plen)))
+      (local.set $seg (i32.add (local.get $seg) (i32.const 1)))
+      (block $sinner (loop $linner
+        (br_if $sinner (i32.ge_u (local.get $seg) (local.get $plen)))
+        (br_if $sinner (i32.eq (i32.load8_u (i32.add (local.get $pdata) (local.get $seg)))
+                               (i32.const {ASCII_SLASH})))
+        (local.set $seg (i32.add (local.get $seg) (i32.const 1)))
+        (br $linner)))
+      (drop (call $path_create_directory (i32.const 3) (local.get $pdata) (local.get $seg)))
+      (br $louter)))
+    ;; Final attempt: create the full path, capture errno (EEXIST = 20 here once the loop made it).
+    (local.set $errno (call $path_create_directory (i32.const 3) (local.get $pdata) (local.get $plen)))
+    ;; errno 0 OR 20 (EEXIST) -> Ok(()), else Err("mkdir failed").
+    (if (result i32)
+        (i32.or (i32.eqz (local.get $errno)) (i32.eq (local.get $errno) (i32.const 20)))
+      (then
+        ;; Build Ok(()) — a 1-slot block with len@4=0 (no owned payload — the
+        ;; `materialize_result_ok` convention), @12/@16 zeroed by the i64.store.
+        (local.set $obj (call $list_new (i32.const 1) (i32.const 1)))
+        (i64.store (i32.add (local.get $obj) (i32.const {LIST_HEADER})) (i64.const 0))
+        (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
+        (local.get $obj))
+      (else
+        (local.set $msg (call $rtf_str (i32.const {MKDIR_ERR_ADDR}) (i32.const {MKDIR_ERR_LEN})))
+        (call $rtf_result (local.get $msg) (i32.const 1)))))
 
   ;; helper: lexicographic LESS-THAN over two canonical String handles $a, $b (byte order =
   ;; UTF-8 code-point order for valid UTF-8 = Rust's `str` Ord). Returns 1 if $a < $b, else 0.

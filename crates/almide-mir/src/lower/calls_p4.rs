@@ -945,6 +945,31 @@ impl LowerCtx {
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }
+        // `prim.make_dir(path)` — the WASI directory-CREATE floor (fs.mkdir_p). ONE BORROWED
+        // `String` arg (the path; the caller still owns it). Its dst is a FRESH OWNED
+        // `Result[Unit, String]` built by the render ($make_dir): Ok(()) with `len@4 = 0` (no
+        // payload String — the `materialize_result_ok` convention, IDENTICAL to write_text_file's
+        // Ok arm) so the scope-end flat `DropListStr` frees nothing at @12, or Err(msg) with
+        // `len@4 = 1` + `@12 = msg` (the flat drop frees the one owned message). Tracked exactly
+        // like write_text_file's heap Result: `materialized_results_str` so a downstream `match`/`!`
+        // reads the @16 tag, AND `heap_elem_lists` so the heap-payload bind gates open AND the
+        // scope-end drop is the flat `DropListStr`. Carries Capability::FsWrite (a mkdir IS a
+        // filesystem write — counted in cap_witness). The render emits the WASI recursive
+        // path_create_directory sequence.
+        if func == "make_dir" {
+            let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported("prim.make_dir path is not a lowerable scalar/handle".into())
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: PrimKind::MakeDir,
+                dst: Some(dst),
+                args: vec![path],
+            });
+            self.materialized_results_str.insert(dst);
+            self.heap_elem_lists.insert(dst);
+            return Ok(Some(dst));
+        }
         // Bitwise binary ops lower to a scalar `Op::IntBinOp` (i64 and/or/xor/shl/shr_s),
         // not an `Op::Prim` — the int.band/bor/bxor/bshl/bshr floor. No ownership.
         let bitop = match func {
@@ -1019,6 +1044,7 @@ impl LowerCtx {
             }
             "fd_write" => PrimKind::FdWrite,
             "random_get" => PrimKind::RandomGet,
+            "clock_time_get" => PrimKind::ClockTimeGet,
             // The FLOAT floor (the f64 bits live in the i64-uniform value; render reinterprets).
             "fabs" => PrimKind::FloatUn(crate::FUnOp::Abs),
             "fsqrt" => PrimKind::FloatUn(crate::FUnOp::Sqrt),

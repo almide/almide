@@ -219,6 +219,23 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         if let Op::Prim { kind: crate::PrimKind::WriteTextFile, .. } = op {
             used.push(Capability::FsWrite);
         }
+        // The `make_dir` primitive is ALSO an FS-WRITE floor op — reached by the self-hosted
+        // `fs.mkdir_p`. A mkdir IS a filesystem write, so it REUSES Capability::FsWrite (NOT a
+        // new capability — the SAME accounting as WriteTextFile → FsWrite). The transitive
+        // `reachable_caps` follows the CallFn edge into `fs.mkdir_p`, so a caller inherits this
+        // FsWrite and is caps-verified against its declared bound.
+        if let Op::Prim { kind: crate::PrimKind::MakeDir, .. } = op {
+            used.push(Capability::FsWrite);
+        }
+        // The `clock_time_get` primitive is the WALL-CLOCK floor op — reached by the self-hosted
+        // `env.unix_timestamp`, so a fn using it must declare Clock (a DISTINCT capability: a
+        // clock read is neither a filesystem nor an entropy effect; the same accounting as
+        // RandomGet → Entropy). The transitive `reachable_caps` follows the CallFn edge into
+        // `env.unix_timestamp`, so a caller inherits this Clock and is caps-verified against its
+        // declared bound.
+        if let Op::Prim { kind: crate::PrimKind::ClockTimeGet, .. } = op {
+            used.push(Capability::Clock);
+        }
         // SOUNDNESS CRUX: a CallIndirect invokes a closure that may reach ANY capability.
         // When the table index resolves to a KNOWN lifted lambda (a `FuncRef` in THIS
         // function), its REAL caps are folded transitively by `reachable_caps` (which
@@ -728,6 +745,16 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             // heap-return move-out (`m`). Without this the heap result would be an unbacked object
             // the cert never opens — the verify_ownership/cert agreement breaks for the fs.write body.
             Op::Prim { kind: PrimKind::WriteTextFile, dst: Some(d), .. } => {
+                s.of.insert(*d, *d);
+                s.event(*d, 'i');
+            }
+            // `make_dir` ALLOCATES a fresh owned `Result[Unit, String]` (the cap-as-tag block —
+            // Ok carries NO payload, Err owns one message String) — a +1, EXACTLY like
+            // `WriteTextFile`/`Alloc`. Its path arg is BORROWED (no cert event). Its own stream
+            // (`i`), balanced by the caller's scope-end flat `DropListStr` (`d`) or a heap-return
+            // move-out (`m`). Without this the heap result would be an unbacked object the cert
+            // never opens — the verify_ownership/cert agreement breaks for the fs.mkdir_p body.
+            Op::Prim { kind: PrimKind::MakeDir, dst: Some(d), .. } => {
                 s.of.insert(*d, *d);
                 s.event(*d, 'i');
             }

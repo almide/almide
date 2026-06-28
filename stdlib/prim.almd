@@ -223,6 +223,30 @@ fn read_dir(path: String) -> Result[List[String], String] = _
 @intrinsic("almide_rt_prim_write_text_file")
 fn write_text_file(path: String, content: String) -> Result[Unit, String] = _
 
+// The path_create_directory WASI host call, packaged as ONE high-level HEAP-RESULT prim — a
+// FS-WRITE sandbox exit (reaches Capability::FsWrite — a mkdir IS a filesystem write, the SAME
+// capability as write_text_file, NOT a new one). Creates the directory at `path` (preopen-
+// relative, leading '/' stripped — the same resolution read_text_file uses), creating each
+// missing parent segment (recursive); an already-existing dir counts as success. Returns a
+// fresh OWNED `Result[Unit, String]`: `Ok(())` on success, `Err(message)` on a
+// path_create_directory error. Reached only by the self-hosted `fs.mkdir_p` (fs_mkdir_p.almd)
+// in the v1 trust-spine wasm backend; the render emits the WASI path_create_directory +
+// Result-build sequence. No native runtime impl — the native target uses fs.mkdir_p's own
+// @intrinsic.
+@intrinsic("almide_rt_prim_make_dir")
+fn make_dir(path: String) -> Result[Unit, String] = _
+
+// The clock_time_get WASI host call — the WALL-CLOCK sandbox exit (reaches Capability::Clock,
+// a DISTINCT capability: a clock read is neither a filesystem nor an entropy effect). Writes
+// the current clock value (nanoseconds) as an i64 at `time_ptr`, returning the i32 errno
+// (zero-extended). `id` selects the clock (0 = CLOCK_REALTIME), `precision` is the requested
+// resolution (ns). Reached only by the self-hosted `env.unix_timestamp`
+// (env_unix_timestamp.almd) in the v1 trust-spine wasm backend; the render emits the WASI
+// clock_time_get host call. No native runtime impl — the native target uses
+// env.unix_timestamp's own @intrinsic.
+@intrinsic("almide_rt_prim_clock_time_get")
+fn clock_time_get(id: Int, precision: Int, time_ptr: Int) -> Int = _
+
 // The FLOAT floor: a `Float` is the i64-uniform value holding the f64 BITS; each op
 // reinterprets i64→f64, computes the wasm f64 instruction, and reinterprets back (a
 // compare / f2i yields a real Int). Pure scalar — the cert is untouched. This is what
