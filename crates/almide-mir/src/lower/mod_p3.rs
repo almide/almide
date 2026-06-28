@@ -679,6 +679,25 @@ impl LowerCtx {
                     self.value_of.insert(var, dst);
                     return Ok(dst);
                 }
+                // A NESTED-OWNERSHIP heap global with no flat CONST-data form but a PURE
+                // (call-free) LITERAL initializer — the `let DIFFICULTIES = ["basic", …]`
+                // shape: materialize a FRESH OWNED copy via the SAME `DynListStr` builder a
+                // local `let xs = [..]` uses (`try_lower_str_list_literal`). GATED to a
+                // call-free literal list (`is_pure_literal_list`) so the materialization
+                // injects ZERO `CallFn` — the IR reference is a single `Var` (0 calls), so the
+                // gate's `mir == ir` count stays exact. A COMPUTED element (`[f(x)]`,
+                // `string.repeat(..)`) is NOT pure → keeps walling (no mir>ir de-taint). The
+                // builder registers the right recursive drop set (`heap_elem_lists` →
+                // `DropListStr`); we add it to `live_heap_handles` so the fresh owned copy is
+                // freed at scope end (cert one `i` + one `d`), the real module global untouched.
+                if is_pure_literal_list(init) {
+                    let init = init.clone();
+                    if let Some(dst) = self.try_lower_str_list_literal(&init) {
+                        self.live_heap_handles.push(dst);
+                        self.value_of.insert(var, dst);
+                        return Ok(dst);
+                    }
+                }
             }
             return Err(LowerError::Unsupported(format!(
                 "reference to a heap module-level global {var:?} cannot be faithfully \

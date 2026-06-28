@@ -95,6 +95,29 @@ fn const_global_init(init: &IrExpr) -> Option<crate::Init> {
     }
 }
 
+/// Is `init` a PURE (call-free) LITERAL `List` — every element a bare `LitStr` / `LitInt` /
+/// `LitFloat` / `LitBool`, NO nested call/var/interpolation? This is the admission gate for
+/// materializing a NESTED-OWNERSHIP module-level list global (`let DIFFICULTIES = ["a", "b"]`)
+/// via the `DynListStr` builder: a call-free literal list injects ZERO `CallFn`, so the gate's
+/// IR-side `count_ir_calls` (which sees the reference as a single `Var` = 0 calls) stays exact.
+/// A computed element (a call, a var, a `${...}`) returns `false` → the global keeps walling
+/// (materializing it would inject an uncounted call ⇒ a false caps de-taint).
+fn is_pure_literal_list(init: &IrExpr) -> bool {
+    let IrExprKind::List { elements } = &init.kind else {
+        return false;
+    };
+    !elements.is_empty()
+        && elements.iter().all(|e| {
+            matches!(
+                &e.kind,
+                IrExprKind::LitStr { .. }
+                    | IrExprKind::LitInt { .. }
+                    | IrExprKind::LitFloat { .. }
+                    | IrExprKind::LitBool { .. }
+            )
+        })
+}
+
 /// Is `ty` an `Option[_]` / `Result[_, _]` — a tagged heap VARIANT? Used to gate the
 /// value-position variant-match WALL: a scalar-result match over an Option/Result subject
 /// that can't execute the tag-read must reject (a Const-0 would pick a wrong arm), but a

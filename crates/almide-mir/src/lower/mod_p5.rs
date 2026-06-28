@@ -924,6 +924,22 @@ pub(crate) fn try_tco_rewrite(
     // ACCUMULATOR computed in the loop, and the post-loop is a trivial read. Needs an empty initial
     // value of the result type; without one DECLINE the TCO entirely — the function keeps its
     // memory-safe non-TCO form (a clean wall), never the dispatch's use-after-free.
+    // The in-loop RESULT ACCUMULATOR materializes each base via the cap-as-tag heap-Ok Result block
+    // (`materialize_result_str` over `lower_result_str_piece`), which needs a HEAP Ok payload. A
+    // `Result[Unit/scalar, String]` (`ok(())`) has no heap Ok piece for that path, and routing it
+    // through the len-as-tag materializers instead would drift from the empty-init / drop repr (the
+    // Result-repr-drift hole) — so the loop-slot reassign walls. DECLINE the TCO for that shape: the
+    // function falls to the proven REAL recursive lowering (control_p4 self-call arm), which is
+    // input-bounded and byte-matches v0. Only the accumulator path is affected — the post-loop
+    // DISPATCH form (no loop-body-local base) keeps lowering its bases via the non-TCO arm path.
+    {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let non_heap_ok_result = matches!(&ret_ty,
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && !is_heap_ty(&a[0]));
+        if (base_reads_loop_local || tuple_with_value) && non_heap_ok_result {
+            return None;
+        }
+    }
     let result_var: Option<VarId> = if base_reads_loop_local || tuple_with_value {
         tco_empty_for(&ret_ty)?;
         let rv = VarId(slot_next);

@@ -401,6 +401,30 @@ impl LowerCtx {
                         }
                     }
                 }
+                // A SPREAD-record argument (`upd({ ...opts, entry: next }, …)` — the dominant
+                // porta recursive-parser shape `parse_options(args, idx+2, {...opts, field: v})`):
+                // materialize the fresh same-layout block via `try_lower_spread_record_construct`
+                // (each non-overridden field copied from the materialized base — a scalar Load / a
+                // borrowed-handle Dup — and the overrides stored), then BORROW it into the call +
+                // drop at scope end via `materialized_call_arg` (which seeds its heap-slot
+                // `record_masks` + recursive `$__drop_<R>`): cert `i` (alloc + per-field moves) + `d`
+                // (recursive drop), identical to the verified `let r = {...base, …}; f(r)` bind. The
+                // SAME producer + drop wiring the Record arm uses — only the base-copy differs.
+                // Outside the subset (a non-materialized base, an override field outside the
+                // executable subset) it returns None → WALL (never an `Init::Opaque` empty record).
+                IrExprKind::SpreadRecord { .. } => {
+                    let repr = repr_of(&a.ty)?;
+                    match self.try_lower_spread_record_construct(a) {
+                        Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
+                        None => {
+                            return Err(LowerError::Unsupported(
+                                "spread-record argument cannot be faithfully materialized in this \
+                                 brick (a non-materialized base or a field outside the subset)"
+                                    .into(),
+                            ))
+                        }
+                    }
+                }
                 // A fresh HEAP literal argument (`f("x")`, `f([1, 2, 3])`):
                 // materialized into an owned temp via `Alloc`, borrowed into the
                 // call, dropped at scope end — cert `i` (alloc) + `d` (drop), both
@@ -450,7 +474,6 @@ impl LowerCtx {
                 | IrExprKind::List { .. }
                 | IrExprKind::MapLiteral { .. }
                 | IrExprKind::EmptyMap
-                | IrExprKind::SpreadRecord { .. }
                 // A CLOSURE value argument (`register((x) => …)`): a fresh heap env,
                 // materialized + borrowed into the call. The callee borrows it per the
                 // borrow-by-default convention; its body's calls are elided ⇒ the gate

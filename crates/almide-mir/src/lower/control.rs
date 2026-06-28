@@ -903,6 +903,64 @@ fn detect_enum_map_fusion<'a>(
     Some((real, i_var, key_var, key_ty, tail))
 }
 
+/// Detect the enumerate+FOLD FUSION shape: `list.fold(list.enumerate(real), init, (acc, entry) => {
+/// let (i, key) = entry; <tail> })`. Returns `(real, i_var, acc_param, key_var, key_ty, tail)` — the
+/// inner iterates `real` binding i=loop-index + key=element (the acc param is preserved), running
+/// `<tail>` (the block minus the leading destructure), so the `(Int,String)` intermediate list is never
+/// built. The 2-param sibling of `detect_enum_map_fusion` (`acc` is `params[0]`, the enumerated `entry`
+/// is `params[1]`). `None` if the shape doesn't match. The `find_flag` idiom (`args |> list.enumerate |>
+/// list.fold("", (acc, entry) => { let (i, arg) = entry; if arg == flag then … else acc })`).
+fn detect_enum_fold_fusion<'a>(
+    xs: &'a IrExpr,
+    params: &[(VarId, Ty)],
+    body: &IrExpr,
+) -> Option<(&'a IrExpr, VarId, (VarId, Ty), VarId, Ty, IrExpr)> {
+    use almide_ir::{IrPattern, IrStmtKind};
+    let real = match &xs.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            if module.as_str() == "list" && func.as_str() == "enumerate" && args.len() == 1 =>
+        {
+            &args[0]
+        }
+        _ => return None,
+    };
+    if params.len() != 2 {
+        return None;
+    }
+    let acc_param = params[0].clone();
+    let entry_var = params[1].0;
+    let IrExprKind::Block { stmts, expr } = &body.kind else {
+        return None;
+    };
+    let first = stmts.first()?;
+    let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements }, value } = &first.kind
+    else {
+        return None;
+    };
+    if elements.len() != 2 {
+        return None;
+    }
+    match &value.kind {
+        IrExprKind::Var { id } if *id == entry_var => {}
+        _ => return None,
+    }
+    let i_var = match &elements[0] {
+        IrPattern::Bind { var, .. } => *var,
+        _ => return None,
+    };
+    let (key_var, key_ty) = match &elements[1] {
+        IrPattern::Bind { var, ty } => (*var, ty.clone()),
+        _ => return None,
+    };
+    let tail = IrExpr {
+        kind: IrExprKind::Block { stmts: stmts[1..].to_vec(), expr: expr.clone() },
+        ty: body.ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    };
+    Some((real, i_var, acc_param, key_var, key_ty, tail))
+}
+
 fn is_self_host_result_call(subject: &IrExpr) -> bool {
     match &subject.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {

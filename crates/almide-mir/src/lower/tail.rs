@@ -955,6 +955,23 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_variant_value_match(subject, arms, &tail.ty) {
                         return Ok(Some(dst));
                     }
+                    // A UNIT-result tail variant match (`match write_summary(..) { ok(p) =>
+                    // {…effects…}, err(e) => {…effects…} }` — the run_all_finish shape): the arms
+                    // produce no VALUE, only effects, so there is nothing to "pick" — this is
+                    // exactly the statement/Unit-position dispatch `lower_branch` already executes
+                    // (track the Result subject → `try_lower_result_match` reads the tag and runs
+                    // ONLY the taken arm; an untrackable subject linearizes both arms, the
+                    // existing caps-union-sound fallback). DELEGATE to it rather than wall — the
+                    // function's Unit return is the merged `Const` below (no value escapes the
+                    // branch). The same proven machinery every non-tail Unit match uses; gated to
+                    // `Unit` so a SCALAR/HEAP-result variant match (whose value DOES matter) keeps
+                    // walling here (`lower_branch` would discard its value = a silent miscompile).
+                    if matches!(tail.ty, Ty::Unit) {
+                        self.lower_branch(tail)?;
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::Const { dst });
+                        return Ok(Some(dst));
+                    }
                     return Err(LowerError::Unsupported(
                         "variant (Option/Result) match in tail position outside the \
                          executable subset cannot be faithfully computed (a Const-0 would \

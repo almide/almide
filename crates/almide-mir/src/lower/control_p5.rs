@@ -106,6 +106,23 @@ impl LowerCtx {
                     (xs, params.as_slice(), body)
                 }
             }
+        } else if func == "fold" {
+            // enumerate+FOLD fusion (`args |> list.enumerate |> list.fold(init, (acc, entry) => { let
+            // (i, key) = entry; … })`): iterate `real` directly, binding i=loop-index + key=element +
+            // KEEPING the acc param, so the `(Int,String)` intermediate is never built. The `find_flag`
+            // shape.
+            match detect_enum_fold_fusion(xs, params, body) {
+                Some((real, i_var, acc_param, key_var, key_ty, tail)) => {
+                    fuse_index = Some(i_var);
+                    fuse_holder = Some((vec![acc_param, (key_var, key_ty)], tail));
+                    let (p, b) = fuse_holder.as_ref().unwrap();
+                    (real, p.as_slice(), b)
+                }
+                None => {
+                    fuse_holder = None;
+                    (xs, params.as_slice(), body)
+                }
+            }
         } else {
             fuse_holder = None;
             (xs, params.as_slice(), body)
@@ -406,10 +423,35 @@ impl LowerCtx {
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
         self.in_defunc_body += 1;
+        // A HEAP (String) fold accumulator whose body CONDITIONALLY replaces the accumulator
+        // (`if cond then <new> else acc` — the `find_flag` shape): the unconditional drop-old +
+        // SetLocal append-accumulator below cannot lower it (the `else acc` arm would drop-then-store
+        // the FREED acc → use-after-free). Update the slot IN PLACE — only the THEN arm drops-old +
+        // rebinds, the empty ELSE leaves acc untouched — so the loop slot owns exactly one ref at the
+        // body's start and end in BOTH arms (the conditional-acquire invariant, OwnershipFilter.v's
+        // CondLoop). The handler emits the whole `IfThen/Else/EndIf` + slot update itself, so the
+        // generic `match func` update below is skipped.
+        let cond_acc_handled = func == "fold"
+            && fold_acc_ty.is_some()
+            && acc_local.is_some()
+            && {
+                self.scalar_loop_depth += 1;
+                // Returns true ONLY when fully handled; on a shape match it could not lower it
+                // truncates its own ops + returns false, so we fall through to the concat/scalar
+                // paths (which, for a non-conditional body, lower it; for a failed conditional body,
+                // also fail → the whole HOF rolls back at the call site). On a non-conditional body
+                // it returns false with no ops emitted.
+                let ok = self.try_lower_cond_heap_acc_fold(body, params[0].0, acc_local.unwrap());
+                self.scalar_loop_depth -= 1;
+                ok
+            };
         // `filter`'s body is the PREDICATE (a Bool) regardless of the result element type — the kept
         // ELEMENT (not the body) is stored. Only map/flat_map-style HOFs lower the body AS the heap
         // result element. So route filter to the scalar (Bool) path even when result_elem is Some.
-        let body_v = if let Some(elem_ty) = result_elem.as_ref().filter(|_| func != "filter") {
+        let body_v = if cond_acc_handled {
+            // The slot was already updated in place; no merged body value flows out.
+            Some(acc_local.unwrap())
+        } else if let Some(elem_ty) = result_elem.as_ref().filter(|_| func != "filter") {
             self.lower_heap_result_arm(body, elem_ty)
         } else if fold_acc_ty.is_some() {
             // A heap (String) fold accumulator: the body `acc + s` is a ConcatStr producing a FRESH
@@ -435,9 +477,14 @@ impl LowerCtx {
             None => return None,
         };
         // SCALAR: drop the body's heap temps. HEAP: lower_heap_result_arm already balanced its own
-        // temps + Consumed body_v (moved out), so this is a no-op (live is back to body_mark).
+        // temps + Consumed body_v (moved out), so this is a no-op (live is back to body_mark). The
+        // conditional-acc handler already dropped its per-arm temps WITHIN the then-arm, so live is
+        // back to body_mark here too (no-op).
         self.drop_arm_locals(body_mark);
 
+        // The conditional-acc fold already emitted its IfThen/Else/EndIf + in-place slot update — the
+        // generic per-func slot update below must NOT run (it would re-drop + re-store the slot).
+        if !cond_acc_handled {
         match func {
             "map" => {
                 // result[i] = body_v.
@@ -506,6 +553,7 @@ impl LowerCtx {
             }
             _ => return None,
         }
+        }
 
         // Advance the index and close the loop.
         let next_v = self.fresh_value();
@@ -532,6 +580,118 @@ impl LowerCtx {
                 self.ops.push(Op::IntBinOp { dst: lenaddr, op: IntOp::Add, a: rh, b: four });
                 self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![lenaddr, cur] });
                 Some(result_list.unwrap())
+            }
+            _ => None,
+        }
+    }
+
+    /// A HEAP (String) `list.fold` body that CONDITIONALLY replaces the accumulator —
+    /// `if cond then <new-string> else acc` (the `find_flag` shape). Updates the loop-carried
+    /// String slot IN PLACE: the THEN arm produces a FRESH owned String, DROPS the old slot value,
+    /// and `SetLocal`'s the slot to the new one; the (empty) ELSE arm leaves the slot untouched. So
+    /// the slot owns EXACTLY ONE reference at the body's start and end in BOTH arms — the conditional-
+    /// acquire invariant (drop-then-rebind in a guarded arm, OwnershipFilter.v's CondLoop). The
+    /// unconditional append-accumulator update CANNOT lower this: its `else acc` would drop-then-store
+    /// the FREED slot (use-after-free). Each per-arm operand temp (the `??` operand's materialized
+    /// Option block) is dropped WITHIN the then-arm (before `Else`), so neither arm leaks.
+    ///
+    /// Returns `true` iff fully lowered. On a NON-conditional body (a plain `acc + s` concat) it
+    /// returns `false` with NO ops emitted (the caller's concat/scalar path takes over). On a
+    /// conditional body it cannot fully lower it TRUNCATES the ops it pushed + returns `false` (the
+    /// caller falls through, fails, and the whole HOF rolls back — never a wrong-bytes slot).
+    fn try_lower_cond_heap_acc_fold(
+        &mut self,
+        body: &IrExpr,
+        acc_param: VarId,
+        acc_local: ValueId,
+    ) -> bool {
+        use almide_ir::IrExprKind;
+        // Unwrap a single-expression Block (the post-fusion `tail` is `{ <if> }`).
+        let inner = match &body.kind {
+            IrExprKind::Block { stmts, expr } if stmts.is_empty() => match expr {
+                Some(e) => e.as_ref(),
+                None => return false,
+            },
+            _ => body,
+        };
+        let (cond, then, else_) = match &inner.kind {
+            IrExprKind::If { cond, then, else_ } => (cond.as_ref(), then.as_ref(), else_.as_ref()),
+            _ => return false,
+        };
+        // The ELSE arm must be EXACTLY the accumulator param (`else acc`): that is what makes the
+        // empty-else in-place update sound (the slot is genuinely unchanged when `cond` is false).
+        match &else_.kind {
+            IrExprKind::Var { id } if *id == acc_param => {}
+            _ => return false,
+        }
+        // The shape matched — roll back our own ops on any sub-failure (so the caller's fall-through
+        // path starts clean).
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let cond_v = match self.lower_scalar_value(cond) {
+            Some(v) => v,
+            None => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return false;
+            }
+        };
+        self.ops.push(Op::IfThen { cond: cond_v, dst: None });
+        // THEN arm: a FRESH owned String (BARE — NOT Consumed/registered; the slot will own it).
+        let arm_mark = self.live_heap_handles.len();
+        let new_v = match self.lower_cond_acc_then_value(then) {
+            Some(v) => v,
+            None => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return false;
+            }
+        };
+        // Drop the OLD slot value, then move the new one in (the slot's single ref is preserved).
+        let drop_op = self.drop_op_for(acc_local);
+        self.ops.push(drop_op);
+        self.ops.push(Op::SetLocal { local: acc_local, src: new_v });
+        // Free the then-arm's operand temps (e.g. the `??` operand Option block) WITHIN the arm.
+        self.drop_arm_locals(arm_mark);
+        self.ops.push(Op::Else { val: None });
+        // ELSE arm: empty — the slot is left as-is.
+        self.ops.push(Op::EndIf { val: None });
+        true
+    }
+
+    /// Lower the THEN arm of a conditional heap-acc fold to a BARE owned String (rc 1, NOT Consumed,
+    /// NOT registered for scope-end drop — the accumulator slot becomes its sole owner via the
+    /// caller's drop-old + `SetLocal`). Any operand temp it materializes IS registered (freed by the
+    /// caller's per-arm `drop_arm_locals`). `None` ⇒ out of subset (the caller rolls back + walls).
+    fn lower_cond_acc_then_value(&mut self, then: &IrExpr) -> Option<ValueId> {
+        use almide_ir::{BinOp, IrExprKind};
+        match &then.kind {
+            // `e!` — strip the effect-propagation unwrap (identity on the Ok payload here).
+            IrExprKind::Unwrap { expr } => self.lower_cond_acc_then_value(expr),
+            // `<option/result> ?? <fallback>` (`list.get(args, i+1) ?? ""`) → a fresh owned String.
+            IrExprKind::UnwrapOr { expr, fallback } => {
+                self.try_lower_option_unwrap_or(expr, fallback, false)
+            }
+            // A string LITERAL → a fresh owned String block.
+            IrExprKind::LitStr { value } => {
+                let dst = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::Str(value.clone()),
+                });
+                Some(dst)
+            }
+            // `a + b` string concat → a fresh owned String.
+            IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => self.try_lower_concat_str(then),
+            // A string INTERPOLATION → a fresh owned String.
+            IrExprKind::StringInterp { parts } => self.try_lower_string_interp(parts),
+            // A bare heap Var → ACQUIRE our own reference (`Dup`) so the slot owns it independently.
+            IrExprKind::Var { id } => {
+                let src = self.value_for(*id).ok()?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::Dup { dst, src });
+                Some(dst)
             }
             _ => None,
         }
