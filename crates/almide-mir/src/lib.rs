@@ -518,6 +518,21 @@ pub enum PrimKind {
     /// ownership certificate emits an `i` (alloc) for it, balanced by the caller's
     /// scope-end drop (a recursive `DropListStr` over the owned element Strings).
     ArgsGetList,
+    /// The WASI `fd_read`-from-stdin line-read sequence, packaged as ONE high-level HEAP-RESULT
+    /// prim — no args, dst = a fresh OWNED canonical `String` of ONE line of standard input.
+    /// Reads fd 0 BYTE-BY-BYTE (so it never over-reads past the newline — a later
+    /// `read_n_bytes` of the body still sees the right stream) until a `\n` (excluded from the
+    /// result) or EOF, then strips a trailing `\r` (matching native
+    /// `read_line().trim_end_matches('\n').trim_end_matches('\r')`). EOF with no bytes yields the
+    /// empty String. Reached only by the self-hosted `io.read_line`. Carries [`Capability::Stdin`]
+    /// — a DISTINCT capability (reading standard input is neither a write, a filesystem, an
+    /// entropy, nor a clock effect; the cap_witness counts it exactly like `RandomGet` → Entropy),
+    /// so a function using it is caps-verified ONLY if it declares Stdin — never accept-but-unsafe.
+    /// NON-DETERMINISTIC (reads live stdin): no byte-match across runs unless stdin is fixed. Its
+    /// dst is a heap Ptr (like [`ArgsGetList`]), so the ownership certificate emits an `i` (alloc)
+    /// for it, balanced by the caller's scope-end flat `Drop` (a String owns no nested handles) or
+    /// a heap-return move-out.
+    ReadLine,
     /// The WASI `path_open` + `fd_read` file-read sequence, packaged as ONE high-level
     /// HEAP-RESULT prim — `args = [path]` (a BORROWED `String` handle), dst = a fresh
     /// OWNED `Result[String, String]`. Opens the file at `path` (relative to the first
@@ -588,6 +603,22 @@ pub enum PrimKind {
     /// a heap Ptr, so the ownership certificate emits an `i` (alloc), balanced by the
     /// caller's scope-end flat `DropListStr` (sound for BOTH arms given the `len@4 = 0` Ok).
     MakeDir,
+    /// The WASI `path_remove_directory` / `path_unlink_file` RECURSIVE-remove sequence, packaged
+    /// as ONE high-level HEAP-RESULT prim — `args = [path]` (a BORROWED `String` handle, the
+    /// caller still owns it), dst = a fresh OWNED `Result[Unit, String]`. Removes the tree rooted
+    /// at `path` (relative to the first preopened dir, leading `/` stripped — the same resolution
+    /// [`WriteTextFile`] uses): if `path` opens as a directory it RECURSIVELY removes every entry
+    /// (a child directory via `path_remove_directory` after it is emptied, a child file via
+    /// `path_unlink_file`) then removes the now-empty directory; if it is a file it is unlinked
+    /// directly — matching native `fs.remove_all` (`remove_dir_all` for a dir, `remove_file`
+    /// otherwise). On success builds `Ok(())` (the `len@4 = 0` `materialize_result_ok` convention,
+    /// IDENTICAL to [`WriteTextFile`]'s Ok arm), on a removal error builds `Err(<message>)`
+    /// (`len@4 = 1`, `@12 = msg`, `@16 tag = 1`). A remove IS a filesystem WRITE, so it REUSES
+    /// [`Capability::FsWrite`] (NOT a new capability — that would be a false distinction); counted
+    /// in cap_witness exactly like [`WriteTextFile`]. Its dst is a heap Ptr, so the ownership
+    /// certificate emits an `i` (alloc), balanced by the caller's scope-end flat `DropListStr`
+    /// (sound for BOTH arms given the `len@4 = 0` Ok).
+    RemoveAll,
     /// Release one reference of a RAW heap handle (`(call $rc_dec …)`), the inverse of [`RcInc`].
     /// The MECHANISM the self-hosted recursive `value.__drop_value` frees a dynamic Value tree with
     /// (the §4.1-compliant alternative to a hand-written WAT drop): it operates on raw Int handles,
@@ -781,6 +812,15 @@ pub enum Capability {
     /// NEVER read the clock un-witnessed (the checker REJECTS `used ⊄ allowed`); only an
     /// `effect fn` (which declares the host caps) may.
     Clock,
+    /// Reading STANDARD INPUT — the WASI `fd_read`-from-fd-0 floor ([`PrimKind::ReadLine`]),
+    /// reached by the self-hosted `io.read_line`. The seventh sandbox exit. Reading stdin is
+    /// neither a write, a filesystem read, an entropy draw, nor a clock read, so it is a DISTINCT
+    /// capability with its own id — never aliased to FsRead/FsWrite/Entropy/Clock (a fn that
+    /// consumes the operator's input stream is a real, separately-grantable authority). Accounted
+    /// exactly like Entropy/FsRead: a pure `fn` declares ∅ and so can NEVER read stdin
+    /// un-witnessed (the checker REJECTS `used ⊄ allowed`); only an `effect fn` (which declares
+    /// the host caps) may.
+    Stdin,
 }
 
 impl Capability {
@@ -788,7 +828,7 @@ impl Capability {
     /// proofs/CapabilityBound.v's checker is GENERIC over `list nat` (a `subset_check`,
     /// no per-capability enumeration), so it needs no edit to admit a new id — only
     /// this mapping must stay injective + stable (Stdout = 0, Entropy = 1, CliArgs = 2,
-    /// FsRead = 3, FsWrite = 4, Clock = 5).
+    /// FsRead = 3, FsWrite = 4, Clock = 5, Stdin = 6).
     pub const fn id(self) -> u32 {
         match self {
             Capability::Stdout => 0,
@@ -797,6 +837,7 @@ impl Capability {
             Capability::FsRead => 3,
             Capability::FsWrite => 4,
             Capability::Clock => 5,
+            Capability::Stdin => 6,
         }
     }
 }

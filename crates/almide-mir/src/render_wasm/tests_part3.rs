@@ -538,9 +538,19 @@
     /// the same reason RC primitives are: a host-floor exit is the trust spine's own core, not
     /// "another stdlib routine." This set grows ONLY when the capability vocabulary gains a new
     /// heap-result host floor (here: directory listing); the open ratchet stays exactly as strict.
+    // `$write_text_file` (`PrimKind::WriteTextFile`, Capability::FsWrite), `$make_dir`
+    // (`PrimKind::MakeDir`, Capability::FsWrite) and `$remove_all` (`PrimKind::RemoveAll`,
+    // Capability::FsWrite, with its recursive byte-path leaf `$remove_path`) are the
+    // filesystem-WRITE host-floor sequences (path_open(O_CREAT|O_TRUNC)+fd_write /
+    // path_create_directory / path_remove_directory+path_unlink_file + the cap-as-tag
+    // `Result[Unit, String]` build); `$read_line` (`PrimKind::ReadLine`, Capability::Stdin) is
+    // the byte-by-byte fd_read-from-stdin + canonical-String build the self-hosted
+    // `io.read_line` reaches. Each is a host-call boundary with no pure-Almide form, accounted in
+    // the closed host-floor set exactly like the read sequences above.
     const WASI_FLOOR_FNS: &[&str] = &[
         "$args_get_list", "$read_text_file", "$rtf_str", "$rtf_result", "$alloc8",
         "$read_dir", "$str_lt", "$is_dot_entry",
+        "$write_text_file", "$make_dir", "$remove_all", "$remove_path", "$read_line",
     ];
 
     #[test]

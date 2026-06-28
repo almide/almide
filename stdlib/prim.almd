@@ -236,6 +236,30 @@ fn write_text_file(path: String, content: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_prim_make_dir")
 fn make_dir(path: String) -> Result[Unit, String] = _
 
+// The path_remove_directory / path_unlink_file WASI host calls, packaged as ONE high-level
+// HEAP-RESULT prim — a FS-WRITE sandbox exit (reaches Capability::FsWrite — a recursive remove
+// IS a filesystem write, the SAME capability as write_text_file, NOT a new one). Removes the
+// tree at `path` (preopen-relative, leading '/' stripped — the same resolution read_text_file
+// uses): a directory is emptied RECURSIVELY (each child file unlinked, each child directory
+// removed) then removed, a file is unlinked directly. Returns a fresh OWNED
+// `Result[Unit, String]`: `Ok(())` on success, `Err(message)` on a removal error. Reached only
+// by the self-hosted `fs.remove_all` (fs_remove_all.almd) in the v1 trust-spine wasm backend;
+// the render emits the WASI recursive path_remove_directory/path_unlink_file sequence. No native
+// runtime impl — the native target uses fs.remove_all's own @intrinsic.
+@intrinsic("almide_rt_prim_remove_all")
+fn remove_all(path: String) -> Result[Unit, String] = _
+
+// The fd_read-from-stdin line-read WASI host call, packaged as ONE high-level HEAP-RESULT prim —
+// the STANDARD-INPUT sandbox exit (reaches Capability::Stdin, a DISTINCT capability: reading the
+// operator's input stream is neither a write, a filesystem, an entropy, nor a clock effect).
+// Reads fd 0 byte-by-byte until a '\n' (excluded) or EOF, strips a trailing '\r', and returns a
+// fresh OWNED canonical `String` of that one line (matching native read_line trimmed). Reached
+// only by the self-hosted `io.read_line` (io_read_line.almd) in the v1 trust-spine wasm backend;
+// the render emits the WASI fd_read host loop. No native runtime impl — the native target uses
+// io.read_line's own @intrinsic.
+@intrinsic("almide_rt_prim_read_line")
+fn read_line() -> String = _
+
 // The clock_time_get WASI host call — the WALL-CLOCK sandbox exit (reaches Capability::Clock,
 // a DISTINCT capability: a clock read is neither a filesystem nor an entropy effect). Writes
 // the current clock value (nanoseconds) as an i64 at `time_ptr`, returning the i32 errno

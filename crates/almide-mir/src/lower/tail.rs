@@ -591,6 +591,15 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_result_list_value_int_ctor(tail, &tail.ty) {
                         return Ok(Some(dst));
                     }
+                    // `ok(())` / `ok(<scalar>)` RETURNED for a `Result[<non-heap>, String]` (porta
+                    // `run_foreground` / `ensure_porta_dir` `ok(())`): materialize the flat len-0 Ok
+                    // block, MOVED OUT as the return (its scope-end `DropListStr` frees just the block —
+                    // no nested heap). The heap-Ok cases (record/value/tuple/String) were intercepted
+                    // by the ctors above, so reaching here is exactly the scalar/Unit Ok the arm path
+                    // already lowers — only the TAIL position was missing it (this closed that gap).
+                    if let Some(dst) = self.try_lower_result_scalar_ok_ctor(tail, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);
                     // `alloc_init` faithfully materializes a string literal and a scalar-

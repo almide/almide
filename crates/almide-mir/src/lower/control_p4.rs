@@ -871,6 +871,48 @@ impl LowerCtx {
         }
     }
 
+    /// Construct a `Result[<non-heap>, String]` `ok(<scalar/unit>)` block — the porta
+    /// `run_foreground` / `ensure_porta_dir` `ok(())` tail and any `ok(<Int/Bool>)`. The Ok payload
+    /// is a SCALAR (or Unit → a `0` placeholder; the @4 len-0 field is the Ok tag consumers read, the
+    /// @12 payload slot is never extracted for a Unit Ok), wrapped by `materialize_result_ok` into the
+    /// flat len-0 block (scope-end `DropListStr` frees just the block — no nested heap to recurse).
+    /// Returns the block (NOT Consumed — the caller moves it out as a tail return, or pushes
+    /// `Op::Consume` for a heap-result-if/match arm). `None` outside `Result[<non-heap>, String]`, a
+    /// non-`ResultOk`, or a HEAP Ok payload — those route to the heap-ok / record / value ctors above.
+    pub(crate) fn try_lower_result_scalar_ok_ctor(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let ok_ty = match result_ty {
+            Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && matches!(a[1], Ty::String) =>
+            {
+                &a[0]
+            }
+            _ => return None,
+        };
+        if is_heap_ty(ok_ty) {
+            return None;
+        }
+        let IrExprKind::ResultOk { expr: inner } = &expr.kind else {
+            return None;
+        };
+        if is_heap_ty(&inner.ty) {
+            return None;
+        }
+        let payload = if matches!(&inner.kind, IrExprKind::Unit) {
+            let z = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: z, value: 0 });
+            z
+        } else {
+            self.lower_scalar_value(inner)?
+        };
+        let repr = repr_of(result_ty).ok()?;
+        Some(self.materialize_result_ok(payload, repr))
+    }
+
     /// Construct a `Result[Value, String]` `ok(<Value>)` / `err(<String>)` (the `ok(value.array(...))`
     /// shape) — the len-1 + tag@16 block, Ok payload a Value (materialized via `lower_owned_heap_field`,
     /// which handles the `value.*` ctor + nested `list.map`), Err a String. Marked

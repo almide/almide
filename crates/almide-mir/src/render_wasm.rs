@@ -62,7 +62,9 @@ const WRITE_ERR_ADDR: u32 = 100; // "write failed" message bytes (fs.write Err) 
 const WRITE_ERR_LEN: u32 = 12; // len of "write failed"
 const MKDIR_ERR_ADDR: u32 = 112; // "mkdir failed" message bytes (fs.mkdir_p Err) — 112..124
 const MKDIR_ERR_LEN: u32 = 12; // len of "mkdir failed"
-const LABELS_ADDR: u32 = 128; // print labels (the data section) — after the fixed messages
+const REMOVE_ERR_ADDR: u32 = 124; // "remove failed" message bytes (fs.remove_all Err) — 124..137
+const REMOVE_ERR_LEN: u32 = 13; // len of "remove failed"
+const LABELS_ADDR: u32 = 144; // print labels (the data section) — after the fixed messages
 const SCRATCH_ADDR: u32 = 512; // the line build buffer
 const HEAP_BASE: u32 = 8192; // bump allocator start
 // The Ok/Err tag of a cap-as-tag `Result[String, String]` lives in the HIGH 32 bits of
@@ -612,10 +614,12 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
                 dst: Some(dst),
                 kind: PrimKind::LoadHandle
                     | PrimKind::ArgsGetList
+                    | PrimKind::ReadLine
                     | PrimKind::ReadTextFile
                     | PrimKind::ReadDir
                     | PrimKind::WriteTextFile
-                    | PrimKind::MakeDir,
+                    | PrimKind::MakeDir
+                    | PrimKind::RemoveAll,
                 ..
             } => {
                 m.insert(*dst, Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });

@@ -1,0 +1,20 @@
+// io_print — the SELF-HOSTED `io.print(s)` implementation for v1, written in ALMIDE over the
+// `prim` primitive floor (raw memory + the fd_write host call), the v1 trust-spine realization
+// of the effectful `io.print`. It writes the string's UTF-8 bytes to stdout via a single-iovec
+// `fd_write` — WITHOUT a trailing newline (the only difference from the self-hosted `print_str`
+// = `println`), matching native `io.print` (print! + flush, no '\n'). Addresses match the
+// preamble layout: NWRITTEN@0, IOVEC@8 {ptr,len}.
+//
+// Because this body reaches prim.fd_write, its cap_witness carries Capability::Stdout — the SAME
+// capability as println, NOT a new one (a stdout write is a stdout write). So a caller is
+// caps-verified ONLY if it declares Stdout (an `effect fn`); a pure `fn` reaching it is a
+// frontend error AND would REJECT at the gate. A PLAIN `fn` (NOT `effect fn`, like print_str) so
+// the bare Unit return is not effect-monad/Result wrapped — `io.print` callers expect Unit.
+fn io_print(s: String) -> Unit = {
+  let h = prim.handle(s)        // i64 address of the [rc][len][cap][bytes] block
+  let len = prim.load32(h + 4)  // header len (LIST_LEN_OFFSET)
+  let data = h + 12             // byte start (LIST_HEADER)
+  prim.store32(8, data)         // iovec = { the string bytes, len }
+  prim.store32(12, len)
+  let _w0 = prim.fd_write(1, 8, 1, 0)  // fd_write(stdout, iovec@8, count 1, nwritten@0)
+}

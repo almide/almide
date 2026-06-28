@@ -970,6 +970,47 @@ impl LowerCtx {
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }
+        // `prim.remove_all(path)` — the WASI recursive-remove floor (fs.remove_all). ONE BORROWED
+        // `String` arg (the path; the caller still owns it). Its dst is a FRESH OWNED
+        // `Result[Unit, String]` built by the render ($remove_all): Ok(()) with `len@4 = 0` (no
+        // payload String — the `materialize_result_ok` convention, IDENTICAL to make_dir's Ok arm)
+        // so the scope-end flat `DropListStr` frees nothing at @12, or Err(msg) with `len@4 = 1` +
+        // `@12 = msg` (the flat drop frees the one owned message). Tracked exactly like make_dir's
+        // heap Result: `materialized_results_str` so a downstream `match`/`!` reads the @16 tag, AND
+        // `heap_elem_lists` so the heap-payload bind gates open AND the scope-end drop is the flat
+        // `DropListStr`. Carries Capability::FsWrite (a recursive remove IS a filesystem write —
+        // counted in cap_witness). The render emits the WASI recursive
+        // path_remove_directory/path_unlink_file sequence.
+        if func == "remove_all" {
+            let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported("prim.remove_all path is not a lowerable scalar/handle".into())
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: PrimKind::RemoveAll,
+                dst: Some(dst),
+                args: vec![path],
+            });
+            self.materialized_results_str.insert(dst);
+            self.heap_elem_lists.insert(dst);
+            return Ok(Some(dst));
+        }
+        // `prim.read_line()` — the WASI stdin-line floor (io.read_line). NO args. Its dst is a
+        // FRESH OWNED canonical `String` (one line of stdin, newline excluded) built by the render
+        // ($read_line). A plain String owns NO nested handles, so it is tracked in NO classification
+        // set — its scope-end drop (if not moved out as a return) is the flat `Op::Drop` that frees
+        // the block (a `DropListStr` would WRONGLY treat the byte payload as i64 element handles).
+        // Carries Capability::Stdin (counted in cap_witness). The render emits the byte-by-byte
+        // fd_read-from-fd-0 sequence.
+        if func == "read_line" {
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: PrimKind::ReadLine,
+                dst: Some(dst),
+                args: vec![],
+            });
+            return Ok(Some(dst));
+        }
         // Bitwise binary ops lower to a scalar `Op::IntBinOp` (i64 and/or/xor/shl/shr_s),
         // not an `Op::Prim` — the int.band/bor/bxor/bshl/bshr floor. No ownership.
         let bitop = match func {

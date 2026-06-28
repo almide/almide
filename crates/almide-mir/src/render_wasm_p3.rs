@@ -23,6 +23,10 @@ pub(crate) fn preamble() -> String {
     (func $fd_readdir (param i32 i32 i32 i64 i32) (result i32)))
   (import "wasi_snapshot_preview1" "path_create_directory"
     (func $path_create_directory (param i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "path_remove_directory"
+    (func $path_remove_directory (param i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "path_unlink_file"
+    (func $path_unlink_file (param i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "clock_time_get"
     (func $clock_time_get (param i32 i64 i32) (result i32)))
   (memory (export "memory") 1)
@@ -34,6 +38,8 @@ pub(crate) fn preamble() -> String {
   (data (i32.const {WRITE_ERR_ADDR}) "write failed")
   ;; the fs.mkdir_p path_create_directory error message — a CONST byte run the Err arm copies.
   (data (i32.const {MKDIR_ERR_ADDR}) "mkdir failed")
+  ;; the fs.remove_all path_remove_directory/path_unlink_file error message — a CONST byte run.
+  (data (i32.const {REMOVE_ERR_ADDR}) "remove failed")
   (global $bump (mut i32) (i32.const {HEAP_BASE}))
   ;; the free-list head (0 = empty) — physical reclamation (A1.2-render), the
   ;; realization of proofs/FreeList.v. A freed block is pushed here; $alloc reuses
@@ -517,6 +523,151 @@ pub(crate) fn preamble() -> String {
         (local.get $obj))
       (else
         (local.set $msg (call $rtf_str (i32.const {MKDIR_ERR_ADDR}) (i32.const {MKDIR_ERR_LEN})))
+        (call $rtf_result (local.get $msg) (i32.const 1)))))
+
+  ;; io.read_line() — the WASI stdin-line floor. Reads fd 0 BYTE-BY-BYTE into a scratch buffer
+  ;; until a '\n' (EXCLUDED from the result) or EOF, strips a trailing '\r', then copies the bytes
+  ;; into a fresh OWNED canonical String via $rtf_str — matching native
+  ;; read_line().trim_end_matches('\n').trim_end_matches('\r'). The SEVENTH sandbox exit
+  ;; (Capability::Stdin). EOF with no bytes yields the empty String. Byte-at-a-time so it never
+  ;; over-reads past the newline (a later read of the stream still sees the right bytes). The 4 KiB
+  ;; cap bounds a pathological line (JSON-RPC headers are short); the scratch is immortal $alloc8,
+  ;; like read_text_file's out-params.
+  (func $read_line (result i32)
+    (local $buf i32) (local $n i32) (local $cap i32) (local $iov i32) (local $nread_p i32) (local $b i32)
+    (local.set $cap (i32.const 4096))
+    (local.set $buf (call $alloc8 (local.get $cap)))
+    (local.set $iov (call $alloc8 (i32.const 8)))
+    (local.set $nread_p (call $alloc8 (i32.const 4)))
+    (local.set $n (i32.const 0))
+    (block $done (loop $l
+      (br_if $done (i32.ge_u (local.get $n) (local.get $cap)))
+      ;; iov = [buf+n, 1] — read exactly one byte.
+      (i32.store (local.get $iov) (i32.add (local.get $buf) (local.get $n)))
+      (i32.store (i32.add (local.get $iov) (i32.const 4)) (i32.const 1))
+      (drop (call $fd_read (i32.const 0) (local.get $iov) (i32.const 1) (local.get $nread_p)))
+      ;; EOF (0 bytes) -> stop.
+      (br_if $done (i32.eqz (i32.load (local.get $nread_p))))
+      (local.set $b (i32.load8_u (i32.add (local.get $buf) (local.get $n))))
+      ;; newline -> stop (do NOT include it).
+      (br_if $done (i32.eq (local.get $b) (i32.const 10)))
+      (local.set $n (i32.add (local.get $n) (i32.const 1)))
+      (br $l)))
+    ;; strip a trailing '\r' (CRLF line endings).
+    (if (i32.and (i32.gt_u (local.get $n) (i32.const 0))
+                 (i32.eq (i32.load8_u (i32.add (local.get $buf) (i32.sub (local.get $n) (i32.const 1))))
+                         (i32.const 13)))
+      (then (local.set $n (i32.sub (local.get $n) (i32.const 1)))))
+    (call $rtf_str (local.get $buf) (local.get $n)))
+
+  ;; helper: RECURSIVELY remove the tree at byte-path [$pdata, $pdata+$plen) relative to preopen
+  ;; fd 3. Returns 0 on success or the FIRST non-zero errno. If the path opens as a directory it
+  ;; removes every entry — recursing via a re-readdir-from-cookie-0 scan that removes ONE entry per
+  ;; pass (so a removal never invalidates a live readdir cookie) — then path_remove_directory's the
+  ;; emptied directory; otherwise it path_unlink_file's it as a file (matching native remove_dir_all
+  ;; vs remove_file). All removals are issued against the preopen fd 3 with full child paths, so the
+  ;; opened dir fd needs only fd_readdir rights. Used by $remove_all.
+  (func $remove_path (param $pdata i32) (param $plen i32) (result i32)
+    (local $fd_out i32) (local $errno i32) (local $fd i32) (local $buf i32) (local $bufused_p i32)
+    (local $bufused i32) (local $off i32) (local $namlen i32) (local $nameptr i32)
+    (local $child i32) (local $clen i32) (local $i i32) (local $rc i32) (local $found i32)
+    (local.set $fd_out (call $alloc8 (i32.const 4)))
+    ;; path_open(dirfd=3, dirflags=0, path, plen, oflags=O_DIRECTORY=2, rights=fd_readdir(16384),
+    ;;   rights_inheriting=16384, fdflags=0, fd_out)
+    (local.set $errno
+      (call $path_open (i32.const 3) (i32.const 0) (local.get $pdata) (local.get $plen)
+                       (i32.const 2) (i64.const 16384) (i64.const 16384) (i32.const 0) (local.get $fd_out)))
+    (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
+      (then
+        ;; not a directory (or missing) — unlink as a file; its errno is the result.
+        (call $path_unlink_file (i32.const 3) (local.get $pdata) (local.get $plen)))
+      (else
+        (local.set $fd (i32.load (local.get $fd_out)))
+        (local.set $rc (i32.const 0))
+        (local.set $buf (call $alloc8 (i32.const 4096)))
+        (local.set $bufused_p (call $alloc8 (i32.const 4)))
+        (block $emptied (loop $scan
+          ;; re-read from cookie 0 each pass; the buffer holds at least the first real entry
+          ;; (after the leading "."/"..") of any directory.
+          (drop (call $fd_readdir (local.get $fd) (local.get $buf) (i32.const 4096)
+                                  (i64.const 0) (local.get $bufused_p)))
+          (local.set $bufused (i32.load (local.get $bufused_p)))
+          (local.set $off (i32.const 0))
+          (local.set $found (i32.const 0))
+          (block $entry (loop $ent
+            ;; dirent header = d_next(8) d_ino(8) d_namlen(4) d_type(4) = 24 bytes, then name.
+            (br_if $entry (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $bufused)))
+            (local.set $namlen (i32.load (i32.add (local.get $buf) (i32.add (local.get $off) (i32.const 16)))))
+            (local.set $nameptr (i32.add (local.get $buf) (i32.add (local.get $off) (i32.const 24))))
+            ;; a truncated trailing name (name overflows the buffer) — stop scanning this pass.
+            (br_if $entry (i32.gt_u (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $namlen))
+                                    (local.get $bufused)))
+            (if (i32.eqz (call $is_dot_entry (local.get $nameptr) (local.get $namlen)))
+              (then
+                ;; child path = pdata + "/" + name.
+                (local.set $clen (i32.add (i32.add (local.get $plen) (i32.const 1)) (local.get $namlen)))
+                (local.set $child (call $alloc8 (i32.add (local.get $clen) (i32.const 1))))
+                (local.set $i (i32.const 0))
+                (block $c1d (loop $c1
+                  (br_if $c1d (i32.ge_u (local.get $i) (local.get $plen)))
+                  (i32.store8 (i32.add (local.get $child) (local.get $i))
+                              (i32.load8_u (i32.add (local.get $pdata) (local.get $i))))
+                  (local.set $i (i32.add (local.get $i) (i32.const 1)))
+                  (br $c1)))
+                (i32.store8 (i32.add (local.get $child) (local.get $plen)) (i32.const {ASCII_SLASH}))
+                (local.set $i (i32.const 0))
+                (block $c2d (loop $c2
+                  (br_if $c2d (i32.ge_u (local.get $i) (local.get $namlen)))
+                  (i32.store8 (i32.add (local.get $child)
+                                       (i32.add (i32.add (local.get $plen) (i32.const 1)) (local.get $i)))
+                              (i32.load8_u (i32.add (local.get $nameptr) (local.get $i))))
+                  (local.set $i (i32.add (local.get $i) (i32.const 1)))
+                  (br $c2)))
+                ;; recurse: remove the child. Keep the FIRST non-zero errno.
+                (local.set $errno (call $remove_path (local.get $child) (local.get $clen)))
+                (if (i32.and (i32.eqz (local.get $rc)) (i32.ne (local.get $errno) (i32.const 0)))
+                  (then (local.set $rc (local.get $errno))))
+                (local.set $found (i32.const 1))
+                (br $entry)))
+            (local.set $off (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $namlen)))
+            (br $ent)))
+          ;; no real entry this pass -> the directory is empty.
+          (br_if $emptied (i32.eqz (local.get $found)))
+          (br $scan)))
+        (drop (call $fd_close (local.get $fd)))
+        ;; remove the now-empty directory.
+        (local.set $errno (call $path_remove_directory (i32.const 3) (local.get $pdata) (local.get $plen)))
+        (if (i32.and (i32.eqz (local.get $rc)) (i32.ne (local.get $errno) (i32.const 0)))
+          (then (local.set $rc (local.get $errno))))
+        (local.get $rc))))
+
+  ;; fs.remove_all(path) — the WASI recursive-remove floor. $path is a BORROWED canonical String.
+  ;; Strips a leading '/' (preopen-relative, same resolution as $write_text_file), recursively
+  ;; removes the tree at $path via $remove_path, and builds a fresh OWNED `Result[Unit, String]`:
+  ;; Ok(()) (a 1-slot block, len@4=0 + @12=0 + tag@16=0 — the materialize_result_ok convention,
+  ;; IDENTICAL to $make_dir's Ok arm, so the scope-end flat $drop_list_str frees nothing) when
+  ;; $remove_path returns 0, or Err("remove failed") via $rtf_result on any non-zero errno. A
+  ;; recursive remove IS a filesystem write (Capability::FsWrite — the SAME cap as fs.write). The
+  ;; result is an owned heap handle the caller's scope-end DropListStr balances.
+  (func $remove_all (param $path i32) (result i32)
+    (local $pdata i32) (local $plen i32) (local $errno i32) (local $obj i32) (local $msg i32)
+    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
+    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
+    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
+                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
+      (then
+        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
+        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    (local.set $errno (call $remove_path (local.get $pdata) (local.get $plen)))
+    (if (result i32) (i32.eqz (local.get $errno))
+      (then
+        ;; Build Ok(()) — len@4=0, @12/@16 zeroed by the i64.store.
+        (local.set $obj (call $list_new (i32.const 1) (i32.const 1)))
+        (i64.store (i32.add (local.get $obj) (i32.const {LIST_HEADER})) (i64.const 0))
+        (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
+        (local.get $obj))
+      (else
+        (local.set $msg (call $rtf_str (i32.const {REMOVE_ERR_ADDR}) (i32.const {REMOVE_ERR_LEN})))
         (call $rtf_result (local.get $msg) (i32.const 1)))))
 
   ;; helper: lexicographic LESS-THAN over two canonical String handles $a, $b (byte order =

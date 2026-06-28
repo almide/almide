@@ -215,16 +215,23 @@ impl LowerCtx {
         // FsRead / FsWrite / FsWrite) — UNLIKE a bodyless effectful intrinsic (which would
         // contribute 0 caps = accept-but-unsafe, the reason is_pure walls the rest).
         // `env.unix_timestamp` carries Capability::Clock — a DISTINCT cap (a clock read is neither
-        // a filesystem nor an entropy effect). `fs.mkdir_p` REUSES Capability::FsWrite (a mkdir IS a
-        // filesystem write). The caller is an `effect fn` (declares the host caps) so the `used ⊆
-        // declared` checker verifies it; a pure caller is a frontend error.
+        // a filesystem nor an entropy effect). `fs.mkdir_p` / `fs.remove_all` REUSE
+        // Capability::FsWrite (a mkdir / recursive remove IS a filesystem write). `io.print` REUSES
+        // Capability::Stdout (it self-hosts over the SAME prim.fd_write floor as println, no new
+        // prim). `io.read_line` carries Capability::Stdin — a DISTINCT cap (reading the operator's
+        // input stream is neither a write, a filesystem, an entropy, nor a clock effect). The
+        // caller is an `effect fn` (declares the host caps) so the `used ⊆ declared` checker
+        // verifies it; a pure caller is a frontend error.
         let is_admitted_effectful = (module == "random" && func == "int")
             || (module == "env" && func == "args")
             || (module == "env" && func == "unix_timestamp")
             || (module == "fs" && func == "read_text")
             || (module == "fs" && func == "list_dir")
             || (module == "fs" && func == "write")
-            || (module == "fs" && func == "mkdir_p");
+            || (module == "fs" && func == "mkdir_p")
+            || (module == "fs" && func == "remove_all")
+            || (module == "io" && func == "print")
+            || (module == "io" && func == "read_line");
         if !purity::is_pure(module, func) && !is_admitted_effectful {
             return Err(LowerError::Unsupported(format!(
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"

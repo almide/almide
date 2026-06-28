@@ -1,0 +1,12 @@
+// io_read_line — SELF-HOSTED `io.read_line()` over the WASI stdin-line floor (prim.read_line),
+// the v1 trust-spine realization of the effectful `io.read_line`. Reads ONE line of standard
+// input (fd 0), returning it WITHOUT the trailing newline (and without a trailing '\r'), matching
+// native `io.read_line` (read_line().trim_end '\n'/'\r'). EOF with no bytes yields the empty
+// String. The prim packages the byte-by-byte fd_read loop and the canonical String construction;
+// the result is a fresh OWNED String dropped at scope end (the flat Drop — a String owns no
+// nested handles: no leak). Because this body reaches prim.read_line, its cap_witness carries
+// Capability::Stdin — a DISTINCT capability (reading the operator's input stream is neither a
+// write, a filesystem, an entropy, nor a clock effect) — so a caller is caps-verified ONLY if it
+// declares Stdin (an `effect fn`); a pure `fn` reaching it is a frontend error AND would REJECT
+// at the gate. NON-DETERMINISTIC (reads live stdin): no byte-match unless stdin is fixed.
+effect fn io_read_line() -> String = prim.read_line()

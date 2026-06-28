@@ -264,7 +264,13 @@ fn count_ir_calls(
                 let operand_is_value_result = almide_mir::lower::is_value_result_ty(&expr.ty)
                     || almide_mir::lower::is_result_listval_ty(&expr.ty)
                     || almide_mir::lower::is_result_str_str_ty(&expr.ty)
-                    || almide_mir::lower::is_option_value_ty(&expr.ty);
+                    || almide_mir::lower::is_option_value_ty(&expr.ty)
+                    // An Option[List[Value]] / Option[List[String]] `??` (`json.get_array(v,k) ?? []`,
+                    // `list.first_liststr(xs) ?? []`) routes to ONE synthetic option.listvalue_unwrap_or /
+                    // option.liststr_unwrap_or CALL (pure value_core helpers, no Stdout) — count +1 so
+                    // mir == ir, mirroring the Option[Value] case.
+                    || almide_mir::lower::is_option_listvalue_ty(&expr.ty)
+                    || almide_mir::lower::is_option_liststr_ty(&expr.ty);
                 // value/list-Ok Result + Option[Value] Vars route (the handle Var-case admits them);
                 // a str-str Var keeps its original path, so only a DIRECT str-result CALL lowers there.
                 // An Option[Value] operand is a self-host option CALL (list.get) or a Var.
@@ -279,7 +285,9 @@ fn count_ir_calls(
                         almide_mir::lower::is_self_host_result_str_module_fn(
                             module.as_str(),
                             func.as_str(),
-                        ) || (almide_mir::lower::is_option_value_ty(&expr.ty)
+                        ) || ((almide_mir::lower::is_option_value_ty(&expr.ty)
+                            || almide_mir::lower::is_option_listvalue_ty(&expr.ty)
+                            || almide_mir::lower::is_option_liststr_ty(&expr.ty))
                             && almide_mir::lower::is_self_host_option_module_fn(
                                 module.as_str(),
                                 func.as_str(),

@@ -1206,6 +1206,7 @@ fn lower_function_all_impl(
             crate::Capability::CliArgs,
             crate::Capability::FsRead,
             crate::Capability::FsWrite,
+            crate::Capability::Stdin,
         ]
     } else {
         Vec::new()

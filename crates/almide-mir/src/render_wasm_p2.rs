@@ -694,6 +694,19 @@ fn render_op(
                 PrimKind::MakeDir => {
                     format!("(call $make_dir (local.get {}))", local(args[0]))
                 }
+                // remove_all(path) — the WASI recursive-remove floor; recursively unlinks files +
+                // removes directories under `path`, then builds a fresh owned `Result[Unit, String]`
+                // (Ok(()) / Err) in the preamble helper. The path arg is a heap Ptr local (i32
+                // handle), passed DIRECTLY (no i32.wrap). dst is a heap Ptr (value_reprs_wasm), so
+                // the call result sets the local directly (no i64 extend) — mirror MakeDir.
+                PrimKind::RemoveAll => {
+                    format!("(call $remove_all (local.get {}))", local(args[0]))
+                }
+                // read_line() — the WASI stdin-line floor; reads fd 0 byte-by-byte until '\n'/EOF
+                // and builds a fresh owned canonical `String` (newline excluded, trailing '\r'
+                // stripped) in the preamble helper. NO args. dst is a heap Ptr (value_reprs_wasm),
+                // so the call result sets the local directly (no i64 extend) — like ArgsGetList.
+                PrimKind::ReadLine => "(call $read_line)".to_string(),
                 // RAW refcount ops (the self-host drop/copy mechanism) — reuse the proven $rc_dec/
                 // $rc_inc on the i32-wrapped handle. dst is None (Unit), so the `match dst` below
                 // emits the call as a STATEMENT (no local.set).
