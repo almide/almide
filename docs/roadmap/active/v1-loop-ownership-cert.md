@@ -1143,3 +1143,34 @@ cannot express without the deferred effect-fn-Result-tag ABI + the conditional-l
 is the genuine floor; the SINGLE deep research theme that unblocks all 3 is the effect-monad-in-HOF/loop lowering
 (+ its CondLoop/CondHOF cert). The capturing-record map/filter capability (bcf82dd7) is sound, landed, and a
 real prerequisite piece of load_porta_config.
+
+## 2026-06-30 — list_instances CLEARED (real 3→2). effect-`!`-in-`for`-loop, NO cert/Coq change (d3853d52)
+
+The "early-return past an effect-`!` in a loop body" sub-case did NOT need the deferred-Result-tag ABI nor a
+new cert. It is a PURE IR→IR desugar (`desugar_loop_unwrap`, mod_p6.rs) to the EXISTING proven loop-slot:
+
+  `for x in xs { … e! … }; <post>`  →  `var __ef=false; var __ev=""; for x in xs { if not __ef then { match e
+  { ok(v)=>…, err($x)=>{__ef=true; __ev=$x ++ ""} } } else () }; if __ef then err(__ev) else { <post> }`
+
+Byte-identical to early-return (once `__ef` is set the per-iteration guard skips the rest; the loop terminates
+by exhausting `xs` — **`for` ONLY**, `while` is excluded: skipping its progress update is non-terminating).
+
+**THE KEY SOUNDNESS INSIGHT (reusable):** the err accumulator must store an **OWNED copy** (`$x ++ ""`, a
+fresh String) — storing the borrowed match payload and moving it out post-loop certifies as the UNSOUND `idm`
+(init/drop/move-a-dead-ref → corpus-wall REJECT, a real double-free). The `++ ""` allocates a fresh String the
+slot owns, so the loop-carried slot certifies as the PROVEN `i(id)m` (corpus-wall ownership ACCEPT over all
+4517). Gated to a `String` error (covers every porta wall). Fixture: spec/wasm_cross/effect_unwrap_in_loop.almd
+(C-119). All gates green; native==wasm on ok-path (completes) and err-path (short-circuits).
+
+### Refined next-steps for the remaining 2 (each a SEPARATE deep cycle, but the owned-copy insight transfers)
+
+- **read_message** (jsonrpc.almd) — a pure RETRY recursion (`else read_message()`). TCO → `while`, but the
+  base cases (`ok(r)`, `r = parse_and_wrap(body)!`) reference LOOP-BODY-LOCALS (`r`/`body`/`body_bytes`), so the
+  TCO's POST-LOOP dispatch (mod_p5.rs `tco_rewrite`) walls at the use-after-free guard (~:910). FIX PATH: teach
+  the TCO to build the heap result **IN-loop into an OWNED accumulator + a `done` flag** (the same owned-copy /
+  loop-slot shape this brick proved) instead of post-loop reconstruction, then the post-loop just returns the
+  accumulator. Hard to byte-test (stdin `io.read_line`); termination of the retry `while` is the open cert q.
+- **load_porta_config** (config.almd) — secrets `filter_map`: a CAPTURING lambda producing a record via a
+  `match` (some-arm=record / conditional none-arm `if from_env then some(record) else none`) + `process.env`.
+  This is the defunc-`filter_map` machinery (control_p5 `lower_defunc_filter_map_hof`), NOT a loop desugar — a
+  distinct deep cycle (Block-keep-arm + conditional-none-arm + the effectful none-arm).
