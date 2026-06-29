@@ -1385,3 +1385,13 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_args.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-119"
+title     = "effect-`!` inside a `for` loop body propagates Err and byte-matches native"
+statement = "An effect-`!` (error propagation) inside a `for` loop body, in a function returning `Result[T, String]`, runs on the WASM target and agrees with native. Previously such a `!` WALLed at lowering (a mid-loop early-return makes the loop's owned iterable + iteration transients conditionally dropped — a double-free the flat ownership certificate cannot model). It is now a PURE IR→IR desugar (desugar_loop_unwrap) to a loop-carried error-flag + post-loop dispatch: `for x in xs { … e! … }; <post>` becomes `var __ef=false; var __ev=\"\"; for x in xs { if not __ef then { match e { ok(v)=>…, err($x)=>{__ef=true; __ev=$x ++ \"\"} } } else () }; if __ef then err(__ev) else <post>`. BYTE-IDENTICAL to early-return: once __ef is set the per-iteration guard skips all remaining effects, the loop terminates by exhausting xs (bounded — `for` only, never `while`), and the post-loop dispatch yields the propagated Err. The accumulator stores an OWNED copy (`$x ++ \"\"`, a fresh String) so the loop-carried slot certifies as the PROVEN i(id)m shape — the whole desugar reuses the existing loop-slot + heap-result-`if` machinery with NO new MIR op and NO certificate/Coq change (corpus-wall: ownership ACCEPT over all 4517 functions). Verified byte-identical native == wasm on both the all-ok path (the loop completes) and the err path (a mid-loop `!` short-circuits)."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/effect_unwrap_in_loop.almd", class = "fixture" },
+]

@@ -1132,6 +1132,12 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             cur = Some(r);
             continue;
         }
+        // effect-`!` inside a `for` loop body → loop-carried error-flag + post-loop dispatch (the
+        // effect-monad-in-loop frontier; a PURE IR→IR desugar over the proven loop-slot + heap-if).
+        if let Some(r) = desugar_loop_unwrap(src, next_var) {
+            cur = Some(r);
+            continue;
+        }
         // STATEMENT-CONTROL continuation-lift: a UNIT `if`/`match` STATEMENT carrying a stmt/let `!`
         // followed by a non-empty continuation. Lift `after` into each arm (tail-duplication) so the
         // branch becomes the block TAIL — the tail effect-unwrap then resolves the `!`. Runs in this
@@ -1688,6 +1694,378 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
     Some(mk(
         IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(match_expr)) },
         result_ty,
+    ))
+}
+
+// ─────────── effect-`!` inside a `for` loop body → loop-carried error flag ───────────
+//
+// A `for x in xs { … e! … }` in a function returning `Result[T, E]` cannot early-return the
+// `Err(E)` from inside the loop in the FLAT certificate (a mid-loop `return` makes the loop's
+// owned iterable + iteration transients conditionally dropped — a double-drop the flat checker
+// rejects). This is the effect-monad-in-loop frontier.
+//
+// REWRITE (a PURE IR→IR desugar — "desugar-before-both", no new MIR op, no certificate/Coq
+// change; it reuses the PROVEN loop-carried scalar/heap slot reassignment + heap-result-`if`):
+//
+//   { <pre>; for x in xs { BODY }; <post> }
+//     ↓
+//   { <pre>;
+//     var __ef = false;            // err flag (scalar loop-carried)
+//     var __ev = <empty E>;        // err accumulator (heap loop-carried slot, reassigned on Err)
+//     for x in xs { if not __ef then { BODY' } else () };
+//     if __ef then err(__ev) else { <post> } }
+//
+// where BODY' replaces each `let v = e!` / `e!` with `match e { ok(v) => <rest>, err($x) =>
+// { __ef = true; __ev = $x } }`. BYTE-IDENTICAL to early-return: once `__ef` is set the per-
+// iteration `if not __ef` guard skips ALL remaining effects (no later `e!`/`println` runs), the
+// loop terminates by exhausting `xs` (a BOUNDED iteration — this is why it is `for` ONLY: a
+// `while` could spin forever once its progress update is skipped), and the post-loop dispatch
+// yields the propagated `Err`. Per-iteration transients are dropped by the normal iter-scope
+// (there is NO early exit), so no special leak handling is needed.
+//
+// FAIL-SAFE: any `!` the rewrite cannot place a clean continuation behind is left untouched, so
+// the function still WALLS at lowering (never a silent miscompile).
+
+/// Does `e` contain an effect-`!` (`Unwrap`) anywhere in its subtree?
+fn expr_has_unwrap(e: &IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct U(bool);
+    impl IrVisitor for U {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(&e.kind, IrExprKind::Unwrap { .. }) {
+                self.0 = true;
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut u = U(false);
+    u.visit_expr(e);
+    u.0
+}
+
+/// Does statement `s` contain an effect-`!` anywhere in its subtree?
+fn stmt_has_unwrap(s: &IrStmt) -> bool {
+    use almide_ir::visit::{walk_stmt, IrVisitor};
+    struct U(bool);
+    impl IrVisitor for U {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(&e.kind, IrExprKind::Unwrap { .. }) {
+                self.0 = true;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut u = U(false);
+    walk_stmt(&mut u, s);
+    u.0
+}
+
+fn loop_uw_node(kind: IrExprKind, ty: Ty) -> IrExpr {
+    IrExpr { kind, ty, span: None, def_id: None }
+}
+
+/// The `err($x) => { __ef = true; __ev = $x }` arm (a fresh `$x` allocated from `nv`).
+fn loop_uw_err_arm(ef: VarId, ev: VarId, err_ty: &Ty, nv: &mut u32) -> almide_ir::IrMatchArm {
+    let x = VarId(*nv);
+    *nv += 1;
+    let set_flag = IrStmt {
+        kind: IrStmtKind::Assign {
+            var: ef,
+            value: loop_uw_node(IrExprKind::LitBool { value: true }, Ty::Bool),
+        },
+        span: None,
+    };
+    // Store an OWNED copy (`$x ++ ""`, a fresh String) — NOT the borrowed match payload. The
+    // loop-carried slot must OWN its value so the post-loop move-out is not a double-free of the
+    // subject's reference; the concat allocates a fresh String, severing the borrow. This is what
+    // turns the slot's ownership certificate into the PROVEN `i(id)m` loop-slot shape (storing the
+    // bare borrow certifies as the unsound `idm` = init/drop/move-a-dead-ref). `err_ty` is gated
+    // to `String` by the caller, so `ConcatStr` typechecks and yields the same bytes as `$x`.
+    let owned = loop_uw_node(
+        IrExprKind::BinOp {
+            op: almide_ir::BinOp::ConcatStr,
+            left: Box::new(loop_uw_node(IrExprKind::Var { id: x }, err_ty.clone())),
+            right: Box::new(loop_uw_node(
+                IrExprKind::LitStr { value: String::new() },
+                Ty::String,
+            )),
+        },
+        err_ty.clone(),
+    );
+    let set_val = IrStmt {
+        kind: IrStmtKind::Assign { var: ev, value: owned },
+        span: None,
+    };
+    almide_ir::IrMatchArm {
+        pattern: almide_ir::IrPattern::Err {
+            inner: Box::new(almide_ir::IrPattern::Bind { var: x, ty: err_ty.clone() }),
+        },
+        guard: None,
+        body: loop_uw_node(
+            IrExprKind::Block { stmts: vec![set_flag, set_val], expr: None },
+            Ty::Unit,
+        ),
+    }
+}
+
+/// `let v = e!` / `Expr(e!)` whose `!` propagates `Result[_, err_ty]` → `(ok_pattern, inner)`.
+fn loop_uw_unwrap_stmt(s: &IrStmt, err_ty: &Ty) -> Option<(almide_ir::IrPattern, IrExpr)> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let (ok_pat, inner): (almide_ir::IrPattern, IrExpr) = match &s.kind {
+        IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
+            IrExprKind::Unwrap { expr } => {
+                (almide_ir::IrPattern::Bind { var: *var, ty: ty.clone() }, (**expr).clone())
+            }
+            _ => return None,
+        },
+        IrStmtKind::Expr { expr } => match &expr.kind {
+            IrExprKind::Unwrap { expr: inner } => {
+                (almide_ir::IrPattern::Wildcard, (**inner).clone())
+            }
+            _ => return None,
+        },
+        _ => return None,
+    };
+    match &inner.ty {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && &a[1] == err_ty => {
+            Some((ok_pat, inner))
+        }
+        _ => None,
+    }
+}
+
+/// Rewrite a UNIT-typed loop-body remainder `e`, replacing each effect-`!` with a flag-setting
+/// `match`. Returns `None` (the whole desugar declines, leaving the `!` to WALL) if any `!` sits
+/// in a position where a clean continuation cannot be captured.
+fn loop_uw_rewrite(e: &IrExpr, ef: VarId, ev: VarId, err_ty: &Ty, nv: &mut u32) -> Option<IrExpr> {
+    if !expr_has_unwrap(e) {
+        return Some(e.clone());
+    }
+    match &e.kind {
+        IrExprKind::Block { stmts, expr: tail } => {
+            // First DIRECT `let v=e!` / `Expr(e!)`: push the rest of the block into its ok-arm.
+            for (i, s) in stmts.iter().enumerate() {
+                if let Some((ok_pat, inner)) = loop_uw_unwrap_stmt(s, err_ty) {
+                    // Everything BEFORE the `!` must be `!`-free (else its continuation is wrong).
+                    if stmts[..i].iter().any(stmt_has_unwrap) {
+                        return None;
+                    }
+                    let rest = loop_uw_node(
+                        IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
+                        Ty::Unit,
+                    );
+                    let rest2 = loop_uw_rewrite(&rest, ef, ev, err_ty, nv)?;
+                    let ok_arm = almide_ir::IrMatchArm {
+                        pattern: almide_ir::IrPattern::Ok { inner: Box::new(ok_pat) },
+                        guard: None,
+                        body: rest2,
+                    };
+                    let err_arm = loop_uw_err_arm(ef, ev, err_ty, nv);
+                    let m = loop_uw_node(
+                        IrExprKind::Match { subject: Box::new(inner), arms: vec![ok_arm, err_arm] },
+                        Ty::Unit,
+                    );
+                    return Some(loop_uw_node(
+                        IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(m)) },
+                        Ty::Unit,
+                    ));
+                }
+            }
+            // No direct `!` stmt: the `!` is nested in a TERMINAL `if`/`match` (the tail, or the
+            // last stmt) — recurse into it. Everything else must be `!`-free.
+            if let Some(t) = tail {
+                if stmts.iter().all(|s| !stmt_has_unwrap(s)) {
+                    let nt = loop_uw_rewrite(t, ef, ev, err_ty, nv)?;
+                    return Some(loop_uw_node(
+                        IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
+                        Ty::Unit,
+                    ));
+                }
+                return None;
+            }
+            // No tail: the unwrap must be in the LAST stmt (an `Expr(if/match)`), rest `!`-free.
+            let last = stmts.len().checked_sub(1)?;
+            if stmts[..last].iter().any(stmt_has_unwrap) {
+                return None;
+            }
+            if let IrStmtKind::Expr { expr } = &stmts[last].kind {
+                let ne = loop_uw_rewrite(expr, ef, ev, err_ty, nv)?;
+                let mut ns = stmts[..last].to_vec();
+                ns.push(IrStmt { kind: IrStmtKind::Expr { expr: ne }, span: stmts[last].span.clone() });
+                return Some(loop_uw_node(
+                    IrExprKind::Block { stmts: ns, expr: None },
+                    Ty::Unit,
+                ));
+            }
+            None
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            if expr_has_unwrap(cond) {
+                return None;
+            }
+            let nt = loop_uw_rewrite(then, ef, ev, err_ty, nv)?;
+            let ne = loop_uw_rewrite(else_, ef, ev, err_ty, nv)?;
+            Some(loop_uw_node(
+                IrExprKind::If { cond: cond.clone(), then: Box::new(nt), else_: Box::new(ne) },
+                e.ty.clone(),
+            ))
+        }
+        IrExprKind::Match { subject, arms } => {
+            if expr_has_unwrap(subject) {
+                return None;
+            }
+            let mut new_arms = Vec::with_capacity(arms.len());
+            for a in arms {
+                if a.guard.as_ref().is_some_and(expr_has_unwrap) {
+                    return None;
+                }
+                let nb = loop_uw_rewrite(&a.body, ef, ev, err_ty, nv)?;
+                new_arms.push(almide_ir::IrMatchArm {
+                    pattern: a.pattern.clone(),
+                    guard: a.guard.clone(),
+                    body: nb,
+                });
+            }
+            Some(loop_uw_node(
+                IrExprKind::Match { subject: subject.clone(), arms: new_arms },
+                e.ty.clone(),
+            ))
+        }
+        // A bare trailing `e!` (Unit-typed): `match e { ok(_) => (), err($x) => { flag } }`.
+        IrExprKind::Unwrap { expr } => {
+            use almide_lang::types::constructor::TypeConstructorId;
+            if expr_has_unwrap(expr) {
+                return None;
+            }
+            match &expr.ty {
+                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && &a[1] == err_ty => {}
+                _ => return None,
+            }
+            let ok_arm = almide_ir::IrMatchArm {
+                pattern: almide_ir::IrPattern::Ok {
+                    inner: Box::new(almide_ir::IrPattern::Wildcard),
+                },
+                guard: None,
+                body: loop_uw_node(IrExprKind::Unit, Ty::Unit),
+            };
+            let err_arm = loop_uw_err_arm(ef, ev, err_ty, nv);
+            Some(loop_uw_node(
+                IrExprKind::Match { subject: expr.clone(), arms: vec![ok_arm, err_arm] },
+                Ty::Unit,
+            ))
+        }
+        // An `!` in a kind we do not rewrite — decline (fail-safe wall).
+        _ => None,
+    }
+}
+
+/// See the module comment above: rewrite the FIRST `for` loop (in a `Result[T, E]`-returning block)
+/// whose body contains an effect-`!` into the loop-carried error-flag form.
+pub fn desugar_loop_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        return None;
+    };
+    // The enclosing result must be `Result[T, E]`. `E` is gated to `String`: the accumulator's
+    // owned-copy (`$x ++ ""`, see `loop_uw_err_arm`) and `""` seed are String-specific, and a
+    // String error is the effect-fn norm (it covers every porta wall). A non-String `E` declines
+    // (the `!` is left to WALL — never a silent miscompile).
+    let err_ty = match &body.ty {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(a[1], Ty::String) => {
+            a[1].clone()
+        }
+        _ => return None,
+    };
+    let empty_err = tco_empty_for(&err_ty)?;
+    // The FIRST `for` loop whose body holds an `!`. (`while` is excluded — see the module comment.)
+    let loop_idx = stmts.iter().position(|s| match &s.kind {
+        IrStmtKind::Expr { expr } => matches!(
+            &expr.kind,
+            IrExprKind::ForIn { body: lbody, .. } if lbody.iter().any(stmt_has_unwrap)
+        ),
+        _ => false,
+    })?;
+    let IrStmtKind::Expr { expr: loop_expr } = &stmts[loop_idx].kind else {
+        return None;
+    };
+    let IrExprKind::ForIn { var, var_tuple, iterable, body: lbody } = &loop_expr.kind else {
+        return None;
+    };
+    let ef = VarId(*next_var);
+    let ev = VarId(*next_var + 1);
+    *next_var += 2;
+    // Rewrite the loop body's `!`s (declining the whole pass if any cannot be cleanly placed).
+    let body_block =
+        loop_uw_node(IrExprKind::Block { stmts: lbody.clone(), expr: None }, Ty::Unit);
+    let rewritten = loop_uw_rewrite(&body_block, ef, ev, &err_ty, next_var)?;
+    // Guard the iteration: `if not __ef then { <rewritten> } else ()`.
+    let not_ef = loop_uw_node(
+        IrExprKind::UnOp {
+            op: almide_ir::UnOp::Not,
+            operand: Box::new(loop_uw_node(IrExprKind::Var { id: ef }, Ty::Bool)),
+        },
+        Ty::Bool,
+    );
+    let guard_if = loop_uw_node(
+        IrExprKind::If {
+            cond: Box::new(not_ef),
+            then: Box::new(rewritten),
+            else_: Box::new(loop_uw_node(IrExprKind::Unit, Ty::Unit)),
+        },
+        Ty::Unit,
+    );
+    let new_loop = loop_uw_node(
+        IrExprKind::ForIn {
+            var: *var,
+            var_tuple: var_tuple.clone(),
+            iterable: iterable.clone(),
+            body: vec![IrStmt { kind: IrStmtKind::Expr { expr: guard_if }, span: None }],
+        },
+        Ty::Unit,
+    );
+    // `<stmts before loop>; var __ef=false; var __ev=<empty>; <new_loop>`.
+    let mut new_stmts: Vec<IrStmt> = stmts[..loop_idx].to_vec();
+    new_stmts.push(IrStmt {
+        kind: IrStmtKind::Bind {
+            var: ef,
+            mutability: almide_ir::Mutability::Var,
+            ty: Ty::Bool,
+            value: loop_uw_node(IrExprKind::LitBool { value: false }, Ty::Bool),
+        },
+        span: None,
+    });
+    new_stmts.push(IrStmt {
+        kind: IrStmtKind::Bind {
+            var: ev,
+            mutability: almide_ir::Mutability::Var,
+            ty: err_ty.clone(),
+            value: empty_err,
+        },
+        span: None,
+    });
+    new_stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: new_loop }, span: None });
+    // Post-loop dispatch: `if __ef then err(__ev) else { <post-stmts>; <orig tail> }`.
+    let post = loop_uw_node(
+        IrExprKind::Block { stmts: stmts[loop_idx + 1..].to_vec(), expr: tail.clone() },
+        body.ty.clone(),
+    );
+    let err_result = loop_uw_node(
+        IrExprKind::ResultErr {
+            expr: Box::new(loop_uw_node(IrExprKind::Var { id: ev }, err_ty.clone())),
+        },
+        body.ty.clone(),
+    );
+    let new_tail = loop_uw_node(
+        IrExprKind::If {
+            cond: Box::new(loop_uw_node(IrExprKind::Var { id: ef }, Ty::Bool)),
+            then: Box::new(err_result),
+            else_: Box::new(post),
+        },
+        body.ty.clone(),
+    );
+    Some(loop_uw_node(
+        IrExprKind::Block { stmts: new_stmts, expr: Some(Box::new(new_tail)) },
+        body.ty.clone(),
     ))
 }
 

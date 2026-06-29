@@ -29,6 +29,7 @@ spec/wasm_cross/control_flow.almd
 spec/wasm_cross/cross_dep_accumulator.almd
 spec/wasm_cross/default_param_ref.almd
 spec/wasm_cross/destructure_let_unwrap.almd
+spec/wasm_cross/effect_unwrap_in_loop.almd
 spec/wasm_cross/empty_collection_annotated.almd
 spec/wasm_cross/empty_collection_fold.almd
 spec/wasm_cross/float_interp_forms.almd

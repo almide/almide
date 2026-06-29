@@ -1,0 +1,54 @@
+// @contract: C-119
+// effect-`!` inside a `for` loop body propagates Err and byte-matches native. The `!` is desugared
+// (desugar_loop_unwrap) to a loop-carried error-flag + post-loop dispatch — once the flag is set the
+// per-iteration guard skips the rest, the loop terminates by exhausting the list, and the post-loop
+// `if __ef then err else <post>` yields the propagated error. The accumulator stores an OWNED copy so
+// the loop-carried slot certifies as the proven i(id)m shape (corpus-wall ownership ACCEPT). Covers
+// the direct `let v = e!` shape AND the `!`-inside-a-nested-`if` shape (the list_instances form).
+
+// Direct `let n = e!` in the loop body (no continuation transients before the `!`).
+effect fn sum_parse(xs: List[String]) -> Result[Int, String] = {
+  var total = 0
+  for x in xs {
+    let n = int.parse(x)!
+    total = total + n
+  }
+  ok(total)
+}
+
+// `!` nested inside an `if` inside the loop (the porta list_instances form), plus a heap transient
+// (`tag`) built before the `!` — dropped by the normal iter-scope, no early exit.
+effect fn sum_positive(xs: List[String]) -> Result[Int, String] = {
+  var total = 0
+  for x in xs {
+    let tag = "v=" + x
+    if string.len(tag) > 2 then {
+      let n = int.parse(x)!
+      total = total + n
+    }
+    else ()
+  }
+  ok(total)
+}
+
+effect fn main() -> Unit = {
+  // all-ok: the loop completes, sum is returned.
+  match sum_parse(["1", "2", "3"]) {
+    ok(t) => println("sum=" + int.to_string(t)),
+    err(e) => println("err"),
+  }
+  // err path: "oops" fails to parse, the `!` short-circuits, the rest is skipped.
+  match sum_parse(["10", "oops", "20"]) {
+    ok(t) => println("sum=" + int.to_string(t)),
+    err(e) => println("stopped"),
+  }
+  // nested-if form, all-ok then err.
+  match sum_positive(["4", "5", "6"]) {
+    ok(t) => println("pos=" + int.to_string(t)),
+    err(e) => println("err"),
+  }
+  match sum_positive(["7", "nope"]) {
+    ok(t) => println("pos=" + int.to_string(t)),
+    err(e) => println("stopped"),
+  }
+}
