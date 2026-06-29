@@ -1164,12 +1164,22 @@ slot owns, so the loop-carried slot certifies as the PROVEN `i(id)m` (corpus-wal
 
 ### Refined next-steps for the remaining 2 (each a SEPARATE deep cycle, but the owned-copy insight transfers)
 
-- **read_message** (jsonrpc.almd) — a pure RETRY recursion (`else read_message()`). TCO → `while`, but the
-  base cases (`ok(r)`, `r = parse_and_wrap(body)!`) reference LOOP-BODY-LOCALS (`r`/`body`/`body_bytes`), so the
-  TCO's POST-LOOP dispatch (mod_p5.rs `tco_rewrite`) walls at the use-after-free guard (~:910). FIX PATH: teach
-  the TCO to build the heap result **IN-loop into an OWNED accumulator + a `done` flag** (the same owned-copy /
-  loop-slot shape this brick proved) instead of post-loop reconstruction, then the post-loop just returns the
-  accumulator. Hard to byte-test (stdin `io.read_line`); termination of the retry `while` is the open cert q.
+- **read_message** (jsonrpc.almd) — **RE-ROOTED 2026-06-30 (the TCO theory below was WRONG).** The true root is
+  NOT the TCO: it is the missing `Result[Option[heap], String]` constructor. `read_message` (and `parse_and_wrap`)
+  return `Result[Option[JsonRpcRequest], String]` and build `ok(some(<record>))`. tail.rs's heap-result ctor
+  chain has `try_lower_result_record_ctor` / `_value_ctor` / `_str_int_ctor` / … but NO **option-payload** ctor,
+  so `ok(some(heap))` falls through to `alloc_init → Opaque → bail` (tail.rs:611 "heap-result ResultOk cannot be
+  faithfully returned"). MINIMAL REPROS (scratchpad): `wrap.almd` = NON-recursive `{ let f = "h:"+x; ok(some(f)) }`
+  WALLS "ResultOk cannot be faithfully returned" — proving it is the ctor, not the recursion. `scan3.almd` = the
+  recursive form; the recursion makes the TCO try→fail→fall to the model-one-iteration `while` (hence the
+  misleading "while body heap-accumulator" reason). `scan` (`Result[String,_]`) and `scan3b` (`ok(some("CONST"))`)
+  and `scan3c` (`ok(none)` only) all LOWER — confirming the trigger is precisely `ok(some(<loop/heap-local>))`.
+  FIX PATH: add `try_lower_result_option_ctor` for `Result[Option[heap], String]`, mirroring the record ctor.
+  The nested DROP is the real work: `Result[Option[String],String]` may reuse `DropResultListStr` (Option[T] is
+  the 0-or-1-element list layout); `Result[Option[record],String]` (read_message's actual type) needs a 3-level
+  recursive drop (Result→Option→record→heap-fields) = a NEW `Drop*` primitive across Op/render_wasm/certificate/
+  Coq — the deep part. Once the base `ok(some(record))` lowers, the recursion should ride the existing TCO/real-
+  recursive path (re-verify). Still hard to byte-test E2E (stdin), but `wrap`/`scan3` are deterministic fixtures.
 - **load_porta_config** (config.almd) — secrets `filter_map`: a CAPTURING lambda producing a record via a
   `match` (some-arm=record / conditional none-arm `if from_env then some(record) else none`) + `process.env`.
   This is the defunc-`filter_map` machinery (control_p5 `lower_defunc_filter_map_hof`), NOT a loop desugar — a
