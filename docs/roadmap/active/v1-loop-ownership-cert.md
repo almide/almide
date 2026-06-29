@@ -1194,6 +1194,19 @@ slot owns, so the loop-carried slot certifies as the PROVEN `i(id)m` (corpus-wal
   Option[String] is a 0-or-1 `DropListStr` block). Gate backstop: wrong drop → corpus-wall REJECT.
   okvar/okrec/okstr/dropopt are deterministic classify_corpus fixtures; E2E byte-test needs stdin. Remaining work
   is the ctor + the discovery/generation plumbing + gates — a focused cycle, no longer a trust-spine-depth blocker.
+
+  **EMPIRICAL UPDATE (prototyped + reverted 2026-06-30): read_message is MULTI-LAYERED — the ctor is necessary
+  but NOT sufficient.** Prototyping `try_lower_result_option_ctor` confirmed the NON-recursive case lowers
+  (`okrecvar.almd` `fn pass(o: Option[Req]) = ok(o)` → wall=0, FORBIDDEN=0) — so the ctor + the verified
+  `$__drop_opt_<R>` helper IS a real, sound capability. BUT **read_message itself STILL walls** with the same
+  "while body heap-accumulator" reason: its `ok(r)` sits in a nested if-arm of the `else read_message()` RETRY
+  recursion, which routes through the TCO (`tco_rewrite`), not the tail/arm ctor. So read_message = LAYER 1 (the
+  `ok(<Option-Var>)` ctor — prototyped, viable, reverted as incomplete: it still needs the `$__drop_opt_<R>`
+  generation wired or it renders a dangling call) + LAYER 2 (the TCO must build the `Result[Option[record]]`
+  result for a recursion base referencing a loop-body-local — the genuinely deep layer that has resisted three
+  framings). The ctor was reverted (not committed) to avoid a half-wired invalid-wasm state; re-do it WITH the
+  generation as the first slice, then attack the TCO Option-result base as the second. load_porta_config's
+  defunc-filter_map remains the cleaner of the two remaining targets to try first.
 - **load_porta_config** (config.almd) — secrets `filter_map`: a CAPTURING lambda producing a record via a
   `match` (some-arm=record / conditional none-arm `if from_env then some(record) else none`) + `process.env`.
   This is the defunc-`filter_map` machinery (control_p5 `lower_defunc_filter_map_hof`), NOT a loop desugar — a
