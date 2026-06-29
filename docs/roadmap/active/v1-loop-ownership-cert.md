@@ -1207,6 +1207,21 @@ slot owns, so the loop-carried slot certifies as the PROVEN `i(id)m` (corpus-wal
   framings). The ctor was reverted (not committed) to avoid a half-wired invalid-wasm state; re-do it WITH the
   generation as the first slice, then attack the TCO Option-result base as the second. load_porta_config's
   defunc-filter_map remains the cleaner of the two remaining targets to try first.
+
+  **LAYER STACK (verified by a full prototype, 2026-06-30, then reverted to a clean tree).** read_message is
+  the DEEPEST porta function — its wall cascades through ≥5 interacting layers. Prototyping confirmed:
+  (a) the `ok(<Option-Var>)` ctor lowers the non-recursive case (okrecvar wall=0);
+  (b) declining the TCO for `Result[Option[<nested-heap>], String]` base-reads-loop-local (mod_p5 ~:944,
+      excluding Option[String]) flips the wall from "while body heap-accumulator" → "heap-result `if`" — i.e.
+      it correctly falls out of the TCO to the real-recursive heap-result-`if` path;
+  (c) wiring the ctor into BOTH tail.rs AND `lower_heap_result_arm` (control_p4) — STILL walls "heap-result
+      `if`", because read_message's arms contain `let r = parse_and_wrap(body)!` — an **effect-`!` INSIDE a
+      heap-result-`if` arm** (the 5th layer), distinct from the loop-`!` brick (a Unit `for` body) and not yet
+      lowerable in a Result[Option]-returning if.
+  So a full read_message clear needs: ctor + TCO-decline + arm-wiring + `$__drop_opt_<R>` generation + the
+  effect-`!`-in-heap-result-`if`-arm lowering — a coordinated multi-layer cycle. All prototype edits were
+  REVERTED (the ctor was render-incomplete without the generation; none cleared the wall alone). Recommendation:
+  do load_porta_config (single-mechanism defunc-filter_map) before read_message (5-layer).
 - **load_porta_config** (config.almd) — secrets `filter_map`: a CAPTURING lambda producing a record via a
   `match` (some-arm=record / conditional none-arm `if from_env then some(record) else none`) + `process.env`.
   This is the defunc-`filter_map` machinery (control_p5 `lower_defunc_filter_map_hof`), NOT a loop desugar — a
