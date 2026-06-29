@@ -1179,16 +1179,21 @@ slot owns, so the loop-carried slot certifies as the PROVEN `i(id)m` (corpus-wal
   (The earlier `wrap`/`scan3` "while body" reason was the recursion layering the TCO→while fallback ON TOP of this
   ctor gap; the ctor gap is the root.) FIX PATH: add `try_lower_result_option_ctor` for `Result[Option[heap],
   String]` covering `ok(<Option Var>)` (Dup the owned Option block in), `ok(some(x))`, `ok(none)`, `err(s)`,
-  mirroring `try_lower_result_record_ctor`+`materialize_result_aggregate`. THE DROP IS THE DEEP PART (a NEW
-  primitive, NOT a reuse): `some(record)` is built by `materialize_opt_aggregate_some` as an `optrec:<R>` wrapper
-  (`Op::DropWrapperRec is_result=false` → `$__drop_<R>`), NOT a list block — so `resrec:list_<R>` does NOT apply.
-  `Result[Option[record],String]` therefore needs a **2-LEVEL** recursive drop: Result-wrapper(tag@16) → Ok →
-  the Option `optrec` wrapper → the record `$__drop_<R>`; Err → flat String. There is no single `$__drop_<x>`
-  that composes two wrapper levels, so this is a NEW `Op::Drop*` (e.g. `DropResultOptionRec`) across
-  Op / render_wasm / certificate.rs / the Coq checker / verify_ownership — the genuine trust-spine depth here
-  (`Result[Option[String],String]` is the easier sibling: the inner Option[String] is a 0-or-1 `DropListStr`
-  block, so a `DropResultListStr`-style flat-ish drop may suffice). Gate backstop: a wrong drop → corpus-wall
-  REJECT. okvar/okrec/okstr are deterministic classify_corpus fixtures; E2E byte-test needs stdin.
+  mirroring `try_lower_result_record_ctor`+`materialize_result_aggregate`. THE DROP — **CONFIRMED VIABLE with NO
+  new Op and NO Coq change** (2026-06-30): route the Ok-drop through the EXISTING `Op::DropWrapperRec` via
+  `resrec:opt_<R>` (its certificate is uniform over `drop_fn` — certificate.rs:76/679 ignore the name — so the
+  proven checker needs ZERO change), and GENERATE a new Almide drop helper `fn __drop_opt_<R>(e: Option[R]) ->
+  Unit = { match e { some(r) => (), none => () } }` (the `match` consumes `e`, freeing the Option block, and the
+  `some` arm drops `r` via `$__drop_<R>`). The helper's only dependency — that `match Option[record] { some(r)
+  => (), none => () }` LOWERS — is VERIFIED (scratchpad `dropopt.almd`, 0 walls). So this is NOT a deep Op/Coq
+  change; it is: (1) `try_lower_result_option_ctor` (lower side), (2) a used-only discovery
+  `collect_result_option_records(&ir)` (mirror `collect_recursive_anon_records`) feeding (3) a `$__drop_opt_<R>`
+  generation loop in `generate_record_drop_sources`, threaded to its render call site. Generate USED-ONLY (not
+  all recursive records — a non-lowering helper would break the whole program; the discovery keeps it to the R's
+  actually wrapped in `Result[Option[R],String]`). `Result[Option[String],String]` is the easier sibling (inner
+  Option[String] is a 0-or-1 `DropListStr` block). Gate backstop: wrong drop → corpus-wall REJECT.
+  okvar/okrec/okstr/dropopt are deterministic classify_corpus fixtures; E2E byte-test needs stdin. Remaining work
+  is the ctor + the discovery/generation plumbing + gates — a focused cycle, no longer a trust-spine-depth blocker.
 - **load_porta_config** (config.almd) — secrets `filter_map`: a CAPTURING lambda producing a record via a
   `match` (some-arm=record / conditional none-arm `if from_env then some(record) else none`) + `process.env`.
   This is the defunc-`filter_map` machinery (control_p5 `lower_defunc_filter_map_hof`), NOT a loop desugar — a
