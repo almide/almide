@@ -198,7 +198,8 @@ impl LowerCtx {
             // fails mid-build (which would leak partial ops). Mirrors `try_lower_heap_field_borrow`'s
             // container gate so the two never disagree.
             IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-                if (elem_flat_variant || elem_rich_variant.is_some()) && is_heap_ty(&e.ty) =>
+                if (elem_flat_variant || elem_rich_variant.is_some() || elem_str || elem_value)
+                    && is_heap_ty(&e.ty) =>
             {
                 self.heap_field_container_tracked(object)
             }
@@ -308,8 +309,15 @@ impl LowerCtx {
                 // variant block owns no inner handle so `rc_dec` is its full free — no double-free
                 // (rc-aware). Cert-identical to the `Var` element case (the extra `LoadHandle` is a
                 // cert-neutral prim load): `Dup` = `a`, `Consume` = the move into the list `i…m`.
+                // A heap-FIELD String/Value element (`opts.profile` in `args + ["--profile",
+                // opts.profile]`, the porta serialize_opts shape) — BORROW the field handle (the
+                // container keeps owning it, freed by its own drop) and `Dup` a fresh OWNED reference
+                // to MOVE into the slot. The list co-owns the rc-inc'd String/Value; its DropListStr /
+                // DropListValue `rc_dec`s it, balancing the `Dup` — no double-free (rc-aware), no leak.
+                // Cert-identical to the `Var` element case (the `Dup` = `a`, the move into the list =
+                // `m`); the extra `LoadHandle` is a cert-neutral prim load.
                 IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
-                    if elem_flat_variant || elem_rich_variant.is_some() =>
+                    if elem_flat_variant || elem_rich_variant.is_some() || elem_str || elem_value =>
                 {
                     let borrowed = self.try_lower_heap_field_borrow(elem)?;
                     let dup = self.fresh_value();

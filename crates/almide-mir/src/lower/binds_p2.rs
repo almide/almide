@@ -796,7 +796,31 @@ impl LowerCtx {
                         .into(),
                 ))
             }
-            IrExprKind::If { .. } => {
+            IrExprKind::If { else_, .. } => {
+                // STRAIGHT-LINE identity-else shadow rebind `let acc = if cond then acc + [x] else acc`
+                // (porta `serialize_opts`' 7 stacked optional-arg appends on one `args` slot). The ELSE
+                // arm is EXACTLY the accumulator var — the PROVEN loop-carried `i(id)m` append slot,
+                // UNROLLED straight-line. Drop-old + `SetLocal` the slot in place (the THEN arm only);
+                // the new shadow ALIASES the same slot (NOT re-pushed to live_heap_handles — one
+                // scope-end drop / tail move-out covers it). Each rebind folds to a `(id)` CLoop body
+                // in the certificate (check_line_unroll_sound, the same unit the loop slot proves).
+                if let IrExprKind::Var { id: acc_id } = &else_.kind {
+                    if let Some(&acc_local) = self.value_of.get(acc_id) {
+                        // The slot must be an OWNED, scope-tracked heap handle (the seed's `[]`/`""`) —
+                        // NOT a borrowed param field (`param_values`), whose drop-old would release a
+                        // reference we do not own. A borrow falls through to the wall.
+                        if self.live_heap_handles.contains(&acc_local)
+                            && !self.param_values.contains(&acc_local)
+                        {
+                            let mark = self.ops.len();
+                            if self.try_lower_line_cond_acc(value, *acc_id, acc_local) {
+                                self.value_of.insert(var, acc_local);
+                                return Ok(());
+                            }
+                            self.ops.truncate(mark);
+                        }
+                    }
+                }
                 Err(LowerError::Unsupported(
                     "heap-result `if` bound to a let/var cannot be faithfully \
                      computed in this brick (would bind an empty deferred heap value); \

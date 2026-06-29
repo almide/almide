@@ -684,6 +684,13 @@ impl LowerCtx {
             }
             // `a + b` string concat → a fresh owned String.
             IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => self.try_lower_concat_str(then),
+            // `acc + [x]` list concat → a fresh owned list (the straight-line / loop append-
+            // accumulator THEN arm). `try_lower_concat_list` reads the loop-carried `acc` slot as a
+            // BORROW and emits a fresh owned list via `__list_concat`/`__list_concat_rc`; the caller's
+            // drop-old + `SetLocal` then moves it into the slot (single-owned). It classifies the
+            // result's recursive drop kind (heap_elem/value/…); the caller copies that onto the slot
+            // so the per-iteration drop-old frees the right grain.
+            IrExprKind::BinOp { op: BinOp::ConcatList, .. } => self.try_lower_concat_list(then),
             // A string INTERPOLATION → a fresh owned String.
             IrExprKind::StringInterp { parts } => self.try_lower_string_interp(parts),
             // A bare heap Var → ACQUIRE our own reference (`Dup`) so the slot owns it independently.
@@ -695,6 +702,104 @@ impl LowerCtx {
             }
             _ => None,
         }
+    }
+
+    /// Copy the RECURSIVE-DROP classification of one heap object onto another (the loop-carried slot
+    /// inherits its feeder's drop grain). A `List[String]`/flat-element list drops via `DropListStr`,
+    /// a `List[Value]` via `DropListValue`, a `(String,Value)`/`(String,String)`/`(Int,String)` tuple
+    /// list / record / variant element list via its dedicated recursive drop — so the slot's
+    /// per-iteration drop-old frees exactly the same grain its feeder allocated (no leak, no
+    /// double-free). A plain String/scalar feeder is in no set ⇒ a no-op (the slot stays a flat `Drop`).
+    pub(crate) fn copy_heap_drop_class(&mut self, from: ValueId, to: ValueId) {
+        if self.heap_elem_lists.contains(&from) {
+            self.heap_elem_lists.insert(to);
+        }
+        if self.value_elem_lists.contains(&from) {
+            self.value_elem_lists.insert(to);
+        }
+        if self.str_value_elem_lists.contains(&from) {
+            self.str_value_elem_lists.insert(to);
+        }
+        if self.str_str_elem_lists.contains(&from) {
+            self.str_str_elem_lists.insert(to);
+        }
+        if self.list_list_str_lists.contains(&from) {
+            self.list_list_str_lists.insert(to);
+        }
+        if self.value_handles.contains(&from) {
+            self.value_handles.insert(to);
+        }
+        if let Some(k) = self.variant_drop_handles.get(&from).cloned() {
+            self.variant_drop_handles.insert(to, k);
+        }
+    }
+
+    /// STRAIGHT-LINE identity-else shadow rebind — `let acc = if cond then acc + [x] else acc` bound
+    /// to a let/var OUTSIDE any loop (porta `serialize_opts`: 7 stacked optional-arg appends on one
+    /// `args` slot). The ELSE arm is EXACTLY the accumulator var, so this is the PROVEN loop-carried
+    /// `i(id)m` append-accumulator slot, just UNROLLED to a fixed straight-line sequence: the THEN arm
+    /// produces a FRESH owned value, DROPS the old slot, and `SetLocal`s the slot to the new one; the
+    /// (empty) ELSE leaves the slot untouched. So the slot owns EXACTLY ONE reference at each rebind's
+    /// start and end in BOTH arms (the conditional-acquire invariant, OwnershipChecker.v
+    /// `check_line_unroll_sound`, which quantifies over ALL iteration counts — including this
+    /// unrolling). `ownership_certificate` folds each rebind to a `(id)` CLoop body, so the whole body
+    /// reads `i(id)…(id)m` — each `(id)` the same rc-preserving unit the loop slot proves, accepted by
+    /// the kernel-checked `check_cert_lc`.
+    ///
+    /// `acc_local` MUST be the OWNED, scope-tracked heap handle behind `acc` (the seed's `[]`/`""`),
+    /// already in `live_heap_handles` — the caller aliases the new shadow to it and does NOT re-push,
+    /// so the single scope-end drop (or tail move-out) still covers it. Returns `true` iff fully
+    /// lowered; on a sub-failure it TRUNCATES its own ops and returns `false` (the caller walls).
+    pub(crate) fn try_lower_line_cond_acc(
+        &mut self,
+        value: &IrExpr,
+        acc_id: VarId,
+        acc_local: ValueId,
+    ) -> bool {
+        use almide_ir::IrExprKind;
+        let (cond, then, else_) = match &value.kind {
+            IrExprKind::If { cond, then, else_ } => (cond.as_ref(), then.as_ref(), else_.as_ref()),
+            _ => return false,
+        };
+        // The ELSE arm must be EXACTLY the accumulator var (`else acc`) — that is what makes the
+        // empty-else in-place update sound (the slot is genuinely unchanged when `cond` is false).
+        match &else_.kind {
+            IrExprKind::Var { id } if *id == acc_id => {}
+            _ => return false,
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let cond_v = match self.lower_scalar_value(cond) {
+            Some(v) => v,
+            None => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return false;
+            }
+        };
+        self.ops.push(Op::IfThen { cond: cond_v, dst: None });
+        // THEN arm: a FRESH owned value (BARE — NOT Consumed/registered; the slot will own it).
+        let arm_mark = self.live_heap_handles.len();
+        let new_v = match self.lower_cond_acc_then_value(then) {
+            Some(v) => v,
+            None => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return false;
+            }
+        };
+        // The slot inherits the fresh value's recursive-drop grain, so the drop-old below (and at
+        // every later rebind, and at scope end) frees exactly the right element grain.
+        self.copy_heap_drop_class(new_v, acc_local);
+        // Drop the OLD slot value, then move the new one in (the slot's single ref is preserved).
+        let drop_op = self.drop_op_for(acc_local);
+        self.ops.push(drop_op);
+        self.ops.push(Op::SetLocal { local: acc_local, src: new_v });
+        // Free the then-arm's operand temps (e.g. a materialized list-literal operand) WITHIN the arm.
+        self.drop_arm_locals(arm_mark);
+        self.ops.push(Op::Else { val: None });
+        self.ops.push(Op::EndIf { val: None });
+        true
     }
 
     /// C1 DEFUNCTIONALIZATION for a TUPLE-accumulator `list.fold` whose accumulator is a 2-tuple

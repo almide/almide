@@ -546,7 +546,9 @@ impl Streams {
 /// drop-old = rc-preserving; move out the final) — accepted by the proven
 /// `check_cert_lc`. Returns `feeder -> slot` (route the feeder's `i` to the slot
 /// stream) and the set of slot locals (open/close `(`/`)` around the loop body).
-fn loop_carried_slots(func: &MirFunction) -> (BTreeMap<ValueId, ValueId>, BTreeSet<ValueId>) {
+fn loop_carried_slots(
+    func: &MirFunction,
+) -> (BTreeMap<ValueId, ValueId>, BTreeSet<ValueId>, BTreeSet<ValueId>) {
     // Heap object dsts: Alloc, and calls with a heap result.
     let mut heap_objs: BTreeSet<ValueId> = BTreeSet::new();
     for p in &func.params {
@@ -572,26 +574,37 @@ fn loop_carried_slots(func: &MirFunction) -> (BTreeMap<ValueId, ValueId>, BTreeS
     }
     let mut feeder_to_slot: BTreeMap<ValueId, ValueId> = BTreeMap::new();
     let mut slots: BTreeSet<ValueId> = BTreeSet::new();
+    // STRAIGHT-LINE (non-loop) heap slots: a `SetLocal { local, src }` with a heap `src` OUTSIDE any
+    // loop region (the unrolled identity-else shadow-rebind append-accumulator — porta serialize_opts).
+    // Each such reassign is folded into its OWN `(id)` CLoop body (`(` at the feeder's `i`, `)` at the
+    // SetLocal), so a body with k reassigns reads `i(id)…(id)m` — the SAME rc-preserving unit the loop
+    // slot proves, accepted by check_cert_lc. A SCALAR `src` (a loop counter `i+1`) is not a heap_obj,
+    // so it is never a slot here (no spurious fold).
+    let mut line_slots: BTreeSet<ValueId> = BTreeSet::new();
     let mut depth: u32 = 0;
     for op in &func.ops {
         match op {
             Op::LoopStart => depth += 1,
             Op::LoopEnd => depth = depth.saturating_sub(1),
-            Op::SetLocal { local, src } if depth > 0 && heap_objs.contains(src) => {
+            Op::SetLocal { local, src } if heap_objs.contains(src) => {
                 feeder_to_slot.insert(*src, *local);
-                slots.insert(*local);
+                if depth > 0 {
+                    slots.insert(*local);
+                } else {
+                    line_slots.insert(*local);
+                }
             }
             _ => {}
         }
     }
-    (feeder_to_slot, slots)
+    (feeder_to_slot, slots, line_slots)
 }
 
 /// Emit the per-object ownership certificate (format v2) for a function. Heap
 /// loop-carried accumulator slots are folded into a single `i(id)m` stream with
 /// loop delimiters (option C); everything else is the flat per-object format.
 pub fn ownership_certificate(func: &MirFunction) -> String {
-    let (feeder_to_slot, slots) = loop_carried_slots(func);
+    let (feeder_to_slot, slots, line_slots) = loop_carried_slots(func);
     let mut depth: u32 = 0;
     let mut s = Streams::new();
 
@@ -616,6 +629,12 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                 // stream (folded inside the loop delimiters); otherwise its own stream.
                 if let Some(&slot) = feeder_to_slot.get(dst) {
                     s.of.insert(*dst, slot);
+                    // A STRAIGHT-LINE slot opens a `(id)` CLoop body per reassign: `(` before this
+                    // feeder's `i`, `)` at the following SetLocal. (A loop slot's parens are the
+                    // LoopStart/LoopEnd delimiters instead, so do NOT double-open it here.)
+                    if line_slots.contains(&slot) {
+                        s.event(slot, '(');
+                    }
                     s.event(slot, 'i');
                 } else {
                     s.of.insert(*dst, *dst);
@@ -680,11 +699,22 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                 // fresh owned object with its own stream (`i`).
                 if let Some(&slot) = feeder_to_slot.get(d) {
                     s.of.insert(*d, slot);
+                    // STRAIGHT-LINE slot: open its `(id)` CLoop body before the feeder's `i`.
+                    if line_slots.contains(&slot) {
+                        s.event(slot, '(');
+                    }
                     s.event(slot, 'i');
                 } else {
                     s.of.insert(*d, *d);
                     s.event(*d, 'i');
                 }
+            }
+            // Close a STRAIGHT-LINE slot's `(id)` CLoop body: the feeder's `i` + the drop-old's `d`
+            // were already emitted; `)` here makes the per-reassign stream read `(id)` (rc-preserving).
+            // A loop slot's SetLocal carries no cert event (its parens are the LoopStart/LoopEnd
+            // delimiters); a scalar SetLocal is cert-neutral. So this fires ONLY for a line slot.
+            Op::SetLocal { local, .. } if line_slots.contains(local) => {
+                s.event(*local, ')');
             }
             // Loop delimiters for a heap loop-carried slot: open `(` on each slot
             // stream when entering a top-level loop, close `)` on leaving — so the
