@@ -1111,3 +1111,18 @@ result slot, the proven write-cursor/result-list recursive drop) in ALL THREE po
 lift_lambda. Tractable but intricate (the defunc multi-path + sound per-iteration record ownership + HOLE-1
 recursive drop + full gates). This is the load_porta_config wall (1 of the 3); read_message/list_instances
 remain the effect-monad-in-loop pair.
+
+### load_porta_config — HALF landed (2026-06-30, direct main-agent implementation)
+The TRUE root (capturing list.map/filter_map → record element not defunc-inlined) is now PARTLY fixed:
+- ✅ **list.map / list.filter** capturing record element — LANDED (commit bcf82dd7): admit a record result
+  element with a generated `$__drop_<R>` + register the recursive `$__drop_list_<R>` (NOT flat DropListStr =
+  HOLE-1 leak). Verified: byte-match native==wasm, corpus-wall ALL ACCEPT (ownership +2), parity 124/124,
+  recursive drop emitted (valid wat). This clears load_porta_config's `env_vars` map.
+- ⏳ **list.filter_map** capturing record element (load_porta_config's `secrets`) — REMAINING. Deeper: the
+  filter_map element path (`append_variant_match_to_result_list`) only tracks a CALL subject, but secrets is
+  `let val = json.get_string(sec_obj,k); match val {…}` (a Block whose subject is a let-bound VAR). Needs:
+  (a) subject-substitution (`{let v=E; match v}` with v∉arms → `match E`) so the subject is the call again;
+  (b) a Block keep-arm (`some(v) => { let e=…; some(e) }`); (c) the none-arm's nested `let obj=json.get(…); if
+  json.get_bool(…) then some({…process.env(k)…}) else none` (effectful process.env capture). Multi-layer.
+So load_porta_config = map-half DONE + filter_map-half remaining; real stays 3 until both land (one fn, two
+HOFs). read_message/list_instances remain the effect-monad-in-loop pair.
