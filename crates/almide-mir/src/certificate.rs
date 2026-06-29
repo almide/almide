@@ -211,6 +211,14 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         if let Op::Prim { kind: crate::PrimKind::ReadDir, .. } = op {
             used.push(Capability::FsRead);
         }
+        // The `path_exists` primitive is the FS-READ floor op for an existence stat — reached by
+        // the self-hosted `fs.exists`. A stat IS a filesystem read, so it REUSES Capability::FsRead
+        // (NOT a new capability — the SAME accounting as ReadTextFile → FsRead). The transitive
+        // `reachable_caps` follows the CallFn edge into `fs.exists`, so a caller inherits this
+        // FsRead and is caps-verified against its declared bound.
+        if let Op::Prim { kind: crate::PrimKind::PathExists, .. } = op {
+            used.push(Capability::FsRead);
+        }
         // The `write_text_file` primitive is the FS-WRITE floor op — reached by the self-hosted
         // `fs.write`, so a fn using it must declare FsWrite (a DISTINCT capability from FsRead — a
         // write is strictly greater authority; the same accounting as ReadTextFile → FsRead). The

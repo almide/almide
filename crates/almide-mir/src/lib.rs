@@ -619,6 +619,18 @@ pub enum PrimKind {
     /// certificate emits an `i` (alloc), balanced by the caller's scope-end flat `DropListStr`
     /// (sound for BOTH arms given the `len@4 = 0` Ok).
     RemoveAll,
+    /// The WASI `path_filestat_get` existence query, packaged as ONE high-level SCALAR prim —
+    /// `args = [path]` (a BORROWED `String` handle, the caller still owns it), dst = a SCALAR
+    /// `Bool` (an i64 0/1). Stats `path` (relative to the first preopened dir, leading `/`
+    /// stripped — the same resolution [`ReadTextFile`] uses) and yields `1` if a file OR
+    /// directory exists there (errno 0), `0` otherwise — matching native `fs.exists`
+    /// (`std::path::Path::exists`). UNLIKE every other fs prim this is NOT a heap result: a stat
+    /// allocates nothing, so its dst is a plain scalar (NO `materialize_result` block, NO
+    /// scope-end drop, NO ownership-cert `i` — it falls in the scalar-result `_ => {}` arm).
+    /// A stat IS a filesystem READ, so it REUSES [`Capability::FsRead`] (NOT a new capability —
+    /// the SAME accounting as [`ReadTextFile`] → FsRead); counted in cap_witness. Reached only by
+    /// the self-hosted `fs.exists`.
+    PathExists,
     /// Release one reference of a RAW heap handle (`(call $rc_dec …)`), the inverse of [`RcInc`].
     /// The MECHANISM the self-hosted recursive `value.__drop_value` frees a dynamic Value tree with
     /// (the §4.1-compliant alternative to a hand-written WAT drop): it operates on raw Int handles,

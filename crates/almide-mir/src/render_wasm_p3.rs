@@ -21,6 +21,8 @@ pub(crate) fn preamble() -> String {
     (func $fd_filestat_get (param i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "fd_readdir"
     (func $fd_readdir (param i32 i32 i32 i64 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "path_filestat_get"
+    (func $path_filestat_get (param i32 i32 i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "path_create_directory"
     (func $path_create_directory (param i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "path_remove_directory"
@@ -524,6 +526,28 @@ pub(crate) fn preamble() -> String {
       (else
         (local.set $msg (call $rtf_str (i32.const {MKDIR_ERR_ADDR}) (i32.const {MKDIR_ERR_LEN})))
         (call $rtf_result (local.get $msg) (i32.const 1)))))
+
+  ;; fs.exists(path) — the WASI path-stat floor. $path is a BORROWED canonical String. Strips a
+  ;; leading '/' (path relative to preopen fd 3, same resolution as $read_text_file), then queries
+  ;; path_filestat_get(dirfd=3, flags=symlink_follow(1), path, path_len, stat_buf): errno 0 means a
+  ;; file OR directory exists there → return 1, else 0 — matching native Path::exists(). The stat
+  ;; buffer is 8-aligned $alloc8 scratch (the host writes i64 fields there). Returns a SCALAR i32
+  ;; Bool (the caller i64.extend's it) — NO heap result, so no Capability beyond FsRead.
+  (func $path_exists (param $path i32) (result i32)
+    (local $pdata i32) (local $plen i32) (local $stat i32) (local $errno i32)
+    ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.
+    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
+    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
+    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
+                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
+      (then
+        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
+        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    (local.set $stat (call $alloc8 (i32.const 64)))
+    (local.set $errno
+      (call $path_filestat_get (i32.const 3) (i32.const 1) (local.get $pdata) (local.get $plen)
+                               (local.get $stat)))
+    (i32.eqz (local.get $errno)))
 
   ;; io.read_line() — the WASI stdin-line floor. Reads fd 0 BYTE-BY-BYTE into a scratch buffer
   ;; until a '\n' (EXCLUDED from the result) or EOF, strips a trailing '\r', then copies the bytes

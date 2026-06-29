@@ -230,6 +230,12 @@ impl LowerCtx {
             || (module == "fs" && func == "write")
             || (module == "fs" && func == "mkdir_p")
             || (module == "fs" && func == "remove_all")
+            // `fs.exists` READS the filesystem (a path stat) — it REUSES Capability::FsRead
+            // (the SAME accounting as `fs.read_text`, NOT a new cap). Self-hosted to
+            // `prim.path_exists` (fs_exists.almd), so its prim floor is in the program map
+            // and the transitive cap_witness counts FsRead. UNLIKE the heap-Result fs prims,
+            // it returns a SCALAR Bool (no allocation, no scope-end drop).
+            || (module == "fs" && func == "exists")
             || (module == "io" && func == "print")
             || (module == "io" && func == "read_line");
         if !purity::is_pure(module, func) && !is_admitted_effectful {

@@ -551,6 +551,7 @@
         "$args_get_list", "$read_text_file", "$rtf_str", "$rtf_result", "$alloc8",
         "$read_dir", "$str_lt", "$is_dot_entry",
         "$write_text_file", "$make_dir", "$remove_all", "$remove_path", "$read_line",
+        "$path_exists",
     ];
 
     #[test]

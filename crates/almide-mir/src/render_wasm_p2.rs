@@ -702,6 +702,14 @@ fn render_op(
                 PrimKind::RemoveAll => {
                     format!("(call $remove_all (local.get {}))", local(args[0]))
                 }
+                // path_exists(path) — the WASI path-stat floor; path_filestat_get on `path`,
+                // yielding 1 if it exists (errno 0) else 0. The path arg is a heap Ptr local (i32
+                // handle), passed DIRECTLY (no i32.wrap). UNLIKE the heap-result fs prims, dst is a
+                // SCALAR Bool (an i64 local), so the i32 0/1 the $path_exists func returns is
+                // i64.extend'd into it — exactly the FloatCmp scalar-Bool widening discipline.
+                PrimKind::PathExists => {
+                    format!("(i64.extend_i32_u (call $path_exists (local.get {})))", local(args[0]))
+                }
                 // read_line() — the WASI stdin-line floor; reads fd 0 byte-by-byte until '\n'/EOF
                 // and builds a fresh owned canonical `String` (newline excluded, trailing '\r'
                 // stripped) in the preamble helper. NO args. dst is a heap Ptr (value_reprs_wasm),

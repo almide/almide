@@ -995,6 +995,25 @@ impl LowerCtx {
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }
+        // `prim.path_exists(path)` — the WASI path-stat floor (fs.exists). ONE BORROWED `String`
+        // arg (the path; the caller still owns it). Its dst is a SCALAR `Bool` (i64 0/1) — UNLIKE
+        // every other fs prim, a stat allocates NO heap result, so the dst is tracked in NO
+        // classification set (no `materialized_results_str` / `heap_elem_lists`): it is a plain
+        // scalar with no scope-end drop and no ownership-cert `i`. Carries Capability::FsRead (a
+        // stat IS a filesystem read — counted in cap_witness). The render emits the WASI
+        // path_filestat_get query (errno 0 = exists).
+        if func == "path_exists" {
+            let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported("prim.path_exists path is not a lowerable scalar/handle".into())
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: PrimKind::PathExists,
+                dst: Some(dst),
+                args: vec![path],
+            });
+            return Ok(Some(dst));
+        }
         // `prim.read_line()` — the WASI stdin-line floor (io.read_line). NO args. Its dst is a
         // FRESH OWNED canonical `String` (one line of stdin, newline excluded) built by the render
         // ($read_line). A plain String owns NO nested handles, so it is tracked in NO classification
