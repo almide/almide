@@ -941,3 +941,28 @@ FsRead): (1) admit fs.write in is_admitted_effectful, (2) a self-host fs_write.a
 fd_write), (6) Capability::FsWrite in the Rust enum AND the Coq Capability registry (single-source, #35) +
 cap_witness + the caps gate. The new capability + Coq registry single-source is the soundness-critical part.
 This is the effectful-27 / WASI-write floor (#61 family) — a real brick, the last thing between dojo and 0.
+
+### 🎯 Final frontier (2026-06-29): real lowering walls = 3 (all porta) — the genuine targeted-irreducible floor
+This session drove the org REAL lowering walls from ~89 (conflated, pre-categorization) to **3**, with native-FFI
+(porta wasm_rt @extern + sqlite + process/http) cleanly separated (44 excluded) and 16/17 repos at wall=0.
+Every wall cleared passed the full gate (corpus-wall ALL ACCEPT + Coq PROOF SPINE OK + 3-way oracle 0
+backend-split + parity 124/124 + byte/leak-check); 4 new effectful WASI prims landed Coq-green (FsWrite=4,
+Clock=5, Stdin=6, PathExists + fs.mkdir_p/remove_all reusing FsRead/FsWrite); HOLE-1 (a gate-invisible
+record-Ok flat-drop leak) was proven + closed with a permanent wasmtime regression test.
+
+The remaining **3 are the targeted-irreducible deep frontier** (each repeatedly found "no sound producer-only /
+lowering-only fix" by adversarial design+critique — they need genuine research, NOT a materializer arm):
+1. **config.almd::load_porta_config** — A2 asymmetric-join + **6+ heap-capturing list.map/filter_map closures**
+   the defunctionalizer walls. Needs closure-capture defunc (env-record lift KEEPING direct calls — NOT
+   first-class fn values, which would break the caps proof) — the C2 territory. Deep.
+2. **ops.almd::list_instances** — **effect-monad-in-loop**: `fs.read_text()!` inside a `for d in dirs` body
+   where err must terminate the loop AND return err from the function (loop-carried early-exit). Combines #76
+   (effect-! value-position) with the loop frontier. Deep.
+3. **jsonrpc.almd::read_message** — #77/#78 **loop-carried accumulator producer**: a TCO-while String/buffer
+   accumulator whose shape does NOT reduce to the proven unconditional net-0 loop-slot cert (OwnershipLoop.v
+   is landed; the producer-side lowering for this specific buffer shape has no sound producer-only path).
+
+These are the honest end of the targeted approach. Clearing them is multi-session research (closure-capture
+defunc / effect-monad-in-loop early-exit / the read_message loop-producer cert), success uncertain. native-FFI
+means literal all-repo-zero is structurally impossible regardless; "real lowering walls = 3" (all porta, all
+characterized) is the achieved floor.
