@@ -1079,3 +1079,35 @@ effect-monad-in-loop desugar (refuted — foundational effect-fn Result-tag ABI)
 sidestep (refuted — real read_message's nested structure resists clean recursion). The wall=0 path remains the
 v2-scale program (effect-fn Result-tag ABI + CondLoop nested-cond/break Coq + stack mirror, OR a deeper
 recursion lowering for the real nested shape) — not an autonomous brick.
+
+### load_porta_config TRUE root (2026-06-30, direct main-agent diagnosis — corrects 3 workflow misdiagnoses)
+3 workflows misdiagnosed load_porta_config (a/ closure-capture but fixed the wrong location; b/ "filter_map
+closure-RETURN heap-match"; c/ "multi-heap-field record-Ok"). Direct 5-layer tracing + bisection to a 3-LINE
+minimal repro found the ACTUAL root:
+
+```almide
+type P = { a: String, b: String }
+fn f(cap: String, keys: List[String]) -> List[P] =
+  keys |> list.map((k) => { let e: P = {a: k, b: cap}; e })   // 🔴 WALL "list.map unliftable/closure-list"
+```
+
+EXACT trigger (empirically isolated): a `list.map`/`filter_map` lambda that **CAPTURES a free var AND produces
+a RECORD element**. Proven by isolation: capturing→scalar element WORKS (#67); capturing→json-scalar WORKS;
+NON-capturing→record element WORKS (lift_lambda saves it); only **capturing + record element** walls. In
+load_porta_config it is `env_vars = env_keys |> list.map((k) => { let val=json.get_string(env_obj,k)??""; let
+e: dispatch.EnvVar={key:k,val:val}; e })` (captures env_obj, builds a record) — the wall then propagates up as
+the tail "heap-result match" (the effect-! desugar's ok-arm Block can't lower this stmt).
+
+WHY: the C1 defunc INLINE specializer (resolves captures via value_of) does NOT take the record-element map
+through its inline path in this position; it falls to `lift_lambda` (binds.rs:38), which REJECTS any capturing
+lambda (free_vars non-empty) — a first-class FuncRef can't carry an environment. A non-capturing record map is
+saved by lift_lambda; a capturing one has no liftable form → walls. NB the lowering is MULTI-PATH (tail vs
+bind vs value position route list.map differently — `lower_heap_result_arm` is NOT the path for the
+tail-position record-element map, confirmed by instrumentation), which is what makes the fix non-trivial.
+
+FIX (located, not yet implemented): route a CAPTURING record-element `list.map`/`filter_map` through the C1
+defunc INLINE path (capture resolves via value_of, the record element built per-iteration + moved into the
+result slot, the proven write-cursor/result-list recursive drop) in ALL THREE positions, instead of falling to
+lift_lambda. Tractable but intricate (the defunc multi-path + sound per-iteration record ownership + HOLE-1
+recursive drop + full gates). This is the load_porta_config wall (1 of the 3); read_message/list_instances
+remain the effect-monad-in-loop pair.
