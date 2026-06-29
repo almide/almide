@@ -233,16 +233,32 @@ impl LowerCtx {
             s.live_heap_handles.truncate(lhh_mark);
             None
         };
+        // EFFECT-RESULT SUBJECT (#76): a ctor-`match` over a CAN-ERR EFFECT call returning a Result
+        // — an `@intrinsic`/impure stdlib `Module` effect (`process.kill`/`process.spawn`) or a bare
+        // effect `RuntimeCall`. `lower_call_args` REFUSES such a heap-result effect call in argument
+        // position (it would defer to an empty Opaque), so the match over it walled. Materialize it
+        // HERE as a real OWNED Result handle so the tag-read below executes. HOLE-1: gated on
+        // `effect_unwrap_admitted` (Result whose Ok payload has a real recursive drop — scalar /
+        // String / Value / List[Value] / tuple-Ok); a RECORD-Ok effect result is REFUSED here and
+        // falls through to the ordinary path (which walls), NEVER routed through a leaky flat cert.
+        let used_effect_subj = self.is_effect_result_subject(subject);
         // Materialize/borrow + track the subject exactly as the statement Match entry does:
         // an owned ctor temp (`Some(5)`) is dropped at scope end; a tracked Var (`let o =
         // Some(5)`) is borrowed; a self-host Option/Result-returning call is tracked here.
-        let subj = match self
+        let subj = if used_effect_subj {
+            match self.try_materialize_effect_result_subject(subject) {
+                Some(v) => v,
+                None => return rollback(self),
+            }
+        } else {
+            match self
             .lower_call_args(std::slice::from_ref(subject))
             .ok()
             .and_then(|a| a.into_iter().next())
         {
             Some(CallArg::Handle(v)) => v,
             _ => return rollback(self),
+        }
         };
         // A USER-FN `Named` call returning Option/Result is tracked the SAME as a self-host call: every
         // Option/Result value uses the one DynListStr len-as-tag repr (brick #51), so `match find_colon(t)
@@ -270,6 +286,10 @@ impl LowerCtx {
             || (is_named_call
                 && crate::lower::is_result_ty(&subject.ty)
                 && !Self::is_heap_ok_result(&subject.ty))
+            // An EFFECT-result subject (process.kill / RuntimeCall) with a SCALAR-Ok / heap-Err
+            // Result is tracked the SAME as a scalar self-host/Named result: len-as-tag @4, Err arm
+            // binds slot-0 String, subject drops via DropListStr (the case-A heap_elem_lists below).
+            || (used_effect_subj && !Self::is_heap_ok_result(&subject.ty))
         {
             self.materialized_results.insert(subj);
             // Camp-4 sub-case 1 — a SCALAR-Ok / HEAP-Err `Result[Int, String]` (char_to_val; the
@@ -298,8 +318,22 @@ impl LowerCtx {
         // below: List[Value]→value_result_lists, Value→value_result_results, else flat→heap_elem_lists
         // = DropListStr, exact for a List[Int]/String Ok). WITHOUT this the match read the len-as-tag
         // @4 over a cap-tag block — a SILENT MISCOMPILE (Ok payload + tag both misread).
-        if is_self_host_result_str_call(subject)
+        // *** HOLE-1 GATE (the gate-INVISIBLE leak guard) *** EXCLUDE a record-Ok subject
+        // (`Result[<recursive-drop record>, String]` — resolve_run_caps' `Result[Manifest,String]`,
+        // load_manifest's nested record-Ok) from the str-result tracking entirely. The by-type drop
+        // dispatch below has NO recursive-drop case for a record Ok payload, so it would fall to the
+        // FLAT `else => heap_elem_lists` (DropListStr) — a balanced-LOOKING cert that frees ONLY the
+        // slot-0 record HANDLE and LEAKS the record's nested heap fields. Refusing it here leaves
+        // `subj` untracked → `is_result == false` → rollback → the fn walls cleanly (an honest
+        // `Unsupported` > a gate-invisible leak). Record-Ok Result CONSTRUCTION (the ctor/arm side) is
+        // handled soundly elsewhere (`is_record_result_ty` → `try_lower_result_record_ctor`); only the
+        // record-Ok MATCH-SUBJECT side (this tracking) is the leak, and it is the part walled here.
+        if (is_self_host_result_str_call(subject)
             || (is_named_call && Self::is_heap_ok_result(&subject.ty))
+            // An EFFECT-result subject with a HEAP-Ok Result (String/Value/List[Value]/tuple-Ok —
+            // `effect_unwrap_admitted` already excluded RECORD-Ok; the by-type dispatch below is exact).
+            || (used_effect_subj && Self::is_heap_ok_result(&subject.ty)))
+            && !self.is_record_result_ty(&subject.ty)
         {
             self.materialized_results_str.insert(subj);
             if crate::lower::is_result_listval_ty(&subject.ty) {
@@ -529,6 +563,62 @@ impl LowerCtx {
     /// type name. Handles the three surface forms a variant type takes
     /// (`Named` / inline `Variant` / `Applied(UserDefined)`). `None` for Option/Result (those
     /// use the dedicated len-as-tag path) and every non-variant type.
+    /// Is `subject` a CAN-ERR EFFECT call returning a Result whose Ok payload the ctor-match can
+    /// bind/drop SOUNDLY (`effect_unwrap_admitted` — scalar / String / Value / List[Value] / tuple-Ok;
+    /// RECORD-Ok is REFUSED)? Two shapes: an impure stdlib `Module` effect (`process.kill`/
+    /// `process.spawn`, gated `!purity::is_pure`) or a bare effect `RuntimeCall`. Such a heap-result
+    /// effect call is REFUSED by `lower_call_args` in argument position (it defers to an empty
+    /// Opaque), so the tail/value ctor-match over it walled; [`Self::try_materialize_effect_result_subject`]
+    /// materializes it as a real owned Result handle so the match executes. (#76)
+    pub(crate) fn is_effect_result_subject(&self, subject: &IrExpr) -> bool {
+        if !effect_unwrap_admitted(&subject.ty) {
+            return false;
+        }
+        match &subject.kind {
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
+                !crate::purity::is_pure(module.as_str(), func.as_str())
+            }
+            IrExprKind::RuntimeCall { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Materialize a CAN-ERR EFFECT Result-call subject ([`Self::is_effect_result_subject`]) into a
+    /// real OWNED Result handle (`Op::CallFn` with the effect's dotted/symbol name, result = the
+    /// DynListStr len-as-tag repr), pushed to `live_heap_handles` so the SUBJECT-DROP-BEFORE-ARMS /
+    /// drop-after machinery frees it exactly once. Self-rolls-back on any partial failure (so a
+    /// declining caller starts clean). The OWNERSHIP cert stays exact (the heap result backs one
+    /// `i`); the CAPS fold sees a dotted/effect name — Stdout-free under the current vocabulary
+    /// (`process.kill` is not a `fd_write`), so no false Stdout claim.
+    pub(crate) fn try_materialize_effect_result_subject(&mut self, subject: &IrExpr) -> Option<ValueId> {
+        let (name, args): (String, &[IrExpr]) = match &subject.kind {
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                if !crate::purity::is_pure(module.as_str(), func.as_str()) =>
+            {
+                (format!("{}.{}", module.as_str(), func.as_str()), args)
+            }
+            IrExprKind::RuntimeCall { symbol, args } => (symbol.as_str().to_string(), args),
+            _ => return None,
+        };
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let rollback = |s: &mut Self| {
+            s.ops.truncate(ops_mark);
+            s.live_heap_handles.truncate(lhh_mark);
+            None
+        };
+        let Ok(lowered) = self.lower_call_args(args) else {
+            return rollback(self);
+        };
+        let Ok(repr) = repr_of(&subject.ty) else {
+            return rollback(self);
+        };
+        let dst = self.fresh_value();
+        self.ops.push(Op::CallFn { dst: Some(dst), name, args: lowered, result: Some(repr) });
+        self.live_heap_handles.push(dst);
+        Some(dst)
+    }
+
     pub(crate) fn custom_variant_type_name(&self, ty: &Ty) -> Option<String> {
         use almide_lang::types::constructor::TypeConstructorId;
         let name = match ty {

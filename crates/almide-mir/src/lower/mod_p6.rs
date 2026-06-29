@@ -537,7 +537,14 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
     for (i, s) in stmts.iter().enumerate() {
         // A TOP-LEVEL effect-`!` — the WHOLE stmt value is `Unwrap { f() }`:
         //   let-bind `let x = f()!` → the Ok-arm binds `x` to the payload
-        //   bare stmt `f()!`        → the Ok-arm discards the (Unit) payload (`_`)
+        //   bare stmt `f()!`        → the Ok-arm discards the (Unit/None) payload (`_`)
+        // The desugar is repr-AGNOSTIC: it admits Option-`!` and Result-`!` uniformly — the same
+        // `err(e) => err(e), ok(x) => cont` skeleton lowers through the shared variant-match path for
+        // both (Option=none/some, Result=err/ok positionally, one len-as-tag repr). HOLE-1 (the
+        // record-Ok recursive-drop leak) is gated NOT here but at the match-LOWERING mechanism
+        // (`try_lower_variant_value_match` excludes a record-Ok subject from the str-result/
+        // `heap_elem_lists` tracking via `is_record_result_ty`, so it rolls back → walls cleanly),
+        // because identifying a record-Ok payload needs the record-layout registry the desugar lacks.
         let (inner, ok_pat) = match &s.kind {
             IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
                 IrExprKind::Unwrap { expr } => (
@@ -563,33 +570,7 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             def_id: body.def_id,
         };
         let cont = desugar_effect_unwrap_inner(&cont, next_var).unwrap_or(cont);
-        // err(e): a fresh `e` bound by the Err-pattern, reconstructed at the fn's Result return type.
-        let e_var = VarId(*next_var);
-        *next_var += 1;
-        let err_arm = IrMatchArm {
-            pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: e_var, ty: Ty::String }) },
-            guard: None,
-            body: IrExpr {
-                kind: IrExprKind::ResultErr {
-                    expr: Box::new(IrExpr {
-                        kind: IrExprKind::Var { id: e_var },
-                        ty: Ty::String,
-                        span: body.span.clone(),
-                        def_id: None,
-                    }),
-                },
-                ty: body.ty.clone(),
-                span: body.span.clone(),
-                def_id: body.def_id,
-            },
-        };
-        let ok_arm = IrMatchArm { pattern: ok_pat, guard: None, body: cont };
-        let m = IrExpr {
-            kind: IrExprKind::Match { subject: Box::new(inner), arms: vec![err_arm, ok_arm] },
-            ty: body.ty.clone(),
-            span: body.span.clone(),
-            def_id: body.def_id,
-        };
+        let m = build_unwrap_match(inner, ok_pat, cont, body, next_var);
         return Some(IrExpr {
             kind: IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(m)) },
             ty: body.ty.clone(),
@@ -597,7 +578,157 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             def_id: body.def_id,
         });
     }
+    // No TOP-LEVEL stmt-`!` in this block — RECURSE INTO THE TAIL. A tail `if`/`match`/block is a
+    // RETURN position whose arm bodies may carry a stmt-`!` (porta_init's `else { … fs.write(p,c)!;
+    // … }`, signal_instance's nested if-arms). `desugar_tail_effect_unwrap` navigates that control
+    // flow and applies the SAME gated stmt-`!` rewrite inside each arm/tail block.
+    if let Some(t) = tail.as_deref() {
+        if let Some(nt) = desugar_tail_effect_unwrap(t, next_var) {
+            return Some(IrExpr {
+                kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            });
+        }
+    }
     None
+}
+
+/// Build the nested-match `match inner { err(e) => err(e), ok(<ok_pat>) => <cont> }` at the enclosing
+/// fn's `Result[_, String]` return type (`body.ty`). The err-arm is a REAL move-out `err(e) => err(e)`
+/// (NOT a strip): a fresh `e: String` bound by the Err-pattern, reconstructed as `ResultErr` at the
+/// return type. The continuation nests ONLY in the ok-arm. Shared by the stmt-position and the
+/// tail/return-position (`desugar_tail_effect_unwrap`) rewrites.
+fn build_unwrap_match(
+    inner: IrExpr,
+    ok_pat: almide_ir::IrPattern,
+    cont: IrExpr,
+    body: &IrExpr,
+    next_var: &mut u32,
+) -> IrExpr {
+    use almide_ir::{IrMatchArm, IrPattern};
+    use almide_lang::types::Ty;
+    let e_var = VarId(*next_var);
+    *next_var += 1;
+    let err_arm = IrMatchArm {
+        pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: e_var, ty: Ty::String }) },
+        guard: None,
+        body: IrExpr {
+            kind: IrExprKind::ResultErr {
+                expr: Box::new(IrExpr {
+                    kind: IrExprKind::Var { id: e_var },
+                    ty: Ty::String,
+                    span: body.span.clone(),
+                    def_id: None,
+                }),
+            },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        },
+    };
+    let ok_arm = IrMatchArm { pattern: ok_pat, guard: None, body: cont };
+    IrExpr {
+        kind: IrExprKind::Match { subject: Box::new(inner), arms: vec![err_arm, ok_arm] },
+        ty: body.ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    }
+}
+
+/// Recurse the effect-`!` desugar into RETURN/TAIL positions — an `if`/`match` arm body or a nested
+/// block tail — so a stmt-`!` inside a branch (porta_init's `else { … fs.write(p, c)!; … }`,
+/// signal_instance's nested if/else arm blocks) desugars to the same nested-match continuation. The
+/// err-arm `err(e) => err(e)` propagates to the ENCLOSING fn's `Result[_, String]` return; the
+/// continuation nests only in the ok-arm. Each arm/tail recurses INDEPENDENTLY (no duplication), so
+/// `count_ir_calls` stays exact (`f()` once, continuation in one arm, `err(e)` is a ctor). HOLE-1
+/// (admitted Ok-payload reprs only) is enforced inside the block path (`desugar_effect_unwrap_inner`).
+/// Returns `None` if no `!` is reachable in a return position of `tail` (the body keeps its form).
+fn desugar_tail_effect_unwrap(tail: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    match &tail.kind {
+        // A nested block — its own stmts/tail may carry a stmt-`!`.
+        IrExprKind::Block { .. } => desugar_effect_unwrap_inner(tail, next_var),
+        IrExprKind::If { cond, then, else_ } => {
+            let nt = desugar_tail_effect_unwrap(then, next_var);
+            let ne = desugar_tail_effect_unwrap(else_, next_var);
+            if nt.is_none() && ne.is_none() {
+                return None;
+            }
+            Some(IrExpr {
+                kind: IrExprKind::If {
+                    cond: cond.clone(),
+                    then: Box::new(nt.unwrap_or_else(|| (**then).clone())),
+                    else_: Box::new(ne.unwrap_or_else(|| (**else_).clone())),
+                },
+                ty: tail.ty.clone(),
+                span: tail.span.clone(),
+                def_id: tail.def_id,
+            })
+        }
+        IrExprKind::Match { subject, arms } => {
+            let mut changed = false;
+            let new_arms: Vec<almide_ir::IrMatchArm> = arms
+                .iter()
+                .map(|a| match desugar_tail_effect_unwrap(&a.body, next_var) {
+                    Some(nb) => {
+                        changed = true;
+                        almide_ir::IrMatchArm {
+                            pattern: a.pattern.clone(),
+                            guard: a.guard.clone(),
+                            body: nb,
+                        }
+                    }
+                    None => a.clone(),
+                })
+                .collect();
+            if !changed {
+                return None;
+            }
+            Some(IrExpr {
+                kind: IrExprKind::Match { subject: subject.clone(), arms: new_arms },
+                ty: tail.ty.clone(),
+                span: tail.span.clone(),
+                def_id: tail.def_id,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// HOLE-1 GATE: is the `!`-subject's `Result[Ok, Err]` type one whose Ok payload the nested-match
+/// continuation can BIND + DROP soundly in this brick? Admit ONLY: `Err == String` (the err-arm
+/// reconstructs `err(e: String)`) AND Ok ∈ { scalar / Unit (the `result_heap_err_bind` len-as-tag
+/// path, Err-String drop only), String / Value (the `str_heap_bind` flat / value-result drops),
+/// List[Value] + the four tuple-Ok shapes (their dedicated RECURSIVE result-drops) }. A heap RECORD /
+/// Option-of-record / List[String] / List[Int] / nested Ok payload has NO real recursive drop here —
+/// the match-lowering's type dispatch would fall through to the FLAT `heap_elem_lists`/`DropListStr`
+/// cert (control_p2.rs:330-332), which LEAKS that payload's nested heap. So REFUSE it: the fn then
+/// walls cleanly on the raw `!` (an honest `Unsupported` > a gate-invisible leak).
+fn effect_unwrap_admitted(result_ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let Ty::Applied(TypeConstructorId::Result, a) = result_ty else {
+        return false;
+    };
+    if a.len() != 2 || !matches!(a[1], Ty::String) {
+        return false;
+    }
+    let ok = &a[0];
+    // scalar / Unit Ok — result_heap_err_bind (the Ok side frees nothing; only Err-String drops).
+    if !is_heap_ty(ok) {
+        return true;
+    }
+    // String / Value Ok — the existing str_heap_bind flat / DropResultValue drops.
+    if matches!(ok, Ty::String) || is_value_ty(ok) {
+        return true;
+    }
+    // List[Value] Ok + the (String,Int)/(Value,Int)/(List[String],Int)/(List[Value],Int) tuple-Ok
+    // shapes — each has a dedicated RECURSIVE result-drop the match-lowering routes to soundly.
+    is_result_listval_ty(result_ty)
+        || is_str_int_result_ty(result_ty)
+        || is_value_int_result_ty(result_ty)
+        || is_list_str_int_result_ty(result_ty)
+        || is_list_value_int_result_ty(result_ty)
 }
 
 /// Is `e` a PURE, freely-duplicable match subject — a `Var` or a literal? `build_match_chain`
