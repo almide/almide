@@ -1232,6 +1232,19 @@ slot owns, so the loop-carried slot certifies as the PROVEN `i(id)m` (corpus-wal
   (filter_map_conditional_arm.almd; the porta `json.get_string` subject is stood in by a user fn so it
   renders through render_program's registry). **read_message is now the SOLE remaining porta wall** (the
   5-layer one above) — and the only thing standing between porta and wall=0.
+
+  **read_message LEAD for the next cycle (the layer-3 simplifier).** read_message's hard arms are
+  `{ let r = parse_and_wrap(body)!; ok(r) }`. But `let r = e!; ok(r)` is the IDENTITY on `e` (Ok(x) →
+  x → Ok(x); Err(s) → propagate Err(s)) — i.e. the whole block ≡ `e`. A small general desugar
+  `{ <pure-prefix>; let r = e!; ok(r) }` → `{ <pure-prefix>; e }` (gated: the unwrap's result is
+  re-wrapped UNCHANGED as the block tail) collapses layer-3 (the effect-`!`-in-arm) into a bare
+  tail-call arm `parse_and_wrap(body)`, which the real-recursive heap-result-`if` arm path already
+  lowers as `CallFn`+`Consume` (no option-ctor, no `$__drop_opt` needed for THESE arms — the call
+  result is propagated, not constructed). What remains after that desugar: the `ok(none)` arms (need
+  the option-ctor + `$__drop_opt_<R>` generation, prototyped in 04caf8e0) and the TCO-decline (mod_p5
+  ~:944, prototyped in 791807ae). Combined, those three small pieces should clear read_message — verify
+  the desugar is sound (it removes an effect-`!` that early-returns, so it must NOT cross any other
+  live-heap-introducing stmt; gate to a pure prefix) against corpus-wall.
 - **load_porta_config** (config.almd) — secrets `filter_map`: a CAPTURING lambda producing a record via a
   `match` (some-arm=record / conditional none-arm `if from_env then some(record) else none`) + `process.env`.
   This is the defunc-`filter_map` machinery (control_p5 `lower_defunc_filter_map_hof`), NOT a loop desugar — a
