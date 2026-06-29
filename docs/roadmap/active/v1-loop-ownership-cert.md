@@ -1063,3 +1063,19 @@ theorems + a stack-based mirror) — a v2-scale program touching a deliberate v1
 autonomous research brick. The decision to undertake it is the user's, not the autonomous loop's. native-FFI
 (44) makes literal all-repo-zero structurally impossible regardless. Genuine progress landed: CondLoop
 extraction (#78, the conditional-loop-slot kernel base) stands as the first reusable piece.
+
+### Recursion/TCO-gate sidestep also refuted (2026-06-30) — real=3 confirmed across ALL angles
+A creative self-critique angle (avoid the loop entirely: gate try_tco_rewrite so an effect fn with a mid-body
+effect-! lowers as PLAIN RECURSION via the proven tail effect-unwrap, the Almide recursion-not-loop idiom) was
+tried against the REAL porta source (confirmed present at /Users/o6lvl4/workspace/github.com/almide/porta — a
+prior workflow wrongly reported it absent by only checking the worktree+cache). Result: a MINIMAL reconstructed
+recursive-effect-! fixture lowers CLEAN (byte-match ok+err), but the REAL read_message (jsonrpc.almd:39-65 —
+nested if/else with multiple ok(...) returns + the `else read_message()` tail recursion + mid-body
+parse_and_wrap(body)!) does NOT reduce to that clean shape: it still walls "while body with heap-accumulator
+reassignment" even with the TCO gate. list_instances recursion-rewrite makes MIR ACCEPT but FAILS byte-match.
+So the recursion sidestep is refuted against the real functions too. real lowering walls = 3 is now confirmed
+the floor across EVERY tried angle: targeted lowering (exhausted), CondLoop extraction (DONE/#78), the
+effect-monad-in-loop desugar (refuted — foundational effect-fn Result-tag ABI), AND the recursion/TCO-gate
+sidestep (refuted — real read_message's nested structure resists clean recursion). The wall=0 path remains the
+v2-scale program (effect-fn Result-tag ABI + CondLoop nested-cond/break Coq + stack mirror, OR a deeper
+recursion lowering for the real nested shape) — not an autonomous brick.
