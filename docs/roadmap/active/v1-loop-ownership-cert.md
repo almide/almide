@@ -1038,3 +1038,28 @@ REFINED research path to wall=0 (each a real, soundness-critical step; success u
 - step 2   effect-monad-in-loop desugar (needs 1.5) → read_message + list_instances.
 - step 3   closure-capture defunc → load_porta_config.
 real lowering walls = 3 stands; it is the floor until step 1.5 (a fundamental verifier change) lands.
+
+### ABSOLUTE floor (2026-06-29): the effect-monad-in-loop walls require a FOUNDATIONAL effect-fn ABI redesign (not a research brick)
+The combined step-1.5+2 design was refuted with the DEEPEST, decisive finding: clearing read_message +
+list_instances is NOT "deep research" — it requires changing a DELIBERATE v1 design decision plus multiple
+proof extensions:
+1. **v1 MIR returns a BARE value from a user effect fn — it does NOT wrap the return in a runtime tagged
+   Result** (lib.rs lower_body_with_globals; the ⛔ DEFINITIVE note at lines 417-431). Both walls genuinely
+   err (byte-match is required on the err path), so the never-errs strip (b154a270) does not apply; without a
+   runtime Result tag the err-break/propagate edge is a SILENT MISCOMPILE — the exact blanket-strip ②-trap
+   that was already REVERTED (lines 293-305). So the effect-monad-in-loop desugar needs a runtime effect-fn
+   Result-tag ABI, which v1 deliberately omits.
+2. **CCondLoop (step 1) proves only a CONTINUE-ONLY loop over TWO FLAT net-0 branches** (`list FlatOp`, "no
+   nested loop"). The desugar's nested `match status { ok => match f(x){ok,err} }` is a CondLoop whose
+   then-branch contains another conditional — CCondLoop cannot express it (needs a nested-conditional Coq
+   generalization), and the err-break EXIT edge (leaving mid-iteration with a partial live set) has NO Coq
+   counterpart = a de-facto new axiom.
+3. The strengthened mirror (snapshot/restore across if-arms) needs a STACK + rc-map normalization or it
+   false-rejects balanced corpus fns (4517-gate BREACH risk).
+
+CONCLUSION: real lowering walls = 3 is the ABSOLUTE floor for this codebase's current design. The path to 0 is
+a FOUNDATIONAL redesign (a runtime effect-fn Result-tag ABI + CondLoop nested-conditional + break-exit Coq
+theorems + a stack-based mirror) — a v2-scale program touching a deliberate v1 design decision, NOT an
+autonomous research brick. The decision to undertake it is the user's, not the autonomous loop's. native-FFI
+(44) makes literal all-repo-zero structurally impossible regardless. Genuine progress landed: CondLoop
+extraction (#78, the conditional-loop-slot kernel base) stands as the first reusable piece.
