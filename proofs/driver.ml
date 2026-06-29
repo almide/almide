@@ -18,7 +18,7 @@ let () =
   let bytes = read_file Sys.argv.(2) in
   let accepted =
     match mode with
-    | "ownership" -> Checker.check_cert_lc bytes  (* loop-aware (v2); flat certs unchanged *)
+    | "ownership" -> Checker.check_clc bytes  (* conditional-loop-aware (v3); flat + CLoop certs unchanged *)
     | "names" -> Checker.check_names_cert bytes
     | "caps" -> Checker.check_caps_cert bytes
     | "caps-transitive" -> Checker.check_prog_cert bytes  (* call-graph: transitive reach ⊆ declared *)

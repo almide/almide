@@ -53,6 +53,7 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `check_all_sound` | OwnershipChecker.v | Closed under the global context |
 | `check_cert_sound` | OwnershipChecker.v | Closed under the global context |
 | `check_reuse_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_clc_unroll_sound` | OwnershipChecker.v | Closed under the global context |
 | `eager_copy_refines_safety` | ALS.v | Closed under the global context |
 | `mrun_tracks_exec` | RuntimeModel.v | Closed under the global context |
 | `alloc_not_live` | FreeList.v | Closed under the global context |

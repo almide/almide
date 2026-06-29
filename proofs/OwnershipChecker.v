@@ -313,7 +313,17 @@ Proof. reflexivity. Qed.
 
 Inductive CertItem : Type :=
   | COp : Op -> CertItem            (* a plain op *)
-  | CLoop : list Op -> CertItem.    (* a loop body run any number of times *)
+  | CLoop : list Op -> CertItem     (* a loop body run any number of times *)
+  | CCondLoop : list Op -> list Op -> CertItem.
+    (* a CONDITIONAL loop (filter / filter_map): each iteration runs EITHER the
+       `then` body (predicate true) OR the `else` body (predicate false). The
+       number of `then` iterations is RUNTIME-VARIABLE. Accepted iff BOTH branch
+       bodies PRESERVE rc from the entry count — then ANY per-iteration outcome
+       sequence preserves it, for ANY iteration count (proved sound vs. the
+       concrete unrolling `cond_concat` below). The unconditional `CLoop body`
+       is the degenerate case `then = else = body`; this strictly generalizes it.
+       Ported from OwnershipFilter.v (`cexec`/`ccheck_unroll_sound`, kernel-checked,
+       axiom-clean) onto the production Inc/Alias/Dec/MoveOut/Reuse `exec`. *)
 
 (* exec_line folds a cert LINE. A CLoop body is checked via the existing flat `exec`
    (its body is plain ops); accepted iff the body preserves rc (sufficient for any
@@ -331,6 +341,15 @@ Fixpoint exec_line (cs : list CertItem) (rc : Z) : option Z :=
       match exec body rc with
       | Some rc' => if Z.eqb rc' rc then exec_line rest rc else None
       | None => None
+      end
+  | CCondLoop thenb elseb :: rest =>
+      (* accept iff BOTH branches preserve rc (and neither faults) from the entry
+         count — then any per-iteration choice preserves it (cf. OwnershipFilter
+         cexec). *)
+      match exec thenb rc, exec elseb rc with
+      | Some rt, Some re =>
+          if andb (Z.eqb rt rc) (Z.eqb re rc) then exec_line rest rc else None
+      | _, _ => None
       end
   end.
 
@@ -370,12 +389,43 @@ Proof.
   - rewrite exec_app, Hpres. exact IH.
 Qed.
 
+(* CONCRETE unrolling of a CONDITIONAL loop: a list of bools `bs` (the runtime
+   predicate outcomes) selects `thenb` or `elseb` each iteration. The real loop
+   runs the SAME two branch bodies, choosing per the data — so this is exactly its
+   concrete ownership trace. (Ported from OwnershipFilter.cond_concat over `list Op`.) *)
+Fixpoint cond_concat (thenb elseb : list Op) (bs : list bool) : list Op :=
+  match bs with
+  | [] => []
+  | true :: rest => thenb ++ cond_concat thenb elseb rest
+  | false :: rest => elseb ++ cond_concat thenb elseb rest
+  end.
+
+(* Two rc-preserving branches ⇒ ANY choice sequence preserves rc and never faults.
+   (Ported from OwnershipFilter.cond_concat_preserve; exec_flat → exec, exec_flat_app
+   → exec_app.) *)
+Lemma cond_concat_preserve :
+  forall thenb elseb rc,
+    exec thenb rc = Some rc ->
+    exec elseb rc = Some rc ->
+    forall bs, exec (cond_concat thenb elseb bs) rc = Some rc.
+Proof.
+  intros thenb elseb rc Ht He.
+  induction bs as [| b bs IH]; simpl.
+  - reflexivity.
+  - destruct b.
+    + rewrite exec_app, Ht. exact IH.
+    + rewrite exec_app, He. exact IH.
+Qed.
+
 (* CONCRETE unrolling: a cert line unrolls to a flat run (each CLoop body → n copies). *)
 Inductive UnrollsL : list CertItem -> list Op -> Prop :=
   | UL_nil : UnrollsL [] []
   | UL_op : forall o a b, UnrollsL a b -> UnrollsL (COp o :: a) (o :: b)
   | UL_loop : forall body a b n,
-      UnrollsL a b -> UnrollsL (CLoop body :: a) (List.concat (List.repeat body n) ++ b).
+      UnrollsL a b -> UnrollsL (CLoop body :: a) (List.concat (List.repeat body n) ++ b)
+  | UL_cond : forall thenb elseb a b bs,
+      UnrollsL a b ->
+      UnrollsL (CCondLoop thenb elseb :: a) (cond_concat thenb elseb bs ++ b).
 
 (* SOUNDNESS CORE: an accepting line, at any rc, executes EVERY unrolling to the
    same result — so no unrolling faults and the final rc matches. *)
@@ -397,6 +447,15 @@ Proof.
     destruct (Z.eqb rc' rc) eqn:Eq; [| discriminate].
     apply Z.eqb_eq in Eq. subst rc'.
     rewrite exec_app, (exec_repeat_preserve body rc Eb n).
+    apply IHHU. exact Hexec.
+  - (* CCondLoop thenb elseb — copy of OwnershipFilter cexec_unroll's loop case *)
+    simpl in *.
+    destruct (exec thenb rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (exec elseb rc) as [re |] eqn:Ee; [| discriminate].
+    destruct (andb (Z.eqb rt rc) (Z.eqb re rc)) eqn:Eb; [| discriminate].
+    apply andb_prop in Eb. destruct Eb as [Hrt Hre].
+    apply Z.eqb_eq in Hrt. apply Z.eqb_eq in Hre. subst rt re.
+    rewrite exec_app, (cond_concat_preserve thenb elseb rc Et Ee bs).
     apply IHHU. exact Hexec.
 Qed.
 
@@ -420,6 +479,21 @@ Proof. reflexivity. Qed.
 Example leaky_loop_line_rejects : check_line [COp Inc; CLoop [Inc]; COp MoveOut] = false.
 Proof. reflexivity. Qed.
 Example draining_loop_line_rejects : check_line [COp Inc; CLoop [Dec]; COp MoveOut] = false.
+Proof. reflexivity. Qed.
+
+(* CONDITIONAL-loop (filter slot) non-vacuity: acquire once; each iteration EITHER
+   drop-old+alloc-new (predicate true, net 0) OR nothing (predicate false, net 0);
+   move out the final. ACCEPTS — the runtime-variable #appends is irrelevant. *)
+Example filter_slot_line_accepts :
+  check_line [COp Inc; CCondLoop [Dec; Inc] []; COp MoveOut] = true.
+Proof. reflexivity. Qed.
+(* THEN branch leaks (net +1) — REJECT. *)
+Example filter_leaky_then_line_rejects :
+  check_line [COp Inc; CCondLoop [Inc] []; COp MoveOut] = false.
+Proof. reflexivity. Qed.
+(* ELSE branch drains (net −1) — REJECT. *)
+Example filter_draining_else_line_rejects :
+  check_line [COp Inc; CCondLoop [Dec; Inc] [Dec]; COp MoveOut] = false.
 Proof. reflexivity. Qed.
 
 (* ─── LOOP-AWARE certificate parsing (format v2, backward-compatible) ───
@@ -490,12 +564,112 @@ Proof. reflexivity. Qed.
 Example cert_lc_draining_loop_rejects : check_cert_lc "i(d)m"%string = false. (* loop body drains *)
 Proof. reflexivity. Qed.
 
+(* ─── CONDITIONAL-LOOP-aware certificate parsing (format v3, backward-compatible) ───
+   Extends format v2 with conditional-loop delimiters `[` then `|` else `]` around
+   two flat branch bodies: e.g. `i[di|]m` = COp Inc, CCondLoop [Dec; Inc] [], COp
+   MoveOut (the filter accumulator slot). `parse_clc` is a SUPERSET of `parse_lc`:
+   it ALSO handles the `(` … `)` loop form, and a cert with NO `[` parses byte-for-
+   byte as `parse_lc` (the `|` / `]` bytes are not in the op alphabet, so outside a
+   `[` they are skipped exactly as `parse_lc` skips them) — full backward compat for
+   every flat and CLoop certificate. The op alphabet inside a branch is the same
+   i/a/d/m/r. Conditional-loop bodies are FLAT (no nested `(`/`[`). *)
+Definition lbracket : ascii := "["%char.
+Definition rbracket : ascii := "]"%char.
+Definition bar : ascii := "|"%char.
+
+(* in-progress conditional-loop state: (collecting-else?, then-acc-rev, else-acc-rev). *)
+Definition condst : Type := (bool * list Op * list Op)%type.
+
+(* Flush the in-progress line, defensively closing a dangling `(`-loop or `[`-cond. *)
+Definition finish_line_c (cur : list CertItem) (lp : option (list Op))
+                         (cp : option condst) : list CertItem :=
+  match cp with
+  | Some (_, th, el) => rev (CCondLoop (rev th) (rev el) :: cur)
+  | None =>
+      match lp with
+      | Some body => rev (CLoop (rev body) :: cur)
+      | None => rev cur
+      end
+  end.
+
+Fixpoint parse_clc (s : string) (cur : list CertItem)
+                   (lp : option (list Op)) (cp : option condst)
+                   {struct s} : list (list CertItem) :=
+  match s with
+  | EmptyString => [finish_line_c cur lp cp]
+  | String b rest =>
+      if Ascii.eqb b newline then finish_line_c cur lp cp :: parse_clc rest [] None None
+      else match cp with
+      | Some (in_else, th, el) =>
+          (* inside `[ … | … ]` — collect ops into the then/else branch *)
+          if Ascii.eqb b bar then parse_clc rest cur lp (Some (true, th, el))
+          else if Ascii.eqb b rbracket then
+            parse_clc rest (CCondLoop (rev th) (rev el) :: cur) lp None
+          else match parse_byte b with
+               | Some op =>
+                   if in_else then parse_clc rest cur lp (Some (true, th, op :: el))
+                   else parse_clc rest cur lp (Some (false, op :: th, el))
+               | None => parse_clc rest cur lp cp
+               end
+      | None =>
+          if Ascii.eqb b lbracket then parse_clc rest cur lp (Some (false, [], []))
+          else if Ascii.eqb b lparen then parse_clc rest cur (Some []) None
+          else if Ascii.eqb b rparen then
+            match lp with
+            | Some body => parse_clc rest (CLoop (rev body) :: cur) None None
+            | None => parse_clc rest cur None None
+            end
+          else match parse_byte b with
+               | Some op =>
+                   match lp with
+                   | Some body => parse_clc rest cur (Some (op :: body)) None
+                   | None => parse_clc rest (COp op :: cur) None None
+                   end
+               | None => parse_clc rest cur lp None
+               end
+      end
+  end.
+
+(* The full conditional-loop-aware checker over raw certificate bytes. *)
+Definition check_clc (s : string) : bool :=
+  forallb check_line (parse_clc s [] None None).
+
+(* SOUNDNESS over bytes (1-line corollary of check_line_unroll_sound, now covering
+   CCondLoop automatically via UL_cond + the exec_line_unroll CCondLoop case): an
+   accepted conditional-loop certificate has, for EVERY parsed line and EVERY
+   concrete unrolling, no double-free / use-after-free and no leak. *)
+Theorem check_clc_unroll_sound :
+  forall s, check_clc s = true ->
+    forall cs, In cs (parse_clc s [] None None) ->
+      forall fops, UnrollsL cs fops -> run fops <> None /\ run fops = Some 0.
+Proof.
+  intros s H cs Hin fops HU.
+  unfold check_clc in H. rewrite forallb_forall in H.
+  apply (check_line_unroll_sound cs (H cs Hin) fops HU).
+Qed.
+
+(* backward-compat (flat + `(`-loop certs parse/verify exactly as before) + the new
+   conditional-loop (filter) certs, on real bytes *)
+Example cert_clc_flat_accepts : check_clc "iidd"%string = true.
+Proof. reflexivity. Qed.
+Example cert_clc_flat_rejects : check_clc "idd"%string = false.
+Proof. reflexivity. Qed.
+Example cert_clc_loop_accepts : check_clc "i(di)m"%string = true.        (* v2 CLoop still accepts *)
+Proof. reflexivity. Qed.
+Example cert_clc_filter_slot_accepts : check_clc "i[di|]m"%string = true.   (* filter accumulator slot *)
+Proof. reflexivity. Qed.
+Example cert_clc_leaky_then_rejects : check_clc "i[i|]m"%string = false.    (* then branch leaks *)
+Proof. reflexivity. Qed.
+Example cert_clc_draining_else_rejects : check_clc "i[di|d]m"%string = false. (* else branch drains *)
+Proof. reflexivity. Qed.
+
 (* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on
    nothing but the Coq kernel — no admits, no extra axioms. Expected output:
    "Closed under the global context". *)
 Print Assumptions check_sound.
 Print Assumptions check_line_unroll_sound.
 Print Assumptions check_cert_lc_sound.
+Print Assumptions check_clc_unroll_sound.
 Print Assumptions check_all_sound.
 Print Assumptions check_cert_sound.
 Print Assumptions check_reuse_sound.

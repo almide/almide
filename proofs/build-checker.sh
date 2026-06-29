@@ -31,6 +31,9 @@ printf 'IDD\n'     > /tmp/stack_uflow.cert     # operand-stack UNDERFLOW (pop be
 printf 'I(DI)M\n'  > /tmp/loop_acc.cert        # heap-loop-carried accumulator slot: acquire, loop[drop-old acquire-new], move-out → ACCEPT
 printf 'I(I)M\n'   > /tmp/loop_leak.cert       # loop body LEAKS (acquire each iter, never release) → REJECT
 printf 'I(D)M\n'   > /tmp/loop_drain.cert      # loop body DRAINS (release each iter, never acquire) → REJECT
+printf 'I[ID|]M\n' > /tmp/filter_slot.cert     # conditional-loop (filter) slot: then[drop-old acquire-new] / else[] both net 0 → ACCEPT
+printf 'I[I|]M\n'  > /tmp/filter_then_leak.cert # filter THEN branch leaks (net +1) → REJECT
+printf 'I[ID|D]M\n'> /tmp/filter_else_drain.cert # filter ELSE branch drains (net −1) → REJECT
 
 run() { # path expected_exit
   set +e; ./checker ownership "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e
@@ -48,6 +51,9 @@ run /tmp/stack_uflow.cert 1
 run /tmp/loop_acc.cert 0
 run /tmp/loop_leak.cert 1
 run /tmp/loop_drain.cert 1
+run /tmp/filter_slot.cert 0
+run /tmp/filter_then_leak.cert 1
+run /tmp/filter_else_drain.cert 1
 
 # TRANSITIVE capability witness (call graph): functions ';'-separated, each
 # `allowed|direct|callee-indices`. accept ⟹ every function's transitive reach ⊆ declared.

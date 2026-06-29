@@ -22,4 +22,8 @@ Set Extraction Output Directory ".".
    emitted call-graph witness and decides prog_ok, so `accept ⟹ every function's full
    transitive reach ⊆ its declared bound` — the gate consumes the proof instead of the
    untrusted transitive fold. *)
-Extraction "checker.ml" check_cert check_cert_lc check_names_cert check_caps_cert check_prog_cert.
+(* `check_clc` is the conditional-loop-aware ownership checker (format v3, a SUPERSET
+   of `check_cert_lc`: it also parses `[ then | else ]` filter slots; flat + CLoop
+   certs parse identically, so it is fully backward-compatible). The driver dispatches
+   ownership to it. *)
+Extraction "checker.ml" check_cert check_cert_lc check_clc check_names_cert check_caps_cert check_prog_cert.
