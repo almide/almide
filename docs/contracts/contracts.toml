@@ -1395,3 +1395,13 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_unwrap_in_loop.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-120"
+title     = "capturing filter_map with a conditional keep/skip arm body byte-matches native"
+statement = "A CAPTURING `list.filter_map` whose inline lambda body is a variant `match` with a CONDITIONAL arm — an arm whose body is a Block and/or an `if c then some(rec) else none` (the porta load_porta_config `secrets` shape: `match val { some(s) => some(rec), none => { let b = …; if b then some(rec2) else none } }`) — runs on the WASM target and agrees with native. Previously the defunc `emit_filter_map_arm` handled only a bare `some(elem)` / `none` / empty-list arm body and WALLed any other shape (`list.filter_map with an unliftable/closure-list higher-order argument`). It now recurses into a Block arm body (lowering the leading `let`s as per-arm effects, captures resolving via value_of, heap temps freed at the arm frame end) and an `if` arm body (a UNIT keep/skip control structure — only the taken arm runs, its record built+stored into the SAME write-cursor result list, the cursor's increment in-place under unit_arm_depth), mirroring the proven `append_body_to_str_acc` Block/If handling for the str-accumulator path. NO merged heap value is bound (the record is materialized inside the taken arm), so no unsound flat-cert shape arises; NO new MIR op and NO certificate/Coq change (corpus-wall: ownership ACCEPT over all 4520 functions). Verified byte-identical native == wasm: the some-arm (key present), the none-arm's `if … then some` (conditional keep), and the none-arm's `else none` (skip) all produce identical output."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/filter_map_conditional_arm.almd", class = "fixture" },
+]

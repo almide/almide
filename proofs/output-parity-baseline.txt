@@ -32,6 +32,7 @@ spec/wasm_cross/destructure_let_unwrap.almd
 spec/wasm_cross/effect_unwrap_in_loop.almd
 spec/wasm_cross/empty_collection_annotated.almd
 spec/wasm_cross/empty_collection_fold.almd
+spec/wasm_cross/filter_map_conditional_arm.almd
 spec/wasm_cross/float_interp_forms.almd
 spec/wasm_cross/float_shortest_roundtrip.almd
 spec/wasm_cross/float_sign_minmax_ieee.almd

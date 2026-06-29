@@ -2056,6 +2056,36 @@ impl LowerCtx {
         match &body.kind {
             IrExprKind::OptionNone => Some(()),
             IrExprKind::List { elements } if elements.is_empty() => Some(()),
+            // A BLOCK arm body (`none => { let obj = …; let b = …; if b then some(e) else none }` —
+            // porta load_porta_config's secrets `none`-arm): lower the leading lets as per-arm effects
+            // (their captures resolve via value_of; their heap temps freed at the arm frame end), then
+            // recurse on the tail. Mirrors `append_body_to_str_acc`'s Block case for the str-acc path.
+            IrExprKind::Block { stmts, expr: Some(tail) } => {
+                let arm_mark = self.live_heap_handles.len();
+                for s in stmts {
+                    self.lower_stmt(s).ok()?;
+                }
+                let r = self.emit_filter_map_arm(tail, rh, cursor, result_elem, eight);
+                self.drop_arm_locals(arm_mark);
+                r
+            }
+            // A CONDITIONAL arm body (`if from_env then some(e2) else none` — the secrets none-arm's
+            // keep/skip decision): a UNIT control structure, only the taken arm runs. Lower the cond to a
+            // scalar bool, then recurse each arm as an append/skip into the SAME result-list cursor (the
+            // cursor's `SetLocal` increment is in-place under `unit_arm_depth`). No merged heap value —
+            // the record is built+stored INSIDE the taken arm. Mirrors `append_body_to_str_acc`'s If case.
+            IrExprKind::If { cond, then, else_ } => {
+                let cond_v = self.lower_heap_result_cond(cond)?;
+                self.ops.push(Op::IfThen { cond: cond_v, dst: None });
+                self.unit_arm_depth += 1;
+                let then_ok = self.emit_filter_map_arm(then, rh, cursor, result_elem, eight);
+                self.ops.push(Op::Else { val: None });
+                let else_ok =
+                    then_ok.and_then(|_| self.emit_filter_map_arm(else_, rh, cursor, result_elem, eight));
+                self.unit_arm_depth -= 1;
+                self.ops.push(Op::EndIf { val: None });
+                else_ok
+            }
             IrExprKind::OptionSome { expr } => {
                 let arm_mark = self.live_heap_handles.len();
                 let elem_v = self.lower_heap_result_arm(expr, result_elem)?;
