@@ -1268,3 +1268,23 @@ CHAINED PURE heap-`let`s at depth 3 lower (rdcore3d). So it is a narrow interact
 result) × (deep arm nesting) — the 8th and final read_message feature. Next: crack it in the heap-result-`if`-
 arm Block lowering's handling of an effect-call-bound heap local at depth → porta wall=0. read_message stacks
 ~8 hard features (the hardest porta function); 7 are cracked + committed this turn.
+
+### DEFINITIVE root of the 8th blocker (it is NOT lowering — it is a MISSING RUNTIME PRIMITIVE)
+
+Bisected to the minimum (scratchpad iob_arm7): `let b = io.read_n_bytes(n)` at the FUNCTION TOP LEVEL walls
+**"effectful/impure stdlib Module call io.read_n_bytes needs a declared capability not in this brick"**
+(calls.rs:241) — NOT a heap-result-`if` wall. The earlier "heap-result `if`" messages were that capability
+wall PROPAGATING up through the arms. So read_message's LOWERING is fully solved (the 7 committed features;
+iob_arm8 = the same `ok(some(record))` with a PURE let lowers at wall=0); the ONLY remaining blocker is that
+**io.read_n_bytes has no v1 runtime floor**. `io.read_line` IS admitted (calls.rs:240 whitelist + the
+self-host `stdlib/io_read_line.almd` = `prim.read_line()` + `PrimKind::ReadLine` render = a WASI fd-0
+byte-loop building a String, carrying Capability::Stdin). io.read_n_bytes is its sibling (WASI fd-0 read of
+N bytes → a `Bytes` block) and is genuinely WASI-able — so it is a REAL wall, NOT a NATIVE-FFI one (marking it
+native-FFI to drop it from the metric would be metric-gaming — forbidden). TO CLOSE porta wall=0, implement
+io.read_n_bytes as a sibling of read_line: (1) whitelist `io.read_n_bytes` (calls.rs:240); (2) `stdlib/
+io_read_n_bytes.almd` = `effect fn io_read_n_bytes(n: Int) -> Bytes = prim.read_n_bytes(n)`; (3) a
+`func == "read_n_bytes"` branch (calls_p4 ~:1024) emitting a new `PrimKind::ReadNBytes` (args [n]); (4) the
+render for `PrimKind::ReadNBytes` (a WASI `fd_read` of N bytes from fd 0 into a `Bytes` block — the real
+runtime work, adapt the `ReadLine` render); (5) Capability::Stdin accounting (reuse). This is the
+effectful-WASI-floor workstream (task #61), a DIFFERENT kind of work from the now-solved read_message lowering —
+a clean boundary. Once io.read_n_bytes has a floor, read_message lowers (its structure is proven by rdcore3*).
