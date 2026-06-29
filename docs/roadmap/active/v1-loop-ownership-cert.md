@@ -1222,6 +1222,16 @@ slot owns, so the loop-carried slot certifies as the PROVEN `i(id)m` (corpus-wal
   effect-`!`-in-heap-result-`if`-arm lowering — a coordinated multi-layer cycle. All prototype edits were
   REVERTED (the ctor was render-incomplete without the generation; none cleared the wall alone). Recommendation:
   do load_porta_config (single-mechanism defunc-filter_map) before read_message (5-layer).
+
+  **load_porta_config CLEARED 2026-06-30 (bc37cbe0): real lowering walls 2 → 1.** The single mechanism was
+  exactly as predicted: the defunc `emit_filter_map_arm` (control_p5) handled only a bare `some(elem)` /
+  `none` arm body and WALLed any other shape. Extending it to RECURSE into a Block arm body (lower the
+  leading lets) and an `if` arm body (a unit keep/skip into the same write-cursor — mirror of the proven
+  `append_body_to_str_acc`) lowered the secrets `none => { let b = …; if b then some(rec) else none }`
+  shape. NO new MIR op, NO cert/Coq change (corpus-wall ACCEPT over 4520). Fixture C-120
+  (filter_map_conditional_arm.almd; the porta `json.get_string` subject is stood in by a user fn so it
+  renders through render_program's registry). **read_message is now the SOLE remaining porta wall** (the
+  5-layer one above) — and the only thing standing between porta and wall=0.
 - **load_porta_config** (config.almd) — secrets `filter_map`: a CAPTURING lambda producing a record via a
   `match` (some-arm=record / conditional none-arm `if from_env then some(record) else none`) + `process.env`.
   This is the defunc-`filter_map` machinery (control_p5 `lower_defunc_filter_map_hof`), NOT a loop desugar — a
