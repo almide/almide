@@ -1016,3 +1016,25 @@ EXHAUSTED targeted/integration evidence (this session): loop-cert producer = NO_
 conditional-acquire-5 = 3 tractable cleared (fs.exists) + 2 A2-hard; list_instances + read_message maps =
 NO_SOUND_PATH; theme A design = REFUTED (needs CondLoop + multi-slot). real lowering walls = 3 is the floor.
 native-FFI (44) makes literal all-repo-zero structurally impossible regardless.
+
+### Step-2 refutation (2026-06-29): the decisive blocker is step 1.5 — verify_ownership does not model intra-iteration control flow
+The effect-monad-in-loop desugar (step 2) was adversarially REFUTED with a DECISIVE finding (H-A): the
+executable mirror verify_ownership (lib.rs:1117-1119) AND the cert generator (certificate.rs:127) walk a loop
+body as ONE flat iteration with LoopBreakUnless / IfThen / Else as no-ops — they do NOT model that a break
+SKIPS the rest of the iteration, nor snapshot/restore rc across if-arms. Consequences:
+- a transient acquired before a !-break and released only on the post-break continue path is counted
+  BALANCED by both the mirror and the Coq cert, yet LEAKS on the break iteration → a desugar that forgets a
+  break-path drop is accepted UNSOUNDLY (the mirror cannot confirm faithfulness — H3 undischargeable today).
+- dually, a transient dropped in BOTH if-arms double-decrements in the flat walk → false DoubleFree.
+The CCondLoop kernel cert (step 1, landed) proves ONLY the single carried status/rv slot's rc-deltas; the
+dominant leak surface (per-iteration transients dropped across multiple !-Err-arms, the TCO back-edge drop,
+the move-out-of-Result identity) is OUTSIDE the cert and OUTSIDE what the mirror can currently see.
+
+REFINED research path to wall=0 (each a real, soundness-critical step; success uncertain):
+- step 1   CondLoop extraction — DONE (commit 19474461, task #78).
+- step 1.5 extend verify_ownership + the cert generator to model intra-iteration control flow (LoopBreakUnless
+  skips the iteration remainder; IfThen/Else snapshot+restore rc/dead per arm) — a FUNDAMENTAL change to the
+  trust kernel's executable mirror; must keep corpus-wall ALL ACCEPT over all 4517 fns. THE decisive blocker.
+- step 2   effect-monad-in-loop desugar (needs 1.5) → read_message + list_instances.
+- step 3   closure-capture defunc → load_porta_config.
+real lowering walls = 3 stands; it is the floor until step 1.5 (a fundamental verifier change) lands.
