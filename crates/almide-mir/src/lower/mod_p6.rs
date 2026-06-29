@@ -722,6 +722,22 @@ fn effect_unwrap_admitted(result_ty: &Ty) -> bool {
     if matches!(ok, Ty::String) || is_value_ty(ok) {
         return true;
     }
+    // List[<non-heap scalar>] (List[Int]/Float/Bool/…) or `Bytes` Ok — a FLAT block of INLINE
+    // scalars (fs.read_bytes' `Result[List[Int], String]`, the `load` shape). The by-type dispatch
+    // (control_p2.rs:334-376) routes it to the `else => heap_elem_lists` flat `DropListStr`, which
+    // frees the block with NO nested-heap leak — the elements are inline scalars, identical
+    // soundness to the existing String-Ok flat path. GATE HARD: a `List[String]/List[record]/
+    // List[Value]/nested` element IS heap, so the flat drop would LEAK every element — those keep
+    // walling (`is_heap_ty(&le[0])` excludes them; a `List[Value]` Ok takes the dedicated recursive
+    // `is_result_listval_ty` branch below, never this flat one).
+    if let Ty::Applied(TypeConstructorId::List, le) = ok {
+        if le.len() == 1 && !is_heap_ty(&le[0]) {
+            return true;
+        }
+    }
+    if matches!(ok, Ty::Applied(TypeConstructorId::Bytes, _)) {
+        return true;
+    }
     // List[Value] Ok + the (String,Int)/(Value,Int)/(List[String],Int)/(List[Value],Int) tuple-Ok
     // shapes — each has a dedicated RECURSIVE result-drop the match-lowering routes to soundly.
     is_result_listval_ty(result_ty)
