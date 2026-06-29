@@ -615,6 +615,7 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
                 kind: PrimKind::LoadHandle
                     | PrimKind::ArgsGetList
                     | PrimKind::ReadLine
+                    | PrimKind::ReadNBytes
                     | PrimKind::ReadTextFile
                     | PrimKind::ReadDir
                     | PrimKind::WriteTextFile

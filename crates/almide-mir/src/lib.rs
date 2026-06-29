@@ -533,6 +533,14 @@ pub enum PrimKind {
     /// for it, balanced by the caller's scope-end flat `Drop` (a String owns no nested handles) or
     /// a heap-return move-out.
     ReadLine,
+    /// `read_n_bytes(n)` — the WASI stdin-N-bytes floor (io.read_n_bytes), the SIBLING of
+    /// [`PrimKind::ReadLine`]: `args = [n]` (an `Int`, the byte count), dst = a fresh OWNED `Bytes`
+    /// block (the same byte-buffer block layout a `String` uses, built by the preamble `$read_n_bytes`
+    /// via `$rtf_str`). Reads UP TO `n` bytes from fd 0 (stopping early at EOF). Carries
+    /// Capability::Stdin (same DISTINCT cap as ReadLine). NON-DETERMINISTIC (live stdin): no byte-match.
+    /// Its dst is a heap Ptr, so the ownership certificate emits an `i` (alloc) balanced by the caller's
+    /// scope-end flat `Drop` (a Bytes owns no nested handles) or a heap-return move-out.
+    ReadNBytes,
     /// The WASI `path_open` + `fd_read` file-read sequence, packaged as ONE high-level
     /// HEAP-RESULT prim — `args = [path]` (a BORROWED `String` handle), dst = a fresh
     /// OWNED `Result[String, String]`. Opens the file at `path` (relative to the first

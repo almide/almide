@@ -260,6 +260,14 @@ fn remove_all(path: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_prim_read_line")
 fn read_line() -> String = _
 
+// read_n_bytes(n) — read UP TO `n` bytes of standard input (fd 0) and return them as a
+// `List[Int]` (each byte 0..255 as one element; fewer than `n` at EOF). The SIBLING of read_line
+// (which builds a String). Reached only by the self-hosted `io.read_n_bytes` (io_read_n_bytes.almd)
+// in the v1 trust-spine wasm backend; the render emits the WASI fd_read host loop into a List[Int].
+// No native runtime impl — the native target uses io.read_n_bytes's own @intrinsic.
+@intrinsic("almide_rt_prim_read_n_bytes")
+fn read_n_bytes(n: Int) -> List[Int] = _
+
 // The clock_time_get WASI host call — the WALL-CLOCK sandbox exit (reaches Capability::Clock,
 // a DISTINCT capability: a clock read is neither a filesystem nor an entropy effect). Writes
 // the current clock value (nanoseconds) as an i64 at `time_ptr`, returning the i32 errno

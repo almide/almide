@@ -1030,6 +1030,24 @@ impl LowerCtx {
             });
             return Ok(Some(dst));
         }
+        // `prim.read_n_bytes(n)` — the WASI stdin-N-bytes floor (io.read_n_bytes). The n arg is a
+        // scalar Int (byte count); dst is a FRESH OWNED `Bytes` block (byte-buffer layout, built by the
+        // preamble `$read_n_bytes`). Carries Capability::Stdin (counted via certificate.rs). Like
+        // read_line, a plain Bytes owns no nested handles, so its scope-end drop is the flat `Op::Drop`.
+        if func == "read_n_bytes" {
+            let n = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported(
+                    "prim.read_n_bytes needs a scalar Int byte count not in this brick".into(),
+                )
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: PrimKind::ReadNBytes,
+                dst: Some(dst),
+                args: vec![n],
+            });
+            return Ok(Some(dst));
+        }
         // Bitwise binary ops lower to a scalar `Op::IntBinOp` (i64 and/or/xor/shl/shr_s),
         // not an `Op::Prim` — the int.band/bor/bxor/bshl/bshr floor. No ownership.
         let bitop = match func {

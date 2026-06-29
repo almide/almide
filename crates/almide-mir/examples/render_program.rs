@@ -284,12 +284,24 @@ fn main() {
         almide_mir::lower::generate_variant_drop_sources(&all_type_decls),
         almide_mir::lower::generate_record_drop_sources(&all_type_decls, &anon_recs),
     );
+    // The generated drops free a `Value` field via the value_core INTERNAL `__drop_value` (and a
+    // `List[Value]` via `__drop_list_value`) — NOT a public `value.*` the type checker knows. So when
+    // the drops reference them, the re-lower's type check would fail with "undefined function
+    // '__drop_value'" (porta read_message: `JsonRpcRequest { id: Value }` → `$__drop_opt_…` →
+    // `$__drop_…` → `__drop_value`). Bring value_core's source into scope for that type check; at
+    // render the auto-link (self_host_runtime) dedups it to one definition.
+    let needs_value_core = drops.contains("__drop_value") || drops.contains("__drop_list_value");
+    let value_core_src: &str = if needs_value_core {
+        include_str!("../../../stdlib/value_core.almd")
+    } else {
+        ""
+    };
     let ir = if drops.trim().is_empty() {
         ir
     } else {
         // Re-lower WITH the same self-modules in scope — the drop fns may reference
         // cross-module record/variant type decls (the resolved siblings).
-        source_to_ir_with(&format!("{source}\n{drops}"), &self_modules)
+        source_to_ir_with(&format!("{source}\n{value_core_src}\n{drops}"), &self_modules)
     };
 
     // Top-level `let` globals (VarId -> Ty), union of program + module top_lets.

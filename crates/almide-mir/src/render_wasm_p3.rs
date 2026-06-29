@@ -584,6 +584,39 @@ pub(crate) fn preamble() -> String {
       (then (local.set $n (i32.sub (local.get $n) (i32.const 1)))))
     (call $rtf_str (local.get $buf) (local.get $n)))
 
+  ;; io.read_n_bytes(n) -> List[Int] — the WASI stdin-N-bytes floor. Reads UP TO $want bytes from fd 0
+  ;; (a chunked fd_read loop — WASI may return fewer bytes per call; stops at EOF) into a scratch byte
+  ;; buffer, then builds a fresh OWNED `List[Int]` of the bytes read (each byte zero-extended to an i64
+  ;; element via $list_new/$list_set). The SIBLING of $read_line; carries Capability::Stdin. A List[Int]
+  ;; owns NO nested handles (flat Drop). NON-DETERMINISTIC (live stdin). EOF before $want yields fewer.
+  (func $read_n_bytes (param $want i32) (result i32)
+    (local $buf i32) (local $n i32) (local $iov i32) (local $nread_p i32) (local $got i32)
+    (local $list i32) (local $i i32)
+    (local.set $buf (call $alloc8 (i32.add (local.get $want) (i32.const 1))))
+    (local.set $iov (call $alloc8 (i32.const 8)))
+    (local.set $nread_p (call $alloc8 (i32.const 4)))
+    (local.set $n (i32.const 0))
+    (block $done (loop $l
+      (br_if $done (i32.ge_u (local.get $n) (local.get $want)))
+      ;; iov = [buf+n, want-n] — request the remaining bytes (the call may return fewer).
+      (i32.store (local.get $iov) (i32.add (local.get $buf) (local.get $n)))
+      (i32.store (i32.add (local.get $iov) (i32.const 4)) (i32.sub (local.get $want) (local.get $n)))
+      (drop (call $fd_read (i32.const 0) (local.get $iov) (i32.const 1) (local.get $nread_p)))
+      (local.set $got (i32.load (local.get $nread_p)))
+      (br_if $done (i32.eqz (local.get $got)))  ;; EOF -> stop
+      (local.set $n (i32.add (local.get $n) (local.get $got)))
+      (br $l)))
+    ;; build List[Int] of the $n bytes (each byte -> an i64 element).
+    (local.set $list (call $list_new (local.get $n) (local.get $n)))
+    (local.set $i (i32.const 0))
+    (block $bdone (loop $bl
+      (br_if $bdone (i32.ge_u (local.get $i) (local.get $n)))
+      (call $list_set (local.get $list) (local.get $i)
+            (i64.extend_i32_u (i32.load8_u (i32.add (local.get $buf) (local.get $i)))))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $bl)))
+    (local.get $list))
+
   ;; helper: RECURSIVELY remove the tree at byte-path [$pdata, $pdata+$plen) relative to preopen
   ;; fd 3. Returns 0 on success or the FIRST non-zero errno. If the path opens as a directory it
   ;; removes every entry — recursing via a re-readdir-from-cookie-0 scan that removes ONE entry per

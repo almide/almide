@@ -715,6 +715,12 @@ fn render_op(
                 // stripped) in the preamble helper. NO args. dst is a heap Ptr (value_reprs_wasm),
                 // so the call result sets the local directly (no i64 extend) — like ArgsGetList.
                 PrimKind::ReadLine => "(call $read_line)".to_string(),
+                // read_n_bytes(n) — the WASI stdin-N-bytes floor; reads up to n bytes from fd 0 into a
+                // fresh owned Bytes block (the byte-buffer layout, built in the preamble helper). The
+                // n arg is an Int (i64 local), wrapped to i32 for the byte count; dst is a heap Ptr.
+                PrimKind::ReadNBytes => {
+                    format!("(call $read_n_bytes (i32.wrap_i64 (local.get {})))", local(args[0]))
+                }
                 // RAW refcount ops (the self-host drop/copy mechanism) — reuse the proven $rc_dec/
                 // $rc_inc on the i32-wrapped handle. dst is None (Unit), so the `match dst` below
                 // emits the call as a STATEMENT (no local.set).

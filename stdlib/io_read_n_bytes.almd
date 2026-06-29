@@ -1,0 +1,11 @@
+// io_read_n_bytes — SELF-HOSTED `io.read_n_bytes(n)` over the WASI stdin-N-bytes floor
+// (prim.read_n_bytes), the v1 trust-spine realization of `io.read_n_bytes`. Reads UP TO `n` bytes
+// of standard input (fd 0) and returns them as a `List[Int]` (each byte 0..255 as one element);
+// fewer than `n` at EOF. The SIBLING of io_read_line (which builds a String); this builds a
+// List[Int]. The prim packages the chunked fd_read loop and the list construction; the result is a
+// fresh OWNED List[Int] (a flat block — its i64 elements own no nested handles, so the scope-end
+// Drop frees just the block: no leak). Because this body reaches prim.read_n_bytes, its cap_witness
+// carries Capability::Stdin — the SAME distinct capability io.read_line carries — so a caller is
+// caps-verified ONLY if it declares Stdin (an `effect fn`). NON-DETERMINISTIC (reads live stdin):
+// no byte-match unless stdin is fixed. Matches io.almd's `fn read_n_bytes(n: Int) -> List[Int]`.
+fn io_read_n_bytes(n: Int) -> List[Int] = prim.read_n_bytes(n)

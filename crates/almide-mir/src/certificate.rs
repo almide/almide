@@ -258,7 +258,7 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         // effect; the same accounting as RandomGet → Entropy). The transitive `reachable_caps`
         // follows the CallFn edge into `io.read_line`, so a caller inherits this Stdin and is
         // caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::ReadLine, .. } = op {
+        if let Op::Prim { kind: crate::PrimKind::ReadLine | crate::PrimKind::ReadNBytes, .. } = op {
             used.push(Capability::Stdin);
         }
         // SOUNDNESS CRUX: a CallIndirect invokes a closure that may reach ANY capability.
@@ -829,7 +829,7 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             // the caller's scope-end flat `Drop` (a String owns no nested handles) or a heap-return
             // move-out (`m`). Without this the heap result would be an unbacked object the cert
             // never opens — the verify_ownership/cert agreement breaks for the io.read_line body.
-            Op::Prim { kind: PrimKind::ReadLine, dst: Some(d), .. } => {
+            Op::Prim { kind: PrimKind::ReadLine | PrimKind::ReadNBytes, dst: Some(d), .. } => {
                 s.of.insert(*d, *d);
                 s.event(*d, 'i');
             }

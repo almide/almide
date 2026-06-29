@@ -237,7 +237,12 @@ impl LowerCtx {
             // it returns a SCALAR Bool (no allocation, no scope-end drop).
             || (module == "fs" && func == "exists")
             || (module == "io" && func == "print")
-            || (module == "io" && func == "read_line");
+            || (module == "io" && func == "read_line")
+            // `io.read_n_bytes` READS standard input (the SIBLING of read_line) — REUSES
+            // Capability::Stdin. Self-hosted to `prim.read_n_bytes` (io_read_n_bytes.almd → the
+            // WASI fd-0 $read_n_bytes floor), so its prim is in the program map and the transitive
+            // cap_witness counts Stdin. Returns a heap Bytes block (flat Drop, no nested handles).
+            || (module == "io" && func == "read_n_bytes");
         if !purity::is_pure(module, func) && !is_admitted_effectful {
             return Err(LowerError::Unsupported(format!(
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
