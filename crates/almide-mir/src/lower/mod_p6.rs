@@ -747,6 +747,171 @@ fn effect_unwrap_admitted(result_ty: &Ty) -> bool {
         || is_list_value_int_result_ty(result_ty)
 }
 
+/// Does `e` carry a STATEMENT/let-position effect-`!` (an `Unwrap` bound to a `let` or run as an
+/// `Expr` stmt, or a tail/return-position `!`) anywhere a branch reaches, AND is EVERY such `!`'s Ok
+/// payload HOLE-1-admitted (`effect_unwrap_admitted`)? Returns `(has_unwrap, all_admitted)`. Used by
+/// the statement-control continuation-lift to fire ONLY when a branch genuinely needs the lift (some
+/// `!` is present) and the lift's downstream tail effect-unwrap will lower soundly (no unproven-drop
+/// Ok payload). A NON-admitted `!` flips `all_admitted` so the lift refuses → the raw `!` walls
+/// cleanly (an honest `Unsupported` > a gate-invisible leak).
+fn collect_arm_unwrap_admit(e: &IrExpr, has: &mut bool, all_admitted: &mut bool) {
+    match &e.kind {
+        IrExprKind::Unwrap { expr } => {
+            *has = true;
+            if !effect_unwrap_admitted(&expr.ty) {
+                *all_admitted = false;
+            }
+            collect_arm_unwrap_admit(expr, has, all_admitted);
+        }
+        IrExprKind::Block { stmts, expr } => {
+            for s in stmts {
+                match &s.kind {
+                    IrStmtKind::Bind { value, .. } => collect_arm_unwrap_admit(value, has, all_admitted),
+                    IrStmtKind::Expr { expr } => collect_arm_unwrap_admit(expr, has, all_admitted),
+                    IrStmtKind::Assign { value, .. } => collect_arm_unwrap_admit(value, has, all_admitted),
+                    _ => {}
+                }
+            }
+            if let Some(t) = expr {
+                collect_arm_unwrap_admit(t, has, all_admitted);
+            }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            collect_arm_unwrap_admit(cond, has, all_admitted);
+            collect_arm_unwrap_admit(then, has, all_admitted);
+            collect_arm_unwrap_admit(else_, has, all_admitted);
+        }
+        IrExprKind::Match { subject, arms } => {
+            collect_arm_unwrap_admit(subject, has, all_admitted);
+            for a in arms {
+                collect_arm_unwrap_admit(&a.body, has, all_admitted);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Push the continuation `{ after_stmts; tail }` into a single branch ARM, FLATTENING the arm's own
+/// block so a stmt-position `!` in the arm becomes a TOP-LEVEL stmt of the produced block (reachable
+/// by `desugar_effect_unwrap_inner` / `desugar_let_unwrap` once the enclosing branch is in tail
+/// position). The arm's own tail expr (if any, and not a trivial Unit) is demoted to an `Expr` stmt
+/// before the continuation. Typed at the enclosing fn's return `result_ty`.
+fn append_arm_continuation(
+    arm: &IrExpr,
+    after_stmts: &[IrStmt],
+    tail: &Option<Box<IrExpr>>,
+    result_ty: &Ty,
+) -> IrExpr {
+    let mut stmts: Vec<IrStmt> = Vec::new();
+    match &arm.kind {
+        IrExprKind::Block { stmts: bs, expr: be } => {
+            stmts.extend(bs.iter().cloned());
+            if let Some(be) = be {
+                if !matches!(be.kind, IrExprKind::Unit) {
+                    stmts.push(IrStmt {
+                        kind: IrStmtKind::Expr { expr: (**be).clone() },
+                        span: be.span.clone(),
+                    });
+                }
+            }
+        }
+        // A trivial Unit arm (`else ()`) contributes no statement — just the continuation.
+        IrExprKind::Unit => {}
+        _ => stmts.push(IrStmt {
+            kind: IrStmtKind::Expr { expr: arm.clone() },
+            span: arm.span.clone(),
+        }),
+    }
+    stmts.extend(after_stmts.iter().cloned());
+    IrExpr {
+        kind: IrExprKind::Block { stmts, expr: tail.clone() },
+        ty: result_ty.clone(),
+        span: arm.span.clone(),
+        def_id: None,
+    }
+}
+
+/// STATEMENT-CONTROL continuation-lift (the #76 statement-control continuation-lift, deferred from
+/// the tail-only `desugar_tail_effect_unwrap`): a block `{ before; S; after }` where `S` is a UNIT
+/// `Expr`-statement `if`/`match` whose arm transitively carries a stmt/let effect-`!` (`Unwrap`) and
+/// `after` (the remaining stmts + tail) is NON-EMPTY. The stmt-`!` cannot desugar in place (the v1
+/// MIR has no mid-function early-return Op) and `desugar_tail_effect_unwrap` only navigates TAIL
+/// control flow — so `S` in statement position with a continuation is unreachable. LIFT it: push
+/// `after` into EACH of `S`'s arm tails (the proven `desugar_let_bound_heap_branch` tail-DUPLICATION
+/// discipline), turning `S` into the block TAIL. The existing tail effect-unwrap then rewrites the
+/// `!` into `match f() { err(e) => err(e), ok(x) => { after } }` — the err-arm returning early from
+/// the fn, the continuation nesting ONLY in the ok-arm. Lives in the SHARED `desugar_heap_branches`
+/// so the duplicated `after` is counted 1:1 by `count_ir_calls` in BOTH the caps gate and the
+/// lowering (mir == ir). HOLE-1: fire only when every triggering `!`-subject's Ok payload has a
+/// proven drop (`effect_unwrap_admitted`); otherwise leave `S` untouched so the raw `!` walls.
+fn desugar_stmt_control_unwrap(body: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        return None;
+    };
+    for (i, s) in stmts.iter().enumerate() {
+        // S = a UNIT `Expr`-statement that is an `if`/`match` (a branch run for effect).
+        let IrStmtKind::Expr { expr: s_expr } = &s.kind else {
+            continue;
+        };
+        if !matches!(&s_expr.kind, IrExprKind::If { .. } | IrExprKind::Match { .. }) {
+            continue;
+        }
+        if !matches!(s_expr.ty, Ty::Unit) {
+            continue;
+        }
+        // `after` must be NON-EMPTY (a real continuation to lift past `S`).
+        let after_stmts = &stmts[i + 1..];
+        if after_stmts.is_empty() && tail.is_none() {
+            continue;
+        }
+        // Fire ONLY for a branch that carries a stmt/let `!`, and ONLY when every such `!`'s Ok
+        // payload is HOLE-1-admitted (else the lift would feed an unprovable-drop Ok into the tail
+        // effect-unwrap — refuse so the raw `!` walls cleanly).
+        let (mut has, mut all_admitted) = (false, true);
+        collect_arm_unwrap_admit(s_expr, &mut has, &mut all_admitted);
+        if !has || !all_admitted {
+            continue;
+        }
+        // Push `after` into each arm's tail. The lifted branch is typed at the fn return `body.ty`.
+        let new_s = match &s_expr.kind {
+            IrExprKind::If { cond, then, else_ } => IrExpr {
+                kind: IrExprKind::If {
+                    cond: cond.clone(),
+                    then: Box::new(append_arm_continuation(then, after_stmts, tail, &body.ty)),
+                    else_: Box::new(append_arm_continuation(else_, after_stmts, tail, &body.ty)),
+                },
+                ty: body.ty.clone(),
+                span: s_expr.span.clone(),
+                def_id: s_expr.def_id,
+            },
+            IrExprKind::Match { subject, arms } => {
+                let new_arms: Vec<almide_ir::IrMatchArm> = arms
+                    .iter()
+                    .map(|a| almide_ir::IrMatchArm {
+                        pattern: a.pattern.clone(),
+                        guard: a.guard.clone(),
+                        body: append_arm_continuation(&a.body, after_stmts, tail, &body.ty),
+                    })
+                    .collect();
+                IrExpr {
+                    kind: IrExprKind::Match { subject: subject.clone(), arms: new_arms },
+                    ty: body.ty.clone(),
+                    span: s_expr.span.clone(),
+                    def_id: s_expr.def_id,
+                }
+            }
+            _ => unreachable!(),
+        };
+        return Some(IrExpr {
+            kind: IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(new_s)) },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        });
+    }
+    None
+}
+
 /// Is `e` a PURE, freely-duplicable match subject — a `Var` or a literal? `build_match_chain`
 /// inlines such a subject into EACH literal arm's `==` test (no re-eval cost / effect). A
 /// non-pure subject (a CALL) inlined per arm would be EVALUATED once per arm — wrong if it has
@@ -964,6 +1129,14 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             continue;
         }
         if let Some(r) = desugar_let_unwrap(src) {
+            cur = Some(r);
+            continue;
+        }
+        // STATEMENT-CONTROL continuation-lift: a UNIT `if`/`match` STATEMENT carrying a stmt/let `!`
+        // followed by a non-empty continuation. Lift `after` into each arm (tail-duplication) so the
+        // branch becomes the block TAIL — the tail effect-unwrap then resolves the `!`. Runs in this
+        // SHARED desugar so the duplicated `after` is counted 1:1 by the caps gate (mir == ir).
+        if let Some(r) = desugar_stmt_control_unwrap(src) {
             cur = Some(r);
             continue;
         }
