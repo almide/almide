@@ -1164,22 +1164,27 @@ slot owns, so the loop-carried slot certifies as the PROVEN `i(id)m` (corpus-wal
 
 ### Refined next-steps for the remaining 2 (each a SEPARATE deep cycle, but the owned-copy insight transfers)
 
-- **read_message** (jsonrpc.almd) — **RE-ROOTED 2026-06-30 (the TCO theory below was WRONG).** The true root is
-  NOT the TCO: it is the missing `Result[Option[heap], String]` constructor. `read_message` (and `parse_and_wrap`)
-  return `Result[Option[JsonRpcRequest], String]` and build `ok(some(<record>))`. tail.rs's heap-result ctor
-  chain has `try_lower_result_record_ctor` / `_value_ctor` / `_str_int_ctor` / … but NO **option-payload** ctor,
-  so `ok(some(heap))` falls through to `alloc_init → Opaque → bail` (tail.rs:611 "heap-result ResultOk cannot be
-  faithfully returned"). MINIMAL REPROS (scratchpad): `wrap.almd` = NON-recursive `{ let f = "h:"+x; ok(some(f)) }`
-  WALLS "ResultOk cannot be faithfully returned" — proving it is the ctor, not the recursion. `scan3.almd` = the
-  recursive form; the recursion makes the TCO try→fail→fall to the model-one-iteration `while` (hence the
-  misleading "while body heap-accumulator" reason). `scan` (`Result[String,_]`) and `scan3b` (`ok(some("CONST"))`)
-  and `scan3c` (`ok(none)` only) all LOWER — confirming the trigger is precisely `ok(some(<loop/heap-local>))`.
-  FIX PATH: add `try_lower_result_option_ctor` for `Result[Option[heap], String]`, mirroring the record ctor.
-  The nested DROP is the real work: `Result[Option[String],String]` may reuse `DropResultListStr` (Option[T] is
-  the 0-or-1-element list layout); `Result[Option[record],String]` (read_message's actual type) needs a 3-level
-  recursive drop (Result→Option→record→heap-fields) = a NEW `Drop*` primitive across Op/render_wasm/certificate/
-  Coq — the deep part. Once the base `ok(some(record))` lowers, the recursion should ride the existing TCO/real-
-  recursive path (re-verify). Still hard to byte-test E2E (stdin), but `wrap`/`scan3` are deterministic fixtures.
+- **read_message** (jsonrpc.almd) — **RE-ROOTED 2026-06-30 (NOT the TCO; and `ok(some(record))` is NOT the gap —
+  it already lowers).** The true root is the missing `Result[Option[heap], String]` constructor for the
+  **`ok(<Option-typed Var>)`** and **`ok(some(<String>))`** shapes. `read_message`'s base is `ok(r)` where
+  `r = parse_and_wrap(body)!` is an owned `Option[JsonRpcRequest]` LOCAL — i.e. `ok(<Option Var>)`. tail.rs's
+  heap-result ctor chain (`try_lower_result_record_ctor` / `_value_ctor` / `_str_int_ctor` / …) has NO
+  **option-payload** ctor, so it falls through to `alloc_init → Opaque → bail` (tail.rs:611 "heap-result ResultOk
+  cannot be faithfully returned"). MINIMAL REPROS (scratchpad), classify_corpus-verified:
+  - `okrec.almd` `ok(some({id,method}))` (a record-literal Some) → **LOWERS** (the record-Option path exists; this
+    is why `parse_and_wrap` does NOT wall — only `read_message` does).
+  - `okvar.almd` `fn pass(o: Option[String]) = ok(o)` → **WALLS** "ResultOk cannot be faithfully returned" — the
+    exact `ok(<Option Var>)` shape read_message hits.
+  - `okstr.almd` `ok(some("hi"))` → **WALLS** (Option[String] Some).
+  (The earlier `wrap`/`scan3` "while body" reason was the recursion layering the TCO→while fallback ON TOP of this
+  ctor gap; the ctor gap is the root.) FIX PATH: add `try_lower_result_option_ctor` for `Result[Option[heap],
+  String]` covering `ok(<Option Var>)` (Dup the owned Option block in), `ok(some(x))`, `ok(none)`, `err(s)`,
+  mirroring `try_lower_result_record_ctor`+`materialize_result_aggregate`. DROP reuse (the careful part):
+  Option[heap] is the 0-or-1-element list layout, so `Result[Option[record],String]` should route its Ok-drop to
+  the EXISTING recursive `$__drop_list_<R>` (`resrec:list_<R>`, the same helper the loop-`!` brick used) and
+  Option[String] to the flat String drop — verify against corpus-wall (a wrong drop_fn → REJECT, the safe
+  backstop). Then re-verify the recursion rides the existing path. Hard to byte-test E2E (stdin), but
+  okvar/okrec/okstr are deterministic classify_corpus fixtures.
 - **load_porta_config** (config.almd) — secrets `filter_map`: a CAPTURING lambda producing a record via a
   `match` (some-arm=record / conditional none-arm `if from_env then some(record) else none`) + `process.env`.
   This is the defunc-`filter_map` machinery (control_p5 `lower_defunc_filter_map_hof`), NOT a loop desugar — a
