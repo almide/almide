@@ -991,3 +991,28 @@ workflows: loop-cert producer, CondLoop-extract, conditional-acquire-5, list_ins
 returned NO_SOUND_PATH or were over-engineering caught by adversarial critique). Clearing the 3 = a dedicated
 multi-session research program on (A) effect-monad-in-loop and (B) closure-capture defunc, success uncertain.
 native-FFI (44) means literal all-repo-zero is structurally impossible regardless.
+
+### DEFINITIVE (2026-06-29): real=3 is the proven research floor — the path to 0 is a multi-component research program
+Theme A (effect-monad-in-loop) design was adversarially REFUTED: both read_message + list_instances have a
+THIRD per-iteration path (skip/continue, ownership shape []), so the loop slot is irreducibly CONDITIONAL
+(CondLoop: then=[Dec;Inc] / else=[]), NOT the single-body CLoop. A CLoop cert for it is accepts-but-unmodeled
+(check_line_unroll_sound's UnrollsL = n identical copies only) = UNSOUND. Collapsing to unconditional re-wrap
+would RE-RUN the effect after Err (breaks parity). So clearing these 2 GENUINELY REQUIRES: (1) extract
+OwnershipFilter.v CondLoop into checker.ml (ccheck_unroll_sound is proven but only CLoop is extracted today);
+(2) model the multiple per-iteration slots (status + result-accumulator) + the transient f(x) wrapper/moved-out
+Err payload as distinct objects with discharged break-path drops. That is a real multi-component research
+program, not a brick.
+
+WALL=0 PATH (a dedicated multi-session research program, success uncertain):
+- CondLoop checker.ml extraction (Coq port OwnershipFilter CondLoop -> OwnershipChecker.v -> regenerate
+  checker.ml + parse_clc) — soundness-critical, touches the trust kernel.
+- effect-monad-in-loop desugar (loop-carried Result status + conditional skip/continue + break-path drops) on
+  top of CondLoop — clears read_message + list_instances.
+- closure-capture defunc (env-record lift keeping DIRECT calls, never first-class fn values) — clears
+  load_porta_config.
+
+EXHAUSTED targeted/integration evidence (this session): loop-cert producer = NO_SOUND_PATH; CondLoop-extract
+= over-engineering for serialize_opts (critique) but GENUINELY needed for the conditional loop slots; A2
+conditional-acquire-5 = 3 tractable cleared (fs.exists) + 2 A2-hard; list_instances + read_message maps =
+NO_SOUND_PATH; theme A design = REFUTED (needs CondLoop + multi-slot). real lowering walls = 3 is the floor.
+native-FFI (44) makes literal all-repo-zero structurally impossible regardless.
