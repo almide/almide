@@ -1179,12 +1179,16 @@ slot owns, so the loop-carried slot certifies as the PROVEN `i(id)m` (corpus-wal
   (The earlier `wrap`/`scan3` "while body" reason was the recursion layering the TCO→while fallback ON TOP of this
   ctor gap; the ctor gap is the root.) FIX PATH: add `try_lower_result_option_ctor` for `Result[Option[heap],
   String]` covering `ok(<Option Var>)` (Dup the owned Option block in), `ok(some(x))`, `ok(none)`, `err(s)`,
-  mirroring `try_lower_result_record_ctor`+`materialize_result_aggregate`. DROP reuse (the careful part):
-  Option[heap] is the 0-or-1-element list layout, so `Result[Option[record],String]` should route its Ok-drop to
-  the EXISTING recursive `$__drop_list_<R>` (`resrec:list_<R>`, the same helper the loop-`!` brick used) and
-  Option[String] to the flat String drop — verify against corpus-wall (a wrong drop_fn → REJECT, the safe
-  backstop). Then re-verify the recursion rides the existing path. Hard to byte-test E2E (stdin), but
-  okvar/okrec/okstr are deterministic classify_corpus fixtures.
+  mirroring `try_lower_result_record_ctor`+`materialize_result_aggregate`. THE DROP IS THE DEEP PART (a NEW
+  primitive, NOT a reuse): `some(record)` is built by `materialize_opt_aggregate_some` as an `optrec:<R>` wrapper
+  (`Op::DropWrapperRec is_result=false` → `$__drop_<R>`), NOT a list block — so `resrec:list_<R>` does NOT apply.
+  `Result[Option[record],String]` therefore needs a **2-LEVEL** recursive drop: Result-wrapper(tag@16) → Ok →
+  the Option `optrec` wrapper → the record `$__drop_<R>`; Err → flat String. There is no single `$__drop_<x>`
+  that composes two wrapper levels, so this is a NEW `Op::Drop*` (e.g. `DropResultOptionRec`) across
+  Op / render_wasm / certificate.rs / the Coq checker / verify_ownership — the genuine trust-spine depth here
+  (`Result[Option[String],String]` is the easier sibling: the inner Option[String] is a 0-or-1 `DropListStr`
+  block, so a `DropResultListStr`-style flat-ish drop may suffice). Gate backstop: a wrong drop → corpus-wall
+  REJECT. okvar/okrec/okstr are deterministic classify_corpus fixtures; E2E byte-test needs stdin.
 - **load_porta_config** (config.almd) — secrets `filter_map`: a CAPTURING lambda producing a record via a
   `match` (some-arm=record / conditional none-arm `if from_env then some(record) else none`) + `process.env`.
   This is the defunc-`filter_map` machinery (control_p5 `lower_defunc_filter_map_hof`), NOT a loop desugar — a
