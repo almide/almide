@@ -414,6 +414,20 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // HEAP-Ok `Result[Option[record], String]` (read_message's `ok(none)` / `ok(r)` arms): the
+            // Ok payload is an `Option[record]`, freed recursively via the generated `$__drop_opt_<R>`
+            // (`resrec:opt_<R>`) — NOT the flat `DropListStr` that would leak the Some record. Guard =
+            // `Result[Option[<recursive-drop record>], String]`; `Result[Option[String], String]` keeps
+            // the flat path below.
+            IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+                if self.is_option_record_result_ty(result_ty) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_result_option_ctor(arm, result_ty)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // HEAP-Ok `Result[String, String]`: BOTH `Ok(string)` and `Err(string)` own a String, so
             // len-as-tag can't distinguish — materialize a len-1 DynListStr + the Ok/Err tag in cap@8.
             IrExprKind::ResultOk { expr }
@@ -751,6 +765,20 @@ impl LowerCtx {
         self.result_ok_record_drop_fn(ty).is_some()
     }
 
+    /// A `Result[Option[<record needing recursive drop>], String]` — read_message's
+    /// `Result[Option[JsonRpcRequest], String]`. Its `ok(none)` / `ok(some(rec))` / `ok(<Option Var>)`
+    /// arms route to `try_lower_result_option_ctor` (the recursive `$__drop_opt_<R>`). `None` for a
+    /// `Result[Option[String], String]` (flat) or a non-Option Ok.
+    pub(crate) fn is_option_record_result_ty(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::Result, a) = ty else { return false };
+        if a.len() != 2 || !matches!(&a[1], Ty::String) {
+            return false;
+        }
+        let Ty::Applied(TypeConstructorId::Option, oa) = &a[0] else { return false };
+        oa.len() == 1 && self.record_or_anon_drop_type_name(&oa[0]).is_some()
+    }
+
     /// For a `Result[<record needing recursive drop>, String]` (`Result[Manifest, String]` —
     /// porta load_manifest / resolve_run_caps), the Ok record's generated recursive-drop name
     /// `<R>` (→ `$__drop_<R>`, registered by `build_record_layouts` / synthesized for an anon
@@ -942,6 +970,83 @@ impl LowerCtx {
             IrExprKind::ResultErr { expr: inner } => {
                 let piece = self.lower_result_str_piece(inner)?;
                 Some(self.materialize_result_aggregate(piece, repr, true, drop_fn))
+            }
+            _ => None,
+        }
+    }
+
+    /// `ok(<Option[R] value>)` / `ok(none)` / `err(<String>)` for `Result[Option[R], String]` where R is
+    /// a record needing a recursive drop — read_message's `ok(none)` / `ok(r)` bases (r:
+    /// `Option[JsonRpcRequest]`). The Ok payload (an Option Var → `Dup`; `some(record)` / `none` →
+    /// materialized) is MOVED into the Result block @12; the wrapper's drop routes to `$__drop_opt_<R>`
+    /// via `resrec:opt_<R>` ([`Op::DropWrapperRec`], certificate UNIFORM over `drop_fn` — no Coq change).
+    /// `$__drop_opt_<R>` is GENERATED (`generate_record_drop_sources`) as `fn __drop_opt_<R>(e: Option[R])
+    /// = match e { some(r) => (), none => () }` (frees the record via `$__drop_<R>` + the Option block).
+    /// `None` outside `Result[Option[<recursive-drop record>], String]` or a non-materializable payload.
+    pub(crate) fn try_lower_result_option_ctor(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let ok_ty = match result_ty {
+            Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && matches!(a[1], Ty::String) =>
+            {
+                &a[0]
+            }
+            _ => return None,
+        };
+        let rec = match ok_ty {
+            Ty::Applied(TypeConstructorId::Option, oa) if oa.len() == 1 => &oa[0],
+            _ => return None,
+        };
+        let rec_drop = self.record_or_anon_drop_type_name(rec)?;
+        let drop_fn = format!("opt_{rec_drop}");
+        let repr = repr_of(result_ty).ok()?;
+        match &expr.kind {
+            IrExprKind::ResultOk { expr: inner } => {
+                let piece = self.lower_option_piece(inner, rec)?;
+                Some(self.materialize_result_aggregate(piece, repr, false, drop_fn))
+            }
+            IrExprKind::ResultErr { expr: inner } => {
+                let piece = self.lower_result_str_piece(inner)?;
+                Some(self.materialize_result_aggregate(piece, repr, true, drop_fn))
+            }
+            _ => None,
+        }
+    }
+
+    /// Build the `Option[R]` Ok payload for [`try_lower_result_option_ctor`]: an Option Var (`Dup` a
+    /// fresh owned ref), `some(record)` (materialize the record into the 0-or-1 Option block via
+    /// `materialize_opt_aggregate_some`), or `none` (a 0-element Option block). `None` otherwise.
+    fn lower_option_piece(&mut self, inner: &IrExpr, rec: &Ty) -> Option<ValueId> {
+        match &inner.kind {
+            // `ok(r)` where r is an owned/borrowed `Option[R]` local — `Dup` a fresh owned reference
+            // (the original drops once at its scope; the Result's @12 owns the Dup'd one).
+            IrExprKind::Var { id } => {
+                let src = self.value_for(*id).ok()?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::Dup { dst, src });
+                Some(dst)
+            }
+            IrExprKind::OptionNone => {
+                // A 0-element Option block (no record inside) — the same empty 0-or-1 layout the
+                // some-builder emits, so `$__drop_opt_<R>` frees it uniformly (its `match` takes none).
+                let repr = repr_of(&inner.ty).ok()?;
+                let z = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: z, value: 0 });
+                let obj = self.fresh_value();
+                self.ops
+                    .push(Op::Alloc { dst: obj, repr, init: crate::Init::DynListStr { len: z } });
+                self.variant_drop_handles.insert(obj, format!("opt_{}", self.record_or_anon_drop_type_name(rec)?));
+                Some(obj)
+            }
+            IrExprKind::OptionSome { expr: rec_expr } => {
+                let repr = repr_of(&inner.ty).ok()?;
+                let piece = self.lower_result_str_piece(rec_expr)?;
+                let drop_fn = self.record_or_anon_drop_type_name(rec)?;
+                Some(self.materialize_opt_aggregate_some(piece, repr, drop_fn))
             }
             _ => None,
         }

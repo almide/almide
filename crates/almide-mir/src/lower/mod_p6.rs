@@ -1128,6 +1128,13 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             cur = Some(r);
             continue;
         }
+        // `{ …; let r = e!; ok(r) }` ≡ `{ …; e }` (unwrap-rewrap identity) — collapse BEFORE the
+        // let-unwrap continuation desugar, so read_message's `ok(parse_and_wrap(body)!)` arms become
+        // bare tail-call arms instead of a heap-Option continuation match.
+        if let Some(r) = desugar_unwrap_rewrap_identity(src) {
+            cur = Some(r);
+            continue;
+        }
         if let Some(r) = desugar_let_unwrap(src) {
             cur = Some(r);
             continue;
@@ -1590,6 +1597,55 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
     Some(IrExpr {
         kind: IrExprKind::Block { stmts: prefix, expr: Some(Box::new(rewritten_branch)) },
         ty: result_ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    })
+}
+
+/// `{ …; let r = e!; ok(r) }` ≡ `{ …; e }` — the UNWRAP-REWRAP IDENTITY. `e!` unwraps `Ok(x)→x` /
+/// propagates `Err`, and `ok(r)` re-wraps it UNCHANGED, so the trailing `let r = e!; ok(r)` collapses to
+/// `e` (a `Result`-typed tail). This is the layer-3 simplifier for porta read_message's Content-Length
+/// arms (`{ … let r = parse_and_wrap(body)!; ok(r) }` → `{ … parse_and_wrap(body) }`): the `!`-in-a-
+/// heap-result-`if`-arm becomes a bare tail-call arm the real-recursive arm path already lowers. Gated:
+/// the `Bind` is the LAST stmt, the tail is exactly `ok(Var r)` over that var, and `e` is `Result`-typed
+/// (so the re-wrap is a true identity). Recurses via the shared pipeline (`desugar_nested_branch_arms`),
+/// so a deeply-nested arm is reached. Pure IR→IR; NO certificate/Coq change.
+pub fn desugar_unwrap_rewrap_identity(body: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: Some(tail) } = &body.kind else {
+        return None;
+    };
+    // The tail must be `ok(Var r)`.
+    let IrExprKind::ResultOk { expr: tail_inner } = &tail.kind else {
+        return None;
+    };
+    let IrExprKind::Var { id: r } = &tail_inner.kind else {
+        return None;
+    };
+    // The LAST stmt must be `let r = e!` (`Bind` of an `Unwrap`) over the SAME var.
+    let last = stmts.last()?;
+    let IrStmtKind::Bind { var, value, .. } = &last.kind else {
+        return None;
+    };
+    if var != r {
+        return None;
+    }
+    let IrExprKind::Unwrap { expr: e } = &value.kind else {
+        return None;
+    };
+    // `e` must be `Result`-typed (`e!` then `ok(r)` is the identity only when `e` is the SAME `Result`).
+    if !e.ty.is_result() {
+        return None;
+    }
+    // `r` is bound at the last stmt and used only in the tail `ok(r)` — removing the bind + collapsing
+    // the tail to `e` references it nowhere, so the rewrite is sound.
+    let mut new_stmts = stmts[..stmts.len() - 1].to_vec();
+    let new_tail = (**e).clone();
+    // Drop a now-empty trailing block to just `e` would change the node kind needlessly; keep the Block
+    // wrapper (its tail is `e`), which lowers identically.
+    let _ = &mut new_stmts;
+    Some(IrExpr {
+        kind: IrExprKind::Block { stmts: new_stmts, expr: Some(Box::new(new_tail)) },
+        ty: body.ty.clone(),
         span: body.span.clone(),
         def_id: body.def_id,
     })

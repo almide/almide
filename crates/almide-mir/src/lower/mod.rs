@@ -1006,6 +1006,21 @@ pub fn generate_record_drop_sources(
         out.push_str("  prim.rc_dec(h)\n");
         out.push_str("}\n");
     }
+    // `$__drop_opt_<R>` for each recursive-drop record R — frees an `Option[R]` (the 0-or-1-element
+    // layout) used by `Result[Option[R], String]` wrappers (`resrec:opt_<R>`, porta read_message's
+    // `ok(none)` / `ok(r)` bases). The `match` drops the bound record `r` at the Some-arm end (routing
+    // to `$__drop_<R>`); a None is a no-op; consuming `e` frees the Option block. Same per-R set as the
+    // `$__drop_<R>` loop above, so an `$__drop_opt_<R>` is emitted only when its `$__drop_<R>` exists.
+    for decl in type_decls {
+        let IrTypeDeclKind::Record { .. } = &decl.kind else { continue };
+        if !rec_names.contains(decl.name.as_str()) {
+            continue;
+        }
+        let tname = decl.name.as_str();
+        out.push_str(&format!(
+            "fn __drop_opt_{tname}(e: Option[{tname}]) -> Unit = {{\n  match e {{\n    some(r) => (),\n    none => (),\n  }}\n}}\n"
+        ));
+    }
     // SYNTHESIZED recursive drops for the ANONYMOUS record return/binding shapes the corpus uses
     // (`{ data: Bytes, state: Cfb8State }` — aes cfb8). An anon record is NOT a `type` decl, so the
     // loop above never names it; it would otherwise drop via the flat one-level mask `DropListStr`,

@@ -564,6 +564,11 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_result_record_ctor(tail, &tail.ty) {
                         return Ok(Some(dst));
                     }
+                    // `ok(none)` / `ok(<Option[record]>)` / `err(msg)` RETURNED for `Result[Option[record],
+                    // String]` (porta read_message): recursive `$__drop_opt_<R>` via `resrec:opt_<R>`.
+                    if let Some(dst) = self.try_lower_result_option_ctor(tail, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
                     // `ok(value.array(...))` / `err(msg)` RETURNED for a `Result[Value, String]` (csv
                     // `parse`): materialize the Value-Ok / String-Err Result block, MOVED OUT as the
                     // return (the recursive `Op::DropResultValue` frees it at the caller's scope end).

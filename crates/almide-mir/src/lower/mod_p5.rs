@@ -941,7 +941,21 @@ pub(crate) fn try_tco_rewrite(
         use almide_lang::types::constructor::TypeConstructorId;
         let non_heap_ok_result = matches!(&ret_ty,
             Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && !is_heap_ty(&a[0]));
-        if (base_reads_loop_local || tuple_with_value) && non_heap_ok_result {
+        // A `Result[Option[<nested-heap>], String]` Ok payload (read_message: `Option[JsonRpcRequest]`)
+        // also has no SOUND in-loop result-accumulator materializer: `materialize_result_str` would mask
+        // the Option block with the flat `DropListStr`, LEAKING the nested record/Value inside the Some.
+        // DECLINE the TCO for that shape too — the function falls to the proven REAL recursive lowering
+        // (control_p4 self-call arm; input-bounded, byte-matches v0), where the `ok(<Option>)`/`ok(none)`
+        // bases lower via `try_lower_result_option_ctor` (`resrec:opt_<R>` + the generated `$__drop_opt_<R>`)
+        // and the `ok(parse_and_wrap(b)!)` arms via the unwrap-rewrap-identity → bare tail-call. Option[String]
+        // (a flat 0-or-1 `DropListStr` block) is EXCLUDED — its accumulator IS sound, so it keeps TCO.
+        let option_nested_ok_result = matches!(&ret_ty,
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(&a[1], Ty::String)
+                && matches!(&a[0], Ty::Applied(TypeConstructorId::Option, oa)
+                    if oa.len() == 1 && is_heap_ty(&oa[0]) && !matches!(&oa[0], Ty::String)));
+        if (base_reads_loop_local || tuple_with_value)
+            && (non_heap_ok_result || option_nested_ok_result)
+        {
             return None;
         }
     }
