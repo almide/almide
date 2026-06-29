@@ -966,3 +966,28 @@ These are the honest end of the targeted approach. Clearing them is multi-sessio
 defunc / effect-monad-in-loop early-exit / the read_message loop-producer cert), success uncertain. native-FFI
 means literal all-repo-zero is structurally impossible regardless; "real lowering walls = 3" (all porta, all
 characterized) is the achieved floor.
+
+### Refined (2026-06-29): the 3 floor walls = 2 genuine research themes (all NO_SOUND_PATH, empirically proven)
+Three dedicated map workflows confirmed NO sound targeted/integration path for the remaining 3 porta walls;
+they reduce to TWO research themes:
+
+A. **EFFECT-MONAD-IN-LOOP (non-local control)** — 2 walls, both empirically NO_SOUND_PATH:
+   - jsonrpc.almd::read_message — TCO-synthesized whole-Result accumulator (rv=ok(...)) reassigned on multiple
+     conditional early-exit base paths + mid-body effect-! propagation. NOT the proven net-0 append slot
+     (OwnershipLoop.v covers an UNCONDITIONAL buf=buf+chunk; this is a conditional once-written Result acc +
+     effect-monad early-exit).
+   - ops.almd::list_instances — `fs.read_text()!` inside a `for d in dirs` body whose Err must terminate the
+     loop AND return err from the fn.
+   Both need a sound lowering of "effect-! early-return THROUGH a loop" — a loop that carries an Option[err] /
+   breaks on err + propagates, with per-iteration heap drops. The v1 spine has no non-local Return; this needs
+   a new effect-monad-in-loop desugar + its ownership cert. Genuine multi-session research (#76 x loop).
+
+B. **CLOSURE-CAPTURE DEFUNC (C2)** — 1 wall:
+   - config.almd::load_porta_config — 6+ heap-capturing list.map/filter_map closures the defunctionalizer
+     walls. Needs env-record lift KEEPING direct calls (NOT first-class fn values, which break the caps proof).
+
+CONCLUSION: real lowering walls = 3 is the proven floor for the targeted/integration approach (6 dedicated
+workflows: loop-cert producer, CondLoop-extract, conditional-acquire-5, list_instances, read_message all
+returned NO_SOUND_PATH or were over-engineering caught by adversarial critique). Clearing the 3 = a dedicated
+multi-session research program on (A) effect-monad-in-loop and (B) closure-capture defunc, success uncertain.
+native-FFI (44) means literal all-repo-zero is structurally impossible regardless.
