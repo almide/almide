@@ -1249,3 +1249,22 @@ slot owns, so the loop-carried slot certifies as the PROVEN `i(id)m` (corpus-wal
   `match` (some-arm=record / conditional none-arm `if from_env then some(record) else none`) + `process.env`.
   This is the defunc-`filter_map` machinery (control_p5 `lower_defunc_filter_map_hof`), NOT a loop desugar — a
   distinct deep cycle (Block-keep-arm + conditional-none-arm + the effectful none-arm).
+
+## 2026-06-30 — read_message CORE LANDED (06664cd8); 8th feature is the sole remaining blocker
+
+The read_message scaffolding is committed + gate-clean (corpus-wall ACCEPT over 4523, +3 corpus fns now lower,
+output-parity 126/126, proof-spine OK): the unwrap-rewrap-identity desugar (`desugar_unwrap_rewrap_identity`,
+`{…; let r=e!; ok(r)}` ≡ `{…; e}`), the `Result[Option[record]]` ctor (`try_lower_result_option_ctor` +
+`lower_option_piece` + arm/tail wiring + `is_option_record_result_ty`), the Option-nested-heap TCO-decline
+(mod_p5 ~:944), and the over-gen `$__drop_opt_<R>` helper (`generate_record_drop_sources`; narrow to a
+discovery later). VERIFIED by minimal repros (scratchpad rdcore/rdcore2/rdcore3*): the read_message CORE
+lowers (nested `if` + `ok(none)` + identity-desugared `ok(parse_w(b)!)` call-arms + the no-arg `io.read_line`
+retry recursion → wall=0).
+
+**The ONE remaining blocker (rdcore3c): an EFFECT-call heap-`let` (`let body_bytes = io.read_n_bytes(len)`)
+bound DEEP in a nested heap-result-`if` arm (depth ≥3) walls "heap-result `if`"** — yet the SAME
+`io.read_n_bytes` heap-`let` lowers at the function top level (iob_top) AND in a depth-1 arm (iob_arm), and two
+CHAINED PURE heap-`let`s at depth 3 lower (rdcore3d). So it is a narrow interaction of (effect-call heap
+result) × (deep arm nesting) — the 8th and final read_message feature. Next: crack it in the heap-result-`if`-
+arm Block lowering's handling of an effect-call-bound heap local at depth → porta wall=0. read_message stacks
+~8 hard features (the hardest porta function); 7 are cracked + committed this turn.
