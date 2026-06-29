@@ -102,6 +102,14 @@ impl LowerCtx {
                     return None;
                 }
             }
+        } else if let Some(v) = self.materialize_unwrap_or_operand(expr) {
+            // A `??` over a variant-returning call NOT in the self-host registries — the
+            // `json.parse(s) ?? d` (PURE heap-Result) / `process.env(k) ?? d` (IMPURE intrinsic
+            // Option[String]) class. `materialize_unwrap_or_operand` routes it through the SAME
+            // proven machinery a recognized self-host operand uses (the recursive drop is
+            // registered by type), so the helper read below (`option.unwrap_or_str` /
+            // `result.value_unwrap_or`) is over a real owned block, freed once at scope end.
+            v
         } else {
             return None;
         };
@@ -243,6 +251,76 @@ impl LowerCtx {
             self.ops.push(Op::EndIf { val: Some(fb) });
         }
         Some(result)
+    }
+
+    /// Materialize a `??` OPERAND that is an Option/Result-returning `Module`/`RuntimeCall` NOT in
+    /// the self-host registries — the `json.parse(s) ?? d` (PURE heap-Result) and the
+    /// `process.env(k) ?? "/tmp"` (IMPURE intrinsic `Option[String]`) class. This is the SAME
+    /// operand a recognized self-host call (`value.get` / `json.as_array`) would be; only its
+    /// callee was unrecognized, so the `??` walled instead of executing.
+    ///
+    /// - A PURE `Module` variant call routes through the standard call-arg machinery
+    ///   (`lower_call_args` → `materialized_call_arg`), which registers the recursive drop set BY
+    ///   TYPE — byte-identical ownership to materializing `value.get`. `json.parse` (pure, in
+    ///   `PURE_MODULES`) is exactly this; the `result.value_unwrap_or` read below is over a real
+    ///   `Result[Value, String]` block freed once at scope end.
+    /// - An IMPURE intrinsic `Option[String]` call (`process.env`) routes through the proven
+    ///   effect-subject materialization (`try_materialize_effect_result_subject` — the #76
+    ///   direct-`CallFn` path) and registers the FLAT `DropListStr` drop (`heap_elem_lists`):
+    ///   exact for a 0-or-1-element String Option. The `option.unwrap_or_str` read below borrows it.
+    ///
+    /// HOLE-1 DISCIPLINE: the impure path is gated STRICTLY to `Option[String]` — the only variant
+    /// whose payload `DropListStr` frees exactly. A record / aggregate / `Value`-Ok impure operand
+    /// has no proven flat drop here, so it is REFUSED (returns None) and the caller walls cleanly
+    /// rather than register a leaky flat cert. Returns the OWNED operand block (in
+    /// `live_heap_handles`), or None (rolled back) when out of subset.
+    fn materialize_unwrap_or_operand(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        // The same structural gate the caps counter consults (no count drift).
+        if !unwrap_or_operand_admitted(expr) {
+            return None;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let rollback = |s: &mut Self| {
+            s.ops.truncate(ops_mark);
+            s.live_heap_handles.truncate(lhh_mark);
+            None
+        };
+        // PURE Option/Result `Module` call (`json.parse` / `toml.parse`): the standard call-arg
+        // machinery materializes it with the correct recursive drop registration, exactly like a
+        // recognized self-host operand. (A self-host-recognized call never reaches here — it was
+        // matched in the gate above — so this is only the unrecognized pure remainder.)
+        if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } = &expr.kind {
+            if crate::purity::is_pure(module.as_str(), func.as_str()) {
+                return match self.lower_call_args(std::slice::from_ref(expr)) {
+                    Ok(args) => match args.into_iter().next() {
+                        Some(CallArg::Handle(v)) => Some(v),
+                        _ => rollback(self),
+                    },
+                    Err(_) => rollback(self),
+                };
+            }
+        }
+        // IMPURE intrinsic `Option[String]` (`process.env`): admit ONLY this shape — its DynListStr
+        // 0-or-1-element String drop is `DropListStr` exactly (`heap_elem_lists`). Any other impure
+        // variant (a `Value`/record/list Ok, a `Result`) has no proven flat drop here → REFUSE.
+        let impure_admitted = matches!(
+            &expr.ty,
+            Ty::Applied(TC::Option, a) if a.len() == 1 && matches!(a[0], Ty::String)
+        );
+        if !impure_admitted {
+            return None;
+        }
+        let dst = match self.try_materialize_effect_result_subject(expr) {
+            Some(v) => v,
+            None => return rollback(self),
+        };
+        // The 0-or-1-element String Option is freed recursively by `DropListStr` (frees the slot-0
+        // String, if present, then the block). `register_owned_heap_eq_drop` inserts `heap_elem_lists`
+        // for this `is_heap_elem_list_ty` shape — exact, never a leak.
+        self.register_owned_heap_eq_drop(dst, &expr.ty);
+        Some(dst)
     }
 
     /// Emit `base + offset` then a `prim` load of `kind` at that address, returning the

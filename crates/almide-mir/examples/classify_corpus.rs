@@ -248,7 +248,13 @@ fn count_ir_calls(
                     almide_ir::IrExprKind::Call {
                         target: almide_ir::CallTarget::Module { module, func, .. },
                         ..
-                    } => almide_mir::lower::is_self_host_option_module_fn(module.as_str(), func.as_str()),
+                    } => {
+                        almide_mir::lower::is_self_host_option_module_fn(module.as_str(), func.as_str())
+                            // The NEW operand-materialization path (`process.env(k) ?? "/tmp"` — an
+                            // IMPURE intrinsic `Option[String]`): it lowers to ONE synthetic
+                            // `option.unwrap_or_str` CallFn, so credit the node +1.
+                            || almide_mir::lower::unwrap_or_operand_admitted(expr)
+                    }
                     _ => false,
                 };
                 if matches!(fallback.ty, almide_lang::types::Ty::String)
@@ -292,6 +298,10 @@ fn count_ir_calls(
                                 module.as_str(),
                                 func.as_str(),
                             ))
+                            // The NEW operand-materialization path (`json.parse(s) ?? json.array([])`
+                            // — a PURE heap-`Result[Value, String]` module call): it lowers to ONE
+                            // synthetic `result.value_unwrap_or` CallFn, so credit the node +1.
+                            || almide_mir::lower::unwrap_or_operand_admitted(expr)
                     }
                     _ => false,
                 };

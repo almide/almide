@@ -844,6 +844,34 @@ fn is_self_host_option_call(subject: &IrExpr) -> bool {
     }
 }
 
+/// The STRUCTURAL gate for [`LowerCtx::materialize_unwrap_or_operand`] — does a `??` whose OPERAND
+/// is `expr` lower to a synthetic unwrap-helper `CallFn` via that NEW path (so the caps counter must
+/// credit the `UnwrapOr` node +1 to keep `mir_calls <= ir_calls`)? Pure (no `&self`), so the
+/// `classify_corpus` counter consults the SAME admission the lowering uses — no count drift.
+///
+/// Two disjuncts, mirroring `materialize_unwrap_or_operand`:
+///   1. a PURE `Module` variant call (`json.parse` — routed through `lower_call_args`); OR
+///   2. an IMPURE `Module` `Option[String]` call (`process.env` — routed through the effect path).
+/// A self-host-RECOGNIZED operand is NOT this path (it is materialized by the existing gate, and the
+/// counter already credits it via `is_self_host_option_module_fn` / `is_self_host_result_*`), so this
+/// is only the previously-unrecognized remainder.
+pub fn unwrap_or_operand_admitted(expr: &IrExpr) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    if !is_variant_ty(&expr.ty) {
+        return false;
+    }
+    match &expr.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
+            crate::purity::is_pure(module.as_str(), func.as_str())
+                || matches!(
+                    &expr.ty,
+                    Ty::Applied(TC::Option, a) if a.len() == 1 && matches!(a[0], Ty::String)
+                )
+        }
+        _ => false,
+    }
+}
+
 /// Detect the enumerate+map FUSION shape: `list.map(list.enumerate(real), (entry) => { let (i,key) =
 /// entry; <tail> })`. Returns `(real, i_var, key_var, key_ty, tail)` — the inner iterates `real`
 /// binding i=loop-index + key=element, running `<tail>` (the block minus the leading destructure), so

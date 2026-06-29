@@ -1232,6 +1232,10 @@ mod tail;
 mod control;
 mod calls;
 
+// The `??`-operand admission gate (a free fn in the private `control` module) — re-exported so the
+// `classify_corpus` caps counter consults the SAME predicate the lowering uses (no count drift).
+pub use control::unwrap_or_operand_admitted;
+
 
 #[cfg(test)]
 mod tests;
