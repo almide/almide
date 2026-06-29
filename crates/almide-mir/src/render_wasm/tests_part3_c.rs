@@ -559,3 +559,41 @@
             );
         }
     }
+
+    #[test]
+    fn record_result_match_subject_recursive_drop_executes_on_wasmtime() {
+        // HOLE-1 closed: a `match make(n) { ok(r) => .., err(e) => .. }` over a record-Ok
+        // `Result[Rec, String]` SUBJECT (Rec = { tags: List[String], name: String }). The subject's
+        // scope-end drop is the recursive `Op::DropWrapperRec { is_result: true }` into the generated
+        // `$__drop_Rec` — at the Ok tag it recurses into the @12 record (frees the tags List[String]
+        // + name String + record block), at the Err tag it `rc_dec`s the @12 String, then frees the
+        // wrapper. A flat `DropListStr` would free ONLY the @12 handle and LEAK tags+name (the
+        // gate-invisible HOLE-1 leak). The 4000x build+match+drop loop is the LEAK GATE — a leak or
+        // double-free traps via the freelist / grows memory; both ok and err arms byte-match v0.
+        let src = "type Rec = { tags: List[String], name: String }\n\
+            fn make(n: Int) -> Result[Rec, String] =\n  \
+              if n > 0 then ok({ tags: [\"alpha\", \"beta\", \"gamma\"], name: \"record\" }) else err(\"empty\")\n\
+            fn describe(n: Int) -> String = match make(n) {\n  \
+              ok(r)  => \"ok:\" + int.to_string(string.len(r.name) + list.len(r.tags)),\n  \
+              err(e) => \"err:\" + e,\n}\n\
+            fn main() -> Unit = {\n  \
+              println(describe(1))\n  \
+              println(describe(0))\n  \
+              var acc = 0\n  \
+              for i in 0..4000 { acc = acc + string.len(describe(if i % 3 == 0 then 0 else 1)) }\n  \
+              println(int.to_string(acc)) }\n";
+        let prog = lower_source(src);
+        assert!(
+            prog.functions.iter().any(|f| f.name == "__drop_Rec"),
+            "the record recursive drop $__drop_Rec must be generated + linked"
+        );
+        assert!(
+            prog.functions.iter().any(|f| f.name == "describe"),
+            "the record-Ok match-subject fn must lower (not wall)"
+        );
+        if let Some(out) = build_and_run("record_result_subject", &render_wasm_program(&prog)) {
+            // describe(1) = ok, len("record")=6 + len(tags)=3 = 9; describe(0) = err "empty".
+            // loop i in 0..4000: i%3==0 (1334) -> err "empty" len 9; else (2666) -> ok "ok:9" len 4.
+            assert_eq!(out, "ok:9\nerr:empty\n22670");
+        }
+    }

@@ -748,10 +748,30 @@ impl LowerCtx {
     /// `Result[{val, next}, String]`)? Gates the record-Ok Result ctor (arm + tail) — distinct from
     /// `is_heap_ok_result` (which would route a record Ok through the leaky flat `DropListStr`).
     pub(crate) fn is_record_result_ty(&self, ty: &Ty) -> bool {
+        self.result_ok_record_drop_fn(ty).is_some()
+    }
+
+    /// For a `Result[<record needing recursive drop>, String]` (`Result[Manifest, String]` —
+    /// porta load_manifest / resolve_run_caps), the Ok record's generated recursive-drop name
+    /// `<R>` (→ `$__drop_<R>`, registered by `build_record_layouts` / synthesized for an anon
+    /// record). This is the SINGLE shape gate shared by BOTH the record-Result CONSTRUCTION
+    /// (`try_lower_result_record_ctor` → `materialize_result_aggregate`, `resrec:<R>`) and the
+    /// record-Result MATCH-SUBJECT path (`try_lower_variant_value_match`): the subject's
+    /// scope-end drop routes through `Op::DropWrapperRec { is_result: true }` (recurse into the
+    /// @12 record via `$__drop_<R>` at the Ok tag, else `rc_dec` the @12 Err String, then free
+    /// the wrapper) — NEVER the flat `DropListStr` that frees only the @12 handle and LEAKS the
+    /// record's nested heap fields (HOLE-1). `None` for a `Result[String, String]` / a
+    /// scalar-only record Ok (the flat path is sound there).
+    pub(crate) fn result_ok_record_drop_fn(&self, ty: &Ty) -> Option<String> {
         use almide_lang::types::constructor::TypeConstructorId;
-        matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
-            if a.len() == 2 && matches!(a[1], Ty::String)
-                && self.record_or_anon_drop_type_name(&a[0]).is_some())
+        match ty {
+            Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && matches!(a[1], Ty::String) =>
+            {
+                self.record_or_anon_drop_type_name(&a[0])
+            }
+            _ => None,
+        }
     }
 
     /// Is `ty` a `Result[heap, heap]` (e.g. `Result[String, String]`)? Both Ok and Err own a heap

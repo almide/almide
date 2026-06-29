@@ -318,25 +318,34 @@ impl LowerCtx {
         // below: List[Value]→value_result_lists, Value→value_result_results, else flat→heap_elem_lists
         // = DropListStr, exact for a List[Int]/String Ok). WITHOUT this the match read the len-as-tag
         // @4 over a cap-tag block — a SILENT MISCOMPILE (Ok payload + tag both misread).
-        // *** HOLE-1 GATE (the gate-INVISIBLE leak guard) *** EXCLUDE a record-Ok subject
-        // (`Result[<recursive-drop record>, String]` — resolve_run_caps' `Result[Manifest,String]`,
-        // load_manifest's nested record-Ok) from the str-result tracking entirely. The by-type drop
-        // dispatch below has NO recursive-drop case for a record Ok payload, so it would fall to the
-        // FLAT `else => heap_elem_lists` (DropListStr) — a balanced-LOOKING cert that frees ONLY the
-        // slot-0 record HANDLE and LEAKS the record's nested heap fields. Refusing it here leaves
-        // `subj` untracked → `is_result == false` → rollback → the fn walls cleanly (an honest
-        // `Unsupported` > a gate-invisible leak). Record-Ok Result CONSTRUCTION (the ctor/arm side) is
-        // handled soundly elsewhere (`is_record_result_ty` → `try_lower_result_record_ctor`); only the
-        // record-Ok MATCH-SUBJECT side (this tracking) is the leak, and it is the part walled here.
-        if (is_self_host_result_str_call(subject)
+        // *** HOLE-1 (the gate-INVISIBLE leak, now CLOSED by a real recursive drop) *** A record-Ok
+        // subject (`Result[<recursive-drop record>, String]` — resolve_run_caps' `Result[Manifest,
+        // String]`, load_manifest's nested record-Ok) is now ADMITTED: it carries the SAME cap-as-tag
+        // DynListStr repr as every other str-result (slot-0 @12 = the Ok record / Err String, tag @16),
+        // so the match reads tag @16 + binds the @12 payload identically. The ONE thing that made it a
+        // leak — the flat `else => heap_elem_lists` (DropListStr) freeing only the @12 record HANDLE and
+        // LEAKING the record's nested heap fields — is replaced below by routing the subject's scope-end
+        // drop through `variant_drop_handles="resrec:<R>"` → `Op::DropWrapperRec { is_result: true }`:
+        // at the wrapper's last ref it recurses into the @12 record via the generated `$__drop_<R>` (Ok
+        // tag) / `rc_dec`s the @12 Err String, then frees the wrapper — freeing every nested heap field
+        // exactly once (the 6625a5d3 / f75eecae machinery, the SAME `resrec:` the record-Ok CONSTRUCTION
+        // side already uses via `try_lower_result_record_ctor`). Gated on `result_ok_record_drop_fn`
+        // (the record HAS a generated `$__drop_<R>`); a record without one keeps the sound flat path.
+        if is_self_host_result_str_call(subject)
             || (is_named_call && Self::is_heap_ok_result(&subject.ty))
             // An EFFECT-result subject with a HEAP-Ok Result (String/Value/List[Value]/tuple-Ok —
             // `effect_unwrap_admitted` already excluded RECORD-Ok; the by-type dispatch below is exact).
-            || (used_effect_subj && Self::is_heap_ok_result(&subject.ty)))
-            && !self.is_record_result_ty(&subject.ty)
+            || (used_effect_subj && Self::is_heap_ok_result(&subject.ty))
         {
             self.materialized_results_str.insert(subj);
-            if crate::lower::is_result_listval_ty(&subject.ty) {
+            if let Some(drop_fn) = self.result_ok_record_drop_fn(&subject.ty) {
+                // RECORD-Ok `Result[<record>, String]`: route the subject's scope-end drop through the
+                // recursive `Op::DropWrapperRec` (resrec:) — NOT the flat `heap_elem_lists` DropListStr
+                // that leaks the record's nested heap (HOLE-1). `drop_op_for` checks `variant_drop_handles`
+                // FIRST, so this wins over the `else` below; the Ok/Err arm binds the @12 handle as a
+                // BORROW and the subject drops once AFTER the arms (`str_heap_bind`).
+                self.variant_drop_handles.insert(subj, format!("resrec:{drop_fn}"));
+            } else if crate::lower::is_result_listval_ty(&subject.ty) {
                 self.value_result_lists.insert(subj);
             } else if crate::lower::is_value_result_ty(&subject.ty) {
                 // `Result[Value, String]` (value.get): the Ok payload is a single dynamic Value —
@@ -397,7 +406,15 @@ impl LowerCtx {
                     if is_heap_ty(ty)
                         && (s.heap_elem_lists.contains(&subj)
                             || s.value_result_lists.contains(&subj)
-                            || s.value_result_results.contains(&subj)) =>
+                            || s.value_result_results.contains(&subj)
+                            // A record-Ok `Result[<record>, String]` subject (`resrec:<R>` drop
+                            // handle): the `ok(m: record)` payload (AND the `err(e: String)` slot)
+                            // binds the @12 handle as a BORROW; the subject's recursive
+                            // `DropWrapperRec` frees the live block (record or Err String) once
+                            // after the arms. A bare-Var move-out arm auto-`Dup`s, so no double-free.
+                            || s.variant_drop_handles
+                                .get(&subj)
+                                .is_some_and(|h| h.starts_with("resrec:"))) =>
                 {
                     Ok(Some((*var, true)))
                 }
@@ -563,49 +580,84 @@ impl LowerCtx {
     /// type name. Handles the three surface forms a variant type takes
     /// (`Named` / inline `Variant` / `Applied(UserDefined)`). `None` for Option/Result (those
     /// use the dedicated len-as-tag path) and every non-variant type.
-    /// Is `subject` a CAN-ERR EFFECT call returning a Result whose Ok payload the ctor-match can
-    /// bind/drop SOUNDLY (`effect_unwrap_admitted` — scalar / String / Value / List[Value] / tuple-Ok;
-    /// RECORD-Ok is REFUSED)? Two shapes: an impure stdlib `Module` effect (`process.kill`/
-    /// `process.spawn`, gated `!purity::is_pure`) or a bare effect `RuntimeCall`. Such a heap-result
-    /// effect call is REFUSED by `lower_call_args` in argument position (it defers to an empty
-    /// Opaque), so the tail/value ctor-match over it walled; [`Self::try_materialize_effect_result_subject`]
-    /// materializes it as a real owned Result handle so the match executes. (#76)
+    /// Is `subject` a Result-returning call `lower_call_args` REFUSES in subject position (it would
+    /// defer to an empty Opaque, walling the ctor-match over it), but whose Ok payload the ctor-match
+    /// CAN bind/drop soundly? The admitted Ok set is `effect_unwrap_admitted` (scalar / String /
+    /// Value / List[Value] / tuple-Ok) PLUS a RECORD-Ok with a generated `$__drop_<R>`
+    /// (`result_ok_record_drop_fn` — the HOLE-1 record-result now has a real recursive drop). Three
+    /// call shapes materialize via [`Self::try_materialize_effect_result_subject`]:
+    ///   1. an IMPURE stdlib/cross-module `Module` effect (`process.kill`, `manifest.load_manifest`) —
+    ///      the original #76 case (CallFn the dotted effect name);
+    ///   2. a bare effect `RuntimeCall`;
+    ///   3. a PURE heap-Result `Module` call (`json.parse` / `toml.parse`) — the `let x = parse(c)!`
+    ///      monadic-desugar subject. It is NOT a tracked self-host option/result call (those keep
+    ///      their existing borrow/track path through `lower_call_args`), so it walled; route it
+    ///      through `lower_pure_module_value_call` (the SAME emitted CallFn name as every other call
+    ///      site — `list_heap_call_name`, never a raw dotted name) so the match reads a real block.
     pub(crate) fn is_effect_result_subject(&self, subject: &IrExpr) -> bool {
-        if !effect_unwrap_admitted(&subject.ty) {
+        if !effect_unwrap_admitted(&subject.ty)
+            && self.result_ok_record_drop_fn(&subject.ty).is_none()
+        {
             return false;
         }
         match &subject.kind {
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
                 !crate::purity::is_pure(module.as_str(), func.as_str())
+                    // A PURE heap-Result module call NOT already handled as a self-host
+                    // option/result subject (those route through `lower_call_args` + the existing
+                    // borrow/track sets, unchanged).
+                    || (!is_self_host_option_call(subject)
+                        && !is_self_host_result_call(subject)
+                        && !is_self_host_result_str_call(subject))
             }
             IrExprKind::RuntimeCall { .. } => true,
             _ => false,
         }
     }
 
-    /// Materialize a CAN-ERR EFFECT Result-call subject ([`Self::is_effect_result_subject`]) into a
-    /// real OWNED Result handle (`Op::CallFn` with the effect's dotted/symbol name, result = the
-    /// DynListStr len-as-tag repr), pushed to `live_heap_handles` so the SUBJECT-DROP-BEFORE-ARMS /
-    /// drop-after machinery frees it exactly once. Self-rolls-back on any partial failure (so a
-    /// declining caller starts clean). The OWNERSHIP cert stays exact (the heap result backs one
-    /// `i`); the CAPS fold sees a dotted/effect name — Stdout-free under the current vocabulary
-    /// (`process.kill` is not a `fd_write`), so no false Stdout claim.
+    /// Materialize a Result-call subject ([`Self::is_effect_result_subject`]) into a real OWNED
+    /// Result handle pushed to `live_heap_handles` so the SUBJECT-DROP-BEFORE-ARMS / drop-after
+    /// machinery frees it exactly once. A PURE `Module` call routes through
+    /// `lower_pure_module_value_call` (its CallFn name = `list_heap_call_name`, byte-identical to
+    /// every other site, and it records the call's caps properly — a pure `json.parse` is
+    /// Stdout-free). An IMPURE `Module` effect / a `RuntimeCall` emit a direct `Op::CallFn` with the
+    /// dotted/symbol name (the #76 path). Self-rolls-back on any partial failure. The OWNERSHIP cert
+    /// stays exact (the heap result backs one `i`).
     pub(crate) fn try_materialize_effect_result_subject(&mut self, subject: &IrExpr) -> Option<ValueId> {
-        let (name, args): (String, &[IrExpr]) = match &subject.kind {
-            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-                if !crate::purity::is_pure(module.as_str(), func.as_str()) =>
-            {
-                (format!("{}.{}", module.as_str(), func.as_str()), args)
-            }
-            IrExprKind::RuntimeCall { symbol, args } => (symbol.as_str().to_string(), args),
-            _ => return None,
-        };
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
         let rollback = |s: &mut Self| {
             s.ops.truncate(ops_mark);
             s.live_heap_handles.truncate(lhh_mark);
             None
+        };
+        // PURE module call (json.parse / toml.parse): route through the standard pure-module value
+        // call so the emitted CallFn name + arg lowering match every other site.
+        if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
+            &subject.kind
+        {
+            if crate::purity::is_pure(module.as_str(), func.as_str()) {
+                let Ok(dst) = self.lower_pure_module_value_call(
+                    module.as_str(),
+                    func.as_str(),
+                    args,
+                    &subject.ty,
+                ) else {
+                    return rollback(self);
+                };
+                if !self.live_heap_handles.contains(&dst) {
+                    self.live_heap_handles.push(dst);
+                }
+                return Some(dst);
+            }
+        }
+        // IMPURE effect Module / RuntimeCall: CallFn the dotted/symbol name directly.
+        let (name, args): (String, &[IrExpr]) = match &subject.kind {
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+                (format!("{}.{}", module.as_str(), func.as_str()), args)
+            }
+            IrExprKind::RuntimeCall { symbol, args } => (symbol.as_str().to_string(), args),
+            _ => return None,
         };
         let Ok(lowered) = self.lower_call_args(args) else {
             return rollback(self);
