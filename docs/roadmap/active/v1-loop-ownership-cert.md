@@ -1126,3 +1126,20 @@ The TRUE root (capturing list.map/filter_map → record element not defunc-inlin
   json.get_bool(…) then some({…process.env(k)…}) else none` (effectful process.env capture). Multi-layer.
 So load_porta_config = map-half DONE + filter_map-half remaining; real stays 3 until both land (one fn, two
 HOFs). read_message/list_instances remain the effect-monad-in-loop pair.
+
+### Sharpened (2026-06-30): all 3 remaining walls converge on the effect-monad-in-HOF/loop frontier
+Direct implementation landed the load_porta_config MAP half (bcf82dd7, sound) but deeper inspection of the
+filter_map half (`secrets`) shows it is NOT a clean 4-layer extension — it is genuinely multi-frontier:
+`sec_keys |> list.filter_map((k) => { let val = json.get_string(sec_obj,k); match val {
+  some(v) => some({key:k, val:v}),                                    // capturing + record keep
+  none => { let obj=json.get(sec_obj,k)??null; let from_env=json.get_bool(obj,"from-env")??false;
+            if from_env then { let env_val = process.env(k) ?? ""; some({key:k, val:env_val}) }  // EFFECT in arm
+            else none } } })`                                          // none-arm is itself a CONDITIONAL keep
+So the none-arm is a conditional keep (not a plain skip) AND contains an EFFECT call (process.env). That is the
+same effect-! -in-HOF-arm frontier as read_message/list_instances (effect-! -in-loop). CONCLUSION: the 3
+remaining walls (load_porta_config secrets / read_message / list_instances) all converge on ONE frontier —
+"an effect-! / conditional-acquire threaded through a HOF arm or loop body, early-returning past it" — which v1
+cannot express without the deferred effect-fn-Result-tag ABI + the conditional-loop/HOF ownership cert. real=3
+is the genuine floor; the SINGLE deep research theme that unblocks all 3 is the effect-monad-in-HOF/loop lowering
+(+ its CondLoop/CondHOF cert). The capturing-record map/filter capability (bcf82dd7) is sound, landed, and a
+real prerequisite piece of load_porta_config.
