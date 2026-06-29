@@ -271,8 +271,22 @@ impl LowerCtx {
             Some(Ty::Tuple(tys)) if tys.len() == 2
                 && matches!(tys[0], Ty::String) && crate::lower::is_value_ty(&tys[1]));
         let result_is_value = matches!(&result_elem, Some(t) if crate::lower::is_value_ty(t));
+        // A `List[<record>]` result element with a generated recursive `$__drop_<R>` (`map`/`filter`
+        // building/keeping records — porta load_porta_config's `env_keys |> list.map((k) => {key:k,
+        // val:json.get_string(env_obj,k)??""})`, which CAPTURES env_obj). Admitted here so the CAPTURING
+        // record-element closure inlines (captures resolve via value_of, control_p5 head) instead of
+        // falling to lift_lambda (which rejects every capturing lambda) → an honest wall. The result list
+        // is registered for the RECURSIVE `$__drop_list_<R>` below (NOT the flat DropListStr that leaks the
+        // record's nested String fields — HOLE-1). A record WITHOUT a generated `$__drop_<R>` (e.g. an
+        // anonymous structural record) keeps walling — no leaky flat drop.
+        let result_record_drop: Option<String> =
+            result_elem.as_ref().and_then(|t| self.record_drop_type_name(t));
         if let Some(elem) = &result_elem {
-            if !matches!(elem, Ty::String) && !result_is_str_value_tuple && !result_is_value {
+            if !matches!(elem, Ty::String)
+                && !result_is_str_value_tuple
+                && !result_is_value
+                && result_record_drop.is_none()
+            {
                 return None;
             }
         }
@@ -341,6 +355,12 @@ impl LowerCtx {
                     self.str_value_elem_lists.insert(dst);
                 } else if result_is_value {
                     self.value_elem_lists.insert(dst);
+                } else if let Some(rname) = &result_record_drop {
+                    // A `List[<record>]` result: register the RECURSIVE `$__drop_list_<R>` (frees each
+                    // element's nested heap fields via `$__drop_<R>`), NOT the flat `heap_elem_lists`
+                    // DropListStr which would rc_dec only the element HANDLE and LEAK the record's String
+                    // fields (HOLE-1). Identical registration the record-list LITERAL uses (binds_p3:517).
+                    self.variant_drop_handles.insert(dst, format!("list_{rname}"));
                 } else if result_elem.is_some() {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -1354,11 +1374,22 @@ impl LowerCtx {
         result_elem: &Ty,
     ) -> Option<ValueId> {
         use crate::PrimKind;
-        // The body must be a 2-arm variant match (the keep/skip decision). Defer anything else.
-        let (subject, arms) = match &body.kind {
+        // The body is a 2-arm variant match (the keep/skip decision), OR a BLOCK whose leading lets feed
+        // the tail match (`(k) => { let val = json.get_string(obj, k); match val { … } }` — porta
+        // load_porta_config's CAPTURING `secrets` filter_map). The leading lets are lowered per-iteration
+        // AFTER the element param is bound (captures resolve via value_of), BEFORE the match arms. Defer
+        // anything else.
+        let (lead_stmts, subject, arms): (&[almide_ir::IrStmt], &IrExpr, &[IrMatchArm]) = match &body.kind
+        {
             IrExprKind::Match { subject, arms } if is_variant_ty(&subject.ty) => {
-                (subject.as_ref(), arms.as_slice())
+                (&[], subject.as_ref(), arms.as_slice())
             }
+            IrExprKind::Block { stmts, expr: Some(tail) } => match &tail.kind {
+                IrExprKind::Match { subject, arms } if is_variant_ty(&subject.ty) => {
+                    (stmts.as_slice(), subject.as_ref(), arms.as_slice())
+                }
+                _ => return None,
+            },
             _ => return None,
         };
 
@@ -1440,12 +1471,23 @@ impl LowerCtx {
             }
         }
 
-        // Lower the per-element keep/skip variant match into the write-cursor result list.
+        // Lower the per-element keep/skip variant match into the write-cursor result list. A Block body's
+        // leading lets (`let val = json.get_string(obj, k)`) are lowered FIRST in this per-iteration frame
+        // (their captures resolve via value_of, the element param is bound above) so the tail match's
+        // subject (`val`) is in scope; their own heap temps are freed within the iteration frame.
         self.in_frame += 1;
         self.in_defunc_body += 1;
-        let ok = self
-            .append_variant_match_to_result_list(subject, arms, rh, cursor, result_elem, eight)
-            .is_some();
+        let mut lead_ok = true;
+        for stmt in lead_stmts {
+            if self.lower_stmt(stmt).is_err() {
+                lead_ok = false;
+                break;
+            }
+        }
+        let ok = lead_ok
+            && self
+                .append_variant_match_to_result_list(subject, arms, rh, cursor, result_elem, eight)
+                .is_some();
         self.in_defunc_body -= 1;
         self.in_frame -= 1;
         if !ok {
