@@ -143,6 +143,8 @@ agg="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$allwalls" | sort | uniq -c | sort 
   echo
   echo "- **Every** \`src/*.almd\` module is swept (not just the entry). classify_corpus reads one file with no cross-module import resolution, so a module that imports a SIBLING is skipped — surfaced per repo as \`+N xmod\`. The real number is therefore an UNDER-count (the skipped importers add more), never an over-count."
   echo "- The \`almide\` repo itself is the v0 corpus (its own \`proofs/corpus-wall.sh\` gate), not a target here."
+  echo "- \`porta\` is a NATIVE HOST (\`almide.toml\`: wasmtime + reqwest/Net) — the full MCP server is native-only by design (WASI preview1 has no net and can't embed wasmtime), so the 25 native-FFI are its host calls and only its PORTABLE protocol layer (jsonrpc/config) is in the v1 subset. 'porta wall=0' = that layer lowers."
+  echo "- ✅ **first cross-module byte-match milestone**: porta's \`read_message\` (jsonrpc — a cross-module \`Result[Option[JsonRpcRequest]]\` parsed from a Content-Length frame over \`io.read_n_bytes\`) is byte-verified on v1 (\`almide run --target wasm\` == native, no trap) after the io.read_n_bytes WASI floor (949cd0cb) + the effect-fn control-flow-tail return-type fix (81840f8d). \`porta\` stays 🟡 because the REST of its protocol layer is not byte-verified yet."
   echo "- To byte-verify a repo: render its functions to wasm and diff v0 (native) vs v1 (wasmtime) over the"
   echo "  repo's test vectors, then add it to \`BYTE_VERIFIED\` in the script."
 } > "$OUT"
