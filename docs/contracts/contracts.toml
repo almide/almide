@@ -1435,3 +1435,13 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/spread_record_share.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-124"
+title     = "Value equality is deep structural, mirroring the native PartialEq"
+statement = "`Value == Value` (and `!=`) compares deep structure exactly like the native derived `PartialEq` on `enum Value`: strict tag match (no Int/Float widening), string payloads by content, arrays elementwise, and objects as IN-ORDER pair lists. The WASM emitter previously fell through to the childless-record equality arm and compared POINTERS — two separately-built `json.null()`s were unequal, so `(json.get(f, \"import\") ?? json.null()) != json.null()` classified every function as a JS import on wasm (almide-wasm-bindgen generate_esm) while native said none."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/value_deep_eq.almd", class = "fixture" },
+]

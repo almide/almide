@@ -206,7 +206,11 @@ impl FuncCompiler<'_> {
                     if_i32;
                       i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                       local_get(result); i32_const(0); i32_store(0); // ok
-                      local_get(result); local_get(v); i32_load(4); i32_store(4);
+                      // SHARE: the payload list stays owned by the Value — the
+                      // Result box must own its own +1 (#668 class), like
+                      // emit_value_as_type's pointer-tag rule.
+                      local_get(result); local_get(v); i32_load(4);
+                      call(self.emitter.rt.rc_inc); i32_store(4);
                       local_get(result);
                     else_;
                 });

@@ -1357,3 +1357,12 @@ status = "verified"
 class = "fuzz"
 oracle = "runtime/rs/src/regex.rs rx_find_at (search start..=len, fresh caps per pos, sets match_start)"
 test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
+
+[[routine]]
+file = "rt_value.rs"
+routine = "compile_value_eq"
+status = "verified"
+class = "fixture"
+oracle = "runtime/rs/src/value.rs::derive(PartialEq) on enum Value (strict tags, in-order object pairs)"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
+note = "Deep structural Value equality dispatched from the emit_eq Named(\"Value\") arm; exercised by spec/wasm_cross/value_deep_eq.almd (nulls, scalars, cross-tag, arrays, in-order objects, parsed-vs-built)."

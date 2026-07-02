@@ -95,6 +95,12 @@ pub(super) fn register(emitter: &mut WasmEmitter) {
     // __json_stringify_pretty(v: i32, depth: i32) -> i32 (String ptr)
     let pretty_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.json_stringify_pretty = emitter.register_func("__json_stringify_pretty", pretty_ty);
+
+    // __value_eq(a: i32, b: i32) -> i32 (Bool) — deep structural equality,
+    // mirroring the native derived `PartialEq` on `Value` (strict tags,
+    // in-order object pairs). Registered last to keep prior indices stable.
+    let eq_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
+    emitter.rt.value_eq = emitter.register_func("__value_eq", eq_ty);
 }
 
 /// Compile all runtime function bodies.
@@ -108,6 +114,102 @@ pub(super) fn compile(emitter: &mut WasmEmitter) {
     // MUST be compiled in the same order it was registered (last) — the emitter
     // matches compiled bodies to registered func indices positionally (#526).
     compile_json_stringify_pretty(emitter);
+    compile_value_eq(emitter);
+}
+
+/// __value_eq(a: i32, b: i32) -> i32 (Bool)
+///
+/// Deep structural Value equality, mirroring the native derived `PartialEq`
+/// on `enum Value` (runtime/rs/src/value.rs): strict tag match (no Int/Float
+/// widening), string payloads by content, arrays elementwise, objects as
+/// IN-ORDER pair lists (the derive compares `Vec<(String, Value)>`
+/// positionally — key order matters, exactly like native). Before this, a
+/// `Value == Value` at the IR level fell to the childless-record arm and
+/// compared POINTERS — two separately-built `json.null()`s were "unequal".
+fn compile_value_eq(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.value_eq];
+    let self_idx = emitter.rt.value_eq;
+    let streq = emitter.rt.string.eq;
+    // params: 0=a, 1=b | locals: 2=tag, 3=pa, 4=pb, 5=len, 6=i, 7=ea, 8=eb
+    let mut f = Function::new([(7, ValType::I32)]);
+    let dat = list_data_off();
+    wasm!(f, {
+        // Identical pointer (shared box) — trivially equal.
+        local_get(0); local_get(1); i32_eq;
+        if_empty; i32_const(1); return_; end;
+        // Tags must match (native derive: no cross-tag equality).
+        local_get(0); i32_load(0); local_set(2);
+        local_get(2); local_get(1); i32_load(0); i32_ne;
+        if_empty; i32_const(0); return_; end;
+        // null
+        local_get(2); i32_eqz;
+        if_empty; i32_const(1); return_; end;
+        // bool: i32 payload
+        local_get(2); i32_const(1); i32_eq;
+        if_empty;
+          local_get(0); i32_load(4); local_get(1); i32_load(4); i32_eq; return_;
+        end;
+        // int: i64 payload
+        local_get(2); i32_const(2); i32_eq;
+        if_empty;
+          local_get(0); i64_load(4); local_get(1); i64_load(4); i64_eq; return_;
+        end;
+        // float: f64 payload (NaN != NaN, like the native derive)
+        local_get(2); i32_const(3); i32_eq;
+        if_empty;
+          local_get(0); f64_load(4); local_get(1); f64_load(4); f64_eq; return_;
+        end;
+        // string: content equality
+        local_get(2); i32_const(4); i32_eq;
+        if_empty;
+          local_get(0); i32_load(4); local_get(1); i32_load(4); call(streq); return_;
+        end;
+        // array: elementwise recursion
+        local_get(2); i32_const(VTAG_ARRAY); i32_eq;
+        if_empty;
+          local_get(0); i32_load(4); local_set(3);
+          local_get(1); i32_load(4); local_set(4);
+          local_get(3); i32_load(0); local_set(5);
+          local_get(5); local_get(4); i32_load(0); i32_ne;
+          if_empty; i32_const(0); return_; end;
+          i32_const(0); local_set(6);
+          block_empty; loop_empty;
+            local_get(6); local_get(5); i32_ge_u; br_if(1);
+            local_get(3); i32_const(dat); i32_add; local_get(6); i32_const(4); i32_mul; i32_add; i32_load(0);
+            local_get(4); i32_const(dat); i32_add; local_get(6); i32_const(4); i32_mul; i32_add; i32_load(0);
+            call(self_idx); i32_eqz;
+            if_empty; i32_const(0); return_; end;
+            local_get(6); i32_const(1); i32_add; local_set(6);
+            br(0);
+          end; end;
+          i32_const(1); return_;
+        end;
+        // object: in-order pair list (key content + value recursion)
+        local_get(2); i32_const(VTAG_OBJECT); i32_eq;
+        if_empty;
+          local_get(0); i32_load(4); local_set(3);
+          local_get(1); i32_load(4); local_set(4);
+          local_get(3); i32_load(0); local_set(5);
+          local_get(5); local_get(4); i32_load(0); i32_ne;
+          if_empty; i32_const(0); return_; end;
+          i32_const(0); local_set(6);
+          block_empty; loop_empty;
+            local_get(6); local_get(5); i32_ge_u; br_if(1);
+            local_get(3); i32_const(dat); i32_add; local_get(6); i32_const(4); i32_mul; i32_add; i32_load(0); local_set(7);
+            local_get(4); i32_const(dat); i32_add; local_get(6); i32_const(4); i32_mul; i32_add; i32_load(0); local_set(8);
+            local_get(7); i32_load(0); local_get(8); i32_load(0); call(streq); i32_eqz;
+            if_empty; i32_const(0); return_; end;
+            local_get(7); i32_load(4); local_get(8); i32_load(4); call(self_idx); i32_eqz;
+            if_empty; i32_const(0); return_; end;
+            local_get(6); i32_const(1); i32_add; local_set(6);
+            br(0);
+          end; end;
+          i32_const(1); return_;
+        end;
+        // Unknown tag: pointer identity already failed above.
+        i32_const(0); end;
+    });
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.value_eq, type_idx, f));
 }
 
 /// __json_escape_string(str_ptr: i32) -> i32

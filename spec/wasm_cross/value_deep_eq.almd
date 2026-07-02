@@ -1,0 +1,40 @@
+// @contract: C-124
+// `Value == Value` (and `!=`) is DEEP STRUCTURAL equality mirroring the native
+// derived `PartialEq` on `enum Value`: strict tags (no Int/Float widening),
+// string payloads by content, arrays elementwise, objects as IN-ORDER pair
+// lists. The WASM emitter previously fell through to the childless-record arm
+// and compared POINTERS, so two separately-built `json.null()`s were unequal —
+// almide-wasm-bindgen's `(json.get(f, "import") ?? json.null()) != json.null()`
+// classified every function as a JS import on wasm while native said none.
+import json
+
+fn main() -> Unit = {
+  // Separately-allocated nulls are equal (the wasm-bindgen is_import shape).
+  println(if json.null() == json.null() then "null-eq" else "null-ne")
+  let obj = json.parse("{\"name\":\"g\"}") ?? json.null()
+  let missing = json.get(obj, "import") ?? json.null()
+  println(if missing != json.null() then "import" else "plain")
+
+  // Scalars: strict tags, payload equality.
+  println(if value.int(3) == value.int(3) then "int-eq" else "int-ne")
+  println(if value.int(3) == value.int(4) then "int-eq2" else "int-ne2")
+  println(if value.int(1) == value.bool(true) then "cross-eq" else "cross-ne")
+  println(if value.str("ab") == value.str("ab") then "str-eq" else "str-ne")
+  println(if value.float(1.5) == value.float(1.5) then "f-eq" else "f-ne")
+
+  // Containers: deep, order-sensitive.
+  let a1 = value.array([value.int(1), value.str("x")])
+  let a2 = value.array([value.int(1), value.str("x")])
+  let a3 = value.array([value.str("x"), value.int(1)])
+  println(if a1 == a2 then "arr-eq" else "arr-ne")
+  println(if a1 == a3 then "arr-eq2" else "arr-ne2")
+  let o1 = value.object([("k", value.int(1)), ("m", value.array([value.bool(false)]))])
+  let o2 = value.object([("k", value.int(1)), ("m", value.array([value.bool(false)]))])
+  let o3 = value.object([("k", value.int(2)), ("m", value.array([value.bool(false)]))])
+  println(if o1 == o2 then "obj-eq" else "obj-ne")
+  println(if o1 == o3 then "obj-eq2" else "obj-ne2")
+
+  // Parsed vs built.
+  let p = json.parse("{\"k\":1,\"m\":[false]}") ?? json.null()
+  println(if p == o1 then "parse-eq" else "parse-ne")
+}

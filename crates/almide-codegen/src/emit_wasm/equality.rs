@@ -122,6 +122,15 @@ impl FuncCompiler<'_> {
             }
 
             Ty::Named(name, type_args) => {
+                // The stdlib JSON `Value` is an opaque runtime type — no
+                // record_fields entry — so it used to fall through to the
+                // childless-record `i32_eq` and compare POINTERS (two
+                // separately-built `json.null()`s were "unequal"). Dispatch to
+                // the deep structural runtime, mirroring native PartialEq.
+                if name.as_str() == "Value" {
+                    wasm!(self.func, { call(self.emitter.rt.value_eq); });
+                    return;
+                }
                 if let Some(cases) = self.emitter.variant_info.get(name.as_str()).cloned() {
                     let has_pointers = cases.iter().any(|c| c.fields.iter().any(|(_, ft)| !self.is_value_type(ft)));
                     if has_pointers {

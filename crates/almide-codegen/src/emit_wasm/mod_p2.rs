@@ -70,6 +70,7 @@ impl WasmEmitter {
                     capitalize: 0,
                 },
                 value_stringify: 0,
+                value_eq: 0,
                 json_stringify_pretty: 0,
                 json_escape_string: 0,
                 json_parse: 0,

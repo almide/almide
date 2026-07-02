@@ -359,6 +359,7 @@ pub struct RuntimeFuncs {
     pub hex_decode: u32,
     pub string: StringRuntime,
     pub value_stringify: u32,
+    pub value_eq: u32,
     pub json_stringify_pretty: u32,
     pub json_escape_string: u32,
     pub json_parse: u32,
