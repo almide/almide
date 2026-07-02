@@ -118,7 +118,7 @@ impl Checker {
                 let param_hint = self.lambda_arg_hint.take();
                 let param_tys: Vec<Ty> = params.iter().enumerate().map(|(i, p)| {
                     let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te))
-                        .or_else(|| param_hint.as_ref().and_then(|h| h.get(i).cloned()))
+                        .or_else(|| param_hint.as_ref().and_then(|h| h.get(i).cloned().flatten()))
                         .unwrap_or_else(|| self.fresh_var());
                     let concrete = resolve_ty(&ty, &self.uf);
                     self.env.define_var(&p.name, concrete);

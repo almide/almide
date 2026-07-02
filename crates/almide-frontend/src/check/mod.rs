@@ -76,7 +76,11 @@ pub struct Checker {
     /// arg whose call-parameter slot is a `Fn`; consumed (taken) by the
     /// `ExprKind::Lambda` inference arm to type unannotated params from the
     /// expected element type instead of a fresh var. `None` everywhere else.
-    pub(crate) lambda_arg_hint: Option<Vec<crate::types::Ty>>,
+    /// Per-slot `None` = no usable expectation for that param (the substituted
+    /// slot still carried the CALLEE's own unbound generic — pinning a literal
+    /// sig generic like `A` would disconnect the lambda param from the
+    /// union-find and it would silently default to Int later).
+    pub(crate) lambda_arg_hint: Option<Vec<Option<crate::types::Ty>>>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
     /// Module-name prefix active during `infer_module`. `None` for the

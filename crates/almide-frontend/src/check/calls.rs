@@ -99,13 +99,36 @@ impl Checker {
             for (i, a) in args.iter_mut().enumerate() {
                 // Pin an unannotated lambda's params to the expected element
                 // types substituted with bindings learned from earlier args.
+                // A slot whose substituted type still mentions one of the
+                // CALLEE's OWN unbound generics (`A` when arg0 was itself an
+                // unresolved inference var) gets NO pin: writing the literal
+                // sig generic into the lambda param disconnects it from the
+                // union-find, so it never picks up the element type that flows
+                // in later and silently defaults to Int (nn variance_rows:
+                // `let sq = list.map(row, (x) => …)` inside a map lambda).
                 let pinned = if matches!(&a.kind, ExprKind::Lambda { .. }) {
                     call_sig.as_ref()
-                        .and_then(|sig| sig.params.get(i))
-                        .map(|(_, pty)| crate::types::substitute(pty, &bindings))
-                        .and_then(|pty| match pty {
-                            Ty::Fn { params, .. } => Some(params),
-                            _ => None,
+                        .and_then(|sig| {
+                            let (_, pty) = sig.params.get(i)?;
+                            let pty = crate::types::substitute(pty, &bindings);
+                            let Ty::Fn { params, .. } = pty else { return None };
+                            // A callee generic that no earlier arg pinned is
+                            // MEANINGLESS in the caller's scope — unless its name
+                            // happens to denote an IN-SCOPE rigid generic (the
+                            // enclosing fn's own `T`, registered in env.types as
+                            // a TypeVar), in which case the pin is exactly the
+                            // #653 protocol-bound case and must survive.
+                            let unbound: std::collections::HashSet<Sym> = sig.generics.iter().copied()
+                                .filter(|g| !bindings.contains_key(g))
+                                .filter(|g| !matches!(self.env.types.get(g), Some(Ty::TypeVar(n)) if n == g))
+                                .collect();
+                            let mentions_unbound = |t: &Ty| -> bool {
+                                let hit = |t: &Ty| matches!(t, Ty::TypeVar(n) if unbound.contains(n));
+                                hit(t) || t.any_child_recursive(&hit)
+                            };
+                            Some(params.into_iter()
+                                .map(|t| if mentions_unbound(&t) { None } else { Some(t) })
+                                .collect::<Vec<Option<Ty>>>())
                         })
                 } else { None };
                 let prev_hint = self.lambda_arg_hint.take();
