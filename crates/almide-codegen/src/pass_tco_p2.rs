@@ -1,5 +1,9 @@
 /// Rewrite a TCO-eligible function body from recursive form to a loop.
-fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<usize> {
+fn rewrite_to_loop(
+    func: &mut IrFunction,
+    var_table: &mut VarTable,
+    infer_bindings: &mut std::collections::BTreeSet<VarId>,
+) -> HashSet<usize> {
     let fn_name = func.name.clone();
     // For effect fns returning Result[T, E], the TCO result variable should hold T
     // because the Rust codegen auto-unwraps Result via `?` operator.
@@ -52,22 +56,25 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<u
         None,
     );
 
-    // Allocate temporaries for each param. For borrow-preserved params the
-    // temp's type is `Ty::Unknown` so the walker emits `let __tco_tmp_data = data;`
-    // (no explicit type annotation). That lets Rust infer `&Vec<u8>` from the
-    // RHS, which matches the reassignment `data = __tco_tmp_data`.
+    // Allocate temporaries for each param, each carrying the param's REAL type
+    // (the ConcretizeTypes postcondition verifies no Unknown reaches codegen).
+    // A borrow-preserved param's Rust representation is `&Vec<u8>` — a borrow
+    // the `Ty` system cannot spell — so its temp is registered in
+    // `infer_binding_tys` and the walker renders `let __tco_tmp_data = data;`
+    // with a `_` annotation, letting Rust infer the borrow. (The old approach
+    // smuggled `Ty::Unknown` through the temp's type, which the postcondition
+    // gate rightly refused — nn vocab_at_loop/parse_tensors_loop.)
     let temps: Vec<(VarId, Ty)> = func.params.iter().enumerate().map(|(i, p)| {
-        let tmp_ty = if bytes_borrowed_params.contains(&i) {
-            Ty::Unknown
-        } else {
-            p.ty.clone()
-        };
+        let tmp_ty = p.ty.clone();
         let tmp = var_table.alloc(
             format!("__tco_tmp_{}", p.name).into(),
             tmp_ty.clone(),
             Mutability::Let,
             None,
         );
+        if bytes_borrowed_params.contains(&i) {
+            infer_bindings.insert(tmp);
+        }
         (tmp, tmp_ty)
     }).collect();
 

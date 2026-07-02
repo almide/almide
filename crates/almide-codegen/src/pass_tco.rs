@@ -52,10 +52,11 @@ impl NanoPass for TailCallOptPass {
         // functions need their Borrow wrappers stripped to match the new
         // signature — otherwise a &str arg is passed where String is expected.
         let mut reverted: HashMap<almide_base::intern::Sym, HashSet<usize>> = HashMap::new();
-        let IrProgram { functions, modules, var_table, .. } = &mut program;
-        run_tco(functions, var_table, &mut reverted);
+        let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
+        let infer_bindings = &mut codegen_annotations.infer_binding_tys;
+        run_tco(functions, var_table, &mut reverted, infer_bindings);
         for module in modules.iter_mut() {
-            run_tco(&mut module.functions, var_table, &mut reverted);
+            run_tco(&mut module.functions, var_table, &mut reverted, infer_bindings);
         }
         if !reverted.is_empty() {
             strip_borrows_at_tco_calls(&mut program, &reverted);
@@ -68,11 +69,12 @@ fn run_tco(
     functions: &mut [IrFunction],
     var_table: &mut VarTable,
     reverted: &mut HashMap<almide_base::intern::Sym, HashSet<usize>>,
+    infer_bindings: &mut std::collections::BTreeSet<VarId>,
 ) {
     for func in functions.iter_mut() {
         if is_tco_candidate(func) {
             let fn_name = func.name.clone();
-            let reverted_here = rewrite_to_loop(func, var_table);
+            let reverted_here = rewrite_to_loop(func, var_table, infer_bindings);
             if !reverted_here.is_empty() {
                 reverted.insert(fn_name, reverted_here);
             }

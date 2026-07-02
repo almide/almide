@@ -78,6 +78,11 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 return format!("let {} = {};", name_s, val_s);
             }
             let name_s = ctx.var_name(*var).to_string();
+            // Bindings whose runtime representation is a borrow the `Ty` system
+            // cannot spell (TCO borrow-preserved `Bytes` temps): render the
+            // annotation as `_` and let Rust infer — the IR type stays real for
+            // the ConcretizeTypes postcondition.
+            let ty = if ctx.ann.is_infer_binding(var) { &Ty::Unknown } else { ty };
             // List[Fn] Rc wrapping is now handled by RustLoweringPass
             // which inserts RcWrap nodes into the IR.
             // Erase Fn types in bindings (Rust can't write `impl Fn` in let position; TS gets `any`)
