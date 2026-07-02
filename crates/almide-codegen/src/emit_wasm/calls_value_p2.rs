@@ -308,10 +308,13 @@ impl FuncCompiler<'_> {
             if_i32;
               local_get(v); i32_load(4); local_set(list);
               local_get(list); i32_load(0); local_set(len);
-              // Alloc result list
-              i32_const(4); local_get(len); i32_const(4); i32_mul; i32_add;
+              // Alloc result list — FULL [len][cap][data] layout (the old
+              // `4 + n*4` alloc had no cap word: elements landed one slot late
+              // and the last write ran past the allocation).
+              i32_const(8); local_get(len); i32_const(4); i32_mul; i32_add;
               call(self.emitter.rt.alloc); local_set(result);
               local_get(result); local_get(len); i32_store(0);
+              local_get(result); local_get(len); i32_store(4); // cap = len
               i32_const(0); local_set(i);
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
@@ -322,15 +325,21 @@ impl FuncCompiler<'_> {
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); // pair ptr
                 i32_load(0); // key string ptr
+                // SHARE: the key string stays owned by the object's pair — the
+                // returned list must own its own +1, or binding an element
+                // (`list.get(json.keys(v), 0) ?? d`) frees the object's live
+                // key (#668 class).
+                call(self.emitter.rt.rc_inc);
                 i32_store(0); // store in result
                 local_get(i); i32_const(1); i32_add; local_set(i);
                 br(0);
               end; end;
               local_get(result);
             else_;
-              // Not an object: return empty list
-              i32_const(4); call(self.emitter.rt.alloc); local_set(result);
+              // Not an object: return empty list ([len][cap] header)
+              i32_const(8); call(self.emitter.rt.alloc); local_set(result);
               local_get(result); i32_const(0); i32_store(0);
+              local_get(result); i32_const(0); i32_store(4);
               local_get(result);
             end;
         });
@@ -382,7 +391,12 @@ impl FuncCompiler<'_> {
                 if_empty;
                   i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                   local_get(result); i32_const(0); i32_store(0);
-                  local_get(result); local_get(pair_ptr); i32_load(4); i32_store(4);
+                  // SHARE: the ok payload is the pair's value, still owned by
+                  // the object — the Result box must own its own +1 (#668
+                  // class; unwrapping `value.get(v, k)` freed the object's
+                  // live field value).
+                  local_get(result); local_get(pair_ptr); i32_load(4);
+                  call(self.emitter.rt.rc_inc); i32_store(4);
                   br(2);
                 end;
                 local_get(i); i32_const(1); i32_add; local_set(i);

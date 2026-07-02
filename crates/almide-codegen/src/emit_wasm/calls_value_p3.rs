@@ -20,9 +20,10 @@ impl FuncCompiler<'_> {
         self.emit_expr(&args[1]); // keys: List[String]
         wasm!(self.func, {
             local_set(keys);
-            // Not an object? return as-is
+            // Not an object? return as-is.
+            // SHARE: hands back the INPUT value — own a +1 (#668 class).
             local_get(v); i32_load(0); i32_const(6); i32_ne;
-            if_i32; local_get(v);
+            if_i32; local_get(v); call(self.emitter.rt.rc_inc);
             else_;
               local_get(v); i32_load(4); local_set(old_list);
               local_get(old_list); i32_load(0); local_set(old_len);
@@ -69,10 +70,14 @@ impl FuncCompiler<'_> {
                 local_get(i); i32_const(1); i32_add; local_set(i);
                 br(0);
               end; end;
-              // Alloc new list
-              i32_const(4); local_get(count); i32_const(4); i32_mul; i32_add;
+              // Alloc new pair list — FULL list layout [len][cap][data]: the old
+              // `4 + n*4` alloc had no cap word, so every element landed 4 bytes
+              // past its slot and the LAST write ran past the allocation
+              // (silent heap clobber; value.merge/pick read back ""/null).
+              i32_const(8); local_get(count); i32_const(4); i32_mul; i32_add;
               call(self.emitter.rt.alloc); local_set(new_list);
               local_get(new_list); local_get(count); i32_store(0);
+              local_get(new_list); local_get(count); i32_store(4); // cap = len
               // Second pass: copy matching pairs
               i32_const(0); local_set(i);
               i32_const(0); local_set(count); // reuse as write index
@@ -107,7 +112,9 @@ impl FuncCompiler<'_> {
                 if_empty;
                   local_get(new_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
                   local_get(count); i32_const(4); i32_mul; i32_add;
-                  local_get(pair_ptr); i32_store(0);
+                  // SHARE: the copied pair is now reachable from the source
+                  // object AND the result — own a +1 per copy (#668 class).
+                  local_get(pair_ptr); call(self.emitter.rt.rc_inc); i32_store(0);
                   local_get(count); i32_const(1); i32_add; local_set(count);
                 end;
                 local_get(i); i32_const(1); i32_add; local_set(i);
@@ -161,8 +168,11 @@ impl FuncCompiler<'_> {
             local_get(b); i32_load(4); local_set(b_list);
             local_get(a_list); i32_load(0); local_set(a_len);
             local_get(b_list); i32_load(0); local_set(b_len);
-            // Max possible pairs = a_len + b_len
-            i32_const(4); local_get(a_len); local_get(b_len); i32_add; i32_const(4); i32_mul; i32_add;
+            // Max possible pairs = a_len + b_len. FULL list layout [len][cap][data]
+            // — the old `4 + n*4` alloc had no cap word, so elements landed one
+            // slot late and the last write ran past the allocation (silent heap
+            // clobber; `value.merge` read back `{"":null}` on wasm).
+            i32_const(8); local_get(a_len); local_get(b_len); i32_add; i32_const(4); i32_mul; i32_add;
             call(self.emitter.rt.alloc); local_set(new_list);
             i32_const(0); local_set(count);
             // Copy all from a that are NOT in b
@@ -190,7 +200,9 @@ impl FuncCompiler<'_> {
               if_empty;
                 local_get(new_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
                 local_get(count); i32_const(4); i32_mul; i32_add;
-                local_get(pair_ptr); i32_store(0);
+                // SHARE: the copied pair is reachable from `a` AND the result —
+                // own a +1 per copy (#668 class).
+                local_get(pair_ptr); call(self.emitter.rt.rc_inc); i32_store(0);
                 local_get(count); i32_const(1); i32_add; local_set(count);
               end;
               local_get(i); i32_const(1); i32_add; local_set(i);
@@ -204,13 +216,15 @@ impl FuncCompiler<'_> {
               local_get(count); i32_const(4); i32_mul; i32_add;
               local_get(b_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
               local_get(i); i32_const(4); i32_mul; i32_add;
-              i32_load(0); i32_store(0);
+              // SHARE: same rule for pairs copied from `b`.
+              i32_load(0); call(self.emitter.rt.rc_inc); i32_store(0);
               local_get(count); i32_const(1); i32_add; local_set(count);
               local_get(i); i32_const(1); i32_add; local_set(i);
               br(0);
             end; end;
-            // Set actual count
+            // Set actual count (len + cap)
             local_get(new_list); local_get(count); i32_store(0);
+            local_get(new_list); local_get(count); i32_store(4);
             // Build result
             i32_const(8); call(self.emitter.rt.alloc); local_set(result);
             local_get(result); i32_const(6); i32_store(0);
