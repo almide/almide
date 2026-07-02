@@ -170,10 +170,10 @@ agg="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$allwalls" | sort | uniq -c | sort 
   echo "| \`almide-aituber\` | browser-hosted app | ✅ wasm builds clean (the v1 divergence was the missing develop-side #717 auto-?-branch-retype fix — cherry-picked 2026-07-02) |"
   echo "| \`homullus\` | AI agent | ✅ byte-verified (suite, both targets) |"
   echo "| \`nn\` | AI (neural nets) | ✅ byte-verified (suite: 13/13 files, both targets) — unblocked 2026-07-02 by the TCO-temp type fix, the nested-HOF lambda-pin fix (C-126), the Matrix repr, the SIMD fast-exp clamp, and the unwrap_or chain fix (C-127) |"
-  echo "| \`almai\` | AI (LLM client lib) | 🔴 still red, root causes NARROWED 2026-07-02: field-DEFAULT fill now survives the flatten mangle (E0063 class fixed); the remaining ~37 errors are the root \`LLMResponse\` vs \`openai.LLMResponse\` NOMINAL/STRUCTURAL fork — the checker accepts same-shape records across modules, codegen makes them distinct Rust structs. Needs a language-level decision (reject in check, or insert conversions). The test files' bare \`ToolCall\` refs are the same fork |"
+  echo "| \`almai\` | AI (LLM client lib) | ✅ native suite green (56 tests, 2 files) — resolved 2026-07-03 by the STRUCTURAL-TWIN merge: the checker unifies same-base-name same-shape record decls across modules, so codegen now merges them into one canonical struct (flatten twin-merge; the E0063 default-fill and bare-ref repair ride the same mechanism). wasm leg: native fallback (\`env.get\`/http are native-only — an LLM client needs the network host) |"
 
   echo
-  echo "almai's remaining 🔴 is a COMPILER-SEMANTICS finding (also red on develop), not an app bug."
+  echo "Every graphics/AI repo above now builds or verifies on v1."
 } > "$OUT"
 
 echo "wrote $OUT (${clean}/${counted} at wall=0)" >&2

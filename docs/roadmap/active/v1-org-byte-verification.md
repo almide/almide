@@ -103,7 +103,16 @@ Directive: don't backport to v0; make v1 the branch where these work.
 - **almide-aituber: fixed** — the v1-vs-develop divergence was the missing
   develop-side #717 (recompute if/match/block type after auto-? unwraps an
   effect branch); cherry-picked.
-- **almai: narrowed, not closed.** The E0063 class is fixed (the flatten
+- **almai: CLOSED (2026-07-03).** The nominal/structural fork is resolved by
+  the STRUCTURAL-TWIN merge: the checker demonstrably unifies same-base-name,
+  same-shape record decls across modules (which nominal name a site lands on
+  is an accident of constraint order), so codegen now realizes that semantics
+  — the flatten pass groups decls by (base name, shape fingerprint) and maps
+  every twin to ONE canonical struct; the bare-ref repair accepts an all-twin
+  owner set. Same-name DIFFERENT-shape types keep their distinct mangles (and
+  the checker already rejects them inside one package as E020). almai's native
+  suite: 56 tests green. Guard cell: `structural_twin_records_flow_both_directions`.
+  (Superseded narrative below kept for the record:) The E0063 class is fixed (the flatten
   mangle now remaps name-keyed codegen annotations — default/boxed fields,
   ctor_to_enum — so module-type field DEFAULTS fill). The remaining ~37 errors
   are the root `LLMResponse`/`ToolCall` vs `openai.LLMResponse` etc.
