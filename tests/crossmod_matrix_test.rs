@@ -76,6 +76,12 @@ fn add_num(n: Int) -> Unit = {
 
 type Pigment: Codec = { r: Int, g: Int, b: Int }
 
+type Twin = { label: String, score: Int }
+
+pub fn mk_twin(l: String) -> Twin = Twin { label: l, score: 1 }
+
+pub fn read_twin(t: Twin) -> String = t.label
+
 fn parse_flag(s: String) -> Result[String, String] =
   if s == "yes" then ok("y") else err("n")
 
@@ -417,6 +423,27 @@ effect fn main() -> Unit = {
 }
 "#,
             expected: "b=3",
+            status: Status::Works,
+        },
+        // STRUCTURAL TWINS: the checker unifies same-BASE-NAME same-SHAPE record
+        // decls across modules (values flow both directions freely), so codegen
+        // merges them into one canonical struct (flatten twin-merge). Before,
+        // whichever sites resolved to the "other" twin's name failed as
+        // generated-Rust E0308 (`expected almide_rt_m_Twin, found Twin`) —
+        // the almai root-vs-provider LLMResponse class.
+        Cell {
+            name: "structural_twin_records_flow_both_directions",
+            main: r#"import self as m
+type Twin = { label: String, score: Int }
+fn local_read(t: Twin) -> String = t.label
+effect fn main() -> Unit = {
+  // module → root direction
+  println(local_read(m.mk_twin("from-mod")))
+  // root → module direction (a root literal into the module's reader)
+  println(m.read_twin(Twin { label: "from-root", score: 2 }))
+}
+"#,
+            expected: "from-mod\nfrom-root",
             status: Status::Works,
         },
         // ResultPropagation Phase 2b: an `effect fn main() -> Result[..]` whose

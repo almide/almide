@@ -107,6 +107,68 @@ pub struct IrTypeDecl {
     pub blank_lines_before: u32,
 }
 
+impl IrTypeDecl {
+    /// Base-name-normalized shape fingerprint. Two decls with the same BASE
+    /// name and the same fingerprint are STRUCTURAL TWINS: the checker unifies
+    /// them freely (same-shape records flow into each other across modules),
+    /// so codegen must treat them as one type. Nested references compare by
+    /// base name (`List[openai.ToolCall]` == `List[ToolCall]`) so a twin whose
+    /// fields reference sibling twins still matches.
+    pub fn structural_fingerprint(&self) -> String {
+        fn norm_ty(ty: &Ty) -> String {
+            match ty {
+                Ty::Named(n, args) => {
+                    let base = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
+                    let args_s: Vec<String> = args.iter().map(norm_ty).collect();
+                    format!("N:{}<{}>", base, args_s.join(","))
+                }
+                Ty::Variant { name, .. } => {
+                    let base = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
+                    format!("V:{}", base)
+                }
+                Ty::Applied(c, args) => {
+                    let args_s: Vec<String> = args.iter().map(norm_ty).collect();
+                    format!("A:{:?}<{}>", c, args_s.join(","))
+                }
+                Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                    let fs: Vec<String> = fields.iter().map(|(n, t)| format!("{}:{}", n, norm_ty(t))).collect();
+                    format!("R{{{}}}", fs.join(","))
+                }
+                Ty::Tuple(ts) => format!("T({})", ts.iter().map(norm_ty).collect::<Vec<_>>().join(",")),
+                Ty::Fn { params, ret } => format!(
+                    "F({})->{}",
+                    params.iter().map(norm_ty).collect::<Vec<_>>().join(","),
+                    norm_ty(ret)
+                ),
+                other => format!("{:?}", other),
+            }
+        }
+        match &self.kind {
+            IrTypeDeclKind::Record { fields } => {
+                let fs: Vec<String> = fields.iter()
+                    .map(|f| format!("{}:{}", f.name, norm_ty(&f.ty)))
+                    .collect();
+                format!("record{{{}}}", fs.join(","))
+            }
+            IrTypeDeclKind::Variant { cases, .. } => {
+                let cs: Vec<String> = cases.iter().map(|c| {
+                    let payload = match &c.kind {
+                        IrVariantKind::Unit => String::new(),
+                        IrVariantKind::Tuple { fields } =>
+                            fields.iter().map(norm_ty).collect::<Vec<_>>().join(","),
+                        IrVariantKind::Record { fields } => fields.iter()
+                            .map(|f| format!("{}:{}", f.name, norm_ty(&f.ty)))
+                            .collect::<Vec<_>>().join(","),
+                    };
+                    format!("{}({})", c.name, payload)
+                }).collect();
+                format!("variant[{}]", cs.join("|"))
+            }
+            IrTypeDeclKind::Alias { target } => format!("alias:{}", norm_ty(target)),
+        }
+    }
+}
+
 // ── Function parameter metadata ─────────────────────────────────
 
 /// Borrow classification for a function parameter.

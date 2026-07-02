@@ -78,11 +78,38 @@ impl NanoPass for IrLinkFlattenPass {
 }
 
 fn mangle_qualified_type_names(program: &mut IrProgram) {
-    let mut map: HashMap<String, Sym> = HashMap::new();
+    // STRUCTURAL TWINS — the checker unifies two record/variant decls that share
+    // the same BASE name and the same shape (almai: the root `Message` and every
+    // provider's `Message` are byte-identical and flow into each other freely,
+    // and `check` accepts). Which nominal name a given SITE resolves to is then
+    // an accident of constraint order, so mangling each twin to its own struct
+    // produced `expected almide_rt_openai_Message, found Message` (E0308) on
+    // whichever sites landed on the other twin. Realize the checker's semantics:
+    // map every dotted twin to ONE canonical name — the bare root decl when one
+    // exists with the same fingerprint, else the first twin (sorted) — and
+    // dedup the now-identical decls. Types with a unique shape keep the plain
+    // per-module mangle, so genuinely distinct same-name types stay distinct.
+    // Group decls by (base name, fingerprint).
+    let mut groups: HashMap<(String, String), Vec<String>> = HashMap::new();
     for td in &program.type_decls {
         let n = td.name.as_str();
-        if n.contains('.') {
-            map.insert(n.to_string(), sym(&format!("almide_rt_{}", n.replace('.', "_"))));
+        let base = n.rsplit('.').next().unwrap_or(n).to_string();
+        groups.entry((base, td.structural_fingerprint())).or_default().push(n.to_string());
+    }
+
+    let mut map: HashMap<String, Sym> = HashMap::new();
+    for ((_base, _fp), mut members) in groups {
+        members.sort();
+        // Canonical target: the bare member if present, else the first dotted
+        // member's standard mangle.
+        let canonical: Sym = match members.iter().find(|m| !m.contains('.')) {
+            Some(bare) => sym(bare),
+            None => sym(&format!("almide_rt_{}", members[0].replace('.', "_"))),
+        };
+        for m in &members {
+            if m.contains('.') {
+                map.insert(m.clone(), canonical);
+            }
         }
     }
     if map.is_empty() {
@@ -94,6 +121,12 @@ fn mangle_qualified_type_names(program: &mut IrProgram) {
             td.name = *nn;
         }
         rename_type_decl_kind(&mut td.kind, &map);
+    }
+    // Twin decls now share one canonical name — keep the first, drop the rest
+    // (identical shapes; a second `pub struct Msg` would be E0428).
+    {
+        let mut seen: std::collections::HashSet<Sym> = std::collections::HashSet::new();
+        program.type_decls.retain(|td| seen.insert(td.name));
     }
     for f in &mut program.functions {
         for p in &mut f.params {
