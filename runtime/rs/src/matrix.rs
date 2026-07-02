@@ -62,6 +62,29 @@ impl From<Vec<Vec<f64>>> for AlmideMatrix {
     }
 }
 
+// Almide-literal repr for compound string interpolation (a derived record
+// `Repr` over a Matrix field calls `self.w.almide_repr()`). Almide has no
+// matrix literal, so a matrix renders in CONSTRUCTOR form
+// `matrix.from_lists([[1, 2], [3, 4]])` — the Set precedent
+// (`set.from_list([…])`) — rows in row-major order, elements via the same
+// Display path as bare `${f}` interpolation.
+impl AlmideRepr for AlmideMatrix {
+    fn almide_repr(&self) -> String {
+        let mut o = String::from("matrix.from_lists([");
+        for r in 0..self.rows {
+            if r > 0 { o.push_str(", "); }
+            o.push('[');
+            for c in 0..self.cols {
+                if c > 0 { o.push_str(", "); }
+                o.push_str(&format!("{}", self.data[r * self.cols + c]));
+            }
+            o.push(']');
+        }
+        o.push_str("])");
+        o
+    }
+}
+
 pub fn almide_rt_matrix_zeros(rows: i64, cols: i64) -> AlmideMatrix {
     vec![vec![0.0; cols as usize]; rows as usize].into()
 }
