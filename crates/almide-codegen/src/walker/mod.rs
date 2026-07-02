@@ -212,18 +212,27 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             Target::Rust => "rust",
             _ => "wasm",
         };
+        // A module fn's call sites all render the flatten prefix
+        // (`almide_rt_<origin>_<name>`), so an extern binding must be emitted
+        // under that same prefixed name — a bare `use bridge::f as f;` defines
+        // a symbol nobody calls (porta wasm_rt: E0425 on almide_rt_wasm_rt_*).
+        let emit_name = match &func.module_origin {
+            Some(origin) => format!("almide_rt_{}_{}", origin,
+                func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
+            None => func.name.to_string(),
+        };
         for attr in &func.extern_attrs {
             // @extern(rust, ...) / @extern(wasm, ...) — native module binding
             if attr.target == native_target {
-                return render_native_call(ctx, func, attr);
+                return render_native_call(ctx, func, attr, &emit_name);
             }
             if attr.target == target_str {
-                return ctx.templates.render_with("extern_fn", None, &[], &[("module", attr.module.as_str()), ("function", attr.function.as_str()), ("name", func.name.as_str())])
+                return ctx.templates.render_with("extern_fn", None, &[], &[("module", attr.module.as_str()), ("function", attr.function.as_str()), ("name", emit_name.as_str())])
                     .unwrap_or_else(|| format!("// extern: {}.{}", attr.module, attr.function));
             }
             // @extern(c, "lib", "func") — generate extern "C" block + safe wrapper
             if attr.target == "c" && matches!(ctx.target, Target::Rust) {
-                return render_extern_c(ctx, func, attr);
+                return render_extern_c(ctx, func, attr, &emit_name);
             }
         }
     }

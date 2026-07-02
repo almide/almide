@@ -5,7 +5,7 @@
 /// Type mapping (Almide → C extern → safe wrapper):
 /// Render @native("target", "module", "function") — delegates to module::function().
 /// Parameters use reference types (&str, &[T]) matching native Rust conventions.
-fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr) -> String {
+fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr, emit_name: &str) -> String {
     use types::render_type;
     use almide_lang::types::{Ty, TypeConstructorId};
     let mod_name = attr.module.as_str();
@@ -30,7 +30,7 @@ fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang
 
     let ret = render_type(ctx, &func.ret_ty);
     format!("fn {}({}) -> {} {{\n    {}::{}({})\n}}",
-        func.name, params.join(", "), ret,
+        emit_name, params.join(", "), ret,
         mod_name, fn_name, args.join(", "))
 }
 
@@ -38,11 +38,11 @@ fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang
 ///   Float   → f64 (same)
 ///   Bool    → i32 in extern, bool in wrapper (cast)
 ///   RawPtr  → *mut u8 (same)
-fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr) -> String {
+fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr, emit_name: &str) -> String {
 
     let lib = attr.module.as_str();
     let c_func = attr.function.as_str();
-    let almide_name = func.name.as_str();
+    let almide_name = emit_name;
 
     // Build C parameter list and Almide parameter list
     let mut c_params = Vec::new();
