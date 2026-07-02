@@ -87,3 +87,25 @@ One brick that clears a top reason advances multiple repos at once.
 - Repos that CANNOT be byte-verified yet: `almide-web` / `almide-sqlite` (no test vectors — write suites first), `almide-dojo` (task-bank fixtures, not a compilable suite).
 - To byte-verify a repo: run its own tests on BOTH targets (`almide test --target native` and
   `--target wasm`), require a full pass on each, then add it to `BYTE_VERIFIED` in the script.
+
+## Graphics / AI stack — production-target spot-check (2026-07-02)
+
+The graphics and AI repos are mostly BROWSER-HOSTED wasm apps (a JS host loads the module),
+so "runs on v1" for them = the current compiler produces a valid wasm artifact; headless
+byte-run comparison does not apply to a rendering host. Verified states:
+
+| repo | kind | state |
+|------|------|-------|
+| `svg` | graphics (pure lib) | ✅ byte-verified (suite, both targets) |
+| `lumen` | graphics (pure lib) | ✅ byte-verified (suite, both targets) |
+| `canvas` | browser-hosted app | ✅ wasm builds clean |
+| `wasm-canvas` | browser-hosted app | ✅ wasm builds clean |
+| `wasm-webgl` | browser-hosted app | ✅ wasm builds clean |
+| `obsid` | browser+native-hosted app | ✅ wasm builds clean (no test suite yet) |
+| `almide-aituber` | browser-hosted app | 🔴 wasm emit fails STRUCTURAL VALIDATION on develop-v1 (`type mismatch: expected i32, found i64`) — builds clean on develop v0.27.13 → a v1-branch regression that PREDATES the 2026-07-02 session (reproduced at 59dfd762); repro: `cd almide-aituber && almide build src/main.almd --target wasm`; needs a v1-branch bisect |
+| `homullus` | AI agent | ✅ byte-verified (suite, both targets) |
+| `almai` | AI (LLM client lib) | 🔴 does not COMPILE on either branch: `[COMPILER BUG] unresolvable bare type name(s) reached codegen` — 8 provider modules each define `Tool`/`ToolCall`/`Usage`/`LLMResponse` and bare refs cannot pick one (#433 class, cross-module type resolution) |
+| `nn` | AI (neural nets) | 🔴 does not COMPILE on either branch: unresolved `__tco_tmp_data` (ty=Unknown) in `vocab_at_loop`/`parse_tensors_loop` — the TCO temp misses type resolution and the build is honestly refused |
+
+The three 🔴 are COMPILER findings, not app bugs: almai / nn fail identically on develop
+v0.27.13 (pre-existing frontend gaps); almide-aituber is the only v1-vs-develop divergence.

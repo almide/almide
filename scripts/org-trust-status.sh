@@ -40,7 +40,7 @@ echo "building classify_corpus…" >&2
 # Verified 2026-07-02 after the wasm share/layout/value-semantics fixes (contracts C-121..C-125).
 # Update as new ones are checked. Not verifiable: almide-web / almide-sqlite / wasm-webgl / obsid / audio-poc (no tests),
 # almide-dojo (task-bank fixtures, not a compilable suite).
-BYTE_VERIFIED=" yaml sha1 toml svg rsa porta csv bigint base64 aes lumen almide-bindgen almide-wasm-bindgen almide-lander almide-grammar "
+BYTE_VERIFIED=" yaml sha1 toml svg rsa porta csv bigint base64 aes lumen homullus almide-bindgen almide-wasm-bindgen almide-lander almide-grammar "
 
 # Only `src/*.almd` (a real module root) is swept, never embedded shims (`stdlib/`) or benchmark
 # fixtures (`research/`, `benchmark/`) — those misfired into bogus repo-level numbers (e.g.
@@ -152,6 +152,28 @@ agg="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$allwalls" | sort | uniq -c | sort 
   echo "- Repos that CANNOT be byte-verified yet: \`almide-web\` / \`almide-sqlite\` (no test vectors — write suites first), \`almide-dojo\` (task-bank fixtures, not a compilable suite)."
   echo "- To byte-verify a repo: run its own tests on BOTH targets (\`almide test --target native\` and"
   echo "  \`--target wasm\`), require a full pass on each, then add it to \`BYTE_VERIFIED\` in the script."
+  echo
+  echo "## Graphics / AI stack — production-target spot-check (2026-07-02)"
+  echo
+  echo "The graphics and AI repos are mostly BROWSER-HOSTED wasm apps (a JS host loads the module),"
+  echo "so \"runs on v1\" for them = the current compiler produces a valid wasm artifact; headless"
+  echo "byte-run comparison does not apply to a rendering host. Verified states:"
+  echo
+  echo "| repo | kind | state |"
+  echo "|------|------|-------|"
+  echo "| \`svg\` | graphics (pure lib) | ✅ byte-verified (suite, both targets) |"
+  echo "| \`lumen\` | graphics (pure lib) | ✅ byte-verified (suite, both targets) |"
+  echo "| \`canvas\` | browser-hosted app | ✅ wasm builds clean |"
+  echo "| \`wasm-canvas\` | browser-hosted app | ✅ wasm builds clean |"
+  echo "| \`wasm-webgl\` | browser-hosted app | ✅ wasm builds clean |"
+  echo "| \`obsid\` | browser+native-hosted app | ✅ wasm builds clean (no test suite yet) |"
+  echo "| \`almide-aituber\` | browser-hosted app | 🔴 wasm emit fails STRUCTURAL VALIDATION on develop-v1 (\`type mismatch: expected i32, found i64\`) — builds clean on develop v0.27.13 → a v1-branch regression that PREDATES the 2026-07-02 session (reproduced at 59dfd762); repro: \`cd almide-aituber && almide build src/main.almd --target wasm\`; needs a v1-branch bisect |"
+  echo "| \`homullus\` | AI agent | ✅ byte-verified (suite, both targets) |"
+  echo "| \`almai\` | AI (LLM client lib) | 🔴 does not COMPILE on either branch: \`[COMPILER BUG] unresolvable bare type name(s) reached codegen\` — 8 provider modules each define \`Tool\`/\`ToolCall\`/\`Usage\`/\`LLMResponse\` and bare refs cannot pick one (#433 class, cross-module type resolution) |"
+  echo "| \`nn\` | AI (neural nets) | 🔴 does not COMPILE on either branch: unresolved \`__tco_tmp_data\` (ty=Unknown) in \`vocab_at_loop\`/\`parse_tensors_loop\` — the TCO temp misses type resolution and the build is honestly refused |"
+  echo
+  echo "The three 🔴 are COMPILER findings, not app bugs: almai / nn fail identically on develop"
+  echo "v0.27.13 (pre-existing frontend gaps); almide-aituber is the only v1-vs-develop divergence."
 } > "$OUT"
 
 echo "wrote $OUT (${clean}/${counted} at wall=0)" >&2
