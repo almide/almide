@@ -83,6 +83,13 @@ pub struct Checker {
     pub(crate) lambda_arg_hint: Option<Vec<Option<crate::types::Ty>>>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
+    /// Named-type pairs currently being unified structurally. Unifying two
+    /// DIFFERENT-named nominal types expands both to their record forms and
+    /// recurses into the fields; a RECURSIVE type (`El = { children: List[El] }`
+    /// vs a module twin `lib.El`) re-reaches the same pair and would recurse
+    /// forever (stack overflow — the svg cross-module render). Equi-recursive
+    /// unification: a pair already in progress unifies coinductively (true).
+    pub(crate) unify_named_in_progress: std::collections::HashSet<(almide_base::intern::Sym, almide_base::intern::Sym)>,
     /// Module-name prefix active during `infer_module`. `None` for the
     /// main program. Used by the `TopLet` inference branch to write
     /// back inferred types under the prefixed `env.top_lets` key
@@ -265,6 +272,7 @@ impl Checker {
             named_arg_meta: None,
             lambda_arg_hint: None,
             constraints: Vec::new(), uf: UnionFind::new(),
+            unify_named_in_progress: std::collections::HashSet::new(),
             current_module_prefix: None,
             deferred_tuple_indices: Vec::new(),
             deferred_field_accesses: Vec::new(),
