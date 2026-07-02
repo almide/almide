@@ -123,14 +123,29 @@ Directive: don't backport to v0; make v1 the branch where these work.
   (name section intact) when structural validation fails, so `wasm-tools
   validate/print` can name the broken function.
 
+## Third pass — the last two known leftovers (2026-07-03)
+
+- **svg cross-module render stack overflow: FIXED.** The overflow was the
+  COMPILER's: `unify_structural` on a DIFFERENT-named nominal pair (`El` vs its
+  module twin `lib.El`) expanded both sides and recursed into the fields —
+  a RECURSIVE type re-reaches the same pair inside `children: List[El]`,
+  forever. Equi-recursive guard: an in-progress pair set in the checker; a
+  re-encountered pair unifies coinductively. svg renders byte-identically on
+  both targets now. Guard cell: `recursive_record_type_cross_module`.
+  Debug aid: `ALMIDE_TRACE_PASSES=1` names each pass BEFORE it runs.
+- **Cross-module `@inline_rust`: FIXED, both legs.** wasm skipped EVERY
+  `@inline_rust` fn as "dispatch-only" — but a user package's fn carries a
+  real Almide body as its portable implementation (the attr is a native-only
+  optimization); now only Hole-bodied declarations skip, so wasm compiles the
+  body. Native pasted the template's bare struct tokens (`Cfb8State { .. }`)
+  into the post-mangle world (E0422); StdlibLowering now requalifies a
+  package template's own type tokens to the canonical dotted names and the
+  flatten pass rewrites dotted tokens inside templates to the flat struct
+  names. aes cfb8 NIST F.3.7 passes cross-module, byte-identical on both
+  targets. Guard cell: `inline_rust_with_fallback_body_cross_module`.
+
 ## Remaining threads
 
-- **Cross-module `@inline_rust` fns** (aes cfb8_encrypt via `import self`) ICE
-  on wasm (`no WASM dispatch`) and fail native (the inline template references
-  the dep's `native/` module that a cross-module caller doesn't inject). Only
-  affects calling such fns from OUTSIDE the package on this shape.
-- **svg cross-module render stack overflow on BOTH targets** (`import self as
-  svg` + `render(group(...))` recursion) — a separate, target-independent bug.
 - almide-web / almide-sqlite need test vectors before they can be verified.
 - Handoff step 4 (read_message on the VERIFIED render_program path — wasm JSON
   codec self-host) remains open, unchanged.

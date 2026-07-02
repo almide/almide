@@ -161,7 +161,7 @@ agg="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$allwalls" | sort | uniq -c | sort 
   echo
   echo "| repo | kind | state |"
   echo "|------|------|-------|"
-  echo "| \`svg\` | graphics (pure lib) | ✅ byte-verified (suite, both targets) |"
+  echo "| \`svg\` | graphics (pure lib) | ✅ byte-verified (suite, both targets); the cross-module \`render(group(..))\` compiler stack overflow is fixed (2026-07-03 equi-recursive unify guard) |"
   echo "| \`lumen\` | graphics (pure lib) | ✅ byte-verified (suite, both targets) |"
   echo "| \`canvas\` | browser-hosted app | ✅ wasm builds clean |"
   echo "| \`wasm-canvas\` | browser-hosted app | ✅ wasm builds clean |"

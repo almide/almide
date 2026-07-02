@@ -96,7 +96,7 @@ byte-run comparison does not apply to a rendering host. Verified states:
 
 | repo | kind | state |
 |------|------|-------|
-| `svg` | graphics (pure lib) | ✅ byte-verified (suite, both targets) |
+| `svg` | graphics (pure lib) | ✅ byte-verified (suite, both targets); the cross-module `render(group(..))` compiler stack overflow is fixed (2026-07-03 equi-recursive unify guard) |
 | `lumen` | graphics (pure lib) | ✅ byte-verified (suite, both targets) |
 | `canvas` | browser-hosted app | ✅ wasm builds clean |
 | `wasm-canvas` | browser-hosted app | ✅ wasm builds clean |
