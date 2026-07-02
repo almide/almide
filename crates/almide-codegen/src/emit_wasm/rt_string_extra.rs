@@ -20,7 +20,9 @@ pub(super) fn compile_replace_first(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(0); local_get(1); call(emitter.rt.string.index_of); local_set(3);
         local_get(3); i64_const(-1); i64_eq;
-        if_i32; local_get(0);
+        // SHARE: miss → returns the INPUT string; own a +1 or the caller's
+        // result-drop + input-drop double-free it (#668 class).
+        if_i32; local_get(0); call(emitter.rt.rc_inc);
         else_;
           local_get(3); i32_wrap_i64; local_set(4);
           local_get(1); i32_load(0); local_set(5);

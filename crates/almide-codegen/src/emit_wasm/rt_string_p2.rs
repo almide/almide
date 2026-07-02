@@ -190,8 +190,12 @@ fn compile_replace(emitter: &mut WasmEmitter) {
           br(0);
         end; end;
         // No occurrences → return s unchanged.
+        // SHARE: this hands back the INPUT string, so it must own a +1 — the
+        // caller drops the result as a fresh value AND drops `s` at scope end,
+        // so an un-shared pass-through double-frees (#666/#668 class; the svg
+        // `escape_attr` no-match pipe chain trapped __rc_dec on wasm).
         local_get(7); i32_eqz;
-        if_empty; local_get(0); return_; end;
+        if_empty; local_get(0); call(emitter.rt.rc_inc); return_; end;
         // result = string_alloc(blen + cnt * (tl - fl))
         local_get(3); local_get(7); local_get(5); local_get(4); i32_sub; i32_mul; i32_add;
         call(emitter.rt.string_alloc); local_set(8);
@@ -420,7 +424,9 @@ fn compile_pad_start(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(0); call(emitter.rt.string.char_count); i32_wrap_i64; local_set(3);
         local_get(3); local_get(1); i32_ge_u;
-        if_i32; local_get(0);
+        // SHARE: width satisfied → returns the INPUT string; own a +1 or the
+        // caller's result-drop + input-drop double-free it (#668 class).
+        if_i32; local_get(0); call(emitter.rt.rc_inc);
         else_;
           local_get(1); local_get(3); i32_sub; local_set(4);    // n = width - count
     });
@@ -441,7 +447,8 @@ fn compile_pad_end(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(0); call(emitter.rt.string.char_count); i32_wrap_i64; local_set(3);
         local_get(3); local_get(1); i32_ge_u;
-        if_i32; local_get(0);
+        // SHARE: width satisfied → returns the INPUT string; own a +1 (#668 class).
+        if_i32; local_get(0); call(emitter.rt.rc_inc);
         else_;
           local_get(1); local_get(3); i32_sub; local_set(4);
     });

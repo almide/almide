@@ -562,7 +562,8 @@ fn compile_str_capitalize(emitter: &mut WasmEmitter) {
     let capo = string_cap_off() as u32;
     wasm!(f, {
         local_get(0); i32_load(0); local_set(2);
-        local_get(2); i32_eqz; if_empty; local_get(0); return_; end;
+        // SHARE: empty input → returns the INPUT string; own a +1 (#668 class).
+        local_get(2); i32_eqz; if_empty; local_get(0); call(emitter.rt.rc_inc); return_; end;
         local_get(0); i32_const(do_); i32_add; i32_load8_u(0); local_set(5);
         local_get(0); i32_const(0); call(uw); local_set(3);
         local_get(5); i32_const(0x80); i32_lt_u;
