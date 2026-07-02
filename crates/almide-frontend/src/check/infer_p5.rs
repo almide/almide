@@ -15,14 +15,26 @@ pub(crate) fn collect_block_result_match_vars(stmts: &[ast::Stmt], tail: Option<
 
 fn collect_in_stmt(stmt: &ast::Stmt, out: &mut std::collections::HashSet<Sym>) {
     match stmt {
-        ast::Stmt::Let { value, .. } | ast::Stmt::Var { value, .. } => collect_in_expr(value, out),
+        ast::Stmt::Let { value, .. } | ast::Stmt::Var { value, .. }
+        | ast::Stmt::LetDestructure { value, .. }
+        | ast::Stmt::Assign { value, .. }
+        | ast::Stmt::FieldAssign { value, .. } => collect_in_expr(value, out),
+        ast::Stmt::IndexAssign { index, value, .. } => {
+            collect_in_expr(index, out);
+            collect_in_expr(value, out);
+        }
         ast::Stmt::Expr { expr, .. } => collect_in_expr(expr, out),
-        ast::Stmt::Assign { value, .. } => collect_in_expr(value, out),
         ast::Stmt::Guard { cond, else_, .. } => { collect_in_expr(cond, out); collect_in_expr(else_, out); }
+        ast::Stmt::GuardLet { scrutinee, else_, .. } => { collect_in_expr(scrutinee, out); collect_in_expr(else_, out); }
         _ => {}
     }
 }
 
+// Traversal must reach a `match r { ok/err }` through EVERY value-carrying
+// wrapper — a missed form means the binding of `r` gets auto-unwrapped out
+// from under the match (porta mcp: the match sat inside an `ok(...)` tail,
+// the old Match/Block/If-only walk never saw it, and the Bind lost its
+// Result → invalid native Rust).
 fn collect_in_expr(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) {
     match &expr.kind {
         ExprKind::Match { subject, arms, .. } => {
@@ -36,7 +48,10 @@ fn collect_in_expr(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) {
                 }
             }
             collect_in_expr(subject, out);
-            for arm in arms { collect_in_expr(&arm.body, out); }
+            for arm in arms {
+                if let Some(g) = &arm.guard { collect_in_expr(g, out); }
+                collect_in_expr(&arm.body, out);
+            }
         }
         ExprKind::Block { stmts, expr: tail, .. } => {
             for s in stmts { collect_in_stmt(s, out); }
@@ -46,6 +61,71 @@ fn collect_in_expr(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) {
             collect_in_expr(cond, out);
             collect_in_expr(then, out);
             collect_in_expr(else_, out);
+        }
+        ExprKind::IfLet { scrutinee, then, else_, .. } => {
+            collect_in_expr(scrutinee, out);
+            collect_in_expr(then, out);
+            collect_in_expr(else_, out);
+        }
+        ExprKind::ForIn { iterable, body, .. } => {
+            collect_in_expr(iterable, out);
+            for s in body { collect_in_stmt(s, out); }
+        }
+        ExprKind::While { cond, body, .. } => {
+            collect_in_expr(cond, out);
+            for s in body { collect_in_stmt(s, out); }
+        }
+        ExprKind::Paren { expr: inner, .. } | ExprKind::Some { expr: inner, .. }
+        | ExprKind::Ok { expr: inner, .. } | ExprKind::Err { expr: inner, .. }
+        | ExprKind::Try { expr: inner, .. } | ExprKind::Unwrap { expr: inner, .. }
+        | ExprKind::ToOption { expr: inner, .. } | ExprKind::Await { expr: inner, .. }
+        | ExprKind::TypeAscription { expr: inner, .. }
+        | ExprKind::OptionalChain { expr: inner, .. } => collect_in_expr(inner, out),
+        ExprKind::UnwrapOr { expr: inner, fallback, .. } => {
+            collect_in_expr(inner, out);
+            collect_in_expr(fallback, out);
+        }
+        ExprKind::Unary { operand, .. } => collect_in_expr(operand, out),
+        ExprKind::Binary { left, right, .. } | ExprKind::Pipe { left, right, .. }
+        | ExprKind::Compose { left, right, .. } => {
+            collect_in_expr(left, out);
+            collect_in_expr(right, out);
+        }
+        ExprKind::Range { start, end, .. } => {
+            collect_in_expr(start, out);
+            collect_in_expr(end, out);
+        }
+        ExprKind::Call { callee, args, named_args, .. } => {
+            collect_in_expr(callee, out);
+            for a in args { collect_in_expr(a, out); }
+            for (_, a) in named_args { collect_in_expr(a, out); }
+        }
+        ExprKind::Member { object, .. } | ExprKind::TupleIndex { object, .. } => collect_in_expr(object, out),
+        ExprKind::IndexAccess { object, index, .. } => {
+            collect_in_expr(object, out);
+            collect_in_expr(index, out);
+        }
+        ExprKind::List { elements, .. } | ExprKind::Tuple { elements, .. } => {
+            for e in elements { collect_in_expr(e, out); }
+        }
+        ExprKind::Fan { exprs, .. } => {
+            for e in exprs { collect_in_expr(e, out); }
+        }
+        ExprKind::MapLiteral { entries, .. } => {
+            for (k, v) in entries { collect_in_expr(k, out); collect_in_expr(v, out); }
+        }
+        ExprKind::Record { fields, .. } => {
+            for f in fields { collect_in_expr(&f.value, out); }
+        }
+        ExprKind::SpreadRecord { base, fields, .. } => {
+            collect_in_expr(base, out);
+            for f in fields { collect_in_expr(&f.value, out); }
+        }
+        ExprKind::Lambda { body, .. } => collect_in_expr(body, out),
+        ExprKind::InterpolatedString { parts, .. } => {
+            for p in parts {
+                if let ast::StringPart::Expr { expr } = p { collect_in_expr(expr, out); }
+            }
         }
         _ => {}
     }
