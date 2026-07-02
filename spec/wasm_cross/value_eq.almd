@@ -1,5 +1,4 @@
 // @contract: C-099
-// @xt-allow: v0 emit_wasm Value `==` is buggy (returns false for equal Values). The v1 MIR self-host value.eq is byte-correct vs native (verified via render_program + the if-branch fix); this native<->v0-emit_wasm gate surfaced the old-backend bug.
 // value.eq (Value == Value) — deep structural equality. WITHOUT this the heap `==` did not lower to a
 // scalar cond, so `if value_a == value_b …` fell to the both-arms linearization and ran BOTH arms (a
 // silent control-flow miscompile). Now it branches correctly. Byte-matches v0's Value PartialEq.

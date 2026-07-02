@@ -143,8 +143,15 @@ impl FuncCompiler<'_> {
     }
 
     /// value.merge(a: Value, b: Value) -> Value
-    /// Merge two objects. Keys from b override keys from a.
+    ///
+    /// Mirrors the native oracle `almide_rt_value_merge` exactly: for two
+    /// Objects, a's keys keep a's POSITIONS (a key overridden by b keeps its
+    /// slot with b's value), then b's NEW keys append in b's order; when either
+    /// side is not an Object, the result is `b` (native `(_, b) => b.clone()`).
+    /// Every shared key/value/pair owns a +1 (#668 class), and the pair list
+    /// uses the full `[len][cap][data]` layout.
     fn emit_value_merge(&mut self, args: &[IrExpr]) {
+        let dat = self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32;
         let a = self.scratch.alloc_i32();
         let b = self.scratch.alloc_i32();
         let a_list = self.scratch.alloc_i32();
@@ -164,72 +171,132 @@ impl FuncCompiler<'_> {
         self.emit_expr(&args[1]);
         wasm!(self.func, {
             local_set(b);
-            local_get(a); i32_load(4); local_set(a_list);
-            local_get(b); i32_load(4); local_set(b_list);
-            local_get(a_list); i32_load(0); local_set(a_len);
-            local_get(b_list); i32_load(0); local_set(b_len);
-            // Max possible pairs = a_len + b_len. FULL list layout [len][cap][data]
-            // — the old `4 + n*4` alloc had no cap word, so elements landed one
-            // slot late and the last write ran past the allocation (silent heap
-            // clobber; `value.merge` read back `{"":null}` on wasm).
-            i32_const(8); local_get(a_len); local_get(b_len); i32_add; i32_const(4); i32_mul; i32_add;
-            call(self.emitter.rt.alloc); local_set(new_list);
-            i32_const(0); local_set(count);
-            // Copy all from a that are NOT in b
-            i32_const(0); local_set(i);
-            block_empty; loop_empty;
-              local_get(i); local_get(a_len); i32_ge_u; br_if(1);
-              local_get(a_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-              local_get(i); i32_const(4); i32_mul; i32_add;
-              i32_load(0); local_set(pair_ptr);
-              // Check if key exists in b
-              i32_const(0); local_set(found);
+            // Non-object on either side → b (native `(_, b) => b.clone()`).
+            // SHARE: hands back the INPUT value — own a +1 (#668 class).
+            local_get(a); i32_load(0); i32_const(6); i32_ne;
+            local_get(b); i32_load(0); i32_const(6); i32_ne;
+            i32_or;
+            if_i32;
+              local_get(b); call(self.emitter.rt.rc_inc);
+            else_;
+              local_get(a); i32_load(4); local_set(a_list);
+              local_get(b); i32_load(4); local_set(b_list);
+              local_get(a_list); i32_load(0); local_set(a_len);
+              local_get(b_list); i32_load(0); local_set(b_len);
+              // Pass 1: count = a_len + (b keys NOT in a).
+              local_get(a_len); local_set(count);
               i32_const(0); local_set(j);
               block_empty; loop_empty;
                 local_get(j); local_get(b_len); i32_ge_u; br_if(1);
-                local_get(pair_ptr); i32_load(0);
-                local_get(b_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
+                local_get(b_list); i32_const(dat); i32_add;
                 local_get(j); i32_const(4); i32_mul; i32_add;
-                i32_load(0); i32_load(0); // b pair key
-                call(self.emitter.rt.string.eq);
-                if_empty; i32_const(1); local_set(found); br(2); end;
+                i32_load(0); local_set(pair_ptr); // b pair
+                i32_const(0); local_set(found);
+                i32_const(0); local_set(i);
+                block_empty; loop_empty;
+                  local_get(i); local_get(a_len); i32_ge_u; br_if(1);
+                  local_get(pair_ptr); i32_load(0);
+                  local_get(a_list); i32_const(dat); i32_add;
+                  local_get(i); i32_const(4); i32_mul; i32_add;
+                  i32_load(0); i32_load(0); // a pair key
+                  call(self.emitter.rt.string.eq);
+                  if_empty; i32_const(1); local_set(found); br(2); end;
+                  local_get(i); i32_const(1); i32_add; local_set(i);
+                  br(0);
+                end; end;
+                local_get(found); i32_eqz;
+                if_empty; local_get(count); i32_const(1); i32_add; local_set(count); end;
                 local_get(j); i32_const(1); i32_add; local_set(j);
                 br(0);
               end; end;
-              local_get(found); i32_eqz;
-              if_empty;
-                local_get(new_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-                local_get(count); i32_const(4); i32_mul; i32_add;
-                // SHARE: the copied pair is reachable from `a` AND the result —
-                // own a +1 per copy (#668 class).
-                local_get(pair_ptr); call(self.emitter.rt.rc_inc); i32_store(0);
-                local_get(count); i32_const(1); i32_add; local_set(count);
-              end;
-              local_get(i); i32_const(1); i32_add; local_set(i);
-              br(0);
-            end; end;
-            // Copy all from b
-            i32_const(0); local_set(i);
-            block_empty; loop_empty;
-              local_get(i); local_get(b_len); i32_ge_u; br_if(1);
-              local_get(new_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-              local_get(count); i32_const(4); i32_mul; i32_add;
-              local_get(b_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-              local_get(i); i32_const(4); i32_mul; i32_add;
-              // SHARE: same rule for pairs copied from `b`.
-              i32_load(0); call(self.emitter.rt.rc_inc); i32_store(0);
-              local_get(count); i32_const(1); i32_add; local_set(count);
-              local_get(i); i32_const(1); i32_add; local_set(i);
-              br(0);
-            end; end;
-            // Set actual count (len + cap)
-            local_get(new_list); local_get(count); i32_store(0);
-            local_get(new_list); local_get(count); i32_store(4);
-            // Build result
-            i32_const(8); call(self.emitter.rt.alloc); local_set(result);
-            local_get(result); i32_const(6); i32_store(0);
-            local_get(result); local_get(new_list); i32_store(4);
-            local_get(result);
+              // Alloc the result pair list — full [len][cap][data] layout.
+              i32_const(8); local_get(count); i32_const(4); i32_mul; i32_add;
+              call(self.emitter.rt.alloc); local_set(new_list);
+              local_get(new_list); local_get(count); i32_store(0);
+              local_get(new_list); local_get(count); i32_store(4);
+              // Pass 2: a's keys in a's positions; a key present in b takes a
+              // FRESH pair (a's key, b's value), each half owning a +1.
+              i32_const(0); local_set(i);
+              block_empty; loop_empty;
+                local_get(i); local_get(a_len); i32_ge_u; br_if(1);
+                local_get(a_list); i32_const(dat); i32_add;
+                local_get(i); i32_const(4); i32_mul; i32_add;
+                i32_load(0); local_set(pair_ptr); // a pair
+                // Scan b for the same key.
+                i32_const(0); local_set(found);
+                i32_const(0); local_set(j);
+                block_empty; loop_empty;
+                  local_get(j); local_get(b_len); i32_ge_u; br_if(1);
+                  local_get(pair_ptr); i32_load(0);
+                  local_get(b_list); i32_const(dat); i32_add;
+                  local_get(j); i32_const(4); i32_mul; i32_add;
+                  i32_load(0); i32_load(0); // b pair key
+                  call(self.emitter.rt.string.eq);
+                  if_empty; i32_const(1); local_set(found); br(2); end;
+                  local_get(j); i32_const(1); i32_add; local_set(j);
+                  br(0);
+                end; end;
+                local_get(new_list); i32_const(dat); i32_add;
+                local_get(i); i32_const(4); i32_mul; i32_add;
+                local_get(found);
+                if_i32;
+                  // Fresh pair [a.key +1][b[j].value +1] — j stopped at the hit.
+                  i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+                  local_get(result);
+                  local_get(pair_ptr); i32_load(0); call(self.emitter.rt.rc_inc);
+                  i32_store(0);
+                  local_get(result);
+                  local_get(b_list); i32_const(dat); i32_add;
+                  local_get(j); i32_const(4); i32_mul; i32_add;
+                  i32_load(0); i32_load(4); call(self.emitter.rt.rc_inc);
+                  i32_store(4);
+                  local_get(result);
+                else_;
+                  // SHARE: the pair stays owned by `a` too — own a +1.
+                  local_get(pair_ptr); call(self.emitter.rt.rc_inc);
+                end;
+                i32_store(0);
+                local_get(i); i32_const(1); i32_add; local_set(i);
+                br(0);
+              end; end;
+              // Pass 3: b's NEW keys append in b's order.
+              local_get(a_len); local_set(count);
+              i32_const(0); local_set(j);
+              block_empty; loop_empty;
+                local_get(j); local_get(b_len); i32_ge_u; br_if(1);
+                local_get(b_list); i32_const(dat); i32_add;
+                local_get(j); i32_const(4); i32_mul; i32_add;
+                i32_load(0); local_set(pair_ptr); // b pair
+                i32_const(0); local_set(found);
+                i32_const(0); local_set(i);
+                block_empty; loop_empty;
+                  local_get(i); local_get(a_len); i32_ge_u; br_if(1);
+                  local_get(pair_ptr); i32_load(0);
+                  local_get(a_list); i32_const(dat); i32_add;
+                  local_get(i); i32_const(4); i32_mul; i32_add;
+                  i32_load(0); i32_load(0);
+                  call(self.emitter.rt.string.eq);
+                  if_empty; i32_const(1); local_set(found); br(2); end;
+                  local_get(i); i32_const(1); i32_add; local_set(i);
+                  br(0);
+                end; end;
+                local_get(found); i32_eqz;
+                if_empty;
+                  local_get(new_list); i32_const(dat); i32_add;
+                  local_get(count); i32_const(4); i32_mul; i32_add;
+                  // SHARE: the appended pair stays owned by `b` too.
+                  local_get(pair_ptr); call(self.emitter.rt.rc_inc); i32_store(0);
+                  local_get(count); i32_const(1); i32_add; local_set(count);
+                end;
+                local_get(j); i32_const(1); i32_add; local_set(j);
+                br(0);
+              end; end;
+              // Build result box.
+              i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+              local_get(result); i32_const(6); i32_store(0);
+              local_get(result); local_get(new_list); i32_store(4);
+              local_get(result);
+            end;
         });
 
         self.scratch.free_i32(result);
