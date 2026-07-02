@@ -40,7 +40,7 @@ echo "building classify_corpus…" >&2
 # Verified 2026-07-02 after the wasm share/layout/value-semantics fixes (contracts C-121..C-125).
 # Update as new ones are checked. Not verifiable: almide-web / almide-sqlite / wasm-webgl / obsid / audio-poc (no tests),
 # almide-dojo (task-bank fixtures, not a compilable suite).
-BYTE_VERIFIED=" yaml sha1 toml svg rsa porta csv bigint base64 aes lumen homullus almide-bindgen almide-wasm-bindgen almide-lander almide-grammar "
+BYTE_VERIFIED=" yaml sha1 toml svg rsa porta csv bigint base64 aes lumen homullus nn almide-bindgen almide-wasm-bindgen almide-lander almide-grammar "
 
 # Only `src/*.almd` (a real module root) is swept, never embedded shims (`stdlib/`) or benchmark
 # fixtures (`research/`, `benchmark/`) — those misfired into bogus repo-level numbers (e.g.
@@ -167,13 +167,13 @@ agg="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$allwalls" | sort | uniq -c | sort 
   echo "| \`wasm-canvas\` | browser-hosted app | ✅ wasm builds clean |"
   echo "| \`wasm-webgl\` | browser-hosted app | ✅ wasm builds clean |"
   echo "| \`obsid\` | browser+native-hosted app | ✅ wasm builds clean (no test suite yet) |"
-  echo "| \`almide-aituber\` | browser-hosted app | 🔴 wasm emit fails STRUCTURAL VALIDATION on develop-v1 (\`type mismatch: expected i32, found i64\`) — builds clean on develop v0.27.13 → a v1-branch regression that PREDATES the 2026-07-02 session (reproduced at 59dfd762); repro: \`cd almide-aituber && almide build src/main.almd --target wasm\`; needs a v1-branch bisect |"
+  echo "| \`almide-aituber\` | browser-hosted app | ✅ wasm builds clean (the v1 divergence was the missing develop-side #717 auto-?-branch-retype fix — cherry-picked 2026-07-02) |"
   echo "| \`homullus\` | AI agent | ✅ byte-verified (suite, both targets) |"
-  echo "| \`almai\` | AI (LLM client lib) | 🔴 does not COMPILE on either branch: \`[COMPILER BUG] unresolvable bare type name(s) reached codegen\` — 8 provider modules each define \`Tool\`/\`ToolCall\`/\`Usage\`/\`LLMResponse\` and bare refs cannot pick one (#433 class, cross-module type resolution) |"
-  echo "| \`nn\` | AI (neural nets) | 🔴 does not COMPILE on either branch: unresolved \`__tco_tmp_data\` (ty=Unknown) in \`vocab_at_loop\`/\`parse_tensors_loop\` — the TCO temp misses type resolution and the build is honestly refused |"
+  echo "| \`nn\` | AI (neural nets) | ✅ byte-verified (suite: 13/13 files, both targets) — unblocked 2026-07-02 by the TCO-temp type fix, the nested-HOF lambda-pin fix (C-126), the Matrix repr, the SIMD fast-exp clamp, and the unwrap_or chain fix (C-127) |"
+  echo "| \`almai\` | AI (LLM client lib) | 🔴 still red, root causes NARROWED 2026-07-02: field-DEFAULT fill now survives the flatten mangle (E0063 class fixed); the remaining ~37 errors are the root \`LLMResponse\` vs \`openai.LLMResponse\` NOMINAL/STRUCTURAL fork — the checker accepts same-shape records across modules, codegen makes them distinct Rust structs. Needs a language-level decision (reject in check, or insert conversions). The test files' bare \`ToolCall\` refs are the same fork |"
+
   echo
-  echo "The three 🔴 are COMPILER findings, not app bugs: almai / nn fail identically on develop"
-  echo "v0.27.13 (pre-existing frontend gaps); almide-aituber is the only v1-vs-develop divergence."
+  echo "almai's remaining 🔴 is a COMPILER-SEMANTICS finding (also red on develop), not an app bug."
 } > "$OUT"
 
 echo "wrote $OUT (${clean}/${counted} at wall=0)" >&2
