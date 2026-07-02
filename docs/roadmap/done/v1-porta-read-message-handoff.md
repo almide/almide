@@ -1,3 +1,5 @@
+<!-- description: PC-switch handoff: porta wall=0 + read_message cross-module on v1 (steps 1-3 done) -->
+<!-- done: 2026-07-02 -->
 # Handoff — porta wall=0 + read_message cross-module on v1 (session record)
 
 > **Branch `develop-v1`. Written for a PC switch — pick up from here.** All code is committed
@@ -110,3 +112,21 @@ bug** on this branch.
 - Dashboard: `docs/org-trust-status.md` (17/17 wall=0, porta notes).
 - Memory (if synced): `project_v1_read_message_run_landscape`, `project_v1_trust_spine`, `project_org_trust_sweep`.
 - The push of develop-v1 is pending the user's word.
+
+---
+
+## Completion record (2026-07-02, follow-up session)
+
+Steps 1–3 of "Next steps" are DONE on `develop-v1`:
+
+1. porta's native build: 52 errors → 0 (the "toml-dep" attribution was wrong — see
+   [v1-org-byte-verification.md](../active/v1-org-byte-verification.md) for the real
+   decomposition and fixes). Full porta test suite green on both targets.
+2. Byte-match verification: every org repo WITH a test suite now passes both
+   `almide test --target native` and `--target wasm` in full (14 repos), after six
+   wasm bug classes were fixed (contracts C-121..C-125).
+3. Run-rate: superseded by the both-targets suite sweep — the per-repo state is in
+   `docs/org-trust-status.md`.
+
+Step 4 (read_message on the VERIFIED render_program path) remains open and is
+tracked in v1-org-byte-verification.md.

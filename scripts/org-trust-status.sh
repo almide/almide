@@ -35,8 +35,12 @@ BIN="$work_root/target/debug/examples/classify_corpus"
 echo "building classify_corpus…" >&2
 ( cd "$work_root" && cargo build -q -p almide-mir --example classify_corpus )
 
-# The repos verified by a real v0==v1 byte-match (not just wall=0). Update as new ones are checked.
-BYTE_VERIFIED=" yaml sha1 "
+# The repos verified by a real v0==wasm byte-match (not just wall=0): the repo's OWN test suite
+# passes in full on BOTH `almide test --target native` and `almide test --target wasm`.
+# Verified 2026-07-02 after the wasm share/layout/value-semantics fixes (contracts C-121..C-125).
+# Update as new ones are checked. Not verifiable: almide-web / almide-sqlite / wasm-webgl / obsid / audio-poc (no tests),
+# almide-dojo (task-bank fixtures, not a compilable suite).
+BYTE_VERIFIED=" yaml sha1 toml svg rsa porta csv bigint base64 aes lumen almide-bindgen almide-wasm-bindgen almide-lander almide-grammar "
 
 # Only `src/*.almd` (a real module root) is swept, never embedded shims (`stdlib/`) or benchmark
 # fixtures (`research/`, `benchmark/`) — those misfired into bogus repo-level numbers (e.g.
@@ -143,10 +147,11 @@ agg="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$allwalls" | sort | uniq -c | sort 
   echo
   echo "- **Every** \`src/*.almd\` module is swept (not just the entry). classify_corpus reads one file with no cross-module import resolution, so a module that imports a SIBLING is skipped — surfaced per repo as \`+N xmod\`. The real number is therefore an UNDER-count (the skipped importers add more), never an over-count."
   echo "- The \`almide\` repo itself is the v0 corpus (its own \`proofs/corpus-wall.sh\` gate), not a target here."
-  echo "- \`porta\` is a NATIVE HOST (\`almide.toml\`: wasmtime + reqwest/Net) — the full MCP server is native-only by design (WASI preview1 has no net and can't embed wasmtime), so the 25 native-FFI are its host calls and only its PORTABLE protocol layer (jsonrpc/config) is in the v1 subset. 'porta wall=0' = that layer lowers."
-  echo "- ✅ **first cross-module byte-match milestone**: porta's \`read_message\` (jsonrpc — a cross-module \`Result[Option[JsonRpcRequest]]\` parsed from a Content-Length frame over \`io.read_n_bytes\`) is byte-verified on v1 (\`almide run --target wasm\` == native, no trap) after the io.read_n_bytes WASI floor (949cd0cb) + the effect-fn control-flow-tail return-type fix (81840f8d). \`porta\` stays 🟡 because the REST of its protocol layer is not byte-verified yet."
-  echo "- To byte-verify a repo: render its functions to wasm and diff v0 (native) vs v1 (wasmtime) over the"
-  echo "  repo's test vectors, then add it to \`BYTE_VERIFIED\` in the script."
+  echo "- \`porta\` is a NATIVE HOST (\`almide.toml\`: wasmtime + reqwest/Net) — the full MCP server is native-only by design (WASI preview1 has no net and can't embed wasmtime), so the 25 native-FFI are its host calls and only its PORTABLE protocol layer (jsonrpc/config) is in the v1 subset. Its byte-verification = the full test suite on both targets (7/7 wasm-runnable files + 1 FFI file native-only by design), plus the native (v0) build of the full MCP server, both green."
+  echo "- ✅ **byte-verified** = the repo's OWN test suite passes IN FULL on both \`almide test --target native\` and \`--target wasm\` (the assertions are the vectors). The 2026-07-02 sweep took this from 2 repos (yaml, sha1) to every repo WITH a test suite, after fixing six wasm bug classes the sweep itself flushed out (share/+1 on pass-through and copied-pair paths, list-layout under-allocation, missing Value deep-eq, value.merge oracle mismatch, bytes.set value semantics — contracts C-121..C-125; see docs/roadmap/active/v1-org-byte-verification.md)."
+  echo "- Repos that CANNOT be byte-verified yet: \`almide-web\` / \`almide-sqlite\` (no test vectors — write suites first), \`almide-dojo\` (task-bank fixtures, not a compilable suite)."
+  echo "- To byte-verify a repo: run its own tests on BOTH targets (\`almide test --target native\` and"
+  echo "  \`--target wasm\`), require a full pass on each, then add it to \`BYTE_VERIFIED\` in the script."
 } > "$OUT"
 
 echo "wrote $OUT (${clean}/${counted} at wall=0)" >&2
