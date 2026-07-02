@@ -82,6 +82,25 @@ pub fn mk_twin(l: String) -> Twin = Twin { label: l, score: 1 }
 
 pub fn read_twin(t: Twin) -> String = t.label
 
+type Wrap = { v: Int }
+
+pub fn mk_wrap(v: Int) -> Wrap = Wrap { v: v }
+
+pub fn wrap_value(w: Wrap) -> Int = w.v
+
+@inline_rust("{ let w = {w}; Wrap { v: w.v + 1 } }")
+pub fn bump_wrap(w: Wrap) -> Wrap = Wrap { v: w.v + 1 }
+
+type Node = { tag: String, children: List[Node] }
+
+pub fn node(tag: String, children: List[Node]) -> Node = Node { tag: tag, children: children }
+
+pub fn show(n: Node) -> String = {
+  let kids = n.children |> list.map((c) => show(c)) |> list.join("")
+  if list.is_empty(n.children) then "<${n.tag}/>"
+  else "<${n.tag}>${kids}</${n.tag}>"
+}
+
 fn parse_flag(s: String) -> Result[String, String] =
   if s == "yes" then ok("y") else err("n")
 
@@ -444,6 +463,39 @@ effect fn main() -> Unit = {
 }
 "#,
             expected: "from-mod\nfrom-root",
+            status: Status::Works,
+        },
+        // RECURSIVE record type across the module boundary: unifying `El`
+        // with its module twin `lib.El` expands both to record form and
+        // recurses into `children: List[El]` — without the equi-recursive
+        // pair guard in unify_structural this re-reached El×lib.El forever
+        // (compiler stack overflow; the svg `render(group(..))` shape).
+        Cell {
+            name: "recursive_record_type_cross_module",
+            main: r#"import self as m
+effect fn main() -> Unit = {
+  let g = m.node("g", [m.node("rect", []), m.node("g", [m.node("circle", [])])])
+  println(m.show(g))
+}
+"#,
+            expected: "<g><rect/><g><circle/></g></g>",
+            status: Status::Works,
+        },
+        // A user package's `@inline_rust` fn with a REAL Almide body: native
+        // pastes the template (whose bare struct tokens must survive the
+        // flatten mangle — requalified by StdlibLowering), wasm compiles the
+        // body (the attr is a native-only optimization). Both used to fail
+        // cross-module: E0422 on the unmangled struct name / `no WASM
+        // dispatch` ICE (the aes cfb8_encrypt shape).
+        Cell {
+            name: "inline_rust_with_fallback_body_cross_module",
+            main: r#"import self as m
+effect fn main() -> Unit = {
+  let w = m.bump_wrap(m.mk_wrap(4))
+  println(int.to_string(m.wrap_value(w)))
+}
+"#,
+            expected: "5",
             status: Status::Works,
         },
         // ResultPropagation Phase 2b: an `effect fn main() -> Result[..]` whose

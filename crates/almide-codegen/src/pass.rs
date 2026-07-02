@@ -307,6 +307,12 @@ impl Pipeline {
             }
 
             let pass_name = pass.name();
+            // Debug aid: name each pass BEFORE it runs, so a pass that never
+            // returns (infinite recursion → stack overflow) is identifiable —
+            // the ALMIDE_PROFILE line only prints on completion.
+            if std::env::var_os("ALMIDE_TRACE_PASSES").is_some() {
+                eprintln!("[pass:start] {}", pass_name);
+            }
             // Time only through the wasm-safe shim (raw std::time is forbidden in
             // this crate — it panics on the wasm32-unknown-unknown playground).
             let _pass_t = almide_base::profile::ProfileTimer::start(
