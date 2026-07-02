@@ -61,6 +61,34 @@ fn inline_rust_spec(module: Sym, func: Sym) -> Option<InlineRustSpec> {
     INLINE_RUST.with(|s| s.borrow().get(&(module, func)).cloned())
 }
 
+/// Replace whole-identifier occurrences of `from` with `to` in raw Rust
+/// template text: a match is skipped when it abuts an identifier character
+/// (so `Cfb8State` never clips `MyCfb8State`) or a `.` (already-qualified
+/// `aes.Cfb8State` and field accesses stay untouched).
+fn replace_ident_token(text: &str, from: &str, to: &str) -> String {
+    let bytes = text.as_bytes();
+    let is_ident = |b: u8| b == b'_' || b.is_ascii_alphanumeric();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(from.as_bytes()) {
+            let before_ok = i == 0 || (!is_ident(bytes[i - 1]) && bytes[i - 1] != b'.');
+            let after = i + from.len();
+            let after_ok = after >= bytes.len() || !is_ident(bytes[after]);
+            if before_ok && after_ok {
+                out.push_str(to);
+                i = after;
+                continue;
+            }
+        }
+        // Advance one full UTF-8 char (templates may hold non-ASCII strings).
+        let ch_len = text[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+        out.push_str(&text[i..i + ch_len]);
+        i += ch_len;
+    }
+    out
+}
+
 /// Strip owning / borrowing / cloning decorations from an
 /// `@inline_rust` arg before it lands in an `InlineRust` node.
 ///
@@ -245,20 +273,38 @@ impl NanoPass for StdlibLoweringPass {
         // attribute values). Source fallback only fills in modules
         // that IR didn't provide.
         // Scan ALL modules (bundled + packages) for @inline_rust templates.
-        let mut inline_rust: HashMap<(Sym, Sym), InlineRustSpec> = program.modules.iter()
-            .flat_map(|m| {
-                let mname = m.name;
-                m.functions.iter().filter_map(move |f| {
-                    find_inline_rust_template(f).map(|template| {
-                        let param_names = f.params.iter().map(|p| p.name).collect();
-                        let defaults = f.params.iter()
-                            .map(|p| p.default.as_ref().map(|d| (**d).clone()))
-                            .collect();
-                        ((mname, f.name), InlineRustSpec { template, param_names, defaults })
-                    })
-                })
-            })
-            .collect();
+        let mut inline_rust: HashMap<(Sym, Sym), InlineRustSpec> = HashMap::new();
+        for m in &program.modules {
+            let mname = m.name;
+            // A USER package's template references its OWN structs by their
+            // package-local bare names (`Cfb8State { .. }`), but post-flatten
+            // those structs are mangled (`almide_rt_aes_Cfb8State`) — the
+            // pasted text failed as E0422 when the call site was in ANOTHER
+            // module (aes cfb8 via `import self`). Requalify bare type tokens
+            // to the decl's canonical dotted name while the owning module is
+            // still known; the flatten pass rewrites dotted → mangled inside
+            // templates like every other reference. Bundled stdlib types stay
+            // bare — they are never mangled.
+            let own_types: Vec<(String, &str)> = if almide_lang::stdlib_info::is_bundled_module(mname.as_str()) {
+                Vec::new()
+            } else {
+                m.type_decls.iter().filter_map(|td| {
+                    let full = td.name.as_str();
+                    full.rsplit_once('.').map(|(_, base)| (base.to_string(), full))
+                }).collect()
+            };
+            for f in &m.functions {
+                let Some(mut template) = find_inline_rust_template(f) else { continue };
+                for (base, full) in &own_types {
+                    template = replace_ident_token(&template, base, full);
+                }
+                let param_names = f.params.iter().map(|p| p.name).collect();
+                let defaults = f.params.iter()
+                    .map(|p| p.default.as_ref().map(|d| (**d).clone()))
+                    .collect();
+                inline_rust.insert((mname, f.name), InlineRustSpec { template, param_names, defaults });
+            }
+        }
         let loaded_bundled_modules: std::collections::HashSet<Sym> = program.modules.iter()
             .map(|m| m.name)
             .collect();

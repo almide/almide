@@ -593,9 +593,21 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
             // `calls_<module>.rs` (TOML-backed intrinsics); the bundled
             // fn's body (typically `_` / Hole) is never needed and would
             // fail to compile. Skip registration + emission.
-            if func.attrs.iter().any(|a|
-                matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic" | "intrinsic"))
-            {
+            //
+            // BUT a USER package's `@inline_rust` fn can carry a REAL Almide
+            // body as its portable implementation (aes cfb8_encrypt) — there
+            // the attr is a NATIVE-target optimization only, and wasm must
+            // compile the body like any module fn. Previously these were
+            // skipped too, so a cross-module call ICE'd with `no WASM
+            // dispatch`. Skip only the dispatch-only (Hole-bodied) form;
+            // `@wasm_intrinsic`/`@intrinsic` always skip (the wasm emitter
+            // itself IS their implementation).
+            let has_intrinsic_attr = func.attrs.iter().any(|a|
+                matches!(a.name.as_str(), "wasm_intrinsic" | "intrinsic"));
+            let has_inline_rust = func.attrs.iter().any(|a| a.name.as_str() == "inline_rust");
+            let body_is_hole = matches!(func.body.kind,
+                almide_ir::IrExprKind::Hole | almide_ir::IrExprKind::Todo { .. });
+            if has_intrinsic_attr || (has_inline_rust && body_is_hole) {
                 continue;
             }
             let func_name_sanitized = func.name.to_string().replace(' ', "_").replace('-', "_").replace('.', "_");

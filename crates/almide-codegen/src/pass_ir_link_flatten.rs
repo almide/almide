@@ -273,6 +273,23 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
         IrExprKind::RcWrap { cast_ty: Some(ty), .. } => {
             **ty = rename_ty(ty, map);
         }
+        // A user package's `@inline_rust` template is raw Rust text that can
+        // reference the package's OWN structs. StdlibLowering requalified those
+        // tokens to the canonical dotted name (`aes.Cfb8State`); mangle them to
+        // the flat struct name here, exactly like every Ty reference. A dotted
+        // token cannot occur in valid Rust, so plain textual replacement is
+        // unambiguous — longest keys first so `m.Cfg` never clips `m.CfgSet`.
+        IrExprKind::InlineRust { template, .. } => {
+            if template.contains('.') {
+                let mut keys: Vec<&String> = map.keys()
+                    .filter(|k| template.contains(k.as_str()))
+                    .collect();
+                keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
+                for k in keys {
+                    *template = template.replace(k.as_str(), map[k].as_str());
+                }
+            }
+        }
         _ => {}
     }
     e
