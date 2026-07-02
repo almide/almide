@@ -65,6 +65,22 @@ dashboard record the new state. Exclusions: almide-web / almide-sqlite (no
 tests — need vectors first), almide-dojo (task-bank fixtures, not a compilable
 suite), almide-bindgen (see dashboard).
 
+## Graphics / AI stack spot-check (same day, follow-up)
+
+Recorded in the dashboard's "Graphics / AI stack" section: svg/lumen/homullus
+byte-verified (suites, both targets); canvas/wasm-canvas/wasm-webgl/obsid build
+clean wasm (browser-hosted — headless run N/A). Three compiler findings:
+
+- **almide-aituber**: wasm emit fails structural validation on develop-v1
+  (`type mismatch: expected i32, found i64`) but builds clean on develop
+  v0.27.13 — the only v1-vs-develop divergence found; predates the 2026-07-02
+  session (reproduced at 59dfd762). Needs a v1-branch bisect.
+- **almai**: `[COMPILER BUG] unresolvable bare type name(s) reached codegen` on
+  BOTH branches — 8 provider modules define the same type names and bare refs
+  can't resolve (#433 class).
+- **nn**: unresolved `__tco_tmp_data` (ty=Unknown) on BOTH branches — the TCO
+  temp misses type resolution; the build is honestly refused.
+
 ## Remaining threads
 
 - **Cross-module `@inline_rust` fns** (aes cfb8_encrypt via `import self`) ICE
