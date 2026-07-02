@@ -1445,3 +1445,13 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/value_deep_eq.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-125"
+title     = "bytes.set has value semantics — never observable through the input"
+statement = "`bytes.set(b, i, v)` mirrors the native oracle `almide_rt_bytes_set` exactly: it CLONES and returns a new Bytes, so the mutation is never observable through `b` or any binding sharing its buffer — including a fn param (the caller's value stays intact) and a local alias. The wasm emitter previously stored in place unconditionally, so `encrypt_block(iv, …)` inside the aes cfb8 loop clobbered the caller's iv and produced wrong NIST vectors while native was correct. The in-place fast path survives only for the provably-unaliased `x = bytes.set(x, …)` self-update (AliasCowPass marks copy-aliased and param-reachable targets, vetoing the peephole), which is unobservable — byte-identical to native."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_set_value_semantics.almd", class = "fixture" },
+]

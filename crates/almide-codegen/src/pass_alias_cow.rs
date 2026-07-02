@@ -68,13 +68,16 @@ impl NanoPass for AliasCowPass {
         let shared_mut = program.codegen_annotations.shared_mut_vars.clone();
         let module_vars = collect_module_vars(&program);
 
-        let bodies = program.functions.iter().map(|f| &f.body)
-            .chain(program.top_lets.iter().map(|tl| &tl.value))
+        let no_params: Vec<VarId> = Vec::new();
+        let bodies = program.functions.iter()
+            .map(|f| (&f.body, f.params.iter().map(|p| p.var).collect::<Vec<_>>()))
+            .chain(program.top_lets.iter().map(|tl| (&tl.value, no_params.clone())))
             .chain(program.modules.iter().flat_map(|m|
-                m.functions.iter().map(|f| &f.body).chain(m.top_lets.iter().map(|tl| &tl.value))));
+                m.functions.iter().map(|f| (&f.body, f.params.iter().map(|p| p.var).collect::<Vec<_>>()))
+                    .chain(m.top_lets.iter().map(|tl| (&tl.value, no_params.clone())))));
 
-        for body in bodies {
-            let mut a = AliasAnalysis::new(&program.var_table);
+        for (body, params) in bodies {
+            let mut a = AliasAnalysis::new(&program.var_table, &params);
             a.visit_expr(body);
             for v in a.finish() {
                 // Exclude deliberately-shared closure cells and module globals.
@@ -125,11 +128,19 @@ struct AliasAnalysis<'a> {
     /// Vars that are the target of an in-place mutation (statement kinds or an
     /// in-place stdlib mutator's `args[0]`).
     mutated: std::collections::HashSet<VarId>,
+    /// Heap-typed fn params. A param's value is OWNED BY THE CALLER — the callee
+    /// cannot see its aliases (`let e = touch(iv)` shares iv's buffer with `b`
+    /// inside `touch`), so a param — and anything in its alias class — is
+    /// treated as aliased unconditionally.
+    params: std::collections::HashSet<VarId>,
 }
 
 impl<'a> AliasAnalysis<'a> {
-    fn new(var_table: &'a VarTable) -> Self {
-        AliasAnalysis { var_table, parent: HashMap::new(), mutated: Default::default() }
+    fn new(var_table: &'a VarTable, params: &[VarId]) -> Self {
+        let params = params.iter().copied()
+            .filter(|v| (v.0 as usize) < var_table.len() && is_heap_aliasable(&var_table.get(*v).ty))
+            .collect();
+        AliasAnalysis { var_table, parent: HashMap::new(), mutated: Default::default(), params }
     }
 
     fn is_heap_var(&self, v: VarId) -> bool {
@@ -191,18 +202,23 @@ impl<'a> AliasAnalysis<'a> {
         }
     }
 
-    /// Intersect: a var is in `needs_cow` iff it is mutated in place AND its
-    /// may-alias class has size > 1 (some other heap binding shares its value).
+    /// Intersect: a var is in `needs_cow` iff it is mutated in place AND either
+    /// its may-alias class has size > 1 (some other heap binding shares its
+    /// value) or the class reaches a fn param (the CALLER may still hold the
+    /// value — cross-function aliasing the per-function analysis cannot see).
     fn finish(mut self) -> Vec<VarId> {
         // class size per root.
         let mutated: Vec<VarId> = self.mutated.iter().copied().collect();
         let members: Vec<VarId> = self.parent.keys().copied().collect();
         let mut class_size: HashMap<VarId, usize> = HashMap::new();
         for m in members { let r = self.find(m); *class_size.entry(r).or_insert(0) += 1; }
+        let params: Vec<VarId> = self.params.iter().copied().collect();
+        let param_roots: std::collections::HashSet<VarId> =
+            params.into_iter().map(|p| self.find(p)).collect();
         let mut out = Vec::new();
         for v in mutated {
             let r = self.find(v);
-            if class_size.get(&r).copied().unwrap_or(0) > 1 {
+            if class_size.get(&r).copied().unwrap_or(0) > 1 || param_roots.contains(&r) {
                 out.push(v);
             }
         }
@@ -214,7 +230,19 @@ impl IrVisitor for AliasAnalysis<'_> {
     fn visit_expr(&mut self, expr: &IrExpr) {
         // In-place stdlib mutator: `list.push(a, x)`, `map.insert(a, k, v)`, …
         if let IrExprKind::RuntimeCall { symbol, args } = &expr.kind {
-            if is_inplace_mutator(symbol.as_str()) {
+            if is_inplace_mutator(symbol.as_str()) || symbol.as_str() == "almide_rt_bytes_set" {
+                if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
+                    self.mark_mutated(*id);
+                }
+            }
+        }
+        // `bytes.set(x, i, v)` is VALUE-returning in the oracle (native clones),
+        // but the wasm emitter's `x = bytes.set(x, …)` Assign peephole stores in
+        // place — count it as a mutation of `x` so an aliased/param-reachable
+        // target lands in needs_cow and VETOES that fast path (the general emit
+        // then clones, mirroring native).
+        if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &expr.kind {
+            if module.as_str() == "bytes" && func.as_str() == "set" {
                 if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
                     self.mark_mutated(*id);
                 }

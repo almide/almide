@@ -209,6 +209,47 @@ impl FuncCompiler<'_> {
                         }
                     }
                 }
+                // Peephole: x = bytes.set(x, i, v) → in-place byte store. The
+                // oracle `bytes.set` is VALUE-returning (native CLONES), so the
+                // in-place fast path is valid ONLY for a self-update whose target
+                // is provably unaliased: not COW-marked (AliasCowPass marks
+                // copy-aliased and param-reachable bytes.set targets) and not a
+                // shared-cell capture. Everything else takes the general
+                // emit_bytes_call path, which clones a shared input.
+                if let IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, args, .. } = &value.kind {
+                    if module.as_str() == "bytes" && func.as_str() == "set" && args.len() == 3 {
+                        if let IrExprKind::Var { id } = &args[0].kind {
+                            if *id == *var
+                                && !self.emitter.needs_cow.contains(&var.0)
+                                && !self.emitter.mutable_captures.contains(&var.0)
+                            {
+                                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                    let idx = self.scratch.alloc_i32();
+                                    let val = self.scratch.alloc_i32();
+                                    self.emit_expr(&args[1]);
+                                    wasm!(self.func, { i32_wrap_i64; local_set(idx); });
+                                    self.emit_expr(&args[2]);
+                                    wasm!(self.func, {
+                                        i32_wrap_i64; local_set(val);
+                                        // bounds check: idx < len (mirrors bytes.set)
+                                        local_get(idx); local_get(local_idx); i32_load(0); i32_lt_u;
+                                        if_empty;
+                                          local_get(local_idx);
+                                          i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
+                                          i32_add; local_get(idx); i32_add;
+                                          local_get(val);
+                                          i32_store8(0);
+                                        end;
+                                        // ptr unchanged — no local_set needed
+                                    });
+                                    self.scratch.free_i32(val);
+                                    self.scratch.free_i32(idx);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
                 let is_cell = self.emitter.mutable_captures.contains(&var.0);
                 let local_idx = match self.var_map.get(&var.0) {
                     Some(&idx) => idx,

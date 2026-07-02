@@ -3,7 +3,7 @@
 //! Memory layout: [len:i32][data:u8...]  (same as String)
 
 use super::FuncCompiler;
-use almide_ir::IrExpr;
+use almide_ir::{IrExpr, IrExprKind};
 
 /// Requested primitive load for the typed byte-read family.
 #[derive(Clone, Copy)]
@@ -111,11 +111,25 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(buf);
             }
             "set" => {
-                // bytes.set(b, i, val) → Bytes (mutate in place, return same pointer)
+                // bytes.set(b, i, val) → Bytes. ORACLE-pure: the native runtime
+                // CLONES and returns a new Vec (value semantics), so a shared
+                // input — a named Var (locals may alias, params alias the
+                // caller's value) or an alias-shaped expr — must be cloned
+                // before the store, or the mutation is observable through the
+                // other binding (aes cfb8: `encrypt_block(iv, …)` clobbered the
+                // caller's loop iv). The in-place fast path lives ONLY in the
+                // `x = bytes.set(x, …)` Assign peephole (statements.rs) for
+                // provably-unaliased targets. A non-Var, non-alias arg is a
+                // fresh temp this call uniquely owns — no clone needed.
                 let buf = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
                 let val = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
+                if matches!(&args[0].kind, IrExprKind::Var { .. })
+                    || crate::pass_perceus::yields_borrowed_alias(&args[0])
+                {
+                    wasm!(self.func, { call(self.emitter.rt.cow_check); });
+                }
                 wasm!(self.func, { local_set(buf); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { i32_wrap_i64; local_set(idx); });

@@ -1,0 +1,58 @@
+// @contract: C-125
+// `bytes.set(b, i, v)` is VALUE-returning: the native oracle clones and
+// returns a new Vec, so the mutation is NEVER observable through `b` or any
+// binding that shares its buffer. The wasm emitter previously stored in place
+// unconditionally, so a set through a fn param clobbered the CALLER's value
+// (aes cfb8: `encrypt_block(iv, …)` corrupted the loop's iv → wrong NIST
+// vectors), and a set through a local alias was visible through the source.
+// The in-place fast path survives only for the provably-unaliased
+// `x = bytes.set(x, …)` self-update (AliasCowPass vetoes aliased/param
+// targets), which is unobservable — exactly the native result.
+
+fn touch(b: Bytes) -> Bytes = {
+  var s = b
+  s = bytes.set(s, 0, 99)
+  s
+}
+
+fn touch_direct(b: Bytes) -> Bytes = bytes.set(b, 0, 88)
+
+type St = { iv: Bytes }
+
+fn rotate(state: St, n: Int) -> Bytes = {
+  var iv = state.iv
+  for _i in 0..n {
+    let first = bytes.read_u8(iv, 0)
+    iv = bytes.concat(bytes.slice(iv, 1, 4), bytes.from_list([first + 10]))
+  }
+  iv
+}
+
+fn main() -> Unit = {
+  // Param-shared buffer: the caller's binding must be untouched.
+  var a = bytes.from_list([1, 2, 3, 4])
+  let e1 = touch(a)
+  println("t ${int.to_string(bytes.read_u8(e1, 0))} ${int.to_string(bytes.read_u8(a, 0))}")
+  let e2 = touch_direct(a)
+  println("d ${int.to_string(bytes.read_u8(e2, 0))} ${int.to_string(bytes.read_u8(a, 0))}")
+
+  // Local alias: mutating the copy is invisible through the source.
+  var src = bytes.from_list([5, 6, 7, 8])
+  var cp = src
+  cp = bytes.set(cp, 0, 77)
+  println("l ${int.to_string(bytes.read_u8(cp, 0))} ${int.to_string(bytes.read_u8(src, 0))}")
+
+  // Member-alias var reassigned in a loop with a helper reading it (the aes
+  // cfb8 shape): the record's field must survive the loop unchanged.
+  let st = St { iv: bytes.from_list([1, 2, 3, 4]) }
+  let out = rotate(st, 3)
+  println(bytes.to_list(out) |> list.map((x) => int.to_string(x)) |> list.join(","))
+  println(bytes.to_list(st.iv) |> list.map((x) => int.to_string(x)) |> list.join(","))
+
+  // The fast self-update path still works (fresh, unaliased buffer).
+  var buf = bytes.new(4)
+  for i in 0..4 {
+    buf = bytes.set(buf, i, (i + 1) * 3)
+  }
+  println(bytes.to_list(buf) |> list.map((x) => int.to_string(x)) |> list.join(","))
+}
