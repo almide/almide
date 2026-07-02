@@ -483,6 +483,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .filter(|(cn, _)| cn == ctor_name_str)
                 .cloned()
                 .collect();
+            if default_keys.is_empty() && std::env::var("ALMIDE_DEFAULTS_DEBUG").is_ok() {
+                let all: Vec<&String> = ctx.ann.default_fields.keys().map(|(c, _)| c).collect();
+                eprintln!("[defaults-miss] ctor={:?} known={:?}", ctor_name_str, all);
+            }
             // `default_fields` is a HashMap, so `.keys()` iteration order is
             // per-process (RandomState). Sort the default fields we append so
             // the emitted struct literal is host-deterministic. Explicit fields

@@ -114,6 +114,20 @@ fn mangle_qualified_type_names(program: &mut IrProgram) {
     for d in &mut program.def_table.entries {
         d.ty = rename_ty(&d.ty, &map);
     }
+    // The flatten rename must reach every NAME-KEYED annotation too: the walker
+    // looks up default/boxed fields by the ctor name it sees POST-flatten
+    // (`almide_rt_mod_Type`), while the producing passes registered the
+    // pre-flatten `mod.Type` — so a flattened module type's field DEFAULTS were
+    // silently skipped (almai: `Message { role, content }` missing its
+    // defaulted `tool_calls` → generated-Rust E0063).
+    let remap = |n: &str| map.get(n).map(|s| s.as_str().to_string()).unwrap_or_else(|| n.to_string());
+    let ann = &mut program.codegen_annotations;
+    ann.default_fields = std::mem::take(&mut ann.default_fields).into_iter()
+        .map(|((c, f), e)| ((remap(&c), f), e)).collect();
+    ann.boxed_fields = std::mem::take(&mut ann.boxed_fields).into_iter()
+        .map(|(c, f)| (remap(&c), f)).collect();
+    ann.ctor_to_enum = std::mem::take(&mut ann.ctor_to_enum).into_iter()
+        .map(|(c, e)| (remap(&c), remap(&e))).collect();
 }
 
 fn rename_type_decl_kind(kind: &mut IrTypeDeclKind, map: &HashMap<String, Sym>) {
