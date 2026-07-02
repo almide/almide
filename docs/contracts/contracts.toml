@@ -1455,3 +1455,24 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_set_value_semantics.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-126"
+title     = "Nested-lambda HOF params keep their inference link (no literal sig-generic pin)"
+statement = "An unannotated lambda param inside another lambda resolves through the union-find like any inference var: the #653 expected-type pin never writes the CALLEE's own unbound generic (`A` when the collection arg is itself an unresolved var) into the param, while a pin that denotes an IN-SCOPE rigid generic (`names[T: Labelled]` calling `list.map(xs, (e) => e.name())`) still applies. Previously the literal `A` disconnected the param from the solver and the inner `let sq = list.map(row, (x) => x*x)` defaulted its element type to Int — native rendered `Vec<i64>`/`Fn(f64) -> i64` (E0308/E0271) and wasm emitted an invalid module (i64 vs f64), the nn variance_rows shape."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/nested_hof_lambda_inference.almd", class = "fixture" },
+  { path = "spec/wasm_cross/protocol_ufcs_inferred_lambda.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-127"
+title     = "unwrap_or sizes its payload from the default when the chain type is unresolved"
+statement = "`option.unwrap_or` and `result.unwrap_or` derive their payload width from the DEFAULT argument whenever the Option/Result inner type arrives unresolved from a generic chain (`list.find |> option.map |> option.unwrap_or`, the nn gguf get_alignment shape). The wasm emit previously picked the pointer-width arm from the unresolved inner while the default arm emitted its real width — an `if (result i32)` block with an `i64.const` arm that failed structural validation; native was correct. `unwrap_or(o: Option[T], d: T)` makes the default's type authoritative."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/generic_chain_unwrap_or.almd", class = "fixture" },
+]
