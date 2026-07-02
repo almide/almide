@@ -1405,3 +1405,33 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/filter_map_conditional_arm.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-121"
+title     = "String pass-through fast paths hand back an owned (+1) reference"
+statement = "String runtime fns whose fast path returns the INPUT string unchanged — `string.replace` with no occurrence, `string.replace_first` on a miss, `string.pad_start`/`string.pad_end` when the width is already satisfied, and `string.capitalize` of the empty string — hand the caller its OWN reference (SHARE +1), so a pipe chain of no-match links byte-matches native. The WASM emitter previously returned the input borrowed: every no-match link added an extra Dec of the same buffer, and a 3-link no-match `string.replace` chain (the svg `escape_attr` shape) under-flowed the refcount and trapped `__rc_dec` while native printed the correct output."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_passthrough_share.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-122"
+title     = "Value object ops allocate full list layout and share pairs with +1"
+statement = "`value.merge`, `value.pick`, `value.omit`, `json.keys`, and the ok path of `value.get`/`value.field` build their result from an existing object's pairs: the result list uses the FULL `[len][cap][data]` layout and owns a +1 on every shared pair pointer, key string, and ok payload. The WASM emitter previously allocated the pair list 4 bytes short (no cap word — the last element write clobbered the adjacent heap block), left cap uninitialized, and copied the pointers borrowed: `value.merge(a, b)` read back `{\"\":null}`, `list.get(json.keys(v), 0) ?? d` freed the object's live key, and the toml array-of-tables parse silently dropped fields on wasm while native was correct."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/value_object_ops_share.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-123"
+title     = "Record spread shares copied heap fields and alias overrides with +1"
+statement = "`{ ...base, field: v }` byte-copies the base record, so every duplicated heap-field pointer is reachable from two records: the copy owns a +1 per non-overridden heap field, and a borrowed-alias override (a Var) is retained under the same `emit_stored_field` +1 rule as a plain `Record` field. The WASM emitter previously copied both borrowed: the svg `doc` shape (`{ ...piped_base, children }`) rendered `<svg/>` with its attrs Map freed once the piped base temp was dropped, then trapped `__rc_dec` at the scope-end drops, while native printed the full element."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/spread_record_share.almd", class = "fixture" },
+]
