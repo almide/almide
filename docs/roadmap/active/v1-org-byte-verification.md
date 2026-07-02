@@ -81,6 +81,39 @@ clean wasm (browser-hosted — headless run N/A). Three compiler findings:
 - **nn**: unresolved `__tco_tmp_data` (ty=Unknown) on BOTH branches — the TCO
   temp misses type resolution; the build is honestly refused.
 
+## Second pass — the v0 leftovers rescued onto v1 (2026-07-02, same day)
+
+Directive: don't backport to v0; make v1 the branch where these work.
+
+- **nn: 0/13 → 13/13 both targets** (now in `BYTE_VERIFIED`). Five compiler
+  fixes, each with the failing shape minimized first: (1) TCO borrow-preserved
+  Bytes temps carry their REAL type; the Rust-side "no annotation" intent moved
+  to `codegen_annotations.infer_binding_tys` (the old `Ty::Unknown` smuggle was
+  rightly refused by the ConcretizeTypes gate); (2) the #653 lambda-param pin
+  no longer writes the CALLEE's own unbound generic into the param (nested-HOF
+  element types silently defaulted to Int — C-126), while in-scope rigid
+  generics (`names[T: Labelled]`) still pin; (3) `AlmideMatrix` got an
+  `AlmideRepr` impl (constructor form, the Set precedent); (4) the SIMD
+  fast-exp (avx2/neon/simd128) clamps its input to ±708 — the softmax `-1e9`
+  mask wrapped the `(k+1023) << 52` exponent bit trick and corrupted whole
+  rows (masked attention returned wrong NIST vectors); (5) `unwrap_or` sizes
+  its payload from the DEFAULT argument when the chain type is unresolved
+  (`list.find |> option.map |> option.unwrap_or` emitted an `if (result i32)`
+  block with an `i64.const` arm — C-127).
+- **almide-aituber: fixed** — the v1-vs-develop divergence was the missing
+  develop-side #717 (recompute if/match/block type after auto-? unwraps an
+  effect branch); cherry-picked.
+- **almai: narrowed, not closed.** The E0063 class is fixed (the flatten
+  mangle now remaps name-keyed codegen annotations — default/boxed fields,
+  ctor_to_enum — so module-type field DEFAULTS fill). The remaining ~37 errors
+  are the root `LLMResponse`/`ToolCall` vs `openai.LLMResponse` etc.
+  NOMINAL/STRUCTURAL fork: the checker accepts same-shape records across
+  modules, codegen emits distinct Rust structs. Resolving it is a language
+  decision (reject in check, or insert conversions); red on develop too.
+- Debug aid: `ALMIDE_DUMP_INVALID_WASM=<path>` writes the invalid module
+  (name section intact) when structural validation fails, so `wasm-tools
+  validate/print` can name the broken function.
+
 ## Remaining threads
 
 - **Cross-module `@inline_rust` fns** (aes cfb8_encrypt via `import self`) ICE
