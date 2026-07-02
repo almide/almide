@@ -22,6 +22,13 @@ pub fn silu_mul_naive(a: &[f64], b: &[f64], out: &mut [f64]) {
 #[target_feature(enable = "avx2,fma")]
 pub(crate) unsafe fn exp_pd(x: std::arch::x86_64::__m256d) -> std::arch::x86_64::__m256d {
     use std::arch::x86_64::*;
+    // Clamp to the bit-trick's valid range: `(k + 1023) << 52` needs the biased
+    // exponent in (0, 2046), i.e. |x| ≲ 708 (min-normal 2^-1022 .. max 2^1023).
+    // Outside it the shift WRAPS and exp returns garbage — the standard softmax
+    // mask value -1e9 corrupted whole rows (nn masked attention). Clamping to
+    // ±708 saturates to ~3e-308 / ~8e307, which every consumer (softmax weight,
+    // silu/gelu sigmoid) treats identically to 0 / inf.
+    let x = _mm256_max_pd(_mm256_set1_pd(-708.0), _mm256_min_pd(x, _mm256_set1_pd(708.0)));
     let log2e = _mm256_set1_pd(std::f64::consts::LOG2_E);
     let ln2 = _mm256_set1_pd(std::f64::consts::LN_2);
     // k = round(x * log2e)
@@ -78,6 +85,9 @@ unsafe fn silu_mul_avx(a: &[f64], b: &[f64], out: &mut [f64]) {
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 pub(crate) fn exp_pd_wasm(x: std::arch::wasm32::v128) -> std::arch::wasm32::v128 {
     use std::arch::wasm32::*;
+    // Clamp to the bit-trick's valid range (see exp_pd): outside |x| ≲ 708 the
+    // `(k + 1023) << 52` shift wraps and returns garbage (softmax -1e9 mask).
+    let x = f64x2_max(f64x2_splat(-708.0), f64x2_min(x, f64x2_splat(708.0)));
     let log2e = f64x2_splat(std::f64::consts::LOG2_E);
     let ln2 = f64x2_splat(std::f64::consts::LN_2);
     let kf = f64x2_nearest(f64x2_mul(x, log2e));
@@ -130,6 +140,9 @@ pub(crate) unsafe fn exp_pd_neon(
     x: std::arch::aarch64::float64x2_t,
 ) -> std::arch::aarch64::float64x2_t {
     use std::arch::aarch64::*;
+    // Clamp to the bit-trick's valid range (see exp_pd): outside |x| ≲ 708 the
+    // `(k + 1023) << 52` shift wraps and returns garbage (softmax -1e9 mask).
+    let x = vmaxq_f64(vdupq_n_f64(-708.0), vminq_f64(x, vdupq_n_f64(708.0)));
     let log2e = vdupq_n_f64(std::f64::consts::LOG2_E);
     let ln2 = vdupq_n_f64(std::f64::consts::LN_2);
     let kf = vrndnq_f64(vmulq_f64(x, log2e)); // round to nearest
