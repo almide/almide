@@ -221,7 +221,37 @@ impl FuncCompiler<'_> {
             end;
         });
 
-        // Overwrite specified fields
+        // SHARE: the byte-copy duplicated the base's heap-field POINTERS — each
+        // copied field is now reachable from TWO records (the base and this one)
+        // but owns a single refcount, so both records' scope-end drops double-free
+        // it (svg `doc`: `{ ...base, children }` lost its attrs Map on wasm once
+        // the piped `base` temp was dropped). Own a shallow +1 per copied heap
+        // field. Overridden fields are excluded: their copied pointer is clobbered
+        // by the override below and stays owned by the base.
+        for (field_name, field_ty) in &all_fields {
+            if overrides.iter().any(|(n, _)| n.as_str() == field_name.as_str()) {
+                continue;
+            }
+            if !Self::is_heap_type(field_ty) {
+                continue;
+            }
+            if let Some((offset, _)) = values::field_offset(&all_fields, field_name) {
+                let total_offset = (tag_offset + offset) as i32;
+                wasm!(self.func, {
+                    local_get(result_scratch);
+                    i32_const(total_offset);
+                    i32_add;
+                    i32_load(0);
+                    call(self.emitter.rt.rc_inc);
+                    drop;
+                });
+            }
+        }
+
+        // Overwrite specified fields. `emit_stored_field` (not a bare
+        // emit_expr): a borrowed-alias override (`{ ...base, children: kids }`
+        // with `kids` a Var) is RETAINED by this record, so it must own a +1 —
+        // the same rule plain `Record` construction applies to its fields.
         for (field_name, field_expr) in overrides {
             // Use the record's declared field type for the store width — the
             // override expression's own `.ty` may be Unknown when inference
@@ -230,7 +260,7 @@ impl FuncCompiler<'_> {
             if let Some((offset, field_ty)) = values::field_offset(&all_fields, field_name) {
                 let total_offset = tag_offset + offset;
                 wasm!(self.func, { local_get(result_scratch); });
-                self.emit_expr(field_expr);
+                self.emit_stored_field(field_expr);
                 self.emit_store_at(&field_ty, total_offset);
             }
         }
