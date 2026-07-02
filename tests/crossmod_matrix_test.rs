@@ -75,6 +75,14 @@ fn add_num(n: Int) -> Unit = {
 }
 
 type Pigment: Codec = { r: Int, g: Int, b: Int }
+
+fn parse_flag(s: String) -> Result[String, String] =
+  if s == "yes" then ok("y") else err("n")
+
+effect fn confirm(tag: String) -> Result[Unit, String] = {
+  println("confirmed:" + tag)
+  ok(())
+}
 "#;
 
 enum Status {
@@ -411,6 +419,69 @@ effect fn main() -> Unit = {
             expected: "b=3",
             status: Status::Works,
         },
+        // ResultPropagation Phase 2b: an `effect fn main() -> Result[..]` whose
+        // body tail is a `match` must NOT Ok-wrap an arm that calls a
+        // Result-DECLARED effect fn (never sig-lifted, so not in `lifted_fns`,
+        // but its call ty IS already the Result) — the porta `__almide_main`
+        // double-wrap (E0308 `Result<Result<..>>` on native).
+        Cell {
+            name: "effect_main_match_tail_calls_result_effect_fn",
+            main: r#"import self as m
+effect fn main() -> Result[Unit, String] = {
+  let cmd = "go"
+  match cmd {
+    "go" => m.confirm("go"),
+    _ => ok(()),
+  }
+}
+"#,
+            expected: "confirmed:go",
+            status: Status::Works,
+        },
+        // auto-? skip set: a `match r { ok/err }` sitting BEHIND a value wrapper
+        // (here the `ok(...)` tail) must still keep `r`'s binding a Result — the
+        // old checker/lowering walk stopped at Match/Block/If, so the binding was
+        // auto-?'d out from under the match (porta mcp handle_builtin_exec).
+        Cell {
+            name: "result_match_behind_ok_wrapper",
+            main: r#"import self as m
+effect fn main() -> Result[Unit, String] = {
+  let parsed = m.parse_flag("yes")
+  ok(match parsed {
+    ok(v) => println("ok:" + v),
+    err(e) => println("err:" + e),
+  })
+}
+"#,
+            expected: "ok:y",
+            status: Status::Works,
+        },
+        // auto-? skip set, depth: the binding + Result-match live INSIDE another
+        // match arm. The skip set used to apply only to top-level binds, so the
+        // nested `let parsed` was unconditionally auto-?'d while the match kept
+        // its ok/err arms (porta mcp handle_tools_call, E0308 on native).
+        Cell {
+            name: "result_match_bind_inside_match_arm",
+            main: r#"import self as m
+effect fn main() -> Result[Unit, String] = {
+  let sel = some("yes")
+  match sel {
+    some(s) => {
+      let parsed = m.parse_flag(s)
+      let msg = match parsed {
+        ok(v) => "ok:" + v,
+        err(e) => "err:" + e,
+      }
+      println(msg)
+      ok(())
+    },
+    none => ok(()),
+  }
+}
+"#,
+            expected: "ok:y",
+            status: Status::Works,
+        },
     ]
 }
 
@@ -474,6 +545,53 @@ fn run_cell(cell: &Cell, check_wasm: bool) -> CellResult {
     }
 
     CellResult { native_ok: true, detail: String::new() }
+}
+
+/// `@extern(rs, "bridge", "fn")` declared in an IMPORTED module: the definition
+/// is emitted as a `use bridge::fn as <name>;` alias, and every cross-module
+/// call site renders the flatten prefix `almide_rt_<module>_<fn>` — the alias
+/// must carry that same prefixed name (porta wasm_rt: 28× E0425 when the alias
+/// kept the bare name). Needs a native/ dir + [native-deps], so it can't be a
+/// matrix cell (run_cell writes no native assets). Native-only: @extern(rs) has
+/// no wasm leg.
+#[test]
+fn extern_rs_fn_in_module_native() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() { return; }
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    let native = dir.path().join("native");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::create_dir_all(&native).unwrap();
+    // A [native-deps] entry forces the self-contained cargo build with
+    // source_root set — the path that injects native/*.rs into the crate.
+    std::fs::write(
+        dir.path().join("almide.toml"),
+        "[package]\nname = \"externpkg\"\nversion = \"0.1.0\"\n\n[native-deps]\nonce_cell = \"1\"\n",
+    ).unwrap();
+    std::fs::write(
+        native.join("bridge.rs"),
+        "pub fn shout(s: impl AsRef<str>) -> String { format!(\"{}!\", s.as_ref()) }\n",
+    ).unwrap();
+    std::fs::write(
+        src.join("util.almd"),
+        "@extern(rs, \"bridge\", \"shout\")\nfn shout(s: String) -> String\n",
+    ).unwrap();
+    std::fs::write(
+        src.join("main.almd"),
+        "import util\n\neffect fn main() -> Unit = println(util.shout(\"hey\"))\n",
+    ).unwrap();
+    let out_bin = dir.path().join("out");
+    let build = Command::new(almide_bin())
+        .args(["build", "src/main.almd", "-o", out_bin.to_str().unwrap()])
+        .current_dir(dir.path())
+        .output().expect("run almide build");
+    assert!(
+        build.status.success(),
+        "native build of a module @extern(rs) fn failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let run = Command::new(&out_bin).output().expect("run extern binary");
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "hey!");
 }
 
 #[test]
