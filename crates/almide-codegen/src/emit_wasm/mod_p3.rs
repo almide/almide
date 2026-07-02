@@ -840,6 +840,13 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
         eprintln!("  The module would be rejected by any spec-compliant runtime. This is a");
         eprintln!("  compiler bug, not an error in your program.");
         eprintln!("  Please report this at https://github.com/almide/almide/issues");
+        // Debug aid: dump the invalid module (name section included) so the
+        // failing function can be identified with wasm-tools. Never a release
+        // artifact — the path must be requested explicitly.
+        if let Ok(p) = std::env::var("ALMIDE_DUMP_INVALID_WASM") {
+            let _ = std::fs::write(&p, &bytes);
+            eprintln!("  (invalid module dumped to {p})");
+        }
         std::process::exit(1);
     }
 
