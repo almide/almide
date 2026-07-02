@@ -44,11 +44,11 @@ functions.rs::compile_module_function
 functions.rs::compile_function_with_init
 functions.rs::compile_function_inner
 closures.rs::compile_lambda_bodies
-mod.rs::compile_init_globals
-mod.rs::compile_test_runner
-mod.rs::compile_main_runner
+mod_p4.rs::compile_init_globals
+mod_p4.rs::compile_test_runner
+mod_p4.rs::compile_main_runner
 runtime.rs::compile_runtime
-runtime.rs::compile_alloc_pinned
+runtime_p2.rs::compile_alloc_pinned
 rt_dragon.rs::compile_driver
 rt_dragon.rs::compile_helpers
 rt_dec2flt.rs::compile_helpers
