@@ -297,14 +297,18 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
         IrExprKind::RuntimeCall { ref symbol, .. } if intr.contains(symbol.as_str()) => {
             IrExpr { ty: Ty::result(ty, Ty::String), ..expr }
         }
-        // Call to another lifted effect fn — already returns Result
+        // Call to another lifted effect fn — already returns Result.
+        // An effect fn that DECLARES `-> Result[T, String]` was never lifted
+        // (Phase 1 skips is_result rets) so it is NOT in `lifted`, but its
+        // call-site ty IS already Result — wrapping it double-wraps (porta
+        // `__almide_main`'s match arms calling `engine.serve` etc., E0308).
         IrExprKind::Call { ref target, .. } => {
             let callee_name = match target {
                 CallTarget::Named { name } => Some(name.to_string()),
                 CallTarget::Module { func, .. } => Some(func.to_string()),
                 _ => None,
             };
-            if callee_name.as_ref().is_some_and(|n| lifted.contains_key(n)) {
+            if callee_name.as_ref().is_some_and(|n| lifted.contains_key(n)) || ty.is_result() {
                 expr
             } else {
                 let result_ty = Ty::result(ty.clone(), Ty::String);
@@ -342,7 +346,10 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
                 ty: result_ty, span, def_id: None,
             }
         }
-        // Everything else: wrap in Ok(expr)
+        // Everything else: wrap in Ok(expr) — unless the tail is already the
+        // Result this fn returns (a Var re-yielding a bound Result, a runtime
+        // call to a Result-declared effect fn, ...): wrapping would double-wrap.
+        other if ty.is_result() => IrExpr { kind: other, ty, span, def_id: None },
         other => {
             let result_ty = Ty::result(ty.clone(), Ty::String);
             IrExpr {
