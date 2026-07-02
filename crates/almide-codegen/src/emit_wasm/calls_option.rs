@@ -22,7 +22,16 @@ impl FuncCompiler<'_> {
             "unwrap_or" => {
                 // unwrap_or(opt, default) → T
                 // if opt != 0 then load *opt else default
-                let inner_ty = self.option_inner_ty(&args[0].ty);
+                // The Option's inner ty can arrive UNRESOLVED when the option
+                // flowed through a generic chain (`list.find |> option.map |>
+                // option.unwrap_or`, nn get_alignment): the emit then picked
+                // the i32 arm while the DEFAULT arg emitted its real i64 —
+                // an if_i32 block with an i64 arm (invalid wasm). The default's
+                // type is authoritative: `unwrap_or(o: Option[T], d: T)`.
+                let inner_ty = {
+                    let t = self.option_inner_ty(&args[0].ty);
+                    if t.is_unresolved() { args[1].ty.clone() } else { t }
+                };
                 let s = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 let vt = values::ty_to_valtype(&inner_ty);
@@ -436,7 +445,13 @@ impl FuncCompiler<'_> {
             }
             "unwrap_or" => {
                 // unwrap_or(result, default) → T
-                let inner_ty = self.result_ok_ty(&args[0].ty);
+                // Same unresolved-inner fallback as option.unwrap_or: the
+                // default's type is authoritative when the Result flowed
+                // through a generic chain.
+                let inner_ty = {
+                    let t = self.result_ok_ty(&args[0].ty);
+                    if t.is_unresolved() { args[1].ty.clone() } else { t }
+                };
                 let s = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 let vt = values::ty_to_valtype(&inner_ty).unwrap_or(ValType::I32);
