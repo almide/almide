@@ -248,6 +248,21 @@ literal `--` into the guest). `Map[Int, String]` / non-String-value heap maps
 now WALL cleanly instead of linking the wrong-slot plain/`_str` variants
 (map_set_eq: invalid wasm → honest wall).
 
+Seventh pass (2026-07-03, same day): the RECORD-VALUE surface, systematically —
+porta's protocol layer is now fully green (real walls 2 → 1; the remainder is
+wasmtime-bridge-adjacent by nature). What landed: monadic `match` executes
+inside heap-result if-arms (the tail-duplicated `let x = if c then f()! else []`
+— resolve_env); EMPTY list literals of admitted classes materialize; STRUCTURAL
+record-list literals route through the synthesized anon-record drop (plus the
+missing `$__drop_list_anonrec_<hash>` wrapper generation) — this also opens the
+`f([{…}])` argument position; `list.get/first/last` SHARE record elements
+(elimination-keyed to the layout-identical `_value` accessor); a record `??`
+default selects through the handle-level value helper. And the LAST runtime
+RUNERR fell: the append-accumulator TCO now admits a PURE-call-wrapped growth
+(`string.take(acc + "x", 8)` — tco_deep_recursion_churn's 2M-iteration spin
+byte-matches). Parity: match=163, RUNERR 1 (load-flaky), MISMATCH 1 real
+(float.parse exact rounding).
+
 Still open on this frontier: the Map repr variants (`_ivh` scalar-key/heap-val,
 `_hval` heap-val-non-String — the map_set_eq brick),
 `tco_deep_recursion_churn` (a heap accumulator built THROUGH a call —
