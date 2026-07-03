@@ -86,6 +86,10 @@ run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|v0fail
 declare -a suspects=()
 while IFS= read -r f; do
   grep -q 'fn main' "$f" || { skip=$((skip+1)); continue; }
+  # `// wasm:skip` — a multi-module / harness-incompatible fixture that cannot run
+  # STANDALONE (its imports live in sibling files); comparing a broken standalone
+  # invocation proves nothing. Same class as the no-main part files.
+  head -1 "$f" | grep -q 'wasm:skip' && { skip=$((skip+1)); continue; }
   run_one "$f" 20
   case "$VERDICT" in
     match) match=$((match+1)); echo "$f" >> "$TMP/matches.txt" ;;
