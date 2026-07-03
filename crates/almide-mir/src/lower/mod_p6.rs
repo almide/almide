@@ -1200,7 +1200,33 @@ pub fn desugar_heap_branches(body: &IrExpr) -> Option<IrExpr> {
     // the recursion so a lift inside one `if` arm never reuses an id live in a SIBLING arm (block_line's
     // `string.drop` read the then-arm's concat because an arm-local `max_var_id` aliased `line`).
     let mut next_var = max_var_id(body) + 1;
-    desugar_heap_branches_inner(body, &mut next_var)
+    let rewritten = desugar_heap_branches_inner(body, &mut next_var)?;
+    // EXPONENTIAL-BLOW-UP guard: each `let s = <heap branch>; rest` duplicates `rest`
+    // into both arms, so N chained branch binds yield 2^N copies. Real programs chain
+    // 2–4 deep (16 copies — fine); an adversarial/generated 20-chain would be a
+    // million-node body (a compile-time hang, not a wrong answer). Past the cap the
+    // rewrite is DISCARDED — the un-desugared bind then WALLS in `lower_bind`
+    // (an honest refusal, never a hang).
+    const MAX_DESUGARED_NODES: usize = 200_000;
+    if count_expr_nodes(&rewritten) > MAX_DESUGARED_NODES {
+        return None;
+    }
+    Some(rewritten)
+}
+
+/// Node count of an expression tree (the blow-up guard metric).
+fn count_expr_nodes(e: &IrExpr) -> usize {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct C(usize);
+    impl IrVisitor for C {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            self.0 += 1;
+            walk_expr(self, e);
+        }
+    }
+    let mut c = C(0);
+    c.visit_expr(e);
+    c.0
 }
 
 fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
