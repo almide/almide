@@ -98,9 +98,16 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
         let candidate = file_dir.join("almide.toml");
         if candidate.exists() { candidate } else { std::path::PathBuf::from("almide.toml") }
     };
-    let parsed = toml_path.exists()
-        .then(|| crate::project::parse_toml(&toml_path).ok())
-        .flatten();
+    let parsed = toml_path.exists().then(|| {
+        // A broken almide.toml must not be SILENT: dropping it here also drops
+        // [native-deps]/native/ injection, and the build then fails later as an
+        // opaque E0433 on the native module (almide-sqlite: a hyphenated
+        // package name errored in parse_toml and rusqlite never reached the
+        // generated Cargo.toml).
+        crate::project::parse_toml(&toml_path)
+            .map_err(|e| eprintln!("warning: {} ignored: {}", toml_path.display(), e))
+            .ok()
+    }).flatten();
     let native_deps = parsed.as_ref().map(|p| p.native_deps.as_slice()).unwrap_or(&[]);
     let toml_dir = toml_path.parent()
         .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })

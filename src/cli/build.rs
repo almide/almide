@@ -86,7 +86,13 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         if candidate.exists() { candidate } else { std::path::PathBuf::from("almide.toml") }
     };
     let parsed = toml_path.exists()
-        .then(|| project::parse_toml(&toml_path).ok())
+        .then(|| {
+            // Mirror run.rs: a broken almide.toml silently dropped
+            // [native-deps]/native/ injection → opaque E0433 downstream.
+            project::parse_toml(&toml_path)
+                .map_err(|e| eprintln!("warning: {} ignored: {}", toml_path.display(), e))
+                .ok()
+        })
         .flatten();
     let native_deps = parsed.as_ref().map(|p| p.native_deps.as_slice()).unwrap_or(&[]);
     let toml_dir = toml_path.parent()
