@@ -6,7 +6,6 @@ spec/churn/tco_deep_recursion_churn.almd
 spec/churn/tco_loop_churn.almd
 spec/lang/block_comment_raw_string_test.almd
 spec/lang/top_let_test.almd
-spec/lang/var_in_if_skinning_test.almd
 spec/lang/var_in_if_test.almd
 spec/programs/closure_scale.almd
 spec/programs/fib_rec.almd
@@ -159,6 +158,8 @@ spec/wasm_cross/tco_let_bound_if.almd
 spec/wasm_cross/tco_multi_concat.almd
 spec/wasm_cross/tco_nested_list_accumulator.almd
 spec/wasm_cross/tco_over_match_result.almd
+spec/wasm_cross/top_let_div_eager.almd
+spec/wasm_cross/top_let_div_used.almd
 spec/wasm_cross/trig_libm.almd
 spec/wasm_cross/tuple_eq.almd
 spec/wasm_cross/unwrap_in_callarg.almd
