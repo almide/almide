@@ -84,6 +84,25 @@ fn count_eq_calls(ty: &almide_lang::types::Ty, registry: &almide_mir::lower::Rec
                     || almide_mir::lower::is_value_ty(&es[0])),
         );
     }
+    // Map/Set `==` — the implemented repr variants lower to ONE synthetic eq CallFn
+    // (`map.eq_ivh`/`map.eq_hval`/`map.eq_skv`/`set.eq_str`), all pure deep reads.
+    // Mirror EXACTLY the operand shapes calls_p4's eq dispatch admits.
+    if almide_mir::lower::is_map_ivh_ty(ty) || almide_mir::lower::is_map_hval_ty(ty) {
+        return 1;
+    }
+    if let Ty::Applied(TC::Map, kv) = ty {
+        if kv.len() == 2
+            && matches!(kv[0], Ty::String)
+            && !almide_mir::lower::is_heap_ty(&kv[1])
+        {
+            return 1;
+        }
+    }
+    if let Ty::Applied(TC::Set, es) = ty {
+        if es.len() == 1 && matches!(es[0], Ty::String) {
+            return 1;
+        }
+    }
     match ty {
         Ty::Tuple(elems) => elems.iter().map(|t| count_eq_calls(t, registry)).sum(),
         Ty::Record { fields } => fields.iter().map(|(_, t)| count_eq_calls(t, registry)).sum(),
@@ -882,6 +901,7 @@ fn main() {
     // One witness stream per proven property. ownership = one heap object per
     // line; names/caps = one `<superset>|<subset>` line per in-profile function.
     let mut ownership_stream = String::new();
+    let mut ownership_names_stream = String::new();
     let mut names_stream = String::new();
     let mut caps_stream = String::new();
     // One line per FULLY-ANALYZABLE+within-bound file: the call-graph witness for the proven
@@ -1088,7 +1108,15 @@ fn main() {
                         }
                         // Ownership is one heap object per line; names are one line per
                         // function. Both are LOCAL properties — no transitivity.
-                        ownership_stream.push_str(&ownership_certificate(mir));
+                        let cert = ownership_certificate(mir);
+                        // Parallel name index (ownership.names): one `<file>::<fn>` line per
+                        // cert line, so a checker REJECT bisects straight to its function
+                        // (the anonymous 20k-line cert made a reject a needle hunt).
+                        for _ in cert.lines() {
+                            ownership_names_stream
+                                .push_str(&format!("{}::{}\n", file.display(), mir.name));
+                        }
+                        ownership_stream.push_str(&cert);
                         names_stream.push_str(&name_witness_string(mir));
                         names_stream.push('\n');
                     }
@@ -1245,6 +1273,7 @@ fn main() {
         }
     };
     write("ownership.cert", &ownership_stream);
+    write("ownership.names", &ownership_names_stream);
     write("names.cert", &names_stream);
     write("caps.cert", &caps_stream);
     write("caps_graph.cert", &caps_graph_stream);

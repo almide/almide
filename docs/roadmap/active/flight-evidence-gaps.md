@@ -217,6 +217,32 @@ mantissa・half-even・巨大指数すべて Rust と一致）。fast path（15 
 
 ---
 
+## F8 — 新規所見（2026-07-03 夕）: ローカル PCC チェーンが暴いた cert 会計違反
+
+**経緯**: F6-2 の一環で Coq（Rocq 9.1.1）をローカル導入し、`proofs/corpus-wall.sh` の
+checker phase（従来 CI 委任で、ローカルでは一度も走っていなかった）を初めて全量実行した。
+結果: **kernel-proven checker が ownership witness を REJECT**（20393 オブジェクト中、
+`spec/integration/codegen_effect_fn_test.almd::parse_positive_even` — 連鎖 monadic `!` の
+err 再構成 — の cert 行が bare `m`：取得イベントなしの move-out）。
+
+**意味**: この関数の実行は parity で byte-verified（err パス fixture 含め green）であり、
+実害（double-free/leak）の観測は無い。しかし cert が拒否される以上、この関数は
+「accept ⟹ safe」の網の**外**にいる — 証明の保護を受けていない in-profile 関数が
+存在していたことになる。mir>ir ゲート同様、「green に見えたのは検証が走っていなかった
+から」の実例であり、F2（カバレッジの錯覚）の追加証拠。
+
+**是正 work items**:
+1. 犯人経路の特定と会計修正: `err(e) => err(e)` 再構成（mod_p6 の monadic desugar）の
+   payload move-out に取得イベント（Dup/`a`）を対にするか、実際に二重所有なら実バグとして修正。
+2. `ownership.names`（cert 行 ↔ 関数名の並記、本所見の調査で追加済み）を恒久化 — REJECT が
+   即座に関数へ bisect できる。
+3. corpus-wall の checker phase を**ローカル必須**化（coqc は導入済み）— 「CI 委任」は
+   今回のような未実行の温床だった。
+4. CI が本当にこの phase を回しているか確認（回していれば CI も赤いはず — 赤くないなら
+   CI 側も未実行 = 構成の穴）。
+
+**受入基準**: corpus-wall が checker phase 込みでローカル green、REJECT ゼロ。
+
 ## 優先順位と依存
 
 ```
