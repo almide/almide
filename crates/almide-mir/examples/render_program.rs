@@ -348,6 +348,27 @@ fn main() {
     for m in &ir.modules {
         record_layouts.extend(almide_mir::lower::build_record_layouts(&m.type_decls));
     }
+    // Module type decls register under their CANONICAL qualified name
+    // (`grammar.KeywordGroup`), but a reference inside the importing file can
+    // reach the lowering as the BARE base name — the field-offset lookup then
+    // missed and the record read silently shifted (the almide-grammar `info`
+    // garble). Alias each UNIQUELY-owned base name to its qualified layout;
+    // an ambiguous base (two modules, same-named type) stays qualified-only,
+    // so a wrong-guess read is impossible (the lookup misses → walls).
+    {
+        let mut owners: std::collections::HashMap<String, Vec<String>> = Default::default();
+        for k in record_layouts.keys() {
+            if let Some((_, base)) = k.rsplit_once('.') {
+                owners.entry(base.to_string()).or_default().push(k.clone());
+            }
+        }
+        for (base, ks) in owners {
+            if ks.len() == 1 && !record_layouts.contains_key(&base) {
+                let v = record_layouts.get(&ks[0]).cloned().unwrap();
+                record_layouts.insert(base, v);
+            }
+        }
+    }
 
     // The variant-layout registry (type name → tag + per-constructor fields) for custom
     // ADTs, the value-model sibling of `record_layouts`. A variant construct / `match`
@@ -357,6 +378,22 @@ fn main() {
         let m_vl = almide_mir::lower::build_variant_layouts(&m.type_decls);
         variant_layouts.by_type.extend(m_vl.by_type);
         variant_layouts.ctor_to_type.extend(m_vl.ctor_to_type);
+    }
+    // The same unique-base aliasing as record_layouts below (a bare `Named`
+    // reference to a module ADT must resolve its tag/field layout).
+    {
+        let mut owners: std::collections::HashMap<String, Vec<String>> = Default::default();
+        for k in variant_layouts.by_type.keys() {
+            if let Some((_, base)) = k.rsplit_once('.') {
+                owners.entry(base.to_string()).or_default().push(k.clone());
+            }
+        }
+        for (base, ks) in owners {
+            if ks.len() == 1 && !variant_layouts.by_type.contains_key(&base) {
+                let v = variant_layouts.by_type.get(&ks[0]).cloned().unwrap();
+                variant_layouts.by_type.insert(base, v);
+            }
+        }
     }
 
     // PROGRAM pre-pass: inline mutual-recursive tail siblings so the parser loops become direct
