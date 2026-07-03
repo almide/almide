@@ -134,6 +134,7 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
     }
     struct Rw<'a> {
         user_mods: &'a std::collections::HashMap<String, std::collections::HashSet<String>>,
+        root_fns: std::collections::HashSet<String>,
     }
     impl IrMutVisitor for Rw<'_> {
         fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
@@ -144,11 +145,31 @@ fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
                     if self.user_mods.get(m).is_some_and(|fs| fs.contains(f)) {
                         *target = CallTarget::Named { name: sym(&user_module_fn_name(m, f)) };
                     }
+                } else if let CallTarget::Named { name } = target {
+                    // A BARE Named call to a fn that lives in exactly ONE linked user
+                    // module: the frontend resolves an `import self as g` call
+                    // (`g.keyword_groups()`) to the bare name when the target is the
+                    // package's own module — rewrite it to the module fn's mangled
+                    // definition name (almide-grammar main → mod.almd). Ambiguity
+                    // (two modules defining the name, or a root fn shadowing it)
+                    // leaves the call untouched — the unlinked gate then walls it
+                    // honestly instead of guessing.
+                    let f = name.as_str();
+                    if !self.root_fns.contains(f) {
+                        let mut owners =
+                            self.user_mods.iter().filter(|(_, fs)| fs.contains(f));
+                        if let (Some((m, _)), None) = (owners.next(), owners.next()) {
+                            *target =
+                                CallTarget::Named { name: sym(&user_module_fn_name(m, f)) };
+                        }
+                    }
                 }
             }
         }
     }
-    let mut rw = Rw { user_mods: &user_mods };
+    let root_fns: std::collections::HashSet<String> =
+        ir.functions.iter().map(|f| f.name.as_str().to_string()).collect();
+    let mut rw = Rw { user_mods: &user_mods, root_fns };
     for func in &mut ir.functions {
         rw.visit_expr_mut(&mut func.body);
     }
