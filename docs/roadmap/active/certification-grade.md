@@ -5,6 +5,9 @@
 > 5 メカニズムのうち工学で取れるものを全て取り込み、[trust-layer](trust-layer.md) の
 > L2/L3 を「認証級」の定義に引き上げる。証明書そのもの (TÜV 監査・DO-330 TQL) は
 > 商業オプションとして分離 — ここで作るのはその前提となる証拠体系。
+> **実地監査所見**: [flight-evidence-gaps](flight-evidence-gaps.md) — 2026-07-03 の
+> ハンズオン改修で観測した証拠体系の穴 7 件（F1 oracle 循環は CG-1 の、F2 カバレッジ錯覚は
+> evidence ladder の、それぞれ実測された裏付け）。
 > **Active scope: CG-1** — ALS (Almide Language Specification) + reference interpreter
 > の規範化 + 契約の spec-keying。
 > **Exit criteria (CG-1)**: 全 active 契約が ALS の節を `spec` フィールドで参照し、

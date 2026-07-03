@@ -4,7 +4,7 @@
 > **Goal**: [flight-profile](flight-profile.md) ラダー **G-F5**(PCC 証明書/receipt を認証目標へ
 > マッピング)と **G-F6**(資格化キットの製品定義、AbsInt/SCADE-KCG モデル)の具体設計。
 > 今スパインが**実際に産出するもの**に接地する。
-> **関連**: [flight-profile](flight-profile.md) §7.2 / [certification-grade](certification-grade.md)(規格5メカニズム・ALS・evidence ladder)/ [receipt-logic](receipt-logic.md)(主張分類)/ [certificate-format-v1](certificate-format-v1.md)。
+> **関連**: [flight-profile](flight-profile.md) §7.2 / [certification-grade](certification-grade.md)(規格5メカニズム・ALS・evidence ladder)/ [receipt-logic](receipt-logic.md)(主張分類)/ [certificate-format-v1](certificate-format-v1.md)/ [flight-evidence-gaps](flight-evidence-gaps.md)(実地監査所見 — 資格化主張の現在の限界)。
 
 ---
 
