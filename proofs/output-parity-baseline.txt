@@ -4,6 +4,7 @@ spec/churn/nested_named_churn.almd
 spec/churn/record_churn.almd
 spec/churn/tco_loop_churn.almd
 spec/lang/block_comment_raw_string_test.almd
+spec/lang/top_let_test.almd
 spec/lang/var_in_if_skinning_test.almd
 spec/lang/var_in_if_test.almd
 spec/programs/closure_scale.almd
@@ -30,17 +31,20 @@ spec/wasm_cross/bytes_push_inplace.almd
 spec/wasm_cross/bytes_set_value_semantics.almd
 spec/wasm_cross/chunk_str.almd
 spec/wasm_cross/closure_accumulator.almd
+spec/wasm_cross/closures_and_variants.almd
 spec/wasm_cross/const_fold_nonfinite_float.almd
 spec/wasm_cross/container_alias_return.almd
 spec/wasm_cross/control_flow.almd
 spec/wasm_cross/cross_dep_accumulator.almd
 spec/wasm_cross/default_param_ref.almd
 spec/wasm_cross/destructure_let_unwrap.almd
+spec/wasm_cross/effect_assign_unwrap.almd
 spec/wasm_cross/effect_tuple_result_tco.almd
 spec/wasm_cross/effect_unwrap_in_loop.almd
 spec/wasm_cross/empty_collection_annotated.almd
 spec/wasm_cross/empty_collection_fold.almd
 spec/wasm_cross/env_args.almd
+spec/wasm_cross/fan_map_inline_lambda.almd
 spec/wasm_cross/filter_map_conditional_arm.almd
 spec/wasm_cross/float_interp_forms.almd
 spec/wasm_cross/float_parse_special.almd
@@ -65,10 +69,13 @@ spec/wasm_cross/int_from_hex.almd
 spec/wasm_cross/int_parse_overflow.almd
 spec/wasm_cross/int_pow_overflow_wraps.almd
 spec/wasm_cross/int_wrap_rotate_width.almd
+spec/wasm_cross/json_gltf_walk.almd
+spec/wasm_cross/json_number_unicode.almd
 spec/wasm_cross/json_value.almd
 spec/wasm_cross/let_unwrap_propagation.almd
 spec/wasm_cross/letbound_variant_match.almd
 spec/wasm_cross/list_call_element.almd
+spec/wasm_cross/list_count_index_truncation.almd
 spec/wasm_cross/list_enumerate_find.almd
 spec/wasm_cross/list_eq.almd
 spec/wasm_cross/list_eq_float_bool.almd
@@ -91,6 +98,7 @@ spec/wasm_cross/math_log_gamma.almd
 spec/wasm_cross/math_pow.almd
 spec/wasm_cross/module_global_const.almd
 spec/wasm_cross/mutual_append.almd
+spec/wasm_cross/mutual_recursive_types.almd
 spec/wasm_cross/nested_match_heap_arm.almd
 spec/wasm_cross/nested_tuple_destructure.almd
 spec/wasm_cross/num_edge_to_string.almd
@@ -101,6 +109,7 @@ spec/wasm_cross/option_result.almd
 spec/wasm_cross/phantom_type_param.almd
 spec/wasm_cross/pipe_lambda_block_value.almd
 spec/wasm_cross/r5_wasm_interp_alias_rc.almd
+spec/wasm_cross/r5_wasm_split_replace_iterative.almd
 spec/wasm_cross/random_int_entropy.almd
 spec/wasm_cross/rc_reclaim_churn.almd
 spec/wasm_cross/records_variants.almd
@@ -130,6 +139,7 @@ spec/wasm_cross/string_is_alphanumeric.almd
 spec/wasm_cross/string_lines.almd
 spec/wasm_cross/string_ops.almd
 spec/wasm_cross/string_to_upper.almd
+spec/wasm_cross/string_whitespace.almd
 spec/wasm_cross/tco_let_bound_if.almd
 spec/wasm_cross/tco_multi_concat.almd
 spec/wasm_cross/tco_nested_list_accumulator.almd
