@@ -448,7 +448,7 @@ the wrong string. That gap is covered only by differential evidence
 | never-err strip vs REAL Result blocks | record fields read off a Result handle | `effect_assign_unwrap` (all five legs) in the parity baseline + lifted/self strip gate |
 | scalar module-globals lowered to Const-0 | every use of a top-level `let` read 0 | const-init materialization + WALL for call-bearing inits; `top_let_test` in the baseline |
 | lifted lambdas lost variant/global registries | `filter` dropped every element | sub-ctx inheritance (binds.rs); `closures_and_variants` in the baseline |
-| `_start` left an explicit-Result main on the stack | invalid wasm for every Result-main CLI | `_start` tag-read/drop; grammar CLI matrix byte-verified |
+| `$_start` left an explicit-Result main on the stack | invalid wasm for every Result-main CLI | `$_start` tag-read/drop; grammar CLI matrix byte-verified |
 
 | `prim.handle(<literal>)` resolved to deferred-Const **0** | the generated case tables read address 0 — every lookup silently missed (found while landing them, 2026-07-03) | literal materialization in the prim arg loop (calls_p4) + `string_case_unicode` in the parity baseline |
 
