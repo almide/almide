@@ -70,7 +70,15 @@ fn __sti_val(data: Int, pos: Int, end: Int, m: Int) -> Int =
     __sti_val(data, pos + 1, end, m2)
   }
 
+// v0 trims UNICODE whitespace (`s.trim()`), not just ASCII — route through the
+// (now Unicode) string.trim self-host first; the internal ASCII skip below is
+// then a no-op kept for the raw path's self-containment. (C-021.)
 fn string_to_int(s: String) -> Result[Int, String] = {
+  let t = string.trim(s)
+  __sti_raw(t)
+}
+
+fn __sti_raw(s: String) -> Result[Int, String] = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let data = h + 12
@@ -166,6 +174,11 @@ fn __hex_val(data: Int, pos: Int, end: Int, neg: Bool, acc: Int) -> Int =
   }
 
 fn int_from_hex(s: String) -> Result[Int, String] = {
+  let t = string.trim(s)
+  __hex_raw(t)
+}
+
+fn __hex_raw(s: String) -> Result[Int, String] = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let data = h + 12
