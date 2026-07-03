@@ -761,10 +761,50 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
     // (`expected i64, found i32` in the call + the i64 result). `option.unwrap_or_str`
     // (param i32 i32) (result i32) is the rc-correct String variant (deep-copies the kept
     // payload so result + source can both drop). Keyed on the Option payload being String.
+    // The same repr-poly routing for `result.unwrap_or` (the pipe/direct form —
+    // `result.unwrap_or(json.parse(s), json.null())`, json_gltf_walk): the generic
+    // impl takes an i64 scalar default; a heap Ok/default needs the rc-correct
+    // self-hosts registered for the `??` desugar.
+    if module == "result" && func == "unwrap_or" {
+        if let Some(Ty::Applied(TypeConstructorId::Result, a)) = arg_tys.first() {
+            if a.len() == 2 && is_value_ty(&a[0]) {
+                return "result.value_unwrap_or".to_string();
+            }
+            if a.len() == 2
+                && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+                    if e.len() == 1 && is_value_ty(&e[0]))
+            {
+                return "result.list_value_unwrap_or".to_string();
+            }
+            if a.len() == 2 && matches!(a[0], Ty::String) {
+                return "result.str_unwrap_or".to_string();
+            }
+        }
+    }
     if module == "option" && func == "unwrap_or" {
         if let Some(Ty::Applied(TypeConstructorId::Option, a)) = arg_tys.first() {
             if a.len() == 1 && matches!(a[0], Ty::String) {
                 return "option.unwrap_or_str".to_string();
+            }
+            // The remaining heap payloads route to their rc-correct self-hosts
+            // (already registered for the `??` desugar): Value / List[Value] /
+            // List[String]. The generic unwrap_or takes an i64 scalar default,
+            // so a handle default (`json.get_array(v,k) |> option.unwrap_or([])`,
+            // json_gltf_walk's count_floats) repr-mismatched — invalid wasm.
+            if a.len() == 1 && is_value_ty(&a[0]) {
+                return "option.value_unwrap_or".to_string();
+            }
+            if a.len() == 1
+                && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+                    if e.len() == 1 && is_value_ty(&e[0]))
+            {
+                return "option.listvalue_unwrap_or".to_string();
+            }
+            if a.len() == 1
+                && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+                    if e.len() == 1 && matches!(e[0], Ty::String))
+            {
+                return "option.liststr_unwrap_or".to_string();
             }
         }
     }
@@ -882,8 +922,21 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 {
                     return format!("list.{func}_liststr");
                 }
-                if args.len() == 1 && is_heap_ty(&args[0]) {
+                if args.len() == 1 && matches!(args[0], Ty::String) {
                     return format!("list.{func}_str");
+                }
+                // A NON-String heap element (a custom variant / record / Value handle):
+                // the `_str` deep-copy would read the block's length word as a byte
+                // count (garbage handles — the closures_and_variants UAF). `filter`
+                // routes to the rc-sharing `_rc` variant; the other combinators have
+                // no handle-sharing self-host yet, so route them to an UNREGISTERED
+                // `_hshare` name — the render walls it cleanly (the fold_hacc
+                // precedent), never a miscompile.
+                if args.len() == 1 && is_heap_ty(&args[0]) {
+                    if func == "filter" {
+                        return "list.filter_rc".to_string();
+                    }
+                    return format!("list.{func}_hshare");
                 }
             }
         }
@@ -929,7 +982,17 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
         // get_or returns the ELEMENT directly (not an Option). Over a List[heap] it must return
         // an i32 handle (a deep copy), so it is keyed on the heap RESULT being the element type.
         if func == "get_or" && is_heap_ty(result_ty) {
-            return "list.get_or_str".to_string();
+            // A Value element SHARES (the _str deep copy corrupts a Value block —
+            // json_gltf_walk's `list.get_or(meshes, 0, json.null())` returned "?").
+            if is_value_ty(result_ty) {
+                return "list.get_or_value".to_string();
+            }
+            if matches!(result_ty, Ty::String) {
+                return "list.get_or_str".to_string();
+            }
+            // No handle-sharing self-host for other heap elements yet — an
+            // UNREGISTERED name walls cleanly (the fold_hacc precedent).
+            return "list.get_or_hshare".to_string();
         }
         // SUBJECT-keyed (arg 0) over a List[heap], where the result is scalar (Bool/Int/Option[Int])
         // so it can't be keyed on the result type: search (contains/index_of) + the predicate
