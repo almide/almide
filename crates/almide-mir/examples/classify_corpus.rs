@@ -1333,8 +1333,10 @@ fn main() {
     if total_breaches == 0 {
         eprintln!(
             "WALL OK: lower_function was TOTAL over {} corpus functions \
-             (Ok or explicit Unsupported, zero panics, zero silent miscompiles), \
-             and every in-profile certificate `+1` is backed by a real runtime op \
+             (Ok or explicit Unsupported, zero panics, zero undetected refusals \
+             — a totality + certificate claim, NOT output correctness: that is \
+             output-parity's, on its baseline set), and every in-profile \
+             certificate `+1` is backed by a real runtime op \
              (no synthetic param ownership — the borrow-by-default gate).",
             t.functions
         );

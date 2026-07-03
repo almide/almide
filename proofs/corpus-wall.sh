@@ -7,8 +7,12 @@
 #
 #   (1) THE WALL: `lower_function` is TOTAL over the corpus — every function is
 #       `Ok` (in-profile) or an explicit `Unsupported` (walled). Zero panics,
-#       zero silent miscompiles. A program outside the value-semantics subset is
-#       rejected with a reason, never quietly mislowered.
+#       zero UNDETECTED lowering refusals. NOTE (claim precision, F2-4): totality
+#       + certificate acceptance is NOT an output-correctness claim — an Ok
+#       function can still lower to WRONG OUTPUT within a sound cert (the
+#       2026-07-03 match-linearization ran both println arms under a green wall).
+#       Output correctness is the SEPARATE output-parity gate's claim, and only
+#       for its baseline set.
 #   (2) ACCEPT ⟹ SAFE: the ownership witness of EVERY in-profile function is
 #       re-verified by the KERNEL-PROVEN checker in one pass (accept ⟹ RC-safe,
 #       by `check_sound`) — the PCC chain run over real corpus programs, not just
@@ -135,7 +139,7 @@ check_per_function caps-transitive "$OUTDIR/caps_graph.cert" "transitive reach �
 cleanup
 echo
 echo "CORPUS WALL OK: over the whole v0 corpus, lower_function is total (wall holds,"
-echo "zero silent miscompiles) AND the kernel-proven checker accepts every in-profile"
+echo "zero panics, zero undetected refusals) AND the kernel-proven checker accepts every in-profile"
 echo "witness on ALL THREE proven properties (accept ⟹ ownership ∧ name-totality ∧"
 echo "capability-bound, on real corpus programs). Coverage is reported above; the"
 echo "Unsupported histogram is the per-feature roadmap."

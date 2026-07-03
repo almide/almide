@@ -93,7 +93,7 @@ The receipt's claims are scoped to exactly this:
   REAL frontend → `lower_function`, and two soundness invariants are asserted on
   real source, not just hand-built MIR: (1) **the wall** — `lower_function` is
   TOTAL over the corpus: every function is `Ok` (in-profile) or an explicit
-  `Unsupported` (walled); **zero panics, zero silent miscompiles** (a program
+  `Unsupported` (walled); **zero panics, zero undetected refusals** (a program
   outside the value-semantics subset is rejected with a reason, never quietly
   mislowered); (2) **accept ⟹ safe on ALL THREE proven properties** — the
   kernel-proven checker re-verifies EVERY in-profile function's witness and
@@ -401,6 +401,61 @@ The receipt's claims are scoped to exactly this:
   capability witness are still REPRESENTATIVE MIR shapes (emit_cert.rs).
 - **Extraction is trusted** (item 2 above) until CertiCoq/CompCert.
 - **Single independent checker.** Diversity (≥2 independent checkers) is brick 6.
+
+## Proven-vs-trusted boundary map (flight-evidence-gaps F3-1)
+
+The one-page answer to the auditor's first question: **what exactly is proven,
+and what is trusted engineering?** (2026-07-03 — written after a hands-on pass
+found five output-breaking bugs, ALL in the trusted zone.)
+
+```
+                         ┌──────────────────────────────────────────────┐
+  .almd source ──parse──▶│ FRONTEND (trusted Rust)                      │
+                         │  check / lower / optimize / mono / ir_link   │
+                         └──────────────┬───────────────────────────────┘
+                                        │ IR
+                         ┌──────────────▼───────────────────────────────┐
+                         │ MIR LOWERING (trusted Rust, WALLED)          │  ← the five 2026-07-03
+                         │  lower_function + pre-desugars               │    bugs lived HERE
+                         │  emits per-function WITNESSES                │
+                         └──────────────┬───────────────────────────────┘
+                                        │ MIR + certificates
+                         ┌──────────────▼───────────────────────────────┐
+                         │ CHECKER (Coq-PROVEN kernel)                  │  ← accept ⟹ ownership ∧
+                         │  check_all_sound / names / caps-transitive   │    names ∧ caps (37 thms)
+                         └──────────────┬───────────────────────────────┘
+                                        │ accepted MIR
+                         ┌──────────────▼───────────────────────────────┐
+                         │ RENDERER render_wasm (trusted Rust;          │
+                         │  rc_dec/rc_inc byte trees PROVEN — WasmExec) │
+                         └──────────────┬───────────────────────────────┘
+                                        │ wat
+                              wasmtime (UNQUALIFIED tool)
+```
+
+What the proof gives: an ACCEPTED function cannot double-free, leak, dangle a
+name, or reach an undeclared capability. What the proof does NOT give: that the
+lowering picked the RIGHT semantics — a certified-sound function can still print
+the wrong string. That gap is covered only by differential evidence
+(output-parity baseline + org suites), whose reach is measured by
+`proofs/coverage.sh`.
+
+### The five 2026-07-03 trusted-zone bug classes and their regression pins
+
+| class | what broke | pin (gate or fixture) |
+|---|---|---|
+| match linearization ran BOTH effectful arms | wrong output under a green wall | call-bearing-arm WALL guard (`lower_branch`) + `mutual_recursive_types` / grammar dispatch fixtures in the parity baseline |
+| never-err strip vs REAL Result blocks | record fields read off a Result handle | `effect_assign_unwrap` (all five legs) in the parity baseline + lifted/self strip gate |
+| scalar module-globals lowered to Const-0 | every use of a top-level `let` read 0 | const-init materialization + WALL for call-bearing inits; `top_let_test` in the baseline |
+| lifted lambdas lost variant/global registries | `filter` dropped every element | sub-ctx inheritance (binds.rs); `closures_and_variants` in the baseline |
+| `_start` left an explicit-Result main on the stack | invalid wasm for every Result-main CLI | `_start` tag-read/drop; grammar CLI matrix byte-verified |
+
+Pattern across all five: a REGISTRY or CONVENTION (tracking sets, layout tables,
+calling convention) drifted between producer and consumer inside the trusted
+zone. The structural fix direction is certificate-format-v1 / value-rc-cert
+(shrink the trusted zone); the tactical direction is the wall discipline (every
+consumer of an untracked/unknown shape must wall, never guess) — which is now
+enforced at the match-linearization and Map-repr routing sites.
 
 ## Use-relativized completeness
 
