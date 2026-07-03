@@ -616,6 +616,39 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
     let mut depth: u32 = 0;
     let mut s = Streams::new();
 
+    // A branch-MERGE dst (`Op::IfThen {{ dst }}`) that is later RELEASED — consumed
+    // by an OUTER frame (the nested monadic-`!` chain: the inner match's merged
+    // Result moves into the outer merge) or returned — RECEIVES the arm value each
+    // arm moved in (the arm's `m`). Record that move-in as the merge object's `i`
+    // so its later `m`/`d` balances ("im", the physical rc: the arm's −1 and the
+    // merge's +1 are the same reference changing hands). An UNUSED merge dst stays
+    // event-free exactly as before. Without this the chained-`!` witness read as a
+    // bare `m` and the proven checker REJECTED it (flight-evidence-gaps F8).
+    let mut released_merge_dsts: std::collections::HashSet<crate::ValueId> =
+        std::collections::HashSet::new();
+    {
+        let mut merge_dsts: std::collections::HashSet<crate::ValueId> =
+            std::collections::HashSet::new();
+        for op in &func.ops {
+            match op {
+                Op::IfThen { dst: Some(d), .. } => {
+                    merge_dsts.insert(*d);
+                }
+                Op::Consume { v } | Op::Drop { v } | Op::DropListStr { v } => {
+                    if merge_dsts.contains(v) {
+                        released_merge_dsts.insert(*v);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(r) = func.ret {
+            if merge_dsts.contains(&r) {
+                released_merge_dsts.insert(r);
+            }
+        }
+    }
+
     // Heap params are BORROWED (the v1 calling convention): the CALLER owns the
     // reference and releases it, so a param contributes NO `i` event — that `+1`
     // would be SYNTHETIC, unbacked by any runtime `Alloc`/`rc_inc` (the gate-blind
@@ -723,6 +756,11 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             // delimiters); a scalar SetLocal is cert-neutral. So this fires ONLY for a line slot.
             Op::SetLocal { local, .. } if line_slots.contains(local) => {
                 s.event(*local, ')');
+            }
+            // The released branch-merge dst receives the arm's moved-in reference (+1).
+            Op::IfThen { dst: Some(d), .. } if released_merge_dsts.contains(d) => {
+                s.of.insert(*d, *d);
+                s.event(*d, 'i');
             }
             // Loop delimiters for a heap loop-carried slot: open `(` on each slot
             // stream when entering a top-level loop, close `)` on leaving — so the

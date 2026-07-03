@@ -243,6 +243,21 @@ err 再構成 — の cert 行が bare `m`：取得イベントなしの move-ou
 
 **受入基準**: corpus-wall が checker phase 込みでローカル green、REJECT ゼロ。
 
+**進捗（2026-07-03 夜）**: 違反 cert 行を全列挙する自前バランサで棚卸しし、**多数 → 2 件**へ。
+1. **merge move-in の記帳**（根治済み）: ネストした monadic `!` の内側 merge dst が外側に
+   Consume される時の bare `m` — released merge dst に arm からの move-in `i` を対で記帳
+   （物理: アームの −1 と merge の +1 は同一参照の持ち替え）。backing gate（unbacked +1 検査）
+   も同じ released-merge 集合で歩調を合わせた。checker ACCEPT 確認済み。
+2. **via_if クラス（miscompile 8例目、根治済み）**: `let v = if c then boom(x) else boom(y)`
+   （effect fn の auto-`?` が各アーム内に `Try` を置く scalar-typed if）で、scalar 経路が
+   Try を黙って剥がし **Result ブロックの handle に +100 する raw 演算**を出していた —
+   checker の leak 行（bare `i`）が本物のミスコンパイルを指した初の実例。tail-dup の対象を
+   「heap 型 or アームに直接 Try/Unwrap を含む bind」へ拡張し、既存の monadic desugar に
+   委ねて根治（via_if byte-MATCH、baseline 176 退行ゼロ、MIR 507/0）。
+3. **残 2 件**（未根治・記録）: `bytes_set_value_semantics::rotate`（"adm" — loop-carried slot
+   の field-Dup 初期化と括弧イベントの合流）と `effect_tco::checked`（"i" — effect TCO の
+   err パス）。いずれも実行は parity green で、cert 会計の未整備クラス。
+
 ## 優先順位と依存
 
 ```

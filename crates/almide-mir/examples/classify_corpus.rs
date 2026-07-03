@@ -387,7 +387,35 @@ fn plus_one_events_backed(mir: &MirFunction) -> bool {
         })
         .count();
     let dups = mir.ops.iter().filter(|o| matches!(o, Op::Dup { .. })).count();
-    i == allocs + heap_results && a == dups
+    // A RELEASED branch-merge dst's `i` (the arm's moved-in reference — see
+    // ownership_certificate's released_merge_dsts) is backed by the arm value's
+    // real producer: the merge is a reference changing hands (the wasm merge
+    // local.set), not a synthetic +1. Count exactly the merges the certificate
+    // credits so the two stay in lockstep.
+    let released_merges = {
+        let mut merge_dsts = std::collections::HashSet::new();
+        let mut released = std::collections::HashSet::new();
+        for op in &mir.ops {
+            match op {
+                Op::IfThen { dst: Some(d), .. } => {
+                    merge_dsts.insert(*d);
+                }
+                Op::Consume { v } | Op::Drop { v } | Op::DropListStr { v } => {
+                    if merge_dsts.contains(v) {
+                        released.insert(*v);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(r) = mir.ret {
+            if merge_dsts.contains(&r) {
+                released.insert(r);
+            }
+        }
+        released.len()
+    };
+    i == allocs + heap_results + released_merges && a == dups
 }
 
 /// Outcome of driving one `.almd` source through the frontend to linked IR.

@@ -1678,10 +1678,29 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
         return None;
     };
-    // Find the first heap let-bound `if`/`match` bind.
+    // Find the first heap let-bound `if`/`match` bind — OR a SCALAR-typed one whose
+    // arms carry an error operator (`let v = if c then boom(x)! else boom(y)!` — the
+    // effect-fn auto-`?` puts a `Try` INSIDE each arm; the scalar path silently
+    // stripped it and bound the raw Result handle, the via_if class the proven
+    // checker's leak line exposed). Tail-duplicating pushes the continuation into
+    // each arm, where the ordinary monadic `!` desugar handles the Try faithfully.
+    fn arm_has_error_op(e: &IrExpr) -> bool {
+        fn direct(e: &IrExpr) -> bool {
+            match &e.kind {
+                IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } => true,
+                IrExprKind::Block { expr: Some(t), .. } => direct(t),
+                _ => false,
+            }
+        }
+        match &e.kind {
+            IrExprKind::If { then, else_, .. } => direct(then) || direct(else_),
+            IrExprKind::Match { arms, .. } => arms.iter().any(|a| direct(&a.body)),
+            _ => false,
+        }
+    }
     let (i, bind_var, bind_ty, branch) = stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
         IrStmtKind::Bind { var, ty, value, .. }
-            if is_heap_ty(ty)
+            if (is_heap_ty(ty) || arm_has_error_op(value))
                 && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. }) =>
         {
             Some((i, *var, ty.clone(), value))
