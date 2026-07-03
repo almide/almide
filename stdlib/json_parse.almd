@@ -1,0 +1,237 @@
+// json_parse — SELF-HOSTED `json.parse(text)`: a pure-Almide recursive-descent
+// JSON parser, transcribed clause-for-clause from the native oracle
+// (`runtime/rs/src/json.rs::almide_rt_json_parse`) so the v1 trust spine lowers
+// it through the PROVEN pipeline with NO hand-written wasm runtime to drift.
+// This is the last leg of the json codec cascade (parse → get/typed accessors →
+// object/array ctors → stringify) that puts porta's read_message on the
+// VERIFIED render_program path.
+//
+// Oracle-faithful details worth naming (all deliberate, all covered by the
+// probes in spec/):
+//   - positions are CODEPOINT indices (the oracle iterates Vec<char>); error
+//     messages carry them verbatim (`unexpected char 'x' at pos N`).
+//   - parse_string never fails: an unterminated string yields what was read;
+//     unknown escapes and invalid \uXXXX units are silently dropped; a
+//     high+low surrogate pair joins into one astral codepoint (#651).
+//   - trailing separators are lenient exactly where the oracle is: a missing
+//     `]`/`}` at end of input still yields the collection; `{x: 1}` hunts the
+//     key through parse_string unconditionally.
+//   - numbers: `-?digits[.digits][eE[+-]digits]`; any fraction/exponent makes
+//     a Float, else Int; parse errors pass the Rust ParseIntError/
+//     ParseFloatError message through.
+
+fn json_parse(text: String) -> Result[Value, String] =
+  match __jp_value(text, 0) {
+    ok(r) => {
+      let (v, _p) = r
+      ok(v)
+    }
+    err(e) => err(e)
+  }
+
+// Skip Unicode whitespace (char::is_whitespace) from p; returns the first
+// non-ws position (or len).
+fn __jp_ws(t: String, p: Int) -> Int =
+  if p < string.len(t) and string.is_whitespace(string.get(t, p) ?? "x") then __jp_ws(t, p + 1)
+  else p
+
+fn __jp_is_digit(c: String) -> Bool = string.is_digit(c)
+
+fn __jp_value(t: String, p: Int) -> Result[(Value, Int), String] = {
+  let q = __jp_ws(t, p)
+  if q >= string.len(t) then err("unexpected end of input")
+  else {
+    let c = string.get(t, q) ?? ""
+    if c == "\"" then {
+      let (s, np) = __jp_string(t, q)
+      ok((value.str(s), np))
+    }
+    else if c == "{" then {
+      let q2 = __jp_ws(t, q + 1)
+      if (string.get(t, q2) ?? "") == "}" then {
+        let empty: List[(String, Value)] = []
+        ok((value.object(empty), q2 + 1))
+      }
+      else {
+        let acc0: List[(String, Value)] = []
+        __jp_object(t, q2, acc0)
+      }
+    }
+    else if c == "[" then {
+      let q2 = __jp_ws(t, q + 1)
+      if (string.get(t, q2) ?? "") == "]" then {
+        let empty: List[Value] = []
+        ok((value.array(empty), q2 + 1))
+      }
+      else {
+        let acc0: List[Value] = []
+        __jp_array(t, q2, acc0)
+      }
+    }
+    else if c == "t" or c == "f" then __jp_bool(t, q)
+    else if c == "n" then __jp_null(t, q)
+    else if c == "-" or __jp_is_digit(c) then __jp_number(t, q)
+    else err("unexpected char '" + c + "' at pos " + int.to_string(q))
+  }
+}
+
+// ── strings ──
+
+// p is at the opening quote (or, from the object-key path, at whatever char
+// the oracle hands parse_string — it consumes it unconditionally).
+fn __jp_string(t: String, p: Int) -> (String, Int) = __jp_str_rec(t, p + 1, "")
+
+fn __jp_str_rec(t: String, p: Int, acc: String) -> (String, Int) = {
+  if p >= string.len(t) then (acc, p)
+  else {
+    let c = string.get(t, p) ?? ""
+    if c == "\"" then (acc, p + 1)
+    else if c == "\\" then {
+      let e = string.get(t, p + 1) ?? ""
+      if e == "n" then __jp_str_rec(t, p + 2, acc + "\n")
+      else if e == "t" then __jp_str_rec(t, p + 2, acc + "\t")
+      else if e == "r" then __jp_str_rec(t, p + 2, acc + "\r")
+      else if e == "b" then __jp_str_rec(t, p + 2, acc + "\u{0008}")
+      else if e == "f" then __jp_str_rec(t, p + 2, acc + "\u{000c}")
+      else if e == "\"" then __jp_str_rec(t, p + 2, acc + "\"")
+      else if e == "\\" then __jp_str_rec(t, p + 2, acc + "\\")
+      else if e == "/" then __jp_str_rec(t, p + 2, acc + "/")
+      else if e == "u" then __jp_str_u(t, p, acc)
+      else __jp_str_rec(t, p + 2, acc)
+    }
+    else __jp_str_rec(t, p + 1, acc + c)
+  }
+}
+
+// \uXXXX at p (p = the backslash). The oracle advances past the 4 hex digits
+// UNCONDITIONALLY, pushes only when they parse; a D800–DBFF unit followed by
+// a \uDC00–DFFF unit joins into one astral codepoint; lone/invalid surrogates
+// are dropped.
+fn __jp_str_u(t: String, p: Int, acc: String) -> (String, Int) = {
+  let hex = string.slice(t, p + 2, p + 6)
+  match __jp_hex4(hex) {
+    some(unit) =>
+      if unit >= 55296 and unit <= 56319 and string.slice(t, p + 6, p + 8) == "\\u" then {
+        match __jp_hex4(string.slice(t, p + 8, p + 12)) {
+          some(lo) =>
+            if lo >= 56320 and lo <= 57343 then {
+              let cp = 65536 + (unit - 55296) * 1024 + (lo - 56320)
+              __jp_str_rec(t, p + 12, acc + string.from_codepoint(cp))
+            }
+            else __jp_str_rec(t, p + 6, acc)
+          none => __jp_str_rec(t, p + 6, acc)
+        }
+      }
+      else if unit >= 55296 and unit <= 57343 then __jp_str_rec(t, p + 6, acc)
+      else __jp_str_rec(t, p + 6, acc + string.from_codepoint(unit))
+    none => __jp_str_rec(t, p + 6, acc)
+  }
+}
+
+// Exactly 4 ASCII hex digits → the code unit; anything else → none. Hand-rolled
+// (NOT int.from_hex) because that trims whitespace and strips `0x`, which the
+// oracle's from_str_radix rejects.
+fn __jp_hex4(s: String) -> Option[Int] =
+  if string.len(s) != 4 then none
+  else {
+    match __jp_hex_digit(string.get(s, 0) ?? "") {
+      some(a) => match __jp_hex_digit(string.get(s, 1) ?? "") {
+        some(b) => match __jp_hex_digit(string.get(s, 2) ?? "") {
+          some(c) => match __jp_hex_digit(string.get(s, 3) ?? "") {
+            some(d) => some(((a * 16 + b) * 16 + c) * 16 + d)
+            none => none
+          }
+          none => none
+        }
+        none => none
+      }
+      none => none
+    }
+  }
+
+fn __jp_hex_digit(c: String) -> Option[Int] = {
+  let n = string.codepoint(c) ?? 0
+  if n >= 48 and n <= 57 then some(n - 48)
+  else if n >= 97 and n <= 102 then some(n - 87)
+  else if n >= 65 and n <= 70 then some(n - 55)
+  else none
+}
+
+// ── numbers ──
+
+fn __jp_digits(t: String, p: Int) -> Int =
+  if p < string.len(t) and __jp_is_digit(string.get(t, p) ?? "") then __jp_digits(t, p + 1)
+  else p
+
+fn __jp_number(t: String, p: Int) -> Result[(Value, Int), String] = {
+  let p1 = if (string.get(t, p) ?? "") == "-" then p + 1 else p
+  let p2 = __jp_digits(t, p1)
+  let has_frac = (string.get(t, p2) ?? "") == "."
+  let p3 = if has_frac then __jp_digits(t, p2 + 1) else p2
+  let e = string.get(t, p3) ?? ""
+  let has_exp = e == "e" or e == "E"
+  let p4 = if has_exp then {
+    let ps = p3 + 1
+    let sgn = string.get(t, ps) ?? ""
+    let ps2 = if sgn == "+" or sgn == "-" then ps + 1 else ps
+    __jp_digits(t, ps2)
+  } else p3
+  let s = string.slice(t, p, p4)
+  if has_frac or has_exp then
+    match float.parse(s) {
+      ok(f) => ok((value.float(f), p4))
+      err(m) => err(m)
+    }
+  else
+    match int.parse(s) {
+      ok(n) => ok((value.int(n), p4))
+      err(m) => err(m)
+    }
+}
+
+// ── literals ──
+
+fn __jp_bool(t: String, p: Int) -> Result[(Value, Int), String] =
+  if string.slice(t, p, p + 4) == "true" then ok((value.bool(true), p + 4))
+  else if string.slice(t, p, p + 5) == "false" then ok((value.bool(false), p + 5))
+  else err("expected bool")
+
+fn __jp_null(t: String, p: Int) -> Result[(Value, Int), String] =
+  if string.slice(t, p, p + 4) == "null" then ok((value.null(), p + 4))
+  else err("expected null")
+
+// ── collections ──
+
+// p is at the first element (post-`[`, post-ws, non-`]`).
+fn __jp_array(t: String, p: Int, acc: List[Value]) -> Result[(Value, Int), String] =
+  match __jp_value(t, p) {
+    ok(r) => {
+      let (v, np) = r
+      let q = __jp_ws(t, np)
+      let c = string.get(t, q) ?? ""
+      if c == "," then __jp_array(t, q + 1, acc + [v])
+      else if c == "]" then ok((value.array(acc + [v]), q + 1))
+      else ok((value.array(acc + [v]), q))
+    }
+    err(e) => err(e)
+  }
+
+// p is at the first key (post-`{`, post-ws, non-`}`). The oracle re-skips ws
+// at the loop head and consumes `:` only if present.
+fn __jp_object(t: String, p: Int, acc: List[(String, Value)]) -> Result[(Value, Int), String] = {
+  let q = __jp_ws(t, p)
+  let (k, kp) = __jp_string(t, q)
+  let q2 = __jp_ws(t, kp)
+  let q3 = if (string.get(t, q2) ?? "") == ":" then q2 + 1 else q2
+  match __jp_value(t, q3) {
+    ok(r) => {
+      let (v, np) = r
+      let q4 = __jp_ws(t, np)
+      let c = string.get(t, q4) ?? ""
+      if c == "," then __jp_object(t, q4 + 1, acc + [(k, v)])
+      else if c == "}" then ok((value.object(acc + [(k, v)]), q4 + 1))
+      else ok((value.object(acc + [(k, v)]), q4))
+    }
+    err(e) => err(e)
+  }
+}
