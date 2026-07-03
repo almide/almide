@@ -41,6 +41,20 @@ fn has_result_err(body: &IrExpr) -> bool {
                     self.0 = true;
                 }
             }
+            // A `!` over a MODULE / runtime call propagates an error channel this
+            // Named-call-only analysis cannot see (`json.parse(body)!` inside
+            // porta's parse_and_wrap): the fn IS can-err. Without this it was
+            // classified never-err, its callers' `!` got stripped, and the caller
+            // read the REAL Result block as the raw payload (record fields off a
+            // Result handle — the read_message `method=` garbage, 2026-07-03).
+            if let IrExprKind::Unwrap { expr: inner } = &e.kind {
+                if matches!(&inner.kind,
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                        | IrExprKind::RuntimeCall { .. })
+                {
+                    self.0 = true;
+                }
+            }
             walk_expr(self, e);
         }
     }
@@ -99,15 +113,35 @@ pub fn compute_can_err(fns: &[IrFunction]) -> std::collections::HashSet<String> 
 /// returns `Ok`, so the `!` is a no-op; a CAN-ERR callee's `!` is LEFT untouched (it still walls in
 /// `lower_destructure`/`lower_bind`), so its error is never silently dropped (the blanket strip that did
 /// drop it byte-mismatched safe_div_chain & co. — see the roadmap note).
-pub fn strip_never_err_unwraps(body: &mut IrExpr, can_err: &std::collections::HashSet<String>) {
+pub fn strip_never_err_unwraps(
+    body: &mut IrExpr,
+    can_err: &std::collections::HashSet<String>,
+    lifted_effect_fns: &std::collections::HashSet<String>,
+    self_name: &str,
+) {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
-    struct S<'a>(&'a std::collections::HashSet<String>);
+    struct S<'a> {
+        can_err: &'a std::collections::HashSet<String>,
+        lifted: &'a std::collections::HashSet<String>,
+        self_name: &'a str,
+    }
     impl IrMutVisitor for S<'_> {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
             walk_expr_mut(self, expr);
+            // The strip is REPRESENTATION-sound only when the callee's v1 body
+            // returns the raw `T`: a LIFTED effect fn (the frontend added the
+            // Result ABI; the MIR body never built a Result block). A pure /
+            // effect fn DECLARED `-> Result[..]` builds a REAL Result block even
+            // when it never errs (`ok(rec)`), so stripping its bind-position `!`
+            // made the consumer read record fields off the Result handle (the
+            // r8 / read_message miscompile, 2026-07-03). SELF-calls keep the
+            // strip unconditionally — that is the tail-TCO shape (`f(..)!` →
+            // `f(..)`), a same-Result pass-through the tail lowering already
+            // treats as such (the yaml parser cluster).
             let strip = matches!(&expr.kind, IrExprKind::Unwrap { expr: inner }
                 if matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                    if !self.0.contains(name.as_str())));
+                    if !self.can_err.contains(name.as_str())
+                        && (self.lifted.contains(name.as_str()) || name.as_str() == self.self_name)));
             if strip {
                 if let IrExprKind::Unwrap { expr: inner } = &expr.kind {
                     let inner = (**inner).clone();
@@ -116,7 +150,7 @@ pub fn strip_never_err_unwraps(body: &mut IrExpr, can_err: &std::collections::Ha
             }
         }
     }
-    S(can_err).visit_expr_mut(body);
+    S { can_err, lifted: lifted_effect_fns, self_name }.visit_expr_mut(body);
 }
 
 /// Rewrite a NEVER-ERR user `effect fn` `Named` CALL's result type from the lifted-ABI
@@ -320,7 +354,7 @@ pub fn inline_mutual_tail_recursion(
         .iter()
         .map(|f| {
             let mut nf = f.clone();
-            strip_never_err_unwraps(&mut nf.body, &can_err);
+            strip_never_err_unwraps(&mut nf.body, &can_err, &lifted_effect_fns, f.name.as_str());
             rewrite_never_err_effect_match(&mut nf.body, &can_err, &lifted_effect_fns);
             unwrap_never_err_call_types(&mut nf.body, &can_err, &lifted_effect_fns);
             nf

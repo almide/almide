@@ -29,6 +29,14 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
     matches!(
         (module, func),
         ("value", "as_string") | ("result", "zip") | ("value", "as_array") | ("value", "get")
+            // `json.parse` is the SELF-HOSTED recursive-descent parser
+            // (stdlib/json_parse.almd): its `Result[Value, String]` is built by the
+            // ordinary Almide ok()/err() ctors = the materialize_result_str layout
+            // (payload @12, tag @16). Tracking the bound var routes a later
+            // `match r { ok/err }` through try_lower_result_match (tag dispatch)
+            // instead of the linearization, and `is_value_result_ty` picks the
+            // recursive DropResultValue for the Ok Value.
+            | ("json", "parse")
             // `fs.read_text` returns the cap-as-tag `Result[String, String]` ($read_text_file builds
             // it in the EXACT `materialize_result_str` layout — payload @12, Ok/Err tag @16). So a
             // `match`/`!` over it must read tag @16 + bind the @12 payload handle (the str-result
