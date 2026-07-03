@@ -612,7 +612,7 @@ impl LowerCtx {
                             let dst = self.fresh_value();
                             self.record_elided_calls(a);
                             if crate::lower::strict_values() {
-                    return Err(crate::lower::strict_const_wall("call argument"));
+                    return Err(crate::lower::strict_const_wall(&format!("call argument ({})", kind_name(&a.kind))));
                 }
                 self.ops.push(Op::Const { dst });
                             CallArg::Scalar(dst)
@@ -696,7 +696,7 @@ impl LowerCtx {
                                 let dst = self.fresh_value();
                                 self.record_elided_calls(a);
                                 if crate::lower::strict_values() {
-                    return Err(crate::lower::strict_const_wall("call argument"));
+                    return Err(crate::lower::strict_const_wall(&format!("call argument ({})", kind_name(&a.kind))));
                 }
                 self.ops.push(Op::Const { dst });
                                 CallArg::Scalar(dst)
@@ -761,7 +761,7 @@ impl LowerCtx {
                                 }
                                 let dst = self.fresh_value();
                                 if crate::lower::strict_values() {
-                    return Err(crate::lower::strict_const_wall("call argument"));
+                    return Err(crate::lower::strict_const_wall(&format!("call argument ({})", kind_name(&a.kind))));
                 }
                 self.ops.push(Op::Const { dst });
                                 self.record_elided_calls(a);
@@ -897,7 +897,7 @@ impl LowerCtx {
                         let dst = self.fresh_value();
                         self.record_elided_calls(a);
                         if crate::lower::strict_values() {
-                    return Err(crate::lower::strict_const_wall("call argument"));
+                    return Err(crate::lower::strict_const_wall(&format!("call argument ({})", kind_name(&a.kind))));
                 }
                 self.ops.push(Op::Const { dst });
                         CallArg::Scalar(dst)

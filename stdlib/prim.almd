@@ -347,3 +347,7 @@ fn f32bits(x: Float32) -> Int = _
 // negative exponent, int.rotate nonpositive width). Never returns.
 @intrinsic("almide_rt_prim_die")
 fn die(s: Int) -> Unit = _
+// Generic-typed sibling of alloc_map_skv — the SAME 2n-slot map block, typed for
+// any key/value pair (map_ivh's Map[Int,String], map_hval's Map[String,List[Int]]).
+@intrinsic("almide_rt_prim_alloc_map_kv")
+fn alloc_map_kv[K, V](slots: Int) -> Map[K, V] = _

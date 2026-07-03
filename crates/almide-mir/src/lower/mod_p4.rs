@@ -1054,7 +1054,7 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
             arg_tys.first(),
             Some(Ty::Applied(TypeConstructorId::Set, a)) if a.len() == 1 && is_heap_ty(&a[0])
         );
-        if matches!(func, "contains" | "is_subset" | "is_disjoint" | "all" | "any" | "fold")
+        if matches!(func, "contains" | "is_subset" | "is_disjoint" | "all" | "any" | "fold" | "eq")
             && arg0_is_heap_set
         {
             return format!("set.{func}_str");
@@ -1093,8 +1093,20 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 arg_tys.first().or(Some(result_ty)),
                 Some(Ty::Applied(TypeConstructorId::Map, a)) if a.len() == 2 && matches!(a[1], Ty::String)
             );
+            // The FLAT-heap-value class map_hval actually implements (List[scalar]).
+            let val_is_flat_list = matches!(
+                arg_tys.first().or(Some(result_ty)),
+                Some(Ty::Applied(TypeConstructorId::Map, a))
+                    if a.len() == 2 && matches!(&a[1],
+                        Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && !is_heap_ty(&e[0]))
+            );
             let variant = match (key_heap, val_heap) {
-                (true, true) if !val_is_string => Some("_hval"),
+                // `Map[String, List[scalar]]` — the implemented subset of the heap-value
+                // family (new/set/eq; other funcs keep the unregistered wall name).
+                (true, true) if val_is_flat_list && matches!(func, "new" | "set" | "eq") => {
+                    Some("_hval")
+                }
+                (true, true) if !val_is_string => Some("_hval_wall"),
                 (true, true) => matches!(
                     func,
                     "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
@@ -1105,15 +1117,23 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 (true, false) => matches!(
                     func,
                     "new" | "set" | "remove" | "filter" | "get" | "get_or" | "keys" | "values"
-                        | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
+                        | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold" | "eq"
                 )
                 .then_some("_skv"),
-                // A SCALAR-key map with a HEAP value (`Map[Int, String]`) has no
-                // self-hosted variant yet. It used to fall through to the PLAIN
-                // map_core names — which LINKED (Map[Int,Int] i64-slot impls) and
-                // emitted an i64/i32 repr mismatch = INVALID WASM (map_set_eq).
-                // Route to an unregistered `_ivh` name: a clean wall instead.
-                (false, true) => Some("_ivh"),
+                // `Map[Int, String]` — the implemented scalar-key/heap-value variant
+                // (new/set/eq). Other funcs, and other heap value types, keep an
+                // UNREGISTERED wall name (never the plain Map[Int,Int] i64-slot link
+                // that emitted invalid wasm — map_set_eq's original failure).
+                (false, true)
+                    if matches!(
+                        arg_tys.first().or(Some(result_ty)),
+                        Some(Ty::Applied(TypeConstructorId::Map, a))
+                            if a.len() == 2 && matches!(a[0], Ty::Int) && matches!(a[1], Ty::String)
+                    ) && matches!(func, "new" | "set" | "eq") =>
+                {
+                    Some("_ivh")
+                }
+                (false, true) => Some("_ivh_wall"),
                 _ => None,
             };
             if let Some(suffix) = variant {

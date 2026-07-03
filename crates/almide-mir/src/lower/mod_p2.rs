@@ -1116,6 +1116,24 @@ pub(crate) fn is_list_str_str_ty(ty: &Ty) -> bool {
 /// @20 heap) tuple; its scope-end drop must be the recursive `$__drop_list_int_str` (rc_dec each
 /// tuple's String + block), routed via `variant_drop_handles="list_int_str"`. A flat `DropListStr`
 /// would leak each tuple's String (a 10⁴ loop OOMs).
+/// `Map[Int, String]` — the scalar-key / owned-heap-value map (self-host map_ivh).
+pub(crate) fn is_map_ivh_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty,
+        Ty::Applied(TypeConstructorId::Map, a)
+            if a.len() == 2 && matches!(a[0], Ty::Int) && matches!(a[1], Ty::String))
+}
+
+/// `Map[String, List[scalar]]` — the String-key / FLAT-heap-value map (self-host
+/// map_hval; a flat value block's rc_dec is its full free).
+pub(crate) fn is_map_hval_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty,
+        Ty::Applied(TypeConstructorId::Map, a)
+            if a.len() == 2 && matches!(a[0], Ty::String) && matches!(&a[1],
+                Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && !is_heap_ty(&e[0])))
+}
+
 pub(crate) fn is_list_int_str_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(ty,

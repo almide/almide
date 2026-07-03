@@ -562,6 +562,12 @@ impl LowerCtx {
                     // `List[(Int,String)]` (list.enumerate) — recursive `$__drop_list_int_str` (rc_dec
                     // each tuple's String); the flat heap_elem_lists DropListStr would leak them.
                     self.variant_drop_handles.insert(dst, "list_int_str".to_string());
+                } else if crate::lower::is_map_ivh_ty(ty) {
+                    // `Map[Int, String]` — `$__drop_map_ivh` rc_decs each OWNED value slot.
+                    self.variant_drop_handles.insert(dst, "map_ivh".to_string());
+                } else if crate::lower::is_map_hval_ty(ty) {
+                    // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
+                    self.variant_drop_handles.insert(dst, "map_hval".to_string());
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -718,6 +724,12 @@ impl LowerCtx {
                     // `List[(Int,String)]` (list.enumerate) — recursive `$__drop_list_int_str`; the flat
                     // heap_elem_lists DropListStr would leak each tuple's String (a 10⁴ loop OOMs).
                     self.variant_drop_handles.insert(dst, "list_int_str".to_string());
+                } else if crate::lower::is_map_ivh_ty(ty) {
+                    // `Map[Int, String]` — `$__drop_map_ivh` rc_decs each OWNED value slot.
+                    self.variant_drop_handles.insert(dst, "map_ivh".to_string());
+                } else if crate::lower::is_map_hval_ty(ty) {
+                    // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
+                    self.variant_drop_handles.insert(dst, "map_hval".to_string());
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }

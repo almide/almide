@@ -524,7 +524,18 @@ fn main() {
             if any_called && !any_defined {
                 let rt = source_to_ir(source);
                 for f in &rt.functions {
-                    if let Ok(mut mir) = almide_mir::lower::lower_function(f, &globals) {
+                    let lowered = almide_mir::lower::lower_function(f, &globals);
+                    // A self-host fn that fails to lower leaves its call name UNLINKED —
+                    // surface the reason instead of skipping silently (the unlinked-call
+                    // reject below names the symptom; this names the cause).
+                    if let Err(e) = &lowered {
+                        if entries.iter().any(|(impl_fn, _)| f.name.as_str() == *impl_fn)
+                            || f.name.as_str().starts_with("__")
+                        {
+                            eprintln!("[self-host] {} failed to lower: {:?}", f.name.as_str(), e);
+                        }
+                    }
+                    if let Ok(mut mir) = lowered {
                         if let Some((_, call)) = entries.iter().find(|(impl_fn, _)| &mir.name == impl_fn) {
                             mir.name = call.to_string();
                         }

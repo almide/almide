@@ -475,6 +475,38 @@ impl LowerCtx {
                         }
                     }
                 }
+                // `map_a == map_b` over the two implemented map reprs — a deep
+                // order-independent compare call (→ scalar Bool), same shape as list ==.
+                if matches!(op, BinOp::Eq | BinOp::Neq) {
+                    let is_set_str = matches!(&left.ty,
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Set, a)
+                            if a.len() == 1 && matches!(a[0], Ty::String));
+                    let is_map_skv = matches!(&left.ty,
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                            if a.len() == 2 && matches!(a[0], Ty::String) && !crate::lower::is_heap_ty(&a[1]));
+                    let admitted = crate::lower::is_map_ivh_ty(&left.ty)
+                        || crate::lower::is_map_hval_ty(&left.ty)
+                        || is_map_skv
+                        || is_set_str;
+                    if admitted {
+                        let module = if is_set_str { "set" } else { "map" };
+                        // Pass the BARE "eq" — `list_heap_call_name` attaches the repr
+                        // suffix (`map.eq_ivh` / `map.eq_hval`) from the subject type,
+                        // exactly like every other map call site.
+                        let args = [(**left).clone(), (**right).clone()];
+                        let eq = self
+                            .lower_pure_module_value_call(module, "eq", &args, &Ty::Bool)
+                            .ok()?;
+                        if matches!(op, BinOp::Eq) {
+                            return Some(eq);
+                        }
+                        let one = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+                        return Some(dst);
+                    }
+                }
                 // String ordering `< <= > >=` → `string.cmp(a,b)` (lexicographic, -1/0/1) compared with
                 // 0. WITHOUT this the comparison fell through to the i64-handle path → arbitrary order
                 // (silent), or the if linearized both arms. Both operands BORROWED (cmp only reads).
@@ -865,7 +897,7 @@ impl LowerCtx {
         // physically identical to alloc_list) — but the dst is tracked as a NESTED-OWNERSHIP
         // list, so its scope-end drop is a recursive `DropListStr` (frees the owned element
         // Strings) and `prim.store_str` Consumes each String moved into it (Machinery 2).
-        if func == "alloc_list_str" || func == "alloc_set_str" || func == "alloc_map_str" || func == "alloc_map_skv" {
+        if func == "alloc_list_str" || func == "alloc_set_str" || func == "alloc_map_str" || func == "alloc_map_skv" || func == "alloc_map_kv" {
             let len_v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
                 LowerError::Unsupported("prim.alloc_list_str length is not a lowerable scalar".into())
             })?;

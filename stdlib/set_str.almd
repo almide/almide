@@ -365,3 +365,12 @@ fn set_fold_str(s: Set[String], init: Int, f: (Int, String) -> Int) -> Int = {
 // dedup-DISCARDED duplicate must be freed in ONE branch of the recursion only — that consume-in-
 // one-arm interacts badly with the per-arm teardown (drop_arm_locals split_off underflow). Needs
 // a lowering fix (per-branch owned-heap accounting), not an .almd change.
+
+// Order-independent equality: same size and every element of a is in b
+// (size equality makes one-directional subset sufficient).
+fn set_eq_str(a: Set[String], b: Set[String]) -> Bool = {
+  let la = prim.load32(prim.handle(a) + 4)
+  let lb = prim.load32(prim.handle(b) + 4)
+  if la != lb then false
+  else set.is_subset(a, b)
+}

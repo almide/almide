@@ -280,3 +280,25 @@ fn map_fold_skv(m: Map[String, Int], init: Int, f: (Int, String, Int) -> Int) ->
   let entries = prim.load32(sh + 4)
   __skv_fold_loop(sh, f, entries, 0, init)
 }
+
+// Order-independent equality: same length and every (k, v) of `a` has an equal
+// scalar value under the same key in `b`.
+fn __skv_eqm_at(ah: Int, an: Int, bh: Int, bn: Int, i: Int) -> Bool =
+  if i >= an then true
+  else {
+    let k = prim.load_str(ah + 12 + i * 8)
+    let j = __skv_find(bh, bn, k, 0)
+    if j < 0 then false
+    else if prim.load64(ah + 12 + (an + i) * 8) == prim.load64(bh + 12 + (bn + j) * 8)
+    then __skv_eqm_at(ah, an, bh, bn, i + 1)
+    else false
+  }
+
+fn map_eq_skv(a: Map[String, Int], b: Map[String, Int]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let an = prim.load32(ah + 4)
+  let bn = prim.load32(bh + 4)
+  if an != bn then false
+  else __skv_eqm_at(ah, an, bh, bn, 0)
+}

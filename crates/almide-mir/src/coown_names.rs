@@ -36,7 +36,12 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__ls_insert_fill",   // list.insert_str — rc_inc the inserted String
     "__sort_copy_rc",     // list.sort_str — rc-copy each String element
     "__filterrc_fill",
-    "__sbfr_init",    // list.filter_rc — rc_inc each KEPT non-String heap element (handle share)
+    "__sbfr_init",
+    "__ivh_set_copy",
+    "__hvl_set_copy",
+    "__hvl_set_append",
+    "__ivh_drop_vals",
+    "__hvl_drop_slots",    // list.filter_rc — rc_inc each KEPT non-String heap element (handle share)
     "__vmerge_fill_a",    // value.merge — rc_inc each kept/overridden key+value
     "__vmerge_app_b",     // value.merge — rc_inc each appended b key+value
 ];
