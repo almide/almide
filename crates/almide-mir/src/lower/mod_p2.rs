@@ -1117,7 +1117,7 @@ pub(crate) fn is_list_str_str_ty(ty: &Ty) -> bool {
 /// tuple's String + block), routed via `variant_drop_handles="list_int_str"`. A flat `DropListStr`
 /// would leak each tuple's String (a 10⁴ loop OOMs).
 /// `Map[Int, String]` — the scalar-key / owned-heap-value map (self-host map_ivh).
-pub(crate) fn is_map_ivh_ty(ty: &Ty) -> bool {
+pub fn is_map_ivh_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(ty,
         Ty::Applied(TypeConstructorId::Map, a)
@@ -1126,7 +1126,7 @@ pub(crate) fn is_map_ivh_ty(ty: &Ty) -> bool {
 
 /// `Map[String, List[scalar]]` — the String-key / FLAT-heap-value map (self-host
 /// map_hval; a flat value block's rc_dec is its full free).
-pub(crate) fn is_map_hval_ty(ty: &Ty) -> bool {
+pub fn is_map_hval_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(ty,
         Ty::Applied(TypeConstructorId::Map, a)
