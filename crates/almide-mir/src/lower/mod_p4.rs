@@ -1058,7 +1058,17 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
         if let Some((key_heap, val_heap)) = kv {
             // Each repr family routes ONLY the funcs its self-hosted variant file actually defines
             // (an unlisted func keeps the plain name — never a dangling `_str`/`_skv` reference).
+            // Whether the VALUE type is exactly String — the `_str` variant stores
+            // interleaved all-String entries, so a heap-but-not-String value
+            // (`Map[String, List[Int]]`) must NOT route there (its deep-copy would
+            // read the list block as string bytes). It routes to an UNREGISTERED
+            // `_hval` name instead — a clean render wall, never invalid wasm.
+            let val_is_string = matches!(
+                arg_tys.first().or(Some(result_ty)),
+                Some(Ty::Applied(TypeConstructorId::Map, a)) if a.len() == 2 && matches!(a[1], Ty::String)
+            );
             let variant = match (key_heap, val_heap) {
+                (true, true) if !val_is_string => Some("_hval"),
                 (true, true) => matches!(
                     func,
                     "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
@@ -1072,6 +1082,12 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                         | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
                 )
                 .then_some("_skv"),
+                // A SCALAR-key map with a HEAP value (`Map[Int, String]`) has no
+                // self-hosted variant yet. It used to fall through to the PLAIN
+                // map_core names — which LINKED (Map[Int,Int] i64-slot impls) and
+                // emitted an i64/i32 repr mismatch = INVALID WASM (map_set_eq).
+                // Route to an unregistered `_ivh` name: a clean wall instead.
+                (false, true) => Some("_ivh"),
                 _ => None,
             };
             if let Some(suffix) = variant {
