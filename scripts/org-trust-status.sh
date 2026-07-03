@@ -169,6 +169,8 @@ agg="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$allwalls" | sort | uniq -c | sort 
   echo "| \`obsid\` | browser+native-hosted app | ✅ wasm builds clean (no test suite yet) |"
   echo "| \`almide-aituber\` | browser-hosted app | ✅ wasm builds clean (the v1 divergence was the missing develop-side #717 auto-?-branch-retype fix — cherry-picked 2026-07-02) |"
   echo "| \`homullus\` | AI agent | ✅ byte-verified (suite, both targets) |"
+  echo "| \`almide-sqlite\` | native host lib | ✅ suite green (10 tests, :memory: + file persistence) — native host package (rusqlite FFI), verified 2026-07-03 |"
+  echo "| \`almide-web\` | browser bindings | ✅ headless vectors green (17-line byte-match: full import surface + intern protocol + callbacks under runtime/headless.mjs) — verified 2026-07-03 |"
   echo "| \`nn\` | AI (neural nets) | ✅ byte-verified (suite: 13/13 files, both targets) — unblocked 2026-07-02 by the TCO-temp type fix, the nested-HOF lambda-pin fix (C-126), the Matrix repr, the SIMD fast-exp clamp, and the unwrap_or chain fix (C-127) |"
   echo "| \`almai\` | AI (LLM client lib) | ✅ native suite green (56 tests, 2 files) — resolved 2026-07-03 by the STRUCTURAL-TWIN merge: the checker unifies same-base-name same-shape record decls across modules, so codegen now merges them into one canonical struct (flatten twin-merge; the E0063 default-fill and bare-ref repair ride the same mechanism). wasm leg: native fallback (\`env.get\`/http are native-only — an LLM client needs the network host) |"
 

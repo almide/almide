@@ -144,8 +144,59 @@ Directive: don't backport to v0; make v1 the branch where these work.
   names. aes cfb8 NIST F.3.7 passes cross-module, byte-identical on both
   targets. Guard cell: `inline_rust_with_fallback_body_cross_module`.
 
+## Fourth pass — the final two threads (2026-07-03)
+
+- **almide-sqlite: verified.** Root causes: a hyphenated package name errored
+  in `parse_toml` and the error was SILENTLY swallowed, dropping the
+  `[native-deps]` rusqlite injection (opaque E0433 downstream — run.rs/build.rs
+  now WARN); the native bindings had drifted from the runtime's `AlmideMap`
+  Map repr. Fixed both; wrote `spec/sqlite_test.almd` — 10 tests covering the
+  full API against `:memory:` + a file-persistence round-trip. Native host
+  package (like porta).
+- **almide-web: verified.** `runtime/headless.mjs` — a Node reference host
+  implementing the whole import surface (virtual-DOM handle table, captured
+  console, deterministic timer/fetch event queue) — runs `spec/host_app.almd`
+  and byte-diffs against a pinned expected output (`spec/run_host_test.sh`).
+  Every binding, the string-intern protocol, and both callback re-entries are
+  exercised; `runtime/web.js`'s DOM TODOs got the real handle-table
+  implementation with the same semantics.
+- **Handoff step 4: DONE — read_message runs BYTE-IDENTICALLY on the VERIFIED
+  render_program path** (stdin Content-Length framing → json.parse → record →
+  response build → write_message, diffed against `almide run`). What it took:
+  1. `stdlib/json_parse.almd` — a pure-Almide recursive-descent JSON parser
+     transcribed clause-for-clause from the native oracle (char positions,
+     \u surrogate pairs, lenient trailing separators, Int/Float split), plus
+     `json_ctor.almd` (object/array/stringify delegations to value_core).
+     Registered in the self-host registry; `json.parse` joined the
+     str-result-module predicate so `let v = json.parse(s)!` and `match` both
+     track.
+  2. **A soundness hole closed**: a `match` over an UNTRACKED Result subject
+     fell to the both-arms LINEARIZATION even when arms carried calls — BOTH
+     println arms ran (silent miscompile). Call-bearing arms now WALL; pure
+     module-call subjects (json.parse) are tracked like Named calls.
+  3. **never-err strip fixed two ways**: `can_err` now sees `!` over MODULE
+     calls (json.parse errs — parse_and_wrap was misclassified never-err),
+     and the bind-position strip is gated to LIFTED (or self-TCO) callees —
+     a declared-Result fn builds a REAL Result block, so stripping its `!`
+     made consumers read record fields off the Result handle.
+  4. Nested-variant payload tracking (`ok(m)` where m: Option[record]) through
+     both the statement and value Result-match binds, so porta's
+     `match m { some(req)/none }` branches on the tag.
+  5. Discarded heap-result calls (`write_message(..)!` as a statement) now
+     receive + scope-drop the returned block — a bare void call left it on
+     the wasm stack (invalid wasm).
+  Gates: corpus-wall TOTAL over 4556 fns; output-parity baseline 126 → **151**
+  (+25, the JSON-codec cascade); almide-mir tests 501/6-known; spec 273/273.
+
 ## Remaining threads
 
-- almide-web / almide-sqlite need test vectors before they can be verified.
-- Handoff step 4 (read_message on the VERIFIED render_program path — wasm JSON
-  codec self-host) remains open, unchanged.
+- **wall=0 count 21 → 19 (honesty, not regression)**: the linearization guard
+  and the never-err-strip fix surfaced walls in porta (2, native-FFI move-out
+  class) and almide-grammar (1, a call-bearing arm over an untracked subject)
+  that previously lowered into silently-wrong code paths (both arms running /
+  a Result block read as its payload). Both repos' own suites stay green /
+  byte-verified on the production (emit_wasm) path; supporting those shapes
+  faithfully on the MIR path is the next brick.
+- output-parity full-run flakiness: 2–3 baseline files drop only under the
+  full-gate machine load and byte-match solo (pre-existing, recorded).
+- The 6 almide-mir record-materialization DEBUG tests (another workstream).
