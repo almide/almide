@@ -21,28 +21,50 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/proofs/lib/stamp.sh"
 stamp_toolchain "$ROOT" || exit 1
 
-command -v cargo-llvm-cov >/dev/null || {
-    echo "coverage: cargo-llvm-cov not installed (cargo install cargo-llvm-cov) — SKIP"
+LLVM_BIN="$(echo "$HOME"/.rustup/toolchains/stable-*/lib/rustlib/*/bin | awk '{print $1}')"
+[ -x "$LLVM_BIN/llvm-profdata" ] || {
+    echo "coverage: llvm-tools not installed (rustup component add llvm-tools-preview) — SKIP"
     exit 0
 }
 cd "$ROOT"
 
-echo "== instrumented run: cargo test -p almide-mir + render_program sweep =="
-cargo llvm-cov clean --workspace >/dev/null 2>&1 || true
-# 1) the unit/gate tests
-cargo llvm-cov --no-report -p almide-mir --release >/dev/null 2>&1 || true
-# 2) the parity workload: render every wasm_cross fixture through the instrumented
-#    render_program (walls included — a wall exercises the admission gates).
-cargo llvm-cov run --no-report --release -p almide-mir --example render_program -- /dev/null >/dev/null 2>&1 || true
-RP_COV="$ROOT/target/llvm-cov-target/release/examples/render_program"
-if [ -x "$RP_COV" ]; then
-    n=0
-    for f in spec/wasm_cross/*.almd; do
-        LLVM_PROFILE_FILE="$ROOT/target/llvm-cov-target/rp-%m-%p.profraw" "$RP_COV" "$f" >/dev/null 2>&1 || true
-        n=$((n+1))
-    done
-    echo "  render_program sweep: $n fixtures"
-fi
-echo
-echo "== almide-mir line coverage (verification suites + parity workload) =="
-cargo llvm-cov report --release 2>/dev/null | awk 'NR<=2 || /almide-mir/ || /^TOTAL/' | head -40
+# MANUAL llvm-cov pipeline — cargo-llvm-cov's multi-run orchestration silently
+# measured the WRONG binary twice (0.00% over 4 stray files reported as data,
+# 2026-07-03), so each step here is explicit and its artifact is checked.
+COVDIR="$ROOT/target/coverage"
+rm -rf "$COVDIR"; mkdir -p "$COVDIR"
+export RUSTFLAGS="-C instrument-coverage"
+
+echo "== 1/4 instrumented build (almide-mir tests + render_program) =="
+cargo test -p almide-mir --release --no-run --target-dir "$COVDIR/t" 2>&1 | tail -1
+cargo build --release -p almide-mir --example render_program --target-dir "$COVDIR/t" 2>&1 | tail -1
+
+echo "== 2/4 run the almide-mir test suites =="
+TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm +111 ! -name '*.d' ! -name '*.dylib' | grep -E '/(almide_mir|integration|lower|render)[^/]*$' || true)"
+[ -n "$TESTBINS" ] || TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm +111 ! -name '*.d' ! -name '*.dylib')"
+i=0
+for tb in $TESTBINS; do
+    i=$((i+1))
+    LLVM_PROFILE_FILE="$COVDIR/test-$i-%m.profraw" "$tb" >/dev/null 2>&1 || true
+done
+echo "  test binaries run: $i"
+
+echo "== 3/4 parity workload: render_program over spec/wasm_cross =="
+RP="$COVDIR/t/release/examples/render_program"
+n=0
+for f in spec/wasm_cross/*.almd; do
+    LLVM_PROFILE_FILE="$COVDIR/rp-%m.profraw" "$RP" "$f" >/dev/null 2>&1 || true
+    n=$((n+1))
+done
+echo "  fixtures rendered: $n"
+
+echo "== 4/4 merge + report (almide-mir crate lines) =="
+nprof="$(ls "$COVDIR"/*.profraw 2>/dev/null | wc -l | tr -d ' ')"
+[ "$nprof" -gt 0 ] || { echo "coverage: NO profraw produced — measurement failed"; exit 1; }
+"$LLVM_BIN/llvm-profdata" merge -sparse "$COVDIR"/*.profraw -o "$COVDIR/all.profdata"
+OBJS="-object $RP"
+for tb in $TESTBINS; do OBJS="$OBJS -object $tb"; done
+"$LLVM_BIN/llvm-cov" report $OBJS \
+    -instr-profile="$COVDIR/all.profdata" \
+    -ignore-filename-regex='(\.cargo|rustc|/tests?/|examples/)' 2>/dev/null \
+  | awk 'NR<=2 || /almide-mir/ || /^TOTAL/'
