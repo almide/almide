@@ -48,6 +48,7 @@ spec/wasm_cross/env_args.almd
 spec/wasm_cross/fan_map_inline_lambda.almd
 spec/wasm_cross/filter_map_conditional_arm.almd
 spec/wasm_cross/float_interp_forms.almd
+spec/wasm_cross/float_parse.almd
 spec/wasm_cross/float_parse_special.almd
 spec/wasm_cross/float_shortest_roundtrip.almd
 spec/wasm_cross/float_sign_minmax_ieee.almd
