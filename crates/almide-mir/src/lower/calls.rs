@@ -569,11 +569,40 @@ impl LowerCtx {
             // with no direct effect (closes the direct-only caps gap).
             (callee, call_args) => {
                 let lowered = self.lower_call_args(call_args)?;
-                self.ops.push(Op::CallFn {
-                    dst: None,
-                    name: callee.to_string(),
-                    args: lowered,
-                result: None });
+                // A callee whose (post-never-err-rewrite) call type is HEAP returns a
+                // real block — a DECLARED-Result effect fn in statement position
+                // (`write_message(..)!`, porta) or a discarded heap value. A bare
+                // void `(call $f)` left that block ON THE WASM STACK (invalid wasm:
+                // "values remaining on stack") and leaked it. Receive it into an
+                // owned temp dropped at scope end; the by-type drop classes match
+                // the bind path. A genuinely void callee (Unit / a never-err LIFTED
+                // effect fn, whose call type was already rewritten to raw Unit)
+                // keeps the void call.
+                if is_heap_ty(&call.ty) {
+                    let dst = self.fresh_value();
+                    let pr = repr_of(&call.ty)?;
+                    self.ops.push(Op::CallFn {
+                        dst: Some(dst),
+                        name: callee.to_string(),
+                        args: lowered,
+                        result: Some(pr),
+                    });
+                    if crate::lower::is_result_listval_ty(&call.ty) {
+                        self.value_result_lists.insert(dst);
+                    } else if crate::lower::is_value_result_ty(&call.ty) {
+                        self.value_result_results.insert(dst);
+                    } else if crate::lower::is_heap_elem_list_ty(&call.ty) {
+                        self.heap_elem_lists.insert(dst);
+                    }
+                    self.live_heap_handles.push(dst);
+                } else {
+                    self.ops.push(Op::CallFn {
+                        dst: None,
+                        name: callee.to_string(),
+                        args: lowered,
+                        result: None,
+                    });
+                }
                 Ok(())
             }
         }

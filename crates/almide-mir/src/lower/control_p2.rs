@@ -27,7 +27,7 @@ impl LowerCtx {
         // Exactly [Ok(scalar-bind?), Err(heap-bind?)], no nested ctors, Unit bodies. An Ok binds a
         // SCALAR Int (value copy); an Err binds a heap String (borrowed slot-0 handle), gated to a
         // nested-ownership subject (so the Result keeps ownership through its DropListStr).
-        let mut ok: Option<(&IrExpr, Option<VarId>)> = None;
+        let mut ok: Option<(&IrExpr, Option<(VarId, Ty)>)> = None;
         let mut err: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
         for arm in arms {
             match &arm.pattern {
@@ -35,7 +35,7 @@ impl LowerCtx {
                     let bind = match inner.as_ref() {
                         // Scalar Ok (Result[Int,String]) binds a scalar int; a heap-Ok
                         // (Result[String,String]) binds a heap String — gated to `str_result`.
-                        IrPattern::Bind { var, ty } if is_heap_ty(ty) == str_result => Some(*var),
+                        IrPattern::Bind { var, ty } if is_heap_ty(ty) == str_result => Some((*var, ty.clone())),
                         IrPattern::Wildcard => None,
                         _ => return false,
                     };
@@ -93,11 +93,29 @@ impl LowerCtx {
         self.ops.push(Op::Else { val: None });
         // ELSE (tag == 0 = Ok): a scalar Result yields the slot-0 int COPY; a heap-Ok Result yields
         // the BORROWED slot-0 String handle (the Result keeps ownership through its DropListStr).
-        if let Some(bind_var) = ok_bind {
+        if let Some((bind_var, bind_ty)) = ok_bind {
             if str_result {
                 let payload = self.load_at_offset(h, 12, PrimKind::LoadHandle);
                 self.value_of.insert(bind_var, payload);
                 self.param_values.insert(payload);
+                // NESTED VARIANT PAYLOAD: `ok(m)` where m is itself an
+                // Option/Result (`Result[Option[record], String]` — porta
+                // read_message's monadic-desugar Ok arm holding `match m
+                // { some(req)/none }`). Track the BORROWED payload like the
+                // Some-bind path above does, so the INNER match BRANCHES on
+                // its tag instead of hitting the (walled) linearization.
+                use almide_lang::types::constructor::TypeConstructorId;
+                if matches!(&bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
+                    self.materialized_options.insert(payload);
+                    if crate::lower::is_heap_elem_list_ty(&bind_ty) {
+                        self.heap_elem_lists.insert(payload);
+                    }
+                } else if crate::lower::is_result_ty(&bind_ty) {
+                    self.materialized_results.insert(payload);
+                    if crate::lower::is_heap_elem_list_ty(&bind_ty) {
+                        self.heap_elem_lists.insert(payload);
+                    }
+                }
             } else {
                 let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
                 self.value_of.insert(bind_var, payload);
@@ -395,9 +413,9 @@ impl LowerCtx {
         // (`Err(msg: String)`) is allowed only when the arm body never needs it as an owner —
         // here it is bound as a BORROW of the Result's owned slot-0 handle, gated on the subject
         // being a nested-ownership list (it frees the payload at scope end). A wildcard binds nothing.
-        let heap_or_scalar_bind = |s: &Self, inner: &IrPattern| -> Result<Option<(VarId, bool)>, ()> {
+        let heap_or_scalar_bind = |s: &Self, inner: &IrPattern| -> Result<Option<(VarId, bool, Ty)>, ()> {
             match inner {
-                IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
+                IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false, ty.clone()))),
                 // A heap payload bind is admitted over a nested-ownership subject — a str-result
                 // (`heap_elem_lists`, the `value.as_string` String payload) OR a value-array result
                 // (`value_result_lists`, the `value.as_array` `List[Value]` payload, e.g. `ok(items)
@@ -416,16 +434,16 @@ impl LowerCtx {
                                 .get(&subj)
                                 .is_some_and(|h| h.starts_with("resrec:"))) =>
                 {
-                    Ok(Some((*var, true)))
+                    Ok(Some((*var, true, ty.clone())))
                 }
                 IrPattern::Wildcard => Ok(None),
                 _ => Err(()),
             }
         };
-        let mut then_slot: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
-        let mut else_slot: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
+        let mut then_slot: Option<(&IrExpr, Option<(VarId, bool, Ty)>)> = None;
+        let mut else_slot: Option<(&IrExpr, Option<(VarId, bool, Ty)>)> = None;
         for arm in arms {
-            let parsed: Result<(bool, Option<(VarId, bool)>), ()> = match &arm.pattern {
+            let parsed: Result<(bool, Option<(VarId, bool, Ty)>), ()> = match &arm.pattern {
                 // Option Some (then) / None (else). Use heap_or_scalar_bind so a HEAP Some-payload
                 // (`some(key)` where key: String/Value/Tuple — toml set_nested's `match list.first(path)`)
                 // binds the @12 handle as a BORROW, gated on the Option[heap] subject being tracked
@@ -460,7 +478,7 @@ impl LowerCtx {
         };
         let heap_res = is_heap_ty(result_ty);
         let has_heap_bind =
-            matches!(then_bind, Some((_, true))) || matches!(else_bind, Some((_, true)));
+            matches!(then_bind, Some((_, true, _))) || matches!(else_bind, Some((_, true, _)));
         // A HEAP result with a HEAP-PAYLOAD bind is admitted ONLY over a str-result
         // (`value.as_string` — slot-0 @12 owns the ONE String, the Ok/Err tag at @16). The
         // payload binds as a BORROW (`LoadHandle` @12, in `param_values`), the OWNED subject is
@@ -496,8 +514,8 @@ impl LowerCtx {
         let tag = self.load_at_offset(h, tag_off, PrimKind::Load { width: 4 });
         // Bind the scalar payload(s) as subj-independent COPIES (load64 @12) BEFORE the arms —
         // for the heap-result case this is what severs the arm's heap move-out from the subject.
-        let bind_payload = |s: &mut Self, bind: Option<(VarId, bool)>| {
-            if let Some((bind_var, is_heap)) = bind {
+        let bind_payload = |s: &mut Self, bind: Option<(VarId, bool, Ty)>| {
+            if let Some((bind_var, is_heap, bind_ty)) = bind {
                 let payload = if is_heap {
                     s.load_at_offset(h, 12, PrimKind::LoadHandle)
                 } else {
@@ -506,6 +524,25 @@ impl LowerCtx {
                 s.value_of.insert(bind_var, payload);
                 if is_heap {
                     s.param_values.insert(payload);
+                    // NESTED VARIANT PAYLOAD: `ok(m)` where m is itself an
+                    // Option/Result (`Result[Option[record], String]` — the
+                    // `read_message()!` monadic-desugar Ok arm holding porta's
+                    // `match m { some(req)/none }`). Track the BORROWED payload
+                    // exactly like the statement-match Some-bind does
+                    // (control.rs), so the INNER match BRANCHES on its tag
+                    // instead of falling to the (now-walled) linearization.
+                    use almide_lang::types::constructor::TypeConstructorId;
+                    if matches!(&bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
+                        s.materialized_options.insert(payload);
+                        if crate::lower::is_heap_elem_list_ty(&bind_ty) {
+                            s.heap_elem_lists.insert(payload);
+                        }
+                    } else if crate::lower::is_result_ty(&bind_ty) {
+                        s.materialized_results.insert(payload);
+                        if crate::lower::is_heap_elem_list_ty(&bind_ty) {
+                            s.heap_elem_lists.insert(payload);
+                        }
+                    }
                 }
             }
         };
