@@ -413,7 +413,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/list_sort.almd"), &[("list_sort", "list.sort"), ("list_sort_str", "list.sort_str"), ("list_min_str", "list.min_str"), ("list_max_str", "list.max_str")]),
         (include_str!("../../../../stdlib/list_sort_float.almd"), &[("list_sort_float", "list.sort_float")]),
         (include_str!("../../../../stdlib/list_fold_float.almd"), &[("list_max_float", "list.max_float"), ("list_min_float", "list.min_float")]),
-        (include_str!("../../../../stdlib/list_sortby_float.almd"), &[("list_sort_by_float", "list.sort_by_float")]),
+        (include_str!("../../../../stdlib/list_sortby_float.almd"), &[("list_sort_by_float", "list.sort_by_float"), ("list_sort_by_float_rc", "list.sort_by_float_rc")]),
         (include_str!("../../../../stdlib/list_unique.almd"), &[("list_unique", "list.unique")]),
         (include_str!("../../../../stdlib/list_dedup.almd"), &[("list_dedup", "list.dedup")]),
         (

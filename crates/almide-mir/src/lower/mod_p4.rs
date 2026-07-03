@@ -829,7 +829,16 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
         if func == "sort_by" {
             if let Some(Ty::Fn { ret, .. }) = arg_tys.get(1) {
                 if **ret == Ty::Float {
-                    return "list.sort_by_float".to_string();
+                    // A HEAP element (List[R] of records) must be CO-OWNED by the
+                    // result list (rc_inc per copied handle) — the raw-copy variant
+                    // shares without acquiring and the two recursive drops double-free.
+                    let heap_elem = matches!(arg_tys.first(),
+                        Some(Ty::Applied(TypeConstructorId::List, a)) if a.len() == 1 && is_heap_ty(&a[0]));
+                    return if heap_elem {
+                        "list.sort_by_float_rc".to_string()
+                    } else {
+                        "list.sort_by_float".to_string()
+                    };
                 }
             }
         }
