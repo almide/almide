@@ -450,9 +450,16 @@ the wrong string. That gap is covered only by differential evidence
 | lifted lambdas lost variant/global registries | `filter` dropped every element | sub-ctx inheritance (binds.rs); `closures_and_variants` in the baseline |
 | `_start` left an explicit-Result main on the stack | invalid wasm for every Result-main CLI | `_start` tag-read/drop; grammar CLI matrix byte-verified |
 
-Pattern across all five: a REGISTRY or CONVENTION (tracking sets, layout tables,
-calling convention) drifted between producer and consumer inside the trusted
-zone. The structural fix direction is certificate-format-v1 / value-rc-cert
+| `prim.handle(<literal>)` resolved to deferred-Const **0** | the generated case tables read address 0 — every lookup silently missed (found while landing them, 2026-07-03) | literal materialization in the prim arg loop (calls_p4) + `string_case_unicode` in the parity baseline |
+
+Pattern across all six: a REGISTRY or CONVENTION (tracking sets, layout tables,
+calling convention, the scalar deferred-Const fallback) drifted between producer
+and consumer inside the trusted zone. The deferred-Const fallback (a scalar tail
+outside the subset lowers to `Op::Const` zero, calls elided) is the remaining
+SYSTEMIC instance of this pattern — it trades output correctness for caps
+coverage by design, which was sound when scalar fns were never output-observed
+and is NOT sound now. Retiring it (wall instead of Const on the value-observed
+paths) is recorded in flight-evidence-gaps F2. The structural fix direction is certificate-format-v1 / value-rc-cert
 (shrink the trusted zone); the tactical direction is the wall discipline (every
 consumer of an untracked/unknown shape must wall, never guess) — which is now
 enforced at the match-linearization and Map-repr routing sites.
