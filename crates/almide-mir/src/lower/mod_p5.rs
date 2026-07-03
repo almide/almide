@@ -791,6 +791,20 @@ pub(crate) fn try_tco_rewrite(
     let is_identity = |e: &IrExpr, acc: VarId| -> bool {
         matches!(&e.kind, IrExprKind::Var { id } if *id == acc)
     };
+    // A PURE Module call WRAPPING the growth (`string.take(acc + "x", 8)` — the
+    // churn spin): the callee is a pure stdlib fn (fresh-owned result by the
+    // calling convention — self-hosts copy, never alias their inputs), and some
+    // argument grows from / passes through the accumulator. The loop-carried slot
+    // takes the fresh value via the same drop-old/alloc-new; the in-loop reassign
+    // materializes the call through the standard pure-module path.
+    let is_wrapped_growth = |e: &IrExpr, acc: VarId| -> bool {
+        matches!(&e.kind,
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                if crate::purity::is_pure(module.as_str(), func.as_str())
+                    && args.iter().any(|a|
+                        is_self_append(a, acc)
+                            || matches!(&a.kind, IrExprKind::Var { id } if *id == acc)))
+    };
     // A RESET to a FRESH EMPTY heap value (`cur = []` / `acc = ""`): the parser-row shape resets the
     // current-row accumulator after a delimiter. Like a self-append it is a fresh owned heap value the
     // loop-carried slot takes via drop-old/alloc-new (cert `i(id)m`); the in-loop `Assign` lowering's
@@ -809,6 +823,7 @@ pub(crate) fn try_tco_rewrite(
                 is_identity(&c[i], params[i].var)
                     || is_self_append(&c[i], params[i].var)
                     || is_reset(&c[i])
+                    || is_wrapped_growth(&c[i], params[i].var)
             }) {
                 append_accs.push(i);
             } else {

@@ -2,6 +2,7 @@ spec/churn/closure_env_churn.almd
 spec/churn/map_entry_churn.almd
 spec/churn/nested_named_churn.almd
 spec/churn/record_churn.almd
+spec/churn/tco_deep_recursion_churn.almd
 spec/churn/tco_loop_churn.almd
 spec/lang/block_comment_raw_string_test.almd
 spec/lang/top_let_test.almd
@@ -138,6 +139,7 @@ spec/wasm_cross/string_from_bytes.almd
 spec/wasm_cross/string_is_alphanumeric.almd
 spec/wasm_cross/string_lines.almd
 spec/wasm_cross/string_ops.almd
+spec/wasm_cross/string_passthrough_share.almd
 spec/wasm_cross/string_to_upper.almd
 spec/wasm_cross/string_whitespace.almd
 spec/wasm_cross/tco_let_bound_if.almd
