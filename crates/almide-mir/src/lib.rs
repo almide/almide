@@ -489,6 +489,10 @@ pub enum PrimKind {
     /// and exits 1; this traps). For an in-bounds index the loaded element byte-matches v0. A
     /// scalar address computation, no ownership (a no-op in verify_ownership like every Prim).
     ElemAddr,
+    /// Abort: write the String-block message to STDERR and proc_exit(1) — the
+    /// self-host arm of the §13 termination convention (math.pow negative
+    /// exponent, int.rotate nonpositive width). Never returns.
+    Die,
     /// The `fd_write` WASI host call — `args = [fd, iov, count, nwritten]`, dst = the
     /// i64 errno. A sandbox exit; carries [`Capability::Stdout`].
     FdWrite,

@@ -24,7 +24,12 @@ fn __pow_sq(b: Int, e: Int, acc: Int) -> Int =
     __pow_sq(b * b, e / 2, acc2)
   }
 
-fn math_pow(base: Int, exp: Int) -> Int = __pow_sq(base, exp, 1)
+fn math_pow(base: Int, exp: Int) -> Int = {
+  // §13 termination convention (C-035 kin): a negative exponent has no integer
+  // result — abort with the native-identical stderr line + exit 1.
+  if exp < 0 then prim.die(prim.handle("Error: negative exponent\n")) else ()
+  __pow_sq(base, exp, 1)
+}
 
 // math.factorial = (1..=n).product(): n! for n>=1, and 1 for n<=1 (the empty product,
 // matching v0's empty inclusive range). Wraps like v0's i64 product for large n.

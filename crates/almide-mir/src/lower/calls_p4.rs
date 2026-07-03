@@ -615,6 +615,45 @@ impl LowerCtx {
                 };
                 let a = self.lower_scalar_value(left)?;
                 let b = self.lower_scalar_value(right)?;
+                // NARROW signed division overflow (`Int8` MIN ÷ -1 — int8_div_overflow):
+                // the operands live in the i64 model, so the preamble's checked helper
+                // only catches i64::MIN ÷ -1; the narrow MIN wraps silently (v0 aborts
+                // "Error: integer overflow" + exit 1). Inject the width guard as MIR ops:
+                // if (a == MIN_w) & (b == -1) → prim.die with the SAME message bytes.
+                if matches!(iop, crate::IntOp::Div | crate::IntOp::Mod) {
+                    let min_w = match &left.ty {
+                        Ty::Int8 => Some(-128i64),
+                        Ty::Int16 => Some(-32768i64),
+                        Ty::Int32 => Some(-2147483648i64),
+                        _ => None,
+                    };
+                    if let Some(mw) = min_w {
+                        let minc = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: minc, value: mw });
+                        let negc = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: negc, value: -1 });
+                        let c1 = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst: c1, op: crate::IntOp::Eq, a, b: minc });
+                        let c2 = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst: c2, op: crate::IntOp::Eq, a: b, b: negc });
+                        let both = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst: both, op: crate::IntOp::And, a: c1, b: c2 });
+                        let msg = self.fresh_value();
+                        self.ops.push(Op::Alloc {
+                            dst: msg,
+                            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                            init: crate::Init::Str("Error: integer overflow\n".into()),
+                        });
+                        let mh = self.fresh_value();
+                        self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(mh), args: vec![msg] });
+                        self.ops.push(Op::IfThen { cond: both, dst: None });
+                        self.ops.push(Op::Prim { kind: crate::PrimKind::Die, dst: None, args: vec![mh] });
+                        self.ops.push(Op::Else { val: None });
+                        self.ops.push(Op::EndIf { val: None });
+                        // the message block is dead on the non-abort path — release it
+                        self.ops.push(Op::Drop { v: msg });
+                    }
+                }
                 let dst = self.fresh_value();
                 self.ops.push(Op::IntBinOp { dst, op: iop, a, b });
                 Some(dst)
@@ -1072,6 +1111,7 @@ impl LowerCtx {
         }
         let kind = match func {
             "handle" => PrimKind::Handle,
+            "die" => PrimKind::Die,
             "load8" => PrimKind::Load { width: 1 },
             "load32" => PrimKind::Load { width: 4 },
             "load64" => PrimKind::Load { width: 8 },
@@ -1180,7 +1220,7 @@ impl LowerCtx {
             })?;
             lowered.push(v);
         }
-        let dst = if matches!(kind, PrimKind::Store { .. } | PrimKind::RcDec | PrimKind::RcInc) {
+        let dst = if matches!(kind, PrimKind::Store { .. } | PrimKind::RcDec | PrimKind::RcInc | PrimKind::Die) {
             None
         } else {
             Some(self.fresh_value())

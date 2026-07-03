@@ -47,19 +47,41 @@ cargo build -q -p almide-mir --example render_program 2>/dev/null || { echo "out
 RP="$ROOT/target/debug/examples/render_program"
 
 : > "$TMP/matches.txt"
-match=0; wall=0; mismatch=0; runerr=0; v0fail=0; skip=0
+match=0; wall=0; mismatch=0; runerr=0; v0fail=0; skip=0; xfail=0
 # F4 (flight-evidence-gaps): a NON-DETERMINISTIC verification result is not a
 # result. Under full-gate machine load the 20s alarm occasionally fires on files
 # that byte-match solo (append_accumulator/list_eq/string_codepoint — recorded
 # 2026-07-03), so any per-file failure is RETRIED ONCE after the sweep, alone,
 # with a generous timeout. Only the solo re-run's verdict counts — a genuine
 # failure fails twice; a load artifact never reaches the report.
+# THREE-POINT observable comparison (contracts.toml's definition: stdout AND
+# stderr AND exit code — the stdout-only harness hid every trap fixture in
+# v0fail, flight-evidence-gaps item 6). A fixture whose v0 run FAILS is still
+# comparable when the render succeeds: the traps (div-by-zero, index-bounds,
+# unwrap-none) PROMISE identical stderr + exit 1 cross-target (C-001/C-035).
+# v1 stderr is normalized (the wasmtime trap preamble names the tmp wat path).
 run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|v0fail
   local f="$1" t="$2"
-  to "$t" "$ALM" run "$f" > "$TMP/v0" 2>/dev/null || { VERDICT=v0fail; return; }
-  "$RP" "$f" > "$TMP/wat" 2>/dev/null || { VERDICT=wall; return; }
-  to "$t" wasmtime "$TMP/wat" > "$TMP/v1" 2>/dev/null || { VERDICT=runerr; return; }
-  if diff -q "$TMP/v0" "$TMP/v1" >/dev/null 2>&1; then VERDICT=match; else VERDICT=mismatch; fi
+  to "$t" "$ALM" run "$f" > "$TMP/v0" 2>"$TMP/v0e"
+  local v0rc=$?
+  "$RP" "$f" > "$TMP/wat" 2>/dev/null || {
+    if [ "$v0rc" -ne 0 ]; then VERDICT=v0fail; else VERDICT=wall; fi
+    return
+  }
+  to "$t" wasmtime "$TMP/wat" > "$TMP/v1" 2>"$TMP/v1e"
+  local v1rc=$?
+  if [ "$v0rc" -eq 0 ] && [ "$v1rc" -ne 0 ]; then VERDICT=runerr; return; fi
+  diff -q "$TMP/v0" "$TMP/v1" >/dev/null 2>&1 || { VERDICT=mismatch; return; }
+  if [ "$v0rc" -eq 0 ]; then VERDICT=match; return; fi
+  # v0 FAILED (a trap/abort fixture): the full observable must agree —
+  # exit code AND stderr (v1's normalized: strip the wasmtime module preamble).
+  sed -e "s|$TMP/wat|<module>|g" -e '/^Error: failed to run main module/d' \
+      -e '/^$/d' -e '/^Caused by:/d' -e 's/^ *[0-9]*: *//' "$TMP/v1e" > "$TMP/v1en"
+  if [ "$v0rc" -eq "$v1rc" ] && diff -q "$TMP/v0e" "$TMP/v1en" >/dev/null 2>&1; then
+    VERDICT=match
+  else
+    VERDICT=xfail
+  fi
 }
 declare -a suspects=()
 while IFS= read -r f; do
@@ -83,11 +105,17 @@ for sv in "${suspects[@]:-}"; do
     v0fail)   v0fail=$((v0fail+1)) ;;
     wall)     wall=$((wall+1)) ;;
     runerr)   runerr=$((runerr+1)) ;;
+    xfail)    xfail=$((xfail+1)); echo "$f" >> "$TMP/xfail.txt" ;;
     mismatch) mismatch=$((mismatch+1)) ;;
   esac
 done
 sort -o "$TMP/matches.txt" "$TMP/matches.txt"  # (re-sorted below after the retry appends)
-echo "output-parity: match=$match wall=$wall MISMATCH=$mismatch RUNERR=$runerr v0fail=$v0fail skip=$skip"
+echo "output-parity: match=$match wall=$wall MISMATCH=$mismatch RUNERR=$runerr XFAIL=$xfail v0fail=$v0fail skip=$skip"
+if [ "$xfail" -gt 0 ]; then
+  echo "  (XFAIL = a trap/abort fixture whose v1 observable [stderr+exit] diverges from v0 —"
+  echo "   the trap-semantics contract surface not yet implemented on the MIR render path):"
+  sed 's/^/    x /' "$TMP/xfail.txt"
+fi
 
 # The retry loop appends AFTER the first sort — comm(1) requires sorted input,
 # so re-sort before any baseline comparison (the unsorted tail made comm report

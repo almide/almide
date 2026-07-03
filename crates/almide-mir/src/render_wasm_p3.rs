@@ -31,7 +31,14 @@ pub(crate) fn preamble() -> String {
     (func $path_unlink_file (param i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "clock_time_get"
     (func $clock_time_get (param i32 i64 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "proc_exit"
+    (func $proc_exit (param i32)))
   (memory (export "memory") 1)
+  ;; integer div/mod abort messages (C-001/C-035: identical stderr + exit 1 on
+  ;; BOTH targets — the native almide_div!/almide_mod! and v0-wasm __div_trap twins).
+  (data (i32.const {DIVZERO_MSG_ADDR}) "Error: division by zero\n")
+  (data (i32.const {OVERFLOW_MSG_ADDR}) "Error: integer overflow\n")
+  (data (i32.const {BOUNDS_MSG_ADDR}) "Error: index out of bounds\n")
   ;; the fs.read_text path_open error message — a CONST byte run the Err arm copies.
   (data (i32.const {RTF_NOTFOUND_ADDR}) "file not found")
   ;; the fs.list_dir path_open(O_DIRECTORY) error message — a CONST byte run the Err arm copies.
@@ -43,6 +50,39 @@ pub(crate) fn preamble() -> String {
   ;; the fs.remove_all path_remove_directory/path_unlink_file error message — a CONST byte run.
   (data (i32.const {REMOVE_ERR_ADDR}) "remove failed")
   (global $bump (mut i32) (i32.const {HEAP_BASE}))
+  ;; __div_trap(msg,len): write the interned abort line to STDERR and proc_exit(1)
+  ;; — the render-path twin of v0-wasm's __div_trap (§13 termination convention).
+  ;; Uses the fd_write iovec scratch; never returns.
+  (func $__div_trap (param $msg i32) (param $len i32)
+    (i32.store (i32.const {IOVEC_ADDR}) (local.get $msg))
+    (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const {IOVEC_LEN_OFFSET}))
+      (local.get $len))
+    (drop (call $fd_write (i32.const 2) (i32.const {IOVEC_ADDR})
+      (i32.const 1) (i32.const {NWRITTEN_ADDR})))
+    (call $proc_exit (i32.const 1))
+    (unreachable))
+  ;; __die(s): abort with the String block s as the STDERR message + exit 1 —
+  ;; the prim.die self-host abort (message bytes at s+12, byte length at s+4).
+  (func $__die (param $s i32)
+    (call $__div_trap (i32.add (local.get $s) (i32.const 12))
+      (i32.load (i32.add (local.get $s) (i32.const 4))))
+    (unreachable))
+  ;; CHECKED i64 division/remainder: divisor 0 and the MIN/-1 overflow abort with
+  ;; the SAME bytes + exit code as native (never a bare wasm hard trap = exit 134).
+  (func $__chk_div (param $a i64) (param $b i64) (result i64)
+    (if (i64.eqz (local.get $b))
+      (then (call $__div_trap (i32.const {DIVZERO_MSG_ADDR}) (i32.const 24))))
+    (if (i32.and (i64.eq (local.get $a) (i64.const -9223372036854775808))
+                 (i64.eq (local.get $b) (i64.const -1)))
+      (then (call $__div_trap (i32.const {OVERFLOW_MSG_ADDR}) (i32.const 24))))
+    (i64.div_s (local.get $a) (local.get $b)))
+  (func $__chk_rem (param $a i64) (param $b i64) (result i64)
+    (if (i64.eqz (local.get $b))
+      (then (call $__div_trap (i32.const {DIVZERO_MSG_ADDR}) (i32.const 24))))
+    (if (i32.and (i64.eq (local.get $a) (i64.const -9223372036854775808))
+                 (i64.eq (local.get $b) (i64.const -1)))
+      (then (call $__div_trap (i32.const {OVERFLOW_MSG_ADDR}) (i32.const 24))))
+    (i64.rem_s (local.get $a) (local.get $b)))
   ;; the free-list head (0 = empty) — physical reclamation (A1.2-render), the
   ;; realization of proofs/FreeList.v. A freed block is pushed here; $alloc reuses
   ;; the head when it is EXACTLY the requested size. The link is stored in the dead
@@ -165,6 +205,19 @@ pub(crate) fn preamble() -> String {
                 (i32.ge_s (local.get $idx)
                           (i32.load (i32.add (local.get $list) (i32.const {LIST_CAP_OFFSET})))))
       (then (unreachable)))
+    (i32.add (i32.add (local.get $list) (i32.const {LIST_HEADER}))
+             (i32.mul (local.get $idx) (i32.const {ELEM_SIZE}))))
+
+  ;; USER-FACING checked element address: bounds against LEN (not cap — a slot
+  ;; between len and cap is uninitialized), aborting with the native-identical
+  ;; "Error: index out of bounds" + exit 1 (never a bare unreachable = exit 134).
+  ;; Internal fill paths (writes at idx == len during construction) keep the
+  ;; cap-checked $elem_addr above.
+  (func $elem_addr_chk (param $list i32) (param $idx i32) (result i32)
+    (if (i32.or (i32.lt_s (local.get $idx) (i32.const 0))
+                (i32.ge_s (local.get $idx)
+                          (i32.load (i32.add (local.get $list) (i32.const {LIST_LEN_OFFSET})))))
+      (then (call $__div_trap (i32.const {BOUNDS_MSG_ADDR}) (i32.const 27))))
     (i32.add (i32.add (local.get $list) (i32.const {LIST_HEADER}))
              (i32.mul (local.get $idx) (i32.const {ELEM_SIZE}))))
 

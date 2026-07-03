@@ -12,6 +12,9 @@ fn __rotate_mask(bits: Int) -> Int =
   }
 
 fn int_rotate_left(a: Int, n: Int, bits: Int) -> Int = {
+  // §13 termination convention: a nonpositive width has no rotation — abort
+  // with the native-identical stderr line + exit 1.
+  if bits <= 0 then prim.die(prim.handle("Error: rotate width must be positive\n")) else ()
   let mask = __rotate_mask(bits)
   let v = prim.band(a, mask)
   let nn = n % bits
@@ -22,6 +25,7 @@ fn int_rotate_left(a: Int, n: Int, bits: Int) -> Int = {
 }
 
 fn int_rotate_right(a: Int, n: Int, bits: Int) -> Int = {
+  if bits <= 0 then prim.die(prim.handle("Error: rotate width must be positive\n")) else ()
   let mask = __rotate_mask(bits)
   let v = prim.band(a, mask)
   let nn = n % bits

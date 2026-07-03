@@ -64,7 +64,10 @@ const MKDIR_ERR_ADDR: u32 = 112; // "mkdir failed" message bytes (fs.mkdir_p Err
 const MKDIR_ERR_LEN: u32 = 12; // len of "mkdir failed"
 const REMOVE_ERR_ADDR: u32 = 124; // "remove failed" message bytes (fs.remove_all Err) — 124..137
 const REMOVE_ERR_LEN: u32 = 13; // len of "remove failed"
-const LABELS_ADDR: u32 = 144; // print labels (the data section) — after the fixed messages
+const DIVZERO_MSG_ADDR: u32 = 144; // "Error: division by zero\n" — 144..169 (__div_trap)
+const OVERFLOW_MSG_ADDR: u32 = 176; // "Error: integer overflow\n" — 176..200 (__div_trap)
+const BOUNDS_MSG_ADDR: u32 = 208; // "Error: index out of bounds\n" — 208..235 (__div_trap)
+const LABELS_ADDR: u32 = 240; // print labels (the data section) — after the fixed messages
 const SCRATCH_ADDR: u32 = 512; // the line build buffer
 const HEAP_BASE: u32 = 8192; // bump allocator start
 // The Ok/Err tag of a cap-as-tag `Result[String, String]` lives in the HIGH 32 bits of

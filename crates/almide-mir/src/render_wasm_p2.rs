@@ -167,8 +167,11 @@ fn render_op(
                 IntOp::Add => format!("(i64.add {args})"),
                 IntOp::Sub => format!("(i64.sub {args})"),
                 IntOp::Mul => format!("(i64.mul {args})"),
-                IntOp::Div => format!("(i64.div_s {args})"),
-                IntOp::Mod => format!("(i64.rem_s {args})"),
+                // CHECKED: divisor 0 / MIN÷-1 abort via $__div_trap with the
+                // native-identical stderr line + exit 1 (C-001/C-035) — never a
+                // bare i64.div_s hard trap (exit 134, no message).
+                IntOp::Div => format!("(call $__chk_div {args})"),
+                IntOp::Mod => format!("(call $__chk_rem {args})"),
                 IntOp::Lt => format!("(i64.extend_i32_u (i64.lt_s {args}))"),
                 IntOp::Le => format!("(i64.extend_i32_u (i64.le_s {args}))"),
                 IntOp::Gt => format!("(i64.extend_i32_u (i64.gt_s {args}))"),
@@ -630,8 +633,9 @@ fn render_op(
                 // TRAPs — v0's `a[i]` likewise halts on OOB). Both args wrap to i32 (list ptr,
                 // index); the returned i32 address zero-extends back to the i64-uniform dst.
                 PrimKind::ElemAddr => {
-                    format!("(i64.extend_i32_u (call $elem_addr {} {}))", w(0), w(1))
+                    format!("(i64.extend_i32_u (call $elem_addr_chk {} {}))", w(0), w(1))
                 }
+                PrimKind::Die => format!("(call $__die {})", w(0)),
                 PrimKind::FdWrite => {
                     format!("(i64.extend_i32_u (call $fd_write {} {} {} {}))", w(0), w(1), w(2), w(3))
                 }
