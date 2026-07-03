@@ -281,10 +281,18 @@ impl LowerCtx {
         // anonymous structural record) keeps walling — no leaky flat drop.
         let result_record_drop: Option<String> =
             result_elem.as_ref().and_then(|t| self.record_drop_type_name(t));
+        // A `List[scalar]` result element (`list.map(rows, (row) => list.slice(row, s, e))`
+        // — the nn Matrix row ops): the inner list is a FLAT block whose rc_dec is its
+        // full free, so the result list's per-slot DropListStr reclaims everything —
+        // ownership-identical to a String element.
+        let result_is_scalar_list = matches!(result_elem.as_ref(),
+            Some(Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b))
+                if b.len() == 1 && !is_heap_ty(&b[0]));
         if let Some(elem) = &result_elem {
             if !matches!(elem, Ty::String)
                 && !result_is_str_value_tuple
                 && !result_is_value
+                && !result_is_scalar_list
                 && result_record_drop.is_none()
             {
                 return None;

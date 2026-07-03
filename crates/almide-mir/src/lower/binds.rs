@@ -152,6 +152,13 @@ impl LowerCtx {
         let elem_list_str = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
                 Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(b[0], Ty::String)));
+        // A `List[List[scalar]]` literal (`[[1.0, 2.0], [3.0]]` — the nn Matrix seed):
+        // each inner list is a FLAT scalar block whose rc_dec IS its full free, so the
+        // outer list's per-slot DropListStr reclaims everything — same ownership shape
+        // as List[String].
+        let elem_list_scalar = matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
+                Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && !is_heap_ty(&b[0])));
         // A `List[(Int, String)]` (`[(i, line)]` — the list.enumerate append) — each element is a
         // (Int @12 scalar, String @20 heap) tuple, materialized via `try_lower_tuple_construct` and
         // reclaimed RECURSIVELY at scope end via `$__drop_list_int_str` (per tuple: rc_dec the String
@@ -194,7 +201,7 @@ impl LowerCtx {
         // len-0 block frees just the block.
         if !elem_str && !elem_scalar_aggregate && !elem_value && !elem_str_value && !elem_list_str
             && !elem_int_str && !elem_flat_variant && elem_rich_variant.is_none()
-            && elem_recdrop.is_none()
+            && elem_recdrop.is_none() && !elem_list_scalar
         {
             return None;
         }
@@ -208,6 +215,10 @@ impl LowerCtx {
             // emit_sections shape): a fresh owned String, moved into the slot exactly like a concat.
             IrExprKind::StringInterp { .. } => elem_str,
             IrExprKind::Var { id } => self.value_of.contains_key(id),
+            // An inner scalar-list LITERAL (`[1.0, 2.0]` in a List[List[Float]]) —
+            // buildable iff every inner element is a lowerable scalar (the flat
+            // builder itself re-checks; a non-scalar inner defers there).
+            IrExprKind::List { .. } => elem_list_scalar,
             IrExprKind::Record { .. } => elem_scalar_aggregate || elem_recdrop.is_some(),
             IrExprKind::Tuple { .. } => elem_scalar_aggregate || elem_str_value || elem_int_str,
             // A FLAT-variant CONSTRUCTOR element (`[CapIO, CapProcess]`) — a Named call whose name is a
@@ -284,6 +295,12 @@ impl LowerCtx {
                 // block (`try_lower_scalar_record_construct`, cert `i`), moved into the slot.
                 IrExprKind::Record { .. } if elem_recdrop.is_some() => {
                     self.try_lower_record_construct(elem)?
+                }
+                // An inner scalar-list LITERAL element (`[1.0, 2.0]` inside a
+                // List[List[Float]] literal) — the flat scalar-slot builder yields a
+                // fresh owned block moved into the outer slot.
+                IrExprKind::List { elements: inner } if elem_list_scalar => {
+                    self.try_lower_scalar_list_slots(inner)?
                 }
                 IrExprKind::Record { .. } => self.try_lower_scalar_record_construct(elem)?,
                 // A scalar-only tuple literal element (`(1, 100)`) — materialize a fresh OWNED

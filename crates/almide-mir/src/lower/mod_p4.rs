@@ -468,7 +468,19 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
             Ty::Float => ("list", "to_string_f"),
             Ty::Bool => ("list", "to_string_b"),
             Ty::String => ("list", "to_string_s"),
-            // An unsupported element type (NESTED `List[List[_]]`, `List[Map]`, …) routes to an
+            // A NESTED `List[List[Int/Float]]` renders through the composed self-host
+            // (each row via the flat to_string, joined in brackets — byte-matches v0's Debug).
+            Ty::Applied(TypeConstructorId::List, inner)
+                if inner.len() == 1 && matches!(inner[0], Ty::Int) =>
+            {
+                ("list", "to_string_ll")
+            }
+            Ty::Applied(TypeConstructorId::List, inner)
+                if inner.len() == 1 && matches!(inner[0], Ty::Float) =>
+            {
+                ("list", "to_string_llf")
+            }
+            // Any other unsupported element type (`List[Map]`, deeper nesting, …) routes to an
             // UNLINKED variant name so the interp DESUGARS to a real `list.to_string_x` CallFn that
             // the render wall then REJECTS — the function walls cleanly. Returning `None` here would
             // instead leave the interp Opaque and the `println` would emit NOTHING (a silent empty
