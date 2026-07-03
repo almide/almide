@@ -363,6 +363,16 @@ impl LowerCtx {
             // the is_numeric_or_bool / looks_numeric chain) EXECUTES via the same tag-read
             // value-match the tail uses; its own arms recurse through `lower_scalar_arm`, so an
             // N-deep nest lowers. A LITERAL-pattern match desugars to the if-chain as before.
+            // A nested CUSTOM-variant (user ADT) match (`A(b) => match b { … }` — the
+            // mutual-recursive-types depth walk): dispatch on its tag exactly like the
+            // tail does. Checked BEFORE the Option/Result variant path (a custom ADT is
+            // not an Option/Result). Without this the nested match fell to the deferred
+            // Const-0 (a silent miscompile).
+            IrExprKind::Match { subject, arms }
+                if self.custom_variant_type_name(&subject.ty).is_some() =>
+            {
+                self.try_lower_custom_variant_match(subject, arms, &t.ty)
+            }
             IrExprKind::Match { subject, arms } if is_variant_ty(&subject.ty) => {
                 self.try_lower_variant_value_match(subject, arms, &t.ty)
             }

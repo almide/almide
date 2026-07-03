@@ -705,6 +705,48 @@ impl LowerCtx {
                  inject an uncounted call)"
             )));
         }
+        // A SCALAR module-level global: materialize its CONST (call-free)
+        // initializer's REAL value — a literal, const arithmetic, or a
+        // reference to another const global (`let SOLAR_MASS = 4.0 * PI * PI`,
+        // which recurses back through value_or_global). This used to fall to
+        // the deferred `Const` = 0 — every USE of a scalar top-level `let` read
+        // zero (top_let_test printed `PI = 0`, a silent miscompile). A
+        // call-bearing init would inject CallFn ops the gate's IR-side count
+        // never sees, so it WALLS instead (honest, never wrong).
+        if let Some(init) = self.global_inits.get(&var) {
+            fn init_has_call(e: &IrExpr) -> bool {
+                use almide_ir::visit::{walk_expr, IrVisitor};
+                struct C(bool);
+                impl IrVisitor for C {
+                    fn visit_expr(&mut self, e: &IrExpr) {
+                        if matches!(
+                            e.kind,
+                            IrExprKind::Call { .. }
+                                | IrExprKind::TailCall { .. }
+                                | IrExprKind::RuntimeCall { .. }
+                        ) {
+                            self.0 = true;
+                        }
+                        walk_expr(self, e);
+                    }
+                }
+                let mut c = C(false);
+                c.visit_expr(e);
+                c.0
+            }
+            if !init_has_call(init) {
+                let init = init.clone();
+                let mark = self.ops.len();
+                if let Some(dst) = self.lower_scalar_value(&init) {
+                    self.value_of.insert(var, dst);
+                    return Ok(dst);
+                }
+                self.ops.truncate(mark);
+            }
+            return Err(LowerError::Unsupported(format!(
+                "scalar module-level global {var:?} has a non-const-foldable initializer                  (a call would be uncounted; a deferred Const-0 would be silently wrong)                  not in this brick"
+            )));
+        }
         let dst = self.fresh_value();
         self.ops.push(Op::Const { dst });
         self.value_of.insert(var, dst);

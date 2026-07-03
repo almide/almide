@@ -47,6 +47,16 @@ impl LowerCtx {
             // The lifted body may access a record/tuple field (`(p) => p.x`), so it needs
             // the VALUE-MODEL field registry too.
             record_layouts: self.record_layouts.clone(),
+            // …and the VARIANT registry: a custom-ADT `match` inside the lambda
+            // (`list.filter((t) => match t { Empty => false, _ => true })`) resolved
+            // against an EMPTY by_type without it, fell past the executable variant
+            // match, and linearized to a deferred Const-0 — every element filtered
+            // out (the closures_and_variants silent miscompile, 2026-07-03).
+            variant_layouts: self.variant_layouts.clone(),
+            // …and the module-global initializers, so a lambda referencing a
+            // top-level `let` materializes its real value exactly like the
+            // enclosing fn does.
+            global_inits: self.global_inits.clone(),
             ..Default::default()
         };
         let mut mir_params = Vec::new();
