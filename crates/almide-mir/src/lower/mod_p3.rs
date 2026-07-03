@@ -747,6 +747,9 @@ impl LowerCtx {
                 "scalar module-level global {var:?} has a non-const-foldable initializer                  (a call would be uncounted; a deferred Const-0 would be silently wrong)                  not in this brick"
             )));
         }
+        if crate::lower::strict_values() {
+            return Err(crate::lower::strict_const_wall("module-level global"));
+        }
         let dst = self.fresh_value();
         self.ops.push(Op::Const { dst });
         self.value_of.insert(var, dst);

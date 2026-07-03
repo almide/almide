@@ -273,6 +273,11 @@ fn source_to_ir(source: &str) -> almide_ir::IrProgram {
 }
 
 fn main() {
+    // STRICT VALUE MODE: this binary is an OUTPUT path — a deferred Const-0
+    // must never be executable (flight-evidence-gaps F2, the prim.handle
+    // literal address-0 class). The caps-counting classifier stays permissive.
+    almide_mir::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
+
     let path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| die("usage: render_program <file.almd>".into()));

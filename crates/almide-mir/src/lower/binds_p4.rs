@@ -524,6 +524,9 @@ impl LowerCtx {
                     self.ops.push(Op::Dup { dst, src });
                     self.live_heap_handles.push(dst);
                 } else {
+                    if crate::lower::strict_values() {
+                        return Err(crate::lower::strict_const_wall("destructure component"));
+                    }
                     self.ops.push(Op::Const { dst });
                 }
                 self.value_of.insert(*var, dst);

@@ -611,7 +611,10 @@ impl LowerCtx {
                             }
                             let dst = self.fresh_value();
                             self.record_elided_calls(a);
-                            self.ops.push(Op::Const { dst });
+                            if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("call argument"));
+                }
+                self.ops.push(Op::Const { dst });
                             CallArg::Scalar(dst)
                         }
                     }
@@ -692,7 +695,10 @@ impl LowerCtx {
                                 self.ops.truncate(mark);
                                 let dst = self.fresh_value();
                                 self.record_elided_calls(a);
-                                self.ops.push(Op::Const { dst });
+                                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("call argument"));
+                }
+                self.ops.push(Op::Const { dst });
                                 CallArg::Scalar(dst)
                             }
                         }
@@ -754,7 +760,10 @@ impl LowerCtx {
                                     }
                                 }
                                 let dst = self.fresh_value();
-                                self.ops.push(Op::Const { dst });
+                                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("call argument"));
+                }
+                self.ops.push(Op::Const { dst });
                                 self.record_elided_calls(a);
                                 CallArg::Scalar(dst)
                             }
@@ -887,7 +896,10 @@ impl LowerCtx {
                         self.ops.truncate(mark);
                         let dst = self.fresh_value();
                         self.record_elided_calls(a);
-                        self.ops.push(Op::Const { dst });
+                        if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("call argument"));
+                }
+                self.ops.push(Op::Const { dst });
                         CallArg::Scalar(dst)
                     }
                 }

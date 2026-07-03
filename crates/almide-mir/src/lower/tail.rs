@@ -791,6 +791,9 @@ impl LowerCtx {
                     return Ok(Some(dst));
                 }
                 let dst = self.fresh_value();
+                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("tail"));
+                }
                 self.ops.push(Op::Const { dst });
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
@@ -837,6 +840,9 @@ impl LowerCtx {
                 }
                 self.ops.truncate(mark);
                 let dst = self.fresh_value();
+                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("tail"));
+                }
                 self.ops.push(Op::Const { dst });
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
@@ -856,6 +862,9 @@ impl LowerCtx {
                 }
                 self.ops.truncate(mark);
                 let dst = self.fresh_value();
+                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("tail"));
+                }
                 self.ops.push(Op::Const { dst });
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
@@ -875,6 +884,9 @@ impl LowerCtx {
                 }
                 self.ops.truncate(mark);
                 let dst = self.fresh_value();
+                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("tail"));
+                }
                 self.ops.push(Op::Const { dst });
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
@@ -895,6 +907,9 @@ impl LowerCtx {
             // resolvable, else the same deferred `Const` + elided marker.)
             | IrExprKind::Range { .. } => {
                 let dst = self.fresh_value();
+                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("tail"));
+                }
                 self.ops.push(Op::Const { dst });
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
@@ -920,6 +935,9 @@ impl LowerCtx {
                     ));
                 }
                 let dst = self.fresh_value();
+                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("tail"));
+                }
                 self.ops.push(Op::Const { dst });
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
@@ -933,6 +951,9 @@ impl LowerCtx {
                 }
                 self.lower_branch(tail)?;
                 let dst = self.fresh_value();
+                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("tail"));
+                }
                 self.ops.push(Op::Const { dst });
                 Ok(Some(dst))
             }
@@ -983,7 +1004,10 @@ impl LowerCtx {
                     if matches!(tail.ty, Ty::Unit) {
                         self.lower_branch(tail)?;
                         let dst = self.fresh_value();
-                        self.ops.push(Op::Const { dst });
+                        if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("tail"));
+                }
+                self.ops.push(Op::Const { dst });
                         return Ok(Some(dst));
                     }
                     return Err(LowerError::Unsupported(
@@ -1006,6 +1030,9 @@ impl LowerCtx {
                 }
                 self.lower_branch(tail)?;
                 let dst = self.fresh_value();
+                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("tail"));
+                }
                 self.ops.push(Op::Const { dst });
                 Ok(Some(dst))
             }

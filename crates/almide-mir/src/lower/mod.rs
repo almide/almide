@@ -269,6 +269,25 @@ fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, Lower
 
 /// Lower one function to MIR. Parameters are seeded first (the v1 borrow-by-
 /// default calling convention — see [`LowerCtx::bind_params`]), then the body.
+/// STRICT VALUE MODE (flight-evidence-gaps F2 — retiring the deferred-Const):
+/// when set, every lowering site that would fall back to `Op::Const` (the
+/// deferred ZERO whose only legitimate consumer is the caps-counting
+/// classifier) REFUSES instead — a walled function can never print a silently
+/// wrong value (the `prim.handle(<literal>)` → address-0 class). Set ONCE by
+/// the render/output entrypoints (render_program); the classifier and the
+/// in-process unit tests keep the permissive caps-counting behavior.
+pub static STRICT_VALUES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn strict_values() -> bool {
+    STRICT_VALUES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn strict_const_wall(what: &str) -> LowerError {
+    LowerError::Unsupported(format!(
+        "scalar {what} outside the value subset cannot be faithfully computed in this          brick (the permissive caps-counting path defers it to Const 0; STRICT value          mode refuses instead of risking a silently wrong value)"
+    ))
+}
+
 pub fn lower_function(
     func: &IrFunction,
     globals: &HashMap<VarId, Ty>,

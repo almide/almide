@@ -517,6 +517,9 @@ impl LowerCtx {
                 self.value_of.insert(v, dst);
                 self.live_heap_handles.push(dst);
             } else {
+                if crate::lower::strict_values() {
+                    return Err(crate::lower::strict_const_wall("for-in loop variable"));
+                }
                 let dst = self.fresh_value();
                 self.ops.push(Op::Const { dst });
                 self.value_of.insert(v, dst);

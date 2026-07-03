@@ -224,6 +224,9 @@ impl LowerCtx {
             }
             let dst = self.fresh_value();
             self.value_of.insert(var, dst);
+            if crate::lower::strict_values() {
+                return Err(crate::lower::strict_const_wall("binding"));
+            }
             self.ops.push(Op::Const { dst });
             self.record_elided_calls(value);
             return Ok(());
