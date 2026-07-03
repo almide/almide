@@ -134,6 +134,14 @@ impl LowerCtx {
             Some("option.liststr_unwrap_or")
         } else if crate::lower::is_option_listvalue_ty(&expr.ty) {
             Some("option.listvalue_unwrap_or")
+        } else if matches!(&expr.ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
+                if a.len() == 1 && self.record_or_anon_drop_type_name(&a[0]).is_some())
+        {
+            // An `Option[record]` payload (`list.get(vars, idx) ?? {key: "", val: ""}` —
+            // porta dedup_env): the Value helper is a pure HANDLE select (load @12 +
+            // auto-acquire), layout-identical for any single-handle payload — reuse it.
+            Some("option.value_unwrap_or")
         } else {
             None
         };
