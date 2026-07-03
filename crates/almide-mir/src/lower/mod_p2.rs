@@ -138,12 +138,18 @@ pub fn strip_never_err_unwraps(
             // strip unconditionally — that is the tail-TCO shape (`f(..)!` →
             // `f(..)`), a same-Result pass-through the tail lowering already
             // treats as such (the yaml parser cluster).
-            let strip = matches!(&expr.kind, IrExprKind::Unwrap { expr: inner }
+            // `Try` (the frontend auto-`?`) over the same never-err lifted callee is
+            // the identical no-op — `x = step(x)` carries `Try{step(x)}`, which an
+            // unstripped path lowered to a deferred Const-0 (effect_assign_unwrap).
+            let strip = matches!(&expr.kind,
+                IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }
                 if matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
                     if !self.can_err.contains(name.as_str())
                         && (self.lifted.contains(name.as_str()) || name.as_str() == self.self_name)));
             if strip {
-                if let IrExprKind::Unwrap { expr: inner } = &expr.kind {
+                if let IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner } =
+                    &expr.kind
+                {
                     let inner = (**inner).clone();
                     *expr = inner;
                 }
@@ -151,6 +157,92 @@ pub fn strip_never_err_unwraps(
         }
     }
     S { can_err, lifted: lifted_effect_fns, self_name }.visit_expr_mut(body);
+}
+
+/// Rewrite `Try/Unwrap { fan.map(xs, (x) => ok(E)) }` → `list.map(xs, (x) => E)` — a PURE
+/// IR transformation. `fan.map` maps in list order and collects the first Err; a lambda
+/// whose every exit is `ok(…)` can never Err, and fan lambdas cannot capture a `var`, so
+/// parallelism is unobservable — the call IS list.map. This lets the C1 defunctionalization
+/// / self-host list machinery execute it on the v1 path (it previously fell to the elided
+/// deferred-Const and printed all-zero results — fan_map_inline_lambda, 2026-07-03).
+/// Call-count-INVARIANT: one Module call becomes one Module call (`ok` is a constructor).
+/// A lambda with a non-`ok` exit (a real Err path) is left untouched and keeps walling.
+pub fn rewrite_fan_map_pure(body: &mut IrExpr) {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::types::constructor::TypeConstructorId;
+    // The lambda's tail must be `ok(E)` (directly, or as a block tail). Returns the
+    // rewritten body with the `ok` stripped, or None if any exit is not ok-wrapped.
+    fn strip_ok(e: &IrExpr) -> Option<IrExpr> {
+        match &e.kind {
+            IrExprKind::ResultOk { expr } => Some((**expr).clone()),
+            IrExprKind::Block { stmts, expr: Some(tail) } => {
+                let new_tail = strip_ok(tail)?;
+                Some(IrExpr {
+                    kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(new_tail)) },
+                    ty: new_tail_ty(&e.ty),
+                    span: e.span.clone(),
+                    def_id: e.def_id,
+                })
+            }
+            _ => None,
+        }
+    }
+    fn new_tail_ty(t: &Ty) -> Ty {
+        match t {
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[0].clone(),
+            other => other.clone(),
+        }
+    }
+    struct S;
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            let (IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }) = &expr.kind
+            else {
+                return;
+            };
+            let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, type_args } =
+                &inner.kind
+            else {
+                return;
+            };
+            if module.as_str() != "fan" || func.as_str() != "map" || args.len() != 2 {
+                return;
+            }
+            let IrExprKind::Lambda { params, body, lambda_id } = &args[1].kind else { return };
+            let Some(new_body) = strip_ok(body) else { return };
+            let new_lambda_ty = match &args[1].ty {
+                Ty::Fn { params: ps, ret } => Ty::Fn { params: ps.clone(), ret: Box::new(new_tail_ty(ret)) },
+                other => other.clone(),
+            };
+            let new_lambda = IrExpr {
+                kind: IrExprKind::Lambda {
+                    params: params.clone(),
+                    body: Box::new(new_body),
+                    lambda_id: *lambda_id,
+                },
+                ty: new_lambda_ty,
+                span: args[1].span.clone(),
+                def_id: args[1].def_id,
+            };
+            let result_ty = expr.ty.clone(); // the Try-unwrapped List[B]
+            *expr = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: almide_lang::intern::sym("list"),
+                        func: almide_lang::intern::sym("map"),
+                        def_id: None,
+                    },
+                    args: vec![args[0].clone(), new_lambda],
+                    type_args: type_args.clone(),
+                },
+                ty: result_ty,
+                span: expr.span.clone(),
+                def_id: expr.def_id,
+            };
+        }
+    }
+    S.visit_expr_mut(body);
 }
 
 /// Rewrite a NEVER-ERR user `effect fn` `Named` CALL's result type from the lifted-ABI
@@ -215,6 +307,89 @@ pub fn unwrap_never_err_call_types(
         }
     }
     S(can_err, lifted_effect_fns).visit_expr_mut(body);
+}
+
+/// Re-wrap a NEVER-ERR lifted call assigned/bound to an EXPLICITLY `Result`-typed target
+/// (`var r: Result[Int, String] = ok(0); r = step(5)` / `let r2: Result[Int, String] =
+/// step(7)` — the #485 "annotated Result keeps the Result" rule). The never-err type
+/// rewrite makes the CALL yield raw `T` on v1, but the target slot IS a Result block —
+/// assigning the raw i64 into the i32 handle slot emitted invalid wasm
+/// (effect_assign_unwrap). Since the callee never errs, `ok(call)` is exact.
+pub fn rewrap_never_err_into_result_targets(
+    body: &mut IrExpr,
+    can_err: &std::collections::HashSet<String>,
+    lifted_effect_fns: &std::collections::HashSet<String>,
+) {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::types::constructor::TypeConstructorId;
+    // Pass 1: vars DECLARED with a Result type (Bind.ty).
+    fn collect_result_vars(e: &IrExpr, out: &mut std::collections::HashSet<u32>) {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct C<'a>(&'a mut std::collections::HashSet<u32>);
+        impl IrVisitor for C<'_> {
+            fn visit_stmt(&mut self, s: &IrStmt) {
+                if let IrStmtKind::Bind { var, ty, .. } = &s.kind {
+                    if matches!(ty, Ty::Applied(TypeConstructorId::Result, _)) {
+                        self.0.insert(var.0);
+                    }
+                }
+                almide_ir::visit::walk_stmt(self, s);
+            }
+        }
+        C(out).visit_expr(e);
+    }
+    let mut result_vars = std::collections::HashSet::new();
+    collect_result_vars(body, &mut result_vars);
+
+    struct S<'a> {
+        can_err: &'a std::collections::HashSet<String>,
+        lifted: &'a std::collections::HashSet<String>,
+        result_vars: std::collections::HashSet<u32>,
+    }
+    impl S<'_> {
+        fn is_raw_never_err_call(&self, e: &IrExpr) -> bool {
+            !matches!(&e.ty, Ty::Applied(TypeConstructorId::Result, _))
+                && matches!(&e.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if self.lifted.contains(name.as_str()) && !self.can_err.contains(name.as_str()))
+        }
+        fn wrap(&self, e: &mut IrExpr, result_ty: Ty) {
+            let inner = std::mem::replace(
+                e,
+                IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+            );
+            *e = IrExpr {
+                kind: IrExprKind::ResultOk { expr: Box::new(inner) },
+                ty: result_ty,
+                span: e.span.clone(),
+                def_id: None,
+            };
+        }
+    }
+    impl IrMutVisitor for S<'_> {
+        fn visit_stmt_mut(&mut self, s: &mut IrStmt) {
+            almide_ir::walk_stmt_mut(self, s);
+            match &mut s.kind {
+                IrStmtKind::Bind { ty, value, .. }
+                    if matches!(ty, Ty::Applied(TypeConstructorId::Result, _))
+                        && self.is_raw_never_err_call(value) =>
+                {
+                    let rt = ty.clone();
+                    self.wrap(value, rt);
+                }
+                IrStmtKind::Assign { var, value }
+                    if self.result_vars.contains(&var.0) && self.is_raw_never_err_call(value) =>
+                {
+                    let ok_ty = value.ty.clone();
+                    self.wrap(
+                        value,
+                        Ty::Applied(TypeConstructorId::Result, vec![ok_ty, Ty::String]),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+    S { can_err, lifted: lifted_effect_fns, result_vars }.visit_expr_mut(body);
 }
 
 /// Rewrite `match <never-err lifted-effect call> { ok(pat) => A, err(_) => B }` to `{ let pat =
@@ -355,8 +530,10 @@ pub fn inline_mutual_tail_recursion(
         .map(|f| {
             let mut nf = f.clone();
             strip_never_err_unwraps(&mut nf.body, &can_err, &lifted_effect_fns, f.name.as_str());
+            rewrite_fan_map_pure(&mut nf.body);
             rewrite_never_err_effect_match(&mut nf.body, &can_err, &lifted_effect_fns);
             unwrap_never_err_call_types(&mut nf.body, &can_err, &lifted_effect_fns);
+            rewrap_never_err_into_result_targets(&mut nf.body, &can_err, &lifted_effect_fns);
             nf
         })
         .collect();

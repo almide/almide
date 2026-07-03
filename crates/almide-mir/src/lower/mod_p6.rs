@@ -545,16 +545,21 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
         // (`try_lower_variant_value_match` excludes a record-Ok subject from the str-result/
         // `heap_elem_lists` tracking via `is_record_result_ty`, so it rolls back → walls cleanly),
         // because identifying a record-Ok payload needs the record-layout registry the desugar lacks.
+        // `Try` is the frontend's auto-`?` on an UN-annotated bind of a declared-Result
+        // effect call (`let v = declared_result()`) — the same monadic coercion as a
+        // spelled-out `!`, so both desugar identically. (A Try left unhandled emitted a
+        // bare dst-less `(call $f)` whose Result handle stayed on the wasm stack —
+        // effect_assign_unwrap's `unannotated=` leg, 2026-07-03.)
         let (inner, ok_pat) = match &s.kind {
             IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
-                IrExprKind::Unwrap { expr } => (
+                IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => (
                     (**expr).clone(),
                     IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: *var, ty: ty.clone() }) },
                 ),
                 _ => continue,
             },
             IrStmtKind::Expr { expr } => match &expr.kind {
-                IrExprKind::Unwrap { expr } => {
+                IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
                     ((**expr).clone(), IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) })
                 }
                 _ => continue,

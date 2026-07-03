@@ -674,12 +674,40 @@ pub(crate) fn try_tco_rewrite(
     params: &[almide_ir::IrParam],
     body: &IrExpr,
 ) -> Option<IrExpr> {
-    // Only a HEAP-result self-rec function (the kind the self-rec guard walls — it returns an
-    // Option/Result/Value/String the deep recursion would build then trap on). A SCALAR self-rec
-    // already lowers (shallow-correct), so leave it untouched (no regression risk).
     if !is_heap_ty(&body.ty) {
-        return None;
+        // SCALAR-result gate: the loop rewrite mishandles a TUPLE-DESTRUCTURE bind in
+        // the body (`let (cp, l) = __trim_cp(addr)` — the rewritten loop spun forever,
+        // int.parse via the Unicode trim, 2026-07-03). Decline those; they keep the
+        // real-recursion lowering (correct, stack-bound) as before. A destructure-free
+        // scalar body (the `__split_fill`/`__chunk_outer` byte-walkers) is admitted.
+        fn has_tuple_destructure(e: &IrExpr) -> bool {
+            use almide_ir::visit::{walk_expr, IrVisitor};
+            struct C(bool);
+            impl IrVisitor for C {
+                fn visit_stmt(&mut self, s: &almide_ir::IrStmt) {
+                    if matches!(&s.kind, almide_ir::IrStmtKind::BindDestructure { .. }) {
+                        self.0 = true;
+                    }
+                    almide_ir::visit::walk_stmt(self, s);
+                }
+            }
+            let mut c = C(false);
+            c.visit_expr(e);
+            c.0
+        }
+        if has_tuple_destructure(body) {
+            return None;
+        }
     }
+    // A HEAP-result self-rec function (the kind the self-rec guard walls — it returns an
+    // Option/Result/Value/String the deep recursion would build then trap on), AND a
+    // SCALAR-result one: the latter lowers as REAL recursion (a function-tail self-call)
+    // which is correct but STACK-BOUND — the self-host byte-walkers (`__split_fill`,
+    // `__chunk_outer`, `__fp_pow10_acc`) exhausted the wasm call stack on large inputs
+    // (spec/wasm_cross r5_split / list_count_index_truncation, 2026-07-03). A scalar
+    // result is exactly the cert-clean scalar-loop form (`tco_empty_for` has scalar
+    // empties since brick 1), so admit it; the collect/carried gates below still decline
+    // anything outside the loop subset, falling back to the real recursion as before.
     let n = params.len();
     let max_v = max_var_id(body).max(params.iter().map(|p| p.var.0).max().unwrap_or(0));
     let rk = VarId(max_v + 1);

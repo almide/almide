@@ -135,7 +135,16 @@ impl LowerCtx {
         // (a capturing lambda has no liftable FuncRef). A non-inlinable form (a first-class
         // Var closure, a heap element/result, a side-effecting body) returns `None` and
         // falls through to the existing `lift_lambda` / self-host-combinator routing.
-        if module == "list" && matches!(func, "map" | "filter" | "fold" | "flat_map" | "filter_map") {
+        // `fan.map` with a PURE lambda is OBSERVABLY list.map (the native runtime maps
+        // in list order and collects; fan lambdas cannot capture a `var`, so the only
+        // difference — parallelism — is unobservable, and the auto-`?` has already
+        // stripped the effect Result by the time the call reaches a value position).
+        // Route it through the same C1 defunctionalization; a non-inlinable form falls
+        // through and WALLS (an unregistered `fan.*` CallFn), never the elided Const-0
+        // that printed all-zero fan results (fan_map_inline_lambda, 2026-07-03).
+        if (module == "list" || module == "fan")
+            && matches!(func, "map" | "filter" | "fold" | "flat_map" | "filter_map")
+        {
             if let Some(dst) = self.try_lower_defunc_list_hof(func, args, result_ty) {
                 return Ok(dst);
             }
