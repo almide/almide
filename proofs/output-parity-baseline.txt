@@ -133,6 +133,7 @@ spec/wasm_cross/split_empty_sep.almd
 spec/wasm_cross/spread_record_share.almd
 spec/wasm_cross/str_result_heap_bind.almd
 spec/wasm_cross/string_bool_ordering.almd
+spec/wasm_cross/string_case_unicode.almd
 spec/wasm_cross/string_codepoint.almd
 spec/wasm_cross/string_codepoint_index.almd
 spec/wasm_cross/string_count_truncation.almd
