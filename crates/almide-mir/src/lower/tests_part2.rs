@@ -514,9 +514,12 @@
     #[test]
     fn match_arm_heap_payload_binding_aliases_the_subject() {
         use almide_lang::intern::sym;
-        // var opt = make(); match opt { Some(x) => use(x), None => () }  — the heap
-        // payload `x` aliases the WHOLE subject (Op::Dup, container-grain), dropped at
-        // arm end; `None` binds nothing. Balanced.
+        // var opt = make(); match opt { Some(x) => use(x), None => () } — an UNTRACKED
+        // subject with a CALL-bearing arm. This used to LINEARIZE (both arms run, the
+        // heap payload aliasing the subject container-grain): caps/ownership-sound but
+        // an OUTPUT miscompile — `use(x)` ran even on the None path (the porta
+        // read_message `method=` garbage class, 2026-07-03). The linearization is now
+        // gated to effect-free arms, so this shape WALLS cleanly instead.
         let arm_some = almide_ir::IrMatchArm {
             pattern: IrPattern::Some {
                 inner: Box::new(IrPattern::Bind { var: VarId(1), ty: Ty::String }),
@@ -547,13 +550,11 @@
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             stmt(IrStmtKind::Expr { expr: m }),
         ]);
-        let mir = lower_body(&b, "main").expect("payload-binding match lowers");
+        let err = lower_body(&b, "main").expect_err("call-bearing arm over an untracked subject walls");
         assert!(
-            mir.ops.iter().any(|o| matches!(o, Op::Dup { src: ValueId(0), .. })),
-            "the heap payload aliases the subject (container-grain): {:?}",
-            mir.ops
+            matches!(&err, LowerError::Unsupported(m) if m.contains("linearization")),
+            "walls with the linearization guard, not a silent both-arms run: {err:?}"
         );
-        assert_eq!(verify_ownership(&mir), Ok(()), "the payload Dup is balanced by an arm-end drop");
     }
 
     #[test]

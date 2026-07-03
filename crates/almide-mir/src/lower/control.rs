@@ -168,7 +168,19 @@ impl LowerCtx {
                             ));
                         }
                     }
-                    if matches!(&subject.kind, IrExprKind::Call { target: CallTarget::Named { .. }, .. })
+                    // A PURE heap-result MODULE call (`json.parse` — resolved by the
+                    // self-host registry, so its Result is BUILT by the same
+                    // materialize_result_str layout a user fn uses) is tracked exactly
+                    // like a Named user call. Untracked, the match fell to the both-arms
+                    // linearization and RAN BOTH println arms (silent miscompile,
+                    // 2026-07-03; the json.parse read_message leg).
+                    let result_call_subject = match &subject.kind {
+                        IrExprKind::Call { target: CallTarget::Named { .. }, .. } => true,
+                        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } =>
+                            crate::purity::is_pure(module.as_str(), func.as_str()),
+                        _ => false,
+                    };
+                    if result_call_subject
                         && crate::lower::is_result_ty(&subject.ty)
                     {
                         if Self::is_heap_ok_result(&subject.ty) {
@@ -234,6 +246,39 @@ impl LowerCtx {
                         "match arm guard cannot be faithfully lowered (the linearization runs \
                          every arm, losing the guard's conditional selection) not in this brick"
                             .into(),
+                    ));
+                }
+                // The linearization is sound ONLY for effect-free arms (running both
+                // bodies is then observationally a no-op). An arm containing a CALL can
+                // print / write / recurse — running the untaken arm is a silent
+                // miscompile (both println arms of an untracked Result match ran,
+                // 2026-07-03). WALL it: an unlowered shape must be a clean Unsupported,
+                // never wrong output.
+                fn arm_has_call(e: &IrExpr) -> bool {
+                    use almide_ir::visit::{walk_expr, IrVisitor};
+                    struct C(bool);
+                    impl IrVisitor for C {
+                        fn visit_expr(&mut self, e: &IrExpr) {
+                            if matches!(
+                                e.kind,
+                                IrExprKind::Call { .. }
+                                    | IrExprKind::TailCall { .. }
+                                    | IrExprKind::RuntimeCall { .. }
+                            ) {
+                                self.0 = true;
+                            }
+                            walk_expr(self, e);
+                        }
+                    }
+                    let mut c = C(false);
+                    c.visit_expr(e);
+                    c.0
+                }
+                if arms.iter().any(|a| arm_has_call(&a.body)) {
+                    return Err(LowerError::Unsupported(
+                        "match over an UNTRACKED subject with a call-bearing arm cannot take \
+                         the both-arms linearization (it would run the untaken arm's effects) \
+                         not in this brick".into(),
                     ));
                 }
                 for arm in arms {
