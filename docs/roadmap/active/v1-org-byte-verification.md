@@ -188,6 +188,61 @@ Directive: don't backport to v0; make v1 the branch where these work.
   Gates: corpus-wall TOTAL over 4556 fns; output-parity baseline 126 → **151**
   (+25, the JSON-codec cascade); almide-mir tests 501/6-known; spec 273/273.
 
+## Fifth pass — the output-parity frontier (2026-07-03, same day)
+
+Directive: keep rescuing. Attacked the render_program path's MISMATCH (silent
+miscompile) and RUNERR (invalid wasm) classes head-on. **MISMATCH 6 → 0,
+RUNERR 8 → 2, parity baseline 151 → 162.** What fell out:
+
+- **Value-model formatting**: stringify's Float arm now renders Rust's raw `{}`
+  (strip float.to_string's ".0"); float.parse keeps -0.0's sign (`-1.0 *` not
+  `0.0 -`) and caps the pow10 scale at the f64-inf boundary with an
+  ACCUMULATOR (tail) recursion — "1e99999" used to exhaust the call stack.
+- **Unicode whitespace**: string.trim/trim_start/trim_end decode UTF-8 at the
+  boundaries (the full char::is_whitespace 25-codepoint set); int.parse /
+  float.parse route through it (C-021 on the MIR path).
+- **json.parse rewritten over the prim byte floor** — the char-indexed
+  first version was O(n²) (string.get + per-char concat) and timed out on a
+  multi-KB glTF; now byte-addressed with a write-cursor string decoder and
+  UTF-8 encode for \uXXXX (surrogate pairs included).
+- **Lifted lambdas inherit variant_layouts + global_inits** — a custom-ADT
+  match inside `list.filter((t) => match t …)` resolved against an EMPTY
+  registry and filtered EVERYTHING out (closures_and_variants).
+- **Heap-element combinator routing**: filter/get_or/unwrap_or over
+  non-String heap payloads (variants, Values) routed to rc-sharing self-hosts
+  (`list.filter_rc`, `list.get_or_value`, option/result value-unwrap_or
+  variants) instead of the `_str` deep-copy that read a block's length word as
+  a byte count (UAF garbage); unshareable combinators route to unregistered
+  names = clean walls.
+- **Scalar TCO admitted** for destructure-free tail self-recursion — the
+  self-host byte-walkers (`__split_fill`, `__chunk_outer`) no longer exhaust
+  the stack on large inputs; a tuple-destructure body declines (the loop
+  rewrite mishandles it) and keeps real recursion.
+- **`Try` joins `Unwrap` everywhere**: the monadic desugar, the never-err
+  strip, and a new rewrap (never-err call assigned to an EXPLICIT
+  `Result`-typed var re-wraps as `ok(call)`) — the effect_assign_unwrap
+  matrix (assign/loop/index/annotated/unannotated) is fully green.
+- **`_start` handles an explicit-Result main** (reads the tag, drops the Ok
+  block, traps on Err) — every `fn main() -> Result[Unit, String]` CLI
+  (porta, almide-grammar) used to emit invalid wasm ("values remaining").
+- **CLI dispatch shape** (`match list.get(args,1) { some("cmd") => …, _ => usage }`)
+  desugars to the executable two-arm form; bare Named calls resolve into their
+  unique linked user module; `string.capitalize` self-hosted. almide-grammar
+  now RENDERS + runs its dispatch matrix (output byte-diff still divergent —
+  the module-record map leg is the open edge).
+- top_let_test exposed **scalar module-globals lowered to Const-0** — const
+  (call-free) initializers now materialize their real value, incl. transitive
+  const globals (`SOLAR_MASS = 4.0 * PI * PI`); call-bearing inits wall.
+- `fan.map` with an all-`ok` lambda rewrites to `list.map` (observably
+  identical; fan lambdas cannot capture vars) and defunctionalizes.
+
+Still open on this frontier: `map_set_eq` (Map Int-key repr routing),
+`tco_deep_recursion_churn` (a heap accumulator built THROUGH a call —
+`string.take(acc + "x", 8)` — needs the general heap back-edge),
+float.parse's exact decimal→f64 rounding at the denormal/max boundaries
+(a strtod-class brick), the almide-grammar output divergence, and porta's 2
+native-FFI walls.
+
 ## Remaining threads
 
 - **wall=0 count 21 → 19 (honesty, not regression)**: the linearization guard
