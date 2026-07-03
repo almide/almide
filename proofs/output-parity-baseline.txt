@@ -81,6 +81,7 @@ spec/wasm_cross/list_count_index_truncation.almd
 spec/wasm_cross/list_enumerate_find.almd
 spec/wasm_cross/list_eq.almd
 spec/wasm_cross/list_eq_float_bool.almd
+spec/wasm_cross/list_float_total_order.almd
 spec/wasm_cross/list_insert_clamp.almd
 spec/wasm_cross/list_iter_tco.almd
 spec/wasm_cross/list_minmax_str.almd
