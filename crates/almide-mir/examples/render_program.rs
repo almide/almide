@@ -586,6 +586,119 @@ fn main() {
         }
     }
 
+    // EAGER GLOBAL-INIT semantics (C-007, top_let_div_eager): v0 evaluates every
+    // ABORTABLE top-let initializer at startup — `let bad = 10 / 0` aborts BEFORE
+    // main even when `bad` is never used. The v1 per-use materialization is
+    // observably identical for pure inits EXCEPT the trapping ones, so synthesize
+    // `__global_init` binding each CALL-FREE SCALAR initializer (the checked
+    // div/mod inside aborts with the native-identical stderr + exit 1) and have
+    // `_start` call it before `$main`. Call-bearing/heap inits keep their
+    // existing per-use/wall handling (out of this eager slice).
+    {
+        fn has_call(e: &almide_ir::IrExpr) -> bool {
+            use almide_ir::visit::{walk_expr, IrVisitor};
+            struct C(bool);
+            impl IrVisitor for C {
+                fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                    if matches!(
+                        e.kind,
+                        almide_ir::IrExprKind::Call { .. } | almide_ir::IrExprKind::RuntimeCall { .. }
+                    ) {
+                        self.0 = true;
+                    }
+                    walk_expr(self, e);
+                }
+            }
+            let mut c = C(false);
+            c.visit_expr(e);
+            c.0
+        }
+        let mut max_var = 0u32;
+        for (v, _) in &globals {
+            max_var = max_var.max(v.0);
+        }
+        {
+            use almide_ir::visit::{walk_expr, IrVisitor};
+            struct M(u32);
+            impl IrVisitor for M {
+                fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                    if let almide_ir::IrExprKind::Var { id } = &e.kind {
+                        self.0 = self.0.max(id.0);
+                    }
+                    walk_expr(self, e);
+                }
+            }
+            let mut m = M(max_var);
+            for f in &ir.functions {
+                m.visit_expr(&f.body);
+            }
+            max_var = m.0;
+        }
+        let mut stmts: Vec<almide_ir::IrStmt> = Vec::new();
+        let mut ordered: Vec<_> = ir
+            .top_lets
+            .iter()
+            .chain(ir.modules.iter().flat_map(|m| m.top_lets.iter()))
+            .collect();
+        ordered.sort_by_key(|tl| tl.var.0);
+        // A later initializer may READ an earlier global (`let half = 10 / zero`) —
+        // inside the synthesized fn those are unresolvable globals (strict mode
+        // refuses the fallback), so INLINE each processed init into its dependents
+        // (declaration order; all call-free, so substitution is pure and finite).
+        let mut subst: std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr> =
+            std::collections::HashMap::new();
+        for tl in ordered {
+            let scalar = !almide_mir::lower::is_heap_ty(&tl.ty);
+            if scalar && !has_call(&tl.value) {
+                let mut value = tl.value.clone();
+                for (gv, ge) in &subst {
+                    value = almide_ir::substitute::substitute_var_in_expr(&value, *gv, ge);
+                }
+                subst.insert(tl.var, value.clone());
+                max_var += 1;
+                stmts.push(almide_ir::IrStmt {
+                    kind: almide_ir::IrStmtKind::Bind {
+                        var: almide_ir::VarId(max_var),
+                        mutability: almide_ir::Mutability::Let,
+                        ty: tl.ty.clone(),
+                        value,
+                    },
+                    span: None,
+                });
+            }
+        }
+        if !stmts.is_empty() {
+            let body = almide_ir::IrExpr {
+                kind: almide_ir::IrExprKind::Block { stmts, expr: None },
+                ty: almide_lang::types::Ty::Unit,
+                span: Default::default(),
+                def_id: None,
+            };
+            let init_fn = almide_ir::IrFunction {
+                name: almide_lang::intern::sym("__global_init"),
+                params: vec![],
+                ret_ty: almide_lang::types::Ty::Unit,
+                body,
+                is_effect: false,
+                is_async: false,
+                is_test: false,
+                generics: None,
+                extern_attrs: vec![],
+                export_attrs: vec![],
+                attrs: vec![],
+                visibility: almide_ir::IrVisibility::Public,
+                doc: None,
+                blank_lines_before: 0,
+                def_id: None,
+                module_origin: None,
+                mutated_params: vec![],
+            };
+            if let Ok(mir) = almide_mir::lower::lower_function(&init_fn, &globals) {
+                functions.push(mir);
+            }
+        }
+    }
+
     // If `main` itself was WALLED out of the lowering subset (it needs a capability,
     // a RawPtr with no scalar Repr, etc.), there is no `$main` in `functions` — yet
     // render_wasm_program unconditionally emits `(func (export "_start") (call $main))`.

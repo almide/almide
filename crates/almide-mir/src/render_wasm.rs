@@ -371,10 +371,21 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
         .functions
         .iter()
         .any(|f| f.name == "main" && f.ret.is_some());
-    let start = if main_returns {
-        "  (func (export \"_start\") (local $r i32)\n    (local.set $r (call $main))\n    (if (i32.ne (i32.load (i32.add (local.get $r) (i32.const 16))) (i32.const 0))\n      (then unreachable))\n    (call $rc_dec (local.get $r)))\n"
+    // EAGER GLOBAL INITS (C-007): when the program carries a synthesized
+    // `__global_init` (the abortable top-let initializers — render_program builds
+    // it), run it BEFORE `$main` so `let bad = 10 / 0` aborts at startup exactly
+    // as native does, even when the global is never used.
+    let ginit = if prog.functions.iter().any(|f| f.name == "__global_init") {
+        "    (call $__global_init)\n"
     } else {
-        "  (func (export \"_start\") (call $main))\n"
+        ""
+    };
+    let start = if main_returns {
+        format!(
+            "  (func (export \"_start\") (local $r i32)\n{ginit}    (local.set $r (call $main))\n    (if (i32.ne (i32.load (i32.add (local.get $r) (i32.const 16))) (i32.const 0))\n      (then unreachable))\n    (call $rc_dec (local.get $r)))\n"
+        )
+    } else {
+        format!("  (func (export \"_start\")\n{ginit}    (call $main))\n")
     };
     format!("{preamble}{data}{closure_table}{funcs}{start})
 ")
