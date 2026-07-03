@@ -254,9 +254,16 @@ err 再構成 — の cert 行が bare `m`：取得イベントなしの move-ou
    checker の leak 行（bare `i`）が本物のミスコンパイルを指した初の実例。tail-dup の対象を
    「heap 型 or アームに直接 Try/Unwrap を含む bind」へ拡張し、既存の monadic desugar に
    委ねて根治（via_if byte-MATCH、baseline 176 退行ゼロ、MIR 507/0）。
-3. **残 2 件**（未根治・記録）: `bytes_set_value_semantics::rotate`（"adm" — loop-carried slot
-   の field-Dup 初期化と括弧イベントの合流）と `effect_tco::checked`（"i" — effect TCO の
-   err パス）。いずれも実行は parity green で、cert 会計の未整備クラス。
+3. **残クラスも根治（同日深夜）**: `effect_tco::checked`（declared-Result tail-if スタイルは
+   Consume を発行せず `EndIf {{ val }}` が実質 move — val-move 規則を追加、ループ機構の値は
+   除外）と `bytes_set_value_semantics::rotate`（Dup 初期化 slot のイベントが of 解決と
+   ValueId 直打ちで2行に分裂 — slot イベントを object_of 解決に統一、"a(id)m" に収束）。
+
+**クローズ（2026-07-03）**: `proofs/corpus-wall.sh` が **checker phase 込みでローカル完全
+green** — kernel-proven checker が ownership 20876 オブジェクト / names 4248 / caps 3481 /
+caps-transitive 243 の全 witness を ACCEPT。PCC チェーンの全量ローカル実行はプロジェクト
+史上初。副産物として本物のミスコンパイル1クラス（via_if）と cert 会計3クラスを根治。
+同日3回目のバイナリ置換も刻印が FATAL 捕捉（並行セッション活発 — F6 恒久対策が機能）。
 
 ## 優先順位と依存
 

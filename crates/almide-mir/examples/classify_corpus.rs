@@ -405,6 +405,11 @@ fn plus_one_events_backed(mir: &MirFunction) -> bool {
                         released.insert(*v);
                     }
                 }
+                Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } => {
+                    if merge_dsts.contains(v) {
+                        released.insert(*v);
+                    }
+                }
                 _ => {}
             }
         }

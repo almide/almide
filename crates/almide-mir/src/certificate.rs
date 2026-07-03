@@ -536,6 +536,23 @@ impl Streams {
         }
         self.stream.get_mut(&o).unwrap().push(c);
     }
+    /// The current rc balance of `o`'s line (i/a = +1, d/m = −1) — used to decide
+    /// whether a branch-merge val still HOLDS its reference (an un-consumed arm
+    /// value flowing through `EndIf {{ val }}` is a real move the stream must see).
+    fn balance(&self, o: ValueId) -> i64 {
+        self.stream
+            .get(&o)
+            .map(|line| {
+                line.chars()
+                    .map(|c| match c {
+                        'i' | 'a' => 1,
+                        'd' | 'm' => -1,
+                        _ => 0,
+                    })
+                    .sum()
+            })
+            .unwrap_or(0)
+    }
     fn object_of(&self, handle: ValueId) -> ValueId {
         // Well-formed MIR always has the handle mapped; fall back to identity so a
         // malformed input yields an unbalanced (rejected) certificate rather than
@@ -639,6 +656,14 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                         released_merge_dsts.insert(*v);
                     }
                 }
+                // An INNER merge flowing out as an OUTER arm value (`Else/EndIf {{ val }}`
+                // — the effect-TCO nested-if chain) is released the same way: the val-move
+                // rule below emits its `m`.
+                Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } => {
+                    if merge_dsts.contains(v) {
+                        released_merge_dsts.insert(*v);
+                    }
+                }
                 _ => {}
             }
         }
@@ -669,14 +694,17 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                 // An Alloc that FEEDS a loop-carried slot routes its `i` into the slot
                 // stream (folded inside the loop delimiters); otherwise its own stream.
                 if let Some(&slot) = feeder_to_slot.get(dst) {
-                    s.of.insert(*dst, slot);
-                    // A STRAIGHT-LINE slot opens a `(id)` CLoop body per reassign: `(` before this
-                    // feeder's `i`, `)` at the following SetLocal. (A loop slot's parens are the
-                    // LoopStart/LoopEnd delimiters instead, so do NOT double-open it here.)
+                    // Resolve the slot through `of`: a Dup-INITIALIZED slot (`var iv =
+                    // state.iv`) aliases the Dup's source object — its 'a'/'d'/'m' land
+                    // there, so the loop `(i…)`/feeder events must land on the SAME
+                    // stream (they split across two unbalanced lines otherwise — the
+                    // bytes_set_value_semantics::rotate REJECT, F8 residue).
+                    let so = s.object_of(slot);
+                    s.of.insert(*dst, so);
                     if line_slots.contains(&slot) {
-                        s.event(slot, '(');
+                        s.event(so, '(');
                     }
-                    s.event(slot, 'i');
+                    s.event(so, 'i');
                 } else {
                     s.of.insert(*dst, *dst);
                     s.event(*dst, 'i');
@@ -739,12 +767,15 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                 // folded inside the loop delimiters → `i(id)m`. Otherwise it is a
                 // fresh owned object with its own stream (`i`).
                 if let Some(&slot) = feeder_to_slot.get(d) {
-                    s.of.insert(*d, slot);
+                    // Resolve through `of`: a Dup-initialized slot aliases its source
+                    // object (see the sibling arm above).
+                    let so = s.object_of(slot);
+                    s.of.insert(*d, so);
                     // STRAIGHT-LINE slot: open its `(id)` CLoop body before the feeder's `i`.
                     if line_slots.contains(&slot) {
-                        s.event(slot, '(');
+                        s.event(so, '(');
                     }
-                    s.event(slot, 'i');
+                    s.event(so, 'i');
                 } else {
                     s.of.insert(*d, *d);
                     s.event(*d, 'i');
@@ -755,12 +786,31 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             // A loop slot's SetLocal carries no cert event (its parens are the LoopStart/LoopEnd
             // delimiters); a scalar SetLocal is cert-neutral. So this fires ONLY for a line slot.
             Op::SetLocal { local, .. } if line_slots.contains(local) => {
-                s.event(*local, ')');
+                let so = s.object_of(*local);
+                s.event(so, ')');
             }
             // The released branch-merge dst receives the arm's moved-in reference (+1).
             Op::IfThen { dst: Some(d), .. } if released_merge_dsts.contains(d) => {
                 s.of.insert(*d, *d);
                 s.event(*d, 'i');
+            }
+            // An arm value that still HOLDS its reference when it flows into the merge
+            // (`Else/EndIf {{ val }}` with no prior `Consume` — the declared-Result tail-if
+            // style, effect_tco::checked) MOVES it there: emit the `m` the explicit-Consume
+            // style already has. A val already consumed (balance 0) or never tracked
+            // (a scalar) is untouched.
+            Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) }
+                if s.of.contains_key(v)
+                    && s.balance(s.object_of(*v)) > 0
+                    // Loop-carried machinery keeps its own `(id)` accounting — a slot or
+                    // feeder flowing through a branch inside the loop is NOT a move-out
+                    // (heap_result_if_append's accumulator would double-`m`).
+                    && !slots.contains(&s.object_of(*v))
+                    && !feeder_to_slot.contains_key(v)
+                    && !line_slots.contains(&s.object_of(*v)) =>
+            {
+                let o = s.object_of(*v);
+                s.event(o, 'm');
             }
             // Loop delimiters for a heap loop-carried slot: open `(` on each slot
             // stream when entering a top-level loop, close `)` on leaving — so the
@@ -769,7 +819,8 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             Op::LoopStart => {
                 if depth == 0 {
                     for slot in &slots {
-                        s.event(*slot, '(');
+                        let so = s.object_of(*slot);
+                        s.event(so, '(');
                     }
                 }
                 depth += 1;
@@ -778,7 +829,8 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
                     for slot in &slots {
-                        s.event(*slot, ')');
+                        let so = s.object_of(*slot);
+                        s.event(so, ')');
                     }
                 }
             }
