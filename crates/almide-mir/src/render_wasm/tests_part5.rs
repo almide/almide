@@ -135,20 +135,21 @@ fn compound_list_interp_float_byte_matches_v0_with_dot0_drop() {
 
 #[test]
 fn compound_list_interp_nested_walls_cleanly() {
-    // A NESTED `List[List[Int]]` LITERAL is OUT of subset: the inner-list handles are a
-    // nested-ownership element the single-level `DropListStr` cannot free recursively, so the
-    // literal cannot be faithfully materialized. The list-literal WALL (binds.rs) rejects the
-    // whole `main` at lowering — earlier than the old interp `list.to_string_x` route, and a
-    // strictly cleaner wall (no empty len-0 block emitted, no wrong bytes). `lower_source`
-    // drops the walled `main`, so it is ABSENT from the program (never rendered to wasm).
+    // RESOLVED frontier: a NESTED `List[List[Int]]` LITERAL now materializes (each inner
+    // list is a flat block whose rc_dec is its full free — the outer DropListStr reclaims
+    // everything) and `${xs}` renders through the composed `list.to_string_ll` self-host.
+    // The expectation flips from "walls" to the stronger byte-match claim.
     let src = "fn main() -> Unit = {\n  \
         let xs: List[List[Int]] = [[1, 2], [3]]\n  \
         println(\"${xs}\") }\n";
     let prog = lower_source(src);
     assert!(
-        !prog.functions.iter().any(|f| f.name == "main"),
-        "a nested List[List[Int]] literal must WALL main at lowering (absent), not emit an empty list"
+        prog.functions.iter().any(|f| f.name == "main"),
+        "the nested list literal + interp must lower now"
     );
+    if let Some(out) = build_and_run("compound_list_interp_nested", &render_wasm_program(&prog)) {
+        assert_eq!(out, "[[1, 2], [3]]");
+    }
 }
 
 // ── Record / tuple VALUE MODEL (fix-0276): construction + field/element access ──

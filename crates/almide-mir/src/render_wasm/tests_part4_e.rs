@@ -930,18 +930,23 @@
 
     #[test]
     fn string_interp_compound_part_walls_not_invalid_wasm() {
-        // An UNSUPPORTED-element compound `${xs}` (a NESTED `List[List[Int]]` LITERAL) is a
-        // nested-ownership value the single-level `DropListStr` cannot free recursively. The
-        // list-literal WALL (binds.rs) now rejects the whole `main` at lowering — earlier than
-        // the old interp `list.to_string_x` route, and a strictly cleaner wall (no empty len-0
-        // block emitted, no wrong bytes, never invalid wasm). `lower_source` drops the walled
-        // `main`, so it is ABSENT from the program. (Flat Int/Float/Bool/String element lists ARE
-        // self-hosted now and prove byte-match v0 in the `compound_list_interp_*` tests; this
-        // guards that the OUT-OF-SUBSET element types still wall as a unit.)
+        // RESOLVED frontier: `${xs}` over a nested `List[List[Int]]` now renders through
+        // the composed `list.to_string_ll` self-host (byte-matching v0's Debug form).
+        // DEEPER nesting (List[List[List[_]]]) still routes to the unlinked
+        // `list.to_string_x` and walls as a unit — the guard this test keeps.
         let src = "fn main() -> Unit = {\n  let xs: List[List[Int]] = [[1, 2], [3]]\n  println(\"xs=${xs}\") }\n";
         let prog = lower_source(src);
         assert!(
-            !prog.functions.iter().any(|f| f.name == "main"),
-            "a nested List[List[Int]] literal must WALL main at lowering (absent), not emit an empty list"
+            prog.functions.iter().any(|f| f.name == "main"),
+            "the nested list interp must lower now"
+        );
+        if let Some(out) = build_and_run("string_interp_nested_list", &render_wasm_program(&prog)) {
+            assert_eq!(out, "xs=[[1, 2], [3]]");
+        }
+        let deeper = "fn main() -> Unit = {\n  let xs: List[List[List[Int]]] = [[[1]]]\n  println(\"${xs}\") }\n";
+        let prog2 = lower_source(deeper);
+        assert!(
+            !prog2.functions.iter().any(|f| f.name == "main"),
+            "a triply-nested list literal must still wall as a unit"
         );
     }
