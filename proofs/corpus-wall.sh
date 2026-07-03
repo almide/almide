@@ -21,6 +21,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$(cd .. && pwd)"
+# F6-2: identity of the evidence — stamp + verify the toolchain (see proofs/lib/stamp.sh).
+source "$ROOT/proofs/lib/stamp.sh"
+stamp_toolchain "$ROOT" || exit 1
+
 
 CORPUS="${1:-$ROOT/spec}"
 

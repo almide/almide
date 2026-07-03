@@ -21,6 +21,10 @@
 #    not yet gated; only its MIR-level witness is.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# F6-2: identity of the evidence — stamp + verify the toolchain (see proofs/lib/stamp.sh).
+source "$ROOT/proofs/lib/stamp.sh"
+stamp_toolchain "$ROOT" || exit 1
+
 
 echo "== build the kernel-proven checker from the Coq proof =="
 "$ROOT/proofs/build-checker.sh" >/dev/null

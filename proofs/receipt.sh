@@ -7,6 +7,10 @@
 # overclaimed (the hard rail).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# F6-2: identity of the evidence — stamp + verify the toolchain (see proofs/lib/stamp.sh).
+source "$ROOT/proofs/lib/stamp.sh"
+stamp_toolchain "$ROOT" || exit 1
+
 
 pass() { "$@" >/dev/null 2>&1 && echo PASS || echo FAIL; }
 

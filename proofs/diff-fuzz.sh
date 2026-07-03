@@ -19,6 +19,10 @@
 # Skips gracefully if almide (v0) or wasmtime is absent.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# F6-2: identity of the evidence — stamp + verify the toolchain (see proofs/lib/stamp.sh).
+source "$ROOT/proofs/lib/stamp.sh"
+stamp_toolchain "$ROOT" || exit 1
+
 N="${1:-120}"
 SEED="${2:-${EPOCHSECONDS:-$(date +%s)}}"
 
