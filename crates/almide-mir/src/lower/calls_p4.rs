@@ -1156,6 +1156,25 @@ impl LowerCtx {
         };
         let mut lowered = Vec::with_capacity(args.len());
         for a in args {
+            // A STRING-LITERAL argument to `prim.handle` — the frontend's single-use
+            // let-inliner pushes `let tbl = "…"; prim.handle(tbl)` into
+            // `prim.handle("…")` (the generated case-mapping tables). Materialize
+            // the literal block exactly as its let-bound form would (owned Alloc,
+            // scope-end drop) and hand the prim its handle — the scalar-tail
+            // deferred-Const fallback was silently returning 0 as the address.
+            if matches!(kind, PrimKind::Handle) {
+                if let IrExprKind::LitStr { value } = &a.kind {
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::Alloc {
+                        dst,
+                        repr: repr_of(&a.ty)?,
+                        init: crate::Init::Str(value.clone()),
+                    });
+                    self.live_heap_handles.push(dst);
+                    lowered.push(dst);
+                    continue;
+                }
+            }
             let v = self.lower_scalar_value(a).ok_or_else(|| {
                 LowerError::Unsupported(format!("prim.{func} argument is not a lowerable scalar/handle"))
             })?;
