@@ -974,6 +974,23 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 {
                     return format!("list.{func}_liststr");
                 }
+                // A RECORD/aggregate element (`list.get(vars, idx)` over `List[EnvVar]`
+                // — porta dedup_env): SHARE the element handle exactly like the
+                // Value/liststr accessors (the record stays owned by the list; the
+                // `_str` deep copy would read its block as string bytes). The `_value`
+                // impl is layout-identical (load_handle + Some), so reuse it. Keyed by
+                // elimination (this is a free fn, no layout registry): a heap element
+                // that is NOT a String/List/Value is a nominal record/tuple/variant
+                // block — all of which are single-handle share-safe.
+                if args.len() == 1
+                    && matches!(func, "get" | "first" | "last")
+                    && is_heap_ty(&args[0])
+                    && !matches!(args[0], Ty::String)
+                    && !is_value_ty(&args[0])
+                    && !matches!(&args[0], Ty::Applied(TypeConstructorId::List | TypeConstructorId::Map | TypeConstructorId::Set, _))
+                {
+                    return format!("list.{func}_value");
+                }
                 if args.len() == 1 && is_heap_ty(&args[0]) {
                     return format!("list.{func}_str");
                 }

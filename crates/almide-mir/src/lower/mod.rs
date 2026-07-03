@@ -1056,6 +1056,36 @@ pub fn generate_record_drop_sources(
         out.push_str("  prim.rc_dec(h)\n");
         out.push_str("}\n");
     }
+    // The SAME per-element list wrapper for each synthesized ANON-record drop — a
+    // STRUCTURAL record-list literal (`take([{key: "x", val: "2"}])`, the checker
+    // leaves the elements structural) routes to `list_anonrec_<hash>`; without this
+    // wrapper the route referenced a missing `$__drop_list_anonrec_<hash>`.
+    {
+        let mut anon_sorted: Vec<&Vec<(almide_lang::intern::Sym, Ty)>> =
+            anon_records.iter().collect();
+        anon_sorted.sort_by_key(|fields| anon_record_drop_name(fields));
+        anon_sorted.dedup_by_key(|fields| anon_record_drop_name(fields));
+        for fields in anon_sorted {
+            if !anon_record_needs_recursive_drop(fields) {
+                continue;
+            }
+            let name = anon_record_drop_name(fields);
+            let param_ty = anon_record_source_ty(fields);
+            out.push_str(&format!(
+                "fn __drop_list_{name}(xs: List[{param_ty}]) -> Unit = {{
+                     let h = prim.handle(xs)
+                     if prim.load32(h + 0) == 1 then __drop_list_{name}_loop(h, prim.load32(h + 4), 0) else ()
+                     prim.rc_dec(h)
+}}
+                 fn __drop_list_{name}_loop(h: Int, n: Int, i: Int) -> Unit =
+                     if i >= n then ()
+                     else {{ let e: {param_ty} = prim.load_handle(h + 12 + i * 8)
+         __drop_{name}(e)
+         __drop_list_{name}_loop(h, n, i + 1) }}
+"
+            ));
+        }
+    }
     // A per-element-recursive `$__drop_list_<R>` for EVERY recursive-drop record R (not just the
     // field-referenced ones in `list_drops`) — so a standalone `List[R]` LITERAL value (`group([…])`)
     // routes its drop here too. Sorted for host-determinism.

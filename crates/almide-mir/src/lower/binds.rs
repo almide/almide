@@ -159,6 +159,16 @@ impl LowerCtx {
         let elem_int_str = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
                 Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)));
+        // A HEAP-FIELD record element with a generated recursive drop (`[{key: p, val: "1"}]`
+        // — porta's List[EnvVar] literal): each element materializes via the full record
+        // builder (rc-owning its heap fields) and the list drops via `$__drop_list_<R>`
+        // (each element → `$__drop_<R>`), exactly the concat-side `record_elem` route.
+        let elem_recdrop = match &value.ty {
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+                self.record_drop_type_name(&a[0])
+            }
+            _ => None,
+        };
         // A `List[V]` whose element `V` is a FLAT custom variant (every ctor scalar-only — a nullary
         // enum like `Capability = | CapIO | CapProcess`, or a scalar-payload variant): each element is
         // a fresh OWNED tag-block (`try_lower_variant_ctor`, cert `i`) moved into the slot; the list's
@@ -178,9 +188,13 @@ impl LowerCtx {
             }
             _ => None,
         };
-        if (!elem_str && !elem_scalar_aggregate && !elem_value && !elem_str_value && !elem_list_str
-            && !elem_int_str && !elem_flat_variant && elem_rich_variant.is_none())
-            || elements.is_empty()
+        // An EMPTY literal of an admitted class builds the same zero-length block
+        // (`ok([])` — the tail-duplicated else-arm's Result payload, porta
+        // resolve_env). The element loop below is vacuous; DropListStr over a
+        // len-0 block frees just the block.
+        if !elem_str && !elem_scalar_aggregate && !elem_value && !elem_str_value && !elem_list_str
+            && !elem_int_str && !elem_flat_variant && elem_rich_variant.is_none()
+            && elem_recdrop.is_none()
         {
             return None;
         }
@@ -194,7 +208,7 @@ impl LowerCtx {
             // emit_sections shape): a fresh owned String, moved into the slot exactly like a concat.
             IrExprKind::StringInterp { .. } => elem_str,
             IrExprKind::Var { id } => self.value_of.contains_key(id),
-            IrExprKind::Record { .. } => elem_scalar_aggregate,
+            IrExprKind::Record { .. } => elem_scalar_aggregate || elem_recdrop.is_some(),
             IrExprKind::Tuple { .. } => elem_scalar_aggregate || elem_str_value || elem_int_str,
             // A FLAT-variant CONSTRUCTOR element (`[CapIO, CapProcess]`) — a Named call whose name is a
             // registered constructor, materialized via `try_lower_variant_ctor` below.
@@ -243,6 +257,8 @@ impl LowerCtx {
         } else if let Some(vname) = &elem_rich_variant {
             // RECURSIVE per-element drop via the generated `$__drop_list_<V>`.
             self.variant_drop_handles.insert(list, format!("list_{vname}"));
+        } else if let Some(rname) = &elem_recdrop {
+            self.variant_drop_handles.insert(list, format!("list_{rname}"));
         } else {
             self.heap_elem_lists.insert(list);
         }
@@ -266,6 +282,9 @@ impl LowerCtx {
                 }
                 // A scalar-only record literal element — materialize a fresh OWNED record
                 // block (`try_lower_scalar_record_construct`, cert `i`), moved into the slot.
+                IrExprKind::Record { .. } if elem_recdrop.is_some() => {
+                    self.try_lower_record_construct(elem)?
+                }
                 IrExprKind::Record { .. } => self.try_lower_scalar_record_construct(elem)?,
                 // A scalar-only tuple literal element (`(1, 100)`) — materialize a fresh OWNED
                 // flat 2-slot block (`try_lower_scalar_tuple_construct`, cert `i`), moved into the

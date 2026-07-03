@@ -463,7 +463,13 @@ impl LowerCtx {
             Record(String),
             StrStr,
         }
-        let kind = if let Some(rname) = self.record_drop_type_name(&elem_ty) {
+        // A STRUCTURAL record element (`[{key: "x", val: "2"}]` in argument position —
+        // the checker leaves the literal structural, so `record_drop_type_name` alone
+        // declined it, calls_p2's List-arg wall): the synthesized anon-record drop
+        // (`__drop_anonrec_<hash>`) covers it with the SAME field order the literal
+        // materializes in — no declared-vs-structural order mismatch (the soundness
+        // crux the named path guards).
+        let kind = if let Some(rname) = self.record_or_anon_drop_type_name(&elem_ty) {
             ListElemDrop::Record(rname)
         } else if matches!(&elem_ty,
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String))

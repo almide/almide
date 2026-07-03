@@ -751,9 +751,24 @@ impl LowerCtx {
                         });
                         p
                     }
+                    // `ok([])` / `ok(["a", …])` — a LIST-literal Ok payload (the
+                    // tail-duplicated `let xs = if c then load(p)! else []` else-arm,
+                    // porta resolve_env). The string-list literal builder yields a
+                    // fresh owned block movable into the Result exactly like a call
+                    // piece; an out-of-subset element list returns None (wall kept).
+                    IrExprKind::List { .. } => {
+                        let e = (**expr).clone();
+                        self.try_lower_str_list_literal(&e)?
+                    }
                     _ => return None,
                 };
-                Some(self.materialize_result_str(piece, repr, false, false))
+                let dst = self.materialize_result_str(piece, repr, false, false);
+                // TRACK the bound Result like every other materialized producer —
+                // without this a later `match $t { ok/err }` over the LET-BOUND var
+                // was UNTRACKED and rolled back (the monadic-desugar else-arm
+                // `let $t = ok([]); match $t` — porta resolve_env walled on it).
+                self.seed_variant_param(dst, ty);
+                Some(dst)
             }
             IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => {
                 let payload = self.lower_scalar_value(expr)?;

@@ -159,6 +159,21 @@ impl LowerCtx {
             // `live_heap_handles` since `arm_mark`) are freed WITHIN the arm via
             // `drop_arm_locals`; the moved-out value is `Consume`d (never in that set), so it is
             // not double-freed. Same per-arm balance the scalar block arm proves.
+            // A heap-result MATCH arm — the monadic `!`-desugar inside a tail-duplicated
+            // `if` (`let xs = if c then load(p)! else []; ok(xs + t)` becomes
+            // `if c then { match load(p) { err(e)=>err(e), ok(xs)=>ok(xs+t) } } else …`,
+            // porta resolve_env/serve/validate). Delegate to the SAME variant value-match
+            // machinery the fn-tail position already uses (rollback-safe: a shape outside
+            // its subset returns None and the caller keeps the wall — never invalid wasm).
+            IrExprKind::Match { subject, arms }
+                if crate::lower::is_variant_ty(&subject.ty) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_variant_value_match(subject, arms, result_ty)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             IrExprKind::Block { stmts, expr } => {
                 let tail = expr.as_deref()?;
                 let arm_mark = self.live_heap_handles.len();
@@ -835,6 +850,13 @@ impl LowerCtx {
             // `err("missing field '" + key + "'")` — the __str_concat chain's fresh owned String is
             // moved into the Result block (no Dup: it is already a fresh rc=1 reference).
             IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => self.try_lower_concat_str(expr),
+            // `ok(file_env + ["tail"])` — a LIST concat piece (porta resolve_env's
+            // tail-duplicated arm). `try_lower_concat_list` yields a fresh owned list
+            // (`__list_concat_rc` co-owns heap elements), movable into the Result
+            // block exactly like the String-concat piece above.
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {
+                self.try_lower_concat_list(expr)
+            }
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
                 let lowered = self.lower_call_args(args).ok()?;
                 let pr = repr_of(&expr.ty).ok()?;
