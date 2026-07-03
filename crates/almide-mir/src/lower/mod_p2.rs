@@ -531,6 +531,7 @@ pub fn inline_mutual_tail_recursion(
             let mut nf = f.clone();
             strip_never_err_unwraps(&mut nf.body, &can_err, &lifted_effect_fns, f.name.as_str());
             rewrite_fan_map_pure(&mut nf.body);
+            crate::lower::desugar_option_str_literal_match(&mut nf.body);
             rewrite_never_err_effect_match(&mut nf.body, &can_err, &lifted_effect_fns);
             unwrap_never_err_call_types(&mut nf.body, &can_err, &lifted_effect_fns);
             rewrap_never_err_into_result_targets(&mut nf.body, &can_err, &lifted_effect_fns);

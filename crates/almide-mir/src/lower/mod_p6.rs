@@ -507,6 +507,112 @@ pub fn desugar_callarg_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExp
     None
 }
 
+/// Desugar `match opt { some("lit1") => A1, …, none/_ => D }` — an `Option[String]`
+/// subject whose Some patterns carry LITERAL payloads (the almide-grammar CLI
+/// dispatch `match list.get(args, 1) { some("tree-sitter") => …, _ => usage }`) —
+/// into the EXECUTABLE 2-arm form the variant match already lowers:
+///   `match opt { some($p) => { if $p == "lit1" then A1 else … else D }, none => D }`.
+/// String equality is a `BinOp` (not a call) and the duplicated default sits in a
+/// BRANCH (only one side runs), and the count gate counts the SAME desugared tree
+/// (desugar-before-both) — so `mir == ir` stays exact. Unit-typed matches only (the
+/// grammar dispatch shape); a value match keeps its existing walls.
+pub fn desugar_option_str_literal_match(body: &mut IrExpr) {
+    use almide_ir::{walk_expr_mut, IrMatchArm, IrMutVisitor, IrPattern};
+    use almide_lang::types::constructor::TypeConstructorId;
+    struct S {
+        next_var: u32,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            if !matches!(expr.ty, Ty::Unit) {
+                return;
+            }
+            let IrExprKind::Match { subject, arms } = &expr.kind else { return };
+            let is_opt_str = matches!(&subject.ty,
+                Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && matches!(a[0], Ty::String));
+            if !is_opt_str || arms.len() < 2 {
+                return;
+            }
+            let (default, lits) = match arms.split_last() {
+                Some((last, rest))
+                    if matches!(last.pattern, IrPattern::Wildcard | IrPattern::None)
+                        && last.guard.is_none() =>
+                {
+                    (last, rest)
+                }
+                _ => return,
+            };
+            let mut cases: Vec<(String, IrExpr)> = Vec::new();
+            for a in lits {
+                if a.guard.is_some() {
+                    return;
+                }
+                let IrPattern::Some { inner } = &a.pattern else { return };
+                let IrPattern::Literal { expr: lit_e } = &**inner else { return };
+                let IrExprKind::LitStr { value } = &lit_e.kind else { return };
+                cases.push((value.clone(), a.body.clone()));
+            }
+            let p = VarId(self.next_var);
+            self.next_var += 1;
+            let pvar = |ty: Ty| IrExpr {
+                kind: IrExprKind::Var { id: p },
+                ty,
+                span: None,
+                def_id: None,
+            };
+            // Build the innermost-first if-chain: … else D.
+            let mut chain = default.body.clone();
+            for (lit, arm_body) in cases.into_iter().rev() {
+                let cond = IrExpr {
+                    kind: IrExprKind::BinOp {
+                        op: almide_ir::BinOp::Eq,
+                        left: Box::new(pvar(Ty::String)),
+                        right: Box::new(IrExpr {
+                            kind: IrExprKind::LitStr { value: lit },
+                            ty: Ty::String,
+                            span: None,
+                            def_id: None,
+                        }),
+                    },
+                    ty: Ty::Bool,
+                    span: None,
+                    def_id: None,
+                };
+                chain = IrExpr {
+                    kind: IrExprKind::If {
+                        cond: Box::new(cond),
+                        then: Box::new(arm_body),
+                        else_: Box::new(chain),
+                    },
+                    ty: Ty::Unit,
+                    span: None,
+                    def_id: None,
+                };
+            }
+            let new_arms = vec![
+                IrMatchArm {
+                    pattern: IrPattern::Some {
+                        inner: Box::new(IrPattern::Bind { var: p, ty: Ty::String }),
+                    },
+                    guard: None,
+                    body: chain,
+                },
+                IrMatchArm { pattern: IrPattern::None, guard: None, body: default.body.clone() },
+            ];
+            let subject = subject.clone();
+            *expr = IrExpr {
+                kind: IrExprKind::Match { subject, arms: new_arms },
+                ty: Ty::Unit,
+                span: expr.span.clone(),
+                def_id: expr.def_id,
+            };
+        }
+    }
+    let mut s = S { next_var: max_var_id(body) + 1 };
+    s.visit_expr_mut(body);
+}
+
 /// Desugar a STATEMENT/let-bind effect-`!` (`Unwrap`) into a NESTED-MATCH continuation — the standard
 /// monadic do-desugar — so a CAN-ERR effect-`!` propagates without a mid-function early-return (which the
 /// v1 MIR has no Op for):
