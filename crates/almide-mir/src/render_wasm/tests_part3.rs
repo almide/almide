@@ -554,6 +554,14 @@
         "$read_n_bytes", "$path_exists",
     ];
 
+    // The §13 TERMINATION-CONVENTION floor: contract-mandated aborts (C-001/C-035
+    // — identical stderr + exit 1 cross-target). These CANNOT be self-hosted: each
+    // is a diverging stderr writer the capability model deliberately excludes
+    // (an abort is a halt, not an effect). A new entry must correspond to a
+    // contract-pinned abort fixture in spec/wasm_cross.
+    const TERMINATION_FLOOR_FNS: &[&str] =
+        &["$__div_trap", "$__chk_div", "$__chk_rem", "$__die", "$elem_addr_chk"];
+
     #[test]
     fn handwritten_wasm_runtime_does_not_grow() {
         // The guard is SPLIT by principle: the proven memory-model primitives
@@ -567,7 +575,11 @@
             RC_PRIMITIVE_FNS.iter().filter(|n| pre.contains(&format!("\n  (func {n} "))).count();
         let wasi_count =
             WASI_FLOOR_FNS.iter().filter(|n| pre.contains(&format!("\n  (func {n} "))).count();
-        let stdlib_count = total - rc_count - wasi_count;
+        let term_count = TERMINATION_FLOOR_FNS
+            .iter()
+            .filter(|n| pre.contains(&format!("\n  (func {n} ")))
+            .count();
+        let stdlib_count = total - rc_count - wasi_count - term_count;
         // (a) The OPEN stdlib runtime surface — ratchet DOWN only, never raise.
         const BOOTSTRAP_RUNTIME_FN_BASELINE: usize = 11;
         assert!(
@@ -590,6 +602,14 @@
             "more WASI host-floor funcs ({wasi_count}) than the closed set ({}); a \
              host-floor helper must correspond to a Capability + heap-result PrimKind",
             WASI_FLOOR_FNS.len()
+        );
+        // (d) The CLOSED termination-convention floor — present as declared, no more.
+        // A new abort must correspond to a contract-pinned fixture (C-001/C-035 kin).
+        assert!(
+            term_count <= TERMINATION_FLOOR_FNS.len(),
+            "more termination-floor funcs ({term_count}) than the closed set ({}); an \
+             abort must correspond to a contract-pinned trap fixture",
+            TERMINATION_FLOOR_FNS.len()
         );
     }
 
