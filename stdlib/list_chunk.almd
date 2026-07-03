@@ -32,6 +32,10 @@ fn __chunk_outer(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> 
 fn list_chunk(xs: List[Int], n: Int) -> List[List[Int]] = {
   let sh = prim.handle(xs)
   let total = prim.load32(sh + 4)
+  // v0 is `xs.chunks(n as usize)`: a NEGATIVE n reinterprets as a huge usize —
+  // one chunk holding everything (never a negative-count alloc trap). n == 0
+  // keeps the genuine div (native `chunks(0)` panics; the trap IS the oracle).
+  let n = if n < 0 then (if total > 0 then total else 1) else n
   let num = (total + n - 1) / n
   let outer = prim.alloc_list_str(num)
   let _x = __chunk_outer(prim.handle(outer), sh, total, n, 0, 0)
@@ -52,7 +56,8 @@ fn __win_outer(oh: Int, sh: Int, n: Int, num: Int, wi: Int) -> Int =
 fn __do_windows(xs: List[Int], n: Int) -> List[List[Int]] = {
   let sh = prim.handle(xs)
   let total = prim.load32(sh + 4)
-  let num = if n > total then 0 else total - n + 1
+  // v0 is `xs.windows(n as usize)`: a NEGATIVE n is a huge usize — n > len → [].
+  let num = if n < 0 or n > total then 0 else total - n + 1
   let outer = prim.alloc_list_str(num)
   let _x = __win_outer(prim.handle(outer), sh, n, num, 0)
   outer

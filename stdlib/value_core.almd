@@ -721,11 +721,21 @@ fn value_stringify(v: Value) -> String = {
   if tag == 0 then "null"
   else if tag == 1 then (if prim.load64(h + 12) != 0 then "true" else "false")
   else if tag == 2 then int.to_string(prim.load64(h + 12))
-  else if tag == 3 then float.to_string(prim.ffrombits(prim.load64(h + 12)))
+  else if tag == 3 then __vstr_float(prim.ffrombits(prim.load64(h + 12)))
   else if tag == 4 then __json_quote(prim.load_str(h + 12))
   else if tag == 5 then "[" + __vstr_arr(v, 0, prim.load32(h + 8), "") + "]"
   else if tag == 6 then "{" + __vstr_obj(v, 0, prim.load32(h + 8) / 2, "") + "}"
   else "null"
+}
+
+// Float inside a stringified Value renders as Rust's raw `{}` (the native
+// oracle: `format!("{}", f)` — "15000000000", "-0"), NOT float.to_string's
+// ".0"-suffixed form. float.to_string IS `{}` plus a ".0" appended to
+// integral finite values, and `{}` itself never ends in ".0" (it prints the
+// shorter "X"), so stripping that suffix reproduces `{}` exactly.
+fn __vstr_float(f: Float) -> String = {
+  let s = float.to_string(f)
+  if string.ends_with(s, ".0") then string.drop_end(s, 2) else s
 }
 
 // Recursively release each element Value of a tag-5 Array (called only at the Array's last ref).
@@ -948,4 +958,21 @@ fn __drop_result_value(r: Result[Value, String]) -> Unit = {
     } else prim.rc_dec(prim.load64(h + 12))
   } else ()
   prim.rc_dec(h)
+}
+
+// list.get_or over a List[Value] → the ELEMENT directly (not an Option). The
+// repr-poly `_str` deep copy (string.repeat) corrupts a dynamic Value block, so
+// SHARE the element exactly like list.get_value's Some arm (the borrowed handle
+// is auto-acquired on return; the list keeps owning the original).
+fn __get_or_value_elem(h: Int, i: Int) -> Value = {
+  let v: Value = prim.load_handle(h + 12 + i * 8)
+  v
+}
+
+fn list_get_or_value(xs: List[Value], i: Int, default: Value) -> Value = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if i < 0 then default
+  else if i >= len then default
+  else __get_or_value_elem(h, i)
 }

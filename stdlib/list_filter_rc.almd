@@ -1,0 +1,29 @@
+// list_filter_rc — SELF-HOSTED list.filter over a List[heap-handle] whose elements are
+// NOT Strings (custom variants, records, Values). Kept elements are SHARED into the
+// result by handle with an rc_inc co-ownership (the `_str` variant's string.repeat
+// deep-copy reads a non-String block's length word as a byte count — garbage handles,
+// the closures_and_variants UAF). Same single-pass write-cursor shape as list_filter;
+// the predicate is called exactly once per element. Source borrowed; result owned
+// (DynListStr — its recursive DropListStr rc_dec's each co-owned slot, the CoownLoop.v
+// producer/consumer pattern).
+
+fn __filterrc_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let keep = f(x)
+    if keep then {
+      prim.rc_inc(x)
+      prim.store64(dh + 12 + di * 8, x)
+      __filterrc_fill(dh, sh, f, n, i + 1, di + 1)
+    }
+    else __filterrc_fill(dh, sh, f, n, i + 1, di)
+  }
+
+fn list_filter_rc(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list_str(n)
+  let count = __filterrc_fill(prim.handle(buf), prim.handle(xs), f, n, 0, 0)
+  prim.store32(prim.handle(buf) + 4, count)
+  buf
+}
