@@ -357,11 +357,24 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
             None => pre,
         }
     };
-    // `main` is `Unit` (v0 rejects a non-`Unit` main — it must implement
-    // `Termination`), so `_start` discards nothing: a void `(call $main)` matches.
-    format!(
-        "{preamble}{data}{closure_table}{funcs}  (func (export \"_start\") (call $main))\n)\n",
-    )
+    // A `Unit` main is a void `(call $main)`. An EXPLICIT `-> Result[Unit, String]`
+    // main (porta / almide-grammar CLIs) returns a heap Result block: `_start` reads
+    // its tag — Ok is discarded (rc_dec), an Err TRAPs (unreachable) so a failing
+    // main is never silently exit-0. (v0 prints `Error: msg` + exit 1; the trap is
+    // the honest divergence until the message path is worth a helper — no fixture
+    // errs today.) The bare `(call $main)` used to leave the block ON THE STACK —
+    // every explicit-Result main was invalid wasm ("values remaining").
+    let main_returns = prog
+        .functions
+        .iter()
+        .any(|f| f.name == "main" && f.ret.is_some());
+    let start = if main_returns {
+        "  (func (export \"_start\") (local $r i32)\n    (local.set $r (call $main))\n    (if (i32.ne (i32.load (i32.add (local.get $r) (i32.const 16))) (i32.const 0))\n      (then unreachable))\n    (call $rc_dec (local.get $r)))\n"
+    } else {
+        "  (func (export \"_start\") (call $main))\n"
+    };
+    format!("{preamble}{data}{closure_table}{funcs}{start})
+")
 }
 
 /// The `(import …)` declarations for every distinct `@extern(wasm, module, name)`
