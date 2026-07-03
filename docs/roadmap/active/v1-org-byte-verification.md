@@ -236,7 +236,20 @@ RUNERR 8 → 2, parity baseline 151 → 162.** What fell out:
 - `fan.map` with an all-`ok` lambda rewrites to `list.map` (observably
   identical; fan lambdas cannot capture vars) and defunctionalizes.
 
-Still open on this frontier: `map_set_eq` (Map Int-key repr routing),
+Sixth pass (2026-07-03, same day): **almide-grammar wall=0 RESTORED and fully
+byte-verified as a CLI** — all four generator modes byte-match `almide run`
+under the same argv. Three layers: the Option-String literal dispatch desugar,
+bare-Named resolution into the unique linked module, and module type layouts
+ALIASED to their bare base names (a bare `Named` reference read a record with
+NO layout — fields shifted silently; unique owners only, ambiguity stays
+qualified = walls). Also established that v1's `env.args` ALREADY matches v0
+(argv[0]-skipping — the earlier mismatch was `wasmtime -- args` passing the
+literal `--` into the guest). `Map[Int, String]` / non-String-value heap maps
+now WALL cleanly instead of linking the wrong-slot plain/`_str` variants
+(map_set_eq: invalid wasm → honest wall).
+
+Still open on this frontier: the Map repr variants (`_ivh` scalar-key/heap-val,
+`_hval` heap-val-non-String — the map_set_eq brick),
 `tco_deep_recursion_churn` (a heap accumulator built THROUGH a call —
 `string.take(acc + "x", 8)` — needs the general heap back-edge),
 float.parse's exact decimal→f64 rounding at the denormal/max boundaries
