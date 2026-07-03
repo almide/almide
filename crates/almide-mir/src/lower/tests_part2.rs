@@ -475,7 +475,11 @@
         );
 
         // FOUR ifs (3 in the continuation after the first) EXCEED the bound → still WALLS: the
-        // exponential-blow-up guard holds beyond ≤ 2 remaining branch binds.
+        // exponential-blow-up guard, GENERALIZED: the per-count bound (≤ 2) was retired
+        // when the desugar generalized — a 4-chain lowers 16 balanced copies (real
+        // chains are 2–4 deep). What remains is the NODE-COUNT cap: a 20-chain
+        // (≈2^20 copies) is discarded and the bind WALLS — an honest refusal
+        // instead of a compile-time hang.
         let b4 = body(vec![
             bind(0, Ty::String, mk()),
             bind(1, Ty::String, mk()),
@@ -483,9 +487,17 @@
             bind(3, Ty::String, mk()),
             println_s(0),
         ]);
-        match lower_body(&b4, "main") {
+        let mir4 = lower_body(&b4, "main").expect("a 4-chain duplicates boundedly and lowers");
+        assert_eq!(verify_ownership(&mir4), Ok(()), "all 16 leaves balanced");
+        let b20 = body(
+            (0..20)
+                .map(|i| bind(i, Ty::String, mk()))
+                .chain([println_s(0)])
+                .collect::<Vec<_>>(),
+        );
+        match lower_body(&b20, "main") {
             Err(LowerError::Unsupported(_)) => {}
-            other => panic!("> 2 nested continuation must still wall, got: {other:?}"),
+            other => panic!("a 20-chain must hit the node cap and wall, got: {other:?}"),
         }
     }
 
@@ -631,14 +643,17 @@
             list_int(),
         );
         // `var x = []!` bound to a let/var — the deferred lowering was memory-safe (balanced)
-        // but its VALUE was a deferred Const/Opaque = a SILENT MISCOMPILE (the bound result is
-        // wrong, not the unwrapped value). Per the ② cardinal rule, `let x = e!` now WALLs until
-        // the faithful early-return lowering lands; `var y = [] ?? []` (UnwrapOr) still lowers.
+        // but its VALUE was a deferred Const/Opaque = a SILENT MISCOMPILE. The faithful
+        // early-return lowering has since LANDED: the monadic `!` desugar rewrites
+        // `let x = e!; rest` into the err-propagating match continuation, so this now
+        // either lowers balanced or walls inside the match machinery — never the old
+        // silently-wrong bind. Accept both honest outcomes for this synthetic (not
+        // even well-typed) `[]!`; the real shape is pinned by `effect_assign_unwrap`
+        // in the parity baseline. `var y = [] ?? []` (UnwrapOr) still lowers.
         let b = body(vec![bind(0, list_int(), unwrap)]);
-        assert!(
-            lower_body(&b, "main").is_err(),
-            "unwrap `!` bound to a var WALLs (silent miscompile until early-return lowering)"
-        );
+        if let Ok(mir) = lower_body(&b, "main") {
+            assert_eq!(verify_ownership(&mir), Ok(()), "if it lowers it must be balanced");
+        }
         let b2 = body(vec![bind(1, list_int(), unwrap_or)]);
         let mir = lower_body(&b2, "main").expect("UnwrapOr still lowers");
         assert_eq!(verify_ownership(&mir), Ok(()), "fresh results balanced by scope-end drops");
@@ -657,17 +672,18 @@
             },
             list_int(),
         );
-        // The deferred lowering was memory-safe (the v0 leak fix), but `var x = opt!` bound a
-        // SILENTLY-WRONG value (a deferred result, not the unwrapped one). Per the ② cardinal
-        // rule, `let x = e!` now WALLs until the faithful early-return lowering lands.
+        // The faithful early-return lowering LANDED (the monadic `!` desugar): `var x =
+        // opt!` rewrites into the err-propagating match continuation, so this either
+        // lowers balanced or walls inside the match machinery — never the old
+        // silently-wrong deferred bind. (The well-typed end-to-end shape is pinned by
+        // `effect_assign_unwrap` in the parity baseline.)
         let b = body(vec![
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             bind(1, list_int(), unwrap),
         ]);
-        assert!(
-            lower_body(&b, "main").is_err(),
-            "unwrap `!` bound to a var WALLs (silent miscompile until early-return lowering)"
-        );
+        if let Ok(mir) = lower_body(&b, "main") {
+            assert_eq!(verify_ownership(&mir), Ok(()), "if it lowers it must be balanced");
+        }
     }
 
     #[test]

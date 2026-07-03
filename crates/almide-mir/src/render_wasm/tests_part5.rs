@@ -240,12 +240,11 @@ fn heap_field_record_param_read_byte_matches_v0() {
 
 #[test]
 fn nested_ownership_list_literal_walls_not_empty() {
-    // fix-0276 (target 2): a `List[R]` LITERAL where R has a HEAP field needs a two-level
-    // recursive drop (the list frees each record, each record frees its String field) the
-    // single-level `DropListStr` cannot express — the nested-ownership frontier. The list-literal
-    // WALL rejects `main` at lowering rather than emitting an empty len-0 block (the old silent
-    // miscompile: a `list.map`/`sort_by` over it read NOTHING). `lower_source` drops the walled
-    // main, so it is ABSENT — a clean wall, never wrong/empty bytes.
+    // fix-0276 (target 2), RESOLVED: a `List[R]` LITERAL where R has a HEAP field now
+    // MATERIALIZES with the two-level recursive drop (`$__drop_list_<R>` frees each
+    // record, each record frees its String field) — the nested-ownership frontier this
+    // test used to pin as a WALL. The expectation flips to the stronger claim: it
+    // lowers, runs, and the map-over-it reads REAL fields (never the old empty block).
     let src = "type R = { name: String, v: Float }\n\
         fn fmtr(xs: List[R]) -> String = list.join(list.map(xs, (r) => r.name), \",\")\n\
         fn main() -> Unit = {\n  \
@@ -253,9 +252,12 @@ fn nested_ownership_list_literal_walls_not_empty() {
         println(fmtr(rs)) }\n";
     let prog = lower_source(src);
     assert!(
-        !prog.functions.iter().any(|f| f.name == "main"),
-        "a List[R] (heap-field record) literal must WALL main at lowering, not emit an empty list"
+        prog.functions.iter().any(|f| f.name == "main"),
+        "the record-list literal must lower (the nested-ownership drop landed)"
     );
+    if let Some(out) = build_and_run("nested_ownership_list", &render_wasm_program(&prog)) {
+        assert_eq!(out, "a,b", "map over the record list reads real name fields");
+    }
 }
 
 #[test]
@@ -318,6 +320,14 @@ fn heap_field_record_byte_matches_v0() {
     // borrowed `LoadHandle` Handle-arg, accounted by the cert as a no-op call-arg — the same
     // established borrow shape `prim.load_str` + `println(payload)` uses.)
     for f in &prog.functions {
+        // The GENERATED recursive drops (`__drop_R`, `__drop_list_R`) are the trusted
+        // free routines — the real pipeline verifies them by the coown whitelist
+        // (proofs/CoownLoop.v), NOT by per-line parity: their whole job is dec-ing
+        // refs they do not own on the line (the owner is the caller). Skip them here
+        // exactly as the corpus-wall checker does.
+        if f.name.starts_with("__drop_") {
+            continue;
+        }
         let cert = crate::certificate::ownership_certificate(f);
         for line in cert.lines() {
             let mut rc: i64 = 0;
@@ -378,6 +388,14 @@ fn spread_heap_field_record_materializes_soundly() {
     let prog = lower_source(src);
     // The cert stays balanced (the spread copy's `Dup` is matched by the masked drop's free).
     for f in &prog.functions {
+        // The GENERATED recursive drops (`__drop_R`, `__drop_list_R`) are the trusted
+        // free routines — the real pipeline verifies them by the coown whitelist
+        // (proofs/CoownLoop.v), NOT by per-line parity: their whole job is dec-ing
+        // refs they do not own on the line (the owner is the caller). Skip them here
+        // exactly as the corpus-wall checker does.
+        if f.name.starts_with("__drop_") {
+            continue;
+        }
         let cert = crate::certificate::ownership_certificate(f);
         for line in cert.lines() {
             let mut rc: i64 = 0;
