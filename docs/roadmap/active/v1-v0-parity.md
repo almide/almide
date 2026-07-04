@@ -21,11 +21,43 @@ v1 が v0 相当とは、次を**同時に**満たす状態を指す（すべて
    全 org リポジトリで native + wasm 両方 pass。
 6. **native ターゲット復旧**: `almide run`（v0-native）が matrix 系を含め全 spec で通る。
 
-> 現在地（2026-07-04）: spec in-profile **4322/4556（95%）**、実 walls **520**、
-> nn walls **0**（unlinked render-reject 12）、parity baseline 180、PCC ACCEPT、
-> 3-way green（ledger 134）。miscompile は既知ゼロ（honest wall のみ）。
+> 現在地（2026-07-04 セッション後）: spec in-profile **4374/4556（96%）**、実 walls
+> **469**、nn walls **0**、parity baseline 180、PCC ACCEPT（3プロパティ）、3-way green。
+> miscompile は既知ゼロ（honest wall のみ）。
+> **セッション成果**: Phase A 完了（+38 in-profile、guard miscompile を wall→正しく lower に）
+> ＋ Phase B 主要バケット前進（Option[heap] フィールド match / let束縛 custom-variant match
+> / List[record-ctor variant] リテラル — 計 +14 in-profile）。実 walls **520→469**。
+> **残り最大レバーは Phase C（method/computed dispatch）**: `.decode()`/`.encode()` の
+> derived Codec メソッドと first-class クロージャで、heap-result match tail 74・
+> method/computed 79 sites の大半を占める。roadmap が「大」とする architectural 領域。
 
-## Phase A — 制御フローの完成（言語機能の唯一の欠落）
+## ✅ Phase A 完了（2026-07-04）
+
+`desugar_guard`（mod_p6）: `guard cond else E; rest` を bottom-up 再帰で
+`if cond then { rest } else E` に構造化。**関数早期 return**（`else err(…)` は tail の
+heap/scalar-result-if へ）と**ループ continue**（`else continue` → `else ()` で continue
+ノード除去、スカラーループが受理）を開通。break は当面 wall（真のループ早期脱出が必要）。
+call-count-invariant なので `mir == ir` 維持、count 側（classify_corpus）にも desugar 適用。
+guard-else バケット **39→0**、in-profile **4322→4360**。旧「wall」pin は「desugar 発火」
+検証に更新、end-to-end pin 追加。
+
+## Phase B 進行中 — heap-result の位置網羅
+
+- ✅ **Option[heap] / Result[heap] フィールド subject の match**
+  （`match u.email { some(e) => "…${e}…", none => u.name }`）: borrowed フィールドの
+  variant handle を tracking（materialized_options/results + heap_elem_lists）し、heap-payload
+  borrow bind を実行。
+- ✅ **let束縛 custom-variant heap-result match**（`let nm = match s.shape { Circle(_) =>
+  "circle", … }; "${nm}…"`）: `desugar_match_to_if` が literal 専用で declines していたのを、
+  `wrap_match_arms`（各 arm に継続を押し込み Match を保持）で開通。bucket **17→2**。
+- ✅ **List[record-ctor variant] リテラル**（`[Click { x, y }, KeyPress { key }, Close]`）:
+  list-literal builder の要素 gate に `IrExprKind::Record { name: Some(ctor) }` を追加、
+  `try_lower_variant_ctor` で材料化。bucket **29→24**。
+- 残 sub-case: heap-result match tail（74、大半は `.decode()` メソッド = Phase C）、
+  default-field variant ctor の束縛（Group の `items = []` 省略）、compound interp
+  （Map/heterogeneous tuple の `${…}` — Phase D self-host）。
+
+## Phase A（設計メモ・原文保持）— 制御フローの完成（言語機能の唯一の欠落）
 
 **A1. early-return / guard-else の modeling**（39 sites）。
 `guard cond else E; rest` を `if cond then { rest } else { E }` に構造化（block 末尾の
