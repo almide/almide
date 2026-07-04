@@ -49,3 +49,12 @@ Low-coverage ledger (the next test-writing targets, output-affecting first):
 - lower/control_p5.rs 43% — the defunc HOF engine (newest, largest untested surface)
 - lower/tail.rs 61%, binds_p4 63%, binds_p2 64% — bind/tail lowering arms
 - lower/calls_p3 65%, mod_p4 68% — routing and call-arg materialization
+
+
+## Re-measurement — 2026-07-04 (after the crush pass)
+
+TOTAL line coverage: **65.89%** on a GROWN denominator (98,573 lines vs 98,363 —
+the pass added the zip-fusion / scalar-tuple-fold / beta-reduce / eager-init
+machinery WITH their pinned unit tests, so the rate held while the surface grew).
+The five graduated probes (tests_part5) cover the newest defunc arms directly.
+Next targets unchanged: control_p5 defunc engine, tail.rs, binds_p2/p4.
