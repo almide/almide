@@ -70,3 +70,22 @@ SpecialCasing.txt の 1:N 対応、例: ß→SS）。`to_lower` は **Final_Sigm
 実装は Unicode バージョンの更新に追随する義務を負う（現行の生成表は
 `scripts/gen-case-tables.py` — 生成元がいずれの実装であっても、適合判定は本節と
 fixture `spec/wasm_cross/string_case_unicode.almd` に対して行う）。
+
+## ALS-T6 整数演算の終了規約（termination convention）
+
+整数の `/`・`%` は**全域**である: ゼロ除数は stderr に `Error: division by zero`、
+符号付き最小値 ÷ −1（各ビット幅の真の MIN）は `Error: integer overflow` を1行出力し
+**exit code 1 で停止**する。ハードウェア trap（wasm unreachable、exit 134 等）や
+無言の wrap は不適合。同じ規約は `math.pow` の負指数（`Error: negative exponent`）、
+`int.rotate_*` の非正幅（`Error: rotate width must be positive`）、リスト添字の
+範囲外（`Error: index out of bounds`）に適用される。
+Fixtures: `spec/wasm_cross/int_div_by_zero*.almd`, `int_mod_*`, `int8_div_overflow.almd`,
+`int_pow_negative_exponent.almd`, `int_rotate_nonpositive_width.almd`, `index_bounds.almd`。
+
+## ALS-T7 トップレベル let の評価時機
+
+モジュールのトップレベル `let` 初期化子は**宣言順に、プログラム開始時（main 実行前）に
+評価される**。abort し得る初期化子（ALS-T6 の演算を含む等）は、その束縛が一度も
+使用されない場合でも起動時に abort する。初期化子は先行するトップレベル束縛を
+参照できる（宣言順の依存）。
+Fixtures: `spec/wasm_cross/top_let_div_eager.almd`, `top_let_div_used.almd`。

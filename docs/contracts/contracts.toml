@@ -57,6 +57,7 @@
 # ── INTEGER DIV/MOD TOTALITY (PR #378) ───────────────────────────────
 [[contract]]
 id        = "C-001"
+spec      = "ALS-T6"
 title     = "Integer division/modulo by zero is total — it aborts, never traps"
 statement = "Integer `/` and `%` by a zero divisor MUST abort with stderr `Error: division by zero` and exit code 1 on BOTH targets — never a native panic (exit 101) nor a wasm `unreachable` trap (exit 134). The `%`-by-zero message is identical to `/` (both `division by zero`). This holds for a runtime-shielded divisor AND a const-foldable literal `10 / 0`, which must still COMPILE: `/` and `%` route through the non-const-evaluable `almide_div!` / `__div_trap`, so rustc never const-evaluates the divide and the abort happens at runtime."
 since     = "0.24.0"
@@ -70,6 +71,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-002"
+spec      = "ALS-T6"
 title     = "Signed MIN / -1 overflow aborts, at the TRUE per-width MIN"
 statement = "Signed integer `MIN / -1` and `MIN % -1` MUST abort with stderr `Error: integer overflow` and exit 1 on BOTH targets, using the true per-width MIN. Int8 `-128 / -1` must abort even though it lowers to i32 in wasm where `i32.div_s(-128, -1) = 128` does not trap; and wasm `i64.rem_s` DEFINES `MIN % -1 = 0` (no trap), so an explicit MIN/-1 guard before the op realigns wasm with native's `checked_div`/`checked_rem` returning None."
 since     = "0.24.0"
@@ -132,6 +134,7 @@ evidence  = [
 # ── EAGER ABORTABLE TOP-LETS (Cluster-H) ─────────────────────────────
 [[contract]]
 id        = "C-007"
+spec      = "ALS-T7"
 title     = "Abortable top-level lets evaluate eagerly at startup"
 statement = "A top-level `let` whose initializer can abort MUST be evaluated EAGERLY at program startup, in declaration order, on both targets — even if the binding is never used and even if it would be used only mid-main. wasm evaluates every top-let in `_start`; native forces abortable lazies at main entry. So an abortable top-let aborts before any of main's stdout is emitted."
 since     = "0.24.0"
@@ -288,6 +291,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-020"
+spec      = "ALS-T5"
 title     = "Unicode case transforms (to_upper/to_lower/capitalize) are full-Unicode"
 statement = "`to_upper` / `to_lower` / `capitalize` produce the SAME bytes as native (Rust `str::to_uppercase` / `str::to_lowercase` / first-char `char::to_uppercase`) for ALL scalars — accents, Greek, Cyrillic, the length-CHANGING maps (ß -> SS), and the context-sensitive Greek sigma (Final_Sigma: word-final ς vs medial σ). The wasm runtime embeds oracle-derived Unicode case tables and resolves Final_Sigma at runtime; the tables are exhaustively probed against the std `char` methods at emit time."
 since     = "0.24.0"
@@ -300,6 +304,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-021"
+spec      = "ALS-T1"
 title     = "Whitespace trim / is_whitespace use the full Unicode White_Space property"
 statement = "`trim` / `trim_start` / `trim_end` / `is_whitespace` and the leading/trailing trim inside `int.parse` / `float.parse` match native (Rust `str::trim*` / `char::is_whitespace`, the 25-codepoint Unicode White_Space property) byte-identically. The old wasm checked only {0x09,0x0A,0x0D,0x20}; `is_whitespace(\"\")` is now correctly true, routed through the oracle-derived `__is_unicode_ws`."
 since     = "0.24.0"
@@ -333,6 +338,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-024"
+spec      = "ALS-T2"
 title     = "float.parse is correctly-rounded round-to-nearest-even (Clinger AlgorithmM)"
 statement = "`float.parse` produces the SAME f64 as native (`s.trim().parse::<f64>()`), i.e. correctly-rounded round-to-nearest-even, with byte-identical Err strings. The wasm runtime uses Clinger AlgorithmM with exact big-integer arithmetic (rt_dec2flt.rs, reusing the Dragon4 bignum); the old f64-accumulator parser (`acc*10+digit`) was not correctly rounded (\"0.3\" -> 0.30000000000000004, subnormals collapsing to 0)."
 since     = "0.24.0"
