@@ -86,10 +86,11 @@ callee (matrix.split_cols_even / rms_norm_rows / concat_cols / from_lists / to_l
 
 ## B. CG-1 spec-keying の全契約展開（F1 完了条件）
 
-機構は完成・稼働済み（`spec = "ALS-xx"` フィールド + check-contracts.sh の解決検証、
-mutation テスト済み）。**進捗（7/4 パス4）: 4章25節・34契約 keyed**
-（text-and-numbers T1-T11 / strings S1-S4 / collections C1-C8 / runtime R1-R4）。
-残り = 127 契約中 **93** の ALS 節執筆（json/regex/wasm-runtime/module 系のクラスタが主）。
+**完了（2026-07-04）**: 機構（`spec` フィールド + gate 検証、mutation 済み）に加え、
+**全 127 契約を 7章59節の ALS へ keyed**: text-and-numbers（T1-T16）/ strings（S1-S6）/
+collections（C1-C10）/ runtime（R1-R6）/ data-formats（D1-D7）/ semantics（M1-M13）/
+implementation（I1-I3）。check-contracts.sh が spec↔contract↔fixture の三層を全量強制。
+今後の新契約は spec キー必須の運用（節が無ければ gate FAIL）。
 **進め方**: 契約の `statement` は既に規範文なので、クラスタ単位で ALS 章へ昇格する
 （例: Cluster-H → ALS-T7 のように、fixture 群を共有する契約束 = 1節）。
 優先順: (1) 数値/文字列系（ALS-T の続き、~20契約）、(2) コレクション semantics、
