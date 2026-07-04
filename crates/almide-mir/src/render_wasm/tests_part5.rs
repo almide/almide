@@ -555,3 +555,111 @@ fn eager_global_init_traps_before_main() {
         "the program lowers; the trap happens at RUNTIME startup"
     );
 }
+
+// ── 2026-07-04 crush-pass pins: the shapes opened while closing the nn walls,
+// each byte-verified against v0 during development.
+
+#[test]
+fn record_int_tuple_result_ctor() {
+    // `Result[(Record, Int), String]` ok/err (the gguf parse_header shape): a FLAT
+    // record's tuple reuses the DropResultStrInt physics; err is a plain String.
+    let src = "type Hdr = { version: Int, count: Int }\n\
+        effect fn parse(x: Int) -> Result[(Hdr, Int), String] =\n\
+        if x != 7 then err(\"bad magic\") else ok((Hdr { version: x, count: x * 2 }, 24))\n\
+        effect fn main() -> Unit = {\n\
+        match parse(7) {\n\
+        ok(pair) => { let (h, off) = pair\n\
+        println(int.to_string(h.version) + \":\" + int.to_string(h.count) + \":\" + int.to_string(off)) }\n\
+        err(e) => println(\"E:\" + e) }\n\
+        match parse(1) { ok(p) => println(\"?\") err(e) => println(\"E:\" + e) } }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("rec_int_result", &render_wasm_program(&prog)) {
+        assert_eq!(out, "7:14:24\nE:bad magic");
+    }
+}
+
+#[test]
+fn while_two_accumulators_flatten_merge() {
+    // The fft combine skeleton: a while loop carrying TWO list accumulators of
+    // all-scalar tuples, merged by `list.flatten([first, second])` — the heap-var
+    // list-literal call argument + the scalar-aggregate concat element.
+    let src = "fn combine(n: Int) -> List[(Float, Float)] = {\n\
+        var k = 0\n\
+        var first: List[(Float, Float)] = []\n\
+        var second: List[(Float, Float)] = []\n\
+        while k < n {\n\
+        let e = (int.to_float(k), 0.5)\n\
+        first = first + [e]\n\
+        second = second + [e]\n\
+        k = k + 1 }\n\
+        list.flatten([first, second]) }\n\
+        effect fn main() -> Unit = {\n\
+        for c in combine(2) {\n\
+        println(float.to_string(c.0) + \",\" + float.to_string(c.1)) } }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("while_two_acc", &render_wasm_program(&prog)) {
+        assert_eq!(out, "0.0,0.5\n1.0,0.5\n0.0,0.5\n1.0,0.5");
+    }
+}
+
+#[test]
+fn let_bound_tuple_option_match_executes() {
+    // `let e = list.get(xs, k) |> option.unwrap_or((0.0, 0.0))` inside a while —
+    // the tuple-unwrap_or desugar + the component-merge execution (ONE owned block,
+    // no per-arm alloc; the i32 handle widens through Prim::Handle).
+    let src = "fn pick_loop(xs: List[(Float, Float)], n: Int) -> Float = {\n\
+        var k = 0\n\
+        var total = 0.0\n\
+        while k < n {\n\
+        let e = list.get(xs, k) |> option.unwrap_or((0.0, 0.0))\n\
+        total = total + e.0 + e.1\n\
+        k = k + 1 }\n\
+        total }\n\
+        effect fn main() -> Unit =\n\
+        println(float.to_string(pick_loop([(1.0, 0.5), (2.0, 0.25)], 3)))\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("tuple_opt_match", &render_wasm_program(&prog)) {
+        assert_eq!(out, "3.75");
+    }
+}
+
+#[test]
+fn scalar_tuple_fold_with_preamble_statements() {
+    // The best_pair_index skeleton: a scalar-tuple fold whose body carries
+    // per-iteration preamble lets (a String `?? \"\"` copy among them) before the
+    // component-projected if-tree.
+    let src = "fn best(tokens: List[String], ranks: List[Int]) -> (Int, Int) = {\n\
+        let last = list.len(tokens) - 1\n\
+        list.fold(list.range(0, last), (0 - 1, 99999999), (acc, i) => {\n\
+        let (best_i, best_rank) = acc\n\
+        let a = list.get(tokens, i) |> option.unwrap_or(\"\")\n\
+        let rank = if string.len(a) > 1 then list.get(ranks, i) |> option.unwrap_or(99999999) else 99999999\n\
+        if rank < best_rank then (i, rank) else (best_i, best_rank) }) }\n\
+        effect fn main() -> Unit = {\n\
+        let r = best([\"ab\", \"c\", \"def\"], [5, 9, 2])\n\
+        println(int.to_string(r.0) + \":\" + int.to_string(r.1)) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("fold_preamble", &render_wasm_program(&prog)) {
+        assert_eq!(out, "0:5");
+    }
+}
+
+#[test]
+fn range_argument_materializes_via_list_range() {
+    // `for _ in 0..count` over an append accumulator whose desugar passes the
+    // Range as a CALL argument — materialized via the self-hosted list.range.
+    let src = "fn collect(n: Int) -> List[(String, Int)] = {\n\
+        var acc: List[(String, Int)] = []\n\
+        var p = 10\n\
+        for i in 0..n {\n\
+        acc = acc + [(\"k\" + int.to_string(i), p)]\n\
+        p = p + 2 }\n\
+        acc }\n\
+        effect fn main() -> Unit = {\n\
+        for pair in collect(3) {\n\
+        println(pair.0 + \"=\" + int.to_string(pair.1)) } }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("range_arg", &render_wasm_program(&prog)) {
+        assert_eq!(out, "k0=10\nk1=12\nk2=14");
+    }
+}

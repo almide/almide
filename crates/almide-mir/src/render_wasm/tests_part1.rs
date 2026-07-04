@@ -294,6 +294,10 @@
     /// feeder (the same cut point as `examples/render_program.rs`) — for end-to-end
     /// tests over REAL lowering rather than hand-built MIR. Dev-only deps.
     fn lower_source(src: &str) -> MirProgram {
+        // Match the PRODUCTION condition (render_program sets strict values): the
+        // deferred-Const fallback is retired on real render paths, so the tests pin
+        // the same lowering the shipped pipeline runs.
+        crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
         use almide_frontend::check::Checker;
         use almide_frontend::lower::lower_program;
         use almide_frontend::{canonicalize, ir_link};
