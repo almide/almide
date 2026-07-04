@@ -320,6 +320,29 @@ impl LowerCtx {
         use almide_ir::BinOp;
         match &expr.kind {
             IrExprKind::Var { id } => self.value_or_global(*id).ok(),
+            // A SCALAR BLOCK body (`{ let freq = …; let h = …; h * enorm }` — the mel
+            // inner map): lower the binds then the scalar tail. Any stmt outside the
+            // subset rolls this back (partial ops truncated) and returns None — the
+            // caller keeps its own fallback/wall.
+            IrExprKind::Block { stmts, expr: Some(tail) } if !stmts.is_empty() => {
+                let mark = self.ops.len();
+                let lhh = self.live_heap_handles.len();
+                for st in stmts {
+                    if self.lower_stmt(st).is_err() {
+                        self.ops.truncate(mark);
+                        self.live_heap_handles.truncate(lhh);
+                        return None;
+                    }
+                }
+                match self.lower_scalar_value(tail) {
+                    Some(v) => Some(v),
+                    None => {
+                        self.ops.truncate(mark);
+                        self.live_heap_handles.truncate(lhh);
+                        None
+                    }
+                }
+            }
             // A SCALAR record field / tuple element (`r.x`, `t.0`) — load from the
             // block's layout slot. Defers (→ None) for a non-materialized container.
             IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
