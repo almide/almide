@@ -157,6 +157,9 @@ impl LowerCtx {
         if let Some(rewritten) = crate::lower::desugar_beta_reduce(body) {
             return self.lower_body_into(&rewritten);
         }
+        if let Some(rewritten) = crate::lower::desugar_tuple_unwrap_or(body) {
+            return self.lower_body_into(&rewritten);
+        }
         if let Some(rewritten) = desugar_effect_unwrap(body) {
             return self.lower_body_into(&rewritten);
         }

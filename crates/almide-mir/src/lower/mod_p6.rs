@@ -2753,3 +2753,71 @@ pub fn desugar_beta_reduce(body: &IrExpr) -> Option<IrExpr> {
     let out = rewrite(body.clone(), &mut changed);
     changed.then_some(out)
 }
+
+/// Desugar `opt ?? fallback` over an `Option[<all-scalar tuple>]` (`list.get(xs, k) ??
+/// (0.0, 0.0)` — the fft element pick) into `match opt { some($p) => $p, none => fallback }`,
+/// which the proven variant-value-match machinery lowers (Option-tuple payload borrow @12,
+/// subject dropped after the arms). Without this the UnwrapOr path treats the tuple payload
+/// as a SCALAR (an i32 handle in an i64 slot — invalid wasm the engine rejects). Bottom-up;
+/// `None` = no change.
+pub fn desugar_tuple_unwrap_or(body: &IrExpr) -> Option<IrExpr> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    fn is_scalar_tuple(ty: &Ty) -> bool {
+        matches!(ty, Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|t| !is_heap_ty(t)))
+    }
+    fn rewrite(e: IrExpr, changed: &mut bool, next: &mut u32) -> IrExpr {
+        let e = e.map_children(&mut |c| rewrite(c, changed, next));
+        // Both surface forms: the `??` operator (UnwrapOr) AND the explicit
+        // `option.unwrap_or(opt, fb)` module call (the pipe form).
+        let parts: Option<(&IrExpr, &IrExpr)> = match &e.kind {
+            IrExprKind::UnwrapOr { expr, fallback } => Some((expr, fallback)),
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                if module.as_str() == "option" && func.as_str() == "unwrap_or"
+                    && args.len() == 2 =>
+            {
+                Some((&args[0], &args[1]))
+            }
+            _ => None,
+        };
+        if let Some((expr, fallback)) = parts {
+            let is_opt_tuple = matches!(&expr.ty,
+                Ty::Applied(TypeConstructorId::Option, a)
+                    if a.len() == 1 && is_scalar_tuple(&a[0]));
+            if is_opt_tuple {
+                *changed = true;
+                let p = almide_ir::VarId(*next);
+                *next += 1;
+                let arms = vec![
+                    almide_ir::IrMatchArm {
+                        pattern: almide_ir::IrPattern::Some {
+                            inner: Box::new(almide_ir::IrPattern::Bind { var: p, ty: e.ty.clone() }),
+                        },
+                        guard: None,
+                        body: IrExpr {
+                            kind: IrExprKind::Var { id: p },
+                            ty: e.ty.clone(),
+                            span: e.span.clone(),
+                            def_id: e.def_id,
+                        },
+                    },
+                    almide_ir::IrMatchArm {
+                        pattern: almide_ir::IrPattern::None,
+                        guard: None,
+                        body: fallback.clone(),
+                    },
+                ];
+                return IrExpr {
+                    kind: IrExprKind::Match { subject: Box::new(expr.clone()), arms },
+                    ty: e.ty.clone(),
+                    span: e.span.clone(),
+                    def_id: e.def_id,
+                };
+            }
+        }
+        e
+    }
+    let mut changed = false;
+    let mut next = crate::lower::max_var_id(body) + 1;
+    let out = rewrite(body.clone(), &mut changed, &mut next);
+    changed.then_some(out)
+}

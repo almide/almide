@@ -528,6 +528,15 @@ impl LowerCtx {
                             out.push(self.materialized_call_arg(dst, repr, &a.ty));
                             continue;
                         }
+                        // `f([a, b])` where a/b are TRACKED heap Vars with FLAT content
+                        // (`list.flatten([first, second])` — the fft two-accumulator merge;
+                        // `matrix.from_rows([r0, r1])`): materialize a fresh list CO-OWNING
+                        // each element (Dup +1), dropped flat at scope end (per-slot rc_dec
+                        // + block — a flat-content element's rc_dec IS its full free).
+                        if let Some(dst) = self.try_lower_heap_var_list_literal(a) {
+                            out.push(self.materialized_call_arg(dst, repr, &a.ty));
+                            continue;
+                        }
                     }
                     let init = alloc_init(a);
                     // `alloc_init` faithfully materializes a string literal and a scalar-
@@ -975,5 +984,73 @@ impl LowerCtx {
             out.push(arg);
         }
         Ok(out)
+    }
+}
+
+impl LowerCtx {
+    /// Materialize a list LITERAL whose elements are tracked heap Vars with FLAT
+    /// content — String, Bytes, List[scalar], or List[all-scalar aggregate] — as a
+    /// fresh DynListStr co-owning each element (`Op::Dup`). The caller registers the
+    /// scope-end drop via `materialized_call_arg` (flat `DropListStr`: per-slot rc_dec
+    /// + block, which fully frees a flat-content element). `None` for any non-Var
+    /// element, an untracked Var, or an element whose content nests further heap
+    /// (a List[String] element would LEAK its cells under the flat drop — walled).
+    pub(crate) fn try_lower_heap_var_list_literal(&mut self, a: &IrExpr) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let IrExprKind::List { elements } = &a.kind else { return None };
+        if elements.is_empty() {
+            return None;
+        }
+        let elem_ty = match &a.ty {
+            Ty::Applied(TypeConstructorId::List, ts) if ts.len() == 1 => &ts[0],
+            _ => return None,
+        };
+        let flat_content = matches!(elem_ty, Ty::String | Ty::Bytes)
+            || matches!(elem_ty,
+                Ty::Applied(TypeConstructorId::Bytes, _))
+            || matches!(elem_ty,
+                Ty::Applied(TypeConstructorId::List, inner)
+                    if inner.len() == 1
+                        && (!is_heap_ty(&inner[0])
+                            || self.aggregate_field_tys(&inner[0])
+                                .and_then(|(_, tys)| crate::lower::layout::scalar_slots(&tys))
+                                .is_some()));
+        if !flat_content {
+            return None;
+        }
+        let mut handles: Vec<ValueId> = Vec::with_capacity(elements.len());
+        for e in elements {
+            let IrExprKind::Var { id } = &e.kind else { return None };
+            let src = self.value_for(*id).ok()?;
+            handles.push(src);
+        }
+        let n = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: n, value: elements.len() as i64 });
+        let list = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst: list,
+            repr: Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: Init::DynListStr { len: n },
+        });
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });
+        for (i, src) in handles.into_iter().enumerate() {
+            let owned = self.fresh_value();
+            self.ops.push(Op::Dup { dst: owned, src });
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: 12 + (i as i64) * 8 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off });
+            let oh = self.fresh_value();
+            self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(oh), args: vec![owned] });
+            self.ops.push(Op::Prim {
+                kind: crate::PrimKind::Store { width: 8 },
+                dst: None,
+                args: vec![addr, oh],
+            });
+            self.ops.push(Op::Consume { v: owned });
+        }
+        self.materialized_lists.insert(list);
+        Some(list)
     }
 }
