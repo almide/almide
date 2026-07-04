@@ -511,7 +511,9 @@
             println(int.to_string(list.len(kept)))\n  \
             println(list.join(kept, \"-\")) }\n";
         let prog = lower_source(src);
-        assert!(prog.functions.iter().any(|f| f.name == "list.filter_str"));
+        // The BLOCK-bodied lambda now DEFUNCTIONALIZES (inlined as a specialized loop —
+        // the scalar-block body arm); the self-host link is only needed when the defunc
+        // declines. Either way the OUTPUT is the claim.
         if let Some(out) = build_and_run("self_hosted_list_filter_str", &render_wasm_program(&prog)) {
             assert_eq!(out, "2\nbb-dd");
         }

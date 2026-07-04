@@ -761,7 +761,7 @@
             let total = list.fold(xs, 0, (acc, x) => { let l = string.len(x)\n acc + l })\n  \
             println(int.to_string(total)) }\n";
         let prog = lower_source(src);
-        assert!(prog.functions.iter().any(|f| f.name == "list.fold_str"));
+        // The BLOCK-bodied lambda now DEFUNCTIONALIZES (see self_hosted_list_filter_str).
         if let Some(out) = build_and_run("self_hosted_list_string_fold", &render_wasm_program(&prog)) {
             assert_eq!(out, "6");
         }
