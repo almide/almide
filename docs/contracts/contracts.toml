@@ -84,6 +84,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-003"
+spec      = "ALS-T12"
 title     = "Non-aborting integer div/mod stay byte-identical"
 statement = "Ordinary (non-aborting) integer `/` and `%` — including negative operands and the now-total guarded codepath — MUST produce byte-identical results on both targets. The checked-div rewrite must not perturb the happy path; shielded divisors exercise the same guarded path landing on the non-aborting branch."
 since     = "0.24.0"
@@ -343,6 +344,7 @@ evidence  = [
 # ── FLOAT FORMATTING / PARSING (Dragon4 / dec2flt) ──────────────────
 [[contract]]
 id        = "C-023"
+spec      = "ALS-T13"
 title     = "float.to_string is shortest round-tripping decimal (Dragon4)"
 statement = "`float.to_string` produces the SAME bytes as native Rust f64 Display — the shortest round-tripping decimal in fixed notation, with the `.0` integer suffix — byte-identical native == wasm. The wasm runtime implements Dragon4 with exact big-integer arithmetic (rt_dragon.rs); there is no fixed-precision drift (native 0.30000000000000004 vs the old wasm 0.3) and no `i64_trunc` trap for |x| >= 2^63."
 since     = "0.24.0"
@@ -440,6 +442,7 @@ evidence  = [
 # ── JSON PATH OPS ────────────────────────────────────────────────────
 [[contract]]
 id        = "C-031"
+spec      = "ALS-D1"
 title     = "json get/set/remove_path edge cases match the infallible native oracle"
 statement = "`json.get_path` / `set_path` / `remove_path` reproduce native runtime/rs/src/json.rs byte-identically across all edge cases: negative-Index normalization (`len + i`), Index over an object/scalar/null root as an infallible no-op, OOB Index no-op, and Field-over-non-object autovivification (replace with a fresh single-key object, seed descents with `Object(vec![])`). The wasm rt_value.rs path walkers had 8 divergences this locks down."
 since     = "0.24.0"
@@ -452,6 +455,7 @@ evidence  = [
 # ── REGEX ENGINE ─────────────────────────────────────────────────────
 [[contract]]
 id        = "C-032"
+spec      = "ALS-D4"
 title     = "Regex engine is byte-identical to the native engine over a fuzzed grammar"
 statement = "The regex engine produces byte-identical results native == wasm for alternation, escape atoms, class escapes, captures (incl. optional-miss), multibyte `.`/class on CJK, anchors, quantifiers, replace, split edges, full_match, find_all, empty alternation arms, and end-of-string empty-match replace. Native runtime/rs/src/regex.rs is the oracle; a deterministic differential fuzz over the regex grammar certifies the input space beyond the headline corpus."
 since     = "0.24.0"
@@ -525,6 +529,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-037"
+spec      = "ALS-D5"
 title     = "bytes.read_f16_le decodes IEEE-754 half floats identically"
 statement = "`bytes.read_f16_le` (IEEE-754 half -> f64) is byte-identical native == wasm, including the exp-all-ones path rendering ±inf / NaN (zero and nonzero mantissa) rather than the finite ±f32::MAX — over ±inf, NaN, ±0, the smallest subnormal, a few normals, and the largest finite half. Native runtime/rs/src/bytes.rs::f16_bits_to_f64 is the oracle for the wasm expander."
 since     = "0.24.0"
@@ -663,6 +668,7 @@ evidence  = [
 # ── NUMERIC TOTALITY: pow / rotate (Cluster-2) ───────────────────────
 [[contract]]
 id        = "C-047"
+spec      = "ALS-T6"
 title     = "math.pow negative exponent and rotate non-positive width are total — they abort, never trap/wrap"
 statement = "`math.pow(base, exp)` with a NEGATIVE exponent aborts with stderr `Error: negative exponent` + exit 1 on BOTH targets (never the old native `exp as u32` u32-wrap garbage nor the wasm `return 1`); `int.rotate_left`/`rotate_right` with a non-positive `bits` width abort with `Error: rotate width must be positive` + exit 1 (never a native rem-by-zero panic exit 101 nor a wasm `i64.rem_s` trap exit 134). Non-negative pow stays byte-identical including overflow, which wraps under exponentiation-by-squaring (`2^64=0`, `0^0=1`, exponents `>= 2^32` define the full i64 count and never hang)."
 since     = "0.24.0"
@@ -676,6 +682,7 @@ evidence  = [
 # ── NUMERIC WRAP/ROTATE WIDTH MASK (Cluster-2) ───────────────────────
 [[contract]]
 id        = "C-048"
+spec      = "ALS-T14"
 title     = "int.wrap_* / int.rotate_* saturate the mask to u64::MAX for bits >= 64"
 statement = "`int.wrap_add`/`wrap_mul`/`rotate_left`/`rotate_right` model an N-bit register: for `bits >= 64` the low-bit mask is `u64::MAX`, matching native `if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 }`. The wasm emit computed `(1 << bits) - 1` directly, but `i64.shl` masks the shift amount mod 64 so `1 << 64` wrapped to 1 and the mask collapsed to 0 — every `bits >= 64` result silently diverged. Now byte-identical native == wasm via a `bits >= 64 ? -1 : (1<<bits)-1` select."
 since     = "0.24.0"
@@ -687,6 +694,7 @@ evidence  = [
 # ── FLOAT IEEE SIGN / NaN-IGNORING MIN-MAX (Cluster-2) ───────────────
 [[contract]]
 id        = "C-049"
+spec      = "ALS-T15"
 title     = "float.sign is f64::signum; float/math min/max ignore NaN"
 statement = "`float.sign` == Rust `f64::signum` — `copysign(1.0, x)` for every non-NaN x (so `sign(0.0)=1`, `sign(-0.0)=-1`, `sign(±inf)=±1`) and NaN for NaN — NOT the old three-way sign (0 for ±0.0/NaN). `float.max`/`float.min`/`math.fmax`/`math.fmin` IGNORE a NaN operand and return the other, and on ±0 ties ALL FOUR return the FIRST operand (`max(0,-0)=0`, `max(-0,0)=-0`). Both targets implement the same explicit NaN/tie decision tree — never the NaN-propagating raw `f64.max`/`f64.min` wasm instructions, and never the llvm.minnum/maxnum intrinsics, whose unspecified ±0-tie order let x86 `maxsd` return the SECOND operand when inlined. All byte-identical native == wasm == interp."
 since     = "0.24.0"
@@ -709,6 +717,7 @@ evidence  = [
 # ── TRANSCENDENTAL: log_gamma vendored-libm bit-exactness (Cluster-2) ─
 [[contract]]
 id        = "C-051"
+spec      = "ALS-T10"
 title     = "math.log_gamma is bit-identical (both targets use the vendored musl-libm log)"
 statement = "`math.log_gamma` is bit-identical native == wasm: the same Lanczos polynomial, `t = x + 7.5`, and pinned `0.5·ln(2π)` constant, with BOTH `ln` evaluations routed through the vendored musl-libm `log` rather than the platform `f64::ln`. Native previously called the platform `ln`, which drifts ~1 ULP per OS from the wasm vendored port (the StrictMath/fdlibm cross-target-determinism decision shared with sin/cos/exp/log)."
 since     = "0.24.0"
@@ -720,6 +729,7 @@ evidence  = [
 # ── EMPTY-COLLECTION FOLD: ANNOTATE THE COLLECTION (folds into C-058) ─
 [[contract]]
 id        = "C-052"
+spec      = "ALS-C10"
 title     = "A fold over an empty collection requires the collection to carry an element type (no codegen defaulting)"
 statement = "A `list`/`map`/`set` `.fold` over an EMPTY collection whose element/key/value types the closure never uses still requires the EMPTY collection to carry an element type. This is the SAME undecidable-empty-collection class as C-058: an unannotated empty `[]` / `map.new()` / `set.new()` here is a frontend compile error (E018) on BOTH targets, not a slot codegen defaults — the former `Int` defaulting (`default_unconstrained_fold_params`) was a layer violation and has been removed. Once the empty collection is ANNOTATED, its element type pins the closure params the normal way and the fold builds + prints byte-identically native == wasm even though the closure is never invoked. Non-empty folds that DO use the params still infer normally."
 since     = "0.24.0"
@@ -731,6 +741,7 @@ evidence  = [
 # ── LIST TOTAL-ORDER OPS (min / max / sort / sort_by / unique_by) ─────
 [[contract]]
 id        = "C-053"
+spec      = "ALS-C9"
 title     = "list.min/max/sort/sort_by/unique_by are type-directed and total, native == wasm"
 statement = "`list.min`/`list.max` (extremum), `list.sort`/`list.sort_by` (ascending order), and `list.unique_by` (first-of-each-key dedup) are byte-identical native == wasm for EVERY totally-ordered element type — Int, Bool (false<true), String, Tuple (lexicographic), nested List (lexicographic with shorter-first tiebreak), Option (none<some), and variants (tag order) — and for any Eq key type the `unique_by`/`sort_by` callback returns. The wasm side routes all ordering through one type-directed total-order emitter (`emit_ord_cmp3`, the ordering twin of `emit_eq_typed`) instead of a hard-coded i64 element load; an unresolved element type is an emit-time ICE, never a silent wrong comparison or unbounded display loop."
 since     = "0.24.0"
@@ -742,6 +753,7 @@ evidence  = [
 # ── LIST/STRING Int-COUNT & INDEX TRUNCATION (Cluster-B) ─────────────
 [[contract]]
 id        = "C-054"
+spec      = "ALS-T16"
 title     = "List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB"
 statement = "Every list/string op that takes an `Int` (i64) COUNT or INDEX clamps it on the FULL i64 value BEFORE the wasm `i32_wrap_i64` narrowing, so a value at/over the 2^32 boundary can never wrap to a small in-range value, and a NEGATIVE value takes native's unsigned `n as usize` path — never the wrong lo-clamp-to-0 result (the C-034 `with_capacity` rule generalized via named `emit_clamp_count_to_i32` (UNSIGNED `min_u`) / `emit_clamp_count_signed_i32` (SIGNED `max(0).min`) / `emit_clamp_index_to_len_i32` / `emit_checked_index_i32` helpers). For UNSIGNED COUNTS — `list.take`/`drop`/`take_end`/`drop_end`/`chunk`/`windows`, `list.slice` start/end, `string.take`/`drop`/`take_end`/`drop_end`, `string.repeat`, `string.pad_start`/`pad_end` widths — the count is `min(n as usize, hi)`: a NEGATIVE count is enormous as `usize` and saturates to `hi`, so `take(-1)` returns the WHOLE collection, `drop(-1)` returns empty, `chunk(-1)` groups into ONE chunk (was a div-by-0 TRAP), `windows(-1)` is empty (was a wrong non-empty length), and `string.take(s, 2^32)` returns the whole string (was empty); a count `>= 2^32` likewise saturates instead of wrapping to a small in-range count. The size-bounded `repeat`/`chunk`/`windows`/`pad` use an `i32::MAX` sentinel so a genuinely huge count BOTH-FAILS (wasm `memory.grow` / native abort) rather than wasm silently emptying/short-cutting. The ONE exception is `string.slice` start/end, whose native oracle clamps SIGNED (`(x.max(0) as usize).min(len)`): a negative `string.slice` start maps to 0, handled by the separate SIGNED helper. For INDICES — `list.get`/`get_or`/`set`/`insert`/`remove_at`/`swap`/`update` — the index is UNSIGNED (`i as usize`) so a negative or `>= 2^32` index takes native's no-op / default / append path. Previously `list.drop_end(xs, 2^32-1)` returned a corrupt length exposing uninitialized heap, `list.take_end(xs, 2^32-1)` TRAPPED (exit 134), `list.chunk(xs, -1)` TRAPPED on wasm while native made one chunk, and `string.take(s, 2^32)` returned empty on wasm while native returned the whole string — all now byte-identical native == wasm at the 2^31 / 2^32 boundary and for negative counts on small inputs. The fixtures exercise COUNT boundaries (not SIZE boundaries), so no allocation exceeds a few KiB and the result is machine-independent."
 since     = "0.24.0"
@@ -755,6 +767,7 @@ evidence  = [
 # ── FLOAT LIST ORDERING = IEEE-754 totalOrder (Cluster-B) ────────────
 [[contract]]
 id        = "C-055"
+spec      = "ALS-C9"
 title     = "list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets"
 statement = "`list.sort`/`list.min`/`list.max` over `List[Float]` and `list.sort_by` with a Float key ORDER by IEEE-754 totalOrder (the ordering twin of `f64::total_cmp`): a +NaN takes the greatest totalOrder position (after +inf), a -NaN the least (before -inf), and `-0.0 < +0.0`. This makes Float ordering legal and byte-identical native == wasm, fixing the divergence where native REJECTED it at compile (`f64: Ord` unsatisfied) while wasm either accepted it with NaN-unaware `f64.le` or emitted an INVALID module (the `sort_by` Float-key path stored an f64 into an i64 local → `local.set` validator error). Native routes `List[Float]` ordering to `total_cmp`-based `_float` runtime variants (IntrinsicLowering swaps the symbol); wasm mirrors with the sign-magnitude bit trick inside `emit_ord_cmp3`'s Float arm (`key = bits ^ ((bits >>_s 63) >>_u 1)`, a monotone i64 key) and pre-transforms `sort_by` Float keys onto the i64 storage path; interp mirrors with `f64::total_cmp`. NaN-SIGN CAVEAT: the totalOrder POSITION of a NaN depends on its sign bit, which for a COMPUTED NaN (`0.0/0.0`) is implementation-defined — native/wasm const-fold it to +NaN (top) while the interp's runtime `divsd` yields -NaN (bottom), so the 3-way fixture stays sign-deterministic (uses ±inf, not a divided NaN); the +NaN-at-top positioning is verified native == wasm directly. ASYMMETRY (named deliberately): this list-extremum/ordering totalOrder is a DIFFERENT contract from the SCALAR `float.min`/`float.max`/`math.fmin`/`math.fmax`, which keep their C-049 NaN-IGNORING semantics — a resolved-but-unsupported sort element type is still a clean emit-time ICE, never an invalid module."
 since     = "0.24.0"
@@ -767,6 +780,7 @@ evidence  = [
 # ── list.product OVERFLOW WRAPS (Cluster-B) ──────────────────────────
 [[contract]]
 id        = "C-056"
+spec      = "ALS-T16"
 title     = "list.product wraps on i64 overflow, consistent with list.sum and plain `*`"
 statement = "`list.product` follows the language's integer-overflow law — two's-complement WRAPPING at runtime, identical to `list.sum`, to plain `a * b` (C-001/C-047 family), and to the wasm `i64.mul` accumulator. Native folds with `wrapping_mul` (identity 1) so the result is the SAME on any build profile; the old `Iterator::product` PANICKED under debug `-C overflow-checks` (exit 101) while wrapping in release and on wasm — a profile-dependent split now removed. `[i64::MAX, 2]` yields `-2` byte-identically native == wasm; the empty product is `1`. The interp gained a matching `list.product` arm so the 3-way oracle covers it instead of skipping."
 since     = "0.24.0"
@@ -789,6 +803,7 @@ evidence  = [
 # ── UNDECIDABLE EMPTY COLLECTION = COMPILE ERROR (Rust/Swift rule, never defaulted) ─
 [[contract]]
 id        = "C-058"
+spec      = "ALS-C10"
 title     = "An empty collection with an uninferable element type is a compile error on both targets, never silently defaulted"
 statement = "An empty collection whose element type CANNOT be inferred from any surrounding context — an empty `[]` / `[:]` literal, `set.new()`, `map.new()`, or `list.with_capacity(n)` consumed only by element-agnostic ops, and the iterable of a `for _ in []` — is a COMPILE ERROR on BOTH targets (frontend `E018`), resolved by a type annotation. Almide follows Rust/Swift: an undecidable empty collection demands an explicit element type and is NEVER silently defaulted to an arbitrary one (observability is irrelevant, exactly as in Rust/Swift — `for _ in []` is an error even though the element is never read). This replaces the former defaulting behavior (old C-055, which set the element to `Int` in codegen so both targets built): defaulting an undecidable element in codegen was a layer violation and observably mis-typed record fields. Because the check runs in the type checker before code generation, BOTH targets reject identically (previously native rustc failed with E0282/E0283 on the emitted `Vec::<_>::new()` while WASM, carrying no element type, ran — a build-success asymmetry). The ANNOTATED forms of every producer build and print byte-identically native == wasm; a bare list literal also accepts the inline `[]: List[T]` call-arg annotation. A rigid generic parameter (`fn f[T]() -> List[T] = []`) is a concrete element type and is accepted. The fold over an empty collection (former C-052 defaulting) folds into this rule: the empty collection must be annotated."
 since     = "0.24.0"
@@ -813,6 +828,7 @@ evidence  = [
 # ── A Value REPRS AS ITS JSON TEXT, BYTE-IDENTICAL NATIVE == WASM ─────
 [[contract]]
 id        = "C-060"
+spec      = "ALS-D2"
 title     = "A Value reprs as its JSON text byte-identically on native and WASM, bare and as a Repr-record field"
 statement = "A `Value` (the dynamic JSON-like type) renders to its JSON text — `null`, `true`/`false`, the integer's decimal, the float's Display form (`format!(\"{}\", f)`, which drops an integer-valued float's trailing `.0`), the JSON-escaped string, `[…]`, `{…}`, recursively — byte-identically on native and WASM, in EVERY repr path: a bare `\"${v}\"` interpolation, AND a `Value` field inside a `Repr`-deriving record/variant reached through both the `.repr()` (AlmideRepr) path and the `{}` (Display / interpolation) path. Before this, a `Value` field in a `Repr` type failed to COMPILE natively — `Value` impl'd neither `AlmideRepr` nor `Display`, so the derived `self.<field>.almide_repr()` and the `<Type>_repr` `{}` both errored (E0599 / E0277) — while WASM emitted the placeholder `Value {  }` (it treated `Value` as an empty record). Both targets now route through the SAME serializer (native `almide_rt_value_stringify`, WASM `__value_stringify`). The WASM float branch was additionally corrected to the native Display form via `__float_display` — it previously used the round-trip `float_to_string`, so an integer-valued float diverged (`3` native vs `3.0` WASM) — which also makes `value.stringify` / `json.stringify` of a float agree native == wasm."
 since     = "0.26.7"
@@ -845,6 +861,7 @@ evidence  = [
 # ── PARSE A glTF/JSON DOCUMENT + WALK ITS ARRAYS, BYTE-IDENTICAL ─
 [[contract]]
 id        = "C-063"
+spec      = "ALS-D3"
 title     = "Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets"
 statement = "`json.parse` of a glTF-style document (heterogeneous nested objects — accessors with float `min`/`max` arrays and `type` strings, materials with nested extensions, meshes with primitives), followed by `json.get_array` + `list.get_or` element access across `meshes`, every `accessor`'s nested `min`/`max` arrays, and `bufferViews`, produces byte-identical stdout native ⇄ wasm. Regression lock for #470, reported on a real ~10 MB VRM as a wasm-only element-access trap (`memory access out of bounds`) where `list.len` of a `get_array` result was correct but its backing disagreed; the reported flow no longer reproduces on 0.26.18+ (the host-buffer / RawPtr bridge it relied on was reworked in v0.26.15, C-062), and this fixture keeps the parse + array-element walk locked."
 since     = "0.26.19"

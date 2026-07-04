@@ -118,3 +118,36 @@ Contracts: C-026。
 に従い、decode エラーは**位置情報込みで**両ターゲット同文言。大文字小文字の
 扱い・パディング規則・不正長の検出を含む。
 Contracts: C-027, C-030。
+
+## ALS-T12 非 abort 整数除算の一致
+
+abort に至らない `/`・`%` は Rust の `i64` truncating division / remainder と
+byte 一致する（負数の丸め方向・余りの符号を含む: `-7 / 2 == -3`、`-7 % 2 == -1`）。
+Contracts: C-003。
+
+## ALS-T13 浮動小数の文字列化
+
+`float.to_string` は**最短往復十進表現**（shortest round-tripping decimal、
+Dragon4/Ryū 等価）: `parse(to_string(x)) == x` かつ、それを満たす最短の桁数。
+整数値は `.0` を保持（ALS-R2 の Display と区別）。
+Contracts: C-023。
+
+## ALS-T14 wrap / rotate のマスク飽和
+
+`int.wrap_*` / `int.rotate_*` の bits 引数が 64 を超える場合、マスクは
+`u64::MAX` に**飽和**する（モジュロではない）。bits ≤ 0 は ALS-T6 の abort。
+Contracts: C-048。
+
+## ALS-T15 符号と min/max の NaN 規則
+
+`float.sign` は `f64::signum`（NaN → NaN、±0 → ±1）。`float.min/max`・
+`math.min/max` は **NaN を無視**する（片方が NaN なら他方を返す — IEEE-754
+minNum/maxNum 系、Rust `f64::min/max` と一致）。
+Contracts: C-049。
+
+## ALS-T16 長さ・添字の i64 クランプ
+
+List / String の長さ・添字を受け取る API は、i64 値を内部幅へ**先に clamp**
+してから使う（負→0、上限超→len）。ラップや符号化けによる誤アクセスは不適合。
+`list.product` は `list.sum` と同じく i64 wrap（オーバーフローは 2^64 mod）。
+Contracts: C-054, C-056。
