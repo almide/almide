@@ -9,6 +9,15 @@
 > [flight-evidence-gaps](flight-evidence-gaps.md) と memory
 > `project_flight_evidence.md` を参照。
 
+> **進捗 2026-07-04（続行パス2）**: nn **8→7**。A-1 ggml load **完了**（3欠陥: Ty::Bytes
+> admission / err-arm ConcatStr piece / fs.read_bytes_raw self-host + WASI errno→native
+> 文言マップ。probe gl/gm MATCH）。A-2 前進（Range call-arg 材料化 via list.range +
+> caps 台帳整合、(String,Int) concat 要素 — probe pm1 MATCH。実物は list.push mutation
+> + ADT が残り）。A-3 前進（scalar-aggregate concat 要素、heap-var list literal 引数
+> `flatten([first, second])`、tuple unwrap_or→match desugar — 既存の invalid-wasm
+> 型崩れも根治。実物 combine は「while 内の let-bind tuple-match」1形残り）。
+> 全ゲート green 維持（spec 273 / parity 177 / MIR 512/0 / corpus PCC 0）。
+
 ## A. nn 残 8 walls（各個撃破、推定30-90分/件）
 
 ### A-1. ggml_whisper `load` — heap-result match（診断済み、最短）
