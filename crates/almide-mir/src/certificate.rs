@@ -675,6 +675,23 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
         }
     }
 
+    // The set of values EXPLICITLY moved out by an `Op::Consume` — the arm-value move
+    // for the LitStr/Var/concat arms (`lower_heap_result_arm`). Such a value's `m` is
+    // ALREADY on its object's stream, so the `Else/EndIf {val}` val-move rule below must
+    // NOT emit a SECOND `m` for it. The per-object `balance > 0` guard alone cannot catch
+    // this when the value ALIASES a still-live scope local (`else base` — the Var arm
+    // Dups base, so the shared object keeps balance 1 after the Consume, and the val-move
+    // double-`m`'d it → the `iammd` REJECT). Only the val-move-ONLY style (the effect-TCO
+    // declared-Result tail-if, whose arms never Consume) should reach the rule.
+    let consumed_values: std::collections::HashSet<crate::ValueId> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Consume { v } => Some(*v),
+            _ => None,
+        })
+        .collect();
+
     // Heap params are BORROWED (the v1 calling convention): the CALLER owns the
     // reference and releases it, so a param contributes NO `i` event — that `+1`
     // would be SYNTHETIC, unbacked by any runtime `Alloc`/`rc_inc` (the gate-blind
@@ -804,6 +821,11 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) }
                 if s.of.contains_key(v)
                     && s.balance(s.object_of(*v)) > 0
+                    // An EXPLICITLY-Consumed arm value already emitted its move `m` — the
+                    // val-move here would double-count it (the `else base` Var-arm `iammd`
+                    // REJECT: the Dup'd value's Consume + this rule both fired on the shared
+                    // base object). Only the never-Consumed style (effect-TCO tail-if) reaches here.
+                    && !consumed_values.contains(v)
                     // Loop-carried machinery keeps its own `(id)` accounting — a slot or
                     // feeder flowing through a branch inside the loop is NOT a move-out
                     // (heap_result_if_append's accumulator would double-`m`).
