@@ -1410,3 +1410,25 @@ fn derived_codec_decode_chain_lowers_and_byte_matches() {
         assert_eq!(out, "h:8080 1");
     }
 }
+
+#[test]
+fn derived_codec_list_and_default_fields_decode() {
+    // B-2 extension: Codec `List[T]` fields (self-hosted __decode_list_T / __encode_list_T
+    // over value.as_T / value.array) and DEFAULT fields (__decode_default_T: absent/Null →
+    // default). Both decode + the generated encode method byte-match v0 `--target wasm`.
+    let src = "type Rec: Codec = { id: Int, tags: List[Int], names: List[String] }\n\
+        type Cfg: Codec = { host: String = \"localhost\", port: Int = 8080, tags: List[String] }\n\
+        effect fn main() -> Unit = {\n\
+        match json.parse(\"{\\\"id\\\":5,\\\"tags\\\":[1,2,3],\\\"names\\\":[\\\"a\\\",\\\"b\\\"]}\") {\n\
+        ok(v) => match Rec.decode(v) { ok(r) => println(int.to_string(r.id) + \" \" + int.to_string(list.len(r.tags)) + \" \" + int.to_string(list.len(r.names))), err(_e) => println(\"e\") }\n\
+        err(_) => println(\"perr\") }\n\
+        match json.parse(\"{\\\"tags\\\":[\\\"x\\\"]}\") {\n\
+        ok(v) => match Cfg.decode(v) { ok(c) => println(c.host + \" \" + int.to_string(c.port)), err(_e) => println(\"e\") }\n\
+        err(_) => println(\"perr\") } }\n";
+    let prog = lower_source(&format!("import json\n{src}"));
+    assert!(prog.functions.iter().any(|f| f.name == "__decode_list_int"), "list decode helper must link");
+    assert!(prog.functions.iter().any(|f| f.name == "__decode_default_int"), "default decode helper must link");
+    if let Some(out) = build_and_run("codec_list_default", &render_wasm_program(&prog)) {
+        assert_eq!(out, "5 3 2\nlocalhost 8080");
+    }
+}

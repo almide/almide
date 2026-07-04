@@ -1,0 +1,24 @@
+// codec_encode — SELF-HOSTED derived-Codec encode helpers (runtime/rs/src/value.rs):
+// __encode_list_T (List[T] → Value Array), __encode_option_T (Option[T] → Value / Null).
+// Element encode reuses self-hosted value.int/str/float/bool; order preserved.
+
+fn __el_int(items: List[Int], n: Int, i: Int, acc: List[Value]) -> List[Value] =
+  if i >= n then acc else __el_int(items, n, i + 1, acc + [value.int(list.get(items, i) ?? 0)])
+fn __encode_list_int(items: List[Int]) -> Value = value.array(__el_int(items, list.len(items), 0, []))
+
+fn __el_float(items: List[Float], n: Int, i: Int, acc: List[Value]) -> List[Value] =
+  if i >= n then acc else __el_float(items, n, i + 1, acc + [value.float(list.get(items, i) ?? 0.0)])
+fn __encode_list_float(items: List[Float]) -> Value = value.array(__el_float(items, list.len(items), 0, []))
+
+fn __el_bool(items: List[Bool], n: Int, i: Int, acc: List[Value]) -> List[Value] =
+  if i >= n then acc else __el_bool(items, n, i + 1, acc + [value.bool(list.get(items, i) ?? false)])
+fn __encode_list_bool(items: List[Bool]) -> Value = value.array(__el_bool(items, list.len(items), 0, []))
+
+fn __el_string(items: List[String], n: Int, i: Int, acc: List[Value]) -> List[Value] =
+  if i >= n then acc else __el_string(items, n, i + 1, acc + [value.str(list.get(items, i) ?? "")])
+fn __encode_list_string(items: List[String]) -> Value = value.array(__el_string(items, list.len(items), 0, []))
+
+fn __encode_option_int(v: Option[Int]) -> Value = match v { some(x) => value.int(x), none => value.null() }
+fn __encode_option_float(v: Option[Float]) -> Value = match v { some(x) => value.float(x), none => value.null() }
+fn __encode_option_bool(v: Option[Bool]) -> Value = match v { some(x) => value.bool(x), none => value.null() }
+fn __encode_option_string(v: Option[String]) -> Value = match v { some(x) => value.str(x), none => value.null() }
