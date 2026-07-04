@@ -514,13 +514,27 @@ mod tests {
 
     #[test]
     fn repair_leaves_ambiguous_bare_ref_for_the_gate() {
+        // The two owners must have DIFFERENT shapes: same-shape twins are merged by the
+        // structural twin-merge (the checker unifies them), so a bare ref to them IS
+        // unambiguous and repair legitimately completes it. Genuine ambiguity = two
+        // qualified owners whose fingerprints differ.
         let mut program = IrProgram::default();
         program.modules.push(module_with_decl("m.Cfg"));
-        program.modules.push(module_with_decl("n.Cfg"));
+        let mut n = module_with_decl("n.Cfg");
+        if let IrTypeDeclKind::Record { fields } = &mut n.type_decls[0].kind {
+            fields.push(almide_ir::IrFieldDecl {
+                name: sym("extra"),
+                ty: Ty::Int,
+                default: None,
+                alias: None,
+                attrs: vec![],
+            });
+        }
+        program.modules.push(n);
         program.var_table.alloc(sym("v"), named("Cfg"), Mutability::Let, None);
         repair_bare_type_names(&mut program);
         assert_eq!(program.var_table.entries[0].ty, named("Cfg"),
-            "two qualified owners — repair must not guess");
+            "two different-shaped qualified owners — repair must not guess");
         assert_eq!(collect_unresolvable_names(&program).len(), 1,
             "ambiguous bare ref is still rejected by the gate");
     }
