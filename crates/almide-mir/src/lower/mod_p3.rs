@@ -597,6 +597,39 @@ impl LowerCtx {
                     };
                     self.lower_stmt(&assign)
                 }
+                // `list.push(entries, e)` — same treatment as bytes.push: v0's in-place
+                // mutation is observation-equal to the functional `entries = entries + [e]`
+                // under value semantics, and the ConcatList Assign path (the proven
+                // append-accumulator slot in a loop, the rebind at top level) handles it.
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if module.as_str() == "list"
+                        && func.as_str() == "push"
+                        && args.len() == 2
+                        && matches!(&args[0].kind, IrExprKind::Var { .. }) =>
+                {
+                    let IrExprKind::Var { id } = &args[0].kind else { unreachable!() };
+                    let one_elem = IrExpr {
+                        kind: IrExprKind::List { elements: vec![args[1].clone()] },
+                        ty: args[0].ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    let concat = IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: almide_ir::BinOp::ConcatList,
+                            left: Box::new(args[0].clone()),
+                            right: Box::new(one_elem),
+                        },
+                        ty: args[0].ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    let assign = IrStmt {
+                        kind: IrStmtKind::Assign { var: *id, value: concat },
+                        span: None,
+                    };
+                    self.lower_stmt(&assign)
+                }
                 _ => self.lower_effect_call(expr),
             },
             // A source comment carries no ownership — skip it (it is not a
