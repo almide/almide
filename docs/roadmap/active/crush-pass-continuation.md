@@ -25,6 +25,11 @@
 > mutation + ADT）+ best_pair（A-5: find defunc + option.map 連鎖 + fold 多 stmt 拡張）
 > + find_chunk（A-4: Option 成分）。A-4/A-5 は scalar-tuple fold の gate
 > （stmts.len()==1）拡張が共通の入口。
+>
+> **続報（同日パス4）**: nn **6→5、A-5 best_pair_index 完了**（fold の per-iteration
+> preamble stmts 対応 — enumerate+find+option.map 連鎖は既存 bind 機構がそのまま
+> 吸収）。残5 = Matrix 依存3 + gguf（list.push mutation + ADT）+ find_chunk（A-4 のみ:
+> Option[Int] 成分を tag+payload の2 scalar ローカルへ開く + tail の match 射影）。
 
 ## A. nn 残 8 walls（各個撃破、推定30-90分/件）
 
