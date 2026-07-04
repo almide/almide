@@ -34,3 +34,17 @@ Contracts: C-032。
 `bytes.read_f16_le` は IEEE-754 binary16 を f64 へ正確に拡張する（subnormal・
 ±inf・NaN・±0 を含む）。
 Contracts: C-037。
+
+## ALS-D6 Codec と JSON デコード
+
+JSON 数値・`\u` エスケープのデコード、整数形数値の f64 への拡張、
+`json.stringify_pretty` のインデント出力、derive された Codec のクロス
+モジュール dispatch、動的 Value モデル（merge / array 往復）、および
+decode エラーメッセージの文言はターゲット間で byte 一致する。
+Contracts: C-084, C-085, C-087, C-095, C-098, C-103。
+
+## ALS-D7 バイト列ブリッジ
+
+RawPtr / 線形メモリのバイト移動と `bytes.from_list(List[Int])` は値を
+そのまま写す（切り詰め・符号化けは不適合）。
+Contracts: C-062, C-090。

@@ -36,3 +36,16 @@ Contracts: C-018, C-019。
 UTF-8 バイト列をそのまま返し、有効な文字列に対して `from_bytes ∘ to_bytes`
 は恒等。
 Contracts: C-022。
+
+## ALS-S5 split の区切り規範
+
+`string.split` は区切り文字列のエスケープ・特殊文字をリテラルとして扱う
+（正規表現ではない）。連続区切りは空要素を生み、先頭/末尾の区切りも同様
+（Rust `str::split` と観測等価）。
+Contracts: C-050。
+
+## ALS-S6 規模不変性
+
+split / replace 等の反復文字列操作は入力規模（MB 級）に対して結果が
+規模非依存で正しい（内部バッファ境界・再割り当てで結果が変わらない）。
+Contracts: C-074。

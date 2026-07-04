@@ -37,3 +37,19 @@ Contracts: C-004, C-005, C-006。
 const 畳み込みで生じた非有限値（inf / -inf / NaN）は名前付き定数として
 表示される（`inf`・`-inf`・`NaN`）。ビットパターンや `1e999` 形は不適合。
 Contracts: C-012。
+
+## ALS-R5 プロセス環境
+
+`process.args` / `env.args` は argv[0]（プログラム名）を除いた引数列を
+返し、両ターゲットで一致する。`random.int(a, b)` は WASI entropy 下でも
+常に [a, b] 範囲内。
+Contracts: C-096, C-112, C-118。
+
+## ALS-R6 ファイルシステムのパス解決
+
+wasm の fs ランタイムは起動時に WASI preopen ディレクトリ表を構築し、
+絶対パスを最長一致 preopen + 相対残りに解決する（`./` 正規化込み）。
+同一パスへの書き込み→読み戻しは native std::fs と同じホストファイルに
+到達する（CWD 非依存）。open エラー文言は ALS-T6 系の native 文言規範
+に従う。
+Contracts: C-042。
