@@ -1262,3 +1262,64 @@ fn list_of_record_ctor_variants_literal() {
         assert_eq!(out, "click:1\nkey:a\nclose");
     }
 }
+
+#[test]
+fn matrix_softmax_rows_byte_matches_scalar_libm_oracle() {
+    // Phase D1: the WASM matrix oracle computes softmax with scalar `rt.math_exp` (= libm
+    // exp, which the self-hosted `math.exp`/math_exp.almd byte-matches) and a LEFT-TO-RIGHT
+    // scalar sum — NOT the native SIMD fast-exp. The self-host transcribes the SAME op order
+    // (row-max subtract → per-element exp → l-to-r sum → divide, with the NaN/Inf/sum<=0 →
+    // uniform 1/cols guard), so it is byte-exact vs v0 `--target wasm` even at the -1e9 mask,
+    // the ±708 clamp boundary, and extreme magnitudes.
+    let src = "effect fn main() -> Unit = {\n\
+        let m = matrix.from_lists([\n\
+        [1000.0, 0.0 - 1000000000.0, 2.0, 5.5],\n\
+        [0.001, 100.0, 0.0 - 50.0, 0.0033333333],\n\
+        [710.0, 0.0 - 710.0, 0.0, 708.0]])\n\
+        let ls = matrix.to_lists(matrix.softmax_rows(m))\n\
+        for row in ls { for x in row { println(float.to_string(x)) } } }\n";
+    let prog = lower_source(src);
+    assert!(
+        prog.functions.iter().any(|f| f.name == "matrix.softmax_rows"),
+        "softmax_rows must auto-link its self-host"
+    );
+    // Golden captured from `almide run --target wasm` (the scalar-libm oracle).
+    if let Some(out) = build_and_run("matrix_softmax", &render_wasm_program(&prog)) {
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 12, "3 rows × 4 cols");
+        // Row 2 is a proper distribution summing to ~1; row 1's masked lane is ~0.
+        assert!(lines[1].starts_with('0'), "masked -1e9 lane → ~0, got {}", lines[1]);
+    }
+}
+
+#[test]
+fn matrix_gelu_byte_matches_scalar_libm_oracle() {
+    // Phase D1: gelu (tanh approx) is element-wise scalar arithmetic + `rt.math_exp` (libm,
+    // = self-hosted math.exp). The self-host transcribes the exact op order — inner = K*(x +
+    // 0.044715*(x*x)*x), clamp ±20, e2 = exp(2*clamped), tanh = (e2-1)/(e2+1), 0.5*(1+tanh)*x
+    // — so it is byte-exact vs v0 `--target wasm` across sign, magnitude, and the clamp region.
+    let src = "effect fn main() -> Unit = {\n\
+        let m = matrix.from_lists([[0.0 - 3.0, 0.0 - 0.5, 0.0, 0.5, 1.0], [2.0, 5.0, 0.0 - 10.0, 100.0, 0.001]])\n\
+        let ls = matrix.to_lists(matrix.gelu(m))\n\
+        for row in ls { for x in row { println(float.to_string(x)) } } }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "matrix.gelu"), "gelu self-host must link");
+    if let Some(out) = build_and_run("matrix_gelu", &render_wasm_program(&prog)) {
+        assert_eq!(out.lines().count(), 10);
+        assert_eq!(out.lines().next().unwrap(), "-0.0036373920817729943");
+    }
+}
+
+#[test]
+fn matrix_swiglu_gate_byte_matches_scalar_libm_oracle() {
+    // Phase D1: swiglu_gate — g/u are LEFT-TO-RIGHT dot products, sig = 1/(1+exp(clamp(-g,
+    // ±40))) via scalar rt.math_exp (= math.exp), out = (g*sig)*u. The self-host transcribes
+    // the exact accumulation + op order, byte-exact vs v0 `--target wasm`.
+    let src = "effect fn main() -> Unit = {\n        let x = matrix.from_lists([[1.0, 2.0, 0.0 - 1.0], [0.5, 0.0 - 3.0, 2.0]])\n        let wg = matrix.from_lists([[0.1, 0.2, 0.3], [0.0 - 0.4, 0.5, 0.0 - 0.6], [1.0, 0.0, 0.0 - 1.0], [0.2, 0.2, 0.2]])\n        let wu = matrix.from_lists([[0.5, 0.0 - 0.5, 1.0], [0.3, 0.3, 0.3], [0.0 - 1.0, 1.0, 0.0], [0.7, 0.0 - 0.2, 0.1]])\n        let ls = matrix.to_lists(matrix.swiglu_gate(x, wg, wu))\n        for row in ls { for v in row { println(float.to_string(v)) } } }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "matrix.swiglu_gate"), "swiglu self-host must link");
+    if let Some(out) = build_and_run("matrix_swiglu", &render_wasm_program(&prog)) {
+        assert_eq!(out.lines().count(), 8, "2 rows × 4 out channels");
+        assert_eq!(out.lines().next().unwrap(), "-0.1649501991937434");
+    }
+}

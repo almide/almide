@@ -5,7 +5,28 @@
 > /goal で phase 単位に回せるよう、各 phase に **測定可能な exit gate** と **正確な
 > 再開点** を付す。v1-backlog.md（個別バグ台帳）の上位に立つ「完成」ロードマップ。
 
-## 完成の定義（DONE の判定基準）
+## v1.0.0 SHIP GATE（出荷条件 — 100% 北極星のサブセット）
+
+**「全 wall を 0 にする」のは北極星であって出荷条件ではない。** v1.0.0 として何を名乗るかで
+ゲートが変わる：
+
+### 位置づけ A —「検証済みサブセットのコンパイラ」v1.0.0 → **今すぐ出荷可能**
+v1 の核（honest wall）は既に成立：受理プログラムは必ず正しく、拒否は clean。既知 miscompile
+ゼロ、受理全プログラムで native⇄wasm byte-identical + PCC（ownership∧names∧caps）証明済み、
+3-way オラクル green。壁は「バグ」ではなく「未対応」として明示される。この約束の下なら出荷できる。
+
+### 位置づけ B —「v0 の完全な置き換え」v1.0.0 → 下の #1〜4 が致命的ブロッカー
+| # | ブロッカー | 状態 |
+|---|---|---|
+| **B-1** | **動的ディスパッチ（Phase C）** — first-class クロージャ + `.method()`（method/computed ~79 + heap-result match tail 74 の大半）。「普通に書いたコードがコンパイルできるか」を決める実用の本丸。**最大ブロッカー**。 | 未着手 |
+| **B-2** | **derived Codec `.decode()`**（Camp-4 heap-Ok `?`-bind）。serialization 多用。 | 未着手 |
+| **B-3** | **nn end-to-end（fast-exp 族）**。**softmax/gelu/swiglu 開通・byte一致**。wasm oracle は SIMD ではなく scalar libm exp（= self-host 済み math.exp）と判明し、残り mha×2/rope/from_q1_0 も scalar 転写で軽量。**最も近い**。 | 3/7 済み |
+| **B-4** | **native ターゲット** — v0-native matrix codegen 破損（引き継ぎ）。native を出荷対象にする場合のみ。 | 外部ブロック |
+
+**Phase E（caps 証明の完全形）と G（契約網羅）は v1.0.0 に不要** — 北極星（下記 DONE 基準）の
+一部だが出荷ゲートではない。推奨進行: **B-3 完走 → B-2 → B-1**（近い順・実用インパクト順）。
+
+## 完成の定義（DONE の判定基準 = 100% 北極星）
 
 v1 が v0 相当とは、次を**同時に**満たす状態を指す（すべて既存ツールで機械判定可能）：
 

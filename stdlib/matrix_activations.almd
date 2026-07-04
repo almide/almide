@@ -1,0 +1,124 @@
+// matrix_activations — SELF-HOSTED softmax/gelu/etc. over the v1 Matrix (List[List[Float]]).
+// The WASM oracle (emit_wasm/calls_matrix_p2.rs) computes these with SCALAR arithmetic and
+// `rt.math_exp` (= libm exp, the SAME musl exp `math.exp`/math_exp.almd transcribes), NOT the
+// native SIMD fast-exp. So a faithful transcription in the SAME op order (row-max subtract →
+// per-element exp → LEFT-TO-RIGHT sum → divide) byte-matches v0 `--target wasm`.
+
+// Row max: init from row[0], scan the rest with `>` (NaN-safe: a NaN element leaves max).
+fn __sm_row_max(row: List[Float], n: Int, i: Int, acc: Float) -> Float =
+  if i >= n then acc
+  else {
+    let x = list.get(row, i) ?? acc
+    __sm_row_max(row, n, i + 1, if x > acc then x else acc)
+  }
+
+fn __softmax_row(row: List[Float]) -> List[Float] = {
+  let n = list.len(row)
+  if n == 0 then row
+  else {
+    let mx = __sm_row_max(row, n, 1, list.get(row, 0) ?? 0.0)
+    let exps = row |> list.map((x) => math.exp(x - mx))
+    let s = exps |> list.fold(0.0, (acc, v) => acc + v)
+    if s <= 0.0 or s != s then
+      row |> list.map((_x) => 1.0 / int.to_float(n))
+    else
+      exps |> list.map((v) => v / s)
+  }
+}
+
+fn matrix_softmax_rows(m: List[List[Float]]) -> List[List[Float]] =
+  m |> list.map((row) => __softmax_row(row))
+
+// gelu (tanh approximation) — element-wise. v0 (emit_wasm/calls_matrix_p2.rs "gelu"):
+//   inner   = 0.7978845608028654 * (x + 0.044715 * ((x*x)*x))   // sqrt(2/π)
+//   clamped = max(min(inner, 20), -20)
+//   e2      = exp(2 * clamped)                                    // rt.math_exp = libm
+//   tanh    = (e2 - 1) / (e2 + 1)
+//   y       = 0.5 * ((1 + tanh) * x)
+// The op order (and the (x*x)*x association) is transcribed exactly for a byte-match.
+fn __gelu_scalar(x: Float) -> Float = {
+  let inner = 0.7978845608028654 * (x + 0.044715 * ((x * x) * x))
+  let clamped = float.max(float.min(inner, 20.0), -20.0)
+  let e2 = math.exp(2.0 * clamped)
+  let t = (e2 - 1.0) / (e2 + 1.0)
+  0.5 * ((1.0 + t) * x)
+}
+
+fn __gelu_row(dh: Int, sh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(sh + 12 + i * 8))
+    prim.store64(dh + 12 + i * 8, prim.fbits(__gelu_scalar(x)))
+    __gelu_row(dh, sh, n, i + 1)
+  }
+
+fn __gelu_rows(ho: Int, hm: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let rh = prim.load64(hm + 12 + i * 8)
+    let c = prim.load32(rh + 4)
+    let row = prim.alloc_list_f64(c)
+    let _f = __gelu_row(prim.handle(row), rh, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __gelu_rows(ho, hm, n, i + 1)
+  }
+
+fn matrix_gelu(m: List[List[Float]]) -> List[List[Float]] = {
+  let hm = prim.handle(m)
+  let n = prim.load32(hm + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __gelu_rows(prim.handle(out), hm, n, 0)
+  out
+}
+
+// swiglu_gate(x, w_gate, w_up) — the FFN SwiGLU. x: r×d_in, weights: d_out×d_in, out: r×d_out.
+//   g = Σ_k x[i,k]*w_gate[j,k]   (LEFT-TO-RIGHT accumulate)
+//   u = Σ_k x[i,k]*w_up[j,k]
+//   sig = 1 / (1 + exp(clamp(-g, -40, 40)))
+//   out[i,j] = (g * sig) * u
+// v0 (emit_wasm/calls_matrix_p2.rs "swiglu_gate"); scalar `rt.math_exp` = math.exp. Op order exact.
+fn __sg_dot(ah: Int, bh: Int, n: Int, k: Int, acc: Float) -> Float =
+  if k >= n then acc
+  else {
+    let av = prim.ffrombits(prim.load64(ah + 12 + k * 8))
+    let bv = prim.ffrombits(prim.load64(bh + 12 + k * 8))
+    __sg_dot(ah, bh, n, k + 1, acc + av * bv)
+  }
+
+fn __sg_cell(xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], j: Int, d_in: Int) -> Float = {
+  let wgj = prim.load64(prim.handle(wg) + 12 + j * 8)
+  let wuj = prim.load64(prim.handle(wu) + 12 + j * 8)
+  let g = __sg_dot(xrow_h, wgj, d_in, 0, 0.0)
+  let u = __sg_dot(xrow_h, wuj, d_in, 0, 0.0)
+  let negg = float.max(float.min(0.0 - g, 40.0), -40.0)
+  let sig = 1.0 / (1.0 + math.exp(negg))
+  (g * sig) * u
+}
+
+fn __sg_row_cells(dh: Int, xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], d_out: Int, d_in: Int, j: Int) -> Int =
+  if j >= d_out then 0
+  else {
+    prim.store64(dh + 12 + j * 8, prim.fbits(__sg_cell(xrow_h, wg, wu, j, d_in)))
+    __sg_row_cells(dh, xrow_h, wg, wu, d_out, d_in, j + 1)
+  }
+
+fn __sg_rows(ho: Int, x: List[List[Float]], wg: List[List[Float]], wu: List[List[Float]], r: Int, d_out: Int, d_in: Int, i: Int) -> Int =
+  if i >= r then 0
+  else {
+    let xrow_h = prim.load64(prim.handle(x) + 12 + i * 8)
+    let row = prim.alloc_list_f64(d_out)
+    let _c = __sg_row_cells(prim.handle(row), xrow_h, wg, wu, d_out, d_in, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __sg_rows(ho, x, wg, wu, r, d_out, d_in, i + 1)
+  }
+
+fn matrix_swiglu_gate(x: List[List[Float]], w_gate: List[List[Float]], w_up: List[List[Float]]) -> List[List[Float]] = {
+  let hx = prim.handle(x)
+  let r = prim.load32(hx + 4)
+  // d_in = columns = length of x's first row (0 for an empty matrix).
+  let d_in = if r == 0 then 0 else prim.load32(prim.load64(hx + 12) + 4)
+  let d_out = prim.load32(prim.handle(w_gate) + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(r)
+  let _x = __sg_rows(prim.handle(out), x, w_gate, w_up, r, d_out, d_in, 0)
+  out
+}
