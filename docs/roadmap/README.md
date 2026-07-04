@@ -6,7 +6,7 @@
 
 ## Active
 
-59 items
+60 items
 
 | Item | Description |
 |------|-------------|
@@ -62,6 +62,7 @@
 | [v1 trust-spine correctness holes (adversarial sweep 2026-06-27)](active/v1-spine-correctness-holes.md) |  |
 | [v1 System Map — 全体像(mermaid)](active/v1-system-map.md) | v1 system map — mermaid diagrams of the whole trust architecture: each component's what / why / which area it secures, the PCC trust flow, the trust base, the three pillars, the threat model, and the maturity ladder. |
 | [v1 TCO — self-recursive tail calls → scalar-state loop (the yaml parser keystone)](active/v1-tco-self-recursion.md) |  |
+| [V1 → V0 Parity — the completion plan](active/v1-v0-parity.md) | The completion plan to bring the v1 MIR trust-spine to full v0 parity |
 | [v1 dynamic Value model — the yaml keystone (path A: self-host + ONE trusted recursive-drop routine)](active/v1-value-model.md) |  |
 | [柱C extension: bring Value rc into the certified region](active/value-rc-cert.md) |  |
 | [Almide WASM Engine — Complete Redesign](active/wasm-engine-redesign.md) |  |
