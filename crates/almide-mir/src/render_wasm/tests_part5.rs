@@ -663,3 +663,33 @@ fn range_argument_materializes_via_list_range() {
         assert_eq!(out, "k0=10\nk1=12\nk2=14");
     }
 }
+
+#[test]
+fn opt_tuple_fold_scanner() {
+    // The wav find_chunk_at scanner: a (scalar, Option[scalar]) fold accumulator —
+    // the Option component runs as tag+payload locals; the match-over-found projects
+    // to an if-over-tag; the result Option materializes once (len-as-tag overwrite).
+    let src = "fn find_at(sizes: List[Int], target: Int, pos: Int) -> Option[Int] = {\n\
+        let positions = list.range(0, 10)\n\
+        list.fold(positions, (pos, none), (state, i) => {\n\
+        let (p, found) = state\n\
+        match found {\n\
+        some(_) => state\n\
+        none =>\n\
+        if p > 100 then (p, none)\n\
+        else {\n\
+        let size = list.get(sizes, i) |> option.unwrap_or(999)\n\
+        if p == target then (p, some(p))\n\
+        else (p + size, none) } } }).1 }\n\
+        effect fn main() -> Unit = {\n\
+        match find_at([4, 4, 4, 4], 8, 0) {\n\
+        some(p) => println(\"found:\" + int.to_string(p))\n\
+        none => println(\"none\") }\n\
+        match find_at([4, 4], 99, 0) {\n\
+        some(p) => println(\"?\")\n\
+        none => println(\"none\") } }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("opt_tuple_fold", &render_wasm_program(&prog)) {
+        assert_eq!(out, "found:8\nnone");
+    }
+}
