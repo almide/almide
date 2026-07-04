@@ -20,7 +20,7 @@ v1 の核（honest wall）は既に成立：受理プログラムは必ず正し
 |---|---|---|
 | **B-1** | **動的ディスパッチ（Phase C）** — first-class クロージャ + `.method()`（method/computed ~79 + heap-result match tail 74 の大半）。「普通に書いたコードがコンパイルできるか」を決める実用の本丸。**最大ブロッカー**。 | 未着手 |
 | **B-2** | **derived Codec `.decode()`**（Camp-4 heap-Ok `?`-bind）。serialization 多用。 | 未着手 |
-| **B-3** | **nn end-to-end（fast-exp 族）**。**softmax/gelu/swiglu 開通・byte一致**。wasm oracle は SIMD ではなく scalar libm exp（= self-host 済み math.exp）と判明し、残り mha×2/rope/from_q1_0 も scalar 転写で軽量。**最も近い**。 | 3/7 済み |
+| **B-3** | **nn end-to-end（fast-exp 族）**。wasm oracle は SIMD ではなく scalar libm exp（= self-host 済み math.exp）と判明。**7/7 全て開通・byte一致**（softmax_rows / gelu / swiglu_gate / rope_rotate / multi_head_attention / masked_multi_head_attention / from_q1_0_bytes）。nn の matrix スタックは完全 self-host・byte 検証済み。**✅ 実質クローズ**（残る nn unlinked は fft の enumerate_h/zip_h の 4 補助サイトのみ、非推論経路）。 | ✅ 7/7 |
 | **B-4** | **native ターゲット** — v0-native matrix codegen 破損（引き継ぎ）。native を出荷対象にする場合のみ。 | 外部ブロック |
 
 **Phase E（caps 証明の完全形）と G（契約網羅）は v1.0.0 に不要** — 北極星（下記 DONE 基準）の
