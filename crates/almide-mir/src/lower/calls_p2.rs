@@ -102,6 +102,14 @@ impl LowerCtx {
         // `DropListStrInt` (rc_dec the String slot @12 only; the Int @20 is scalar).
         let str_int_elem = matches!(&elem_ty,
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::Int));
+        // An ALL-SCALAR aggregate element (`first + [(re, im)]` — the fft Complex
+        // accumulator): each element block holds only inline scalars, so the flat
+        // per-slot-rc_dec `DropListStr` IS its full free (same physics as the binds-side
+        // `elem_scalar_aggregate` list literal).
+        let scalar_aggregate_elem = self
+            .aggregate_field_tys(&elem_ty)
+            .and_then(|(_, tys)| crate::lower::layout::scalar_slots(&tys))
+            .is_some();
         // A FLAT-variant ELEMENT (`acc + [r.val]` where `acc: List[ValType]`, the wasm-binary
         // recursive-accumulator shape) — each element is a single OWNED tag-block (no inner handle),
         // so `__list_concat_rc` rc-incs each element handle (the new list co-owns each block) and the
@@ -117,8 +125,8 @@ impl LowerCtx {
         // `List[Instr]`). Routed via `variant_drop_handles="list_<V>"`, like the record case.
         let rich_variant_elem = self.variant_layouts.is_rich_variant_ty(&elem_ty);
         if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && !str_str_elem
-            && !int_str_elem && !str_int_elem && !flat_variant_elem && rich_variant_elem.is_none()
-            && record_elem.is_none()
+            && !int_str_elem && !str_int_elem && !scalar_aggregate_elem && !flat_variant_elem
+            && rich_variant_elem.is_none() && record_elem.is_none()
         {
             return None;
         }
@@ -189,6 +197,8 @@ impl LowerCtx {
             self.variant_drop_handles.insert(dst, "list_int_str".to_string());
         } else if str_int_elem {
             self.variant_drop_handles.insert(dst, "list_str_int".to_string());
+        } else if scalar_aggregate_elem {
+            self.heap_elem_lists.insert(dst);
         } else if list_str_elem {
             self.list_list_str_lists.insert(dst);
         } else if let Some(vname) = rich_variant_elem {
