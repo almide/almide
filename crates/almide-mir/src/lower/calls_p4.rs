@@ -324,7 +324,7 @@ impl LowerCtx {
             // inner map): lower the binds then the scalar tail. Any stmt outside the
             // subset rolls this back (partial ops truncated) and returns None — the
             // caller keeps its own fallback/wall.
-            IrExprKind::Block { stmts, expr: Some(tail) } if !stmts.is_empty() => {
+            IrExprKind::Block { stmts, expr: Some(tail) } => {
                 let mark = self.ops.len();
                 let lhh = self.live_heap_handles.len();
                 for st in stmts {
