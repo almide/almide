@@ -418,14 +418,44 @@ pub fn variant_needs_recursive_drop(
     let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else {
         return false;
     };
-    cases.iter().any(|c| {
+    // A ctor field the generated `$__drop_<V>` can free: a nested variant (recurse),
+    // a String (rc_dec), a List[scalar] (flat rc_dec), or a List[<variant>] (per-element).
+    let supported_heap = |t: &Ty| -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        variant_field_name(t, variant_names).is_some()
+            || matches!(t, Ty::String)
+            || matches!(t, Ty::Applied(TypeConstructorId::List, a)
+                if a.len() == 1
+                    && (!is_heap_ty(&a[0])
+                        || variant_field_name(&a[0], variant_names).is_some()))
+    };
+    let mut any_heap = false;
+    let mut all_supported = true;
+    let mut has_variant_field = false;
+    for c in cases {
         let tys: Vec<&Ty> = match &c.kind {
             IrVariantKind::Unit => vec![],
             IrVariantKind::Tuple { fields } => fields.iter().collect(),
             IrVariantKind::Record { fields } => fields.iter().map(|f| &f.ty).collect(),
         };
-        tys.iter().any(|t| variant_field_name(t, variant_names).is_some())
-    })
+        for t in tys {
+            if variant_field_name(t, variant_names).is_some() {
+                has_variant_field = true;
+            }
+            if is_heap_ty(t) {
+                any_heap = true;
+                if !supported_heap(t) {
+                    all_supported = false;
+                }
+            }
+        }
+    }
+    // The ORIGINAL rule (a nested-variant field) OR the widened one: some heap field,
+    // ALL of them freeable by the generator (String / List[scalar] / List[variant]) —
+    // the GGUFValue shape (ValString + ValArray(List[GGUFValue])). A type with an
+    // unsupported heap field (e.g. a Map) keeps needing=false → its list stays WALLED
+    // (never a silent leak).
+    has_variant_field || (any_heap && all_supported)
 }
 
 /// The set of FLAT variant type names — every constructor scalar-only, so the block owns NO inner
@@ -549,6 +579,14 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                 } else if matches!(ty, Ty::String) {
                     frees.push_str(&format!(
                         "        prim.rc_dec(prim.load64(h + {off}))\n"
+                    ));
+                } else if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                    if a.len() == 1 && !is_heap_ty(&a[0]))
+                {
+                    // A List[scalar] ctor field — a FLAT block, one rc_dec is its full free.
+                    frees.push_str(&format!(
+                        "        prim.rc_dec(prim.load64(h + {off}))
+"
                     ));
                 } else if let Some(ev) = list_rich_variant_elem(ty, &rec_variant_names) {
                     // A `List[<rich variant>]` ctor field (`Block(_, List[Instr])`): each element is a

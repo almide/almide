@@ -985,10 +985,34 @@ impl VariantLayouts {
     /// brick 5a/5c). This is the lowering-side mirror of
     /// [`crate::lower::variant_needs_recursive_drop`], computed from the registry's field Tys.
     pub fn needs_recursive_drop(&self, type_name: &str) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
         let Some(layout) = self.by_type.get(type_name) else { return false };
-        layout.cases.iter().any(|c| {
-            c.fields.iter().any(|(_, ty)| self.field_is_variant(ty))
-        })
+        // Mirrors the generator's `variant_needs_recursive_drop`: a nested-variant field
+        // (the original rule) OR heap fields the generated drop can ALL free (String /
+        // List[scalar] / List[variant]) — the GGUFValue shape.
+        let supported_heap = |t: &Ty| -> bool {
+            self.field_is_variant(t)
+                || matches!(t, Ty::String)
+                || matches!(t, Ty::Applied(TypeConstructorId::List, a)
+                    if a.len() == 1 && (!is_heap_ty(&a[0]) || self.field_is_variant(&a[0])))
+        };
+        let mut any_heap = false;
+        let mut all_supported = true;
+        let mut has_variant_field = false;
+        for c in &layout.cases {
+            for (_, ty) in &c.fields {
+                if self.field_is_variant(ty) {
+                    has_variant_field = true;
+                }
+                if is_heap_ty(ty) {
+                    any_heap = true;
+                    if !supported_heap(ty) {
+                        all_supported = false;
+                    }
+                }
+            }
+        }
+        has_variant_field || (any_heap && all_supported)
     }
 
     /// Is `ty` a registry variant ALL of whose constructors have ONLY scalar fields — i.e. a FLAT

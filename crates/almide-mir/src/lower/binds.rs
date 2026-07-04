@@ -229,7 +229,8 @@ impl LowerCtx {
             // A FLAT-variant CONSTRUCTOR element (`[CapIO, CapProcess]`) — a Named call whose name is a
             // registered constructor, materialized via `try_lower_variant_ctor` below.
             IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                if elem_flat_variant && self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                if (elem_flat_variant || elem_rich_variant.is_some())
+                    && self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
             {
                 true
             }
@@ -349,7 +350,8 @@ impl LowerCtx {
                 // (`try_lower_variant_ctor`, cert `i`) and move it into the slot. The block owns no
                 // inner handle (flat), so the list's `DropListStr` `rc_dec` is its full free.
                 IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                    if elem_flat_variant && self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                    if (elem_flat_variant || elem_rich_variant.is_some())
+                    && self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
                 {
                     self.try_lower_variant_ctor(elem)?
                 }
