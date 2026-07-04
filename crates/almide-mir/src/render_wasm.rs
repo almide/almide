@@ -67,8 +67,20 @@ const REMOVE_ERR_LEN: u32 = 13; // len of "remove failed"
 const DIVZERO_MSG_ADDR: u32 = 144; // "Error: division by zero\n" — 144..169 (__div_trap)
 const OVERFLOW_MSG_ADDR: u32 = 176; // "Error: integer overflow\n" — 176..200 (__div_trap)
 const BOUNDS_MSG_ADDR: u32 = 208; // "Error: index out of bounds\n" — 208..235 (__div_trap)
-const LABELS_ADDR: u32 = 240; // print labels (the data section) — after the fixed messages
-const SCRATCH_ADDR: u32 = 512; // the line build buffer
+const LABELS_ADDR: u32 = 376; // print labels (the data section) — after ALL fixed messages (incl. fs errno)
+// fs errno → native std::io Display strings (240..376, FIXED — placed BEFORE the
+// variable-length labels region so labels can never overwrite them): path_open errors
+// map to the EXACT message native std::fs emits, so `err(e)` observes byte-identical
+// text (C-042 kin).
+const FS_ERR_NOENT_ADDR: u32 = 240; // "No such file or directory (os error 2)" — WASI NOENT(44)
+const FS_ERR_NOENT_LEN: u32 = 38;
+const FS_ERR_ACCES_ADDR: u32 = 280; // "Permission denied (os error 13)" — WASI ACCES(2)
+const FS_ERR_ACCES_LEN: u32 = 31;
+const FS_ERR_NOTDIR_ADDR: u32 = 312; // "Not a directory (os error 20)" — WASI NOTDIR(54)
+const FS_ERR_NOTDIR_LEN: u32 = 29;
+const FS_ERR_ISDIR_ADDR: u32 = 344; // "Is a directory (os error 21)" — WASI ISDIR(31)
+const FS_ERR_ISDIR_LEN: u32 = 28;
+const SCRATCH_ADDR: u32 = 768; // the line build buffer
 const HEAP_BASE: u32 = 8192; // bump allocator start
 // The Ok/Err tag of a cap-as-tag `Result[String, String]` lives in the HIGH 32 bits of
 // the 1-slot block's element (@16) — the `materialize_result_str` layout `$read_text_file`

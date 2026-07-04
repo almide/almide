@@ -41,6 +41,10 @@ pub(crate) fn preamble() -> String {
   (data (i32.const {BOUNDS_MSG_ADDR}) "Error: index out of bounds\n")
   ;; the fs.read_text path_open error message — a CONST byte run the Err arm copies.
   (data (i32.const {RTF_NOTFOUND_ADDR}) "file not found")
+  (data (i32.const {FS_ERR_NOENT_ADDR}) "No such file or directory (os error 2)")
+  (data (i32.const {FS_ERR_ACCES_ADDR}) "Permission denied (os error 13)")
+  (data (i32.const {FS_ERR_NOTDIR_ADDR}) "Not a directory (os error 20)")
+  (data (i32.const {FS_ERR_ISDIR_ADDR}) "Is a directory (os error 21)")
   ;; the fs.list_dir path_open(O_DIRECTORY) error message — a CONST byte run the Err arm copies.
   (data (i32.const {RDIR_ERR_ADDR}) "directory not found")
   ;; the fs.write path_open/fd_write error message — a CONST byte run the Err arm copies.
@@ -409,7 +413,7 @@ pub(crate) fn preamble() -> String {
     (local $pdata i32) (local $plen i32) (local $fd_out i32) (local $errno i32)
     (local $fd i32) (local $stat i32) (local $fsize i32) (local $iov i32)
     (local $nread i32) (local $data i32) (local $str i32) (local $result i32)
-    (local $j i32) (local $msg i32)
+    (local $j i32) (local $msg i32) (local $maddr i32) (local $mlen i32)
     ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.
     (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
     (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
@@ -424,10 +428,23 @@ pub(crate) fn preamble() -> String {
     (local.set $errno
       (call $path_open (i32.const 3) (i32.const 0) (local.get $pdata) (local.get $plen)
                        (i32.const 0) (i64.const 6) (i64.const 0) (i32.const 0) (local.get $fd_out)))
-    ;; On a path_open error build Err("file not found").
+    ;; On a path_open error build Err(<native std::io Display>) — the WASI errno maps to
+    ;; the EXACT text native std::fs emits ($fs_errno_msg), so `err(e)` byte-matches.
     (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
       (then
-        (local.set $msg (call $rtf_str (i32.const {RTF_NOTFOUND_ADDR}) (i32.const {RTF_NOTFOUND_LEN})))
+        ;; errno → the EXACT native std::io Display text, INLINE (§4.1: no new wat func).
+        ;; NOENT(44)/ACCES(2)/NOTDIR(54)/ISDIR(31); anything else keeps "file not found".
+        (local.set $maddr (i32.const {RTF_NOTFOUND_ADDR}))
+        (local.set $mlen (i32.const {RTF_NOTFOUND_LEN}))
+        (if (i32.eq (local.get $errno) (i32.const 44)) (then
+          (local.set $maddr (i32.const {FS_ERR_NOENT_ADDR})) (local.set $mlen (i32.const {FS_ERR_NOENT_LEN}))))
+        (if (i32.eq (local.get $errno) (i32.const 2)) (then
+          (local.set $maddr (i32.const {FS_ERR_ACCES_ADDR})) (local.set $mlen (i32.const {FS_ERR_ACCES_LEN}))))
+        (if (i32.eq (local.get $errno) (i32.const 54)) (then
+          (local.set $maddr (i32.const {FS_ERR_NOTDIR_ADDR})) (local.set $mlen (i32.const {FS_ERR_NOTDIR_LEN}))))
+        (if (i32.eq (local.get $errno) (i32.const 31)) (then
+          (local.set $maddr (i32.const {FS_ERR_ISDIR_ADDR})) (local.set $mlen (i32.const {FS_ERR_ISDIR_LEN}))))
+        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
         (call $rtf_result (local.get $msg) (i32.const 1)))
       (else
         (local.set $fd (i32.load (local.get $fd_out)))

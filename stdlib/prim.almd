@@ -199,6 +199,12 @@ fn args_get_list() -> List[String] = _
 @intrinsic("almide_rt_prim_read_text_file")
 fn read_text_file(path: String) -> Result[String, String] = _
 
+// Raw-bytes twin of read_text_file — the SAME WASI path_open/fd_read floor and the
+// same cap-as-tag Result block; only the Ok payload TYPE differs (Bytes, no UTF-8
+// claim). Backs the self-hosted `fs.read_bytes_raw`. Capability::FsRead.
+@intrinsic("almide_rt_prim_read_bytes_file")
+fn read_bytes_file(path: String) -> Result[Bytes, String] = _
+
 // The `read_dir` WASI directory-listing floor — the FIFTH sandbox exit (reaches
 // Capability::FsRead, like read_text_file). Opens the directory at `path` (preopen-relative,
 // same resolution as read_text_file) via path_open(O_DIRECTORY), reads entries via an

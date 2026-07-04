@@ -534,6 +534,11 @@ impl LowerCtx {
                     // `err("…${x}…")` — a string interpolation message: fold it to the __str_concat
                     // chain (a fresh owned String), exactly like the StringInterp value arm above.
                     IrExprKind::StringInterp { parts } => self.try_lower_string_interp(parts)?,
+                    // `err("failed: " + path + ": " + e)` — an explicit `+` concat message (the
+                    // ggml load shape; borrowed payload vars Dup inside the concat machinery).
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                        self.try_lower_concat_str(expr)?
+                    }
                     IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
                         let lowered = self.lower_call_args(args).ok()?;
                         let pr = repr_of(&expr.ty).ok()?;

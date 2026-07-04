@@ -846,7 +846,7 @@ fn effect_unwrap_admitted(result_ty: &Ty) -> bool {
             return true;
         }
     }
-    if matches!(ok, Ty::Applied(TypeConstructorId::Bytes, _)) {
+    if matches!(ok, Ty::Applied(TypeConstructorId::Bytes, _) | Ty::Bytes) {
         return true;
     }
     // List[Value] Ok + the (String,Int)/(Value,Int)/(List[String],Int)/(List[Value],Int) tuple-Ok

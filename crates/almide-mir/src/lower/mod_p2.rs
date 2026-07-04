@@ -37,7 +37,9 @@ fn has_result_err(body: &IrExpr) -> bool {
             }
             if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } = &e.kind
             {
-                if module.as_str() == "prim" && func.as_str() == "read_text_file" {
+                if module.as_str() == "prim"
+                    && (func.as_str() == "read_text_file" || func.as_str() == "read_bytes_file")
+                {
                     self.0 = true;
                 }
             }

@@ -235,6 +235,7 @@ impl LowerCtx {
             || (module == "env" && func == "args")
             || (module == "env" && func == "unix_timestamp")
             || (module == "fs" && func == "read_text")
+            || (module == "fs" && func == "read_bytes_raw")
             || (module == "fs" && func == "list_dir")
             || (module == "fs" && func == "write")
             || (module == "fs" && func == "mkdir_p")

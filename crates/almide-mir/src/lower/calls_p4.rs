@@ -980,7 +980,10 @@ impl LowerCtx {
         // AND the scope-end drop is the flat `DropListStr` (frees the one owned String @12 +
         // the block — a flat `Drop` would leak the String). Carries Capability::FsRead
         // (counted in cap_witness). The render emits the WASI path_open/fd_read sequence.
-        if func == "read_text_file" {
+        if func == "read_text_file" || func == "read_bytes_file" {
+            // read_bytes_file is the raw-bytes twin: the SAME WASI floor + Result block
+            // (the render's $read_text_file reads raw bytes; only the almd-level Ok TYPE
+            // differs), so one PrimKind serves both.
             let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
                 LowerError::Unsupported("prim.read_text_file path is not a lowerable scalar/handle".into())
             })?;
