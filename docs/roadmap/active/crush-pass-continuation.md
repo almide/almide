@@ -26,6 +26,11 @@
 > + find_chunk（A-4: Option 成分）。A-4/A-5 は scalar-tuple fold の gate
 > （stmts.len()==1）拡張が共通の入口。
 >
+> **続報（同日パス6）**: **A-4 find_chunk_at 完了**（(scalar, Option[scalar]) fold —
+> tag+payload 2ローカル、match-over-found の if 射影、len-as-tag 後書きの単一 Option
+> 材料化、borrow-view tuple）。実物 wav.almd 開通、3点一致、pin テスト済（**518/0**）。
+> **nn 残4 = Matrix 値モデル依存3 + gguf 1（list.push mutation + ADT）**。
+>
 > **続報（同日パス5）**: MIR テスト **517/0**（strict-value モードで統一実行）。
 > テスト昇格が **flatten の rc 規約違反による二重解放**（heap 要素 sublist の生コピー）
 > を捕獲 → `list.flatten_rc`（rc_inc-on-copy）+ borrow-view list 引数（Dup なし・
