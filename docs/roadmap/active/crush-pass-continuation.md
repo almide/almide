@@ -26,6 +26,12 @@
 > + find_chunk（A-4: Option 成分）。A-4/A-5 は scalar-tuple fold の gate
 > （stmts.len()==1）拡張が共通の入口。
 >
+> **続報（同日パス5）**: MIR テスト **517/0**（strict-value モードで統一実行）。
+> テスト昇格が **flatten の rc 規約違反による二重解放**（heap 要素 sublist の生コピー）
+> を捕獲 → `list.flatten_rc`（rc_inc-on-copy）+ borrow-view list 引数（Dup なし・
+> plain block Drop）で根治。probe 検証を stdout-only から**3点（stdout+stderr+exit）**
+> に是正し、全12 probe が完全一致。print_str の旧 SCRATCH(512) 直書きも 768 に追随。
+>
 > **続報（同日パス4）**: nn **6→5、A-5 best_pair_index 完了**（fold の per-iteration
 > preamble stmts 対応 — enumerate+find+option.map 連鎖は既存 bind 機構がそのまま
 > 吸収）。残5 = Matrix 依存3 + gguf（list.push mutation + ADT）+ find_chunk（A-4 のみ:
