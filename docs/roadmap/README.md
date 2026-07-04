@@ -6,7 +6,7 @@
 
 ## Active
 
-57 items
+59 items
 
 | Item | Description |
 |------|-------------|
@@ -22,6 +22,7 @@
 | [Completeness by Construction](active/completeness-by-construction.md) |  |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
 | [Cross-Target Completeness (the Lid)](active/cross-target-completeness.md) | Cross-target completeness lid — the staged path from "all known divergences fixed + byte-diff gate" to structural equivalence (drain → interpreter+fuzz → selfhost → kernel proofs), with the live drain queue |
+| [Crush-Pass Continuation — 残件の正確な再開点](active/crush-pass-continuation.md) | Exact re-entry points for the remaining crush-pass items — nn 8 walls, CG-1 expansion, coverage raising, with per-item diagnosis and first move |
 | [The Determinism / Purity Belt](active/determinism-belt.md) | Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1](active/effectful-27-blueprint.md) |  |
@@ -45,6 +46,7 @@
 | [GOAL PROMPT — finish ADT brick 5 (heap-field bind + recursive drop) to the #1 lever](active/v1-adt-brick5-goal.md) |  |
 | [v1 ① — custom ADT (variant) as a first-class value](active/v1-adt-value-model.md) |  |
 | [v1 Bolt Backlog(AI-DLC 管理)](active/v1-bolt-backlog.md) | AI-DLC Bolt backlog for the v1 climb — the camps/steps roadmap expressed as intent-driven, time-boxed Bolts (each with intent / Definition-of-Done / gate / deps / status). The construction guardrails are the goal-prompt discipline; each Bolt's exit gate is independent review (reviewer agent + Trust Spine CI + unbiased dual-oracle corpus); humans (Mob) decide at the marked forks. Tracks "あと何 Bolt" to each summit. |
+| [v1 → develop Reflow Strategy](active/v1-develop-reflow.md) | Strategy for flowing the develop-v1 trust spine back into develop — what moves, in what order, and what stays branch-local until its gate exists |
 | [v1 heap-result `if`/`match` execution — design (DE-RISKED: no Coq change)](active/v1-heap-result-control-flow.md) |  |
 | [v1 KGI / KPI スコアボード](active/v1-kgi-kpi.md) | v1 KGI/KPI scoreboard — the terminal goal indicators (trust + writability), the guard invariants that must never degrade (checker size, TB purity, axiom cleanliness, zero claim-drift), and the progress KPIs toward each gap. Weekly fill-in. |
 | [v1 heap-loop-carried ownership — option C (cert-spine extension), the COMPLETENESS fix](active/v1-loop-ownership-cert.md) |  |
