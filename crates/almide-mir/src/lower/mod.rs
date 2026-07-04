@@ -830,6 +830,7 @@ pub(crate) fn anon_record_needs_recursive_drop(fields: &[(almide_lang::intern::S
 /// a `Value → __drop_value`, a scalar-only nested aggregate / `List[scalar]` → flat `rc_dec`, a
 /// scalar → skip. Records the needed shared-helper flags into the caller's accumulators so they are
 /// emitted once at the end.
+#[allow(clippy::too_many_arguments)]
 fn record_drop_field_frees(
     field_tys: &[Ty],
     rec_names: &std::collections::HashSet<String>,
@@ -838,6 +839,8 @@ fn record_drop_field_frees(
     list_drops: &mut std::collections::BTreeSet<String>,
     need_map_ss: &mut bool,
     need_list_str: &mut bool,
+    need_matrix: &mut bool,
+    need_list_matrix: &mut bool,
 ) -> String {
     use almide_lang::types::constructor::TypeConstructorId;
     let mut frees = String::new();
@@ -863,6 +866,26 @@ fn record_drop_field_frees(
                     frees.push_str(&format!(
                         "    let f{i}: List[{ev}] = prim.load_handle(h + {off})\n    __drop_list_{ev_fn}(f{i})\n"
                     ));
+                } else if matches!(&a[0], Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _)) {
+                    // `List[Matrix]` — each element is a matrix block whose slots hold owned
+                    // row blocks: sweep TWO levels via `__drop_list_matrix` (each element
+                    // through `__drop_matrix`, then the list). A flat `rc_dec` would leak
+                    // every matrix AND its rows.
+                    *need_matrix = true;
+                    *need_list_matrix = true;
+                    frees.push_str(&format!(
+                        "    let f{i}: List[Matrix] = prim.load_handle(h + {off})\n    __drop_list_matrix(f{i})\n"
+                    ));
+                } else if matches!(&a[0],
+                    Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && !is_heap_ty(&b[0]))
+                {
+                    // A matrix-shaped STRUCTURAL field (`List[List[scalar]]`): its slots hold
+                    // owned flat row blocks — `__drop_matrix`'s per-row `rc_dec` sweep is its
+                    // exact free (a flat `rc_dec` frees only the outer block, leaking rows).
+                    *need_matrix = true;
+                    frees.push_str(&format!(
+                        "    let f{i}: Matrix = prim.load_handle(h + {off})\n    __drop_matrix(f{i})\n"
+                    ));
                 } else if matches!(a[0], Ty::String) || is_flat_variant_elem(&a[0], flat_variant_names) {
                     // `List[String]` OR `List[flat-variant]` (a nullary/scalar-only enum like
                     // `Capability`): each element is a single FLAT block, so `__drop_list_str` frees
@@ -877,6 +900,15 @@ fn record_drop_field_frees(
                     // List[scalar] or List[non-recursive heap]: flat free the block.
                     frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
                 }
+            }
+            // A `Matrix` field (the v1 value model: a List[List[Float]] block whose slots
+            // hold owned flat row blocks — nn WhisperWeights.conv1_w): free each row + the
+            // block via `__drop_matrix`. The previous flat `rc_dec` fallback leaked every row.
+            Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _) => {
+                *need_matrix = true;
+                frees.push_str(&format!(
+                    "    let f{i}: Matrix = prim.load_handle(h + {off})\n    __drop_matrix(f{i})\n"
+                ));
             }
             Ty::Applied(TypeConstructorId::Map, a)
                 if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String) =>
@@ -1105,6 +1137,8 @@ pub fn generate_record_drop_sources(
     let mut list_drops: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut need_map_ss = false;
     let mut need_list_str = false;
+    let mut need_matrix = false;
+    let mut need_list_matrix = false;
     for decl in type_decls {
         let IrTypeDeclKind::Record { fields } = &decl.kind else { continue };
         if !rec_names.contains(decl.name.as_str()) {
@@ -1124,6 +1158,8 @@ pub fn generate_record_drop_sources(
             &mut list_drops,
             &mut need_map_ss,
             &mut need_list_str,
+            &mut need_matrix,
+            &mut need_list_matrix,
         ));
         out.push_str("  } else ()\n");
         out.push_str("  prim.rc_dec(h)\n");
@@ -1197,6 +1233,8 @@ pub fn generate_record_drop_sources(
             &mut list_drops,
             &mut need_map_ss,
             &mut need_list_str,
+            &mut need_matrix,
+            &mut need_list_matrix,
         ));
         out.push_str("  } else ()\n");
         out.push_str("  prim.rc_dec(h)\n");
@@ -1267,6 +1305,33 @@ pub fn generate_record_drop_sources(
              fn __drop_map_ss_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
                if i >= n then ()\n  \
                else { prim.rc_dec(prim.load64(h + 12 + i * 8))\n         __drop_map_ss_loop(h, n, i + 1) }\n",
+        );
+    }
+    if need_matrix {
+        // The v1 Matrix free: at the block's last ref, `rc_dec` each owned flat row
+        // (slot i64-widened handles @12 + i*8, count @4), then the block — the
+        // `__drop_list_str` sweep typed over Matrix.
+        out.push_str(
+            "fn __drop_matrix(m: Matrix) -> Unit = {\n  \
+               let h = prim.handle(m)\n  \
+               if prim.load32(h + 0) == 1 then __drop_matrix_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}\n\
+             fn __drop_matrix_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else { prim.rc_dec(prim.load64(h + 12 + i * 8))\n         __drop_matrix_loop(h, n, i + 1) }\n",
+        );
+    }
+    if need_list_matrix {
+        // A `List[Matrix]` field: each element recurses through `__drop_matrix`, then
+        // the list block — the two-level sweep `DropListListStr` performs for values.
+        out.push_str(
+            "fn __drop_list_matrix(xs: List[Matrix]) -> Unit = {\n  \
+               let h = prim.handle(xs)\n  \
+               if prim.load32(h + 0) == 1 then __drop_list_matrix_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}\n\
+             fn __drop_list_matrix_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else { let e: Matrix = prim.load_handle(h + 12 + i * 8)\n         __drop_matrix(e)\n         __drop_list_matrix_loop(h, n, i + 1) }\n",
         );
     }
     if need_list_str {

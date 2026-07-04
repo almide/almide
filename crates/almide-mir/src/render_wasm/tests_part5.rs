@@ -961,3 +961,39 @@ fn load_weights_record_return_shape() {
         assert_eq!(out, "2.0\n-0.5\n100.25");
     }
 }
+
+#[test]
+fn matrix_record_field_drop_routes_recursively() {
+    // A record with `Matrix` / `List[Matrix]` fields: the generated `$__drop_<R>` must
+    // free each field's ROWS (via `__drop_matrix` / `__drop_list_matrix`), not flat-
+    // `rc_dec` the outer block (the pre-fix row leak). A 2000-iteration create+drop
+    // loop runs bounded with the right sum — the leak-loop convention.
+    let src = "type W = {\n\
+        m: Matrix,\n\
+        ms: List[Matrix],\n\
+        }\n\
+        fn mk(i: Int) -> W = {\n\
+        {\n\
+        m: matrix.from_lists([[int.to_float(i), 2.0], [3.0, 4.0]]),\n\
+        ms: matrix.split_cols_even(matrix.ones(2, 4), 2),\n\
+        } }\n\
+        effect fn main() -> Unit = {\n\
+        var i = 0\n\
+        var acc = 0.0\n\
+        while i < 2000 {\n\
+        let w = mk(i)\n\
+        acc = acc + matrix.get(w.m, 0, 0) + int.to_float(list.len(w.ms))\n\
+        i = i + 1 }\n\
+        println(float.to_string(acc)) }\n";
+    let prog = lower_source(src);
+    let wat = render_wasm_program(&prog);
+    assert!(wat.contains("$__drop_matrix"), "the Matrix field routes through __drop_matrix");
+    assert!(
+        wat.contains("$__drop_list_matrix"),
+        "the List[Matrix] field routes through __drop_list_matrix"
+    );
+    if let Some(out) = build_and_run("matrix_field_drop", &wat) {
+        // Σ i (0..2000) + 2000 × len(ms)=2 = 1999000 + 4000.
+        assert_eq!(out, "2003000.0");
+    }
+}
