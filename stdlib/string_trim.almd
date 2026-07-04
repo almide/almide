@@ -1,4 +1,6 @@
 // string_trim — SELF-HOSTED `string.trim` / `trim_start` / `trim_end` for v1
+// NORMATIVE SPEC: ALS-T1 (docs/specs/als/text-and-numbers.md §T1) — conformance is judged against that section's
+// rules and its pinned fixture, NOT against any other implementation (F1: no oracle circularity).
 // over the prim floor. Trims the full Unicode White_Space set (the 25
 // codepoints of Rust's `char::is_whitespace` — the native oracle `str::trim*`),
 // decoding UTF-8 at the boundaries only; the middle is byte-copied verbatim.

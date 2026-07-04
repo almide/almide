@@ -1,4 +1,6 @@
 // to_upper — SELF-HOSTED `string.to_upper(s)` for v1: FULL Unicode case mapping,
+// NORMATIVE SPEC: ALS-T5 (docs/specs/als/text-and-numbers.md §T5) — conformance is judged against that section's
+// rules and its pinned fixture, NOT against any other implementation (F1: no oracle circularity).
 // byte-identical to v0's `str::to_uppercase()`. The mapping table is GENERATED
 // FROM RUST ITSELF (scratch casedump: every codepoint where to_uppercase != identity,
 // 1580 entries incl. 1:N SpecialCasing like ß→SS) so the two implementations

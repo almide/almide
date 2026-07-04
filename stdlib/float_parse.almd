@@ -1,4 +1,6 @@
 // float_parse — SELF-HOSTED `float.parse(s)` → Result[Float, String] for the v1 wasm spine.
+// NORMATIVE SPEC: ALS-T2 (docs/specs/als/text-and-numbers.md §T2) — conformance is judged against that section's
+// rules and its pinned fixture, NOT against any other implementation (F1: no oracle circularity).
 // v0 is `s.trim().parse::<f64>()`. FULL IEEE-754 correctly-rounded strtod, two-tier like Rust:
 //  - FAST PATH: <= 15 digits and |net-exp| <= 22 — the mantissa is exact in f64 and 10^k is an
 //    exact f64, so one multiply/divide is correctly rounded (Clinger's safe region).

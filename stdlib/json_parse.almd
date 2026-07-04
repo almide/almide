@@ -1,4 +1,6 @@
 // json_parse — SELF-HOSTED `json.parse(text)`: a pure-Almide recursive-descent
+// NORMATIVE SPEC: ALS-T3 (docs/specs/als/text-and-numbers.md §T3) — conformance is judged against that section's
+// rules and its pinned fixture, NOT against any other implementation (F1: no oracle circularity).
 // JSON parser over the prim byte floor, transcribed clause-for-clause from the
 // native oracle (`runtime/rs/src/json.rs::almide_rt_json_parse`) so the v1
 // trust spine lowers it through the PROVEN pipeline with NO hand-written wasm

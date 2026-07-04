@@ -1,4 +1,6 @@
 // list_chunk — SELF-HOSTED list.chunk(xs, n) for v1: split xs into consecutive chunks of size n
+// NORMATIVE SPEC: ALS-T4 (docs/specs/als/text-and-numbers.md §T4) — conformance is judged against that section's
+// rules and its pinned fixture, NOT against any other implementation (F1: no oracle circularity).
 // (the last may be smaller), as v0's `xs.chunks(n)`. Builds a NESTED list: a DynListStr outer (via
 // prim.alloc_list_str) whose slots own each chunk (a fresh List[Int], moved in via prim.store_str).
 // n > 0 (chunks(0) panics in v0). Source borrowed; the whole nested result is freshly owned.
