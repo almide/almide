@@ -105,6 +105,7 @@ spec/wasm_cross/list_swap_oob.almd
 spec/wasm_cross/list_with_capacity.almd
 spec/wasm_cross/map_filter.almd
 spec/wasm_cross/map_set_eq.almd
+spec/wasm_cross/map_set_ops.almd
 spec/wasm_cross/match_result.almd
 spec/wasm_cross/math_explog.almd
 spec/wasm_cross/math_log_gamma.almd
