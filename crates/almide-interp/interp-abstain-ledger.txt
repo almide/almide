@@ -19,6 +19,7 @@ bytes_f16  out-of-interp-scope capability: bytes.from_list
 bytes_from_list_param  out-of-interp-scope capability: bytes.from_list
 bytes_push_inplace  out-of-interp-scope capability: bytes.new
 bytes_rawptr  out-of-interp-scope capability: bytes.from_list
+bytes_set_value_semantics  out-of-interp-scope capability: bytes.from_list
 chunk_str  out-of-interp-scope capability: list.chunk
 codec_decode_errors  out-of-interp-scope capability: json.parse
 codec_float_int  out-of-interp-scope capability: json.parse
@@ -88,6 +89,7 @@ memory_stress  out-of-interp-scope capability: in-place container mutation `list
 module_global_const  out-of-interp-scope capability: bytes.from_list
 mut_map_param  out-of-interp-scope capability: in-place container mutation `map.insert` (mut receiver; interp args are by-value so the binding cannot be written back)
 mutual_append  out-of-interp-scope capability: string.get
+nested_hof_lambda_inference  out-of-interp-scope capability: list.zip
 nested_match_heap_arm  out-of-interp-scope capability: int.from_hex
 option_result  out-of-interp-scope capability: option.to_list
 playground_default  out-of-interp-scope capability: string.drop
@@ -102,6 +104,7 @@ result_match_rewrap_modcall  out-of-interp-scope capability: string.from_bytes
 result_value_int_tuple  out-of-interp-scope capability: value.int
 set_insertion_order  out-of-interp-scope capability: set.from_list
 sized_numeric_literals  out-of-interp-scope capability: int.from_int8
+spread_record_share  out-of-interp-scope capability: map.entries
 str_result_heap_bind  out-of-interp-scope capability: value.str
 string_case_unicode  out-of-interp-scope capability: string.from_codepoint
 string_codepoint  out-of-interp-scope capability: string.take
@@ -111,6 +114,7 @@ string_from_bytes  out-of-interp-scope capability: string.to_bytes
 string_is_alphanumeric  out-of-interp-scope capability: string.is_alphanumeric
 string_ops  out-of-interp-scope capability: string.slice
 string_ops_drain  out-of-interp-scope capability: string.replace_first
+string_passthrough_share  out-of-interp-scope capability: string.replace_first
 string_predicates  out-of-interp-scope capability: string.is_alpha
 string_rle  out-of-interp-scope capability: string.run_length_encode
 string_split_rle_codepoint  out-of-interp-scope capability: string.run_length_encode
@@ -122,7 +126,9 @@ value_array_leak_loop  out-of-interp-scope capability: value.int
 value_array_tuple_tco  out-of-interp-scope capability: value.str
 value_as_array_leak_loop  out-of-interp-scope capability: value.int
 value_as_array_roundtrip  out-of-interp-scope capability: value.int
+value_deep_eq  out-of-interp-scope capability: json.null
 value_eq  out-of-interp-scope capability: value.int
 value_merge  out-of-interp-scope capability: value.int
 value_object_leak_loop  out-of-interp-scope capability: value.int
+value_object_ops_share  out-of-interp-scope capability: value.int
 value_repr  out-of-interp-scope capability: value.int
