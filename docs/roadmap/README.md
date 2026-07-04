@@ -22,7 +22,7 @@
 | [Completeness by Construction](active/completeness-by-construction.md) |  |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
 | [Cross-Target Completeness (the Lid)](active/cross-target-completeness.md) | Cross-target completeness lid — the staged path from "all known divergences fixed + byte-diff gate" to structural equivalence (drain → interpreter+fuzz → selfhost → kernel proofs), with the live drain queue |
-| [Crush-Pass Continuation — 残件の正確な再開点](active/crush-pass-continuation.md) | Exact re-entry points for the remaining crush-pass items — nn 8 walls, CG-1 expansion, coverage raising, with per-item diagnosis and first move |
+| [Crush-Pass Continuation — 残件の正確な再開点](active/crush-pass-continuation.md) | Exact re-entry points for the remaining crush-pass work — gguf ADT walls, Matrix value model, coverage — with per-item diagnosis, probes, and first move |
 | [The Determinism / Purity Belt](active/determinism-belt.md) | Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1](active/effectful-27-blueprint.md) |  |
