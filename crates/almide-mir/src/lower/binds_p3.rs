@@ -207,6 +207,27 @@ impl LowerCtx {
     /// allocation (cert `i`; its scope-end `Drop` = cert `d`), tracked as a materialized
     /// aggregate so a later field read / `==` may load its real slots. Mirrors
     /// [`Self::try_lower_scalar_record_construct`] with a leading tag slot.
+    /// Is `ty` a `List` ctor field the GENERATED variant drop can free — a `List[scalar]`
+    /// (the drop body's flat `rc_dec` is a full free: scalar elements own nothing) or a
+    /// `List[<rich variant>]` (freed per-element via the generated mutually-recursive
+    /// `$__drop_list_<E>`)? The construction-side mirror of the field loop in
+    /// [`crate::lower::generate_variant_drop_sources`] — a shape outside this set
+    /// (`List[String]`, `List[<flat variant>]`, `Map`) gets NO free statement there, so
+    /// admitting it here would build a value whose drop leaks.
+    fn ctor_list_field_drop_freeable(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::List, a) = ty else { return false };
+        if a.len() != 1 {
+            return false;
+        }
+        if !is_heap_ty(&a[0]) {
+            return true;
+        }
+        self.variant_layouts
+            .field_variant_name(&a[0])
+            .is_some_and(|n| self.variant_layouts.needs_recursive_drop(&n))
+    }
+
     pub(crate) fn try_lower_variant_ctor(&mut self, value: &IrExpr) -> Option<ValueId> {
         use crate::{IntOp, PrimKind};
         let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &value.kind else {
@@ -247,8 +268,18 @@ impl LowerCtx {
             } else if matches!(arg.ty, Ty::String) {
                 let obj = self.lower_owned_heap_field(arg)?;
                 field_vals.push((obj, true));
+            } else if self.ctor_list_field_drop_freeable(&arg.ty) {
+                // A `List[scalar]` / `List[<rich variant>]` ctor field (ADT brick 5:
+                // `ValArray(items)` — the gguf read_array accumulator): admitted EXACTLY when
+                // the generated `$__drop_<T>` body frees it (flat `rc_dec` / `__drop_list_<E>`
+                // — see `generate_variant_drop_sources`' field loop), so construction and drop
+                // can never disagree. A Var arg is `Dup`'d (co-owned, rc-aware on both drop
+                // paths); a `List[String]` / `List[<flat variant>]` / `Map` field stays walled
+                // (the generator emits no free for those — admitting one would leak).
+                let obj = self.lower_owned_heap_field(arg)?;
+                field_vals.push((obj, true));
             } else if is_heap_ty(&arg.ty) {
-                return None; // List / other heap ctor field — a later brick
+                return None; // List[String] / Map / other heap ctor field — a later brick
             } else {
                 let v = self.lower_scalar_value(arg)?;
                 field_vals.push((v, false));

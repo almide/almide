@@ -80,6 +80,18 @@ impl LowerCtx {
             // Var element's Dup. A pure Module-call (`value.array(items)`) returns a fresh Value the
             // same way; an impure/HO callee errors → None → the tuple defers (sound Opaque).
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                // A variant CONSTRUCTOR element (`(IntV(p), p + 4)` — the gguf read_one
+                // tuple-return shape): `IntV` is a registered ctor, NOT a user fn — a plain
+                // CallFn would emit a dangling `(call $IntV)` (unlinked). Materialize the
+                // fresh OWNED tag-block via `try_lower_variant_ctor` (the same pre-check the
+                // list-element arm uses) and track it for the caller's move-in.
+                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) {
+                    let obj = self.try_lower_variant_ctor(expr)?;
+                    if !self.live_heap_handles.contains(&obj) {
+                        self.live_heap_handles.push(obj);
+                    }
+                    return Some(obj);
+                }
                 let lowered = self.lower_call_args(args).ok()?;
                 let repr = repr_of(&expr.ty).ok()?;
                 let obj = self.fresh_value();

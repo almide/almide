@@ -693,3 +693,77 @@ fn opt_tuple_fold_scanner() {
         assert_eq!(out, "found:8\nnone");
     }
 }
+
+#[test]
+fn adt_int_tuple_return_ctor() {
+    // The gguf read_one shape: an `(ADT, Int)` tuple-return tail whose elements are
+    // variant CTOR calls (`(IntV(p), p + 4)`). The ctor element routes through
+    // `try_lower_variant_ctor` (a plain CallFn would leave `$IntV` unlinked); both a
+    // scalar ctor and a String-payload ctor construct, accumulate through list.push,
+    // and match-extract downstream.
+    let src = "type GV =\n\
+        | IntV(Int)\n\
+        | StrV(String)\n\
+        fn read_one(p: Int) -> (GV, Int) =\n\
+        if p % 2 == 0 then (IntV(p), p + 5)\n\
+        else (StrV(\"s\" + int.to_string(p)), p + 3)\n\
+        fn collect(n: Int) -> (List[GV], Int) = {\n\
+        var items: List[GV] = []\n\
+        var p = 0\n\
+        for _ in 0..n {\n\
+        let (val, next) = read_one(p)\n\
+        list.push(items, val)\n\
+        p = next }\n\
+        (items, p) }\n\
+        effect fn main() -> Unit = {\n\
+        let (vs, endp) = collect(4)\n\
+        for v in vs {\n\
+        match v {\n\
+        IntV(i) => println(\"i:\" + int.to_string(i))\n\
+        StrV(s) => println(\"s:\" + s) } }\n\
+        println(\"end:\" + int.to_string(endp)) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("adt_int_tuple_ret", &render_wasm_program(&prog)) {
+        assert_eq!(out, "i:0\ns:s5\ni:8\ns:s13\nend:16");
+    }
+}
+
+#[test]
+fn variant_ctor_list_field_recursive_accumulator() {
+    // The gguf read_array shape (ADT brick 5): a RECURSIVE accumulator whose tail returns
+    // `(ArrV(items), p)` — a ctor with a `List[<rich variant>]` field. The ctor admits the
+    // Dup'd list (freed via the generated mutually-recursive `$__drop_GV`/`$__drop_list_GV`);
+    // `end:9` witnesses every element's cursor advance through two recursion levels.
+    let src = "type GV =\n\
+        | IntV(Int)\n\
+        | StrV(String)\n\
+        | ArrV(List[GV])\n\
+        fn read_array(n: Int, depth: Int, pos: Int) -> (GV, Int) = {\n\
+        var items: List[GV] = []\n\
+        var p = pos\n\
+        for i in 0..n {\n\
+        if depth > 0 then {\n\
+        let (val, next) = read_array(2, depth - 1, p)\n\
+        list.push(items, val)\n\
+        p = next }\n\
+        else if i % 2 == 0 then {\n\
+        let (val, next) = (IntV(i * 10 + p), p + 1)\n\
+        list.push(items, val)\n\
+        p = next }\n\
+        else {\n\
+        let (val, next) = (StrV(\"x\" + int.to_string(p)), p + 2)\n\
+        list.push(items, val)\n\
+        p = next } }\n\
+        (ArrV(items), p) }\n\
+        effect fn main() -> Unit = {\n\
+        let (v, endp) = read_array(3, 1, 0)\n\
+        match v {\n\
+        ArrV(_) => println(\"arr\")\n\
+        IntV(i) => println(\"i\" + int.to_string(i))\n\
+        StrV(s) => println(s) }\n\
+        println(\"end:\" + int.to_string(endp)) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("ctor_list_field_rec", &render_wasm_program(&prog)) {
+        assert_eq!(out, "arr\nend:9");
+    }
+}
