@@ -154,6 +154,13 @@ impl LowerCtx {
         // — err-propagation WITHOUT a mid-function Return op. Re-enter so a later `!` in the continuation
         // also desugars, then desugar_heap_branches handles any heap-`if` continuations. Call-count-
         // invariant (no duplication), so `count_ir_calls` stays exact without re-running it.
+        // GUARD-ELSE → conditional FIRST (Phase A): restructure `guard cond else E; rest`
+        // into `if cond then { rest } else E` so the proven `if`/tail machinery runs the
+        // early-return / loop-continue. Re-enter so the other desugars then process the
+        // resulting `if`. Call-count-invariant (no duplication), so the caps gate stays exact.
+        if let Some(rewritten) = crate::lower::desugar_guard(body) {
+            return self.lower_body_into(&rewritten);
+        }
         if let Some(rewritten) = crate::lower::desugar_beta_reduce(body) {
             return self.lower_body_into(&rewritten);
         }

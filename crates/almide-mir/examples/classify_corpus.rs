@@ -1090,8 +1090,14 @@ fn main() {
                     // desugar-before-both: the SAME ANF-lift (call-arg heap-if → let) then
                     // tail-duplication the lowering applies, so the duplicated calls are counted
                     // 1:1 (mir == ir) and the caps gate stays exact.
-                    let eff_body = almide_mir::lower::desugar_heap_branches(&func.body)
+                    // desugar-before-both: the guard-else rewrite (Phase A) runs FIRST in
+                    // lowering, so mirror it here before heap_branches — the `if cond then rest
+                    // else E` the lowering counts must equal what this gate counts. Both
+                    // rewrites are call-count-invariant, so `mir == ir` holds by construction.
+                    let guard_body = almide_mir::lower::desugar_guard(&func.body)
                         .unwrap_or_else(|| func.body.clone());
+                    let eff_body = almide_mir::lower::desugar_heap_branches(&guard_body)
+                        .unwrap_or_else(|| guard_body.clone());
                     // INTERP COVERAGE (a): this function LOWERED, so its FULLY-LINKABLE
                     // interps (Lit/String/Int/Bool parts) fold to a registered __str_concat /
                     // int.to_string / bool.to_string chain (proven byte-match v0 by the

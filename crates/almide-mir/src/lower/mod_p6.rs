@@ -634,6 +634,180 @@ pub fn desugar_effect_unwrap(body: &IrExpr) -> Option<IrExpr> {
     desugar_effect_unwrap_inner(body, &mut next_var)
 }
 
+/// GUARD-ELSE → conditional (Phase A of the v1→v0 parity plan). `guard cond else E; rest`
+/// is a CONDITIONAL EARLY EXIT: when `!cond`, `E` becomes the result (a function early
+/// return, or a loop `continue`/`break`). v1 has no early-return op, so DEFERRING it
+/// (always-continue) silently miscompiled the `!cond` path (`guard len>0 else err();
+/// ok(x)` returned ok for the empty input). This PURE IR rewrite restructures the block
+/// so the SAME control flow runs through the proven `if` machinery:
+///
+///   `{ pre…; guard cond else E; rest…; tail }`
+///     → `{ pre…; if cond then { rest…; tail } else E' }`
+///
+/// where `E'` is `E` verbatim EXCEPT a `continue` becomes `()`: `guard cond else continue;
+/// rest` means "skip the rest of THIS iteration when `!cond`", which is exactly `if cond
+/// then { rest } else ()` — eliminating the `continue` node so the scalar-loop path (which
+/// declines a body with `continue`/`break`) accepts it. A `break` stays verbatim (it needs
+/// real loop-exit — the residual guard-break shapes wall until break support lands). A
+/// function-body guard's `E` (an `err(…)`/value) makes the `if` the block TAIL → the proven
+/// heap/scalar-result-`if` handles the early-return value.
+///
+/// CALL-COUNT-INVARIANT: `cond`, `E`, and each `rest` statement appear EXACTLY ONCE before
+/// and after (no duplication — `rest` nests in ONE arm), so `mir == ir` holds and the caps
+/// gate stays exact without re-running. Recurses into every block (function body, loop
+/// bodies, `if`/`match` arms) and handles CHAINED guards (a second guard in `rest` is
+/// rewritten by the recursive call on the constructed then-block).
+pub fn desugar_guard(body: &IrExpr) -> Option<IrExpr> {
+    let mut changed = false;
+    let rewritten = desugar_guard_rec(body.clone(), &mut changed);
+    changed.then_some(rewritten)
+}
+
+/// Rewrite the FIRST `guard` in a loop-body statement list into an `if` statement:
+/// `[pre…, Guard{cond,else}, rest…]` → `[pre…, Expr(if cond then { rest… } else E')]`
+/// (`continue` → `()`, `break`/value verbatim). The `if`'s then-block is recursively
+/// desugared so a chained guard in `rest` is handled. No guard → the list is returned
+/// unchanged (recursion into each statement's sub-exprs already happened via the caller's
+/// `map_children`, so only the list-level restructuring remains here).
+fn rewrite_guard_stmt_list(
+    body: Vec<almide_ir::IrStmt>,
+    changed: &mut bool,
+) -> Vec<almide_ir::IrStmt> {
+    use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind};
+    let Some(i) = body
+        .iter()
+        .position(|s| matches!(s.kind, IrStmtKind::Guard { .. }))
+    else {
+        return body;
+    };
+    *changed = true;
+    let mut pre = body;
+    let rest = pre.split_off(i + 1);
+    let guard = pre.pop().expect("guard at index i");
+    let (cond, else_, gspan) = match guard.kind {
+        IrStmtKind::Guard { cond, else_ } => (cond, else_, guard.span),
+        _ => unreachable!("position() found a Guard"),
+    };
+    // The then-body is `{ rest… }` (Unit); recurse so a further guard in it is rewritten.
+    let then_block = desugar_guard_rec(
+        IrExpr {
+            kind: IrExprKind::Block { stmts: rest, expr: None },
+            ty: Ty::Unit,
+            span: gspan,
+            def_id: None,
+        },
+        changed,
+    );
+    let else_branch = match &else_.kind {
+        IrExprKind::Continue => IrExpr {
+            kind: IrExprKind::Unit,
+            ty: Ty::Unit,
+            span: else_.span,
+            def_id: else_.def_id,
+        },
+        _ => else_,
+    };
+    let if_expr = IrExpr {
+        kind: IrExprKind::If {
+            cond: Box::new(cond),
+            then: Box::new(then_block),
+            else_: Box::new(else_branch),
+        },
+        ty: Ty::Unit,
+        span: gspan,
+        def_id: None,
+    };
+    pre.push(IrStmt { kind: IrStmtKind::Expr { expr: if_expr }, span: gspan });
+    pre
+}
+
+fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
+    use almide_ir::{IrExprKind, IrStmtKind};
+    // Bottom-up: rewrite every child expression first (arm bodies, bind values — all
+    // reachable through `map_children`), so a guard nested inside a sub-expression is
+    // handled before this node's own restructuring.
+    let e = e.map_children(&mut |c| desugar_guard_rec(c, changed));
+    // A LOOP BODY is a `Vec<IrStmt>` (NOT a `Block` expr — `map_children` maps each
+    // statement's sub-exprs but never restructures the list), so a `guard … else continue`
+    // inside `for`/`while` needs its OWN statement-list rewrite: `[pre…, Guard, rest…]` →
+    // `[pre…, Expr(if cond then { rest… } else E')]`. Same continue→() / break-verbatim rule.
+    if let IrExprKind::ForIn { var, var_tuple, iterable, body } = e.kind {
+        let new_body = rewrite_guard_stmt_list(body, changed);
+        return IrExpr {
+            kind: IrExprKind::ForIn { var, var_tuple, iterable, body: new_body },
+            ty: e.ty,
+            span: e.span,
+            def_id: e.def_id,
+        };
+    }
+    if let IrExprKind::While { cond, body } = e.kind {
+        let new_body = rewrite_guard_stmt_list(body, changed);
+        return IrExpr {
+            kind: IrExprKind::While { cond, body: new_body },
+            ty: e.ty,
+            span: e.span,
+            def_id: e.def_id,
+        };
+    }
+    let IrExprKind::Block { stmts, expr } = &e.kind else {
+        return e;
+    };
+    let Some(i) = stmts
+        .iter()
+        .position(|s| matches!(s.kind, IrStmtKind::Guard { .. }))
+    else {
+        return e;
+    };
+    *changed = true;
+    let ty = e.ty.clone();
+    let span = e.span.clone();
+    let def_id = e.def_id;
+    let mut pre = stmts.clone();
+    let rest = pre.split_off(i + 1); // rest = stmts[i+1..]
+    let guard = pre.pop().expect("guard at index i"); // remove the guard; pre = stmts[0..i]
+    let (cond, else_) = match guard.kind {
+        IrStmtKind::Guard { cond, else_ } => (cond, else_),
+        _ => unreachable!("position() found a Guard"),
+    };
+    // The THEN branch (`cond` true) is the continuation `{ rest…; tail }`, same result
+    // type as this block. Recurse so a FURTHER guard inside `rest` is rewritten too.
+    let then_block = desugar_guard_rec(
+        IrExpr {
+            kind: IrExprKind::Block { stmts: rest, expr: expr.clone() },
+            ty: ty.clone(),
+            span,
+            def_id,
+        },
+        changed,
+    );
+    // The ELSE branch (`cond` false) is `E`, except `continue` → `()` (see doc).
+    let else_branch = match &else_.kind {
+        IrExprKind::Continue => IrExpr {
+            kind: IrExprKind::Unit,
+            ty: Ty::Unit,
+            span: else_.span,
+            def_id: else_.def_id,
+        },
+        _ => else_,
+    };
+    let if_expr = IrExpr {
+        kind: IrExprKind::If {
+            cond: Box::new(cond),
+            then: Box::new(then_block),
+            else_: Box::new(else_branch),
+        },
+        ty: ty.clone(),
+        span,
+        def_id,
+    };
+    IrExpr {
+        kind: IrExprKind::Block { stmts: pre, expr: Some(Box::new(if_expr)) },
+        ty,
+        span,
+        def_id,
+    }
+}
+
 fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
     use almide_ir::{IrMatchArm, IrPattern};
     use almide_lang::types::Ty;

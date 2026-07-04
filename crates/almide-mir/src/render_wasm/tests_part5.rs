@@ -1189,3 +1189,25 @@ fn heap_if_returning_a_bound_var_is_leak_free() {
         assert_eq!(out, "rect 2999.0");
     }
 }
+
+#[test]
+fn guard_else_early_return_and_continue_execute() {
+    // Phase A end-to-end: a function-body `guard cond else err(...)` returns the Err on
+    // the failing path (the pre-fix always-continue miscompile returned ok), and a
+    // loop-body `guard cond else continue` filters iterations. Byte-verified vs v0.
+    let src = "effect fn validated(s: String) -> Result[String, String] = {\n\
+        guard string.len(s) > 0 else err(\"empty\")\n\
+        ok(string.to_upper(s)) }\n\
+        effect fn main() -> Unit = {\n\
+        match validated(\"hi\") { ok(v) => println(\"ok:\" + v), err(e) => println(\"err:\" + e) }\n\
+        match validated(\"\") { ok(v) => println(\"ok:\" + v), err(e) => println(\"err:\" + e) }\n\
+        var total = 0\n\
+        for i in 1..=10 {\n\
+        guard i % 2 != 0 else continue\n\
+        total = total + i }\n\
+        println(int.to_string(total)) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("guard_early_return", &render_wasm_program(&prog)) {
+        assert_eq!(out, "ok:HI\nerr:empty\n25");
+    }
+}

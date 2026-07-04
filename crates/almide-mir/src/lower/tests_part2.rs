@@ -960,10 +960,12 @@
     }
 
     #[test]
-    fn guard_else_early_return_walls_not_miscompiles() {
-        // `guard cond else E; …` is a conditional early return; v1 has no early-return
-        // control flow, so the DEFERRED (always-continue) model silently miscompiled the
-        // `!cond` path (validated("") returned ok instead of err). It must WALL, not lower.
+    fn guard_else_desugars_to_a_conditional() {
+        // `guard cond else E; …` is a conditional early return; the Phase-A desugar
+        // rewrites it to `if cond then { rest } else E` so the proven `if`/tail machinery
+        // runs the `!cond` path (validated("") must return err, not the deferred always-ok
+        // miscompile). Assert the desugar FIRES and leaves NO Guard statement behind.
+        use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
         let b = body(vec![
             stmt(IrStmtKind::Guard {
                 cond: ir_expr(IrExprKind::LitBool { value: true }, Ty::Bool),
@@ -978,8 +980,20 @@
                 ),
             }),
         ]);
-        match lower_body(&b, "validated") {
-            Err(LowerError::Unsupported(m)) => assert!(m.contains("guard-else"), "got: {m}"),
-            other => panic!("expected a guard wall, got {other:?}"),
+        let desugared = crate::lower::desugar_guard(&b).expect("guard desugar fires");
+        struct GuardHunter(bool);
+        impl IrVisitor for GuardHunter {
+            fn visit_stmt(&mut self, s: &almide_ir::IrStmt) {
+                if matches!(s.kind, IrStmtKind::Guard { .. }) {
+                    self.0 = true;
+                }
+                walk_stmt(self, s);
+            }
+            fn visit_expr(&mut self, e: &IrExpr) {
+                walk_expr(self, e);
+            }
         }
+        let mut h = GuardHunter(false);
+        h.visit_expr(&desugared);
+        assert!(!h.0, "no Guard statement must remain after the desugar");
     }
