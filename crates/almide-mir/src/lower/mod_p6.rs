@@ -673,6 +673,101 @@ pub fn desugar_guard(body: &IrExpr) -> Option<IrExpr> {
 /// the under-desugared count never sees (the `option.unwrap_or((tuple)); f(r.0)` mir>ir breach).
 /// This is the single "desugar-before-both" source of truth; callers use it instead of
 /// hand-picking a subset of the desugars.
+/// COMPACT IR pretty-printer for desugar debugging (env-gated via `DBG_DESUGAR_FN`). Shows the
+/// tree structure — `Block`, `Match`/`If` with per-arm patterns, `Call` targets, `Try`/`Unwrap`,
+/// ctors, `Var`/`Lit` — concise enough to `diff` two desugared bodies (e.g. a derived-Codec
+/// `decode` vs the proven separate-bind form) and pinpoint where they diverge. NOT used at
+/// runtime; a pure diagnostic reachable through `dump_desugared_ir`.
+pub fn dump_ir(e: &IrExpr) -> String {
+    fn go(e: &IrExpr, ind: usize, out: &mut String) {
+        use almide_ir::{IrExprKind as K, IrStmtKind as S};
+        let pad = "  ".repeat(ind);
+        match &e.kind {
+            K::Block { stmts, expr } => {
+                out.push_str(&format!("{pad}Block\n"));
+                for s in stmts {
+                    match &s.kind {
+                        S::Bind { var, value, .. } => {
+                            out.push_str(&format!("{pad}  let v{}=\n", var.0));
+                            go(value, ind + 2, out);
+                        }
+                        S::Expr { expr } => {
+                            out.push_str(&format!("{pad}  expr\n"));
+                            go(expr, ind + 2, out);
+                        }
+                        other => out.push_str(&format!("{pad}  stmt({other:?})\n")),
+                    }
+                }
+                if let Some(t) = expr {
+                    out.push_str(&format!("{pad}  tail\n"));
+                    go(t, ind + 2, out);
+                }
+            }
+            K::Match { subject, arms } => {
+                out.push_str(&format!("{pad}Match\n{pad}  subj\n"));
+                go(subject, ind + 2, out);
+                for a in arms {
+                    out.push_str(&format!("{pad}  arm {:?} =>\n", a.pattern));
+                    go(&a.body, ind + 2, out);
+                }
+            }
+            K::If { cond, then, else_ } => {
+                out.push_str(&format!("{pad}If\n{pad}  cond\n"));
+                go(cond, ind + 2, out);
+                out.push_str(&format!("{pad}  then\n"));
+                go(then, ind + 2, out);
+                out.push_str(&format!("{pad}  else\n"));
+                go(else_, ind + 2, out);
+            }
+            K::Call { target, args, .. } => {
+                out.push_str(&format!("{pad}Call({})\n", crate::lower::call_target_kind(target)));
+                for a in args {
+                    go(a, ind + 1, out);
+                }
+            }
+            K::Try { expr } => {
+                out.push_str(&format!("{pad}Try\n"));
+                go(expr, ind + 1, out);
+            }
+            K::Unwrap { expr } => {
+                out.push_str(&format!("{pad}Unwrap\n"));
+                go(expr, ind + 1, out);
+            }
+            K::ResultOk { expr } => {
+                out.push_str(&format!("{pad}Ok\n"));
+                go(expr, ind + 1, out);
+            }
+            K::ResultErr { expr } => {
+                out.push_str(&format!("{pad}Err\n"));
+                go(expr, ind + 1, out);
+            }
+            K::Record { name, fields } => {
+                out.push_str(&format!("{pad}Record({:?}, {} fields)\n", name, fields.len()));
+                for f in fields {
+                    go(&f.1, ind + 1, out);
+                }
+            }
+            K::Var { id } => out.push_str(&format!("{pad}v{}\n", id.0)),
+            other => out.push_str(&format!("{pad}{}\n", crate::lower::kind_name(other))),
+        }
+    }
+    let mut s = String::new();
+    go(e, 0, &mut s);
+    s
+}
+
+/// Env-gated desugar dump: when `DBG_DESUGAR_FN == fn_name`, print the fully-desugared body so the
+/// derived-Codec `decode` chain can be diffed against the proven separate-bind form. No-op otherwise.
+pub fn dump_desugared_ir(fn_name: &str, body: &IrExpr) {
+    if std::env::var("DBG_DESUGAR_FN").is_ok_and(|v| v == fn_name) {
+        if std::env::var("DBG_DESUGAR_RAW").is_ok() {
+            eprintln!("=== RAW {fn_name} ===\n{:#?}", desugar_all(body));
+        } else {
+            eprintln!("=== DESUGARED {fn_name} ===\n{}", dump_ir(&desugar_all(body)));
+        }
+    }
+}
+
 pub fn desugar_all(body: &IrExpr) -> IrExpr {
     let mut cur = body.clone();
     loop {

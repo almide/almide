@@ -19,7 +19,7 @@ v1 の核（honest wall）は既に成立：受理プログラムは必ず正し
 | # | ブロッカー | 状態 |
 |---|---|---|
 | **B-1** | **動的ディスパッチ（Phase C）** — first-class クロージャ + `.method()`（method/computed ~79 + heap-result match tail 74 の大半）。「普通に書いたコードがコンパイルできるか」を決める実用の本丸。**最大ブロッカー**。 | 未着手 |
-| **B-2** | **derived Codec `.decode()`**（Camp-4 heap-Ok `?`-bind）。**進行中**: (1) `value.field` を self-host 済み（byte一致、commit 済み — decode が呼ぶ未 self-host prim を解消）。(2) **下流の lowering 機構は正しいと実証**（`effect fn` の別 bind 形 `let fv = value.field(v,k)!; let x = value.as_T(fv)!; …; ok(R{…})` は multi-field でも lower・byte一致=valid wasm）。(3) **残**: derive のネスト `?`（`value.as_T(value.field(v,k)?)?`、plain fn の Try）を上記の別 bind 形へ desugar-lift する。callarg-unwrap を effect-unwrap の前に走らせ Try 認識 + 外側 unwrap への再帰で単一/effect は開通するが、**multi-field の plain-fn `?` は部分 lift で invalid wasm を生む**ため revert（honest-wall: invalid wasm は絶対不可）。目標形（別 bind）は判明済みで、desugared IR を突き合わせて完全 lift すれば通る。 | value.field 済 / desugar 残 |
+| **B-2** | **derived Codec `.decode()`**（Camp-4 heap-Ok `?`-bind）。**進行中 — 精密診断まで完了、次セッション用の handoff あり**。詳細は下の「B-2 handoff」参照。 | value.field 済 / desugar 残 |
 | **B-3** | **nn end-to-end（fast-exp 族）**。wasm oracle は SIMD ではなく scalar libm exp（= self-host 済み math.exp）と判明。**7/7 全て開通・byte一致**（softmax_rows / gelu / swiglu_gate / rope_rotate / multi_head_attention / masked_multi_head_attention / from_q1_0_bytes）。nn の matrix スタックは完全 self-host・byte 検証済み。**✅ 実質クローズ**（残る nn unlinked は fft の enumerate_h/zip_h の 4 補助サイトのみ、非推論経路）。 | ✅ 7/7 |
 | **B-4** | **native ターゲット** — v0-native matrix codegen 破損（引き継ぎ）。native を出荷対象にする場合のみ。 | 外部ブロック |
 
@@ -177,3 +177,46 @@ phase 単位で goal 設定するのが回しやすい。例：
 
 各 goal の完了判定は上記 exit gate（`classify_corpus` の該当バケット count + 横断
 バッテリー green）で機械的に確認できる。
+
+## B-2 handoff（次セッション再開点 — 2026-07-05）
+
+### 状況
+- ✅ `value.field` を self-host（Object タグチェック、byte一致、commit 済み）。
+- ✅ **下流 lowering は正しい**: `effect fn dec(v) = { let fv=value.field(v,k)!; let x=value.as_T(fv)!; …; ok(R{…}) }`
+  （別 bind 形）は **multi-field でも valid wasm・byte一致**（scratch: man5/man6 の `dec`）。
+- ❌ **derive の `Basic.decode`（plain fn, `?`）は invalid wasm**（`type mismatch: expected i32, found i64`）。
+
+### 精密診断（ここが肝）
+デバッグ用の **desugared-IR ダンプを実装済み**（commit 済み、env ゲート）:
+```
+DBG_DESUGAR_FN=<fn名> [DBG_DESUGAR_RAW=1] almide/render_program <file>   # eprintln に desugared IR
+```
+`crates/almide-mir/src/lower/mod_p6.rs::dump_ir` / `dump_desugared_ir`、呼び出しは
+`lower_function_all_impl`（mod.rs）。
+
+**発見**: man6（`type Basic: Codec` + 手書き effect-fn `dec` の両方を含む単一ファイル）で
+`dec`（valid）と `Basic.decode`（invalid）の **desugared IR は VarId 番号を除いて完全一致**
+（`DBG_DESUGAR_RAW` の diff で確認）。にもかかわらず **MIR は異なる**（`Basic.decode` は local が
+2 個多く、v91 付近で i32/i64 が入れ替わる — wat の local 宣言で確認可能）。
+
+→ **同一 desugared IR が別の MIR に lower される**。差は fn レベル:
+  - `dec` は `is_effect: true`、`Basic.decode` は `is_effect: false`（plain fn）。
+  - derive の param `_v: Value` は `ParamBorrow::Own`（手書きは borrow）。ただし現状の
+    `bind_params`（mod_p3）は `ParamBorrow` を見ず全 heap param を borrow 扱い → これ単体は
+    差にならないはず。
+  - **実際の lowering 経路は `desugar_heap_branches(func.body)` → TCO → `lower_body_into`** で、
+    ダンプの `desugar_all` とは入口が違う。**次はここを疑う**: pre_tco の `desugar_heap_branches`
+    が二つの関数で違う中間形を作る／`lower_body_into` の実際の desugar 済み body をダンプして
+    `desugar_all` 版と突き合わせる。
+
+### 次の一手（順に）
+1. **実 lowering 経路の body をダンプ**: `lower_body_into` の入口（desugar 完了後）で同じ
+   `dump_ir` を出し、`dec` と `Basic.decode` で diff。ダンプが `desugar_all` 経由なので、
+   pre_tco 経路との差がここで出るはず。
+2. desugar-lift の正解形は **man5/man6 の `dec` の別 bind nested-match**（`subj: vN`（lift 済み）
+   であって `subj: Call(value.as_int, [Try(...)])` ではない）。これを derive でも生成する。
+   前回の試み（take_or_recurse に Try 認識 + 外側 unwrap 再帰 + callarg-unwrap を effect-unwrap
+   の前に）で単一/effect は開通、**multi-field の plain-fn `?` だけ invalid wasm**（revert 済み、
+   git 履歴の diff 参照）。上記 #1 で「同一 desugared でも MIR が違う」理由を潰してから再適用する。
+3. **honest-wall 厳守**: invalid wasm は絶対に commit しない。各試行で `render + wasmtime` の
+   valid 検証を必須にする。
