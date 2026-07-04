@@ -381,6 +381,16 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // `ok((GGUFHeader {…}, 24))` / err — a (record, Int) tuple Ok (gguf parse_header).
+            IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+                if self.is_rec_int_result_ty(result_ty) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_result_rec_int_ctor(arm, result_ty)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // HEAP-Ok `Result[(Value, Int), String]` (toml parse_val's `ok((value.…, pos))` as an
             // if/match arm) — the (Value,Int) tuple counterpart, recursive DropResultValueInt.
             IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
@@ -955,6 +965,127 @@ impl LowerCtx {
         self.variant_drop_handles.insert(obj, format!("resrec:{drop_fn}"));
         self.materialized_results_str.insert(obj);
         obj
+    }
+
+    /// Construct a `Result[(R, Int), String]` `ok((R {{…}}, n))` / `err(<String>)` — the
+    /// gguf parse_header shape. Ok materializes the owned record then a 2-slot tuple
+    /// block owning it (record handle @12, Int @20) and wraps it; the wrapper's drop
+    /// recurses via the generated `$__drop_tup_int_<R>` (`resrec:tup_int_<R>`).
+    /// Is `ty` `Result[(R, Int), String]` for a RECORD R (recursive-drop or flat)?
+    pub(crate) fn is_rec_int_result_ty(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        matches!(ty,
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2
+                && matches!(a[1], Ty::String)
+                && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+                    && matches!(ts[1], Ty::Int)
+                    && self.aggregate_field_tys(&ts[0]).is_some()
+                    && !matches!(ts[0], Ty::String)))
+    }
+
+    pub(crate) fn try_lower_result_rec_int_ctor(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        use almide_lang::types::constructor::TypeConstructorId;
+        let rec_ty = match result_ty {
+            Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && matches!(a[1], Ty::String) =>
+            {
+                match &a[0] {
+                    Ty::Tuple(ts)
+                        if ts.len() == 2
+                            && matches!(ts[1], Ty::Int)
+                            && self.aggregate_field_tys(&ts[0]).is_some()
+                            && !matches!(ts[0], Ty::String) =>
+                    {
+                        ts[0].clone()
+                    }
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        // A RECURSIVE-drop record routes through the generated `$__drop_tup_int_<R>`
+        // wrapper; a FLAT (all-scalar-field) record's tuple frees exactly like the
+        // (String, Int) tuple — slot0 rc_dec + blocks — so it REUSES DropResultStrInt.
+        let drop_fn = self.record_or_anon_drop_type_name(&rec_ty).map(|r| format!("tup_int_{r}"));
+        let repr = repr_of(result_ty).ok()?;
+        match &expr.kind {
+            IrExprKind::ResultOk { expr: inner } => {
+                let IrExprKind::Tuple { elements } = &inner.kind else { return None };
+                if elements.len() != 2 {
+                    return None;
+                }
+                let ops_mark = self.ops.len();
+                let lhh_mark = self.live_heap_handles.len();
+                let rec = match self
+                    .try_lower_record_construct(&elements[0])
+                    .or_else(|| self.try_lower_scalar_record_construct(&elements[0]))
+                    .or_else(|| self.lower_result_str_piece(&elements[0]))
+                {
+                    Some(v) => v,
+                    None => {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        return None;
+                    }
+                };
+                let n = match self.lower_scalar_value(&elements[1]) {
+                    Some(v) => v,
+                    None => {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        return None;
+                    }
+                };
+                // The 2-slot tuple block OWNING the record (moved in) + the scalar.
+                let two = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: two, value: 2 });
+                let tup = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: tup,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::DynList { len: two },
+                });
+                let th = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(th), args: vec![tup] });
+                let rh = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(rh), args: vec![rec] });
+                let s0 = self.load_addr(th, 12);
+                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![s0, rh] });
+                self.ops.push(Op::Consume { v: rec });
+                let s1o = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: s1o, value: 20 });
+                let s1 = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: s1, op: IntOp::Add, a: th, b: s1o });
+                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![s1, n] });
+                Some(match &drop_fn {
+                    Some(df) => self.materialize_result_aggregate(tup, repr, false, df.clone()),
+                    None => {
+                        let obj = self.materialize_result_str(tup, repr, false, false);
+                        self.heap_elem_lists.remove(&obj);
+                        self.str_int_result_results.insert(obj);
+                        obj
+                    }
+                })
+            }
+            IrExprKind::ResultErr { expr: inner } => {
+                let piece = self.lower_result_str_piece(inner)?;
+                Some(match &drop_fn {
+                    Some(df) => self.materialize_result_aggregate(piece, repr, true, df.clone()),
+                    None => {
+                        let obj = self.materialize_result_str(piece, repr, true, false);
+                        self.heap_elem_lists.remove(&obj);
+                        self.str_int_result_results.insert(obj);
+                        obj
+                    }
+                })
+            }
+            _ => None,
+        }
     }
 
     /// Construct a `Result[heap-record, String]` `ok(<record>)` / `err(<String>)` — porta

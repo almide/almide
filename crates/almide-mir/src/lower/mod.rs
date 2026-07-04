@@ -1040,6 +1040,29 @@ pub fn generate_record_drop_sources(
             "fn __drop_opt_{tname}(e: Option[{tname}]) -> Unit = {{\n  match e {{\n    some(r) => (),\n    none => (),\n  }}\n}}\n"
         ));
     }
+    // `$__drop_tup_int_<R>` for each recursive-drop record R — frees a `(R, Int)` TUPLE
+    // block (record handle @12 recursed via `$__drop_<R>`, the Int @20 is scalar), used
+    // by `Result[(R, Int), String]` wrappers (`resrec:tup_int_<R>` — the gguf
+    // parse_header `ok((GGUFHeader {…}, 24))` shape).
+    for decl in type_decls {
+        let IrTypeDeclKind::Record { .. } = &decl.kind else { continue };
+        if !rec_names.contains(decl.name.as_str()) {
+            continue;
+        }
+        let tname = decl.name.as_str();
+        let fname = drop_fn_ident(tname);
+        out.push_str(&format!(
+            "fn __drop_tup_int_{fname}(e: ({tname}, Int)) -> Unit = {{
+                 let h = prim.handle(e)
+                 if prim.load32(h + 0) == 1 then {{
+                     let r: {tname} = prim.load_handle(h + 12)
+                     __drop_{fname}(r)
+                 }} else ()
+                 prim.rc_dec(h)
+}}
+"
+        ));
+    }
     // SYNTHESIZED recursive drops for the ANONYMOUS record return/binding shapes the corpus uses
     // (`{ data: Bytes, state: Cfb8State }` — aes cfb8). An anon record is NOT a `type` decl, so the
     // loop above never names it; it would otherwise drop via the flat one-level mask `DropListStr`,
