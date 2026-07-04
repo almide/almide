@@ -997,3 +997,22 @@ fn matrix_record_field_drop_routes_recursively() {
         assert_eq!(out, "2003000.0");
     }
 }
+
+#[test]
+fn anon_record_with_anon_list_field_drop_source_typechecks() {
+    // An UNTYPED anon-record binding whose field is a List of STRUCTURAL records:
+    // the synthesized `__drop_anonrec_<hash>` must bind the list field with the
+    // STRUCTURAL source type (`List[{ name: String, off: Int }]`) — writing the
+    // drop-fn hash as a type (`List[anonrec_<hash>]`) type-errored the WHOLE
+    // generated batch ("undefined variable 'f0'") and failed the render
+    // program-level.
+    let src = "effect fn main() -> Unit = {\n\
+        let ts = [{ name: \"a\", off: 3 }, { name: \"b\", off: 9 }]\n\
+        let m = { tensors: ts, tag: 7 }\n\
+        println(int.to_string(m.tag))\n\
+        println(int.to_string(list.len(m.tensors))) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("anon_f0_shape", &render_wasm_program(&prog)) {
+        assert_eq!(out, "7\n2");
+    }
+}

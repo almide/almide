@@ -854,8 +854,14 @@ fn record_drop_field_frees(
                 if let Some(rn) = recursive_aggregate_name(&a[0], rec_names) {
                     list_drops.insert(rn.clone());
                     let rn_fn = drop_fn_ident(&rn);
+                    // The BINDING type must be valid Almide source: a NAMED element renders
+                    // its name, an ANONYMOUS element its STRUCTURAL `{ k: T, … }` form — the
+                    // synthesized `anonrec_<hash>` is a drop-fn identity, NOT a type name
+                    // (writing `List[anonrec_…]` type-errored the whole generated batch:
+                    // "undefined variable 'f0'" after the rejected let).
+                    let src = aggregate_source_ty(&a[0]);
                     frees.push_str(&format!(
-                        "    let f{i}: List[{rn}] = prim.load_handle(h + {off})\n    __drop_list_{rn_fn}(f{i})\n"
+                        "    let f{i}: List[{src}] = prim.load_handle(h + {off})\n    __drop_list_{rn_fn}(f{i})\n"
                     ));
                 } else if let Some(ev) = list_rich_variant_elem(ty, rec_variant_names) {
                     // `List[<rich variant>]` (`Global.init: List[Instr]`): each element is a
