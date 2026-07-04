@@ -17,6 +17,14 @@
 > `flatten([first, second])`、tuple unwrap_or→match desugar — 既存の invalid-wasm
 > 型崩れも根治。実物 combine は「while 内の let-bind tuple-match」1形残り）。
 > 全ゲート green 維持（spec 273 / parity 177 / MIR 512/0 / corpus PCC 0）。
+>
+> **続報（同日パス3）**: nn **7→6、A-3 fft combine 完了**（実物開通）。追加機構4つ:
+> let-bound scalar-tuple Option match の成分 merge 実行（単一 Alloc、cert クリーン、
+> LoadHandle i32→Handle 拡幅の型整合込み）、heap-var list literal の call 要素対応、
+> scalar-aggregate 要素型の flat_content 追加。nn 残6 = Matrix 依存3 + gguf（list.push
+> mutation + ADT）+ best_pair（A-5: find defunc + option.map 連鎖 + fold 多 stmt 拡張）
+> + find_chunk（A-4: Option 成分）。A-4/A-5 は scalar-tuple fold の gate
+> （stmts.len()==1）拡張が共通の入口。
 
 ## A. nn 残 8 walls（各個撃破、推定30-90分/件）
 
