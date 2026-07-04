@@ -2566,9 +2566,13 @@ impl LowerCtx {
         // body = Block{ [let (a1, a2) = acc, ...maybe nothing else], tail }
         let acc_var = params[0].0;
         let IrExprKind::Block { stmts, expr: Some(tail) } = &body.kind else { return None };
-        if stmts.len() != 1 {
+        if stmts.is_empty() {
             return None;
         }
+        // stmts[0] must be the acc destructure; any FURTHER stmts (`let a = …; let rank = …`
+        // — the best_pair_index preamble) lower per-iteration via the ordinary stmt
+        // machinery inside the loop (their heap temps freed within the iteration).
+        let extra_stmts = &stmts[1..];
         let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements: pats }, value } =
             &stmts[0].kind
         else {
@@ -2681,12 +2685,18 @@ impl LowerCtx {
             self.value_of.insert(iv, i_v);
         }
 
-        // Per-component evaluation of the projected trees (both read the PRE-update
-        // locals), then a simultaneous SetLocal pair.
+        // Per-iteration preamble stmts, then per-component evaluation of the projected
+        // trees (both read the PRE-update locals), then a simultaneous SetLocal pair.
+        let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
         self.in_defunc_body += 1;
         self.scalar_loop_depth += 1;
         let updates: Option<(ValueId, ValueId)> = (|| {
+            for st in extra_stmts {
+                if self.lower_stmt(st).is_err() {
+                    return None;
+                }
+            }
             let v1 = self.lower_scalar_value(&proj1)?;
             let v2 = self.lower_scalar_value(&proj2)?;
             Some((v1, v2))
@@ -2696,8 +2706,15 @@ impl LowerCtx {
         self.in_frame -= 1;
         let (n1, n2) = match updates {
             Some(p) => p,
-            None => bail!(),
+            None => {
+                self.value_of = vo_snapshot;
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
         };
+        // Free the iteration's owned temps (the `?? ""` copies) before the back-edge.
+        self.drop_arm_locals(body_mark);
         self.ops.push(Op::SetLocal { local: s1, src: n1 });
         self.ops.push(Op::SetLocal { local: s2, src: n2 });
         self.ops.push(Op::IntBinOp { dst: i_v, op: IntOp::Add, a: i_v, b: one_v });
