@@ -2585,32 +2585,35 @@ impl LowerCtx {
             IrPattern::Bind { var, .. } => *var,
             _ => return None,
         };
-        // tail: (e1, e2)  |  if c then (p1, p2) else (q1, q2)
-        enum TailShape<'a> {
-            Plain(&'a IrExpr, &'a IrExpr),
-            Cond(&'a IrExpr, (&'a IrExpr, &'a IrExpr), (&'a IrExpr, &'a IrExpr)),
+        // tail: an if-TREE whose every leaf is a 2-tuple (`if a then (..) else if b
+        // then (..) else (..)` — the find_chunk chain). PROJECT the tree per
+        // component: the same conditions, each leaf replaced by its idx-th element
+        // (conditions are pure scalar expressions — the scalar path admits nothing
+        // effectful — so evaluating them once per component is value-identical).
+        fn project(e: &IrExpr, idx: usize, comp_ty: &Ty) -> Option<IrExpr> {
+            match &e.kind {
+                IrExprKind::Tuple { elements } if elements.len() == 2 => {
+                    Some(elements[idx].clone())
+                }
+                IrExprKind::If { cond, then, else_ } => {
+                    let t = project(then, idx, comp_ty)?;
+                    let el = project(else_, idx, comp_ty)?;
+                    Some(IrExpr {
+                        kind: IrExprKind::If {
+                            cond: cond.clone(),
+                            then: Box::new(t),
+                            else_: Box::new(el),
+                        },
+                        ty: comp_ty.clone(),
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    })
+                }
+                _ => None,
+            }
         }
-        let shape = match &tail.kind {
-            IrExprKind::Tuple { elements } if elements.len() == 2 => {
-                TailShape::Plain(&elements[0], &elements[1])
-            }
-            IrExprKind::If { cond, then, else_ } => {
-                let th = match &then.kind {
-                    IrExprKind::Tuple { elements } if elements.len() == 2 => {
-                        (&elements[0], &elements[1])
-                    }
-                    _ => return None,
-                };
-                let el = match &else_.kind {
-                    IrExprKind::Tuple { elements } if elements.len() == 2 => {
-                        (&elements[0], &elements[1])
-                    }
-                    _ => return None,
-                };
-                TailShape::Cond(cond, th, el)
-            }
-            _ => return None,
-        };
+        let proj1 = project(tail, 0, &t1)?;
+        let proj2 = project(tail, 1, &t2)?;
 
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
@@ -2678,32 +2681,15 @@ impl LowerCtx {
             self.value_of.insert(iv, i_v);
         }
 
-        // One shared condition; per-component scalar merges; simultaneous SetLocal.
+        // Per-component evaluation of the projected trees (both read the PRE-update
+        // locals), then a simultaneous SetLocal pair.
         self.in_frame += 1;
         self.in_defunc_body += 1;
         self.scalar_loop_depth += 1;
-        let updates: Option<(ValueId, ValueId)> = (|| match &shape {
-            TailShape::Plain(e1, e2) => {
-                let v1 = self.lower_scalar_value(e1)?;
-                let v2 = self.lower_scalar_value(e2)?;
-                Some((v1, v2))
-            }
-            TailShape::Cond(c, (p1, p2), (q1, q2)) => {
-                let cv = self.lower_scalar_value(c)?;
-                let m1 = self.fresh_value();
-                self.ops.push(Op::IfThen { cond: cv, dst: Some(m1) });
-                let tv1 = self.lower_scalar_value(p1)?;
-                self.ops.push(Op::Else { val: Some(tv1) });
-                let ev1 = self.lower_scalar_value(q1)?;
-                self.ops.push(Op::EndIf { val: Some(ev1) });
-                let m2 = self.fresh_value();
-                self.ops.push(Op::IfThen { cond: cv, dst: Some(m2) });
-                let tv2 = self.lower_scalar_value(p2)?;
-                self.ops.push(Op::Else { val: Some(tv2) });
-                let ev2 = self.lower_scalar_value(q2)?;
-                self.ops.push(Op::EndIf { val: Some(ev2) });
-                Some((m1, m2))
-            }
+        let updates: Option<(ValueId, ValueId)> = (|| {
+            let v1 = self.lower_scalar_value(&proj1)?;
+            let v2 = self.lower_scalar_value(&proj2)?;
+            Some((v1, v2))
         })();
         self.scalar_loop_depth -= 1;
         self.in_defunc_body -= 1;
