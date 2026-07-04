@@ -19,7 +19,7 @@ v1 の核（honest wall）は既に成立：受理プログラムは必ず正し
 | # | ブロッカー | 状態 |
 |---|---|---|
 | **B-1** | **動的ディスパッチ（Phase C）** — first-class クロージャ + `.method()`（method/computed ~79 + heap-result match tail 74 の大半）。「普通に書いたコードがコンパイルできるか」を決める実用の本丸。**最大ブロッカー**。 | 未着手 |
-| **B-2** | **derived Codec `.decode()`**（Camp-4 heap-Ok `?`-bind）。serialization 多用。 | 未着手 |
+| **B-2** | **derived Codec `.decode()`**（Camp-4 heap-Ok `?`-bind）。**進行中**: (1) `value.field` を self-host 済み（byte一致、commit 済み — decode が呼ぶ未 self-host prim を解消）。(2) **下流の lowering 機構は正しいと実証**（`effect fn` の別 bind 形 `let fv = value.field(v,k)!; let x = value.as_T(fv)!; …; ok(R{…})` は multi-field でも lower・byte一致=valid wasm）。(3) **残**: derive のネスト `?`（`value.as_T(value.field(v,k)?)?`、plain fn の Try）を上記の別 bind 形へ desugar-lift する。callarg-unwrap を effect-unwrap の前に走らせ Try 認識 + 外側 unwrap への再帰で単一/effect は開通するが、**multi-field の plain-fn `?` は部分 lift で invalid wasm を生む**ため revert（honest-wall: invalid wasm は絶対不可）。目標形（別 bind）は判明済みで、desugared IR を突き合わせて完全 lift すれば通る。 | value.field 済 / desugar 残 |
 | **B-3** | **nn end-to-end（fast-exp 族）**。wasm oracle は SIMD ではなく scalar libm exp（= self-host 済み math.exp）と判明。**7/7 全て開通・byte一致**（softmax_rows / gelu / swiglu_gate / rope_rotate / multi_head_attention / masked_multi_head_attention / from_q1_0_bytes）。nn の matrix スタックは完全 self-host・byte 検証済み。**✅ 実質クローズ**（残る nn unlinked は fft の enumerate_h/zip_h の 4 補助サイトのみ、非推論経路）。 | ✅ 7/7 |
 | **B-4** | **native ターゲット** — v0-native matrix codegen 破損（引き継ぎ）。native を出荷対象にする場合のみ。 | 外部ブロック |
 
