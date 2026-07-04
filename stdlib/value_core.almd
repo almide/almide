@@ -509,6 +509,27 @@ fn value_get(v: Value, key: String) -> Result[Value, String] = {
   }
 }
 
+// value.field — the Codec-derive field accessor. IDENTICAL to value.get EXCEPT it first
+// checks the Object tag (6): a non-Object subject is `Err("expected Object")` (v0
+// almide_rt_value_field), where value.get would scan a scalar's garbage header. The
+// found/missing behaviour + error text ("missing field '<k>'") mirror v0 exactly, so a
+// derived `decode`'s `value.field(_v, "k")?` byte-matches. Ok payload is a fresh co-owned
+// Value (bare-Var arm auto-acquire; the Result frees via its own DropResultValue).
+fn value_field(v: Value, key: String) -> Result[Value, String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag != 6 then Err("expected Object")
+  else {
+    let n = prim.load32(h + 8) / 2
+    let idx = __vobj_find(v, key, 0, n)
+    if idx < 0 then Err("missing field '" + key + "'")
+    else {
+      let val: Value = prim.load_handle(h + 12 + (2 * idx + 1) * 8)
+      Ok(val)
+    }
+  }
+}
+
 // The Value-payload `??` (`value.get(o,k) ?? value.null()`): a Result[Value,String] unwrap, routed
 // here so it reuses the working Value-Ok match read (the `ok(v) => v` bare-Var arm auto-acquires a
 // fresh co-owned reference; the Result `r` is freed by its own scope-end DropResultValue). A call

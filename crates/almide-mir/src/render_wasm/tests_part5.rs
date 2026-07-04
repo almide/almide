@@ -1369,3 +1369,18 @@ fn matrix_from_q1_0_bytes_byte_matches_oracle() {
         assert_eq!(out.lines().next().unwrap(), "-0.5");
     }
 }
+
+#[test]
+fn value_field_byte_matches_oracle() {
+    // B-2 prerequisite: value.field(v, key) self-host — Object tag check + linear key scan,
+    // Ok(field) / Err("missing field '<k>'") / Err("expected Object"), byte-exact vs v0.
+    let src = "fn get_id(v: Value) -> Int =\n\
+        match value.field(v, \"id\") { ok(fv) => value.as_int(fv) ?? 0 - 1, err(_) => 0 - 2 }\n\
+        effect fn main() -> Unit = {\n\
+        match json.parse(\"{\\\"id\\\":7}\") { ok(v) => println(int.to_string(get_id(v))), err(_) => println(\"perr\") } }\n";
+    let prog = lower_source(&format!("import json\n{src}"));
+    assert!(prog.functions.iter().any(|f| f.name == "value.field"), "value.field self-host must link");
+    if let Some(out) = build_and_run("value_field", &render_wasm_program(&prog)) {
+        assert_eq!(out, "6"); // (as_int ?? 0) - 1 = 6 — matches v0
+    }
+}
