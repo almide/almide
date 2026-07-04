@@ -102,6 +102,7 @@ spec/wasm_cross/list_sort_short.almd
 spec/wasm_cross/list_sort_str.almd
 spec/wasm_cross/list_string_param_join_len.almd
 spec/wasm_cross/list_swap_oob.almd
+spec/wasm_cross/list_with_capacity.almd
 spec/wasm_cross/map_filter.almd
 spec/wasm_cross/map_set_eq.almd
 spec/wasm_cross/match_result.almd
@@ -151,6 +152,7 @@ spec/wasm_cross/string_from_bytes.almd
 spec/wasm_cross/string_is_alphanumeric.almd
 spec/wasm_cross/string_lines.almd
 spec/wasm_cross/string_ops.almd
+spec/wasm_cross/string_ops_drain.almd
 spec/wasm_cross/string_passthrough_share.almd
 spec/wasm_cross/string_to_upper.almd
 spec/wasm_cross/string_whitespace.almd
