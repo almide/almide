@@ -27,6 +27,7 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__varr_copy",        // value.array  — rc_inc each Array element (shallow copy)
     "__vfill",            // value as_array element-list fill
     "__lc_copy_rc",       // list-concat copy — co-own each appended heap element
+    "__flat_copy_sub_rc", // flatten copy — the result co-owns each heap sublist slot
     "__copy_slots_rc",    // list.set_str — rc-copy each String element
     "__ldls_share",       // list.take/drop_liststr — rc_inc each shared inner list
     "value_get",          // Object linear-scan get — rc_inc the found value (caller co-owns the result)

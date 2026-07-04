@@ -534,7 +534,10 @@ impl LowerCtx {
                         // each element (Dup +1), dropped flat at scope end (per-slot rc_dec
                         // + block — a flat-content element's rc_dec IS its full free).
                         if let Some(dst) = self.try_lower_heap_var_list_literal(a) {
-                            out.push(self.materialized_call_arg(dst, repr, &a.ty));
+                            // A BORROW-VIEW list (slots are borrowed handles; the block-only
+                            // plain Drop is already tracked inside the builder) — pass the
+                            // handle directly, NO materialized_call_arg re-track.
+                            out.push(CallArg::Handle(dst));
                             continue;
                         }
                     }
@@ -988,13 +991,14 @@ impl LowerCtx {
 }
 
 impl LowerCtx {
-    /// Materialize a list LITERAL whose elements are tracked heap Vars with FLAT
-    /// content — String, Bytes, List[scalar], or List[all-scalar aggregate] — as a
-    /// fresh DynListStr co-owning each element (`Op::Dup`). The caller registers the
-    /// scope-end drop via `materialized_call_arg` (flat `DropListStr`: per-slot rc_dec
-    /// + block, which fully frees a flat-content element). `None` for any non-Var
-    /// element, an untracked Var, or an element whose content nests further heap
-    /// (a List[String] element would LEAK its cells under the flat drop — walled).
+    /// Materialize a list LITERAL argument (`list.flatten([first, second])`,
+    /// `[c_add(e, t)]`) as a BORROW-VIEW: a fresh 2-slot block whose slots hold
+    /// BORROWED handles (a tracked Var stays owned by its binding; a fresh call
+    /// result is pushed to `live_heap_handles` and freed at scope end). The view
+    /// block itself is tracked with NO element set, so its scope-end drop is the
+    /// plain block-only `Op::Drop` — the slots' owners are untouched (no double
+    /// free, no leak; the callee rc_incs whatever it keeps). Flat-content element
+    /// types only (deeper nesting keeps walling).
     pub(crate) fn try_lower_heap_var_list_literal(&mut self, a: &IrExpr) -> Option<ValueId> {
         use almide_lang::types::constructor::TypeConstructorId;
         let IrExprKind::List { elements } = &a.kind else { return None };
@@ -1028,25 +1032,29 @@ impl LowerCtx {
         // Each element is a tracked heap Var (borrowed — Dup'd into the slot below) or a
         // heap-returning NAMED call (`[c_add(e, t)]` — fft's concat element): the call's
         // fresh OWNED result is moved into the slot directly (no Dup).
-        let mut handles: Vec<(ValueId, bool)> = Vec::with_capacity(elements.len());
+        let lhh_mark = self.live_heap_handles.len();
+        let mut handles: Vec<ValueId> = Vec::with_capacity(elements.len());
         for e in elements {
             match &e.kind {
                 IrExprKind::Var { id } => {
                     let Ok(src) = self.value_for(*id) else {
                         self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
                         return None;
                     };
-                    handles.push((src, false));
+                    handles.push(src);
                 }
                 IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
                     if !self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
                 {
                     let Ok(lowered) = self.lower_call_args(args) else {
                         self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
                         return None;
                     };
                     let Ok(erepr) = repr_of(&e.ty) else {
                         self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
                         return None;
                     };
                     let dst = self.fresh_value();
@@ -1056,10 +1064,14 @@ impl LowerCtx {
                         args: lowered,
                         result: Some(erepr),
                     });
-                    handles.push((dst, true));
+                    // The fresh result is OWNED by this scope (freed at scope end,
+                    // AFTER the callee borrowed it through the view).
+                    self.live_heap_handles.push(dst);
+                    handles.push(dst);
                 }
                 _ => {
                     self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
                     return None;
                 }
             }
@@ -1074,28 +1086,21 @@ impl LowerCtx {
         });
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });
-        for (i, (src, is_fresh)) in handles.into_iter().enumerate() {
-            let owned = if is_fresh {
-                src
-            } else {
-                let d = self.fresh_value();
-                self.ops.push(Op::Dup { dst: d, src });
-                d
-            };
+        for (i, src) in handles.into_iter().enumerate() {
             let off = self.fresh_value();
             self.ops.push(Op::ConstInt { dst: off, value: 12 + (i as i64) * 8 });
             let addr = self.fresh_value();
             self.ops.push(Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off });
             let oh = self.fresh_value();
-            self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(oh), args: vec![owned] });
+            self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(oh), args: vec![src] });
             self.ops.push(Op::Prim {
                 kind: crate::PrimKind::Store { width: 8 },
                 dst: None,
                 args: vec![addr, oh],
             });
-            self.ops.push(Op::Consume { v: owned });
         }
-        self.materialized_lists.insert(list);
+        // The view block itself: tracked with NO element set → plain block-only Drop.
+        self.live_heap_handles.push(list);
         Some(list)
     }
 }

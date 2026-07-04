@@ -765,6 +765,16 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
     if func == "fold" && matches!(module, "list" | "map" | "set") && is_heap_ty(result_ty) {
         return format!("{module}.fold_hacc");
     }
+    // `list.flatten` over HEAP-element sublists: the copied slots are handles the
+    // result must CO-OWN — route to the rc_inc-on-copy variant (the scalar variant's
+    // raw copy would make the result a second uncounted owner = a double free).
+    if module == "list" && func == "flatten" {
+        if let Ty::Applied(TypeConstructorId::List, inner) = result_ty {
+            if inner.len() == 1 && is_heap_ty(&inner[0]) {
+                return "list.flatten_rc".to_string();
+            }
+        }
+    }
     // `option.unwrap_or(o, d)` over an `Option[String]` (the pipe/UFCS form
     // `list.get(xs, i) |> option.unwrap_or("")`, NOT the `??` operator that
     // `try_lower_option_unwrap_or` desugars) must route to `option.unwrap_or_str`: the
