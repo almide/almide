@@ -1079,18 +1079,19 @@ fn detect_enum_fold_fusion<'a>(
     let IrExprKind::Block { stmts, expr } = &body.kind else {
         return None;
     };
-    let first = stmts.first()?;
-    let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements }, value } = &first.kind
+    // The entry destructure may be the FIRST or SECOND stmt (an acc destructure
+    // can precede it — the argmax `let (bi,bv)=acc; let (i,v)=entry; …` shape).
+    let entry_at = stmts.iter().take(2).position(|st| {
+        matches!(&st.kind,
+            IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements }, value }
+                if elements.len() == 2
+                    && matches!(&value.kind, IrExprKind::Var { id } if *id == entry_var))
+    })?;
+    let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements }, .. } =
+        &stmts[entry_at].kind
     else {
         return None;
     };
-    if elements.len() != 2 {
-        return None;
-    }
-    match &value.kind {
-        IrExprKind::Var { id } if *id == entry_var => {}
-        _ => return None,
-    }
     let i_var = match &elements[0] {
         IrPattern::Bind { var, .. } => *var,
         _ => return None,
@@ -1099,8 +1100,10 @@ fn detect_enum_fold_fusion<'a>(
         IrPattern::Bind { var, ty } => (*var, ty.clone()),
         _ => return None,
     };
+    let mut rest: Vec<almide_ir::IrStmt> = stmts.to_vec();
+    rest.remove(entry_at);
     let tail = IrExpr {
-        kind: IrExprKind::Block { stmts: stmts[1..].to_vec(), expr: expr.clone() },
+        kind: IrExprKind::Block { stmts: rest, expr: expr.clone() },
         ty: body.ty.clone(),
         span: body.span.clone(),
         def_id: body.def_id,

@@ -2711,3 +2711,45 @@ pub(crate) fn kind_name(k: &IrExprKind) -> &'static str {
         _ => "<other>",
     }
 }
+
+/// BETA-REDUCE a DIRECT lambda application (`(λ(p) => body)(arg)` — the pipe-into-
+/// lambda projection `fold(...) |> ((pair) => pair.0)`, argmax): rewrite to
+/// `{ let p = arg; body }` so the ordinary bind + scalar-field machinery lowers it
+/// (the Computed-callee call is otherwise unanalyzable → deferred/walled). Each arg
+/// is bound ONCE (no duplication; call-count only DECREASES, so the caps gate's
+/// `mir ≤ ir` is preserved). Bottom-up over the whole body; `None` = no change.
+pub fn desugar_beta_reduce(body: &IrExpr) -> Option<IrExpr> {
+    fn rewrite(e: IrExpr, changed: &mut bool) -> IrExpr {
+        let e = e.map_children(&mut |c| rewrite(c, changed));
+        if let IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } = &e.kind {
+            if let IrExprKind::Lambda { params, body, .. } = &callee.kind {
+                if params.len() == args.len() {
+                    *changed = true;
+                    let stmts: Vec<almide_ir::IrStmt> = params
+                        .iter()
+                        .zip(args.iter())
+                        .map(|((var, ty), arg)| almide_ir::IrStmt {
+                            kind: almide_ir::IrStmtKind::Bind {
+                                var: *var,
+                                mutability: almide_ir::Mutability::Let,
+                                ty: ty.clone(),
+                                value: arg.clone(),
+                            },
+                            span: None,
+                        })
+                        .collect();
+                    return IrExpr {
+                        kind: IrExprKind::Block { stmts, expr: Some(body.clone()) },
+                        ty: e.ty.clone(),
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    };
+                }
+            }
+        }
+        e
+    }
+    let mut changed = false;
+    let out = rewrite(body.clone(), &mut changed);
+    changed.then_some(out)
+}

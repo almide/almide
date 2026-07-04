@@ -229,6 +229,20 @@ impl LowerCtx {
         } else {
             None
         };
+        // SCALAR-TUPLE accumulator fold (the argmax idiom) — its own specialized loop.
+        if func == "fold" {
+            if let Some(init_e) = init_idx.map(|ix| &args[ix]) {
+                if matches!(result_ty, Ty::Tuple(ts) if ts.len() == 2
+                    && !is_heap_ty(&ts[0]) && !is_heap_ty(&ts[1]))
+                {
+                    if let Some(dst) = self.try_lower_defunc_scalar_tuple_fold(
+                        xs, params, body, init_e, fuse_index, result_ty,
+                    ) {
+                        return Some(dst);
+                    }
+                }
+            }
+        }
         let result = if result_str_acc {
             // flat_map / filter_map: a dedicated `List[String]` append-accumulator loop (concat each
             // element's sublist onto the loop-carried slot). The sublist body returns `List[String]`
@@ -2511,5 +2525,218 @@ impl LowerCtx {
             }
             _ => None,
         }
+    }
+}
+
+impl LowerCtx {
+    /// C1 defunc for a SCALAR-TUPLE accumulator fold — the argmax idiom:
+    /// `enumerate(xs) |> fold((0, -1.0e308), (acc, entry) => { let (bi,bv)=acc;
+    /// let (i,v)=entry; if v > bv then (i,v) else (bi,bv) })`. The accumulator's
+    /// two SCALAR components live in two mutable locals (no tuple block per
+    /// iteration); the body's tail must be a component-wise tuple (optionally
+    /// under one `if`). After the loop the pair is materialized ONCE as a real
+    /// 2-slot block (registered as a materialized aggregate, so a downstream
+    /// `.0`/`.1` projection reads the real slot). Fully rolled back on any
+    /// out-of-subset shape (the caller walls).
+    #[allow(clippy::too_many_arguments)]
+    fn try_lower_defunc_scalar_tuple_fold(
+        &mut self,
+        xs: &IrExpr,
+        params: &[(VarId, Ty)],
+        body: &IrExpr,
+        init: &IrExpr,
+        fuse_index: Option<VarId>,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        use almide_ir::{IrPattern, IrStmtKind};
+        // Accumulator type: a 2-tuple of scalars; the result is the same tuple.
+        let (t1, t2) = match result_ty {
+            Ty::Tuple(ts) if ts.len() == 2 && !is_heap_ty(&ts[0]) && !is_heap_ty(&ts[1]) => {
+                (ts[0].clone(), ts[1].clone())
+            }
+            _ => return None,
+        };
+        let _ = (&t1, &t2);
+        // init = (e1, e2), both scalar-lowerable.
+        let IrExprKind::Tuple { elements: init_elems } = &init.kind else { return None };
+        if init_elems.len() != 2 {
+            return None;
+        }
+        // body = Block{ [let (a1, a2) = acc, ...maybe nothing else], tail }
+        let acc_var = params[0].0;
+        let IrExprKind::Block { stmts, expr: Some(tail) } = &body.kind else { return None };
+        if stmts.len() != 1 {
+            return None;
+        }
+        let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements: pats }, value } =
+            &stmts[0].kind
+        else {
+            return None;
+        };
+        if pats.len() != 2 || !matches!(&value.kind, IrExprKind::Var { id } if *id == acc_var) {
+            return None;
+        }
+        let a1 = match &pats[0] {
+            IrPattern::Bind { var, .. } => *var,
+            _ => return None,
+        };
+        let a2 = match &pats[1] {
+            IrPattern::Bind { var, .. } => *var,
+            _ => return None,
+        };
+        // tail: (e1, e2)  |  if c then (p1, p2) else (q1, q2)
+        enum TailShape<'a> {
+            Plain(&'a IrExpr, &'a IrExpr),
+            Cond(&'a IrExpr, (&'a IrExpr, &'a IrExpr), (&'a IrExpr, &'a IrExpr)),
+        }
+        let shape = match &tail.kind {
+            IrExprKind::Tuple { elements } if elements.len() == 2 => {
+                TailShape::Plain(&elements[0], &elements[1])
+            }
+            IrExprKind::If { cond, then, else_ } => {
+                let th = match &then.kind {
+                    IrExprKind::Tuple { elements } if elements.len() == 2 => {
+                        (&elements[0], &elements[1])
+                    }
+                    _ => return None,
+                };
+                let el = match &else_.kind {
+                    IrExprKind::Tuple { elements } if elements.len() == 2 => {
+                        (&elements[0], &elements[1])
+                    }
+                    _ => return None,
+                };
+                TailShape::Cond(cond, th, el)
+            }
+            _ => return None,
+        };
+
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let vo_snapshot = self.value_of.clone();
+        let mut fail = || -> Option<ValueId> {
+            None
+        };
+        let _ = &mut fail;
+        macro_rules! bail {
+            () => {{
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                self.value_of = vo_snapshot;
+                return None;
+            }};
+        }
+
+        // Seed the two component locals.
+        let s1 = match self.lower_scalar_value(&init_elems[0]) {
+            Some(v) => v,
+            None => bail!(),
+        };
+        let s2 = match self.lower_scalar_value(&init_elems[1]) {
+            Some(v) => v,
+            None => bail!(),
+        };
+        self.value_of.insert(a1, s1);
+        self.value_of.insert(a2, s2);
+
+        // Borrow the source, read the length.
+        let list_v = match self.lower_call_args(std::slice::from_ref(xs)).ok().and_then(|mut a| a.pop())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => bail!(),
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list_v] });
+        let len_v = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+
+        let i_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: i_v, value: 0 });
+        let one_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one_v, value: 1 });
+        self.ops.push(Op::LoopStart);
+        let cond_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: len_v });
+        self.ops.push(Op::LoopBreakUnless { cond: cond_v });
+
+        // elem = xs[i] (a scalar slot or a borrowed heap handle).
+        let eight = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: eight, value: 8 });
+        let i8_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: i8_v, op: IntOp::Mul, a: i_v, b: eight });
+        let base = self.load_addr(h, 12);
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: base, b: i8_v });
+        let src_heap = matches!(&xs.ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                if a.len() == 1 && is_heap_ty(&a[0]));
+        let elem = self.fresh_value();
+        let rk = if src_heap { PrimKind::LoadHandle } else { PrimKind::Load { width: 8 } };
+        self.ops.push(Op::Prim { kind: rk, dst: Some(elem), args: vec![addr] });
+        self.value_of.insert(params[1].0, elem);
+        if let Some(iv) = fuse_index {
+            self.value_of.insert(iv, i_v);
+        }
+
+        // One shared condition; per-component scalar merges; simultaneous SetLocal.
+        self.in_frame += 1;
+        self.in_defunc_body += 1;
+        self.scalar_loop_depth += 1;
+        let updates: Option<(ValueId, ValueId)> = (|| match &shape {
+            TailShape::Plain(e1, e2) => {
+                let v1 = self.lower_scalar_value(e1)?;
+                let v2 = self.lower_scalar_value(e2)?;
+                Some((v1, v2))
+            }
+            TailShape::Cond(c, (p1, p2), (q1, q2)) => {
+                let cv = self.lower_scalar_value(c)?;
+                let m1 = self.fresh_value();
+                self.ops.push(Op::IfThen { cond: cv, dst: Some(m1) });
+                let tv1 = self.lower_scalar_value(p1)?;
+                self.ops.push(Op::Else { val: Some(tv1) });
+                let ev1 = self.lower_scalar_value(q1)?;
+                self.ops.push(Op::EndIf { val: Some(ev1) });
+                let m2 = self.fresh_value();
+                self.ops.push(Op::IfThen { cond: cv, dst: Some(m2) });
+                let tv2 = self.lower_scalar_value(p2)?;
+                self.ops.push(Op::Else { val: Some(tv2) });
+                let ev2 = self.lower_scalar_value(q2)?;
+                self.ops.push(Op::EndIf { val: Some(ev2) });
+                Some((m1, m2))
+            }
+        })();
+        self.scalar_loop_depth -= 1;
+        self.in_defunc_body -= 1;
+        self.in_frame -= 1;
+        let (n1, n2) = match updates {
+            Some(p) => p,
+            None => bail!(),
+        };
+        self.ops.push(Op::SetLocal { local: s1, src: n1 });
+        self.ops.push(Op::SetLocal { local: s2, src: n2 });
+        self.ops.push(Op::IntBinOp { dst: i_v, op: IntOp::Add, a: i_v, b: one_v });
+        self.ops.push(Op::LoopEnd);
+
+        // Materialize the resulting tuple ONCE (2 uniform slots) and register its
+        // read shape so a downstream `.0`/`.1` loads the real slot.
+        let two = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: two, value: 2 });
+        let tup = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst: tup,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len: two },
+        });
+        let th = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(th), args: vec![tup] });
+        let sl0 = self.load_addr(th, 12);
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![sl0, s1] });
+        let sl1 = self.load_addr(th, 20);
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![sl1, s2] });
+        // NOT pushed to live_heap_handles — the CALLER tracks the returned value
+        // exactly like a self-host combinator result (a second push double-drops).
+        self.materialized_aggregates.insert(tup);
+        self.last_call_had_unlifted_closure = false;
+        Some(tup)
     }
 }

@@ -154,6 +154,9 @@ impl LowerCtx {
         // — err-propagation WITHOUT a mid-function Return op. Re-enter so a later `!` in the continuation
         // also desugars, then desugar_heap_branches handles any heap-`if` continuations. Call-count-
         // invariant (no duplication), so `count_ir_calls` stays exact without re-running it.
+        if let Some(rewritten) = crate::lower::desugar_beta_reduce(body) {
+            return self.lower_body_into(&rewritten);
+        }
         if let Some(rewritten) = desugar_effect_unwrap(body) {
             return self.lower_body_into(&rewritten);
         }
