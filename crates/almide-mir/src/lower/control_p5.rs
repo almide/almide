@@ -2726,3 +2726,152 @@ impl LowerCtx {
         Some(tup)
     }
 }
+
+impl LowerCtx {
+    /// EXECUTE `let e = match <Option[(s1, s2)]> { some(p) => p, none => (f1, f2) }` —
+    /// the let-BOUND scalar-tuple Option match (the fft `list.get(xs,k) ?? (0.0,0.0)`
+    /// pick after the tuple-unwrap_or desugar). The let-bound heap-result match is
+    /// normally unlowerable (per-arm move-out vs scope-end drop breaks the flat cert),
+    /// but a SCALAR-TUPLE payload needs no per-arm alloc at all: merge each COMPONENT
+    /// through the scalar IfThen skeleton (Some → the payload tuple's slot, None → the
+    /// fallback component), then build ONE 2-slot block the binding owns — a single
+    /// `i…d` object, cert-clean by construction. Returns the owned tuple ValueId, or
+    /// `None` (fully rolled back) outside the exact shape.
+    pub(crate) fn try_lower_scalar_tuple_option_match_bind(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[almide_ir::IrMatchArm],
+    ) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        use almide_lang::types::constructor::TypeConstructorId;
+        use almide_ir::{IrMatchArm, IrPattern};
+        // Option[<2-scalar tuple>] subject, exactly two guard-free arms.
+        let tuple_ty = match &subject.ty {
+            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => match &a[0] {
+                Ty::Tuple(ts)
+                    if ts.len() == 2 && !is_heap_ty(&ts[0]) && !is_heap_ty(&ts[1]) =>
+                {
+                    a[0].clone()
+                }
+                _ => return None,
+            },
+            _ => return None,
+        };
+        if arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
+            return None;
+        }
+        let find = |want_some: bool| -> Option<&IrMatchArm> {
+            arms.iter().find(|a| match &a.pattern {
+                IrPattern::Some { .. } => want_some,
+                IrPattern::None | IrPattern::Wildcard => !want_some,
+                _ => false,
+            })
+        };
+        let some_arm = find(true)?;
+        let none_arm = find(false)?;
+        // some(p) => Var(p) (the payload passthrough) — the only admitted Some body.
+        let p_var = match &some_arm.pattern {
+            IrPattern::Some { inner } => match &**inner {
+                IrPattern::Bind { var, .. } => *var,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        if !matches!(&some_arm.body.kind, IrExprKind::Var { id } if *id == p_var) {
+            return None;
+        }
+        // none => (f1, f2) with scalar-lowerable components.
+        let IrExprKind::Tuple { elements: fb } = &none_arm.body.kind else { return None };
+        if fb.len() != 2 {
+            return None;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        macro_rules! bail {
+            () => {{
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }};
+        }
+        // Materialize/borrow the Option subject (a self-host option call is tracked +
+        // dropped at scope end by the caller's machinery; a Var is borrowed).
+        let subj = match self.lower_call_args(std::slice::from_ref(subject)) {
+            Ok(mut a) => match a.pop() {
+                Some(CallArg::Handle(v)) => v,
+                _ => bail!(),
+            },
+            Err(_) => bail!(),
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = {
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: 4 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            let t = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(t), args: vec![addr] });
+            t
+        };
+        // Component k: IfThen(tag) → payload.slot[k] (LoadHandle @12 then load64 @12/@20),
+        // Else → fallback component (pure scalar).
+        let mut comps: [ValueId; 2] = [ValueId(0), ValueId(0)];
+        for (k, comp) in comps.iter_mut().enumerate() {
+            let m = self.fresh_value();
+            self.ops.push(Op::IfThen { cond: tag, dst: Some(m) });
+            let ph = {
+                let off = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: off, value: 12 });
+                let addr = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+                let p = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(p), args: vec![addr] });
+                p
+            };
+            // ph is an i32 handle local — widen through Prim::Handle before i64 address math.
+            let ph64 = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ph64), args: vec![ph] });
+            let slot = {
+                let off = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: off, value: 12 + (k as i64) * 8 });
+                let addr = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: ph64, b: off });
+                let v = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(v), args: vec![addr] });
+                v
+            };
+            self.ops.push(Op::Else { val: Some(slot) });
+            let fbv = match self.lower_scalar_value(&fb[k]) {
+                Some(v) => v,
+                None => bail!(),
+            };
+            self.ops.push(Op::EndIf { val: Some(fbv) });
+            *comp = m;
+        }
+        // ONE owned 2-slot block for the binding (the single cert object).
+        let two = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: two, value: 2 });
+        let tup = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst: tup,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len: two },
+        });
+        let th = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(th), args: vec![tup] });
+        for (k, comp) in comps.iter().enumerate() {
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: 12 + (k as i64) * 8 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: th, b: off });
+            self.ops.push(Op::Prim {
+                kind: PrimKind::Store { width: 8 },
+                dst: None,
+                args: vec![addr, *comp],
+            });
+        }
+        let _ = tuple_ty;
+        Some(tup)
+    }
+}

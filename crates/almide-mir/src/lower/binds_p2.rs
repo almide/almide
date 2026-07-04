@@ -786,6 +786,15 @@ impl LowerCtx {
             // of "A"/"B": a SILENT MISCOMPILE. Reject explicitly so the function walls
             // cleanly instead of emitting wrong bytes.
             IrExprKind::Match { subject, arms } => {
+                // `let e = match <Option[(s1,s2)]> { some(p) => p, none => (f1,f2) }` — the
+                // tuple-unwrap_or desugar output: EXECUTE via component merges + ONE owned
+                // block (no per-arm alloc — cert-clean single object).
+                if let Some(dst) = self.try_lower_scalar_tuple_option_match_bind(subject, arms) {
+                    self.value_of.insert(var, dst);
+                    self.live_heap_handles.push(dst);
+                    self.materialized_aggregates.insert(dst);
+                    return Ok(());
+                }
                 // A single-arm tuple-destructure `let offs = match pair { (o, _) => o }` extracting a
                 // HEAP component — semantically `let offs = pair.<i>` (the non-tail tuple-accumulator
                 // `fold` extraction). BORROW the slot handle (the tuple keeps ownership) then ACQUIRE
