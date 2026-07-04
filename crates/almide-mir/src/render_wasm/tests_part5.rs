@@ -1211,3 +1211,30 @@ fn guard_else_early_return_and_continue_execute() {
         assert_eq!(out, "ok:HI\nerr:empty\n25");
     }
 }
+
+#[test]
+fn heap_result_match_over_option_field_and_let_bound_variant() {
+    // Phase B: (1) a heap-result `match` over a BORROWED `Option[String]` FIELD subject
+    // (`match u.email { some(e) => "…${e}…", none => u.name }`) — the field's Option handle
+    // is borrowed and tracked so the heap-payload some-bind executes. (2) a `let nm = match
+    // s.shape { Circle(_) => "circle", … }; "${nm}…"` — a let-bound CUSTOM-VARIANT heap-result
+    // match, tail-duplicated into each arm (wrap_match_arms). Both byte-verified vs v0.
+    let src = "type Shape = | Circle(Float) | Rect(Float, Float)\n\
+        type User = { name: String, email: Option[String] }\n\
+        fn user_display(u: User) -> String =\n\
+        match u.email { some(e) => \"${u.name} <${e}>\", none => u.name }\n\
+        fn describe(s: Shape, label: String) -> String = {\n\
+        let nm = match s { Circle(_) => \"circle\", Rect(_, _) => \"rect\" }\n\
+        \"${nm}: ${label}\" }\n\
+        effect fn main() -> Unit = {\n\
+        let a: User = { name: \"alice\", email: some(\"a@x.com\") }\n\
+        let b: User = { name: \"bob\", email: none }\n\
+        println(user_display(a))\n\
+        println(user_display(b))\n\
+        println(describe(Circle(5.0), \"big\"))\n\
+        println(describe(Rect(1.0, 2.0), \"wide\")) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("heap_match_option_field", &render_wasm_program(&prog)) {
+        assert_eq!(out, "alice <a@x.com>\nbob\ncircle: big\nrect: wide");
+    }
+}

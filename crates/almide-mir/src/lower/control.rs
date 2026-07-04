@@ -719,6 +719,41 @@ impl LowerCtx {
         }
     }
 
+    /// The MATCH analogue of [`Self::wrap_branch_arms`] for a CUSTOM-VARIANT (or any
+    /// non-literal-pattern) `let s = match subj { … }; rest` — `desugar_match_to_if` only
+    /// reduces LITERAL-pattern matches, so a `match s.shape { Circle(_) => "circle", … }`
+    /// declined and the whole let-bound-match walled. Here each arm's BODY is wrapped with
+    /// the continuation `{ let s = <arm_body>; rest }`, keeping the `Match` so the proven
+    /// `try_lower_custom_variant_match` (tail position) runs each per-arm-balanced arm. The
+    /// pattern/guard are preserved; `rest` is duplicated once per arm (bounded by the outer
+    /// `MAX_DESUGARED_NODES` guard, and call-count-invariant so `mir == ir` holds).
+    pub(crate) fn wrap_match_arms(
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        bind_var: VarId,
+        bind_ty: &Ty,
+        rest_stmts: &[IrStmt],
+        rest_tail: &Option<Box<IrExpr>>,
+        result_ty: &Ty,
+    ) -> IrExpr {
+        let new_arms: Vec<IrMatchArm> = arms
+            .iter()
+            .map(|a| IrMatchArm {
+                pattern: a.pattern.clone(),
+                guard: a.guard.clone(),
+                body: Self::continuation_block(
+                    &a.body, bind_var, bind_ty, rest_stmts, rest_tail, result_ty,
+                ),
+            })
+            .collect();
+        IrExpr {
+            kind: IrExprKind::Match { subject: Box::new(subject.clone()), arms: new_arms },
+            ty: result_ty.clone(),
+            span: None,
+            def_id: None,
+        }
+    }
+
     /// `{ let s = arm_value; <rest_stmts>; <rest_tail> }` typed `result_ty` — the continuation pushed
     /// behind the per-arm bind of `s`.
     fn continuation_block(

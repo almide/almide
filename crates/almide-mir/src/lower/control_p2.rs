@@ -395,6 +395,33 @@ impl LowerCtx {
         // Dispatch on the tracking set. An Option reads len-as-tag (Some=len≠0); a scalar
         // Result reads len-as-tag INVERSE (Err=len≠0, Ok=len0). The if-skeleton is uniform
         // (then = tag≠0, else = tag==0): Option → then=Some/else=None; Result → then=Err/else=Ok.
+        // A BORROWED Option[heap] / Result[heap] FIELD subject (`match u.email { some(e) => …,
+        // none => … }` where `email: Option[String]` is a field of the param `u`). `lower_call_args`
+        // borrowed the field's variant handle — a nested-ownership block `u` still OWNS (freed by
+        // `u`'s drop; NOT in `live_heap_handles`, so no owned-subject-drop conflict). Track it so the
+        // tag-read + heap-payload BORROW bind below execute (the some-arm `e` is a second borrow of
+        // the Option's @12 slot; the result String is moved out fresh). Same len-as-tag layout as a
+        // self-host Option/Result value — only the SOURCE (a field borrow, not a call) differs.
+        if matches!(&subject.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) {
+            use almide_lang::types::constructor::TypeConstructorId;
+            match &subject.ty {
+                Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
+                    self.materialized_options.insert(subj);
+                    if is_heap_ty(&a[0]) {
+                        self.heap_elem_lists.insert(subj);
+                    }
+                }
+                Ty::Applied(TypeConstructorId::Result, a)
+                    if a.len() == 2 && !Self::is_heap_ok_result(&subject.ty) =>
+                {
+                    self.materialized_results.insert(subj);
+                    if is_heap_ty(&a[1]) {
+                        self.heap_elem_lists.insert(subj);
+                    }
+                }
+                _ => {}
+            }
+        }
         let is_option = self.materialized_options.contains(&subj);
         // A scalar Result reads len-as-tag (@4); a HEAP-Ok `Result[String,String]` (value.as_string,
         // the cap-as-tag DynListStr) reads the tag at the slot-0 HIGH 32 bits (@16). Both arrange

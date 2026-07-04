@@ -1910,18 +1910,28 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
     let result_ty = &body.ty;
     let rest_stmts: Vec<IrStmt> = stmts[i + 1..].to_vec();
     let rest_tail: Option<Box<IrExpr>> = tail.clone();
-    // Reduce a `match` to a nested literal-pattern `if` chain (the same `desugar_match_to_if`
-    // the tail/scalar machinery uses) — a pure builder, so a throwaway default ctx suffices.
-    let if_branch = match &branch.kind {
-        IrExprKind::If { .. } => (*branch).clone(),
+    // Push the continuation `{ rest }` behind the per-arm bind of `bind_var`. A literal-pattern
+    // `match` (or `if`) reduces to a nested `if` chain via `desugar_match_to_if` and uses
+    // `wrap_branch_arms`; a CUSTOM-VARIANT / non-literal `match` (`match s.shape { Circle(_) =>
+    // "circle", … }`) — which `desugar_match_to_if` declines — keeps its `Match` and pushes the
+    // continuation into each arm via `wrap_match_arms` (the proven tail custom-variant match then
+    // runs each arm). Both are call-count-invariant, so `mir == ir` holds.
+    let rewritten_branch = match &branch.kind {
+        IrExprKind::If { .. } => LowerCtx::wrap_branch_arms(
+            branch, bind_var, &bind_ty, &rest_stmts, &rest_tail, result_ty,
+        ),
         IrExprKind::Match { subject, arms } => {
-            LowerCtx::default().desugar_match_to_if(subject, arms, &branch.ty)?
+            match LowerCtx::default().desugar_match_to_if(subject, arms, &branch.ty) {
+                Some(if_branch) => LowerCtx::wrap_branch_arms(
+                    &if_branch, bind_var, &bind_ty, &rest_stmts, &rest_tail, result_ty,
+                ),
+                None => LowerCtx::wrap_match_arms(
+                    subject, arms, bind_var, &bind_ty, &rest_stmts, &rest_tail, result_ty,
+                ),
+            }
         }
         _ => return None,
     };
-    let rewritten_branch = LowerCtx::wrap_branch_arms(
-        &if_branch, bind_var, &bind_ty, &rest_stmts, &rest_tail, result_ty,
-    );
     // The prefix statements `stmts[0..i]` stay; the rewritten branch is the new block TAIL.
     let prefix: Vec<IrStmt> = stmts[..i].to_vec();
     Some(IrExpr {
