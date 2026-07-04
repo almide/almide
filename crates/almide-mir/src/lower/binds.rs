@@ -238,6 +238,16 @@ impl LowerCtx {
             // buildable iff every inner element is a lowerable scalar (the flat
             // builder itself re-checks; a non-scalar inner defers there).
             IrExprKind::List { .. } => elem_list_scalar,
+            // A RECORD-CTOR VARIANT element (`[Click { x, y }, KeyPress { key }, …]` — the
+            // event-list shape): a `Record` literal whose NAME is a registered constructor is
+            // a TAGGED variant value, materialized via `try_lower_variant_ctor` below (NOT the
+            // plain-record path). Gated on the list being a flat/rich variant list.
+            IrExprKind::Record { name: Some(n), .. }
+                if (elem_flat_variant || elem_rich_variant.is_some())
+                    && self.variant_layouts.ctor_to_type.contains_key(n.as_str()) =>
+            {
+                true
+            }
             IrExprKind::Record { .. } => elem_scalar_aggregate || elem_recdrop.is_some(),
             IrExprKind::Tuple { .. } => elem_scalar_aggregate || elem_str_value || elem_int_str || elem_str_int,
             // A FLAT-variant CONSTRUCTOR element (`[CapIO, CapProcess]`) — a Named call whose name is a
@@ -317,6 +327,16 @@ impl LowerCtx {
                     let dup = self.fresh_value();
                     self.ops.push(Op::Dup { dst: dup, src });
                     dup
+                }
+                // A RECORD-CTOR VARIANT element (`Click { x, y }` where `Click` is a registered
+                // ctor) — materialize the tagged variant block via `try_lower_variant_ctor` (NOT
+                // the plain-record path), moved into the slot; the list's `$__drop_list_<V>` frees
+                // each element recursively. Checked BEFORE the plain-record arms.
+                IrExprKind::Record { name: Some(n), .. }
+                    if (elem_flat_variant || elem_rich_variant.is_some())
+                        && self.variant_layouts.ctor_to_type.contains_key(n.as_str()) =>
+                {
+                    self.try_lower_variant_ctor(elem)?
                 }
                 // A scalar-only record literal element — materialize a fresh OWNED record
                 // block (`try_lower_scalar_record_construct`, cert `i`), moved into the slot.

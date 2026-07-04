@@ -1238,3 +1238,27 @@ fn heap_result_match_over_option_field_and_let_bound_variant() {
         assert_eq!(out, "alice <a@x.com>\nbob\ncircle: big\nrect: wide");
     }
 }
+
+#[test]
+fn list_of_record_ctor_variants_literal() {
+    // Phase B: a `[Click { x, y }, KeyPress { key }, Close]` literal — a List of RECORD-CTOR
+    // variants (a rich variant with a String field). Each element materializes via the tagged
+    // variant ctor (not the plain-record path); the list's `$__drop_list_Event` frees each
+    // recursively. Byte-verified vs v0.
+    let src = "type Event =\n\
+        | Click { x: Int, y: Int }\n\
+        | KeyPress { key: String }\n\
+        | Close\n\
+        fn name(e: Event) -> String = match e {\n\
+        Click { x, .. } => \"click:\" + int.to_string(x)\n\
+        KeyPress { key } => \"key:\" + key\n\
+        Close => \"close\"\n\
+        }\n\
+        effect fn main() -> Unit = {\n\
+        let events = [Click { x: 1, y: 2 }, KeyPress { key: \"a\" }, Close]\n\
+        for e in events { println(name(e)) } }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("list_record_ctor_variants", &render_wasm_program(&prog)) {
+        assert_eq!(out, "click:1\nkey:a\nclose");
+    }
+}
