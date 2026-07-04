@@ -58,3 +58,15 @@ the pass added the zip-fusion / scalar-tuple-fold / beta-reduce / eager-init
 machinery WITH their pinned unit tests, so the rate held while the surface grew).
 The five graduated probes (tests_part5) cover the newest defunc arms directly.
 Next targets unchanged: control_p5 defunc engine, tail.rs, binds_p2/p4.
+
+## Re-measurement — 2026-07-04 (crush-pass close: nn walls 0)
+
+TOTAL line coverage: **66.30%** (99,602 lines, 33,565 missed) — up from 65.89%
+on a denominator grown by ~1,240 lines (matrix_core routing, the general
+unfaithful-closure wall, defunc `list.find`, cross-module record-name
+canonicalization), with only +12 missed lines: the seven new graduated pins
+(tests_part5: adt tuple ctor, ctor list-field recursion, matrix floor/walls/
+norms+bytes, defunc find, load_weights record return) cover the new surface
+almost completely. render_wasm/registry.rs grew 648 → 679 covered lines (the
+matrix_core self-host). Next targets unchanged: control_p5 defunc engine
+(largest untested surface), tail.rs, binds_p2/p4.
