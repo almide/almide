@@ -550,6 +550,12 @@ impl LowerCtx {
                                     self.lower_branch(t)?;
                                 }
                             }
+                            // A LOOP tail is a Unit EFFECT that must RUN — eliding it
+                            // silently drops the whole loop (see lower_branch_arm's twin).
+                            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+                                self.lower_for_in(*var, var_tuple, iterable, body)?
+                            }
+                            IrExprKind::While { cond, body } => self.lower_while(cond, body)?,
                             _ => self.record_elided_calls(t),
                         }
                     }

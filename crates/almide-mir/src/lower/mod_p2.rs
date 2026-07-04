@@ -805,6 +805,11 @@ pub(crate) struct LowerCtx {
     /// deferred `Const 0` merely mis-valued. Gating on real materialization keeps `xs[i]` from
     /// regressing an unmaterialized-list program to a runtime trap.
     materialized_lists: HashSet<ValueId>,
+    /// Heap binds that fell to the DEFERRED `Alloc{Opaque}` model (an EMPTY block whose
+    /// content is never populated — sound only while nothing READS through it). A
+    /// custom-variant `match` over such a subject would read a garbage tag and execute
+    /// the wrong arm (the record-ctor mt2 miscompile), so the match paths WALL on it.
+    pub(crate) deferred_opaque_binds: HashSet<ValueId>,
     /// Set true by `lower_pure_module_call_args` when a closure ARGUMENT to a pure combinator could
     /// NOT be lifted to a FuncRef (a capturing / param-invoking lambda — `list.map(fns, (f) => f(10))`)
     /// and so fell back to `record_elided_calls`. The auto-linked self-host combinator then runs with

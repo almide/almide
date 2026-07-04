@@ -1016,3 +1016,99 @@ fn anon_record_with_anon_list_field_drop_source_typechecks() {
         assert_eq!(out, "7\n2");
     }
 }
+
+#[test]
+fn variant_record_ctor_construct_and_match() {
+    // RECORD-ctor variants end to end: construction (`Data { … }` → the TAGGED block, a
+    // tag-less plain record misread every match as tag 0 — the mt2 miscompile), record
+    // PATTERNS (`Data { seq, .. }` — named-field slot binds incl. `..`), a heap-result
+    // record-pattern match (payload/message borrows), and NESTED record-ctor fields
+    // (`Node { left: Leaf(1), right: Node { … } }` — the recursive tree).
+    let src = "type Tree = | Leaf(Int) | Node { left: Tree, right: Tree, value: Int }\n\
+        fn tree_sum(t: Tree) -> Int =\n\
+        match t {\n\
+        Leaf(n) => n\n\
+        Node { left, right, value } => tree_sum(left) + tree_sum(right) + value\n\
+        }\n\
+        type Message =\n\
+        | Ping\n\
+        | Data { payload: String, seq: Int }\n\
+        | Error { code: Int, message: String }\n\
+        fn message_code(m: Message) -> Int = match m {\n\
+        Ping => 0,\n\
+        Data { seq, .. } => seq,\n\
+        Error { code, .. } => code,\n\
+        }\n\
+        fn message_text(m: Message) -> String = match m {\n\
+        Ping => \"ping\",\n\
+        Data { payload, .. } => payload,\n\
+        Error { message, .. } => message,\n\
+        }\n\
+        effect fn main() -> Unit = {\n\
+        let t = Node { left: Leaf(1), right: Node { left: Leaf(2), right: Leaf(3), value: 10 }, value: 5 }\n\
+        println(int.to_string(tree_sum(t)))\n\
+        let m1 = Data { payload: \"abc\", seq: 42 }\n\
+        let m2 = Error { code: 7, message: \"boom\" }\n\
+        println(int.to_string(message_code(m1)) + \":\" + message_text(m1))\n\
+        println(int.to_string(message_code(m2)) + \":\" + message_text(m2))\n\
+        println(int.to_string(message_code(Ping)) + \":\" + message_text(Ping)) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("variant_record_ctor", &render_wasm_program(&prog)) {
+        assert_eq!(out, "21\n42:abc\n7:boom\n0:ping");
+    }
+}
+
+#[test]
+fn variant_list_field_extraction_loops() {
+    // The gguf ValArray CONSUMER: a statement match binding a `List[variant]` field
+    // (`ArrV(rows)`), iterated with nested matches and a per-row String accumulator —
+    // the arm-tail loop must RUN (it was silently elided to caps markers before).
+    let src = "type GV =\n\
+        | IntV(Int)\n\
+        | StrV(String)\n\
+        | ArrV(List[GV])\n\
+        fn read_array(n: Int, depth: Int, pos: Int) -> (GV, Int) = {\n\
+        var items: List[GV] = []\n\
+        var p = pos\n\
+        for i in 0..n {\n\
+        if depth > 0 then {\n\
+        let (val, next) = read_array(2, depth - 1, p)\n\
+        list.push(items, val)\n\
+        p = next }\n\
+        else if i % 2 == 0 then {\n\
+        let (val, next) = (IntV(i * 10 + p), p + 1)\n\
+        list.push(items, val)\n\
+        p = next }\n\
+        else {\n\
+        let (val, next) = (StrV(\"x\" + int.to_string(p)), p + 2)\n\
+        list.push(items, val)\n\
+        p = next } }\n\
+        (ArrV(items), p) }\n\
+        effect fn main() -> Unit = {\n\
+        let (v, endp) = read_array(3, 1, 0)\n\
+        match v {\n\
+        ArrV(rows) => {\n\
+        println(\"rows:\" + int.to_string(list.len(rows)))\n\
+        for row in rows {\n\
+        match row {\n\
+        ArrV(cells) => {\n\
+        var line = \"\"\n\
+        for c in cells {\n\
+        match c {\n\
+        IntV(i) => { line = line + \"i\" + int.to_string(i) + \",\" }\n\
+        StrV(s) => { line = line + s + \",\" }\n\
+        ArrV(_) => { line = line + \"?,\" }\n\
+        } }\n\
+        println(line) }\n\
+        IntV(i) => println(\"i\" + int.to_string(i))\n\
+        StrV(s) => println(s)\n\
+        } } }\n\
+        IntV(i) => println(\"top-i\")\n\
+        StrV(s) => println(\"top-s\")\n\
+        }\n\
+        println(\"end:\" + int.to_string(endp)) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("variant_list_field_loops", &render_wasm_program(&prog)) {
+        assert_eq!(out, "rows:3\ni0,x1,\ni3,x4,\ni6,x7,\nend:9");
+    }
+}

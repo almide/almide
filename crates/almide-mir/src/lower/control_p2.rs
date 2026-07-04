@@ -779,6 +779,13 @@ impl LowerCtx {
                 return None;
             }
         };
+        // A DEFERRED-Opaque subject is an EMPTY block: reading its tag would take a wrong
+        // arm silently (the record-ctor mt2 miscompile) — decline (the tail walls honestly).
+        if self.deferred_opaque_binds.contains(&subj) {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return None;
+        }
         // A HEAP result over an OWNED subject temp would overlap the owned-subject borrow with the
         // arm's heap move-out (the cert rejects it). Subject-drop-before-arms is ADT brick 4b —
         // for now WALL it (a borrowed param/var subject, the recursive-to_string case, proceeds).
@@ -831,17 +838,42 @@ impl LowerCtx {
                             IrPattern::Bind { var, ty } if !is_heap_ty(ty) => {
                                 binds.push((1 + i, *var, false))
                             }
-                            // A leaf-heap (`String`) OR a nested-VARIANT field binds as a borrow of
-                            // the slot handle (the subject owns it; a move-out auto-Dups, a
-                            // borrow-pass like `tos(l)` just reads — ADT brick 5c, extended to
-                            // variant fields for the recursive `Expr` to_string lever).
-                            IrPattern::Bind { var, ty }
-                                if matches!(ty, Ty::String)
-                                    || self.variant_layouts.field_is_variant(ty) =>
-                            {
+                            // ANY heap field (`String`, a nested VARIANT, a `List[…]` —
+                            // `ArrV(xs) => for x in xs`, the gguf ValArray consumer — Bytes,
+                            // Matrix) binds as a BORROW of the slot handle: the subject owns
+                            // it, a move-out auto-Dups, a borrow-pass just reads. The bind is
+                            // type-agnostic (a slot-handle load); what the ARM does with it is
+                            // gated by the arm-body lowering as usual.
+                            IrPattern::Bind { var, ty } if is_heap_ty(ty) => {
                                 binds.push((1 + i, *var, true))
                             }
-                            // a List/other heap field / nested ctor pattern — a later brick.
+                            // a nested ctor pattern — a later brick.
+                            _ => return None,
+                        }
+                    }
+                    VariantArmKind::Ctor { tag: case.tag as i64, binds }
+                }
+                // A RECORD-ctor pattern (`Node { left, right, value }`, `Data { seq, .. }`,
+                // `Click { .. }`): resolve each named field to its declared slot (1 + index)
+                // and bind exactly like the positional ctor arm — scalar by value copy, heap
+                // as a borrow of the slot handle. `..`/unmentioned fields bind nothing; a
+                // NESTED field pattern stays a later brick.
+                IrPattern::RecordPattern { name, fields, rest: _ } => {
+                    let case = layout.case_by_ctor(name)?;
+                    let mut binds = Vec::new();
+                    for f in fields {
+                        let idx = case
+                            .fields
+                            .iter()
+                            .position(|(n, _)| n.as_str() == f.name)?;
+                        match &f.pattern {
+                            None | Some(IrPattern::Wildcard) => {}
+                            Some(IrPattern::Bind { var, ty }) if !is_heap_ty(ty) => {
+                                binds.push((1 + idx, *var, false))
+                            }
+                            Some(IrPattern::Bind { var, ty }) if is_heap_ty(ty) => {
+                                binds.push((1 + idx, *var, true))
+                            }
                             _ => return None,
                         }
                     }
@@ -908,6 +940,11 @@ impl LowerCtx {
         let Some(subj) = subject_value else {
             return wall("over a non-materialized subject");
         };
+        // A DEFERRED-Opaque subject is an EMPTY block: reading its tag would execute a
+        // wrong arm silently (the record-ctor mt2 miscompile) — wall it honestly.
+        if self.deferred_opaque_binds.contains(&subj) {
+            return wall("over a deferred (unmaterialized) subject");
+        }
         let type_name = match self.custom_variant_type_name(subject_ty) {
             Some(n) => n,
             None => return wall("over an unresolved variant type"),

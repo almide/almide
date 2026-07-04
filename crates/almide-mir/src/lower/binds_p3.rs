@@ -146,6 +146,13 @@ impl LowerCtx {
         let IrExprKind::Record { fields, .. } = &value.kind else {
             return None;
         };
+        // A RECORD-CTOR literal is a TAGGED variant value — route to the variant builder
+        // (see try_lower_record_construct's twin guard).
+        if let IrExprKind::Record { name: Some(n), .. } = &value.kind {
+            if self.variant_layouts.ctor_to_type.contains_key(n.as_str()) {
+                return self.try_lower_variant_ctor(value);
+            }
+        }
         // The CANONICAL declaration-ordered (name, concrete-type) field list. A heap
         // field / unresolvable type ⇒ `None` (via `scalar_slots`) ⇒ wall.
         let (names, tys) = self.aggregate_field_tys(&value.ty)?;
@@ -230,13 +237,35 @@ impl LowerCtx {
 
     pub(crate) fn try_lower_variant_ctor(&mut self, value: &IrExpr) -> Option<ValueId> {
         use crate::{IntOp, PrimKind};
-        let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &value.kind else {
-            return None;
+        // The ctor NAME + its supplied field exprs in DECLARED case order — from a
+        // positional ctor CALL (`IntV(p)`) or a RECORD-ctor literal (`Data { payload: …,
+        // seq: … }`, whose IR is a NAMED Record; field order follows the case, and a
+        // missing field walls — a defaulted variant-record slot would be garbage).
+        let (ctor_name, args): (String, Vec<IrExpr>) = match &value.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                (name.as_str().to_string(), args.clone())
+            }
+            IrExprKind::Record { name: Some(ctor), fields }
+                if self.variant_layouts.ctor_to_type.contains_key(ctor.as_str()) =>
+            {
+                let ctor_s = ctor.as_str().to_string();
+                let case_fields = {
+                    let (_, _, case) = self.variant_layouts.lookup_ctor(&ctor_s)?;
+                    case.fields.clone()
+                };
+                let mut ordered = Vec::with_capacity(case_fields.len());
+                for (fname, _) in &case_fields {
+                    let e = fields.iter().find(|(n, _)| n == fname).map(|(_, e)| e.clone())?;
+                    ordered.push(e);
+                }
+                (ctor_s, ordered)
+            }
+            _ => return None,
         };
         // Resolve the ctor's tag + the type's uniform block width + the OWNING TYPE NAME from the
         // registry. Cloned out of the immutable borrow so the lowering below can mutate `self`.
         let (tag, slot_count, arity, type_name) = {
-            let (ty, layout, case) = self.variant_layouts.lookup_ctor(name.as_str())?;
+            let (ty, layout, case) = self.variant_layouts.lookup_ctor(&ctor_name)?;
             (case.tag as i64, layout.slot_count, case.fields.len(), ty.to_string())
         };
         if args.len() != arity {
@@ -252,12 +281,18 @@ impl LowerCtx {
         // `Dup`'d (a var → lower_owned_heap_field) and moved in — its recursive free is the
         // generated `$__drop_<T>`. A List/other heap field is still ADT-brick-5+ → WALL.
         let mut field_vals: Vec<(ValueId, bool /* is_heap */)> = Vec::with_capacity(args.len());
-        for arg in args {
+        for arg in &args {
             if self.variant_layouts.field_is_variant(&arg.ty) {
+                // A nested ctor field — positional (`Leaf(1)`) OR a record-ctor literal
+                // (`right: Node { … }`) — recurses into this same builder.
                 let is_ctor_call = matches!(
                     &arg.kind,
                     IrExprKind::Call { target: CallTarget::Named { name }, .. }
                         if self.variant_layouts.ctor_to_type.contains_key(name.as_str())
+                ) || matches!(
+                    &arg.kind,
+                    IrExprKind::Record { name: Some(n), .. }
+                        if self.variant_layouts.ctor_to_type.contains_key(n.as_str())
                 );
                 let v = if is_ctor_call {
                     self.try_lower_variant_ctor(arg)?
@@ -361,6 +396,14 @@ impl LowerCtx {
         let IrExprKind::Record { fields, .. } = &value.kind else {
             return None;
         };
+        // A RECORD-CTOR literal (`Data { payload: …, seq: … }` — the NAME is a registered
+        // variant constructor): this is a TAGGED variant value, NOT a plain record — route
+        // to the variant builder (a tag-less field block here would misread every match).
+        if let IrExprKind::Record { name: Some(n), .. } = &value.kind {
+            if self.variant_layouts.ctor_to_type.contains_key(n.as_str()) {
+                return self.try_lower_variant_ctor(value);
+            }
+        }
         let (names, tys) = self.aggregate_field_tys(&value.ty)?;
         if tys.is_empty() {
             return None;

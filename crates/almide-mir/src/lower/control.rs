@@ -352,6 +352,14 @@ impl LowerCtx {
                 IrExprKind::If { cond, then, else_ }
                     if self.try_lower_unit_if(cond, then, else_) => {}
                 IrExprKind::If { .. } | IrExprKind::Match { .. } => self.lower_branch(tail)?,
+                // A LOOP tail (`ArrV(rows) => { for row in rows { … } }` — the gguf ValArray
+                // consumer arm; a `while` sibling): a loop is a Unit EFFECT, so it must RUN,
+                // not fall to `record_elided_calls` (which captures the body's calls as caps
+                // markers and SILENTLY DROPS the loop — the unlinked-`println` render leak).
+                IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+                    self.lower_for_in(*var, var_tuple, iterable, body)?
+                }
+                IrExprKind::While { cond, body } => self.lower_while(cond, body)?,
                 // A nested BLOCK tail (`{ stmt; … }` as an arm's tail — e.g. a flattened
                 // binder body, or a brace-wrapped arm) must NOT fall to `record_elided_calls`:
                 // that captures only the calls inside and SILENTLY DROPS its statements (the

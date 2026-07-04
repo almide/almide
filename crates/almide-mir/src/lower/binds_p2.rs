@@ -293,6 +293,12 @@ impl LowerCtx {
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
                 let init = alloc_init(value);
+                // A DEFERRED Opaque bind is an EMPTY block — record it so a custom-variant
+                // `match` over this var WALLS instead of reading a garbage tag (the
+                // record-ctor mt2 miscompile class).
+                if matches!(init, Init::Opaque) {
+                    self.deferred_opaque_binds.insert(dst);
+                }
                 self.value_of.insert(var, dst);
                 self.ops.push(Op::Alloc { dst, repr, init });
                 self.live_heap_handles.push(dst);
@@ -410,6 +416,21 @@ impl LowerCtx {
                         self.value_of.insert(var, dst);
                         self.live_heap_handles.push(dst);
                         return Ok(());
+                    }
+                    // A VARIANT record-ctor literal (`Data { … }`) outside the builder's
+                    // subset must WALL, not defer: a deferred Opaque variant read through a
+                    // CALL arg (`tree_sum(t)`) bypasses the match-side deferred gate and the
+                    // callee reads a garbage tag — the same miscompile class the Call-ctor
+                    // bind gate above already errors on.
+                    if let IrExprKind::Record { name: Some(n), .. } = &value.kind {
+                        if self.variant_layouts.ctor_to_type.contains_key(n.as_str()) {
+                            return Err(LowerError::Unsupported(format!(
+                                "variant record-ctor `{}` bound to a let/var cannot be \
+                                 faithfully materialized in this brick (a field outside the \
+                                 ctor subset)",
+                                n.as_str()
+                            )));
+                        }
                     }
                     // A record with one or more HEAP fields (`R { name: "x", n: i }`) —
                     // materialize the mixed scalar+heap block + track its heap-slot mask, so a
