@@ -89,3 +89,32 @@ Fixtures: `spec/wasm_cross/int_div_by_zero*.almd`, `int_mod_*`, `int8_div_overfl
 使用されない場合でも起動時に abort する。初期化子は先行するトップレベル束縛を
 参照できる（宣言順の依存）。
 Fixtures: `spec/wasm_cross/top_let_div_eager.almd`, `top_let_div_used.almd`。
+
+## ALS-T8 整数パースのエラー規範
+
+`int.parse` のエラーメッセージは Rust `ParseIntError` の Display と byte 一致する:
+空入力は `cannot parse integer from empty string`、不正文字は
+`invalid digit found in string`、範囲外は `number too large to fit in target type` /
+`number too small to fit in target type`。`int.from_hex` は `i64::from_str_radix(s, 16)`
+と観測等価（`+`/`-` 接頭辞・大文字小文字・オーバーフローの native 特性を含む）。
+Contracts: C-028, C-029。
+
+## ALS-T9 固定小数表示
+
+`float.to_fixed(x, n)` は**正確な二進値に対する round-half-to-even**（銀行丸め）。
+十進文字列経由の再丸めや half-up は不適合。n=0 の小数点無し、負数・境界値
+（0.5 ちょうど等）も同規則。
+Contracts: C-025。
+
+## ALS-T10 数学関数の決定性
+
+`math.sin/cos/tan/exp/log/pow` 等の超越関数は**全ターゲットで byte 一致**する
+（実装は vendored libm を両ターゲットで共有 — ホスト libm 依存は不適合）。
+Contracts: C-026。
+
+## ALS-T11 バイナリテキスト符号化
+
+`base64.encode/decode`（standard + URL-safe）と `hex.encode/decode` は RFC 4648
+に従い、decode エラーは**位置情報込みで**両ターゲット同文言。大文字小文字の
+扱い・パディング規則・不正長の検出を含む。
+Contracts: C-027, C-030。
