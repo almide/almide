@@ -6,7 +6,7 @@
 
 ## Active
 
-59 items
+60 items
 
 | Item | Description |
 |------|-------------|
@@ -50,6 +50,7 @@
 | [v1 heap-result `if`/`match` execution — design (DE-RISKED: no Coq change)](active/v1-heap-result-control-flow.md) |  |
 | [v1 KGI / KPI スコアボード](active/v1-kgi-kpi.md) | v1 KGI/KPI scoreboard — the terminal goal indicators (trust + writability), the guard invariants that must never degrade (checker size, TB purity, axiom cleanliness, zero claim-drift), and the progress KPIs toward each gap. Weekly fill-in. |
 | [v1 heap-loop-carried ownership — option C (cert-spine extension), the COMPLETENESS fix](active/v1-loop-ownership-cert.md) |  |
+| [V1 Matrix Follow-Ups — 残課題の正確な再開点](active/v1-matrix-followups.md) | Follow-ups surfaced while closing the nn matrix walls — exact re-entry points |
 | [Almide v1: MIR を唯一の真とする単一意味論アーキテクチャ](active/v1-mir-architecture.md) |  |
 | [Org byte-verification — every repo's own vectors on both targets](active/v1-org-byte-verification.md) | Org-wide v0==wasm byte-verification sweep and the wasm bug classes it flushed out |
 | [v1 — the parser-TCO lever (the real "heap-result-expr" cross-repo lever)](active/v1-parser-tco-lever.md) |  |
@@ -109,13 +110,14 @@
 
 ## Done
 
-252 items
+253 items
 
 <details>
-<summary>Show all 252 completed items</summary>
+<summary>Show all 253 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-07-04 | [Crush-Pass Continuation — gguf + Matrix walls closed](done/crush-pass-continuation.md) | gguf ADT walls, the Matrix value model, and coverage pins — all closed; nn walls 0 |
 | 2026-07-02 | [Handoff — porta wall=0 + read_message cross-module on v1 (session record)](done/v1-porta-read-message-handoff.md) | PC-switch handoff: porta wall=0 + read_message cross-module on v1 (steps 1-3 done) |
 | 2026-06-05 | [WASM Remaining 15 Skips — Fix Roadmap](done/wasm-remaining-15.md) | WASM spec skip burndown — fixable skips all resolved, 233/233 wasm-eligible (8 intentional skips) |
 | 2026-06-05 | [Perceus Void Block Stack Balance — CI Blocker](done/wasm-perceus-void-block.md) | StackBalancePass — void-context blocks never leak stack values (wasmtime 45+ strict validation) |
