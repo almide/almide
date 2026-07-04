@@ -663,6 +663,44 @@ pub fn desugar_guard(body: &IrExpr) -> Option<IrExpr> {
     changed.then_some(rewritten)
 }
 
+/// Apply the FULL pre-lowering desugar fixpoint — the EXACT sequence (and order)
+/// `lower_body_into` runs before it lowers a body: guard → beta-reduce → tuple-unwrap-or →
+/// effect-unwrap → heap-branches, restarting from the top after each rewrite. The MIR the
+/// lowering emits reflects this fully-desugared tree, so any consumer that must count calls /
+/// interps 1:1 against the MIR (the caps `mir == ir` gate, the interp-coverage count in
+/// classify_corpus) MUST read the SAME tree — otherwise a tail-duplicating rewrite (a
+/// let-bound `match` pushing its continuation into each arm) duplicates a call in the MIR that
+/// the under-desugared count never sees (the `option.unwrap_or((tuple)); f(r.0)` mir>ir breach).
+/// This is the single "desugar-before-both" source of truth; callers use it instead of
+/// hand-picking a subset of the desugars.
+pub fn desugar_all(body: &IrExpr) -> IrExpr {
+    let mut cur = body.clone();
+    loop {
+        if let Some(r) = desugar_guard(&cur) {
+            cur = r;
+            continue;
+        }
+        if let Some(r) = desugar_beta_reduce(&cur) {
+            cur = r;
+            continue;
+        }
+        if let Some(r) = desugar_tuple_unwrap_or(&cur) {
+            cur = r;
+            continue;
+        }
+        if let Some(r) = desugar_effect_unwrap(&cur) {
+            cur = r;
+            continue;
+        }
+        if let Some(r) = desugar_heap_branches(&cur) {
+            cur = r;
+            continue;
+        }
+        break;
+    }
+    cur
+}
+
 /// Rewrite the FIRST `guard` in a loop-body statement list into an `if` statement:
 /// `[pre…, Guard{cond,else}, rest…]` → `[pre…, Expr(if cond then { rest… } else E')]`
 /// (`continue` → `()`, `break`/value verbatim). The `if`'s then-block is recursively
