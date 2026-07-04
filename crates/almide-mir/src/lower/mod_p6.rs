@@ -380,7 +380,7 @@ pub fn desugar_callarg_heap_if(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
 /// / `ok(int.parse(s)!)` into the proven match-based early-return.
 fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
     fn take_or_recurse(child: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
-        if matches!(&child.kind, IrExprKind::Unwrap { .. }) {
+        if matches!(&child.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }) {
             let var = IrExpr {
                 kind: IrExprKind::Var { id: tmp },
                 ty: child.ty.clone(),
@@ -425,6 +425,10 @@ fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
         IrExprKind::ResultOk { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultOk { expr: Box::new(ne) }))),
         IrExprKind::ResultErr { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultErr { expr: Box::new(ne) }))),
         IrExprKind::OptionSome { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::OptionSome { expr: Box::new(ne) }))),
+        IrExprKind::Unwrap { expr } => extract_first_callarg_unwrap(expr, tmp)
+            .map(|(u, ne)| (u, mk(IrExprKind::Unwrap { expr: Box::new(ne) }))),
+        IrExprKind::Try { expr } => extract_first_callarg_unwrap(expr, tmp)
+            .map(|(u, ne)| (u, mk(IrExprKind::Try { expr: Box::new(ne) }))),
         _ => None,
     }
 }

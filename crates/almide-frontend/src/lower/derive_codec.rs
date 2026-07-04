@@ -206,15 +206,20 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
             kind: IrStmtKind::Bind { var: field_var, mutability: Mutability::Let, ty: f.ty.clone(), value: decode_expr },
             span: None,
         });
-        field_vars.push((f.name, field_var));
+        field_vars.push((f.name, field_var, f.ty.clone()));
     }
 
     // ok(TypeName { field1: _field1, field2: _field2, ... })
     let record = IrExpr {
         kind: IrExprKind::Record {
             name: Some(sym(type_name)),
-            fields: field_vars.iter().map(|(name, var)| {
-                (*name, IrExpr { kind: IrExprKind::Var { id: *var }, ty: Ty::Unknown, span: None, def_id: None })
+            // Each field value carries its DECLARED type — NOT Ty::Unknown. The v1 record
+            // builder decides a field's heap-ness from `expr.ty` (binds_p3), so an Unknown
+            // scalar field (`id: Int`) was mis-classified as heap → an rc_inc + i64.extend_i32_u
+            // of an i64 Int → invalid wasm in the generated `T.decode`. The real type makes the
+            // builder store a scalar directly and co-own only true heap fields.
+            fields: field_vars.iter().map(|(name, var, ty)| {
+                (*name, IrExpr { kind: IrExprKind::Var { id: *var }, ty: ty.clone(), span: None, def_id: None })
             }).collect(),
         },
         ty: type_ty.clone(), span: None, def_id: None,

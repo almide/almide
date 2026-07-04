@@ -173,6 +173,16 @@ impl LowerCtx {
         if let Some(rewritten) = desugar_heap_branches(body) {
             return self.lower_body_into(&rewritten);
         }
+        // DEBUG (env `DBG_LOWER_FN`): the FULLY-desugared body this function actually lowers — the
+        // real lowering path (`desugar_heap_branches → TCO → here`), distinct from `desugar_all`.
+        // Diff two functions' dumps to see why an identical `desugar_all` yields different MIR.
+        if std::env::var("DBG_LOWER_FN").is_ok_and(|v| v == self.fn_name) {
+            eprintln!(
+                "=== LOWER-BODY {} ===\n{}",
+                self.fn_name,
+                crate::lower::dump_ir(body)
+            );
+        }
         // The set of vars reassigned INSIDE a loop (option-C slots) — gates the mutable
         // `var x = r.field` owned-field-`Dup` (a loop-reassigned such var would leak; see
         // `lower_heap_extraction`). Computed once over this (possibly tail-duplicated) body; a later

@@ -1384,3 +1384,29 @@ fn value_field_byte_matches_oracle() {
         assert_eq!(out, "6"); // (as_int ?? 0) - 1 = 6 — matches v0
     }
 }
+
+#[test]
+fn derived_codec_decode_chain_lowers_and_byte_matches() {
+    // B-2: the derived Codec `T.decode(v)` chain — `let f = value.as_T(value.field(v,k)?)?; …;
+    // ok(T{…})`. Two fixes compose: (1) the nested call-arg `?` (Try) is lifted to a separate
+    // bind so the proven nested value-Result match lowers (extract_first_callarg_unwrap), and
+    // (2) the derive tags each record-field value with its DECLARED type (not Ty::Unknown) so
+    // the v1 record builder stores a scalar `Int` field directly instead of the rc_inc +
+    // i64.extend_i32_u heap path that emitted invalid wasm. Single, multi, and NESTED-record
+    // fields all byte-match v0 `--target wasm`.
+    let src = "type Inner: Codec = { x: Int, y: Int }\n\
+        type Config: Codec = { host: String, port: Int, inner: Inner }\n\
+        effect fn main() -> Unit = {\n\
+        let text = \"{\\\"host\\\":\\\"h\\\",\\\"port\\\":8080,\\\"inner\\\":{\\\"x\\\":1,\\\"y\\\":2}}\"\n\
+        match json.parse(text) {\n\
+        ok(v) => match Config.decode(v) {\n\
+        ok(c) => println(c.host + \":\" + int.to_string(c.port) + \" \" + int.to_string(c.inner.x))\n\
+        err(e) => println(\"e:\" + e) }\n\
+        err(_) => println(\"perr\") } }\n";
+    let prog = lower_source(&format!("import json\n{src}"));
+    assert!(prog.functions.iter().any(|f| f.name == "Config.decode"), "Config.decode must link");
+    assert!(prog.functions.iter().any(|f| f.name == "Inner.decode"), "nested Inner.decode must link");
+    if let Some(out) = build_and_run("codec_decode", &render_wasm_program(&prog)) {
+        assert_eq!(out, "h:8080 1");
+    }
+}
