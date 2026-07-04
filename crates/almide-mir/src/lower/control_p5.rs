@@ -187,10 +187,14 @@ impl LowerCtx {
             "filter" => result_heap_elem
                 || matches!(result_ty,
                     Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0])),
-            // A SCALAR accumulator (Int/Bool/Float), OR a heap STRING accumulator (`fold("", (acc,x)
-            // => acc + …)`): the inlined `acc = <body>` is the loop-carried slot's drop-old + SetLocal
-            // (the proven i(id)m append-accumulator pattern), reclaiming each transient String.
-            "fold" => !is_heap_ty(result_ty) || matches!(result_ty, Ty::String),
+            // A SCALAR accumulator (Int/Bool/Float), OR any HEAP accumulator the seed/body
+            // machinery can handle (String, a list, a Matrix — `fold(layers, x, (h, l) =>
+            // block(h, l))`): the inlined `acc = <body>` is the loop-carried slot's
+            // drop-old + SetLocal (the proven i(id)m append-accumulator pattern). The
+            // strict per-shape gating lives in the SEED (LitStr/Var/list-literal only)
+            // and BODY (concat/fresh-owned-call only) lowerers — an unsupported shape
+            // returns None there and the whole HOF rolls back to the wall.
+            "fold" => true,
             "flat_map" => result_str_acc,
             "filter_map" => result_str_acc || result_filter_map_heap,
             _ => false,
@@ -364,17 +368,44 @@ impl LowerCtx {
                     // via SetLocal each iteration — the proven i(id)m append-accumulator slot. Gated to
                     // a String LITERAL init (`fold("", …)` / `fold("prefix", …)`); a non-literal heap
                     // init rolls back (the HOF WALLs).
-                    if let IrExprKind::LitStr { value: s } = &init_expr.kind {
-                        let acc = self.fresh_value();
-                        self.ops.push(Op::Alloc {
-                            dst: acc,
-                            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
-                            init: crate::Init::Str(s.clone()),
-                        });
-                        (Some(acc), None, None, None)
-                    } else {
-                        return None;
+                    let seeded = match &init_expr.kind {
+                        IrExprKind::LitStr { value: s } => {
+                            let acc = self.fresh_value();
+                            self.ops.push(Op::Alloc {
+                                dst: acc,
+                                repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                                init: crate::Init::Str(s.clone()),
+                            });
+                            Some(acc)
+                        }
+                        // `fold(layers, x, …)` — a VAR init (usually a borrowed param):
+                        // ACQUIRE an owned copy (`Dup`) so the slot owns its reference
+                        // independently (the loop's drop-old frees exactly this chain).
+                        IrExprKind::Var { id } => {
+                            let src = self.value_for(*id).ok()?;
+                            let acc = self.fresh_value();
+                            self.ops.push(Op::Dup { dst: acc, src });
+                            Some(acc)
+                        }
+                        // `fold(xs, [], …)` — an admitted list literal init.
+                        IrExprKind::List { .. } => self
+                            .try_lower_str_list_literal(init_expr)
+                            .or_else(|| self.try_lower_scalar_list_construct(init_expr)),
+                        _ => None,
+                    };
+                    let acc = seeded?;
+                    // Classify the slot's DROP GRAIN from the accumulator TYPE, so the
+                    // per-iteration drop-old (and the final move-out) frees the right
+                    // shape — a `List[List[Float]]` (Matrix) accumulator would leak its
+                    // rows under a flat Drop.
+                    if crate::lower::is_list_list_str_ty(&init_expr.ty) {
+                        self.list_list_str_lists.insert(acc);
+                    } else if let Some(rname) = self.record_or_anon_drop_type_name(&init_expr.ty) {
+                        self.variant_drop_handles.insert(acc, rname);
+                    } else if is_heap_elem_list_ty(&init_expr.ty) {
+                        self.heap_elem_lists.insert(acc);
                     }
+                    (Some(acc), None, None, None)
                 } else {
                     let init_v = self.lower_scalar_value(init_expr)?;
                     // A STABLE mutable local: ConstInt-seed then SetLocal to the init value (so the
@@ -547,7 +578,14 @@ impl LowerCtx {
             // double-free). It reads the loop-carried `acc` BEFORE the drop (borrow-then-rebind). A
             // non-ConcatStr body returns None → the HOF rolls back and the caller WALLs.
             self.scalar_loop_depth += 1;
-            let v = self.try_lower_concat_str(body);
+            let v = self
+                .try_lower_concat_str(body)
+                // `acc + [x]` — a list append accumulator.
+                .or_else(|| self.try_lower_concat_list(body))
+                // `encoder_block_r(h, layer, n)` — a CALL producing the new accumulator
+                // as a FRESH owned value (the calling convention): bare CallFn dst, moved
+                // into the slot by the drop-old + SetLocal below.
+                .or_else(|| self.try_lower_fold_acc_call(body));
             self.scalar_loop_depth -= 1;
             v
         } else {
@@ -2430,5 +2468,48 @@ impl LowerCtx {
             )));
         }
         Ok(())
+    }
+}
+
+impl LowerCtx {
+    /// Lower a fold-accumulator BODY that is a direct CALL (`(h, k) => step(h, k)` —
+    /// the transformer layer fold) to a BARE fresh owned heap value: a Named user fn
+    /// via `CallFn`, a pure Module fn via the routed self-host name. The result is
+    /// NOT registered for scope-end drop — the caller's drop-old + `SetLocal` makes
+    /// the loop slot its single owner. Unwraps a trivial `{ <call> }` block.
+    fn try_lower_fold_acc_call(&mut self, body: &IrExpr) -> Option<ValueId> {
+        use almide_ir::IrExprKind;
+        let inner = match &body.kind {
+            IrExprKind::Block { stmts, expr: Some(e) } if stmts.is_empty() => e.as_ref(),
+            _ => body,
+        };
+        match &inner.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                let lowered = self.lower_call_args(args).ok()?;
+                let repr = repr_of(&inner.ty).ok()?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::CallFn {
+                    dst: Some(dst),
+                    name: name.as_str().to_string(),
+                    args: lowered,
+                    result: Some(repr),
+                });
+                Some(dst)
+            }
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                if crate::purity::is_pure(module.as_str(), func.as_str()) =>
+            {
+                let mark = self.live_heap_handles.len();
+                let v = self.lower_pure_module_value_call(module, func, args, &inner.ty).ok()?;
+                // lower_pure_module_value_call tracks its result for scope-end drop —
+                // the slot must be the SINGLE owner, so untrack it (bare).
+                if let Some(pos) = self.live_heap_handles.iter().rposition(|&h| h == v) {
+                    self.live_heap_handles.remove(pos);
+                }
+                let _ = mark;
+                Some(v)
+            }
+            _ => None,
+        }
     }
 }
