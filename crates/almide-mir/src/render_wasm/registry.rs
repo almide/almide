@@ -152,7 +152,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/bytes_f16.almd"), &[("bytes_read_f16_le", "bytes.read_f16_le"), ("bytes_read_f16_le_array", "bytes.read_f16_le_array")]),
         (
             include_str!("../../../../stdlib/matrix_activations.almd"),
-            &[("matrix_softmax_rows", "matrix.softmax_rows"), ("matrix_gelu", "matrix.gelu"), ("matrix_swiglu_gate", "matrix.swiglu_gate")],
+            &[("matrix_softmax_rows", "matrix.softmax_rows"), ("matrix_gelu", "matrix.gelu"), ("matrix_swiglu_gate", "matrix.swiglu_gate"), ("matrix_rope_rotate", "matrix.rope_rotate"), ("matrix_multi_head_attention", "matrix.multi_head_attention"), ("matrix_masked_multi_head_attention", "matrix.masked_multi_head_attention"), ("matrix_from_q1_0_bytes", "matrix.from_q1_0_bytes")],
         ),
         (
             include_str!("../../../../stdlib/matrix_core.almd"),

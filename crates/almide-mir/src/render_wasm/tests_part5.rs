@@ -1323,3 +1323,49 @@ fn matrix_swiglu_gate_byte_matches_scalar_libm_oracle() {
         assert_eq!(out.lines().next().unwrap(), "-0.1649501991937434");
     }
 }
+
+#[test]
+fn matrix_rope_rotate_byte_matches_scalar_oracle() {
+    // Phase D1: RoPE — per (row=pos, head, pair) rotate by inv_freq = exp(-(2i/head_dim)*
+    // log theta), angle = pos*inv_freq, (x0*cos-x1*sin, x0*sin+x1*cos), via scalar self-hosted
+    // math.{exp,log,sin,cos}. Op order transcribed exactly → byte-exact vs v0 `--target wasm`.
+    let src = "effect fn main() -> Unit = {\n        let x = matrix.from_lists([\n        [1.0, 0.0, 0.5, 0.0 - 0.5, 2.0, 1.0, 0.0 - 1.0, 0.3],\n        [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]])\n        let ls = matrix.to_lists(matrix.rope_rotate(x, 2, 4, 10000.0))\n        for row in ls { for v in row { println(float.to_string(v)) } } }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "matrix.rope_rotate"), "rope self-host must link");
+    if let Some(out) = build_and_run("matrix_rope", &render_wasm_program(&prog)) {
+        assert_eq!(out.lines().count(), 16, "2 rows × 8 cols");
+        assert_eq!(out.lines().next().unwrap(), "1.0");
+    }
+}
+
+#[test]
+fn matrix_multi_head_attention_byte_matches_scalar_oracle() {
+    // Phase D1: MHA — per head, per query row: scaled Q·K^T (+ causal -1e9 mask), softmax
+    // (scalar rt.math_exp = math.exp), weighted V-sum. Heads write DISJOINT columns so the
+    // i-outer/h-inner self-host is byte-identical to v0's h-outer/i-inner `--target wasm`.
+    let src = "effect fn main() -> Unit = {\n        let q = matrix.from_lists([[1.0, 0.0, 0.5, 0.0 - 0.5], [0.2, 0.3, 0.0 - 0.1, 0.4], [1.0, 1.0, 0.0, 0.0]])\n        let k = matrix.from_lists([[0.5, 0.5, 1.0, 0.0], [0.0 - 0.2, 0.1, 0.3, 0.0 - 0.4], [0.7, 0.0 - 0.3, 0.2, 0.9]])\n        let v = matrix.from_lists([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0], [0.0 - 1.0, 0.0 - 2.0, 0.5, 0.25]])\n        for row in matrix.to_lists(matrix.multi_head_attention(q, k, v, 2)) { for x in row { println(float.to_string(x)) } }\n        for row in matrix.to_lists(matrix.masked_multi_head_attention(q, k, v, 2)) { for x in row { println(float.to_string(x)) } } }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "matrix.masked_multi_head_attention"), "masked mha self-host must link");
+    if let Some(out) = build_and_run("matrix_mha", &render_wasm_program(&prog)) {
+        assert_eq!(out.lines().count(), 24, "2×(3 rows × 4 cols)");
+        assert_eq!(out.lines().next().unwrap(), "1.0487146726713201");
+    }
+}
+
+#[test]
+fn matrix_from_q1_0_bytes_byte_matches_oracle() {
+    // Phase D1 (final): Q1_0 dequant — fp16 scale decode + per-weight sign bit (1→+scale,
+    // 0→-scale) over an 18-byte/128-weight block. Pure bit-ops via prim.band/bshr_u/bshl/bor
+    // + bits_to_f32. Byte-exact vs v0 `--target wasm`.
+    let src = "effect fn main() -> Unit = {\n\
+        let b = bytes.from_list([0, 56, 170, 204, 15, 240, 0, 255, 51, 102, 129, 66, 24, 60, 195, 60, 90, 165])\n\
+        let m = matrix.from_q1_0_bytes(b, 0, 2, 8)\n\
+        for row in matrix.to_lists(m) { for x in row { println(float.to_string(x)) } } }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "matrix.from_q1_0_bytes"), "q1_0 self-host must link");
+    if let Some(out) = build_and_run("matrix_q1_0", &render_wasm_program(&prog)) {
+        assert_eq!(out.lines().count(), 16, "2 rows × 8 cols");
+        // fp16 0x3800 = 0.5; first sign byte 0xAA = 10101010 → bit0=0 → -0.5.
+        assert_eq!(out.lines().next().unwrap(), "-0.5");
+    }
+}
