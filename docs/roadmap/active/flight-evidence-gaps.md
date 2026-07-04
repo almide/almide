@@ -90,7 +90,13 @@ render 負荷）。ゲート文言は corpus-wall / receipt / TRUSTED_BASE / cla
 「totality + certificate claim, NOT output correctness」に修正済み。同日、この文言修正の
 正しさが実地で証明された: `prim.handle(<literal>)` が deferred-Const 0 に落ちる
 silent-miscompile（6 例目のクラス）を corpus-wall green の裏で発見・修正した。
-deferred-Const フォールバックの退役が次の一手（TRUSTED_BASE の境界図に記録）。
+deferred-Const フォールバックの退役が次の一手（TRUSTED_BASE の境界図に記録）→ **退役済み**
+（strict value mode、2026-07-03）。
+
+**進捗2（2026-07-04）**: ワークロードを拡大した再計測 — almide-mir + almide-codegen の
+テストスイート + spec 全実行可能 fixture の v1 render + **v0 生産経路**（`almide test spec/`
+のフルパイプライン）。TOTAL line 65.89%。per-file 台帳を `proofs/COVERAGE.md` に固定
+（最低は defunc エンジン control_p5 の 43% — 次のテスト作成対象リスト付き）。
 
 ## F3 — 証明と実装の間隙（lowering は信頼コード）
 
