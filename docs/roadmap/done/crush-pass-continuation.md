@@ -4,7 +4,7 @@
 
 > 2026-07-04 完了。このファイルはセッション引き継ぎ（残件の再開点）として書かれ、
 > 全項目がクローズされたため done へ移動。副産物の既知課題は
-> [active/v1-matrix-followups.md](../active/v1-matrix-followups.md) に再開点付きで分離。
+> [active/v1-backlog.md](../active/v1-backlog.md) に再開点付きで分離。
 
 ## 最終結果
 
