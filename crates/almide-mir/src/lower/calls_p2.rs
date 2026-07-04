@@ -97,6 +97,11 @@ impl LowerCtx {
         // the Int @12 is scalar). Routed via variant_drop_handles (a DropVariant, like the record case).
         let int_str_elem = matches!(&elem_ty,
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String));
+        // A `(String, Int)` TUPLE element (the gguf `entries + [(key, pos)]` metadata
+        // accumulator) — the MIRROR of `int_str_elem`: rc-own each tuple, recursive drop via
+        // `DropListStrInt` (rc_dec the String slot @12 only; the Int @20 is scalar).
+        let str_int_elem = matches!(&elem_ty,
+            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::Int));
         // A FLAT-variant ELEMENT (`acc + [r.val]` where `acc: List[ValType]`, the wasm-binary
         // recursive-accumulator shape) — each element is a single OWNED tag-block (no inner handle),
         // so `__list_concat_rc` rc-incs each element handle (the new list co-owns each block) and the
@@ -112,7 +117,7 @@ impl LowerCtx {
         // `List[Instr]`). Routed via `variant_drop_handles="list_<V>"`, like the record case.
         let rich_variant_elem = self.variant_layouts.is_rich_variant_ty(&elem_ty);
         if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && !str_str_elem
-            && !int_str_elem && !flat_variant_elem && rich_variant_elem.is_none()
+            && !int_str_elem && !str_int_elem && !flat_variant_elem && rich_variant_elem.is_none()
             && record_elem.is_none()
         {
             return None;
@@ -182,6 +187,8 @@ impl LowerCtx {
             self.str_str_elem_lists.insert(dst);
         } else if int_str_elem {
             self.variant_drop_handles.insert(dst, "list_int_str".to_string());
+        } else if str_int_elem {
+            self.variant_drop_handles.insert(dst, "list_str_int".to_string());
         } else if list_str_elem {
             self.list_list_str_lists.insert(dst);
         } else if let Some(vname) = rich_variant_elem {
@@ -660,6 +667,46 @@ impl LowerCtx {
                          wrong value) not in this brick"
                             .into(),
                     ));
+                }
+                // A RANGE argument with SCALAR bounds (`f(0..n)` — the gguf
+                // parse_metadata_entries `for _ in 0..count` append-accumulator desugar):
+                // materialize the REAL list via the self-hosted `list.range` (a fresh owned
+                // List[Int], borrowed into the call, dropped at scope end). An inclusive
+                // range widens the end by one (`a..=b` = `range(a, b+1)`), exactly v0's
+                // iteration space. Non-scalar bounds still wall below.
+                IrExprKind::Range { start, end, inclusive }
+                    if is_heap_ty(&a.ty)
+                        && self.lower_scalar_value(start).is_some() =>
+                {
+                    let s_v = self.lower_scalar_value(start).unwrap();
+                    let Some(mut e_v) = self.lower_scalar_value(end) else {
+                        return Err(LowerError::Unsupported(
+                            "heap-result Range in a call-argument position cannot be                              faithfully computed in this brick (non-scalar end bound)"
+                                .into(),
+                        ));
+                    };
+                    if *inclusive {
+                        let one = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                        let e2 = self.fresh_value();
+                        self.ops.push(Op::IntBinOp {
+                            dst: e2,
+                            op: crate::IntOp::Add,
+                            a: e_v,
+                            b: one,
+                        });
+                        e_v = e2;
+                    }
+                    let repr = repr_of(&a.ty)?;
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::CallFn {
+                        dst: Some(dst),
+                        name: "list.range".to_string(),
+                        args: vec![CallArg::Scalar(s_v), CallArg::Scalar(e_v)],
+                        result: Some(repr),
+                    });
+                    out.push(self.materialized_call_arg(dst, repr, &a.ty));
+                    continue;
                 }
                 IrExprKind::BinOp { .. }
                 | IrExprKind::UnOp { .. }
