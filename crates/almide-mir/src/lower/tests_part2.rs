@@ -958,3 +958,28 @@
         );
         assert_eq!(verify_ownership(&mir2), Ok(()));
     }
+
+    #[test]
+    fn guard_else_early_return_walls_not_miscompiles() {
+        // `guard cond else E; …` is a conditional early return; v1 has no early-return
+        // control flow, so the DEFERRED (always-continue) model silently miscompiled the
+        // `!cond` path (validated("") returned ok instead of err). It must WALL, not lower.
+        let b = body(vec![
+            stmt(IrStmtKind::Guard {
+                cond: ir_expr(IrExprKind::LitBool { value: true }, Ty::Bool),
+                else_: ir_expr(
+                    IrExprKind::ResultErr {
+                        expr: Box::new(ir_expr(
+                            IrExprKind::LitStr { value: "empty".into() },
+                            Ty::String,
+                        )),
+                    },
+                    Ty::Applied(TypeConstructorId::Result, vec![Ty::String, Ty::String]),
+                ),
+            }),
+        ]);
+        match lower_body(&b, "validated") {
+            Err(LowerError::Unsupported(m)) => assert!(m.contains("guard-else"), "got: {m}"),
+            other => panic!("expected a guard wall, got {other:?}"),
+        }
+    }

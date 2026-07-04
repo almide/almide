@@ -648,9 +648,21 @@ impl LowerCtx {
             // functional, not a safety property). Capture the caps of any call in the
             // condition or the else body so a printing/effectful guard taints honestly.
             IrStmtKind::Guard { cond, else_ } => {
+                // `guard cond else E` is a CONDITIONAL EARLY RETURN: when `!cond`, `E` is the
+                // function's result. The old model DEFERRED it (always-continue), which SILENTLY
+                // MISCOMPILES every call with `!cond` — `guard len(s)>0 else err("empty"); ok(x)`
+                // returned `ok` for the empty input (validated(""), error_test). v1 has no
+                // early-return control flow yet, so WALL it (honest) rather than emit wrong output.
+                // (A guard whose `else` is a pure no-op continue would be safe to defer, but the
+                // corpus guards all early-RETURN a value — none is a no-op — so an unconditional
+                // wall matches the real shapes without a false-negative.)
                 self.record_elided_calls(cond);
                 self.record_elided_calls(else_);
-                Ok(())
+                let _ = (cond, else_);
+                Err(LowerError::Unsupported(
+                    "guard-else early return cannot be faithfully lowered (v1 has no early-return                      control flow; deferring it silently miscompiles the !cond path) not in this brick"
+                        .into(),
+                ))
             }
             other => Err(LowerError::Unsupported(format!(
                 "statement {} not in the value-semantics subset",
