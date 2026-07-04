@@ -93,6 +93,11 @@ impl LowerCtx {
         // source/params/body to the fused form + remember the index var (bound to i_v in the inner).
         let fuse_holder: Option<(Vec<(VarId, Ty)>, IrExpr)>;
         let mut fuse_index: Option<VarId> = None;
+        // zip+map FUSION second source: `(b_expr, p1_var, t1)` — the loop iterates `a`
+        // as the primary source, borrows `b` alongside, binds p1 = b[i] each iteration,
+        // and bounds the loop by min(len_a, len_b) (v0 zip semantics). The (A,B) tuple
+        // list is never built.
+        let mut fuse_second: Option<(IrExpr, VarId, Ty)> = None;
         let (xs, params, body) = if func == "map" {
             match detect_enum_map_fusion(xs, params, body) {
                 Some((real, i_var, key_var, key_ty, tail)) => {
@@ -101,10 +106,18 @@ impl LowerCtx {
                     let (p, b) = fuse_holder.as_ref().unwrap();
                     (real, p.as_slice(), b)
                 }
-                None => {
-                    fuse_holder = None;
-                    (xs, params.as_slice(), body)
-                }
+                None => match detect_zip_map_fusion(xs, params, body) {
+                    Some((a, b, p0, t0, p1, t1, new_body)) => {
+                        fuse_second = Some((b.clone(), p1, t1));
+                        fuse_holder = Some((vec![(p0, t0)], new_body));
+                        let (p, bd) = fuse_holder.as_ref().unwrap();
+                        (a, p.as_slice(), bd)
+                    }
+                    None => {
+                        fuse_holder = None;
+                        (xs, params.as_slice(), body)
+                    }
+                },
             }
         } else if func == "fold" {
             // enumerate+FOLD fusion (`args |> list.enumerate |> list.fold(init, (acc, entry) => { let
@@ -234,6 +247,7 @@ impl LowerCtx {
                 init_idx.map(|i| &args[i]),
                 result_elem,
                 fuse_index,
+                fuse_second.as_ref(),
             )
         };
         if result.is_none() {
@@ -248,6 +262,7 @@ impl LowerCtx {
         result
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn lower_defunc_list_hof_inner(
         &mut self,
         func: &str,
@@ -257,6 +272,7 @@ impl LowerCtx {
         init: Option<&IrExpr>,
         result_elem: Option<Ty>,
         fuse_index: Option<VarId>,
+        fuse_second: Option<&(IrExpr, VarId, Ty)>,
     ) -> Option<ValueId> {
         use crate::PrimKind;
         // A HEAP (String) fold accumulator: the inlined `acc = <body>` is a loop-carried slot
@@ -307,7 +323,33 @@ impl LowerCtx {
         };
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list_v] });
-        let len_v = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        let mut len_v = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        // zip+map FUSION: borrow the SECOND source and bound the loop by
+        // min(len_a, len_b) — v0's zip stops at the shorter list.
+        let second = if let Some((b_expr, p1, t1)) = fuse_second {
+            let b_v = match self
+                .lower_call_args(std::slice::from_ref(b_expr))
+                .ok()?
+                .into_iter()
+                .next()?
+            {
+                CallArg::Handle(v) => v,
+                _ => return None,
+            };
+            let bh = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(bh), args: vec![b_v] });
+            let len_b = self.load_at_offset(bh, 4, PrimKind::Load { width: 4 });
+            let lt = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: lt, op: IntOp::Lt, a: len_v, b: len_b });
+            let min_v = self.fresh_value();
+            self.ops.push(Op::IfThen { cond: lt, dst: Some(min_v) });
+            self.ops.push(Op::Else { val: Some(len_v) });
+            self.ops.push(Op::EndIf { val: Some(len_b) });
+            len_v = min_v;
+            Some((bh, *p1, t1.clone()))
+        } else {
+            None
+        };
 
         // The FOLD accumulator: a stable mutable scalar local seeded from `init`. map/filter
         // build a result list block of `len` slots instead.
@@ -418,6 +460,22 @@ impl LowerCtx {
         // VarIds already resolve through `value_of`.
         let elem_param = if func == "fold" { params[1].0 } else { params[0].0 };
         self.value_of.insert(elem_param, elem);
+        // zip+map FUSION: bind p1 = b[i] (same slot arithmetic on the second source).
+        if let Some((bh, p1, t1)) = &second {
+            let b_base = self.load_addr(*bh, 12);
+            let b_addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: b_addr, op: IntOp::Add, a: b_base, b: i8_v });
+            let b_elem = self.fresh_value();
+            let b_read = if is_heap_ty(t1) { PrimKind::LoadHandle } else { PrimKind::Load { width: 8 } };
+            self.ops.push(Op::Prim { kind: b_read, dst: Some(b_elem), args: vec![b_addr] });
+            self.value_of.insert(*p1, b_elem);
+            if is_heap_ty(t1)
+                && (matches!(t1, Ty::Tuple(_)) || self.aggregate_field_tys(t1).is_some())
+            {
+                self.param_values.insert(b_elem);
+                self.materialized_aggregates.insert(b_elem);
+            }
+        }
         // A heap-AGGREGATE element (a `(String,String)`/`(String,Value)` tuple, a record) bound as the
         // lambda param: register the borrowed handle as a materialized aggregate so the body's
         // `let (k,v)=pair` destructure BORROWS its slots (try_lower_tuple_destructure requires this;

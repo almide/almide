@@ -923,6 +923,80 @@ pub fn unwrap_or_operand_admitted(expr: &IrExpr) -> bool {
 /// the `(Int,String)` intermediate list is never built. `None` if the shape doesn't match (the caller
 /// keeps the ordinary map path). The COMMON enumerate idiom (CLAUDE.md's `cases |> list.enumerate |>
 /// list.map((entry) => { let (idx, case) = entry; … })`).
+/// Detect the zip+map FUSION shape: `list.map(list.zip(a, b), (pair) => <body using
+/// pair.0 / pair.1>)` — the nn concat_cols idiom. Returns `(a, b, p0, t0, p1, t1,
+/// new_body)` where `new_body` is `body` with every `pair.0` / `pair.1` REPLACED by
+/// fresh vars `p0` / `p1` (bound by the fused loop to a[i] / b[i]), so the
+/// `(A, B)` tuple-element intermediate list is NEVER built (no tuple alloc, no
+/// tuple-list drop). Declines when `pair` is used any way OTHER than `.0`/`.1`
+/// (the whole-tuple escape would need the real tuple).
+fn detect_zip_map_fusion<'a>(
+    xs: &'a IrExpr,
+    params: &[(VarId, Ty)],
+    body: &IrExpr,
+) -> Option<(&'a IrExpr, &'a IrExpr, VarId, Ty, VarId, Ty, IrExpr)> {
+    let (a, b) = match &xs.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            if module.as_str() == "list" && func.as_str() == "zip" && args.len() == 2 =>
+        {
+            (&args[0], &args[1])
+        }
+        _ => return None,
+    };
+    if params.len() != 1 {
+        return None;
+    }
+    let pair_var = params[0].0;
+    let (t0, t1) = match &params[0].1 {
+        Ty::Tuple(ts) if ts.len() == 2 => (ts[0].clone(), ts[1].clone()),
+        _ => return None,
+    };
+    let base = {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct M(u32);
+        impl IrVisitor for M {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if let IrExprKind::Var { id } = &e.kind {
+                    self.0 = self.0.max(id.0);
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut m = M(pair_var.0);
+        m.visit_expr(body);
+        m.0 + 1
+    };
+    let p0 = VarId(base);
+    let p1 = VarId(base + 1);
+    // Replace `pair.0`/`pair.1` with the fresh vars; flag any OTHER use of `pair`.
+    fn rewrite(e: IrExpr, pair: VarId, p0: VarId, p1: VarId, escaped: &mut bool) -> IrExpr {
+        if let IrExprKind::TupleIndex { object, index } = &e.kind {
+            if let IrExprKind::Var { id } = &object.kind {
+                if *id == pair && (*index == 0 || *index == 1) {
+                    return IrExpr {
+                        kind: IrExprKind::Var { id: if *index == 0 { p0 } else { p1 } },
+                        ty: e.ty.clone(),
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    };
+                }
+            }
+        }
+        if let IrExprKind::Var { id } = &e.kind {
+            if *id == pair {
+                *escaped = true;
+            }
+        }
+        e.map_children(&mut |c| rewrite(c, pair, p0, p1, escaped))
+    }
+    let mut escaped = false;
+    let new_body = rewrite(body.clone(), pair_var, p0, p1, &mut escaped);
+    if escaped {
+        return None;
+    }
+    Some((a, b, p0, t0, p1, t1, new_body))
+}
+
 fn detect_enum_map_fusion<'a>(
     xs: &'a IrExpr,
     params: &[(VarId, Ty)],
