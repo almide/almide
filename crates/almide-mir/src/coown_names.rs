@@ -45,6 +45,8 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__hvl_drop_slots",    // list.filter_rc — rc_inc each KEPT non-String heap element (handle share)
     "__vmerge_fill_a",    // value.merge — rc_inc each kept/overridden key+value
     "__vmerge_app_b",     // value.merge — rc_inc each appended b key+value
+    "__mx_share_fill",    // matrix.from_lists/to_lists — rc_inc each shared row block
+    "__repeat_fill_rc",   // list.repeat_rc — rc_inc the element into each duplicated slot
 ];
 
 /// RECURSIVE-DROP CONSUMERS — rc_dec each element at the container's death (the `rec_drop` half of

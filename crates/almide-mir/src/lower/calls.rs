@@ -142,9 +142,11 @@ impl LowerCtx {
         // Route it through the same C1 defunctionalization; a non-inlinable form falls
         // through and WALLS (an unregistered `fan.*` CallFn), never the elided Const-0
         // that printed all-zero fan results (fan_map_inline_lambda, 2026-07-03).
-        if (module == "list" || module == "fan")
-            && matches!(func, "map" | "filter" | "fold" | "flat_map" | "filter_map")
-        {
+        // STRUCTURAL dispatch (no name whitelist): any HIGHER-ORDER list/fan call is offered
+        // to the defunc engine; WHICH combinators it inlines is the engine's own `match func`
+        // — the single source of truth, so adding one there needs no second edit here (the
+        // duplicated-list drift already caused a silent miss once).
+        if (module == "list" || module == "fan") && crate::lower::is_higher_order(args) {
             if let Some(dst) = self.try_lower_defunc_list_hof(func, args, result_ty) {
                 return Ok(dst);
             }
@@ -166,11 +168,14 @@ impl LowerCtx {
         // invalid wasm. Truncate the partial closure/list temps we just pushed so the rolled-back
         // function starts clean. A non-HOF call, or a FAITHFULLY-lifted/C1-inlined closure, is
         // unaffected (`last_call_had_unlifted_closure` is false ⇒ this guard never fires for them).
-        if module == "list"
-            && matches!(func, "map" | "filter" | "fold" | "flat_map" | "filter_map")
-            && crate::lower::is_higher_order(args)
-            && self.last_call_had_unlifted_closure
-        {
+        // GENERAL, not just the defunc five: EVERY registered combinator (`list.find`,
+        // `sort_by`, `zip_with`, `set.filter`, `map.fold`, …) has a real wasm body whose
+        // signature expects the funcref — emitting the call with the closure dropped is
+        // INVALID WASM (the `find_tensor` capturing-`list.find` translation error: expected
+        // i64, found i32 — an invalid-wasm-as-Ok escape the render wall cannot catch, since
+        // the callee IS linked). An UNREGISTERED callee would have walled at render anyway,
+        // so walling here is equally honest for it and strictly sounder for the rest.
+        if crate::lower::is_higher_order(args) && self.last_call_had_unlifted_closure {
             self.ops.truncate(ops_mark);
             return Err(LowerError::Unsupported(format!(
                 "{module}.{func} with an unliftable/closure-list higher-order argument cannot execute \

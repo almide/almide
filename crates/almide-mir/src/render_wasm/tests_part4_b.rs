@@ -882,7 +882,12 @@
             let f2 = list.find(xs, (x) => { let l = string.len(x)\n l == 99 })\n  \
             match f2 { Some(v) => println(v), None => println(\"none\"), } }\n";
         let prog = lower_source(src);
-        assert!(prog.functions.iter().any(|f| f.name == "list.find_str"));
+        // C1: the inline closure is defunctionalized — `list.find` is inlined as an
+        // early-exit loop (try_lower_defunc_find), NOT auto-linked as a combinator.
+        assert!(
+            !prog.functions.iter().any(|f| f.name == "list.find_str"),
+            "list.find is inlined, NOT auto-linked as a combinator"
+        );
         if let Some(out) = build_and_run("self_hosted_list_string_find", &render_wasm_program(&prog)) {
             assert_eq!(out, "banana\nnone");
         }

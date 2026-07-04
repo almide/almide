@@ -767,3 +767,197 @@ fn variant_ctor_list_field_recursive_accumulator() {
         assert_eq!(out, "arr\nend:9");
     }
 }
+
+#[test]
+fn matrix_self_host_floor() {
+    // The Matrix value model (roadmap B, approach (a)): a v1 Matrix IS a List[List[Float]],
+    // served by the matrix_core self-host registry. Construction, metadata, element-wise,
+    // transpose, and the k-ascending mul all byte-match the v0 oracle.
+    let src = "effect fn main() -> Unit = {\n\
+        let m = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])\n\
+        println(float.to_string(matrix.get(m, 0, 0)))\n\
+        println(int.to_string(matrix.rows(m)) + \"x\" + int.to_string(matrix.cols(m)))\n\
+        let z = matrix.zeros(2, 3)\n\
+        println(float.to_string(matrix.get(z, 1, 2)))\n\
+        let a = matrix.add(m, m)\n\
+        println(float.to_string(matrix.get(a, 1, 0)))\n\
+        let t = matrix.transpose(m)\n\
+        println(float.to_string(matrix.get(t, 0, 1)))\n\
+        let s = matrix.scale(m, 2.5)\n\
+        println(float.to_string(matrix.get(s, 0, 1)))\n\
+        let p = matrix.mul(m, m)\n\
+        println(float.to_string(matrix.get(p, 0, 0)) + \",\" + float.to_string(matrix.get(p, 1, 1)))\n\
+        let ll = matrix.to_lists(m)\n\
+        println(int.to_string(list.len(ll))) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("matrix_floor", &render_wasm_program(&prog)) {
+        assert_eq!(out, "1.0\n2x2\n0.0\n6.0\n3.0\n5.0\n7.0,22.0\n2");
+    }
+}
+
+#[test]
+fn matrix_per_head_repeat_kv_concat_rows() {
+    // The three nn Matrix walls (roadmap B): per_head_rms_norm (list.map closure over
+    // List[Matrix] + split/concat), repeat_kv (heap-result if returning a param + flat_map
+    // with list.repeat_rc), concat_rows (a list-literal flatten arg of to_lists calls).
+    // Expectations byte-verified against `almide run --target wasm` (the v0 oracle).
+    let src = "fn per_head_rms_norm(x: Matrix, gamma: List[Float], n_heads: Int, eps: Float) -> Matrix = {\n\
+        let heads = matrix.split_cols_even(x, n_heads)\n\
+        let normed = heads |> list.map((h) => matrix.rms_norm_rows(h, gamma, eps))\n\
+        matrix.concat_cols(normed) }\n\
+        fn repeat_kv(kv: Matrix, n_kv_heads: Int, n_rep: Int) -> Matrix = {\n\
+        if n_rep == 1 then kv\n\
+        else {\n\
+        let heads = matrix.split_cols_even(kv, n_kv_heads)\n\
+        let repeated = heads |> list.flat_map((h) => list.repeat(h, n_rep))\n\
+        matrix.concat_cols(repeated) } }\n\
+        fn concat_rows(a: Matrix, b: Matrix) -> Matrix = {\n\
+        let all = list.flatten([matrix.to_lists(a), matrix.to_lists(b)])\n\
+        matrix.from_lists(all) }\n\
+        effect fn main() -> Unit = {\n\
+        let x = matrix.from_lists([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]])\n\
+        let g = [0.5, 1.5]\n\
+        let p = per_head_rms_norm(x, g, 2, 0.00001)\n\
+        println(float.to_string(matrix.get(p, 0, 0)) + \",\" + float.to_string(matrix.get(p, 1, 3)))\n\
+        let r1 = repeat_kv(x, 2, 1)\n\
+        println(float.to_string(matrix.get(r1, 0, 0)))\n\
+        let r2 = repeat_kv(x, 2, 2)\n\
+        println(int.to_string(matrix.cols(r2)) + \":\" + float.to_string(matrix.get(r2, 0, 2)) + \",\" + float.to_string(matrix.get(r2, 1, 7)))\n\
+        let cr = concat_rows(x, matrix.from_lists([[9.0, 10.0, 11.0, 12.0]]))\n\
+        println(int.to_string(matrix.rows(cr)) + \":\" + float.to_string(matrix.get(cr, 2, 1))) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("matrix_walls", &render_wasm_program(&prog)) {
+        assert_eq!(
+            out,
+            "0.31622713356320326,1.5964561112912787\n1.0\n8:1.0,8.0\n3:10.0"
+        );
+    }
+}
+
+#[test]
+fn matrix_norms_and_bytes() {
+    // rms/layer norms (full-row statistics, zip-truncated output), split/concat round-trip,
+    // gather with the OOB zero-row edge, and the f32/f16 LE byte decoders (in-bounds — the
+    // native oracle's OOB→zeros edge is pinned by the from_bytes probe, not here).
+    let src = "effect fn main() -> Unit = {\n\
+        let m = matrix.from_lists([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]])\n\
+        let g = [0.5, 1.5, 2.5, 3.5]\n\
+        let r = matrix.rms_norm_rows(m, g, 0.00001)\n\
+        println(float.to_string(matrix.get(r, 0, 0)) + \",\" + float.to_string(matrix.get(r, 1, 3)))\n\
+        let ln = matrix.layer_norm_rows(m, g, [0.1, 0.2, 0.3, 0.4], 0.00001)\n\
+        println(float.to_string(matrix.get(ln, 0, 1)) + \",\" + float.to_string(matrix.get(ln, 1, 2)))\n\
+        let heads = matrix.split_cols_even(m, 2)\n\
+        let cc = matrix.concat_cols(heads)\n\
+        println(float.to_string(matrix.get(cc, 0, 0)) + \",\" + float.to_string(matrix.get(cc, 1, 3)))\n\
+        let ga = matrix.gather_rows(m, [1, 0, 9])\n\
+        println(float.to_string(matrix.get(ga, 0, 0)) + \",\" + float.to_string(matrix.get(ga, 2, 3)))\n\
+        let b32 = bytes.from_list([0, 0, 192, 63, 0, 0, 0, 64, 0, 0, 0, 191, 0, 128, 200, 66])\n\
+        let m32 = matrix.from_bytes_f32_le(b32, 0, 2, 2)\n\
+        println(float.to_string(matrix.get(m32, 1, 0)) + \",\" + float.to_string(matrix.get(m32, 1, 1)))\n\
+        let b16 = bytes.from_list([0, 60, 0, 193, 0, 56, 255, 123])\n\
+        let m16 = matrix.from_bytes_f16_le(b16, 0, 2, 2)\n\
+        println(float.to_string(matrix.get(m16, 0, 1)) + \",\" + float.to_string(matrix.get(m16, 1, 1))) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("matrix_norms_bytes", &render_wasm_program(&prog)) {
+        assert_eq!(
+            out,
+            "0.1825740641190532,4.2453485560707875\n-0.47081770998446343,1.4180295166407726\n\
+             1.0,8.0\n5.0,0.0\n-0.5,100.25\n-2.5,65504.0"
+        );
+    }
+}
+
+#[test]
+fn defunc_find_capturing_predicate() {
+    // `list.find` with a CAPTURING predicate over record elements (the gguf/ggml
+    // find_tensor shape) — inlined as an early-exit loop with a len-as-tag Option
+    // result. Previously the dropped closure emitted INVALID WASM (the translation
+    // type-mismatch escape); the general unfaithful-HOF wall plus this inline turned
+    // that into a faithful execution. Scalar find (`x == k`) rides the same loop.
+    let src = "type Tensor = {\n\
+        name: String,\n\
+        off: Int,\n\
+        }\n\
+        fn find_tensor(ts: List[Tensor], name: String) -> Option[Tensor] =\n\
+        ts |> list.find((t) => t.name == name)\n\
+        fn find_val(xs: List[Int], k: Int) -> Option[Int] =\n\
+        xs |> list.find((x) => x == k)\n\
+        effect fn main() -> Unit = {\n\
+        let ts = [{ name: \"a\", off: 3 }, { name: \"b\", off: 7 }]\n\
+        match find_tensor(ts, \"b\") {\n\
+        some(t) => println(\"hit:\" + int.to_string(t.off))\n\
+        none => println(\"none\") }\n\
+        match find_tensor(ts, \"zz\") {\n\
+        some(t) => println(\"?\")\n\
+        none => println(\"none\") }\n\
+        match find_val([3, 7, 9], 7) {\n\
+        some(v) => println(\"v:\" + int.to_string(v))\n\
+        none => println(\"none\") } }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("defunc_find", &render_wasm_program(&prog)) {
+        assert_eq!(out, "hit:7\nnone\nv:7");
+    }
+}
+
+#[test]
+fn load_weights_record_return_shape() {
+    // The whisper load_weights skeleton: a heap-result RECORD return whose fields are a
+    // match-bound Matrix (via find_tensor + a byte decode), a List[Float] call, and a
+    // `list.map` of a record-building user call capturing the model record.
+    let src = "type Tensor = {\n\
+        name: String,\n\
+        ftype: Int,\n\
+        off: Int,\n\
+        }\n\
+        type Model = {\n\
+        tensors: List[Tensor],\n\
+        data: Bytes,\n\
+        }\n\
+        type Layer = {\n\
+        w: Matrix,\n\
+        b: List[Float],\n\
+        }\n\
+        type Weights = {\n\
+        conv_w: Matrix,\n\
+        conv_b: List[Float],\n\
+        layers: List[Layer],\n\
+        }\n\
+        fn find_tensor(ts: List[Tensor], name: String) -> Option[Tensor] =\n\
+        ts |> list.find((t) => t.name == name)\n\
+        fn tensor_vec(m: Model, name: String, n: Int) -> List[Float] =\n\
+        match find_tensor(m.tensors, name) {\n\
+        some(t) => bytes.read_f32_le_array(m.data, t.off, n)\n\
+        none => list.map(list.range(0, n), (_) => 0.0) }\n\
+        fn load_layer(m: Model, i: Int, n: Int) -> Layer = {\n\
+        {\n\
+        w: matrix.from_bytes_f32_le(m.data, i * 8, 1, 2),\n\
+        b: tensor_vec(m, \"conv.bias\", n),\n\
+        } }\n\
+        fn load_weights(m: Model, n: Int) -> Weights = {\n\
+        let conv_w = match find_tensor(m.tensors, \"conv.weight\") {\n\
+        some(t) => matrix.transpose(matrix.from_bytes_f32_le(m.data, t.off, 2, 2))\n\
+        none => matrix.zeros(2, 2) }\n\
+        {\n\
+        conv_w: conv_w,\n\
+        conv_b: tensor_vec(m, \"conv.bias\", 2),\n\
+        layers: list.map(list.range(0, n), (i) => load_layer(m, i, 2)),\n\
+        } }\n\
+        effect fn main() -> Unit = {\n\
+        let ts = [\n\
+        { name: \"conv.weight\", ftype: 0, off: 0 },\n\
+        { name: \"conv.bias\", ftype: 0, off: 8 },\n\
+        ]\n\
+        let data = bytes.from_list([0, 0, 192, 63, 0, 0, 0, 64, 0, 0, 0, 191, 0, 128, 200, 66])\n\
+        let m: Model = { tensors: ts, data: data }\n\
+        let w = load_weights(m, 2)\n\
+        println(float.to_string(matrix.get(w.conv_w, 1, 0)))\n\
+        println(float.to_string(list.get(w.conv_b, 0) ?? 9.9))\n\
+        let l1 = list.get(w.layers, 1)\n\
+        match l1 {\n\
+        some(l) => println(float.to_string(matrix.get(l.w, 0, 1)))\n\
+        none => println(\"none\") } }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("load_weights_shape", &render_wasm_program(&prog)) {
+        assert_eq!(out, "2.0\n-0.5\n100.25");
+    }
+}

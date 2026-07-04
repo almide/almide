@@ -1121,6 +1121,17 @@ pub(crate) fn is_scalar_elem_list_ty(ty: &Ty) -> bool {
 /// site checks this FIRST.
 pub(crate) fn is_list_list_str_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
+    // A `List[Matrix]` (matrix.split_cols_even's result) is the SAME two-level shape: a
+    // v1 Matrix IS a List[List[Float]] block whose slots hold owned row handles, so
+    // `DropListListStr`'s per-element inner sweep (rc_dec each row + the matrix block,
+    // then the outer block) is its exact recursive free — each row is a FLAT f64 block,
+    // like a String. The flat `DropListStr` would leak every row.
+    if matches!(ty,
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1
+            && matches!(&a[0], Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _)))
+    {
+        return true;
+    }
     matches!(ty,
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
             Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(b[0], Ty::String)))
@@ -1259,6 +1270,10 @@ pub fn is_list_value_int_result_ty(ty: &Ty) -> bool {
 pub(crate) fn is_heap_elem_list_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     match ty {
+        // A `Matrix` VALUE (the v1 value model): a List[List[Float]] block whose slots
+        // hold owned row handles — each row a FLAT f64 block, so the per-slot-rc_dec
+        // `DropListStr` is its exact recursive free (a Matrix drops like a List[String]).
+        Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _) => true,
         // `List[heap]` / `Option[heap]` / `Set[heap]` — heap element slots (DynListStr nested
         // ownership). A `Set[heap]` is physically a `List[heap]` of unique elements, so the SAME
         // recursive free applies (each owned element + the block).

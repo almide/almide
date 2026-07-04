@@ -36,3 +36,23 @@ fn list_repeat(x: Int, n: Int) -> List[Int] = {
 // capacity is not observable in v1 (no self-host `push`), so the byte-matching result is the empty
 // list — list.len = 0.
 fn list_with_capacity(cap: Int) -> List[Int] = prim.alloc_list(0)
+
+// list.repeat over a HEAP element (`list.repeat(h, n_rep)`, h: Matrix — the nn repeat_kv
+// GQA duplication): each slot CO-OWNS the element (rc_inc per copy — the co-own producer
+// pattern), so the result's recursive drop releases exactly the references it holds.
+// The scalar `list_repeat` above ALIASES x raw (sound only for i64 values); routing
+// (`list_heap_call_name`) sends every heap-element repeat here.
+fn __repeat_fill_rc(lh: Int, hx: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.rc_inc(hx)
+    prim.store64(lh + 12 + i * 8, hx)
+    __repeat_fill_rc(lh, hx, n, i + 1)
+  }
+
+fn list_repeat_rc(x: List[Int], n: Int) -> List[List[Int]] = {
+  let count = if n > 0 then n else 0
+  let buf: List[List[Int]] = prim.alloc_list_str(count)
+  let _x = __repeat_fill_rc(prim.handle(buf), prim.handle(x), count, 0)
+  buf
+}

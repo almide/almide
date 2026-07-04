@@ -310,6 +310,53 @@ pub fn lower_function_all(
     lower_function_all_with_types(func, globals, &RecordLayouts::new())
 }
 
+/// Resolve a TYPE NAME against the record registry, accepting the BARE spelling of a
+/// cross-module type when it is UNAMBIGUOUS: the frontend qualifies an imported DECL
+/// (`types_mod.Lin`) but leaves some USE-site `Ty::Named`s bare (`Lin` — the alias-typed
+/// annotation `tm.Lin` resolves to the decl's own Sym), so an exact miss falls back to
+/// the unique `".{name}"`-suffixed key. Two modules exporting the same bare name stay
+/// unresolved (`None`) — the caller walls, never a wrong-layout guess. Returns the
+/// CANONICAL registry key, which is also the drop-fn identity (`$__drop_<canonical>`),
+/// so lowering-side routing and the decl-side generators can never disagree on a name.
+pub(crate) fn canonical_record_key<'a>(layouts: &'a RecordLayouts, name: &str) -> Option<&'a str> {
+    if let Some((k, _)) = layouts.get_key_value(name) {
+        return Some(k.as_str());
+    }
+    let suffix = format!(".{name}");
+    let mut found: Option<&'a str> = None;
+    for k in layouts.keys() {
+        if k.ends_with(&suffix) {
+            if found.is_some() {
+                return None; // ambiguous bare name — walled, never a guess
+            }
+            found = Some(k.as_str());
+        }
+    }
+    found
+}
+
+/// The [`canonical_record_key`] resolution over a NAME SET (the drop generators'
+/// `rec_names`) instead of the layout map — the same exact-then-unique-suffix rule.
+pub(crate) fn canonical_name_in<'a>(
+    names: &'a std::collections::HashSet<String>,
+    name: &str,
+) -> Option<&'a str> {
+    if let Some(k) = names.get(name) {
+        return Some(k.as_str());
+    }
+    let suffix = format!(".{name}");
+    let mut found: Option<&'a str> = None;
+    for k in names {
+        if k.ends_with(&suffix) {
+            if found.is_some() {
+                return None;
+            }
+            found = Some(k.as_str());
+        }
+    }
+    found
+}
+
 /// Build the [`RecordLayouts`] registry from a program's type declarations — the
 /// VALUE-MODEL field structure the lowering consults to materialize records and
 /// resolve `r.x`. Each `type R = { … }` becomes `R → (generic params, fields)`;
@@ -693,7 +740,11 @@ fn recursive_aggregate_name(ty: &Ty, rec_names: &std::collections::HashSet<Strin
         }
         _ => return None,
     };
-    rec_names.contains(&n).then_some(n)
+    // A cross-module field may be spelled BARE (`Lin`) while `rec_names` carries the
+    // QUALIFIED decl name (`types_mod.Lin`) — resolve via the unique-suffix rule so the
+    // generated free targets the real `$__drop_<canonical>` (an ambiguous bare name stays
+    // unresolved → the field falls to the flat arm, never a wrong-name dangling call).
+    canonical_name_in(rec_names, &n).map(|k| k.to_string())
 }
 
 /// A DETERMINISTIC, host-independent synthetic type name for an ANONYMOUS record shape, used as the

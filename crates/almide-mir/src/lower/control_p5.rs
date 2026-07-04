@@ -39,7 +39,9 @@ impl LowerCtx {
         // The closure arg index per combinator: map/filter/flat_map/filter_map = arg 1,
         // fold = arg 2 (after init).
         let (xs, lambda_idx, init_idx) = match func {
-            "map" | "filter" | "flat_map" | "filter_map" if args.len() == 2 => (&args[0], 1usize, None),
+            "map" | "filter" | "flat_map" | "filter_map" | "find" if args.len() == 2 => {
+                (&args[0], 1usize, None)
+            }
             "fold" if args.len() == 3 => (&args[0], 2usize, Some(1usize)),
             _ => return None,
         };
@@ -58,6 +60,21 @@ impl LowerCtx {
             Some((p, b)) => (p, b),
             None => return None,
         };
+        // `list.find` — an EARLY-EXIT scan returning `Option[elem]`, with its OWN gating
+        // (the map/filter source/result gates below don't apply to it, so it is dispatched
+        // FIRST — placing it after `result_ok` silently killed it once).
+        if func == "find" {
+            let f_ops = self.ops.len();
+            let f_lhh = self.live_heap_handles.len();
+            let f_lifted = self.lifted.len();
+            let f_vo = self.value_of.clone();
+            if let Some(dst) = self.try_lower_defunc_find(xs, params, body, result_ty) {
+                self.last_call_had_unlifted_closure = false;
+                return Some(dst);
+            }
+            self.rollback_scalar_loop(f_ops, f_lhh, f_lifted, f_vo);
+            return None;
+        }
         // A TUPLE-accumulator `fold((<empty-list>, <int-init>), (state, e) => { let (acc, n) = state;
         // (acc + [<elem>], n + <step>) })` returning `(List[T], Int)` — the wasm-bindgen
         // `wasm_record_offsets` shape. The accumulator is a 2-tuple `(List[T], Int)`; the body
@@ -141,20 +158,10 @@ impl LowerCtx {
             (xs, params.as_slice(), body)
         };
         let _ = &fuse_holder;
-        // The source element read is a uniform `load64` of slot i — for a SCALAR list it is the
-        // value, for a HEAP list (`List[String]`/`List[Value]`) it is the element HANDLE (a borrow
-        // the inlined body reads). `map` admits a heap source; `filter`/`fold` stay scalar-source
-        // (their element move-out / accumulator paths are not heap-extended here).
-        let src_scalar = matches!(&xs.ty,
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
-        // `map` admits a heap source; `fold` now does too (a heap accumulator over a List[String],
-        // e.g. `lines |> list.fold("", (acc, s) => acc + s)` — the element is read as a borrowed
-        // handle like map's). `flat_map`/`filter_map` admit a heap source too (the toml/dojo cases
-        // map over a `List[String]` of keys/codes — the element is a borrowed String handle). `filter`
-        // stays scalar-source.
-        if !src_scalar && !matches!(func, "map" | "filter" | "fold" | "flat_map" | "filter_map") {
-            return None;
-        }
+        // (Every combinator the entry `match func` admits — map/filter/fold/flat_map/
+        // filter_map; `find` exited above — reads a heap source element as a borrowed
+        // handle, so there is no name-keyed source gate here: the per-shape gating lives
+        // in each combinator's own seed/body/result lowerers below.)
         // map: a HEAP-element result list (`List[String]`/`List[Value]`) is now built too — each
         // slot holds an OWNED handle the per-element body produces (via lower_heap_result_arm), and
         // the result list is tracked for the recursive scope-end drop. filter keeps scalar results;
@@ -169,7 +176,15 @@ impl LowerCtx {
         // heap `fold` arm uses). Gated to a `List[String]` result; any other element type defers.
         let result_str_acc = matches!(func, "flat_map" | "filter_map")
             && matches!(result_ty,
-                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String));
+                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String))
+            // A `flat_map` producing a `List[Matrix]` (`heads |> list.flat_map((h) =>
+            // list.repeat(h, n_rep))` — the nn repeat_kv GQA shape): the SAME
+            // append-accumulator loop; the acc/leaf drop grain is derived from the list
+            // TYPE inside (`is_list_list_str_ty` → the nested DropListListStr sweep).
+            || (func == "flat_map"
+                && matches!(result_ty,
+                    Ty::Applied(TypeConstructorId::List, a) if a.len() == 1
+                        && matches!(&a[0], Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _))));
         // A `filter_map` building a HEAP-but-non-String element list (`List[record]`/`List[Value]`/
         // `List[(String,Value)]` — the dojo `backfill_dir` `task_files |> filter_map((f) => match
         // fs.read_text(dir+"/"+f) { ok(c) => some(parse_task_md(f,c)), err(_) => none })`). A
@@ -328,11 +343,25 @@ impl LowerCtx {
         let result_is_scalar_list = matches!(result_elem.as_ref(),
             Some(Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b))
                 if b.len() == 1 && !is_heap_ty(&b[0]));
+        // A `Matrix` result element (`heads |> list.map((h) => matrix.rms_norm_rows(h, g, e))`
+        // — the nn per-head shape) or its structural `List[List[scalar]]` spelling: each
+        // element is a TWO-LEVEL block (row handles inside), so the result list's scope-end
+        // drop must be the nested `DropListListStr` (`list_list_str_lists`) — the flat
+        // DropListStr would leak every element's rows.
+        let result_is_matrix = matches!(result_elem.as_ref(),
+            Some(Ty::Matrix)
+            | Some(Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Matrix, _)))
+            || matches!(result_elem.as_ref(),
+                Some(Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b))
+                    if b.len() == 1 && matches!(&b[0],
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, c)
+                            if c.len() == 1 && !is_heap_ty(&c[0])));
         if let Some(elem) = &result_elem {
             if !matches!(elem, Ty::String)
                 && !result_is_str_value_tuple
                 && !result_is_value
                 && !result_is_scalar_list
+                && !result_is_matrix
                 && result_record_drop.is_none()
             {
                 return None;
@@ -456,6 +485,9 @@ impl LowerCtx {
                     self.str_value_elem_lists.insert(dst);
                 } else if result_is_value {
                     self.value_elem_lists.insert(dst);
+                } else if result_is_matrix {
+                    // A List[Matrix] result — the nested two-level DropListListStr sweep.
+                    self.list_list_str_lists.insert(dst);
                 } else if let Some(rname) = &result_record_drop {
                     // A `List[<record>]` result: register the RECURSIVE `$__drop_list_<R>` (frees each
                     // element's nested heap fields via `$__drop_<R>`), NOT the flat `heap_elem_lists`
@@ -1425,7 +1457,14 @@ impl LowerCtx {
             repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
             init: crate::Init::DynList { len: zero_len },
         });
-        self.heap_elem_lists.insert(acc);
+        // The acc's drop grain follows the ELEMENT class: a matrix-shaped sublist type
+        // (`List[Matrix]` — repeat_kv) needs the nested DropListListStr sweep; a String
+        // element the flat per-slot DropListStr.
+        if crate::lower::is_list_list_str_ty(&body.ty) {
+            self.list_list_str_lists.insert(acc);
+        } else {
+            self.heap_elem_lists.insert(acc);
+        }
 
         // The loop index (stable mutable i64 local) + the +1 step constant.
         let i_v = self.fresh_value();
@@ -2265,6 +2304,155 @@ impl LowerCtx {
         }
     }
 
+    /// C1 DEFUNCTIONALIZATION for `list.find` — the EARLY-EXIT scan `xs |> list.find((t) =>
+    /// <pred>)` (the gguf/ggml `find_tensor` / `get_metadata_*` shape, whose predicate CAPTURES
+    /// the search key, so the lift path can never serve it). A specialized loop over the source
+    /// with the FIRST match written into a pre-allocated 0-or-1 OPTION block (the len-as-tag
+    /// layout: 1 slot, `len@4` starts 0 = none, overwritten to 1 = some on the hit), then an
+    /// immediate loop break.
+    ///
+    /// SOUNDNESS by REUSE: the option block is ONE fresh owned Alloc (cert `i`) the caller
+    /// binds/moves like any self-host Option result; the hit arm's payload acquire is the
+    /// per-arm `Dup` (+1, cert `a`) + `Consume` (move-in, `m`) the heap-result-if arms prove —
+    /// executed at most once (the break). The predicate lowers via `lower_heap_result_cond`
+    /// (scalar / heap-eq / pure-call conds; its transient temps are freed within the cond
+    /// frame). Out of subset → `None` (the caller rolls back + WALLs — never invalid wasm).
+    /// A RICH record payload routes the option's drop through `optrec:<R>` (the
+    /// `materialize_opt_aggregate_some` convention); a matrix-shaped payload has no two-level
+    /// option drop yet → defers.
+    fn try_lower_defunc_find(
+        &mut self,
+        xs: &IrExpr,
+        params: &[(VarId, Ty)],
+        body: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        use almide_lang::types::constructor::TypeConstructorId;
+        if params.len() != 1 {
+            return None;
+        }
+        let elem_ty = match &xs.ty {
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
+            _ => return None,
+        };
+        if !matches!(result_ty, Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1) {
+            return None;
+        }
+        // A matrix-shaped payload (`Option[Matrix]` / `Option[List[List[Float]]]`) would need a
+        // two-level option drop this brick does not route — defer (never a row leak).
+        if matches!(&elem_ty, Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _))
+            || crate::lower::is_list_list_str_ty(&Ty::Applied(
+                TypeConstructorId::List,
+                vec![elem_ty.clone()],
+            ))
+        {
+            return None;
+        }
+        let elem_heap = is_heap_ty(&elem_ty);
+        // Borrow the source list (evaluated once).
+        let list_v = match self.lower_call_args(std::slice::from_ref(xs)).ok()?.into_iter().next()? {
+            CallArg::Handle(v) => v,
+            _ => return None,
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list_v] });
+        let len_v = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+
+        // The result OPTION block: 1 slot, len@4 overwritten to 0 (none) until a hit.
+        let one_len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one_len, value: 1 });
+        let opt = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst: opt,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len: one_len },
+        });
+        let oh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![opt] });
+        let zero = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+        let len_addr = self.load_addr(oh, 4);
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![len_addr, zero] });
+
+        // Loop index + step.
+        let i_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: i_v, value: 0 });
+        let one_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one_v, value: 1 });
+
+        self.ops.push(Op::LoopStart);
+        let cond_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: len_v });
+        self.ops.push(Op::LoopBreakUnless { cond: cond_v });
+
+        // elem = xs[i] — a borrowed handle (heap) or the i64 value (scalar).
+        let i8_v = self.fresh_value();
+        let eight = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: eight, value: 8 });
+        self.ops.push(Op::IntBinOp { dst: i8_v, op: IntOp::Mul, a: i_v, b: eight });
+        let src_base = self.load_addr(h, 12);
+        let src_addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: src_addr, op: IntOp::Add, a: src_base, b: i8_v });
+        let elem = self.fresh_value();
+        let read_kind = if elem_heap { PrimKind::LoadHandle } else { PrimKind::Load { width: 8 } };
+        self.ops.push(Op::Prim { kind: read_kind, dst: Some(elem), args: vec![src_addr] });
+        self.value_of.insert(params[0].0, elem);
+        if elem_heap {
+            self.param_values.insert(elem);
+            // An aggregate element's field read (`t.name`) borrows its real slot.
+            if matches!(&elem_ty, Ty::Tuple(_)) || self.aggregate_field_tys(&elem_ty).is_some() {
+                self.materialized_aggregates.insert(elem);
+            }
+            self.seed_variant_param(elem, &elem_ty);
+        }
+
+        // The predicate (Bool) — scalar / heap-eq / pure-call conds; temps freed in the frame.
+        let pred = self.lower_heap_result_cond(body)?;
+
+        // On the hit: write the payload into slot 0, flip len to 1 (some), then break.
+        self.ops.push(Op::IfThen { cond: pred, dst: None });
+        let slot_addr = self.load_addr(oh, 12);
+        if elem_heap {
+            let dup = self.fresh_value();
+            self.ops.push(Op::Dup { dst: dup, src: elem });
+            let ph = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ph), args: vec![dup] });
+            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![slot_addr, ph] });
+            self.ops.push(Op::Consume { v: dup });
+        } else {
+            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![slot_addr, elem] });
+        }
+        let one_tag = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one_tag, value: 1 });
+        let len_addr2 = self.load_addr(oh, 4);
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![len_addr2, one_tag] });
+        self.ops.push(Op::Else { val: None });
+        self.ops.push(Op::EndIf { val: None });
+
+        // Break when found (LoopBreakUnless breaks on 0 → pass 1 - pred), else advance.
+        let not_pred = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: not_pred, op: IntOp::Sub, a: one_v, b: pred });
+        self.ops.push(Op::LoopBreakUnless { cond: not_pred });
+        let next_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: next_v, op: IntOp::Add, a: i_v, b: one_v });
+        self.ops.push(Op::SetLocal { local: i_v, src: next_v });
+        self.ops.push(Op::LoopEnd);
+
+        // Drop routing: a RICH record payload frees through the option-wrapper recursion
+        // (`optrec:<R>` → `$__drop_<R>` at the wrapper's last ref); a flat heap payload
+        // (String / List[scalar] / flat record) keeps the caller's per-slot classification
+        // (`heap_elem_lists` — DropListStr over the 0-or-1 slot). The option READS as a
+        // materialized 0-or-1 list either way.
+        if let Some(rn) = self.record_or_anon_drop_type_name(&elem_ty) {
+            self.variant_drop_handles.insert(opt, format!("optrec:{rn}"));
+        } else if elem_heap {
+            self.heap_elem_lists.insert(opt);
+        }
+        self.materialized_lists.insert(opt);
+        Some(opt)
+    }
+
     /// Lower a `List[String]`-valued LEAF (a list literal, a `+` concat, a named call, or a `??`) to
     /// a FRESH OWNED, TRACKED sublist (in `live_heap_handles` with the recursive `DropListStr` drop) —
     /// a single allocation (`i`), so it is soundly droppable (unlike a merged-if). `None` out of subset.
@@ -2294,8 +2482,13 @@ impl LowerCtx {
                     result: Some(repr),
                 });
                 // A `List[String]` call result is a fresh owned nested-ownership list — mark its
-                // recursive drop (the uniform registration below adds the scope-end free).
-                self.heap_elem_lists.insert(dst);
+                // recursive drop (the uniform registration below adds the scope-end free). A
+                // matrix-shaped sublist (`List[Matrix]`) needs the nested DropListListStr grain.
+                if crate::lower::is_list_list_str_ty(&leaf.ty) {
+                    self.list_list_str_lists.insert(dst);
+                } else {
+                    self.heap_elem_lists.insert(dst);
+                }
                 dst
             }
             // A `Module` call (`(... ?? []) |> list.flat_map(...)` — the NESTED flat_map leaf): route
@@ -2305,7 +2498,11 @@ impl LowerCtx {
                 let dst = self
                     .lower_pure_module_value_call(module.as_str(), func.as_str(), args, &leaf.ty)
                     .ok()?;
-                self.heap_elem_lists.insert(dst);
+                if crate::lower::is_list_list_str_ty(&leaf.ty) {
+                    self.list_list_str_lists.insert(dst);
+                } else {
+                    self.heap_elem_lists.insert(dst);
+                }
                 dst
             }
             _ => return None,
@@ -2410,7 +2607,12 @@ impl LowerCtx {
             args: vec![CallArg::Handle(acc), CallArg::Handle(sub)],
             result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
         });
-        self.heap_elem_lists.insert(new);
+        // `new` inherits the acc's drop grain (a matrix-elem acc sweeps two levels).
+        if self.list_list_str_lists.contains(&acc) {
+            self.list_list_str_lists.insert(new);
+        } else {
+            self.heap_elem_lists.insert(new);
+        }
         // DROP-OLD the previous accumulator value, then rebind the slot IN PLACE to `new`. `SetLocal`
         // folds `new`'s `i` into the slot stream (the loop-carried `i(id)m`).
         let drop_acc = self.drop_op_for(acc);

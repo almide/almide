@@ -158,7 +158,12 @@
             let a = list.find([1, 2, 3, 4], (x) => x > 2) ?? 0\n  println(int.to_string(a))\n  \
             let b = list.find([1, 2, 3, 4], (x) => x > 9) ?? 0\n  println(int.to_string(b)) }\n";
         let prog = lower_source(src);
-        assert!(prog.functions.iter().any(|f| f.name == "list.find"));
+        // C1: the inline closure is defunctionalized — `list.find` is inlined as an
+        // early-exit loop (try_lower_defunc_find), NOT auto-linked as a combinator.
+        assert!(
+            !prog.functions.iter().any(|f| f.name == "list.find"),
+            "list.find is inlined, NOT auto-linked as a combinator"
+        );
         if let Some(out) = build_and_run("self_hosted_list_find", &render_wasm_program(&prog)) {
             // find(x>2)=Some(3)→3 ; find(x>9)=None→0 (fallback)
             assert_eq!(out, "3\n0");

@@ -811,10 +811,15 @@ impl LowerCtx {
             Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
             _ => return None,
         };
+        // Return the CANONICAL registry key (a bare cross-module spelling resolves to the
+        // qualified decl name) — this string is the drop-routing identity, and the
+        // generators name `$__drop_<R>` from the QUALIFIED decl.
+        let canonical =
+            crate::lower::canonical_record_key(&self.record_layouts, &name)?.to_string();
         let (_, tys) = self.aggregate_field_tys(ty)?;
         tys.iter()
             .any(record_field_needs_recursive_drop)
-            .then_some(name)
+            .then_some(canonical)
     }
 
     /// The recursive-drop handle name for a record VALUE of type `ty` — a NAMED recursive record's

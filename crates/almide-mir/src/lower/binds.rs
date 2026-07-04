@@ -159,6 +159,20 @@ impl LowerCtx {
         let elem_list_scalar = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
                 Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && !is_heap_ty(&b[0])));
+        // A `List[List[List[scalar]]]` / `List[Matrix]` literal (`[matrix.to_lists(a),
+        // matrix.to_lists(b)]` — the nn concat_rows flatten argument): each element is a
+        // TWO-LEVEL block (a matrix: its slots hold owned flat row blocks), so the list's
+        // scope-end drop must be the nested `DropListListStr` (rc_dec each element's row
+        // slots + the element block, then the list — `list_list_str_lists`). Elements are
+        // fresh-owned matrix.* / to_lists CALLS moved in, or tracked Vars Dup'd in.
+        let elem_list_flat = matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
+                Ty::Matrix
+                | Ty::Applied(TypeConstructorId::Matrix, _))
+        ) || matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
+                Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(&b[0],
+                    Ty::Applied(TypeConstructorId::List, c) if c.len() == 1 && !is_heap_ty(&c[0]))));
         // A `List[(Int, String)]` (`[(i, line)]` — the list.enumerate append) — each element is a
         // (Int @12 scalar, String @20 heap) tuple, materialized via `try_lower_tuple_construct` and
         // reclaimed RECURSIVELY at scope end via `$__drop_list_int_str` (per tuple: rc_dec the String
@@ -206,7 +220,7 @@ impl LowerCtx {
         // len-0 block frees just the block.
         if !elem_str && !elem_scalar_aggregate && !elem_value && !elem_str_value && !elem_list_str
             && !elem_int_str && !elem_str_int && !elem_flat_variant && elem_rich_variant.is_none()
-            && elem_recdrop.is_none() && !elem_list_scalar
+            && elem_recdrop.is_none() && !elem_list_scalar && !elem_list_flat
         {
             return None;
         }
@@ -248,7 +262,9 @@ impl LowerCtx {
                 // A Value-returning ctor call (elem_value), OR — for a List[String] — a String-returning
                 // call element (`[string.slice(s,a,b)]` in `acc + [string.slice(…)]`, the dominant yaml
                 // append shape): a fresh owned String, moved into the slot. `e.ty` is String here.
-                (elem_value && is_value_ty(&e.ty)) || elem_str
+                // A matrix-shaped call element (`[matrix.to_lists(a), …]` — elem_list_flat) is the
+                // same fresh-owned move-in; the list's DropListListStr reclaims it two levels deep.
+                (elem_value && is_value_ty(&e.ty)) || elem_str || elem_list_flat
             }
             _ => false,
         });
@@ -271,7 +287,10 @@ impl LowerCtx {
             self.variant_drop_handles.insert(list, "list_int_str".to_string());
         } else if elem_str_int {
             self.variant_drop_handles.insert(list, "list_str_int".to_string());
-        } else if elem_list_str {
+        } else if elem_list_str || elem_list_flat {
+            // elem_list_flat: each element is a matrix-shaped two-level block — the SAME
+            // DropListListStr sweep (rc_dec each element's flat sub-blocks + the element,
+            // then the list) is its exact recursive free.
             self.list_list_str_lists.insert(list);
         } else if let Some(vname) = &elem_rich_variant {
             // RECURSIVE per-element drop via the generated `$__drop_list_<V>`.
@@ -328,12 +347,12 @@ impl LowerCtx {
                 // the pure-call path (→ a registered CallFn like `string.slice`), Named via CallFn. The
                 // list's recursive drop (DropListValue / DropListStr) frees each at scope end.
                 IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-                    if elem_value || elem_str =>
+                    if elem_value || elem_str || elem_list_flat =>
                 {
                     self.lower_pure_module_value_call(module.as_str(), func.as_str(), args, &elem.ty).ok()?
                 }
                 IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
-                    if elem_value || elem_str =>
+                    if elem_value || elem_str || elem_list_flat =>
                 {
                     let lowered = self.lower_call_args(args).ok()?;
                     let obj = self.fresh_value();

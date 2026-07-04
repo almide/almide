@@ -335,7 +335,11 @@ impl LowerCtx {
             }
             Ty::Tuple(elems) => Some((Vec::new(), elems.clone())),
             Ty::Named(name, args) => {
-                let (generics, decl_fields) = self.record_layouts.get(name.as_str())?;
+                // A cross-module type may arrive with its BARE spelling (`Lin`) while the
+                // registry keys the QUALIFIED decl name (`types_mod.Lin`) — resolve through
+                // the unique-suffix canonicalizer (ambiguous bare names stay unresolved).
+                let key = crate::lower::canonical_record_key(&self.record_layouts, name.as_str())?;
+                let (generics, decl_fields) = self.record_layouts.get(key)?;
                 // Substitute the declared generic params (`T`, `A`, …) with the concrete
                 // `args` from the instantiated type. A param with no supplied arg (arity
                 // mismatch) is a resolution failure → wall.

@@ -765,6 +765,17 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
     if func == "fold" && matches!(module, "list" | "map" | "set") && is_heap_ty(result_ty) {
         return format!("{module}.fold_hacc");
     }
+    // `list.repeat` over a HEAP element (`list.repeat(h, n_rep)` where `h: Matrix` — the
+    // nn repeat_kv GQA duplication): each result slot must CO-OWN the element (rc_inc per
+    // copy) — the scalar impl's raw alias would make every slot an uncounted owner the
+    // recursive result drop double-frees.
+    if module == "list" && func == "repeat" {
+        if let Some(t) = arg_tys.first() {
+            if is_heap_ty(t) {
+                return "list.repeat_rc".to_string();
+            }
+        }
+    }
     // `list.flatten` over HEAP-element sublists: the copied slots are handles the
     // result must CO-OWN — route to the rc_inc-on-copy variant (the scalar variant's
     // raw copy would make the result a second uncounted owner = a double free).
