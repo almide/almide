@@ -241,6 +241,12 @@ impl LowerCtx {
                         return Some(dst);
                     }
                 }
+                // (scalar, Option[scalar]) accumulator — the find_chunk scanner.
+                if let Some(dst) = self.try_lower_defunc_opt_tuple_fold(
+                    xs, params, body, init_e, fuse_index, result_ty,
+                ) {
+                    return Some(dst);
+                }
             }
         }
         let result = if result_str_acc {
@@ -2889,6 +2895,332 @@ impl LowerCtx {
             });
         }
         let _ = tuple_ty;
+        Some(tup)
+    }
+}
+
+impl LowerCtx {
+    /// C1 defunc for a `(scalar, Option[scalar])` accumulator fold — the wav
+    /// find_chunk_at scanner: `fold(range, (pos, none), (state, _) => { let (p, found)
+    /// = state; match found { some(_) => state, none => <if-tree over (p', none|some)> } })`.
+    /// The Option component runs as TWO scalar locals (tag: 0=none/1=some, payload);
+    /// every tail leaf is projected per SUB-component (the match-over-found becomes an
+    /// `if tag != 0`). After the loop the Option materializes ONCE — a cap-1 block whose
+    /// len field is OVERWRITTEN with the tag (len-as-tag, no branch) and which this
+    /// SCOPE owns; the result tuple holds it as a BORROWED slot (view semantics — the
+    /// downstream `.1` projection Dup-acquires). Fully rolled back outside the shape.
+    ///
+    /// The projected trees re-evaluate shared preamble Blocks once PER SUB-COMPONENT
+    /// (up to 3×) — admitted only through `lower_scalar_value`, which rejects anything
+    /// effectful, so the repeats are value-identical (pure); cost-only.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn try_lower_defunc_opt_tuple_fold(
+        &mut self,
+        xs: &IrExpr,
+        params: &[(VarId, Ty)],
+        body: &IrExpr,
+        init: &IrExpr,
+        fuse_index: Option<VarId>,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        use almide_lang::types::constructor::TypeConstructorId;
+        use almide_ir::{BinOp, IrPattern, IrStmtKind};
+        // (scalar, Option[scalar]) accumulator only.
+        match result_ty {
+            Ty::Tuple(ts)
+                if ts.len() == 2
+                    && !is_heap_ty(&ts[0])
+                    && matches!(&ts[1],
+                        Ty::Applied(TypeConstructorId::Option, a)
+                            if a.len() == 1 && !is_heap_ty(&a[0])) => {}
+            _ => return None,
+        }
+        // Seed: (e0, none).
+        let IrExprKind::Tuple { elements: init_elems } = &init.kind else { return None };
+        if init_elems.len() != 2 || !matches!(init_elems[1].kind, IrExprKind::OptionNone) {
+            return None;
+        }
+        let acc_var = params[0].0;
+        let IrExprKind::Block { stmts, expr: Some(tail) } = &body.kind else { return None };
+        if stmts.len() != 1 {
+            return None;
+        }
+        let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements: pats }, value } =
+            &stmts[0].kind
+        else {
+            return None;
+        };
+        if pats.len() != 2 || !matches!(&value.kind, IrExprKind::Var { id } if *id == acc_var) {
+            return None;
+        }
+        let p_var = match &pats[0] {
+            IrPattern::Bind { var, .. } => *var,
+            _ => return None,
+        };
+        let found_var = match &pats[1] {
+            IrPattern::Bind { var, .. } => *var,
+            _ => return None,
+        };
+        // Synthetic vars standing for the tag/payload locals inside projected trees.
+        let base = crate::lower::max_var_id(body).max(crate::lower::max_var_id(init)) + 1;
+        let ft = VarId(base);
+        let fv = VarId(base + 1);
+
+        #[derive(Clone, Copy, PartialEq)]
+        enum Comp {
+            C0,
+            C1Tag,
+            C1Val,
+        }
+        fn subst_var(e: &IrExpr, from: VarId, to: VarId) -> IrExpr {
+            let mut out = e.clone();
+            fn walk(e: IrExpr, from: VarId, to: VarId) -> IrExpr {
+                let mut e = e.map_children(&mut |c| walk(c, from, to));
+                if let IrExprKind::Var { id } = &mut e.kind {
+                    if *id == from {
+                        *id = to;
+                    }
+                }
+                e
+            }
+            out = walk(out, from, to);
+            out
+        }
+        fn int_expr(kind: IrExprKind, like: &IrExpr) -> IrExpr {
+            IrExpr { kind, ty: Ty::Int, span: like.span.clone(), def_id: like.def_id }
+        }
+        fn tag_of(e: &IrExpr, found_var: VarId, ft: VarId) -> Option<IrExpr> {
+            match &e.kind {
+                IrExprKind::OptionNone => Some(int_expr(IrExprKind::LitInt { value: 0 }, e)),
+                IrExprKind::OptionSome { .. } => {
+                    Some(int_expr(IrExprKind::LitInt { value: 1 }, e))
+                }
+                IrExprKind::Var { id } if *id == found_var => {
+                    Some(int_expr(IrExprKind::Var { id: ft }, e))
+                }
+                _ => None,
+            }
+        }
+        fn val_of(e: &IrExpr, found_var: VarId, fv: VarId) -> Option<IrExpr> {
+            match &e.kind {
+                IrExprKind::OptionNone => Some(int_expr(IrExprKind::LitInt { value: 0 }, e)),
+                IrExprKind::OptionSome { expr } => Some((**expr).clone()),
+                IrExprKind::Var { id } if *id == found_var => {
+                    Some(int_expr(IrExprKind::Var { id: fv }, e))
+                }
+                _ => None,
+            }
+        }
+        fn project(
+            e: &IrExpr,
+            comp: Comp,
+            acc_var: VarId,
+            p_var: VarId,
+            found_var: VarId,
+            ft: VarId,
+            fv: VarId,
+        ) -> Option<IrExpr> {
+            match &e.kind {
+                IrExprKind::Tuple { elements } if elements.len() == 2 => match comp {
+                    Comp::C0 => Some(elements[0].clone()),
+                    Comp::C1Tag => tag_of(&elements[1], found_var, ft),
+                    Comp::C1Val => val_of(&elements[1], found_var, fv),
+                },
+                IrExprKind::Var { id } if *id == acc_var => Some(match comp {
+                    Comp::C0 => int_expr(IrExprKind::Var { id: p_var }, e),
+                    Comp::C1Tag => int_expr(IrExprKind::Var { id: ft }, e),
+                    Comp::C1Val => int_expr(IrExprKind::Var { id: fv }, e),
+                }),
+                IrExprKind::If { cond, then, else_ } => {
+                    let t = project(then, comp, acc_var, p_var, found_var, ft, fv)?;
+                    let el = project(else_, comp, acc_var, p_var, found_var, ft, fv)?;
+                    Some(IrExpr {
+                        kind: IrExprKind::If {
+                            cond: cond.clone(),
+                            then: Box::new(t),
+                            else_: Box::new(el),
+                        },
+                        ty: Ty::Int,
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    })
+                }
+                IrExprKind::Block { stmts, expr: Some(tail) } => {
+                    let t = project(tail, comp, acc_var, p_var, found_var, ft, fv)?;
+                    Some(IrExpr {
+                        kind: IrExprKind::Block {
+                            stmts: stmts.clone(),
+                            expr: Some(Box::new(t)),
+                        },
+                        ty: Ty::Int,
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    })
+                }
+                // `match found { some(b) => X, none => Y }` → `if ft != 0 then X[b:=fv] else Y`.
+                IrExprKind::Match { subject, arms }
+                    if matches!(&subject.kind, IrExprKind::Var { id } if *id == found_var)
+                        && arms.len() == 2
+                        && arms.iter().all(|a| a.guard.is_none()) =>
+                {
+                    let some_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Some { .. }))?;
+                    let none_arm = arms
+                        .iter()
+                        .find(|a| matches!(a.pattern, IrPattern::None | IrPattern::Wildcard))?;
+                    let some_body = match &some_arm.pattern {
+                        IrPattern::Some { inner } => match &**inner {
+                            IrPattern::Bind { var, .. } => subst_var(&some_arm.body, *var, fv),
+                            IrPattern::Wildcard => some_arm.body.clone(),
+                            _ => return None,
+                        },
+                        _ => return None,
+                    };
+                    let t = project(&some_body, comp, acc_var, p_var, found_var, ft, fv)?;
+                    let el = project(&none_arm.body, comp, acc_var, p_var, found_var, ft, fv)?;
+                    let cond = int_expr(
+                        IrExprKind::BinOp {
+                            op: BinOp::Neq,
+                            left: Box::new(int_expr(IrExprKind::Var { id: ft }, e)),
+                            right: Box::new(int_expr(IrExprKind::LitInt { value: 0 }, e)),
+                        },
+                        e,
+                    );
+                    Some(IrExpr {
+                        kind: IrExprKind::If {
+                            cond: Box::new(cond),
+                            then: Box::new(t),
+                            else_: Box::new(el),
+                        },
+                        ty: Ty::Int,
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    })
+                }
+                _ => None,
+            }
+        }
+        let proj0 = project(tail, Comp::C0, acc_var, p_var, found_var, ft, fv)?;
+        let projt = project(tail, Comp::C1Tag, acc_var, p_var, found_var, ft, fv)?;
+        let projv = project(tail, Comp::C1Val, acc_var, p_var, found_var, ft, fv)?;
+
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let vo_snapshot = self.value_of.clone();
+        macro_rules! bail {
+            () => {{
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                self.value_of = vo_snapshot;
+                return None;
+            }};
+        }
+        // Locals: s0 = seed.0; tag = 0; val = 0.
+        let s0 = match self.lower_scalar_value(&init_elems[0]) {
+            Some(v) => v,
+            None => bail!(),
+        };
+        let tloc = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: tloc, value: 0 });
+        let vloc = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: vloc, value: 0 });
+        self.value_of.insert(p_var, s0);
+        self.value_of.insert(ft, tloc);
+        self.value_of.insert(fv, vloc);
+
+        // Source loop (same skeleton as the scalar-tuple fold).
+        let list_v = match self
+            .lower_call_args(std::slice::from_ref(xs))
+            .ok()
+            .and_then(|mut a| a.pop())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => bail!(),
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list_v] });
+        let len_v = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        let i_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: i_v, value: 0 });
+        let one_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one_v, value: 1 });
+        self.ops.push(Op::LoopStart);
+        let cond_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: len_v });
+        self.ops.push(Op::LoopBreakUnless { cond: cond_v });
+        let eight = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: eight, value: 8 });
+        let i8_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: i8_v, op: IntOp::Mul, a: i_v, b: eight });
+        let base_addr = self.load_addr(h, 12);
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: base_addr, b: i8_v });
+        let elem = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(elem), args: vec![addr] });
+        self.value_of.insert(params[1].0, elem);
+        if let Some(iv) = fuse_index {
+            self.value_of.insert(iv, i_v);
+        }
+        let body_mark = self.live_heap_handles.len();
+        self.in_frame += 1;
+        self.in_defunc_body += 1;
+        self.scalar_loop_depth += 1;
+        let updates: Option<(ValueId, ValueId, ValueId)> = (|| {
+            let n0 = self.lower_scalar_value(&proj0)?;
+            let nt = self.lower_scalar_value(&projt)?;
+            let nv = self.lower_scalar_value(&projv)?;
+            Some((n0, nt, nv))
+        })();
+        self.scalar_loop_depth -= 1;
+        self.in_defunc_body -= 1;
+        self.in_frame -= 1;
+        let (n0, nt, nv) = match updates {
+            Some(t) => t,
+            None => bail!(),
+        };
+        self.drop_arm_locals(body_mark);
+        self.ops.push(Op::SetLocal { local: s0, src: n0 });
+        self.ops.push(Op::SetLocal { local: tloc, src: nt });
+        self.ops.push(Op::SetLocal { local: vloc, src: nv });
+        self.ops.push(Op::IntBinOp { dst: i_v, op: IntOp::Add, a: i_v, b: one_v });
+        self.ops.push(Op::LoopEnd);
+
+        // Materialize the Option ONCE: a cap-1 len-as-tag block — store the payload,
+        // then OVERWRITE len(@4) with the tag (0 → none, 1 → some; cap stays 1).
+        let one2 = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one2, value: 1 });
+        let opt = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst: opt,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len: one2 },
+        });
+        let oh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![opt] });
+        let pslot = self.load_addr(oh, 12);
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![pslot, vloc] });
+        let lslot = self.load_addr(oh, 4);
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![lslot, tloc] });
+        // The SCOPE owns the Option block; the tuple below only borrows it.
+        self.live_heap_handles.push(opt);
+
+        // The (scalar, Option) result tuple — slot1 is the BORROWED Option handle.
+        let two = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: two, value: 2 });
+        let tup = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst: tup,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len: two },
+        });
+        let th = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(th), args: vec![tup] });
+        let s0slot = self.load_addr(th, 12);
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![s0slot, s0] });
+        let s1slot = self.load_addr(th, 20);
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![s1slot, oh] });
+        self.materialized_aggregates.insert(tup);
+        self.last_call_had_unlifted_closure = false;
         Some(tup)
     }
 }
