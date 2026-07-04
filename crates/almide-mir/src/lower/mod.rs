@@ -310,6 +310,21 @@ pub fn lower_function_all(
     lower_function_all_with_types(func, globals, &RecordLayouts::new())
 }
 
+/// Substitute every `Var { id: from }` in `e` with `Var { id: to }` — the binder rebind
+/// the defunc match-arm transforms use (`some(b) => X` becomes `X[b := payload_var]`).
+pub(crate) fn subst_var_ir(e: &almide_ir::IrExpr, from: VarId, to: VarId) -> almide_ir::IrExpr {
+    fn walk(e: almide_ir::IrExpr, from: VarId, to: VarId) -> almide_ir::IrExpr {
+        let mut e = e.map_children(&mut |c| walk(c, from, to));
+        if let almide_ir::IrExprKind::Var { id } = &mut e.kind {
+            if *id == from {
+                *id = to;
+            }
+        }
+        e
+    }
+    walk(e.clone(), from, to)
+}
+
 /// Resolve a TYPE NAME against the record registry, accepting the BARE spelling of a
 /// cross-module type when it is UNAMBIGUOUS: the frontend qualifies an imported DECL
 /// (`types_mod.Lin`) but leaves some USE-site `Ty::Named`s bare (`Lin` — the alias-typed

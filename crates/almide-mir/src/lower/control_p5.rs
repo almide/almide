@@ -3112,9 +3112,11 @@ impl LowerCtx {
     /// SCOPE owns; the result tuple holds it as a BORROWED slot (view semantics — the
     /// downstream `.1` projection Dup-acquires). Fully rolled back outside the shape.
     ///
-    /// The projected trees re-evaluate shared preamble Blocks once PER SUB-COMPONENT
-    /// (up to 3×) — admitted only through `lower_scalar_value`, which rejects anything
-    /// effectful, so the repeats are value-identical (pure); cost-only.
+    /// The body lowers ONCE per iteration as a UNIT control tree (Block stmts and `if`
+    /// conds emitted a single time); each tuple LEAF computes all three component values
+    /// and SetLocals them together. (The earlier per-sub-component PROJECTION re-lowered
+    /// shared preambles up to 3× — value-identical because scalar-only, but it emitted
+    /// 3× the CallFn ops and permanently tripped the corpus `mir <= ir` caps gate.)
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn try_lower_defunc_opt_tuple_fold(
         &mut self,
@@ -3302,9 +3304,14 @@ impl LowerCtx {
                 _ => None,
             }
         }
-        let proj0 = project(tail, Comp::C0, acc_var, p_var, found_var, ft, fv)?;
-        let projt = project(tail, Comp::C1Tag, acc_var, p_var, found_var, ft, fv)?;
-        let projv = project(tail, Comp::C1Val, acc_var, p_var, found_var, ft, fv)?;
+        // The tail must be a projectable component tree (the gate) — checked up front so
+        // the single-pass emitter below never leaves partial control flow on a decline.
+        if project(tail, Comp::C0, acc_var, p_var, found_var, ft, fv).is_none()
+            || project(tail, Comp::C1Tag, acc_var, p_var, found_var, ft, fv).is_none()
+            || project(tail, Comp::C1Val, acc_var, p_var, found_var, ft, fv).is_none()
+        {
+            return None;
+        }
 
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
@@ -3367,23 +3374,15 @@ impl LowerCtx {
         self.in_frame += 1;
         self.in_defunc_body += 1;
         self.scalar_loop_depth += 1;
-        let updates: Option<(ValueId, ValueId, ValueId)> = (|| {
-            let n0 = self.lower_scalar_value(&proj0)?;
-            let nt = self.lower_scalar_value(&projt)?;
-            let nv = self.lower_scalar_value(&projv)?;
-            Some((n0, nt, nv))
-        })();
+        let emitted =
+            self.emit_opt_tuple_fold_body(tail, acc_var, found_var, ft, fv, s0, tloc, vloc);
         self.scalar_loop_depth -= 1;
         self.in_defunc_body -= 1;
         self.in_frame -= 1;
-        let (n0, nt, nv) = match updates {
-            Some(t) => t,
-            None => bail!(),
-        };
+        if emitted.is_none() {
+            bail!();
+        }
         self.drop_arm_locals(body_mark);
-        self.ops.push(Op::SetLocal { local: s0, src: n0 });
-        self.ops.push(Op::SetLocal { local: tloc, src: nt });
-        self.ops.push(Op::SetLocal { local: vloc, src: nv });
         self.ops.push(Op::IntBinOp { dst: i_v, op: IntOp::Add, a: i_v, b: one_v });
         self.ops.push(Op::LoopEnd);
 
@@ -3424,5 +3423,126 @@ impl LowerCtx {
         self.materialized_aggregates.insert(tup);
         self.last_call_had_unlifted_closure = false;
         Some(tup)
+    }
+
+    /// SINGLE-PASS body emitter for the (scalar, Option[scalar]) fold: walk the tail as
+    /// a UNIT control tree — Block statements and `if` conditions lower exactly ONCE —
+    /// and at each tuple LEAF compute all three component values (scalar, tag, payload)
+    /// before SetLocal-ing the three loop-carried locals together. A `state` leaf (the
+    /// unchanged accumulator) emits nothing. The shape was pre-validated by `project`
+    /// (the gate), so a `None` here only rolls back through the caller's marks.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_opt_tuple_fold_body(
+        &mut self,
+        e: &IrExpr,
+        acc_var: VarId,
+        found_var: VarId,
+        ft: VarId,
+        fv: VarId,
+        s0: ValueId,
+        tloc: ValueId,
+        vloc: ValueId,
+    ) -> Option<()> {
+        use almide_ir::IrPattern;
+        match &e.kind {
+            // The unchanged-accumulator leaf (`some(_) => state`): all three locals keep
+            // their values — no ops.
+            IrExprKind::Var { id } if *id == acc_var => Some(()),
+            // A tuple LEAF `(e0, none | some(x) | found)` — compute all three component
+            // values FIRST (they read the OLD locals), then SetLocal together.
+            IrExprKind::Tuple { elements } if elements.len() == 2 => {
+                let n0 = self.lower_scalar_value(&elements[0])?;
+                let (nt, nv) = match &elements[1].kind {
+                    IrExprKind::OptionNone => {
+                        let z0 = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: z0, value: 0 });
+                        let z1 = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: z1, value: 0 });
+                        (z0, z1)
+                    }
+                    IrExprKind::OptionSome { expr } => {
+                        let one = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                        let v = self.lower_scalar_value(expr)?;
+                        (one, v)
+                    }
+                    IrExprKind::Var { id } if *id == found_var => (tloc, vloc),
+                    _ => return None,
+                };
+                self.ops.push(Op::SetLocal { local: s0, src: n0 });
+                self.ops.push(Op::SetLocal { local: tloc, src: nt });
+                self.ops.push(Op::SetLocal { local: vloc, src: nv });
+                Some(())
+            }
+            // A shared preamble Block: statements lower ONCE; per-iteration heap locals
+            // (a `let id = bytes_to_string(…)` String) are freed within the frame.
+            IrExprKind::Block { stmts, expr: Some(tail) } => {
+                let mark = self.live_heap_handles.len();
+                self.in_frame += 1;
+                let mut ok = true;
+                for st in stmts {
+                    if self.lower_stmt(st).is_err() {
+                        ok = false;
+                        break;
+                    }
+                }
+                let r = if ok {
+                    self.emit_opt_tuple_fold_body(tail, acc_var, found_var, ft, fv, s0, tloc, vloc)
+                } else {
+                    None
+                };
+                self.drop_arm_locals(mark);
+                self.in_frame -= 1;
+                r
+            }
+            // `if cond then A else B` — the cond lowers ONCE (its transient temps freed
+            // in the cond frame); each arm recurses as a unit arm (no merged value).
+            IrExprKind::If { cond, then, else_ } => {
+                let c = self.lower_heap_result_cond(cond)?;
+                self.ops.push(Op::IfThen { cond: c, dst: None });
+                let t = self.emit_opt_tuple_fold_body(then, acc_var, found_var, ft, fv, s0, tloc, vloc);
+                self.ops.push(Op::Else { val: None });
+                let el = t.and_then(|_| {
+                    self.emit_opt_tuple_fold_body(else_, acc_var, found_var, ft, fv, s0, tloc, vloc)
+                });
+                self.ops.push(Op::EndIf { val: None });
+                el
+            }
+            // `match found { some(b) => X, none => Y }` — the tag local IS the cond
+            // (0 = none / 1 = some); the some-arm binder rebinds to the payload var.
+            IrExprKind::Match { subject, arms }
+                if matches!(&subject.kind, IrExprKind::Var { id } if *id == found_var)
+                    && arms.len() == 2
+                    && arms.iter().all(|a| a.guard.is_none()) =>
+            {
+                let some_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Some { .. }))?;
+                let none_arm = arms
+                    .iter()
+                    .find(|a| matches!(a.pattern, IrPattern::None | IrPattern::Wildcard))?;
+                let some_body = match &some_arm.pattern {
+                    IrPattern::Some { inner } => match &**inner {
+                        IrPattern::Bind { var, .. } => {
+                            crate::lower::subst_var_ir(&some_arm.body, *var, fv)
+                        }
+                        IrPattern::Wildcard => some_arm.body.clone(),
+                        _ => return None,
+                    },
+                    _ => return None,
+                };
+                self.ops.push(Op::IfThen { cond: tloc, dst: None });
+                let t = self.emit_opt_tuple_fold_body(
+                    &some_body, acc_var, found_var, ft, fv, s0, tloc, vloc,
+                );
+                self.ops.push(Op::Else { val: None });
+                let el = t.and_then(|_| {
+                    self.emit_opt_tuple_fold_body(
+                        &none_arm.body, acc_var, found_var, ft, fv, s0, tloc, vloc,
+                    )
+                });
+                self.ops.push(Op::EndIf { val: None });
+                el
+            }
+            _ => None,
+        }
     }
 }
