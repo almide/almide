@@ -467,3 +467,91 @@ fn stmt_binder_match_literal_arm_taken_reassigns_in_place() {
 
 
 
+
+// ── 2026-07-04 feature pins: shapes opened this pass, each byte-matched against
+// v0 during development (the probes graduated to unit tests — coverage ledger F2).
+
+#[test]
+fn zip_map_fusion_two_source_loop() {
+    // `map(zip(a, b), (pair) => flatten([pair.0, pair.1]))` fuses into a two-source
+    // loop bounded by min(len_a, len_b) — no (A,B) tuple list is ever built.
+    let src = "fn concat_cols(a: List[List[Float]], b: List[List[Float]]) -> List[List[Float]] =\n\
+        list.zip(a, b) |> list.map((pair) => list.flatten([pair.0, pair.1]))\n\
+        fn main() -> Unit = {\n\
+        let c = concat_cols([[1.0, 2.0], [3.0, 4.0]], [[5.0], [6.0]])\n\
+        for row in c {\n\
+        println(row |> list.map((v) => float.to_string(v)) |> list.join(\",\")) } }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("zip_map_fusion", &render_wasm_program(&prog)) {
+        assert_eq!(out, "1.0,2.0,5.0\n3.0,4.0,6.0");
+    }
+}
+
+#[test]
+fn conditional_fold_over_string_int_tuples() {
+    // `fold(pairs, "", (acc, pair) => if pair.1 == t then pair.0 else acc)` — the
+    // borrowed tuple's heap field is Dup-acquired into the accumulator slot; the
+    // (String, Int) literal list drops via the mirrored DropListStrInt.
+    let src = "fn lookup(pairs: List[(String, Int)], target: Int) -> String =\n\
+        list.fold(pairs, \"\", (acc, pair) => if pair.1 == target then pair.0 else acc)\n\
+        fn main() -> Unit = {\n\
+        let ps = [(\"alpha\", 1), (\"beta\", 2)]\n\
+        println(lookup(ps, 2))\n\
+        println(lookup(ps, 9)) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("cond_fold_str_int", &render_wasm_program(&prog)) {
+        // (build_and_run trims the trailing newline; the second lookup prints "".)
+        assert_eq!(out, "beta");
+    }
+}
+
+#[test]
+fn fold_heap_accumulator_via_call_body() {
+    // `fold(ks, x, (h, k) => step(h, k))` — a Var-seeded (Dup) heap accumulator
+    // updated by a fresh-owned CALL result each iteration (drop-old + SetLocal).
+    let src = "fn step(acc: List[Float], k: Int) -> List[Float] =\n\
+        list.map(acc, (v) => v + int.to_float(k))\n\
+        fn run(ks: List[Int], x: List[Float]) -> List[Float] =\n\
+        list.fold(ks, x, (h, k) => step(h, k))\n\
+        fn main() -> Unit = {\n\
+        let r = run([1, 2, 3], [10.0, 20.0])\n\
+        println(r |> list.map((v) => float.to_string(v)) |> list.join(\",\")) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("fold_call_acc", &render_wasm_program(&prog)) {
+        assert_eq!(out, "16.0,26.0");
+    }
+}
+
+#[test]
+fn scalar_block_lambda_bodies_inline() {
+    // The mel filterbank shape: nested maps whose inner lambda body is a BLOCK
+    // (lets + an if chain) — lowered inline by the scalar-block body arm.
+    let src = "fn filters(pts: List[Float], m: Int) -> List[List[Float]] =\n\
+        list.range(0, 2) |> list.map((i) => {\n\
+        let left = list.get(pts, i) |> option.unwrap_or(0.0)\n\
+        let right = list.get(pts, i + 1) |> option.unwrap_or(1.0)\n\
+        list.range(0, m) |> list.map((k) => {\n\
+        let f = int.to_float(k)\n\
+        let h = if f < left then 0.0 else if f < right then f - left else right\n\
+        h * 2.0 }) })\n\
+        fn main() -> Unit = {\n\
+        for row in filters([1.0, 3.0], 3) {\n\
+        println(row |> list.map((v) => float.to_string(v)) |> list.join(\",\")) } }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("scalar_block_lambda", &render_wasm_program(&prog)) {
+        assert_eq!(out, "0.0,0.0,2.0\n0.0,0.0,0.0");
+    }
+}
+
+#[test]
+fn eager_global_init_traps_before_main() {
+    // C-007: an abortable top-let evaluates at startup (the synthesized
+    // __global_init runs before $main), even when unused.
+    let src = "let zero = 0\nlet bad = 10 / zero\n\
+        fn main() -> Unit = {\n  println(\"never\") }\n";
+    let prog = lower_source(src);
+    assert!(
+        prog.functions.iter().any(|f| f.name == "main"),
+        "the program lowers; the trap happens at RUNTIME startup"
+    );
+}
