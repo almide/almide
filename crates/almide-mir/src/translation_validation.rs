@@ -89,6 +89,7 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         // Inline-rendered (per-tuple String-slot rc_dec loop, no helper) — cert-claimed token is the
         // final list-block `call $rc_dec`.
         Op::DropListIntStr { .. } => "call $rc_dec".into(),
+        Op::DropListStrInt { .. } => "call $rc_dec".into(),
         Op::DropResultListValue { .. } => "call $__drop_result_lv".into(),
         Op::DropResultValue { .. } => "call $__drop_result_value".into(),
         // Inline-rendered (no helper) like DropListStr; the cert-claimed token is the

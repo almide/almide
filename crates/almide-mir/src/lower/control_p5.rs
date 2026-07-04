@@ -786,6 +786,32 @@ impl LowerCtx {
                 self.ops.push(Op::Dup { dst, src });
                 Some(dst)
             }
+            // `pair.0` — a HEAP field of the borrowed tuple/record element (the
+            // lookup_token fold: `if pair.1 == target then pair.0 else acc`): load
+            // the slot's handle (a borrow of the container's field) then ACQUIRE
+            // (`Dup`) so the accumulator slot owns its own reference.
+            IrExprKind::TupleIndex { object, index } => {
+                use crate::{IntOp, PrimKind};
+                let obj = match &object.kind {
+                    IrExprKind::Var { id } => self.value_for(*id).ok()?,
+                    _ => return None,
+                };
+                if !self.materialized_aggregates.contains(&obj) {
+                    return None;
+                }
+                let off = self.aggregate_index_offset_any(&object.ty, *index)?;
+                let h = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![obj] });
+                let offc = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: offc, value: off as i64 });
+                let addr = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: offc });
+                let raw = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(raw), args: vec![addr] });
+                let dst = self.fresh_value();
+                self.ops.push(Op::Dup { dst, src: raw });
+                Some(dst)
+            }
             _ => None,
         }
     }

@@ -490,7 +490,8 @@ pub fn render_wasm_fn(
     // `DropListIntStr` (List[(Int,String)]) loops with $dlli/$dlln/$dllinner too (no $dlsi/$dlsn —
     // its per-element free is a single rc_dec of the tuple's String slot, not a nested loop).
     if func.ops.iter().any(|op| matches!(op,
-        Op::DropResultListStrInt { .. } | Op::DropResultListStr { .. } | Op::DropListIntStr { .. }))
+        Op::DropResultListStrInt { .. } | Op::DropResultListStr { .. } | Op::DropListIntStr { .. }
+        | Op::DropListStrInt { .. }))
         && !func.ops.iter().any(|op| matches!(op, Op::DropListListStr { .. }))
     {
         locals.push("(local $dlli i32) (local $dlln i32) (local $dllinner i32)".to_string());

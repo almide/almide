@@ -807,6 +807,8 @@ impl LowerCtx {
             // String slot + block, then the list). Every real user-ADT variant keeps `DropVariant`.
             if ty == "list_int_str" {
                 Op::DropListIntStr { v }
+            } else if ty == "list_str_int" {
+                Op::DropListStrInt { v }
             } else if let Some(drop_fn) = ty.strip_prefix("optrec:") {
                 // An Option WRAPPER holding a heap RECORD payload (`some({key, val})`): recurse into
                 // the @12 record via `$__drop_<drop_fn>` at the wrapper's last ref, then free the

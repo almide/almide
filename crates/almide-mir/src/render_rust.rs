@@ -170,6 +170,7 @@ fn render_op(op: &Op) -> Option<String> {
             Some(format!("let mut {}: Vec<i64> = {}.clone();", var(*dst), var(*src)))
         }
         Op::Drop { .. } | Op::DropListStr { .. } | Op::DropValue { .. } | Op::DropListValue { .. } | Op::DropListStrValue { .. } | Op::DropListStrStr { .. } | Op::DropListIntStr { .. } | Op::DropResultListValue { .. } | Op::DropResultValue { .. } | Op::DropResultStrInt { .. } | Op::DropResultValueInt { .. } | Op::DropResultListValueInt { .. } | Op::DropResultListStrInt { .. } | Op::DropResultListStr { .. } | Op::DropListListStr { .. } | Op::DropVariant { .. } | Op::DropWrapperRec { .. } => None, // Rust drops at scope end (wasm-only)
+Op::DropListStrInt { .. } | Op::DropResultListValue { .. } | Op::DropResultValue { .. } | Op::DropResultStrInt { .. } | Op::DropResultValueInt { .. } | Op::DropResultListValueInt { .. } | Op::DropResultListStrInt { .. } | Op::DropResultListStr { .. } | Op::DropListListStr { .. } | Op::DropVariant { .. } | Op::DropWrapperRec { .. } => None, // Rust drops at scope end (wasm-only)
         Op::Consume { .. } => None, // a move
         Op::Borrow { v } => Some(format!("let _ = &{};", var(*v))),
         // MakeUnique is a no-op in idiomatic Rust: the Dup clone already gave

@@ -424,6 +424,32 @@ fn render_op(
         // `$__drop_result_lv` (value_core.almd) tag-dispatches at the last ref: Ok frees the
         // `List[Value]` payload recursively, Err frees the String, then the block. A flat `DropListStr`
         // would only rc_dec the @12 list handle, leaking its element Values. Single cert `d`.
+        // The (String, Int) MIRROR: rc_dec the String slot0 @12 (the Int slot1 @20 is
+        // scalar) — the tokenizer vocab-pairs literal `[("alpha", 1), …]`.
+        Op::DropListStrInt { v } => {
+            let p = local(*v);
+            format!(
+                "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1))\n\
+                 \x20     (then\n\
+                 \x20       (local.set $dlli (i32.const 0))\n\
+                 \x20       (local.set $dlln (i32.load (i32.add (local.get {p}) (i32.const 4))))\n\
+                 \x20       (block $dllbrk (loop $dllcont\n\
+                 \x20         (br_if $dllbrk (i32.ge_s (local.get $dlli) (local.get $dlln)))\n\
+                 \x20         (local.set $dllinner (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.add (i32.const 12) (i32.mul (local.get $dlli) (i32.const 8)))))))\n\
+                 \x20         (if (i32.eq (i32.load (local.get $dllinner)) (i32.const 1))\n\
+                 \x20           (then\n\
+                 \x20             (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get $dllinner) (i32.const 12)))))\n\
+                 \x20             (call $rc_dec (local.get $dllinner))))\n\
+                 \x20         (local.set $dlli (i32.add (local.get $dlli) (i32.const 1)))\n\
+                 \x20         (br $dllcont))))\n\
+                 \x20     )\n\
+                 \x20   (call $rc_dec (local.get {p}))\n"
+            )
+        }
+        // RECURSIVE drop of a `value.as_array` Result `Result[List[Value], String]` — the self-hosted
+        // `$__drop_result_lv` (value_core.almd) tag-dispatches at the last ref: Ok frees the
+        // `List[Value]` payload recursively, Err frees the String, then the block. A flat `DropListStr`
+        // would only rc_dec the @12 list handle, leaking its element Values. Single cert `d`.
         Op::DropResultListValue { v } => {
             format!("    (call $__drop_result_lv (local.get {}))\n", local(*v))
         }

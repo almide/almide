@@ -166,6 +166,11 @@ impl LowerCtx {
         let elem_int_str = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
                 Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)));
+        // A `(String, Int)` TUPLE element (`[("alpha", 1), …]` — the tokenizer vocab
+        // pairs) — `DropListStrInt` rc_decs each tuple's String slot0 only.
+        let elem_str_int = matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
+                Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::Int)));
         // A HEAP-FIELD record element with a generated recursive drop (`[{key: p, val: "1"}]`
         // — porta's List[EnvVar] literal): each element materializes via the full record
         // builder (rc-owning its heap fields) and the list drops via `$__drop_list_<R>`
@@ -200,7 +205,7 @@ impl LowerCtx {
         // resolve_env). The element loop below is vacuous; DropListStr over a
         // len-0 block frees just the block.
         if !elem_str && !elem_scalar_aggregate && !elem_value && !elem_str_value && !elem_list_str
-            && !elem_int_str && !elem_flat_variant && elem_rich_variant.is_none()
+            && !elem_int_str && !elem_str_int && !elem_flat_variant && elem_rich_variant.is_none()
             && elem_recdrop.is_none() && !elem_list_scalar
         {
             return None;
@@ -220,7 +225,7 @@ impl LowerCtx {
             // builder itself re-checks; a non-scalar inner defers there).
             IrExprKind::List { .. } => elem_list_scalar,
             IrExprKind::Record { .. } => elem_scalar_aggregate || elem_recdrop.is_some(),
-            IrExprKind::Tuple { .. } => elem_scalar_aggregate || elem_str_value || elem_int_str,
+            IrExprKind::Tuple { .. } => elem_scalar_aggregate || elem_str_value || elem_int_str || elem_str_int,
             // A FLAT-variant CONSTRUCTOR element (`[CapIO, CapProcess]`) — a Named call whose name is a
             // registered constructor, materialized via `try_lower_variant_ctor` below.
             IrExprKind::Call { target: CallTarget::Named { name }, .. }
@@ -263,6 +268,8 @@ impl LowerCtx {
             self.str_value_elem_lists.insert(list);
         } else if elem_int_str {
             self.variant_drop_handles.insert(list, "list_int_str".to_string());
+        } else if elem_str_int {
+            self.variant_drop_handles.insert(list, "list_str_int".to_string());
         } else if elem_list_str {
             self.list_list_str_lists.insert(list);
         } else if let Some(vname) = &elem_rich_variant {
@@ -310,7 +317,7 @@ impl LowerCtx {
                 // A HEAP-FIELD `(String, Value)` tuple element (`(key, val)`) — materialize a fresh OWNED
                 // mixed 2-slot block (`try_lower_tuple_construct`, rc-owning both fields), moved into the
                 // slot; the list's `DropListStrValue` reclaims each tuple recursively.
-                IrExprKind::Tuple { elements: tup_elems } if elem_str_value || elem_int_str => {
+                IrExprKind::Tuple { elements: tup_elems } if elem_str_value || elem_int_str || elem_str_int => {
                     self.try_lower_tuple_construct(tup_elems)?
                 }
                 IrExprKind::Tuple { .. } => self.try_lower_scalar_tuple_construct_for_elem(elem)?,

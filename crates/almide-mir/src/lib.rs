@@ -246,6 +246,11 @@ pub enum Op {
     /// single cert `d`; the per-tuple recursion is the trusted raw-handle routine (leak-loop verified).
     /// The (Int,String) counterpart of `DropListStrStr`.
     DropListIntStr { v: ValueId },
+    /// `drop_list_str_int v` — release a `List[(String, Int)]` (the tokenizer
+    /// vocab-pairs literal): per tuple rc_dec ONLY the String slot @12 (the Int
+    /// @20 is scalar), then the tuple block, then the list block. The
+    /// (String,Int) MIRROR of `DropListIntStr`.
+    DropListStrInt { v: ValueId },
     /// `drop_result_lv v` — release a `value.as_array` Result `Result[List[Value], String]` (the
     /// cap-as-tag 1-slot block `[rc][len@4=1][cap@8][@12 payload][@16 tag]`). IFF the last reference
     /// (rc==1), the RENDER tag-dispatches on @16: Ok (0) frees the `List[Value]` payload @12
@@ -1050,6 +1055,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             | Op::DropListStrValue { v }
             | Op::DropListStrStr { v }
             | Op::DropListIntStr { v }
+            | Op::DropListStrInt { v }
             | Op::DropResultListValue { v }
             | Op::DropResultValue { v }
             | Op::DropResultStrInt { v }
