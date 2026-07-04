@@ -26,6 +26,12 @@
 > + find_chunk（A-4: Option 成分）。A-4/A-5 は scalar-tuple fold の gate
 > （stmts.len()==1）拡張が共通の入口。
 >
+> **続報（同日パス7）**: **list.push → 関数的 concat assign の rewrite**（bytes.push と
+> 同型）で gg1 probe（call destructure + tuple 返し + push ループ）3点一致。gguf 実物は
+> 下流が開いて read_array が露出: 残る形 = **Unit-if 内の条件付き heap-acc 再代入**
+> （`if retained < limit then { push; retained+1 }` — append-acc は直接 Assign のみ発火）
+> と再帰 call の tuple destructure。nn 実質残 = **Matrix 3 + gguf 2（同根）**。
+>
 > **続報（同日パス6）**: **A-4 find_chunk_at 完了**（(scalar, Option[scalar]) fold —
 > tag+payload 2ローカル、match-over-found の if 射影、len-as-tag 後書きの単一 Option
 > 材料化、borrow-view tuple）。実物 wav.almd 開通、3点一致、pin テスト済（**518/0**）。
