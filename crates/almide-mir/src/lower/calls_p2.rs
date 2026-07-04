@@ -674,17 +674,22 @@ impl LowerCtx {
                 // List[Int], borrowed into the call, dropped at scope end). An inclusive
                 // range widens the end by one (`a..=b` = `range(a, b+1)`), exactly v0's
                 // iteration space. Non-scalar bounds still wall below.
-                IrExprKind::Range { start, end, inclusive }
-                    if is_heap_ty(&a.ty)
-                        && self.lower_scalar_value(start).is_some() =>
-                {
-                    let s_v = self.lower_scalar_value(start).unwrap();
-                    let Some(mut e_v) = self.lower_scalar_value(end) else {
-                        return Err(LowerError::Unsupported(
-                            "heap-result Range in a call-argument position cannot be                              faithfully computed in this brick (non-scalar end bound)"
-                                .into(),
-                        ));
+                IrExprKind::Range { start, end, inclusive } if is_heap_ty(&a.ty) => {
+                    let range_mark = self.ops.len();
+                    let (s_v, e_v0) = match (
+                        self.lower_scalar_value(start),
+                        self.lower_scalar_value(end),
+                    ) {
+                        (Some(sv), Some(ev)) => (sv, ev),
+                        _ => {
+                            self.ops.truncate(range_mark);
+                            return Err(LowerError::Unsupported(
+                                "heap-result Range in a call-argument position cannot be                                  faithfully computed in this brick (non-scalar bound)"
+                                    .into(),
+                            ));
+                        }
                     };
+                    let mut e_v = e_v0;
                     if *inclusive {
                         let one = self.fresh_value();
                         self.ops.push(Op::ConstInt { dst: one, value: 1 });

@@ -241,6 +241,21 @@ fn count_ir_calls(
             }) {
                 self.n += 1;
             }
+            // A HEAP `Range` in a call-ARGUMENT position (`f(0..n)`) lowers to ONE synthetic
+            // `list.range` CallFn (the materialized real list). Count the Range ARG node as one
+            // ir_call so `mir_calls <= ir_calls` holds by construction; a Range the lowering
+            // cannot materialize WALLS the function (never mir > ir). A `for i in 0..n` iterable
+            // is NOT a call argument (no count — the loop lowers inline, no CallFn). list.range
+            // is pure (no Stdout).
+            if let almide_ir::IrExprKind::Call { args, .. } = &e.kind {
+                self.n += args
+                    .iter()
+                    .filter(|a| {
+                        matches!(&a.kind, almide_ir::IrExprKind::Range { .. })
+                            && almide_mir::lower::is_heap_ty(&a.ty)
+                    })
+                    .count();
+            }
             // A heap-String `??` (`Option[String] ?? default`) lowers to ONE synthetic
             // `option.unwrap_or_str` CallFn (a mir_call) — but ONLY when its operand can be
             // materialized as a self-host Option: a Var (possibly a materialized Option, which

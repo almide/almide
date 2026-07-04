@@ -469,7 +469,12 @@ impl LowerCtx {
         // a fresh heap value is materialized into an owned temp dropped at the OUTER
         // scope (its caps captured by the lowering). A scalar iterable (a `Range`)
         // carries no ownership; capture any call in it for caps.
-        let container: Option<ValueId> = if is_heap_ty(&iterable.ty) {
+        let container: Option<ValueId> = if is_heap_ty(&iterable.ty)
+            // A Range ITERABLE stays on the no-container model path (it carries no
+            // ownership; the call-arg Range materialization emits a `list.range` CallFn
+            // the caps ledger only accounts for in ARGUMENT position).
+            && !matches!(&iterable.kind, IrExprKind::Range { .. })
+        {
             match self.lower_call_args(std::slice::from_ref(iterable))?.into_iter().next() {
                 Some(CallArg::Handle(v)) => Some(v),
                 _ => None,
