@@ -1149,9 +1149,17 @@ pub(crate) fn is_list_list_str_ty(ty: &Ty) -> bool {
 /// OOMs). Checked BEFORE `is_heap_elem_list_ty` (which also matches this List type).
 pub(crate) fn is_list_str_str_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
+    // BOTH pair sides must be single FLAT blocks — a String or a List[scalar] row
+    // (list.zip_rc over matrix rows) — so DropListStrStr's two per-slot rc_decs are each
+    // a FULL free. A rich payload (List[heap], record, Value) stays out (would leak).
+    let flat = |t: &Ty| {
+        matches!(t, Ty::String)
+            || matches!(t, Ty::Applied(TypeConstructorId::List, b)
+                if b.len() == 1 && !is_heap_ty(&b[0]))
+    };
     matches!(ty,
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
-            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)))
+            Ty::Tuple(tys) if tys.len() == 2 && flat(&tys[0]) && flat(&tys[1])))
 }
 
 /// A `List[(Int, String)]` — the `list.enumerate` result. Each element is an (Int @12 scalar, String

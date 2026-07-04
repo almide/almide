@@ -351,12 +351,13 @@
 
     #[test]
     fn effectful_module_call_is_walled() {
-        // var x = fs.read_bytes(p)  → walled. `fs` is effectful; `fs.read_bytes` is NOT one of
-        // the ADMITTED self-hosted effectful calls (random.int / env.args / fs.read_text — those
-        // charge a real capability into the transitive witness via their prim floor), so its
-        // capability cannot be charged here and admitting it would be accept-but-unsafe.
-        // (`fs.read_text` is deliberately admitted now — see `effectful_read_text_is_admitted`.)
-        // A HEAP result (List[Int]) so the value-call purity gate is the path that walls it.
+        // var x = fs.stat(p)  → walled. `fs` is effectful; `fs.stat` is NOT one of the
+        // ADMITTED self-hosted effectful calls (random.int / env.args / fs.read_text /
+        // fs.read_bytes — those charge a real capability into the transitive witness via
+        // their prim floor), so its capability cannot be charged here and admitting it
+        // would be accept-but-unsafe. (`fs.read_bytes` is deliberately admitted now, like
+        // read_text — see `effectful_read_text_is_admitted`.)
+        // A HEAP result so the value-call purity gate is the path that walls it.
         let b = body(vec![
             bind(0, Ty::String, ir_expr(IrExprKind::LitStr { value: "p".into() }, Ty::String)),
             bind(
@@ -364,7 +365,7 @@
                 Ty::list(Ty::Int),
                 module_call(
                     "fs",
-                    "read_bytes",
+                    "stat",
                     vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
                     Ty::list(Ty::Int),
                 ),

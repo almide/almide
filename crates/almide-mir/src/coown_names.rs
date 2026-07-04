@@ -47,6 +47,10 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__vmerge_app_b",     // value.merge — rc_inc each appended b key+value
     "__mx_share_fill",    // matrix.from_lists/to_lists — rc_inc each shared row block
     "__repeat_fill_rc",   // list.repeat_rc — rc_inc the element into each duplicated slot
+    "__enum_fill_h",      // list.enumerate_str — rc_inc the element into its (i, x) pair
+    "__zip_fill_rc",      // list.zip_rc — rc_inc both elements into each pair
+    "__take_h_fill",      // list.take_hshare — rc_inc each shared element slot
+    "__skv_entries_fill", // map.entries_skv — rc_inc each key into its (k, v) pair
 ];
 
 /// RECURSIVE-DROP CONSUMERS — rc_dec each element at the container's death (the `rec_drop` half of

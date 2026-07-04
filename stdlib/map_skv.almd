@@ -302,3 +302,97 @@ fn map_eq_skv(a: Map[String, Int], b: Map[String, Int]) -> Bool = {
   if an != bn then false
   else __skv_eqm_at(ah, an, bh, bn, 0)
 }
+
+// map.entries over the skv layout — List[(String, scalar)] pairs in insertion order.
+// Each pair CO-OWNS its key (rc_inc — the call-site DropListStrInt releases it) and
+// copies the scalar value.
+fn __skv_entries_fill(dh: Int, sh: Int, entries: Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let k = prim.load64(sh + 12 + i * 8)
+    prim.rc_inc(k)
+    let v = prim.load64(sh + 12 + (entries + i) * 8)
+    let pair = prim.alloc_list(2)
+    let ph = prim.handle(pair)
+    prim.store64(ph + 12, k)
+    prim.store64(ph + 20, v)
+    prim.store_str(dh + 12 + i * 8, pair)
+    __skv_entries_fill(dh, sh, entries, i + 1)
+  }
+
+fn map_entries_skv(m: Map[String, Int]) -> List[(String, Int)] = {
+  let h = prim.handle(m)
+  let entries = prim.load32(h + 4)
+  let out: List[(String, Int)] = prim.alloc_list_str(entries)
+  let _x = __skv_entries_fill(prim.handle(out), h, entries, 0)
+  out
+}
+
+// map.from_list over (String, scalar) pairs — v0's AlmideMap collect: a duplicate key
+// keeps its FIRST position with the LAST value. Two passes over the pair list (no
+// intermediate maps, no leak): count the first-occurrence keys, then store each with
+// the last-matching value. Keys deep-copied (__skv_store_key), values scalar.
+fn __skv_pair_key(lh: Int, i: Int) -> String = {
+  let pair = prim.load64(lh + 12 + i * 8)
+  let k: String = prim.load_str(pair + 12)
+  k
+}
+
+fn __skv_pair_val(lh: Int, i: Int) -> Int = {
+  let pair = prim.load64(lh + 12 + i * 8)
+  prim.load64(pair + 20)
+}
+
+// Is pairs[i]'s key ALREADY present among pairs[0..i)? (a later duplicate — skipped)
+fn __skv_seen_before(lh: Int, i: Int, k: String, j: Int) -> Bool =
+  if j >= i then false
+  else {
+    let kj = __skv_pair_key(lh, j)
+    let eq = __skv_eq(kj, k)
+    if eq then true
+    else __skv_seen_before(lh, i, k, j + 1)
+  }
+
+fn __skv_count_firsts(lh: Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let k = __skv_pair_key(lh, i)
+    let dup = __skv_seen_before(lh, i, k, 0)
+    let add = if dup then 0 else 1
+    __skv_count_firsts(lh, n, i + 1, acc + add)
+  }
+
+// The LAST value paired with key k anywhere in the list (scan from the end).
+fn __skv_last_val(lh: Int, n: Int, k: String, j: Int, best: Int) -> Int =
+  if j >= n then best
+  else {
+    let kj = __skv_pair_key(lh, j)
+    let eq = __skv_eq(kj, k)
+    let nb = if eq then __skv_pair_val(lh, j) else best
+    __skv_last_val(lh, n, k, j + 1, nb)
+  }
+
+fn __skv_from_fill(lh: Int, rh: Int, n: Int, entries: Int, i: Int, w: Int) -> Int =
+  if i >= n then w
+  else {
+    let k = __skv_pair_key(lh, i)
+    let dup = __skv_seen_before(lh, i, k, 0)
+    if dup then __skv_from_fill(lh, rh, n, entries, i + 1, w)
+    else {
+      let v = __skv_last_val(lh, n, k, 0, 0)
+      let _kc = __skv_store_key(rh + 12 + w * 8, k)
+      prim.store64(rh + 12 + (entries + w) * 8, v)
+      __skv_from_fill(lh, rh, n, entries, i + 1, w + 1)
+    }
+  }
+
+fn map_from_list_skv(pairs: List[(String, Int)]) -> Map[String, Int] = {
+  let lh = prim.handle(pairs)
+  let n = prim.load32(lh + 4)
+  let entries = __skv_count_firsts(lh, n, 0, 0)
+  let r = prim.alloc_map_skv(entries * 2)
+  let rh = prim.handle(r)
+  let _f = __skv_from_fill(lh, rh, n, entries, 0, 0)
+  prim.store32(rh + 4, entries)
+  r
+}

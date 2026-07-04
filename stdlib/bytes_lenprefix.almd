@@ -1,0 +1,33 @@
+// bytes_lenprefix — SELF-HOSTED `bytes.read_length_prefixed_strings_le(b, pos, count)`:
+// up to `count` strings, each a u32-LE length prefix followed by that many bytes,
+// decoded LOSSILY (invalid UTF-8 → U+FFFD, via the registered bytes.to_string_lossy —
+// v0 uses String::from_utf8_lossy). A truncated prefix or body STOPS the scan (the
+// result is shorter, exactly v0's `break`). Two passes: count the readable entries
+// (the result list is allocated up-front), then build each owned String and MOVE it
+// into its slot. A negative start reads nothing (v0's usize cast breaks immediately).
+fn __lps_count(b: Bytes, blen: Int, p: Int, remaining: Int, acc: Int) -> Int =
+  if remaining == 0 then acc
+  else if p < 0 or p + 4 > blen then acc
+  else {
+    let sl = bytes.read_u32_le(b, p)
+    if p + 4 + sl > blen then acc
+    else __lps_count(b, blen, p + 4 + sl, remaining - 1, acc + 1)
+  }
+
+fn __lps_fill(dh: Int, b: Bytes, p: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let sl = bytes.read_u32_le(b, p)
+    let s = bytes.to_string_lossy(bytes.slice(b, p + 4, p + 4 + sl))
+    prim.store_str(dh + 12 + i * 8, s)
+    __lps_fill(dh, b, p + 4 + sl, n, i + 1)
+  }
+
+fn bytes_read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String] = {
+  let blen = bytes.len(b)
+  let n0 = if count > 0 then count else 0
+  let n = __lps_count(b, blen, pos, n0, 0)
+  let out = prim.alloc_list_str(n)
+  let _x = __lps_fill(prim.handle(out), b, pos, n, 0)
+  out
+}

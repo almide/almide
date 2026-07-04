@@ -48,6 +48,9 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // `fs.read_bytes_raw` — the raw-bytes twin (same cap-as-tag Result block; the Ok
             // payload is Bytes instead of String).
             | ("fs", "read_bytes_raw")
+            // `fs.read_bytes` — the List[Int]-expanded sibling (the self-host re-wraps the
+            // prim's Result in the SAME materialize_result_str layout via ok()/err() ctors).
+            | ("fs", "read_bytes")
             // `fs.list_dir` returns the cap-as-tag `Result[List[String], String]` ($read_dir builds
             // it in the same `materialize_result_str` layout — payload @12 a List[String], tag @16).
             // So a `match`/`!` over it must read tag @16 + bind the @12 payload list handle, exactly

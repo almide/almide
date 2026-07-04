@@ -242,6 +242,7 @@ impl LowerCtx {
             || (module == "fs" && func == "read_text")
             || (module == "fs" && func == "read_bytes_raw")
             || (module == "fs" && func == "list_dir")
+            || (module == "fs" && func == "read_bytes")
             || (module == "fs" && func == "write")
             || (module == "fs" && func == "mkdir_p")
             || (module == "fs" && func == "remove_all")

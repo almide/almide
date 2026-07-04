@@ -765,6 +765,64 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
     if func == "fold" && matches!(module, "list" | "map" | "set") && is_heap_ty(result_ty) {
         return format!("{module}.fold_hacc");
     }
+    // `list.enumerate` keys on its SOURCE element: scalar → the flat-pair self-host;
+    // String → the rc-share pair variant (`DropListIntStr` at the call site frees each
+    // pair's key ref); any other heap element routes to an UNREGISTERED name (walls
+    // cleanly — a flat pair drop would leak a rich element's children).
+    if module == "list" && func == "enumerate" {
+        if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+            if a.len() == 1 {
+                if !is_heap_ty(&a[0]) {
+                    return "list.enumerate".to_string();
+                }
+                if matches!(a[0], Ty::String) {
+                    return "list.enumerate_str".to_string();
+                }
+                return "list.enumerate_h".to_string();
+            }
+        }
+    }
+    // `list.zip` keys on BOTH sources: scalar/scalar → flat pairs; FLAT-heap/FLAT-heap
+    // (String or List[scalar] each side — matrix rows) → the rc-share variant (the
+    // call-site `DropListStrStr` releases both acquired refs); anything else walls.
+    if module == "list" && func == "zip" && arg_tys.len() == 2 {
+        let elem = |t: &Ty| match t {
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => Some(a[0].clone()),
+            _ => None,
+        };
+        if let (Some(ea), Some(eb)) = (elem(&arg_tys[0]), elem(&arg_tys[1])) {
+            let flat_heap = |t: &Ty| matches!(t, Ty::String)
+                || matches!(t, Ty::Applied(TypeConstructorId::List, b)
+                    if b.len() == 1 && !is_heap_ty(&b[0]));
+            if !is_heap_ty(&ea) && !is_heap_ty(&eb) {
+                return "list.zip".to_string();
+            }
+            if flat_heap(&ea) && flat_heap(&eb) {
+                return "list.zip_rc".to_string();
+            }
+            return "list.zip_h".to_string();
+        }
+    }
+    // `map.entries` / `map.from_list` over the skv repr (`Map[String, scalar]` — the
+    // tokenizer vocab): route to the skv self-hosts; the all-String repr keeps its
+    // existing `map.entries_str`. Other reprs wall (unregistered).
+    if module == "map" && func == "entries" {
+        if let Some(Ty::Applied(TypeConstructorId::Map, a)) = arg_tys.first() {
+            if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]) {
+                return "map.entries_skv".to_string();
+            }
+        }
+    }
+    if module == "map" && func == "from_list" {
+        if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+            if a.len() == 1
+                && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+                    && matches!(ts[0], Ty::String) && !is_heap_ty(&ts[1]))
+            {
+                return "map.from_list_skv".to_string();
+            }
+        }
+    }
     // `list.repeat` over a HEAP element (`list.repeat(h, n_rep)` where `h: Matrix` — the
     // nn repeat_kv GQA duplication): each result slot must CO-OWN the element (rc_inc per
     // copy) — the scalar impl's raw alias would make every slot an uncounted owner the

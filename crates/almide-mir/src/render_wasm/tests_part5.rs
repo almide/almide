@@ -1112,3 +1112,80 @@ fn variant_list_field_extraction_loops() {
         assert_eq!(out, "rows:3\ni0,x1,\ni3,x4,\ni6,x7,\nend:9");
     }
 }
+
+#[test]
+fn pair_selfhosts_enumerate_zip_skv_hshare() {
+    // The light self-host batch (backlog T3-5): scalar/String enumerate, scalar/rc-row
+    // zip (min-length), map.from_list/entries over the skv vocab repr (duplicate key =
+    // FIRST position, LAST value — v0's AlmideMap collect), and the handle-sharing
+    // get_or/take over a List[rows]. All byte-verified against `almide run` (native).
+    let src = "effect fn main() -> Unit = {\n\
+        let xs = [10.5, 20.25]\n\
+        for pair in list.enumerate(xs) {\n\
+        println(int.to_string(pair.0) + \"=\" + float.to_string(pair.1)) }\n\
+        for p2 in list.enumerate([\"ab\", \"cd\"]) {\n\
+        println(int.to_string(p2.0) + \":\" + p2.1) }\n\
+        let zs = list.zip([1, 2, 3], [40, 50, 60, 70])\n\
+        println(int.to_string(list.len(zs)))\n\
+        let za = list.zip([[1.0, 2.0], [3.0]], [[9.0], [8.0], [7.0]])\n\
+        match list.get(za, 1) {\n\
+        some(pr) => println(float.to_string(list.get(pr.0, 0) ?? 0.0) + \"/\" + float.to_string(list.get(pr.1, 0) ?? 0.0))\n\
+        none => println(\"none\") }\n\
+        let vocab = map.from_list([(\"abc\", 100), (\"d\", 4), (\"abc\", 999)])\n\
+        println(int.to_string(map.len(vocab)) + \",\" + int.to_string(map.get(vocab, \"abc\") ?? -1))\n\
+        for e in map.entries(vocab) {\n\
+        println(e.0 + \"->\" + int.to_string(e.1)) }\n\
+        let rows = [[1.5, 2.5], [3.5]]\n\
+        let r1 = list.get_or(rows, 1, [])\n\
+        println(float.to_string(list.get(r1, 0) ?? -1.0))\n\
+        println(int.to_string(list.len(list.take(rows, 1)))) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("pair_selfhosts", &render_wasm_program(&prog)) {
+        assert_eq!(
+            out,
+            "0=10.5\n1=20.25\n0:ab\n1:cd\n3\n3.0/8.0\n2,999\nabc->999\nd->4\n3.5\n1"
+        );
+    }
+}
+
+#[test]
+fn bytes_length_prefixed_strings() {
+    // bytes.read_length_prefixed_strings_le: u32-LE prefixes, a truncated tail STOPS
+    // the scan (v0's break), lossy UTF-8 decode; a mid-buffer start reads the rest.
+    let src = "effect fn main() -> Unit = {\n\
+        let b = bytes.from_list([2, 0, 0, 0, 97, 98, 0, 0, 0, 0, 3, 0, 0, 0, 120, 121, 122, 9, 0])\n\
+        let xs = bytes.read_length_prefixed_strings_le(b, 0, 10)\n\
+        println(int.to_string(list.len(xs)))\n\
+        for s in xs {\n\
+        println(\"[\" + s + \"]\") }\n\
+        let tail = bytes.read_length_prefixed_strings_le(b, 6, 10)\n\
+        println(int.to_string(list.len(tail))) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("bytes_lenprefix", &render_wasm_program(&prog)) {
+        assert_eq!(out, "3\n[ab]\n[]\n[xyz]\n2");
+    }
+}
+
+#[test]
+fn heap_if_returning_a_bound_var_is_leak_free() {
+    // The `let base = "…"; let base = if c then base + "…" else base` shape (default_fields
+    // describe's Rect arm). The else arm Dups `base` and moves it out; the ownership
+    // certificate must NOT double-count that move against the shared scope-local's
+    // reference (the pre-fix `iammd` REJECT — a Consumed value must not also take the
+    // EndIf val-move). A 3000-iteration loop stays bounded (no double-free / no leak).
+    let src = "fn describe(width: Float, color: String) -> String = {\n\
+        let base = \"rect \" + float.to_string(width)\n\
+        let base = if color != \"\" then base + \" color=\" + color else base\n\
+        base }\n\
+        effect fn main() -> Unit = {\n\
+        var i = 0\n\
+        var last = \"\"\n\
+        while i < 3000 {\n\
+        last = describe(int.to_float(i), if i % 2 == 0 then \"c\" else \"\")\n\
+        i = i + 1 }\n\
+        println(last) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("heap_if_bound_var", &render_wasm_program(&prog)) {
+        assert_eq!(out, "rect 2999.0");
+    }
+}
