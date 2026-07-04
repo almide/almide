@@ -1014,15 +1014,55 @@ impl LowerCtx {
                         && (!is_heap_ty(&inner[0])
                             || self.aggregate_field_tys(&inner[0])
                                 .and_then(|(_, tys)| crate::lower::layout::scalar_slots(&tys))
-                                .is_some()));
+                                .is_some()))
+            // An all-scalar aggregate element itself (`[c_add(e, t)]` — a (Float, Float)
+            // Complex): its block holds only inline scalars, rc_dec IS its full free.
+            || self
+                .aggregate_field_tys(elem_ty)
+                .and_then(|(_, tys)| crate::lower::layout::scalar_slots(&tys))
+                .is_some();
         if !flat_content {
             return None;
         }
-        let mut handles: Vec<ValueId> = Vec::with_capacity(elements.len());
+        let ops_mark = self.ops.len();
+        // Each element is a tracked heap Var (borrowed — Dup'd into the slot below) or a
+        // heap-returning NAMED call (`[c_add(e, t)]` — fft's concat element): the call's
+        // fresh OWNED result is moved into the slot directly (no Dup).
+        let mut handles: Vec<(ValueId, bool)> = Vec::with_capacity(elements.len());
         for e in elements {
-            let IrExprKind::Var { id } = &e.kind else { return None };
-            let src = self.value_for(*id).ok()?;
-            handles.push(src);
+            match &e.kind {
+                IrExprKind::Var { id } => {
+                    let Ok(src) = self.value_for(*id) else {
+                        self.ops.truncate(ops_mark);
+                        return None;
+                    };
+                    handles.push((src, false));
+                }
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+                    if !self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                {
+                    let Ok(lowered) = self.lower_call_args(args) else {
+                        self.ops.truncate(ops_mark);
+                        return None;
+                    };
+                    let Ok(erepr) = repr_of(&e.ty) else {
+                        self.ops.truncate(ops_mark);
+                        return None;
+                    };
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::CallFn {
+                        dst: Some(dst),
+                        name: name.as_str().to_string(),
+                        args: lowered,
+                        result: Some(erepr),
+                    });
+                    handles.push((dst, true));
+                }
+                _ => {
+                    self.ops.truncate(ops_mark);
+                    return None;
+                }
+            }
         }
         let n = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: n, value: elements.len() as i64 });
@@ -1034,9 +1074,14 @@ impl LowerCtx {
         });
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });
-        for (i, src) in handles.into_iter().enumerate() {
-            let owned = self.fresh_value();
-            self.ops.push(Op::Dup { dst: owned, src });
+        for (i, (src, is_fresh)) in handles.into_iter().enumerate() {
+            let owned = if is_fresh {
+                src
+            } else {
+                let d = self.fresh_value();
+                self.ops.push(Op::Dup { dst: d, src });
+                d
+            };
             let off = self.fresh_value();
             self.ops.push(Op::ConstInt { dst: off, value: 12 + (i as i64) * 8 });
             let addr = self.fresh_value();
