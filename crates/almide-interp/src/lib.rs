@@ -323,10 +323,62 @@ impl<'a> Interpreter<'a> {
         // globals) does not recurse into re-seeding.
         self.globals_ready.set(true);
         let globals = self.globals.clone();
-        let lets: Vec<_> = self.program.top_lets.iter().collect();
-        for tl in lets {
-            match self.eval_expr(&tl.value, &globals) {
-                Flow::Value(v) => globals.bind(tl.var, v),
+        // DEPENDENCY-ORDERED init (#632, C-007): a top-let whose initializer reads a
+        // LATER-declared global (directly or through a fn it calls — `BANNER =
+        // make_banner()` reading `APP_NAME`) must see it already bound. Both backends
+        // interprocedurally topo-sort the declaration order (`dependency_init_order`);
+        // evaluating in bare declaration order here left the forward-referenced global
+        // unbound (`unbound variable APP_NAME`) — a WRONG third vote vs the native==wasm
+        // consensus. Reuse the SAME ordering utility so the interp matches by construction.
+        use almide_ir::top_let_storage::{
+            build_global_tables, dependency_init_order, top_let_inputs,
+        };
+        let mut inputs = Vec::new();
+        for tl in &self.program.top_lets {
+            inputs.push(top_let_inputs(tl));
+        }
+        for m in &self.program.modules {
+            for tl in &m.top_lets {
+                inputs.push(top_let_inputs(tl));
+            }
+        }
+        let (_globals_info, alias, _offenders) =
+            build_global_tables(&inputs, &self.program.var_table);
+        let order = dependency_init_order(self.program, &alias);
+        // Index every top-let (root + modules) by its VarId so the sorted order can
+        // fetch its initializer. A VarId in `order` but absent here (unreachable) is
+        // skipped; a top-let absent from `order` (defensive) falls back to decl order.
+        let mut by_var: std::collections::HashMap<almide_ir::VarId, &almide_ir::IrExpr> =
+            std::collections::HashMap::new();
+        for tl in &self.program.top_lets {
+            by_var.insert(tl.var, &tl.value);
+        }
+        for m in &self.program.modules {
+            for tl in &m.top_lets {
+                by_var.insert(tl.var, &tl.value);
+            }
+        }
+        let mut seen: std::collections::HashSet<almide_ir::VarId> =
+            std::collections::HashSet::new();
+        let ordered: Vec<(almide_ir::VarId, &almide_ir::IrExpr)> = order
+            .iter()
+            .filter_map(|v| by_var.get(v).map(|e| (*v, *e)))
+            .chain(
+                // Any top-let the sort omitted (a self-referential cycle the topo-sort
+                // dropped) is appended in declaration order — never silently unbound.
+                self.program
+                    .top_lets
+                    .iter()
+                    .map(|tl| (tl.var, &tl.value))
+                    .chain(self.program.modules.iter().flat_map(|m| {
+                        m.top_lets.iter().map(|tl| (tl.var, &tl.value))
+                    })),
+            )
+            .filter(|(v, _)| seen.insert(*v))
+            .collect();
+        for (var, value) in ordered {
+            match self.eval_expr(value, &globals) {
+                Flow::Value(v) => globals.bind(var, v),
                 other => return Err(other),
             }
         }
