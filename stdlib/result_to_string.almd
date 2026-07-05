@@ -85,8 +85,13 @@ fn __rts_digits(n: Int, acc: Int) -> Int =
   if n < 10 then acc + 1
   else __rts_digits(n / 10, acc + 1)
 
+// Negative path WITHOUT negating (i64::MIN safe, #660): count digits of n <= 0 directly.
+fn __rts_count_neg(n: Int, acc: Int) -> Int =
+  if n > 0 - 10 then acc + 1
+  else __rts_count_neg(n / 10, acc + 1)
+
 fn __rts_int_width(v: Int) -> Int =
-  if v < 0 then __rts_digits(0 - v, 0) + 1
+  if v < 0 then __rts_count_neg(v, 0) + 1
   else __rts_digits(v, 0)
 
 fn __rts_fill_digits(n: Int, pos: Int) -> Int =
@@ -99,10 +104,21 @@ fn __rts_fill_digits(n: Int, pos: Int) -> Int =
     p + 1
   }
 
+// Fill the digits of n <= 0 WITHOUT negating: magnitude digit = -(n % 10) ∈ [0, 9].
+fn __rts_fill_neg(n: Int, pos: Int) -> Int =
+  if n > 0 - 10 then {
+    prim.store8(pos, 48 + (0 - n))
+    pos + 1
+  } else {
+    let p = __rts_fill_neg(n / 10, pos)
+    prim.store8(p, 48 + (0 - (n % 10)))
+    p + 1
+  }
+
 fn __rts_fill_int(v: Int, pos: Int) -> Int =
   if v < 0 then {
     prim.store8(pos, 45)
-    __rts_fill_digits(0 - v, pos + 1)
+    __rts_fill_neg(v, pos + 1)
   } else __rts_fill_digits(v, pos)
 
 fn __rts_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =

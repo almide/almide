@@ -393,6 +393,22 @@ impl LowerCtx {
                     self.live_heap_handles.push(dst);
                     return Ok(());
                 }
+                // HONEST-WALL SAFETY NET: a `some(<list>)` / `ok(<list>)` whose LIST payload the ctor
+                // materializer DECLINED (an exotic element the scalar/String/literal arms don't cover —
+                // e.g. a computed List[record]/List[List]) must NOT fall to the deferred Opaque `Alloc`
+                // below, which would read `none` / `ok([])` (the some(computed)/ok(computed) silent
+                // miscompile the adversarial fuzz surfaced). Wall instead — a wall is always safe, a
+                // wrong byte never is.
+                if let IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } = &value.kind {
+                    use almide_lang::types::constructor::TypeConstructorId;
+                    if matches!(&expr.ty, Ty::Applied(TypeConstructorId::List, _)) {
+                        return Err(LowerError::Unsupported(
+                            "some/ok of a list payload outside the executable subset cannot be \
+                             faithfully materialized in this brick (would defer to an empty list)"
+                                .into(),
+                        ));
+                    }
+                }
                 // A scalar-field tuple `(a, b)` of NON-LITERAL fields (vars / scalar exprs) — a
                 // literal `(3, 7)` is already an `Init::IntList` below. Construct the 2-slot block
                 // and store each field's computed value (the tuple-machinery construction sibling

@@ -710,6 +710,21 @@ impl LowerCtx {
                     {
                         self.try_lower_scalar_list_slots(elements)?
                     }
+                    // A COMPUTED scalar-element list payload (`some(list.map(xs, f))`, `some([1,2] |> …)`,
+                    // `some(a + b)`) — lower the fresh owned list via `lower_owned_heap_field` (which
+                    // tracks it in live_heap_handles) then MOVE it into the Some slot (retain-remove so
+                    // materialize_opt_str_some is the SOLE owner). Gated to a SCALAR-element list so the
+                    // flat heap_elem_lists drop is exact. Without this the computed payload fell to
+                    // `_ => None` → a deferred Opaque Option reading `none` (the some(computed) miscompile).
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                    | IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. }
+                        if matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                            if a.len() == 1 && !is_heap_ty(&a[0])) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     _ => return None,
                 };
                 // materialize_opt_str_some tracks materialized_options + heap_elem_lists.
@@ -811,6 +826,21 @@ impl LowerCtx {
                     | IrExprKind::OptionNone
                     | IrExprKind::ResultOk { .. }
                     | IrExprKind::ResultErr { .. } => self.try_lower_option_ctor(expr, &expr.ty)?,
+                    // A COMPUTED list Ok payload (`ok(list.map(xs, f))`, `ok(a + b)`) — lower the fresh
+                    // owned list, moved into the Ok slot (retain-remove so materialize_result_str is the
+                    // sole owner). Gated to a SCALAR- or STRING-element list — the two element kinds whose
+                    // drop `materialize_result_str` routes exactly (flat for scalar, per-element String
+                    // free for List[String], the same as the `ok(["a", …])` literal path). Mirrors the
+                    // OptionSome computed arm; without it `ok(computed)` fell to a deferred Opaque `ok([])`.
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                    | IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. }
+                        if matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                            if a.len() == 1 && (!is_heap_ty(&a[0]) || matches!(a[0], Ty::String))) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     _ => return None,
                 };
                 let dst = self.materialize_result_str(piece, repr, false, false);

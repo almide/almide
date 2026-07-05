@@ -203,3 +203,4 @@ spec/wasm_cross/whilep_str.almd
 spec/wasm_cross/wide_function_body.almd
 spec/lang/option_nested_interp_wasm.almd
 spec/lang/result_nested_interp_wasm.almd
+spec/lang/nested_interp_edgecases_wasm.almd

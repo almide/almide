@@ -1,0 +1,29 @@
+// wasm:enabled
+// Regression fixtures for two miscompiles the adversarial fuzz surfaced (both now fixed):
+//   (A) i64::MIN inside a `${List[Int]}` / `${Option[List[Int]]}` / `${Result[List[Int], String]}`
+//       rendered as "-0" — the inlined int-to-decimal negated the value (0 - i64::MIN overflows).
+//       Fixed by the negate-free negative path (magnitude digit = -(n % 10)), i64::MIN-safe.
+//   (B) `some(<computed list>)` / `ok(<computed list>)` (list.map / filter / concat / pipe) read
+//       `none` / `ok([])` — the Option/Result ctor materializer only admitted list LITERALS, so a
+//       computed payload deferred to an empty Opaque. Fixed by lowering the computed list into the
+//       Some/Ok slot; an unmaterializable list payload now WALLS (never a wrong byte).
+// Byte-identical to v0 --target wasm.
+
+effect fn main() -> Unit = {
+  // (A) i64::MIN boundary
+  let mn: List[Int] = [0 - 9223372036854775807 - 1, 0, 9223372036854775807]
+  println("${mn}")
+  let omn: Option[List[Int]] = some([0 - 9223372036854775807 - 1, 42])
+  println("${omn}")
+  let rmn: Result[List[Int], String] = ok([0 - 9223372036854775807 - 1, 0 - 1])
+  println("${rmn}")
+
+  // (B) computed list payloads
+  let a: Option[List[Int]] = some(list.map([1, 2, 3], (n) => n * 2))
+  let b: Option[List[Int]] = some([1, 2] + [3, 4])
+  let c: Option[List[Int]] = some([5, 6, 7] |> list.filter((n) => n > 5))
+  let d: Result[List[Int], String] = ok(list.map([10, 20], (n) => n + 1))
+  let e: Result[List[String], String] = ok(list.map([1, 2], (n) => int.to_string(n * 3)))
+  let f: Option[List[Bool]] = some(list.map([1, 2, 3], (n) => n > 1))
+  println("${a}") println("${b}") println("${c}") println("${d}") println("${e}") println("${f}")
+}

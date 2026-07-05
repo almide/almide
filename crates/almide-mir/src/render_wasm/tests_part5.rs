@@ -1574,6 +1574,21 @@ fn option_option_int_interp() {
 }
 
 #[test]
+fn nested_interp_min_int_and_computed_list_payloads() {
+    // Two adversarial-fuzz regressions: (A) i64::MIN in a list interp rendered "-0" (negate overflow),
+    // (B) some/ok of a COMPUTED list read none/ok([]). Both fixed.
+    let src = "effect fn main() -> Unit = {\n\
+        let mn: List[Int] = [0 - 9223372036854775807 - 1, 7] println(\"${mn}\")\n\
+        let a: Option[List[Int]] = some(list.map([1, 2, 3], (n) => n * 2)) println(\"${a}\")\n\
+        let b: Result[List[Int], String] = ok([1, 2] + [3]) println(\"${b}\")\n\
+        let c: Option[List[Bool]] = some(list.map([1, 2], (n) => n > 1)) println(\"${c}\") }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("nested_edgecases", &render_wasm_program(&prog)) {
+        assert_eq!(out, "[-9223372036854775808, 7]\nsome([2, 4, 6])\nok([1, 2, 3])\nsome([false, true])");
+    }
+}
+
+#[test]
 fn result_outer_nested_interp() {
     // Result-outer nested `${…}`: the ResultOk heap materializer admits a nested Option/Result ctor
     // Ok payload (construction) and the nested-payload bind seeds its read-shape (inner match).
