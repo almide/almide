@@ -1,0 +1,9 @@
+// Indexing a String with `[]` is not supported — a String is a UTF-8 codepoint
+// sequence, not a byte/char array. The checker used to type this as `Unknown`
+// (check-clean), and BOTH backends then emitted a `[COMPILER BUG] unresolved
+// IndexAccess` blamed on the user. E026 rejects it at check with a hint to the
+// codepoint-indexed accessors. (#558)
+effect fn main() -> () = {
+  let s = "hello"
+  println(s[1])
+}

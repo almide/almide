@@ -1,0 +1,5 @@
+// The fix: use the codepoint-indexed stdlib accessor.
+effect fn main() -> () = {
+  let s = "hello"
+  println(string.get(s, 1) ?? "")
+}
