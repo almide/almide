@@ -576,7 +576,15 @@ impl LowerCtx {
                 }
                 let lowered = self.lower_call_args(args)?;
                 let dst = self.fresh_value();
-                let repr = repr_of(ty)?;
+                // A function-VALUED result (`let f = mk()` where `mk` returns a lifted lambda) is a
+                // scalar FUNCREF (an i64 table slot), NOT the i32 heap Ptr `repr_of(Ty::Fn)` gives — so
+                // the bound local is typed i64 to match the callee's i64 return (the `CallIndirect`
+                // wraps it to the i32 table index).
+                let repr = if matches!(ty, Ty::Fn { .. }) {
+                    crate::Repr::Scalar { width: crate::ScalarWidth::Double }
+                } else {
+                    repr_of(ty)?
+                };
                 self.value_of.insert(var, dst);
                 self.ops.push(Op::CallFn {
                     dst: Some(dst),
@@ -609,6 +617,14 @@ impl LowerCtx {
                 // (was missing here, so a let-bound Named-call Value leaked: a parse loop OOMs).
                 if crate::lower::is_value_ty(ty) {
                     self.value_handles.insert(dst);
+                }
+                // A user fn RETURNING a function value (`let f = mk()` where `mk() -> (Int) -> Int`
+                // returns a lifted non-capturing lambda) yields a FUNCREF (a scalar table slot, NOT a
+                // heap block): track it so a later `f(args)` dispatches through `Op::CallIndirect`, and
+                // drop it from the scope-end set (a funcref is not an allocation to free).
+                if matches!(ty, Ty::Fn { .. }) {
+                    self.live_heap_handles.retain(|h| *h != dst);
+                    self.funcref_values.insert(dst);
                 }
                 // A user function returning Option/Result yields a REAL same-layout variant block
                 // (the v1 calling convention — `seed_variant_param`'s contract). SEED its READ-shape

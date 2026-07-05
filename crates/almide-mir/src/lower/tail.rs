@@ -429,6 +429,21 @@ impl LowerCtx {
                 // tail (return its Result directly). This unblocks the `parse_mapping =
                 // collect_map(..)!` shape (a tail call result propagated).
                 IrExprKind::Unwrap { expr } => return self.lower_tail(Some(expr)),
+                // A NON-CAPTURING lambda RETURNED (`fn mk() -> (Int) -> Int = (x) => x + 1`) — LIFT it
+                // to a table slot (`Op::FuncRef`, a scalar i64) and move THAT out as the return. The
+                // caller tracks the bound result as a funcref (binds_p2) so a later `f(args)` dispatches
+                // through it via `Op::CallIndirect`. A CAPTURING lambda has no liftable slot (a real
+                // closure environment is a later brick) → wall cleanly, never an empty deferred value.
+                IrExprKind::Lambda { params, body, .. } => {
+                    return match self.lift_lambda(params, body) {
+                        Some(slot) => Ok(Some(slot)),
+                        None => Err(LowerError::Unsupported(
+                            "capturing closure returned cannot be faithfully materialized in this \
+                             brick (a real closure environment is a later brick)"
+                                .into(),
+                        )),
+                    };
+                }
                 // A fresh heap literal returned directly (`fn f() = [1, 2, 3]`):
                 // allocate it and move it out. It is NOT added to
                 // `live_heap_handles`, so it is the return value (consumed at the
@@ -453,9 +468,8 @@ impl LowerCtx {
                 | IrExprKind::UnwrapOr { .. }
                 | IrExprKind::ToOption { .. }
                 | IrExprKind::OptionalChain { .. }
-                // A CLOSURE value returned (`fn mk() = (x) => …`) is a fresh heap env;
-                // a RANGE is a fresh value — both `Alloc{Opaque}`, moved out.
-                | IrExprKind::Lambda { .. }
+                // A CAPTURING CLOSURE value returned is a fresh heap env; a RANGE is a fresh value —
+                // both `Alloc{Opaque}`, moved out. (A non-capturing `Lambda` is lifted above.)
                 | IrExprKind::ClosureCreate { .. }
                 | IrExprKind::Range { .. }
                 | IrExprKind::RuntimeCall { .. } => {

@@ -5,6 +5,7 @@ spec/churn/record_churn.almd
 spec/churn/tco_deep_recursion_churn.almd
 spec/churn/tco_loop_churn.almd
 spec/lang/block_comment_raw_string_test.almd
+spec/lang/closure_return_noncapturing_wasm.almd
 spec/lang/codec_method_roundtrip_wasm.almd
 spec/lang/codec_option_field_wasm.almd
 spec/lang/fan_map_int_wasm.almd

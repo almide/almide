@@ -1532,6 +1532,24 @@ fn set_interp_self_hosts_via_to_list() {
 }
 
 #[test]
+fn noncapturing_lambda_returned_as_funcref() {
+    // A function RETURNING a non-capturing lambda / a bare fn reference — the trust-spine lifts it to
+    // a table slot and returns the scalar funcref; the caller tracks the bound result so `f(args)`
+    // dispatches through CallIndirect. A capturing closure still walls (a real env is a later brick).
+    let src = "fn inc() -> (Int) -> Int = (x) => x + 1\n\
+        fn tp(x: Int) -> Int = x * 2 + 3\n\
+        fn getter() -> (Int) -> Int = tp\n\
+        effect fn main() -> Unit = {\n\
+        let f = inc() println(int.to_string(f(5))) println(int.to_string(f(41)))\n\
+        let h = getter() println(int.to_string(h(6))) }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "inc"), "inc must lower");
+    if let Some(out) = build_and_run("closure_return", &render_wasm_program(&prog)) {
+        assert_eq!(out, "6\n42\n15");
+    }
+}
+
+#[test]
 fn fan_race_and_any_inline_literal_thunk_lists() {
     // `fan.race`/`fan.any` over a LITERAL thunk list, deterministic on wasm: race takes thunk[0]'s
     // result (head even if it errs); any takes the FIRST Ok in order (else v0's fixed `fan.any: all
