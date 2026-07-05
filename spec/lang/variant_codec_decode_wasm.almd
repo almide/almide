@@ -1,0 +1,31 @@
+// wasm:enabled
+// A standalone fixture locking in derived-Codec DECODE of tagged variants (unit + tuple cases with
+// scalar/String fields). The decode reads the tag as a plain String (value.keys |> list.get ?? "")
+// and the payload via value.field, then reconstructs the variant — no (String, Value) tuple the
+// trust-spine cannot lower. `ok(Ctor(..))` materializes the variant (real tagged block). Encode →
+// decode → re-encode roundtrip, byte-identical to v0 --target wasm.
+import json
+
+type Shape: Codec =
+  | Pair(Int, String)
+  | Solo(Int)
+  | Plain
+
+effect fn main() -> Unit = {
+  let e0 = Shape.encode(Pair(7, "x"))
+  println(json.stringify(e0))
+  match Shape.decode(e0) {
+    ok(s) => match s { Pair(n, t) => println("pair " + int.to_string(n) + " " + t), Solo(n) => println("solo"), Plain => println("plain") }
+    err(er) => println("err:" + er)
+  }
+  let e1 = Shape.encode(Solo(42))
+  match Shape.decode(e1) {
+    ok(s) => match s { Pair(n, t) => println("pair"), Solo(n) => println("solo " + int.to_string(n)), Plain => println("plain") }
+    err(er) => println("err:" + er)
+  }
+  let e2 = Shape.encode(Plain)
+  match Shape.decode(e2) {
+    ok(s) => match s { Pair(n, t) => println("pair"), Solo(n) => println("solo"), Plain => println("plain") }
+    err(er) => println("err:" + er)
+  }
+}

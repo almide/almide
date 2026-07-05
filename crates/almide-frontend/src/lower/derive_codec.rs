@@ -399,27 +399,14 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
     let result_ty = Ty::result(type_ty.clone(), Ty::String);
     let var_v = vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
 
-    // let (tag, payload) = almide_rt_value_tagged_variant(_v)?
+    // TUPLE-FREE tag/payload split (so neither side materializes a `(String, Value)` tuple the
+    // trust-spine cannot lower): read the tag via `value.variant_tag(_v)` (Result[String, String])
+    // and the payload via `value.field(_v, _tag)` (Result[Value, String]) — both simple Results the
+    // trust-spine already lowers, wrapped as `match tag { ok(_tag) => match field { ok(_payload) =>
+    // <if-chain>, err(e) => err(e) }, err(e) => err(e) }`.
     let var_tag = vt.alloc(sym("_tag"), Ty::String, Mutability::Let, None);
     let var_payload = vt.alloc(sym("_payload"), value_ty.clone(), Mutability::Let, None);
-
-    let extract = IrStmt {
-        kind: IrStmtKind::BindDestructure {
-            pattern: IrPattern::Tuple { elements: vec![IrPattern::Bind { var: var_tag, ty: Ty::String }, IrPattern::Bind { var: var_payload, ty: Ty::String }] },
-            value: IrExpr {
-                kind: IrExprKind::Try { expr: Box::new(IrExpr {
-                    kind: IrExprKind::Call {
-                        target: CallTarget::Named { name: sym("almide_rt_value_tagged_variant") },
-                        args: vec![IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None }],
-                        type_args: vec![],
-                    },
-                    ty: Ty::result(Ty::Tuple(vec![Ty::String, value_ty.clone()]), Ty::String), span: None, def_id: None,
-                })},
-                ty: Ty::Tuple(vec![Ty::String, value_ty.clone()]), span: None, def_id: None,
-            },
-        },
-        span: None,
-    };
+    let var_e2 = vt.alloc(sym("_e2"), Ty::String, Mutability::Let, None);
 
     // Build if-else chain: if tag == "Circle" then ... else if tag == "Rect" then ... else err
     let mut else_expr = IrExpr {
@@ -491,7 +478,11 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
                 let ctor = IrExpr {
                     kind: IrExprKind::Call {
                         target: CallTarget::Named { name: case.name },
-                        args: elem_vars.iter().map(|v| IrExpr { kind: IrExprKind::Var { id: *v }, ty: Ty::Unknown, span: None, def_id: None }).collect(),
+                        // Give each ctor arg its REAL field type (NOT `Ty::Unknown`): the trust-spine's
+                        // variant-ctor materializer (`try_lower_variant_ctor`) reads `arg.ty` to place each
+                        // field (heap handle moved in vs scalar stored), so an `Unknown`-typed arg walls the
+                        // whole `ok(Ctor(..))`. v0's codegen re-infers, so it was insensitive to this.
+                        args: elem_vars.iter().zip(fields.iter()).map(|(v, field_ty)| IrExpr { kind: IrExprKind::Var { id: *v }, ty: field_ty.clone(), span: None, def_id: None }).collect(),
                         type_args: vec![],
                     },
                     ty: type_ty.clone(), span: None, def_id: None,
@@ -549,7 +540,7 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
                         kind: IrStmtKind::Bind { var: fv, mutability: Mutability::Let, ty: f.ty.clone(), value: decoded },
                         span: None,
                     });
-                    field_pairs.push((f.name, IrExpr { kind: IrExprKind::Var { id: fv }, ty: Ty::Unknown, span: None, def_id: None }));
+                    field_pairs.push((f.name, IrExpr { kind: IrExprKind::Var { id: fv }, ty: f.ty.clone(), span: None, def_id: None }));
                 }
                 let record = IrExpr {
                     kind: IrExprKind::Record { name: Some(case.name), fields: field_pairs },
@@ -571,8 +562,68 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
         };
     }
 
+    // Inner: `match value.field(_v, _tag) { ok(_payload) => <if-chain>, err(_e2) => err(_e2) }`.
+    let field_call = IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module { module: sym("value"), func: sym("field"), def_id: None },
+            args: vec![
+                IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None },
+                IrExpr { kind: IrExprKind::Var { id: var_tag }, ty: Ty::String, span: None, def_id: None },
+            ],
+            type_args: vec![],
+        },
+        ty: Ty::result(value_ty.clone(), Ty::String), span: None, def_id: None,
+    };
+    let err_e2 = IrExpr {
+        kind: IrExprKind::ResultErr { expr: Box::new(IrExpr { kind: IrExprKind::Var { id: var_e2 }, ty: Ty::String, span: None, def_id: None }) },
+        ty: result_ty.clone(), span: None, def_id: None,
+    };
+    let inner_match = IrExpr {
+        kind: IrExprKind::Match {
+            subject: Box::new(field_call),
+            arms: vec![
+                IrMatchArm { pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: var_payload, ty: value_ty.clone() }) }, guard: None, body: else_expr },
+                IrMatchArm { pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: var_e2, ty: Ty::String }) }, guard: None, body: err_e2 },
+            ],
+        },
+        ty: result_ty.clone(), span: None, def_id: None,
+    };
+    // `let _tag = value.keys(_v) |> list.get(0) ?? ""` — the variant tag (first Object key) as a
+    // PLAIN String (NOT a Result), built from RECOGNIZED self-host module calls (value.keys /
+    // list.get / `??`) so the trust-spine materializes it. A simple `let` bind (not the Ok-payload of
+    // an outer Result-match, which the trust-spine walls when it wraps a heap-String subject whose arm
+    // re-borrows the same param). A non-Object `_v` → `value.keys` returns `[]` → `""` → `value.field`
+    // then yields the same "expected Object" the strict tuple path did.
+    let keys_ty = Ty::list(Ty::String);
+    let keys_call = IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module { module: sym("json"), func: sym("keys"), def_id: None },
+            args: vec![IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None }],
+            type_args: vec![],
+        },
+        ty: keys_ty.clone(), span: None, def_id: None,
+    };
+    let get_call = IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module { module: sym("list"), func: sym("get"), def_id: None },
+            args: vec![keys_call, IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None }],
+            type_args: vec![],
+        },
+        ty: Ty::option(Ty::String), span: None, def_id: None,
+    };
+    let tag_call = IrExpr {
+        kind: IrExprKind::UnwrapOr {
+            expr: Box::new(get_call),
+            fallback: Box::new(IrExpr { kind: IrExprKind::LitStr { value: String::new() }, ty: Ty::String, span: None, def_id: None }),
+        },
+        ty: Ty::String, span: None, def_id: None,
+    };
+    let bind_tag = IrStmt {
+        kind: IrStmtKind::Bind { var: var_tag, mutability: Mutability::Let, ty: Ty::String, value: tag_call },
+        span: None,
+    };
     let body = IrExpr {
-        kind: IrExprKind::Block { stmts: vec![extract], expr: Some(Box::new(else_expr)) },
+        kind: IrExprKind::Block { stmts: vec![bind_tag], expr: Some(Box::new(inner_match)) },
         ty: result_ty.clone(), span: None, def_id: None,
     };
 

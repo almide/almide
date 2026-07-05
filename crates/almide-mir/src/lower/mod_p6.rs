@@ -1672,6 +1672,13 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             cur = Some(r);
             continue;
         }
+        // Collapse the scopeless `Block { stmts: [], expr: e }` wrappers `desugar_let_unwrap` leaves
+        // behind (one per `?`-bind field of the derived variant decode), so the nested monadic matches
+        // lower like the hand-written form instead of walling on the `Block`-wrapped arm.
+        if let Some(r) = desugar_flatten_empty_block(src) {
+            cur = Some(r);
+            continue;
+        }
         // effect-`!` inside a `for` loop body → loop-carried error-flag + post-loop dispatch (the
         // effect-monad-in-loop frontier; a PURE IR→IR desugar over the proven loop-slot + heap-if).
         if let Some(r) = desugar_loop_unwrap(src, next_var) {
@@ -2727,6 +2734,41 @@ pub fn desugar_flatten_let_block(body: &IrExpr) -> Option<IrExpr> {
         span: body.span.clone(),
         def_id: body.def_id,
     })
+}
+
+/// Flatten a scopeless `Block { stmts: [], expr: e }` to `e`, EVERYWHERE it appears (a match-arm body,
+/// an `if` branch, a nested block tail). An empty-statement block binds nothing, so it opens no drop
+/// scope — it is observationally `e`, but the trust-spine's arm/branch lowering keys on the concrete
+/// tail kind (a bare `Match`/`Ok` lowers; a `Block` wrapping it takes a different path that can wall).
+/// The desugared derived variant decode (`let _e0 = as_int(..)?; …; ok(Ctor(..))`) leaves one such
+/// wrapper per field-bind after `desugar_let_unwrap` rewrites each `?` bind to a match — this collapses
+/// them so the nested monadic matches lower like the hand-written form. Run in BOTH the lowering and the
+/// `count_ir_calls` gate; an empty block has no calls, so `mir == ir` is unaffected.
+pub fn desugar_flatten_empty_block(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    struct V {
+        changed: bool,
+    }
+    impl IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            if let IrExprKind::Block { stmts, expr: Some(inner) } = &e.kind {
+                if stmts.is_empty() {
+                    let inner = (**inner).clone();
+                    *e = inner;
+                    self.changed = true;
+                }
+            }
+        }
+    }
+    let mut v = V { changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    if v.changed {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 /// Count the occurrences of `var` (as an `IrExprKind::Var`) inside `e` — a local use-count for the

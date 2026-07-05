@@ -1434,6 +1434,24 @@ fn derived_codec_list_and_default_fields_decode() {
 }
 
 #[test]
+fn derived_variant_codec_decode_tuple_and_unit() {
+    // Derived-Codec DECODE of tagged variants (tuple cases with scalar/String fields + unit cases).
+    // The decode reads the tag as a plain String (value.keys |> list.get ?? "") and the payload via
+    // value.field — NOT a (String, Value) tuple the trust-spine walls — then `ok(Ctor(..))`
+    // materializes the variant. Encode → decode roundtrip, byte-identical to v0.
+    let src = "type Shape: Codec = | Pair(Int, String) | Solo(Int) | Plain\n\
+        effect fn main() -> Unit = {\n\
+        match Shape.decode(Shape.encode(Pair(7, \"x\"))) { ok(s) => match s { Pair(n, t) => println(int.to_string(n) + t), Solo(n) => println(\"solo\"), Plain => println(\"plain\") }, err(e) => println(e) }\n\
+        match Shape.decode(Shape.encode(Solo(42))) { ok(s) => match s { Pair(n, t) => println(\"p\"), Solo(n) => println(\"solo \" + int.to_string(n)), Plain => println(\"plain\") }, err(e) => println(e) }\n\
+        match Shape.decode(Shape.encode(Plain)) { ok(s) => match s { Pair(n, t) => println(\"p\"), Solo(n) => println(\"solo\"), Plain => println(\"plain\") }, err(e) => println(e) } }\n";
+    let prog = lower_source(&format!("import json\n{src}"));
+    assert!(prog.functions.iter().any(|f| f.name == "Shape.decode"), "Shape.decode must link");
+    if let Some(out) = build_and_run("variant_codec_decode", &render_wasm_program(&prog)) {
+        assert_eq!(out, "7x\nsolo 42\nplain");
+    }
+}
+
+#[test]
 fn variant_ctor_in_result_ok_materializes() {
     // `ok(<user-variant ctor>)` in Result-Ok position (the derived variant-decode `ok(Pair(..))`
     // shape) MATERIALIZES the tagged variant block (the SAME block `let p = Pair(..)` builds, with its
