@@ -1532,6 +1532,22 @@ fn set_interp_self_hosts_via_to_list() {
 }
 
 #[test]
+fn result_ok_err_concat_payload_materializes() {
+    // `ok("n" + int.to_string(x))` / `err("bad " + …)` — a computed (ConcatStr) String payload the
+    // trust-spine used to wall (only literal/Var/call payloads were handled). It now materializes the
+    // concat and moves it into the Result, dropping the borrowed operand temps.
+    let src = "fn classify(x: Int) -> Result[String, String] =\n\
+        if x > 0 then ok(\"pos \" + int.to_string(x)) else err(\"neg \" + int.to_string(x))\n\
+        fn show(r: Result[String, String]) -> String = match r { ok(s) => \"OK:\" + s, err(e) => \"ERR:\" + e }\n\
+        effect fn main() -> Unit = { println(show(classify(7))) println(show(classify(-3))) }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "classify"), "classify must lower");
+    if let Some(out) = build_and_run("result_concat", &render_wasm_program(&prog)) {
+        assert_eq!(out, "OK:pos 7\nERR:neg -3");
+    }
+}
+
+#[test]
 fn result_interp_self_hosts_per_element_pair() {
     // `${Result[Int, String]}` / `${Result[String, String]}` render v0's `ok(<T>)` / `err(<E>)` via a
     // per-(T,E) self-host (`result.to_string` / `result.to_string_ss`); a String payload is quoted +

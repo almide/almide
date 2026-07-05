@@ -1,0 +1,25 @@
+// wasm:enabled
+// Locks in a heap-result `ok(<computed String>)` / `err(<computed String>)` — a `ConcatStr` payload
+// (`ok("n" + int.to_string(x))`), the shape an effect fn / a `fan.map` callback returns. The
+// trust-spine used to handle only a String LITERAL / Var / call payload and wall a computed one; it
+// now materializes the concat (a fresh `__str_concat` result) and moves it into the Result, dropping
+// the borrowed operand temps. Byte-identical to v0 --target wasm.
+
+fn classify(x: Int) -> Result[String, String] =
+  if x > 0 then ok("pos " + int.to_string(x))
+  else if x == 0 then ok("zero")
+  else err("neg " + int.to_string(x))
+
+effect fn label(x: Int) -> Result[String, String] = ok("n" + int.to_string(x))
+
+fn show(r: Result[String, String]) -> String = match r {
+  ok(s) => "OK:" + s,
+  err(e) => "ERR:" + e,
+}
+
+effect fn main() -> Unit = {
+  println(show(classify(7)))
+  println(show(classify(0)))
+  println(show(classify(-3)))
+  match label(42) { ok(s) => println(s), err(e) => println(e) }
+}

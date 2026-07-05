@@ -12,6 +12,7 @@ spec/lang/map_literal_wasm.almd
 spec/lang/map_interp_wasm.almd
 spec/lang/option_interp_wasm.almd
 spec/lang/result_interp_wasm.almd
+spec/lang/result_concat_payload_wasm.almd
 spec/lang/set_interp_wasm.almd
 spec/lang/top_let_test.almd
 spec/lang/tuple_and_multifield_match_wasm.almd

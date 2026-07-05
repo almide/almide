@@ -775,6 +775,17 @@ impl LowerCtx {
                         let e = (**expr).clone();
                         self.try_lower_str_list_literal(&e)?
                     }
+                    // `ok("n" + int.to_string(x))` — a COMPUTED String Ok payload (a `ConcatStr`
+                    // chain, the `fan.map`/effect-fn `ok(label)` shape). `try_lower_concat_str` yields a
+                    // fresh owned `__str_concat` result (movable into the Result exactly like a call
+                    // piece); its borrowed operand temps drop here so only the concat result survives to
+                    // be consumed by `materialize_result_str`.
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_concat_str(expr)?;
+                        self.drop_arm_locals(mark);
+                        obj
+                    }
                     _ => return None,
                 };
                 let dst = self.materialize_result_str(piece, repr, false, false);
@@ -828,6 +839,14 @@ impl LowerCtx {
                         });
                         p
                     }
+                    // `err("bad " + reason)` — a COMPUTED String Err payload (`ConcatStr`). Same
+                    // fresh-owned `__str_concat` piece as an `ok(concat)`; operand temps drop here.
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_concat_str(expr)?;
+                        self.drop_arm_locals(mark);
+                        obj
+                    }
                     _ => return None,
                 };
                 Some(self.materialize_result_str(piece, repr, true, false))
@@ -865,6 +884,13 @@ impl LowerCtx {
                             result: Some(pr),
                         });
                         p
+                    }
+                    // A COMPUTED String Err payload (`ConcatStr`) — fresh-owned concat piece.
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_concat_str(expr)?;
+                        self.drop_arm_locals(mark);
+                        obj
                     }
                     _ => return None,
                 };
