@@ -1643,6 +1643,12 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             cur = Some(r);
             continue;
         }
+        // Lower a match over a TUPLE subject into element index-tests + an if-chain (also handles the
+        // tuple sub-match a multi-field variant regroup produces).
+        if let Some(r) = desugar_tuple_match(src) {
+            cur = Some(r);
+            continue;
+        }
         if let Some(r) = desugar_if_arm_unwrap(src) {
             cur = Some(r);
             continue;
@@ -2842,53 +2848,45 @@ fn group_option_result_arms(
         Err_,
         User(String),
     }
-    let scalar_inner =
+    let scalar_col =
         |p: &IrPattern| matches!(p, IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::Wildcard);
-    // `(key, payload_pattern_or_none)` for one arm — `None` (bail) for a top-level catch-all/binder,
-    // a multi-field / record ctor, or a nested payload.
-    let parse = |p: &IrPattern| -> Option<(CKey, Option<IrPattern>)> {
+    // `(key, field_patterns)` for one arm — `None` (bail) for a top-level catch-all/binder, a
+    // record-variant, or a nested column. Field arity: 0 (nullary), 1 (Some/Ok/Err/single-field), or
+    // N (a multi-field user ctor `KV(String, Int)` → grouped via a TUPLE payload sub-match).
+    let parse = |p: &IrPattern| -> Option<(CKey, Vec<IrPattern>)> {
         match p {
-            IrPattern::Some { inner } if scalar_inner(inner) => {
-                Some((CKey::Some_, Some((**inner).clone())))
-            }
-            IrPattern::None => Some((CKey::None_, Option::None)),
-            IrPattern::Ok { inner } if scalar_inner(inner) => {
-                Some((CKey::Ok_, Some((**inner).clone())))
-            }
-            IrPattern::Err { inner } if scalar_inner(inner) => {
-                Some((CKey::Err_, Some((**inner).clone())))
-            }
-            IrPattern::Constructor { name, args } if args.is_empty() => {
-                Some((CKey::User(name.clone()), Option::None))
-            }
-            IrPattern::Constructor { name, args } if args.len() == 1 && scalar_inner(&args[0]) => {
-                Some((CKey::User(name.clone()), Some(args[0].clone())))
+            IrPattern::Some { inner } if scalar_col(inner) => Some((CKey::Some_, vec![(**inner).clone()])),
+            IrPattern::None => Some((CKey::None_, vec![])),
+            IrPattern::Ok { inner } if scalar_col(inner) => Some((CKey::Ok_, vec![(**inner).clone()])),
+            IrPattern::Err { inner } if scalar_col(inner) => Some((CKey::Err_, vec![(**inner).clone()])),
+            IrPattern::Constructor { name, args } if args.iter().all(scalar_col) => {
+                Some((CKey::User(name.clone()), args.clone()))
             }
             _ => Option::None,
         }
     };
     // Ordered per-ctor buckets (first-occurrence order — the constructors are DISJOINT so outer arm
-    // order is immaterial). Each entry: (key, Vec<(payload_pattern_or_none, guard, body)>).
-    let mut groups: Vec<(CKey, Vec<(Option<IrPattern>, Option<IrExpr>, IrExpr)>)> = Vec::new();
+    // order is immaterial). Each entry: (key, Vec<(field_patterns, guard, body)>).
+    let mut groups: Vec<(CKey, Vec<(Vec<IrPattern>, Option<IrExpr>, IrExpr)>)> = Vec::new();
     let mut any_guard_or_lit = false;
     for arm in arms {
-        let (key, payload) = parse(&arm.pattern)?;
-        if arm.guard.is_some() || matches!(&payload, Some(IrPattern::Literal { .. })) {
+        let (key, fields) = parse(&arm.pattern)?;
+        if arm.guard.is_some() || fields.iter().any(|p| matches!(p, IrPattern::Literal { .. })) {
             any_guard_or_lit = true;
         }
         match groups.iter_mut().find(|(k, _)| *k == key) {
-            Some((_, v)) => v.push((payload, arm.guard.clone(), arm.body.clone())),
-            Option::None => groups.push((key, vec![(payload, arm.guard.clone(), arm.body.clone())])),
+            Some((_, v)) => v.push((fields, arm.guard.clone(), arm.body.clone())),
+            Option::None => groups.push((key, vec![(fields, arm.guard.clone(), arm.body.clone())])),
         }
     }
     // Nothing to gain (a plain `some(x)/none` / `Ctor(x)` shape already lowers) — leave untouched.
     if !any_guard_or_lit {
         return Option::None;
     }
-    // The payload type for a ctor's sub-match var: Option/Result from the subject; a user ctor from a
-    // Literal (its `expr.ty`) / Bind (its `ty`) among the group's arms. `None` when undeterminable.
     let subject_ty = subject.ty.clone();
-    let payload_ty_for = |key: &CKey, bucket: &[(Option<IrPattern>, Option<IrExpr>, IrExpr)]| -> Option<Ty> {
+    // The type of field `c` of a ctor group: Option/Result from the subject; a user ctor from a
+    // Literal (its `expr.ty`) / Bind (its `ty`) in that column across the group's arms.
+    let field_ty = |key: &CKey, c: usize, bucket: &[(Vec<IrPattern>, Option<IrExpr>, IrExpr)]| -> Option<Ty> {
         match key {
             CKey::Some_ => match &subject_ty {
                 Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => Some(a[0].clone()),
@@ -2902,58 +2900,85 @@ fn group_option_result_arms(
                 Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => Some(a[1].clone()),
                 _ => Option::None,
             },
-            CKey::None_ => Some(Ty::Unit),
-            CKey::User(_) => bucket.iter().find_map(|(p, _, _)| match p {
+            CKey::None_ => Option::None,
+            CKey::User(_) => bucket.iter().find_map(|(pats, _, _)| match pats.get(c) {
                 Some(IrPattern::Bind { ty, .. }) => Some(ty.clone()),
                 Some(IrPattern::Literal { expr }) => Some(expr.ty.clone()),
                 _ => Option::None,
             }),
         }
     };
-    let rebuild = |key: &CKey, payload: IrPattern| -> IrPattern {
+    let rebuild = |key: &CKey, args: Vec<IrPattern>| -> IrPattern {
         match key {
-            CKey::Some_ => IrPattern::Some { inner: Box::new(payload) },
+            CKey::Some_ => IrPattern::Some { inner: Box::new(args.into_iter().next().unwrap()) },
             CKey::None_ => IrPattern::None,
-            CKey::Ok_ => IrPattern::Ok { inner: Box::new(payload) },
-            CKey::Err_ => IrPattern::Err { inner: Box::new(payload) },
-            CKey::User(name) => IrPattern::Constructor { name: name.clone(), args: vec![payload] },
+            CKey::Ok_ => IrPattern::Ok { inner: Box::new(args.into_iter().next().unwrap()) },
+            CKey::Err_ => IrPattern::Err { inner: Box::new(args.into_iter().next().unwrap()) },
+            CKey::User(name) => IrPattern::Constructor { name: name.clone(), args },
         }
     };
     let mut new_arms = Vec::with_capacity(groups.len());
     for (key, bucket) in groups {
-        let has_payload = !matches!(key, CKey::None_);
-        let needs_inner = has_payload
+        let arity = bucket[0].0.len();
+        let needs_inner = arity >= 1
             && (bucket.len() > 1
-                || bucket
-                    .iter()
-                    .any(|(p, g, _)| g.is_some() || matches!(p, Some(IrPattern::Literal { .. }))));
+                || bucket.iter().any(|(pats, g, _)| {
+                    g.is_some() || pats.iter().any(|p| matches!(p, IrPattern::Literal { .. }))
+                }));
         if !needs_inner {
-            // A single arm for this ctor (a lone `some(x) => body` / a nullary `none => body`) — keep
-            // it verbatim. A nullary ctor with a guard/duplicate cannot sub-match (no payload) → bail.
+            // A single arm for this ctor (a lone `some(x)`/`none`/`Ctor(a, b)` with no guard/literal)
+            // — keep verbatim. A nullary ctor with a guard/duplicate cannot sub-match → bail.
             if bucket.len() != 1 {
                 return Option::None;
             }
-            let (payload, guard, body) = bucket.into_iter().next().unwrap();
-            let pat = match payload {
-                Some(p) => rebuild(&key, p),
-                Option::None => rebuild(&key, IrPattern::Wildcard),
-            };
-            // `rebuild` for a nullary key ignores the payload arg, so the Wildcard above is inert.
-            let pat = if matches!(key, CKey::None_) {
-                IrPattern::None
-            } else {
-                pat
-            };
-            new_arms.push(IrMatchArm { pattern: pat, guard, body });
+            let (fields, guard, body) = bucket.into_iter().next().unwrap();
+            new_arms.push(IrMatchArm { pattern: rebuild(&key, fields), guard, body });
             continue;
         }
-        let payload_ty = payload_ty_for(&key, &bucket)?;
-        let pv = VarId(*next_var);
-        *next_var += 1;
+        // Bind each field to a fresh var; the sub-match subject is that var (1 field) or a TUPLE of
+        // them (N fields — lowered by `desugar_tuple_match`), and each arm re-matches the fields.
+        let mut field_tys = Vec::with_capacity(arity);
+        let mut binds = Vec::with_capacity(arity);
+        for c in 0..arity {
+            let ty = field_ty(&key, c, &bucket)?;
+            let v = VarId(*next_var);
+            *next_var += 1;
+            field_tys.push(ty.clone());
+            binds.push((v, ty));
+        }
+        let sub_subject = if arity == 1 {
+            IrExpr {
+                kind: IrExprKind::Var { id: binds[0].0 },
+                ty: field_tys[0].clone(),
+                span: subject.span.clone(),
+                def_id: None,
+            }
+        } else {
+            IrExpr {
+                kind: IrExprKind::Tuple {
+                    elements: binds
+                        .iter()
+                        .map(|(v, ty)| IrExpr {
+                            kind: IrExprKind::Var { id: *v },
+                            ty: ty.clone(),
+                            span: subject.span.clone(),
+                            def_id: None,
+                        })
+                        .collect(),
+                },
+                ty: Ty::Tuple(field_tys.clone()),
+                span: subject.span.clone(),
+                def_id: None,
+            }
+        };
         let inner_arms: Vec<IrMatchArm> = bucket
             .into_iter()
-            .map(|(payload, guard, body)| IrMatchArm {
-                pattern: payload.unwrap_or(IrPattern::Wildcard),
+            .map(|(fields, guard, body)| IrMatchArm {
+                pattern: if arity == 1 {
+                    fields.into_iter().next().unwrap()
+                } else {
+                    IrPattern::Tuple { elements: fields }
+                },
                 guard,
                 body,
             })
@@ -2961,20 +2986,19 @@ fn group_option_result_arms(
         let body_ty = inner_arms[0].body.ty.clone();
         let sub = IrExpr {
             kind: IrExprKind::Match {
-                subject: Box::new(IrExpr {
-                    kind: IrExprKind::Var { id: pv },
-                    ty: payload_ty.clone(),
-                    span: subject.span.clone(),
-                    def_id: None,
-                }),
+                subject: Box::new(sub_subject),
                 arms: inner_arms,
             },
             ty: body_ty,
             span: subject.span.clone(),
             def_id: None,
         };
+        let ctor_args = binds
+            .into_iter()
+            .map(|(v, ty)| IrPattern::Bind { var: v, ty })
+            .collect();
         new_arms.push(IrMatchArm {
-            pattern: rebuild(&key, IrPattern::Bind { var: pv, ty: payload_ty }),
+            pattern: rebuild(&key, ctor_args),
             guard: Option::None,
             body: sub,
         });
@@ -2983,6 +3007,170 @@ fn group_option_result_arms(
         return Option::None;
     }
     Some(new_arms)
+}
+
+/// Desugar a `match` over a TUPLE subject into element accesses + a linear guard/`if` chain — `match t
+/// { ("a", 1) => A, ("a", _) => B, (_, _) => C }` becomes `if t.0 == "a" && t.1 == 1 then A else if
+/// t.0 == "a" then B else C`. Each column's LITERAL becomes an `== `-test on `t.<c>`, each BIND is
+/// substituted by `t.<c>` in the guard + body, and a trailing all-wildcard/binder arm is the `else`.
+/// The trust-spine already lowers tuple index (`t.0`) + the heap-result `if` chain; the TUPLE-pattern
+/// match itself was the gap. Requires a pure (`Var`) subject (element re-reads are effect-free) + a
+/// trailing catch-all (exhaustiveness); a nested column pattern bails (a later brick).
+pub fn desugar_tuple_match(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    struct V {
+        changed: bool,
+    }
+    impl IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            if let IrExprKind::Match { subject, arms } = &e.kind {
+                if let Some(chain) = rewrite_tuple_match(subject, arms) {
+                    *e = chain;
+                    self.changed = true;
+                }
+            }
+        }
+    }
+    let mut v = V { changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    if v.changed {
+        Some(out)
+    } else {
+        None
+    }
+}
+
+fn rewrite_tuple_match(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option<IrExpr> {
+    use almide_ir::{substitute_var_in_expr, BinOp, IrPattern};
+    use almide_lang::types::Ty;
+    let Ty::Tuple(elem_tys) = &subject.ty else {
+        return None;
+    };
+    let n = elem_tys.len();
+    if n == 0 || arms.is_empty() {
+        return None;
+    }
+    // The column source. A `Var` subject is re-read per column via a side-effect-free `t.<c>` index; a
+    // TUPLE LITERAL of pure elements (`match ($a, $b) { .. }` — what a multi-field variant regroup
+    // produces) uses each element directly. Any other subject (a call) is left to
+    // `desugar_match_subject_hoist` to bind first.
+    let pure_elems: Option<Vec<IrExpr>> = match &subject.kind {
+        IrExprKind::Tuple { elements }
+            if elements.len() == n
+                && elements.iter().all(|e| {
+                    matches!(
+                        &e.kind,
+                        IrExprKind::Var { .. }
+                            | IrExprKind::LitInt { .. }
+                            | IrExprKind::LitBool { .. }
+                            | IrExprKind::LitFloat { .. }
+                    )
+                }) =>
+        {
+            Some(elements.clone())
+        }
+        _ => None,
+    };
+    if pure_elems.is_none() && !matches!(&subject.kind, IrExprKind::Var { .. }) {
+        return None;
+    }
+    let result_ty = arms[0].body.ty.clone();
+    // `t.<c>` (Var subject) or the c-th tuple-literal element.
+    let elem = |c: usize| match &pure_elems {
+        Some(elems) => elems[c].clone(),
+        None => IrExpr {
+            kind: IrExprKind::TupleIndex {
+                object: Box::new(subject.clone()),
+                index: c,
+            },
+            ty: elem_tys[c].clone(),
+            span: subject.span.clone(),
+            def_id: None,
+        },
+    };
+    // Recursively fold the arms into a right-nested `if`/`else` chain.
+    fn build(
+        arms: &[almide_ir::IrMatchArm],
+        n: usize,
+        subject: &IrExpr,
+        elem: &dyn Fn(usize) -> IrExpr,
+        result_ty: &Ty,
+    ) -> Option<IrExpr> {
+        let (first, rest) = arms.split_first()?;
+        // Build the literal `==` tests and the bind substitution for this arm.
+        let mut conds: Vec<IrExpr> = Vec::new();
+        let mut subst: Vec<(VarId, IrExpr)> = Vec::new();
+        match &first.pattern {
+            // A whole-tuple catch-all: `_` binds nothing, a binder maps to the whole subject.
+            IrPattern::Wildcard => {}
+            IrPattern::Bind { var, .. } => subst.push((*var, subject.clone())),
+            // A `(c0, c1, ..)` tuple pattern: each scalar column contributes a test or a bind.
+            IrPattern::Tuple { elements } if elements.len() == n => {
+                for (c, col) in elements.iter().enumerate() {
+                    match col {
+                        IrPattern::Literal { expr } => conds.push(IrExpr {
+                            kind: IrExprKind::BinOp {
+                                op: BinOp::Eq,
+                                left: Box::new(elem(c)),
+                                right: Box::new(expr.clone()),
+                            },
+                            ty: Ty::Bool,
+                            span: None,
+                            def_id: None,
+                        }),
+                        IrPattern::Bind { var, .. } => subst.push((*var, elem(c))),
+                        IrPattern::Wildcard => {}
+                        _ => return None, // a nested column — a later brick
+                    }
+                }
+            }
+            _ => return None,
+        }
+        // Apply the bind substitution to the guard + body.
+        let apply = |e: &IrExpr| -> IrExpr {
+            let mut out = e.clone();
+            for (v, rep) in &subst {
+                out = substitute_var_in_expr(&out, *v, rep);
+            }
+            out
+        };
+        let body = apply(&first.body);
+        if let Some(g) = &first.guard {
+            conds.push(apply(g));
+        }
+        if conds.is_empty() {
+            // A trivially-true arm (all binds/wildcards, no guard) — the catch-all terminator.
+            return Some(body);
+        }
+        // cond = conds[0] && conds[1] && ...
+        let cond = conds
+            .into_iter()
+            .reduce(|a, b| IrExpr {
+                kind: IrExprKind::BinOp {
+                    op: BinOp::And,
+                    left: Box::new(a),
+                    right: Box::new(b),
+                },
+                ty: Ty::Bool,
+                span: None,
+                def_id: None,
+            })
+            .unwrap();
+        let else_ = build(rest, n, subject, elem, result_ty)?;
+        Some(IrExpr {
+            kind: IrExprKind::If {
+                cond: Box::new(cond),
+                then: Box::new(body),
+                else_: Box::new(else_),
+            },
+            ty: result_ty.clone(),
+            span: None,
+            def_id: None,
+        })
+    }
+    build(arms, n, subject, &elem, &result_ty)
 }
 
 /// Count the occurrences of `var` (as an `IrExprKind::Var`) inside `e` — a local use-count for the

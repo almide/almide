@@ -1459,6 +1459,31 @@ fn derived_variant_codec_decode_all_payload_shapes() {
 }
 
 #[test]
+fn tuple_multifield_and_single_ctor_matches_lower() {
+    // A TUPLE-subject match (`desugar_tuple_match`), a MULTI-FIELD variant match (regrouped into a
+    // tuple payload sub-match), and a SINGLE-CTOR newtype match (routed through an IfThen merge with
+    // an unreachable empty-heap else — no double-move). Every arm's literal/column must select the
+    // exact result, byte-identical to v0.
+    let src = "type Ev = KV(String, Int) | Tag(String)\n\
+        type Rec = Pair(Int, String)\n\
+        type Boxed = B(Int)\n\
+        fn tup(t: (String, Int)) -> String = match t { (\"a\", 1) => \"A1\", (\"a\", _) => \"AX\", (_, 0) => \"X0\", (_, _) => \"XX\" }\n\
+        fn ev(e: Ev) -> String = match e { KV(\"count\", n) => \"C\" + int.to_string(n), KV(_, n) => \"K\" + int.to_string(n), Tag(_) => \"T\" }\n\
+        fn rec(r: Rec) -> String = match r { Pair(1, \"one\") => \"1ONE\", Pair(1, _) => \"1X\", Pair(_, _) => \"XX\" }\n\
+        fn unbox(b: Boxed) -> String = match b { B(n) => \"b\" + int.to_string(n) }\n\
+        effect fn main() -> Unit = {\n\
+        println(tup((\"a\", 1))) println(tup((\"z\", 0))) println(tup((\"z\", 5)))\n\
+        println(ev(KV(\"count\", 3))) println(ev(KV(\"x\", 7))) println(ev(Tag(\"t\")))\n\
+        println(rec(Pair(1, \"one\"))) println(rec(Pair(1, \"z\"))) println(rec(Pair(2, \"z\")))\n\
+        println(unbox(B(42))) }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "unbox"), "single-ctor unbox must lower");
+    if let Some(out) = build_and_run("tuple_multifield_match", &render_wasm_program(&prog)) {
+        assert_eq!(out, "A1\nX0\nXX\nC3\nK7\nT\n1ONE\n1X\nXX\nb42");
+    }
+}
+
+#[test]
 fn guarded_option_result_match_regroups_and_lowers() {
     // A heap-result `match` over an Option / Result subject whose arms carry GUARDS + LITERAL
     // payloads regroups into constructor dispatch + a scalar payload sub-match (`some(n) if g` →

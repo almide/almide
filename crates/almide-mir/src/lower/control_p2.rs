@@ -782,13 +782,18 @@ impl LowerCtx {
         let type_name = self.custom_variant_type_name(&subject.ty)?;
         let layout = self.variant_layouts.by_type.get(&type_name)?.clone();
         let plans = self.parse_variant_arms(&layout, arms)?;
-        // A SINGLE-arm HEAP-result match (a 1-ctor newtype `unbox`, `match b { B(x) => x }`)
-        // returns the arm value DIRECTLY to `func.ret` — with no IfThen branch-merge `dst` to
-        // route through, the arm's move-out `Consume` (`m`) double-moves with the ret's move
-        // (`m`), the `amm`/`aamdm` net-−1 the proven checker REJECTS. A multi-arm match routes
-        // through the IfThen `dst` (one ret move). Wall the degenerate single-arm heap case
-        // (ADT brick 5c-newtype) rather than emit a checker-rejected double-move.
-        if is_heap_ty(result_ty) && plans.len() == 1 {
+        // A SINGLE-arm HEAP-result match (a 1-ctor newtype `unbox`, `match b { B(x) => x }`) that
+        // returned the arm value DIRECTLY to `func.ret` would double-move (the arm's move-out
+        // `Consume` + the ret's move — the `amm`/`aamdm` net-−1 the proven checker REJECTS). A
+        // 1-CTOR variant's tag ALWAYS matches (there is no other constructor), so route the arm
+        // through an IfThen `dst` (one ret move, exactly like a multi-arm match) whose ELSE is an
+        // unreachable empty-heap block — never executed, so no leak. A single-arm WILDCARD (`_ =>
+        // body`) has no ctor tag to test → stays declined (a later brick). See
+        // [`Self::emit_single_ctor_heap_arm`].
+        let sole_ctor_heap = is_heap_ty(result_ty)
+            && plans.len() == 1
+            && matches!(plans[0].0, VariantArmKind::Ctor { .. });
+        if is_heap_ty(result_ty) && plans.len() == 1 && !sole_ctor_heap {
             return None;
         }
         let ops_mark = self.ops.len();
@@ -825,7 +830,13 @@ impl LowerCtx {
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
         let tag = self.load_at_offset(h, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 });
-        match self.emit_variant_arm_chain(h, tag, &plans, result_ty) {
+        let emitted = if sole_ctor_heap {
+            let (kind, body) = &plans[0];
+            self.emit_single_ctor_heap_arm(h, tag, kind, body, result_ty)
+        } else {
+            self.emit_variant_arm_chain(h, tag, &plans, result_ty)
+        };
+        match emitted {
             Some(dst) => Some(dst),
             None => {
                 self.ops.truncate(ops_mark);
@@ -833,6 +844,41 @@ impl LowerCtx {
                 None
             }
         }
+    }
+
+    /// Route a SOLE-constructor HEAP-result arm through an IfThen `dst` (one ret move) with an
+    /// unreachable empty-heap ELSE. A 1-ctor variant's tag always equals `arm_tag`, so the `else` is
+    /// dead — it exists only so the arm value flows through the branch-merge `dst` the ownership
+    /// certificate needs (a direct return would double-move — see the caller). The empty-heap block is
+    /// never allocated at runtime, so it cannot leak.
+    fn emit_single_ctor_heap_arm(
+        &mut self,
+        h: ValueId,
+        tag: ValueId,
+        kind: &VariantArmKind,
+        body: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let arm_tag = match kind {
+            VariantArmKind::Ctor { tag, .. } => *tag,
+            VariantArmKind::Wildcard => return None,
+        };
+        let dst = self.fresh_value();
+        let tc = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: tc, value: arm_tag });
+        let cond = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
+        self.ops.push(Op::IfThen { cond, dst: Some(dst) });
+        let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, true)?;
+        self.ops.push(Op::Else { val: Some(then_v) });
+        // The dead `else`: a fresh owned empty-string block (a heap i32 handle, repr-compatible with
+        // any heap result). `Consume` moves it into `dst` exactly as a real arm value would.
+        let repr = repr_of(result_ty).ok()?;
+        let else_v = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: else_v, repr, init: crate::Init::Str(String::new()) });
+        self.ops.push(Op::Consume { v: else_v });
+        self.ops.push(Op::EndIf { val: Some(else_v) });
+        Some(dst)
     }
 
     /// Parse a custom-variant `match`'s arms into per-arm plans — shared by the value-result
