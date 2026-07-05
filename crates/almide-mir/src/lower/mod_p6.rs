@@ -787,9 +787,79 @@ pub fn dump_desugared_ir(fn_name: &str, body: &IrExpr) {
     }
 }
 
+/// Resolve a UFCS / derived-method `Call`/`TailCall` whose target is `CallTarget::Method
+/// { object, method }` to the concrete free function it names — the SAME resolution the v0
+/// emitter does at emit time (`emit_wasm/calls_p2.rs`'s `Method` catch-all): a `Ty::Named(T)`
+/// receiver → the derived/user fn `T.method` (`p.encode()` → `Person.encode(p)`), an
+/// already-qualified `method` (contains '.') → that name verbatim. The receiver becomes the
+/// FIRST argument, matching v0 (`emit_expr(object)` then the args). An unresolvable Method
+/// (a non-`Named` receiver with a bare method — e.g. a stdlib UFCS the frontend left as Method)
+/// is LEFT in place, so it still walls honestly rather than resolving to a bogus name. Run in
+/// BOTH the real lowering (`lower_body_into`) and the `count_ir_calls` gate (`desugar_all`) so
+/// `mir == ir` holds by construction. Returns `None` when no Method was rewritten.
+pub fn desugar_method_calls(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use almide_ir::{CallTarget, IrExpr, IrExprKind};
+    use almide_lang::types::Ty;
+
+    struct V {
+        changed: bool,
+    }
+    impl IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            // Post-order: resolve the receiver / args (which may themselves be method calls)
+            // BEFORE rewriting this node, so a chained `a.f().g()` resolves inside-out.
+            walk_expr_mut(self, e);
+            let (target, args) = match &mut e.kind {
+                IrExprKind::Call { target, args, .. } => (target, args),
+                IrExprKind::TailCall { target, args } => (target, args),
+                _ => return,
+            };
+            let name = match &*target {
+                CallTarget::Method { object, method } => {
+                    if method.as_str().contains('.') {
+                        Some(method.as_str().to_string())
+                    } else if let Ty::Named(n, _) = &object.ty {
+                        Some(format!("{}.{}", n.as_str(), method.as_str()))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            if let Some(name) = name {
+                if let CallTarget::Method { object, .. } = target {
+                    let obj = (**object).clone();
+                    let mut new_args = Vec::with_capacity(args.len() + 1);
+                    new_args.push(obj);
+                    new_args.append(args);
+                    *args = new_args;
+                }
+                *target = CallTarget::Named {
+                    name: almide_lang::intern::sym(&name),
+                };
+                self.changed = true;
+            }
+        }
+    }
+
+    let mut v = V { changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    if v.changed {
+        Some(out)
+    } else {
+        None
+    }
+}
+
 pub fn desugar_all(body: &IrExpr) -> IrExpr {
     let mut cur = body.clone();
     loop {
+        if let Some(r) = desugar_method_calls(&cur) {
+            cur = r;
+            continue;
+        }
         if let Some(r) = desugar_guard(&cur) {
             cur = r;
             continue;

@@ -1,0 +1,19 @@
+// wasm:enabled
+// A standalone (non-test) fixture locking in B-1 method-call resolution: instance-method
+// syntax `p.encode()` resolves to the derived free fn `Person.encode(p)`, byte-identical to
+// v0 `--target wasm`. Covers scalar, nested-record, and List fields through encode + decode.
+import json
+
+type Addr: Codec = { city: String, zip: Int }
+type Person: Codec = { name: String, age: Int, home: Addr, tags: List[String] }
+
+effect fn main() -> Unit = {
+  let a = Addr { city: "Tokyo", zip: 100 }
+  let p = Person { name: "Alice", age: 30, home: a, tags: ["x", "y", "z"] }
+  let v = p.encode()
+  println(json.stringify(v))
+  match Person.decode(v) {
+    ok(p2) => println(p2.name + "/" + int.to_string(p2.age) + "/" + p2.home.city + "/" + int.to_string(list.len(p2.tags)))
+    err(e) => println("err:" + e)
+  }
+}

@@ -714,6 +714,41 @@
     }
 
     #[test]
+    fn method_call_on_named_receiver_resolves_to_the_qualified_free_fn() {
+        use almide_lang::intern::sym;
+        use almide_lang::types::Ty;
+        // B-1: `p.encode()` with `p: Person` (a Ty::Named receiver) resolves to the derived
+        // free fn `Person.encode(p)` — the receiver becomes the first argument. Mirrors the v0
+        // emitter's Method catch-all (emit_wasm/calls_p2.rs). A NON-Named receiver (the test
+        // above) stays an unresolved Method and walls.
+        let person = Ty::Named(sym("Person"), vec![]);
+        let mcall = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Method {
+                    object: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, person.clone())),
+                    method: sym("encode"),
+                },
+                args: vec![],
+                type_args: vec![],
+            },
+            Ty::Named(sym("Value"), vec![]),
+        );
+        let rewritten =
+            crate::lower::desugar_method_calls(&mcall).expect("a Named-receiver method resolves");
+        match &rewritten.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                assert_eq!(name.as_str(), "Person.encode", "qualified as TypeName.method");
+                assert_eq!(args.len(), 1, "receiver prepended as the first argument");
+                assert!(
+                    matches!(&args[0].kind, IrExprKind::Var { id } if *id == VarId(0)),
+                    "the receiver is the first arg",
+                );
+            }
+            other => panic!("expected a resolved Named call, got: {other:?}"),
+        }
+    }
+
+    #[test]
     fn match_on_a_fresh_heap_subject_is_materialized_and_dropped() {
         use almide_lang::intern::sym;
         // match make() { _ => () }  — the fresh heap subject is MATERIALIZED into an

@@ -158,6 +158,15 @@ impl LowerCtx {
         // into `if cond then { rest } else E` so the proven `if`/tail machinery runs the
         // early-return / loop-continue. Re-enter so the other desugars then process the
         // resulting `if`. Call-count-invariant (no duplication), so the caps gate stays exact.
+        // METHOD/UFCS RESOLUTION FIRST (B-1): rewrite `obj.method(a)` (an unresolved
+        // `CallTarget::Method`) to the concrete free fn it names — `p.encode()` →
+        // `Person.encode(p)` — so the proven Named-call machinery lowers it. Must precede
+        // the other desugars, which operate on resolved call structure. Call-count-invariant
+        // (a Method Call and its resolved Named Call both count as one), so the caps gate stays
+        // exact; the SAME step runs in `desugar_all` for the `count_ir_calls` side.
+        if let Some(rewritten) = crate::lower::desugar_method_calls(body) {
+            return self.lower_body_into(&rewritten);
+        }
         if let Some(rewritten) = crate::lower::desugar_guard(body) {
             return self.lower_body_into(&rewritten);
         }
