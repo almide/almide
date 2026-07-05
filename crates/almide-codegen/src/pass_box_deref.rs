@@ -393,9 +393,8 @@ impl IrVisitor for DerefCollector<'_> {
             };
             if let Some(ref ename) = enum_name {
                 if self.recursive_enums.contains(ename.as_str()) {
-                    let td = self.type_decls.iter().find(|td| *ename == td.name);
                     for arm in arms {
-                        collect_deref_from_pattern(&arm.pattern, self.recursive_enums, td, self.name_to_var, self.deref_vars);
+                        collect_deref_from_pattern(&arm.pattern, self.recursive_enums, self.type_decls, self.name_to_var, self.deref_vars);
                     }
                 }
             }
@@ -415,17 +414,27 @@ fn find_variant_case<'a>(td: Option<&'a IrTypeDecl>, ctor_name: &str) -> Option<
     cases.iter().find(|c| c.name == ctor_name).map(|c| &c.kind)
 }
 
-fn collect_deref_from_pattern(pattern: &IrPattern, recursive: &HashSet<String>, td: Option<&IrTypeDecl>, name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
+/// Find the variant type-decl that DECLARES constructor `ctor` — lets a nested
+/// constructor resolve to its OWN enum (which may differ from the outer one under
+/// mutual recursion), so each field's box-ness is judged against the right decl.
+fn find_td_for_ctor<'a>(type_decls: &'a [IrTypeDecl], ctor: &str) -> Option<&'a IrTypeDecl> {
+    type_decls.iter().find(|td| matches!(&td.kind,
+        IrTypeDeclKind::Variant { cases, .. } if cases.iter().any(|c| c.name == ctor)))
+}
+
+fn collect_deref_from_pattern(pattern: &IrPattern, recursive: &HashSet<String>, type_decls: &[IrTypeDecl], name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
     match pattern {
         IrPattern::Constructor { name, args } => {
+            let td = find_td_for_ctor(type_decls, name.as_str());
             let Some(IrVariantKind::Tuple { fields }) = find_variant_case(td, name) else { return };
             // A field bound here is Box'd iff it references ANY cycle member, so
             // the deref must use the SAME predicate as the Box-rendering site (#656).
             args.iter().enumerate()
                 .filter(|(i, _)| fields.get(*i).map_or(false, |ft| walker::ty_contains_any_recursive(ft, recursive)))
-                .for_each(|(_, arg)| collect_bind_vars(arg, deref_vars));
+                .for_each(|(_, arg)| mark_boxed_field_pattern(arg, recursive, type_decls, name_to_var, deref_vars));
         }
         IrPattern::RecordPattern { name, fields, .. } => {
+            let td = find_td_for_ctor(type_decls, name.as_str());
             let Some(IrVariantKind::Record { fields: case_fields }) = find_variant_case(td, name) else { return };
             for field_pat in fields {
                 let is_recursive = case_fields.iter()
@@ -434,7 +443,7 @@ fn collect_deref_from_pattern(pattern: &IrPattern, recursive: &HashSet<String>, 
                 if !is_recursive { continue; }
 
                 if let Some(ref p) = field_pat.pattern {
-                    collect_bind_vars(p, deref_vars);
+                    mark_boxed_field_pattern(p, recursive, type_decls, name_to_var, deref_vars);
                 } else if let Some(var_ids) = name_to_var.get(&field_pat.name) {
                     // Shorthand: lookup VarId by name, only if unambiguous
                     if var_ids.len() == 1 {
@@ -447,12 +456,17 @@ fn collect_deref_from_pattern(pattern: &IrPattern, recursive: &HashSet<String>, 
     }
 }
 
-fn collect_bind_vars(pattern: &IrPattern, deref_vars: &mut HashSet<VarId>) {
-    match pattern {
+/// A pattern occupying a BOXED field position. A var bound here aliases the box
+/// itself, so it derefs on use. But a NESTED constructor/record matches THROUGH
+/// the box — its OWN inner fields must be re-gated by their declared types, never
+/// blanket-marked: `Node(Leaf(a), _)`'s `a: Int` is not boxed and must not get a
+/// spurious `*a` (the #610 E0614). Recursing via `collect_deref_from_pattern`
+/// re-applies the box predicate at each level (and re-resolves the enum decl).
+fn mark_boxed_field_pattern(pat: &IrPattern, recursive: &HashSet<String>, type_decls: &[IrTypeDecl], name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
+    match pat {
         IrPattern::Bind { var, .. } => { deref_vars.insert(*var); }
-        IrPattern::Constructor { args, .. } => {
-            for a in args { collect_bind_vars(a, deref_vars); }
-        }
+        IrPattern::Constructor { .. } | IrPattern::RecordPattern { .. } =>
+            collect_deref_from_pattern(pat, recursive, type_decls, name_to_var, deref_vars),
         _ => {}
     }
 }

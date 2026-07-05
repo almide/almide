@@ -545,6 +545,207 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
     }
 }
 
+// ── #610: nested constructor patterns through a `Box` ──
+//
+// Rust cannot pattern-match through a `Box` on stable (box-patterns are
+// unstable). A nested constructor on a BOXED recursive field —
+// `Node(Leaf(a), Leaf(b))` where `Node`'s fields are `Box<Tree>` — used to render
+// `Tree::Node(Tree::Leaf(a), ..)`, which rustc rejects: the field is `Box<Tree>`,
+// not `Tree` (E0308). We rewrite the arm instead:
+//   * each boxed-nested position becomes a fresh `Box` binding in a FLAT pattern,
+//   * a `matches!` shape-guard verifies the nested structure (a non-match falls
+//     through to a later arm — refinement, exactly like the wasm emitter),
+//   * a `let-else` moves the value out of the box in the body and binds the inner
+//     names by value (matching the by-value `*box` convention of simple arms).
+// All stable since 1.65, edition-agnostic, any nesting depth. With no boxed-nested
+// position `unbox_arm_pattern` returns None and the arm renders unchanged.
+
+fn pattern_is_complex(p: &IrPattern) -> bool {
+    matches!(p, IrPattern::Constructor { .. } | IrPattern::RecordPattern { .. })
+}
+
+fn fresh_box_var(counter: &mut usize) -> String {
+    let v = format!("__bx{}", *counter);
+    *counter += 1;
+    v
+}
+
+fn qualify_ctor(ctx: &RenderContext, name: &str, enum_hint: Option<&str>) -> String {
+    let enum_name = enum_hint.map(|s| s.to_string())
+        .or_else(|| ctx.ann.ctor_to_enum.get(name).map(|s| s.to_string()));
+    match enum_name {
+        Some(en) => ctx.templates.render_with("ctor_qualify", None, &[],
+            &[("enum_name", en.as_str()), ("ctor_name", name)])
+            .unwrap_or_else(|| format!("{}::{}", en, name)),
+        None => name.to_string(),
+    }
+}
+
+fn is_boxed_tuple_field(ctx: &RenderContext, ctor: &str, idx: usize) -> bool {
+    ctx.ann.boxed_fields.contains(&(ctor.to_string(), idx.to_string()))
+}
+
+fn is_boxed_record_field(ctx: &RenderContext, ctor: &str, field: &str) -> bool {
+    ctx.ann.boxed_fields.contains(&(ctor.to_string(), field.to_string()))
+}
+
+/// `matches!`-shaped boolean that `access` (a `&Enum`-typed expr) structurally
+/// matches `pat`, deref-ing one box per level. Bindings render as `_`; a deeper
+/// boxed-nested sub-pattern binds a fresh var and recurses through `&**` into the
+/// matches! `if` clause.
+fn box_shape_guard(ctx: &RenderContext, pat: &IrPattern, access: &str, counter: &mut usize) -> String {
+    match pat {
+        IrPattern::Constructor { name, args } => {
+            let qualified = qualify_ctor(ctx, name.as_str(), None);
+            if args.is_empty() {
+                return format!("matches!({}, {})", access, qualified);
+            }
+            let mut shape = Vec::with_capacity(args.len());
+            let mut subs = Vec::new();
+            for (i, arg) in args.iter().enumerate() {
+                if is_boxed_tuple_field(ctx, name.as_str(), i) && pattern_is_complex(arg) {
+                    let g = fresh_box_var(counter);
+                    subs.push(box_shape_guard(ctx, arg, &format!("&**{}", g), counter));
+                    shape.push(g);
+                } else {
+                    shape.push("_".to_string());
+                }
+            }
+            let pat_str = format!("{}({})", qualified, shape.join(", "));
+            if subs.is_empty() {
+                format!("matches!({}, {})", access, pat_str)
+            } else {
+                format!("matches!({}, {} if {})", access, pat_str, subs.join(" && "))
+            }
+        }
+        IrPattern::RecordPattern { name, fields, .. } => {
+            let qualified = qualify_ctor(ctx, name.as_str(), None);
+            let mut shape = Vec::with_capacity(fields.len());
+            let mut subs = Vec::new();
+            for fp in fields {
+                match &fp.pattern {
+                    Some(p) if is_boxed_record_field(ctx, name.as_str(), fp.name.as_str())
+                        && pattern_is_complex(p) =>
+                    {
+                        let g = fresh_box_var(counter);
+                        subs.push(box_shape_guard(ctx, p, &format!("&**{}", g), counter));
+                        shape.push(format!("{}: {}", fp.name, g));
+                    }
+                    _ => shape.push(format!("{}: _", fp.name)),
+                }
+            }
+            let pat_str = format!("{} {{ {}, .. }}", qualified, shape.join(", "));
+            if subs.is_empty() {
+                format!("matches!({}, {})", access, pat_str)
+            } else {
+                format!("matches!({}, {} if {})", access, pat_str, subs.join(" && "))
+            }
+        }
+        // Non-constructor pattern in a boxed position cannot occur (a recursive
+        // field is always a variant); be conservative and impose no constraint.
+        _ => "true".to_string(),
+    }
+}
+
+/// Emit `let <flat pat> = <move_expr> else { unreachable!() };` to move the value
+/// out of its box and bind the inner names by value, recursing for deeper boxes.
+/// The guard has already verified the structure, so `else` is dead.
+fn box_extract(ctx: &RenderContext, pat: &IrPattern, move_expr: &str, binds: &mut Vec<String>, counter: &mut usize) {
+    match pat {
+        IrPattern::Constructor { name, args } => {
+            let qualified = qualify_ctor(ctx, name.as_str(), None);
+            let mut flat = Vec::with_capacity(args.len());
+            let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
+            for (i, arg) in args.iter().enumerate() {
+                if is_boxed_tuple_field(ctx, name.as_str(), i) && pattern_is_complex(arg) {
+                    let e = fresh_box_var(counter);
+                    flat.push(e.clone());
+                    deeper.push((e, arg));
+                } else {
+                    flat.push(render_pattern_hinted(ctx, arg, None));
+                }
+            }
+            let flat_pat = if args.is_empty() { qualified } else { format!("{}({})", qualified, flat.join(", ")) };
+            binds.push(format!("let {} = {} else {{ unreachable!() }};", flat_pat, move_expr));
+            for (e, sub) in deeper {
+                box_extract(ctx, sub, &format!("*{}", e), binds, counter);
+            }
+        }
+        IrPattern::RecordPattern { name, fields, .. } => {
+            let qualified = qualify_ctor(ctx, name.as_str(), None);
+            let mut flat = Vec::with_capacity(fields.len());
+            let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
+            for fp in fields {
+                match &fp.pattern {
+                    Some(p) if is_boxed_record_field(ctx, name.as_str(), fp.name.as_str())
+                        && pattern_is_complex(p) =>
+                    {
+                        let e = fresh_box_var(counter);
+                        flat.push(format!("{}: {}", fp.name, e));
+                        deeper.push((e, p));
+                    }
+                    Some(p) => flat.push(format!("{}: {}", fp.name, render_pattern_hinted(ctx, p, None))),
+                    None => flat.push(fp.name.to_string()),
+                }
+            }
+            binds.push(format!("let {} {{ {}, .. }} = {} else {{ unreachable!() }};", qualified, flat.join(", "), move_expr));
+            for (e, sub) in deeper {
+                box_extract(ctx, sub, &format!("*{}", e), binds, counter);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Rewrite an arm whose top-level variant pattern has a boxed-nested constructor.
+/// Returns `(flat_pattern, shape_guards, body_let_else_binds)` or None if the arm
+/// has no boxed-nested position (the common case → no rewrite).
+fn unbox_arm_pattern(ctx: &RenderContext, pat: &IrPattern, enum_hint: Option<&str>)
+    -> Option<(String, Vec<String>, Vec<String>)>
+{
+    let mut counter = 0usize;
+    let mut guards = Vec::new();
+    let mut binds = Vec::new();
+    let flat = match pat {
+        IrPattern::Constructor { name, args } => {
+            let qualified = qualify_ctor(ctx, name.as_str(), enum_hint);
+            let mut flat = Vec::with_capacity(args.len());
+            for (i, arg) in args.iter().enumerate() {
+                if is_boxed_tuple_field(ctx, name.as_str(), i) && pattern_is_complex(arg) {
+                    let v = fresh_box_var(&mut counter);
+                    guards.push(box_shape_guard(ctx, arg, &format!("&*{}", v), &mut counter));
+                    box_extract(ctx, arg, &format!("*{}", v), &mut binds, &mut counter);
+                    flat.push(v);
+                } else {
+                    flat.push(render_pattern_hinted(ctx, arg, None));
+                }
+            }
+            if args.is_empty() { qualified } else { format!("{}({})", qualified, flat.join(", ")) }
+        }
+        IrPattern::RecordPattern { name, fields, .. } => {
+            let qualified = qualify_ctor(ctx, name.as_str(), enum_hint);
+            let mut flat = Vec::with_capacity(fields.len());
+            for fp in fields {
+                match &fp.pattern {
+                    Some(p) if is_boxed_record_field(ctx, name.as_str(), fp.name.as_str())
+                        && pattern_is_complex(p) =>
+                    {
+                        let v = fresh_box_var(&mut counter);
+                        guards.push(box_shape_guard(ctx, p, &format!("&*{}", v), &mut counter));
+                        box_extract(ctx, p, &format!("*{}", v), &mut binds, &mut counter);
+                        flat.push(format!("{}: {}", fp.name, v));
+                    }
+                    Some(p) => flat.push(format!("{}: {}", fp.name, render_pattern_hinted(ctx, p, None))),
+                    None => flat.push(fp.name.to_string()),
+                }
+            }
+            format!("{} {{ {} }}", qualified, flat.join(", "))
+        }
+        _ => return None,
+    };
+    if guards.is_empty() { None } else { Some((flat, guards, binds)) }
+}
+
 // ── Match arm rendering ──
 
 pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty, subject_ty: &almide_lang::types::Ty) -> String {
@@ -558,22 +759,39 @@ pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide
             => Some(n.as_str()),
         _ => None,
     };
-    let pattern = render_pattern_hinted(ctx, &arm.pattern, enum_hint);
+    // #610: a boxed-nested constructor pattern is rewritten to a flat pattern + a
+    // `matches!` shape-guard + `let-else` box move-outs in the body. None when the
+    // arm has no boxed-nested position (the common case → identical to before).
+    let (pattern, shape_guards, box_binds) = match unbox_arm_pattern(ctx, &arm.pattern, enum_hint) {
+        Some((flat, guards, binds)) => (flat, guards, binds),
+        None => (render_pattern_hinted(ctx, &arm.pattern, enum_hint), Vec::new(), Vec::new()),
+    };
     // err() in a match arm where the match type is NOT Result: early return.
     // This handles `let x: T = match ... { none => err("msg") }` in
     // functions returning Result — the err() doesn't contribute a T value,
     // it exits the function with an error.
-    let body = if matches!(&arm.body.kind, IrExprKind::ResultErr { .. }) && !match_ty.is_result() {
+    let raw_body = if matches!(&arm.body.kind, IrExprKind::ResultErr { .. }) && !match_ty.is_result() {
         format!("return {}", render_expr(ctx, &arm.body))
     } else {
         super::expressions::render_expr_owned(ctx, &arm.body)
     };
-    // Append guard to pattern if present
-    let full_pattern = if let Some(ref guard) = arm.guard {
-        let guard_str = render_expr(ctx, guard);
-        format!("{} if {}", pattern, guard_str)
+    // The box move-outs (`let Tree::Leaf(a) = *__bx0 else …`) run FIRST in the
+    // arm body, then the original body sees the inner bindings.
+    let body = if box_binds.is_empty() {
+        raw_body
     } else {
+        format!("{{ {} {} }}", box_binds.join(" "), raw_body)
+    };
+    // Append guards: the structural shape-guards (which must hold for the rewritten
+    // arm to apply, so a non-match falls through) then any user guard.
+    let mut guard_conds = shape_guards;
+    if let Some(ref guard) = arm.guard {
+        guard_conds.push(render_expr(ctx, guard));
+    }
+    let full_pattern = if guard_conds.is_empty() {
         pattern
+    } else {
+        format!("{} if {}", pattern, guard_conds.join(" && "))
     };
     ctx.templates.render_with("match_arm_inline", None, &[], &[("pattern", full_pattern.as_str()), ("body", body.as_str())])
         .unwrap_or_else(|| format!("_ => _,"))
