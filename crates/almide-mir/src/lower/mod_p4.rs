@@ -522,6 +522,11 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
                 {
                     ("result", "to_string_li")
                 }
+                (Ty::Applied(TypeConstructorId::List, e), Ty::String)
+                    if e.len() == 1 && matches!(e[0], Ty::String) =>
+                {
+                    ("result", "to_string_ls")
+                }
                 _ => ("result", "to_string_x"),
             }
         }

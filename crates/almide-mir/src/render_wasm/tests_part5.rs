@@ -1532,6 +1532,20 @@ fn set_interp_self_hosts_via_to_list() {
 }
 
 #[test]
+fn result_list_str_interp() {
+    // `${Result[List[String], String]}` → `ok(["a", "b"])` / `err("<quoted>")`. `result.to_string_ls`
+    // renders the Ok string-list (each element quoted+escaped) reusing `result_to_string`'s `__rts_esc_*`.
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Result[List[String], String] = ok([\"a\", \"b\"]) let b: Result[List[String], String] = err(\"boom\") let c: Result[List[String], String] = ok([])\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "result.to_string_ls"), "must auto-link result.to_string_ls");
+    if let Some(out) = build_and_run("result_list_str_interp", &render_wasm_program(&prog)) {
+        assert_eq!(out, "ok([\"a\", \"b\"])\nerr(\"boom\")\nok([])");
+    }
+}
+
+#[test]
 fn result_list_int_interp_and_construction() {
     // `${Result[List[Int], String]}` → `ok([1, 2, 3])` / `err("<quoted>")`. The ResultOk heap
     // materializer admits a scalar-list literal (incl empty `ok([])`); `result.to_string_li` renders.

@@ -20,6 +20,7 @@ spec/lang/option_list_interp_wasm.almd
 spec/lang/option_list_str_interp_wasm.almd
 spec/lang/option_option_interp_wasm.almd
 spec/lang/result_list_interp_wasm.almd
+spec/lang/result_list_str_interp_wasm.almd
 spec/lang/result_interp_wasm.almd
 spec/lang/result_concat_payload_wasm.almd
 spec/lang/set_interp_wasm.almd
