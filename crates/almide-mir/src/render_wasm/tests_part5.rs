@@ -1532,6 +1532,20 @@ fn set_interp_self_hosts_via_to_list() {
 }
 
 #[test]
+fn option_option_int_interp() {
+    // `${Option[Option[Int]]}` → `some(some(5))` / `some(none)` / `none` (nested Option interp), the
+    // self-host `option.to_string_oi` over the already-materializing nested-Option construction.
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Option[Option[Int]] = some(some(5)) let b: Option[Option[Int]] = some(none) let c: Option[Option[Int]] = none\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "option.to_string_oi"), "must auto-link option.to_string_oi");
+    if let Some(out) = build_and_run("option_option_interp", &render_wasm_program(&prog)) {
+        assert_eq!(out, "some(some(5))\nsome(none)\nnone");
+    }
+}
+
+#[test]
 fn option_list_int_interp_and_construction() {
     // `${Option[List[Int]]}` → `some([1, 2, 3])` / `none` (nested compound). Two gaps close: the
     // OptionSome heap materializer now admits a scalar-list literal (incl the empty `some([])`), and

@@ -1,0 +1,10 @@
+// option_to_string_oi — `option.to_string_oi` over `Option[Option[Int]]`, byte-matching v0's
+// `some(some(5))` / `some(none)` / `none` (a nested Option interp). The inner Option renders like
+// `${Option[Int]}`; a high-level self-host (nested match + int.to_string + concat, all in v1's subset).
+fn option_to_string_oi(o: Option[Option[Int]]) -> String = match o {
+  some(v) => match v {
+    some(w) => "some(some(" + int.to_string(w) + "))",
+    none => "some(none)",
+  },
+  none => "none",
+}
