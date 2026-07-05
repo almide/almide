@@ -329,6 +329,23 @@ impl FuncCompiler<'_> {
             }
             fn visit_expr(&mut self, expr: &IrExpr) {
                 if self.found { return; }
+                // An in-place mutator CALL on a non-scalar loop-outer var writes heap that
+                // outlives the iteration — the scanner must catch the CALL, not just Assign
+                // STATEMENTS. Missing it lets the iter-scope reclamation roll the frontier
+                // back over the reallocated backing; a spurious second __rc_dec at teardown
+                // then hits the rc==0 sentinel (an `unreachable` trap on wasm).
+                if let almide_ir::IrExprKind::RuntimeCall { symbol, args } = &expr.kind {
+                    if crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str()) {
+                        if let Some(almide_ir::IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
+                            let ty = &self.var_table.get(*id).ty;
+                            let scalar = matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit);
+                            if !scalar {
+                                self.found = true;
+                                return;
+                            }
+                        }
+                    }
+                }
                 walk_expr(self, expr);
             }
         }
