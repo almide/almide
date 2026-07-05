@@ -207,3 +207,4 @@ spec/lang/nested_interp_edgecases_wasm.almd
 spec/lang/nested_interp_more_wasm.almd
 spec/lang/nested_interp_float_list_wasm.almd
 spec/lang/option_map_interp_wasm.almd
+spec/lang/nested_interp_batch2_wasm.almd

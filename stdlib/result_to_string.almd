@@ -462,6 +462,102 @@ fn result_to_string_lf(r: Result[List[Float], String]) -> String = match r {
   err(e) => __rts_err(e),
 }
 
+// A BARE `["a", "b"]` string-list (reuses the __rts_ls_* string-element helpers) — for composing
+// `ok(some(["a", "b"]))`.
+fn __rts_strlist_bare(v: List[String]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __rts_ls_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(2 + body)   // "[" + body + "]"
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 91)                // '['
+  let after = __rts_ls_fill_body(addr, count, 0, base + 1)
+  prim.store8(after, 93)               // ']'
+  buf
+}
+
+// `ok(some(["a", "b"]))` / `ok(none)` / `err("<quoted>")` over `Result[Option[List[String]], String]`.
+fn result_to_string_osl(r: Result[Option[List[String]], String]) -> String = match r {
+  ok(o) => match o {
+    some(v) => "ok(some(" + __rts_strlist_bare(v) + "))",
+    none => "ok(none)",
+  },
+  err(e) => __rts_err(e),
+}
+
+// `ok(["a": 1, "b": 2])` / `ok([:])` / `err("<quoted>")` over `Result[Map[String, Int], String]` — the
+// inner map via map.keys / map.values (reuses __rts_esc for keys, __rts int helpers for values),
+// wrapped in `ok(` … `)`.
+fn __rts_map_key_width(elem: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  2 + __rts_esc_len(elem + 12, slen, 0, 0)
+}
+
+fn __rts_map_body_len(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let v = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __rts_map_key_width(kelem) + 2 + __rts_int_width(v)
+    __rts_map_body_len(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
+
+fn __rts_map_fill_key(elem: Int, pos: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  prim.store8(pos, 34)
+  let mid = __rts_fill_esc(elem + 12, slen, 0, pos + 1)
+  prim.store8(mid, 34)
+  mid + 1
+}
+
+fn __rts_map_fill_body(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __rts_map_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)                // ':'
+    prim.store8(pos2 + 1, 32)            // ' '
+    let v = prim.load64(vaddr + i * 8)
+    let pos3 = __rts_fill_int(v, pos2 + 2)
+    __rts_map_fill_body(kaddr, vaddr, count, i + 1, pos3)
+  }
+
+fn __rts_ok_map(m: Map[String, Int]) -> String = {
+  let ks = map.keys(m)
+  let vs = map.values(m)
+  let hk = prim.handle(ks)
+  let hv = prim.handle(vs)
+  let count = prim.load32(hk + 4)
+  if count == 0 then "ok([:])"
+  else {
+    let kaddr = hk + 12
+    let vaddr = hv + 12
+    let body = __rts_map_body_len(kaddr, vaddr, count, 0, 0)
+    let buf = prim.alloc_str(body + 6)   // "ok([" (4) + body + "])" (2)
+    let base = prim.handle(buf) + 12
+    prim.store8(base, 111)               // 'o'
+    prim.store8(base + 1, 107)           // 'k'
+    prim.store8(base + 2, 40)            // '('
+    prim.store8(base + 3, 91)            // '['
+    let after = __rts_map_fill_body(kaddr, vaddr, count, 0, base + 4)
+    prim.store8(after, 93)               // ']'
+    prim.store8(after + 1, 41)           // ')'
+    buf
+  }
+}
+
+fn result_to_string_msi(r: Result[Map[String, Int], String]) -> String = match r {
+  ok(m) => __rts_ok_map(m),
+  err(e) => __rts_err(e),
+}
+
 fn result_to_string_ss(r: Result[String, String]) -> String = match r {
   ok(v) => __rts_ok_s(v),
   err(e) => __rts_err(e),

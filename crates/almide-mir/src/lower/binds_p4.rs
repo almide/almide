@@ -854,6 +854,16 @@ impl LowerCtx {
                         self.live_heap_handles.retain(|h| *h != p);
                         p
                     }
+                    // A `Map[String, Int]` (map_skv) Ok payload (`ok(["a": 1])` → `ok(map.from_list(…))`)
+                    // — mirror the OptionSome map arm: the flat drop frees the map_skv block.
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                        if matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                            if a.len() == 2 && is_heap_ty(&a[0]) && !is_heap_ty(&a[1])) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     _ => return None,
                 };
                 let dst = self.materialize_result_str(piece, repr, false, false);

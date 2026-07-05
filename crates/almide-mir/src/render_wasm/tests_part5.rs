@@ -1574,6 +1574,21 @@ fn option_option_int_interp() {
 }
 
 #[test]
+fn nested_interp_batch2_compositions_and_result_map() {
+    // Option[Option[List[Int]]], Option[Result[List[Int],String]], Result[Option[List[String]],String],
+    // Result[Map[String,Int],String] (the last with a ResultOk map materialization).
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Option[Option[List[Int]]] = some(some([1, 2])) let b: Option[Result[List[Int], String]] = some(ok([3, 4]))\n\
+        let c: Result[Option[List[String]], String] = ok(some([\"x\"])) let d: Result[Map[String, Int], String] = ok([\"k\": 5])\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"${d}\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "result.to_string_msi"), "must auto-link result.to_string_msi");
+    if let Some(out) = build_and_run("nested_batch2", &render_wasm_program(&prog)) {
+        assert_eq!(out, "some(some([1, 2]))\nsome(ok([3, 4]))\nok(some([\"x\"]))\nok([\"k\": 5])");
+    }
+}
+
+#[test]
 fn option_map_string_int_interp() {
     // `${Option[Map[String,Int]]}` — the non-empty map is a map.from_list computed payload materialized
     // into the Some slot; rendered via map.keys/map.values wrapped in some(…).

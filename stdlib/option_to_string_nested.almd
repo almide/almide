@@ -186,3 +186,92 @@ fn option_to_string_ooi(o: Option[Option[Option[Int]]]) -> String = match o {
   },
   none => "none",
 }
+
+// A BARE `[1, 2, 3]` int-list for composing `some(some([…]))` / `some(ok([…]))`. Negate-free negatives.
+fn __onest_digits(n: Int, acc: Int) -> Int =
+  if n < 10 then acc + 1
+  else __onest_digits(n / 10, acc + 1)
+
+fn __onest_count_neg(n: Int, acc: Int) -> Int =
+  if n > 0 - 10 then acc + 1
+  else __onest_count_neg(n / 10, acc + 1)
+
+fn __onest_int_width(v: Int) -> Int =
+  if v < 0 then __onest_count_neg(v, 0) + 1
+  else __onest_digits(v, 0)
+
+fn __onest_fill_digits(n: Int, pos: Int) -> Int =
+  if n < 10 then {
+    prim.store8(pos, 48 + n)
+    pos + 1
+  } else {
+    let p = __onest_fill_digits(n / 10, pos)
+    prim.store8(p, 48 + (n % 10))
+    p + 1
+  }
+
+fn __onest_fill_neg(n: Int, pos: Int) -> Int =
+  if n > 0 - 10 then {
+    prim.store8(pos, 48 + (0 - n))
+    pos + 1
+  } else {
+    let p = __onest_fill_neg(n / 10, pos)
+    prim.store8(p, 48 + (0 - (n % 10)))
+    p + 1
+  }
+
+fn __onest_fill_int(v: Int, pos: Int) -> Int =
+  if v < 0 then {
+    prim.store8(pos, 45)
+    __onest_fill_neg(v, pos + 1)
+  } else __onest_fill_digits(v, pos)
+
+fn __onest_il_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let v = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __onest_il_body_len(addr, count, i + 1, acc + sep + __onest_int_width(v))
+  }
+
+fn __onest_il_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let v = prim.load64(addr + i * 8)
+    let pos2 = __onest_fill_int(v, pos1)
+    __onest_il_fill_body(addr, count, i + 1, pos2)
+  }
+
+fn __onest_intlist_bare(v: List[Int]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __onest_il_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(2 + body)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 91)                // '['
+  let after = __onest_il_fill_body(addr, count, 0, base + 1)
+  prim.store8(after, 93)               // ']'
+  buf
+}
+
+fn option_to_string_ooli(o: Option[Option[List[Int]]]) -> String = match o {
+  some(v) => match v {
+    some(w) => "some(some(" + __onest_intlist_bare(w) + "))",
+    none => "some(none)",
+  },
+  none => "none",
+}
+
+fn option_to_string_rli(o: Option[Result[List[Int], String]]) -> String = match o {
+  some(r) => match r {
+    ok(w) => "some(ok(" + __onest_intlist_bare(w) + "))",
+    err(e) => "some(" + __onest_err(e) + ")",
+  },
+  none => "none",
+}
