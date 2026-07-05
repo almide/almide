@@ -1532,6 +1532,25 @@ fn set_interp_self_hosts_via_to_list() {
 }
 
 #[test]
+fn fan_map_int_lowers_to_self_host_traverse() {
+    // `fan.map` over List[Int] with an (Int) -> Result[Int, String] callback — the compiler intrinsic
+    // routed to the self-host `fan_map` (a fallible traverse invoking the lifted callback via
+    // CallIndirect), collecting ok values in list order and short-circuiting on the first err. The
+    // result is matched / auto-`!`-unwrapped.
+    let src = "effect fn dbl(x: Int) -> Result[Int, String] = ok(x * 2)\n\
+        effect fn checked(x: Int) -> Result[Int, String] = if x < 0 then err(\"neg\") else ok(x)\n\
+        effect fn main() -> Unit = {\n\
+        let doubled = fan.map([1, 2, 3], (x) => dbl(x))\n\
+        println(int.to_string(doubled[0]) + \",\" + int.to_string(doubled[2]))\n\
+        match fan.map([1, -2, 3], (x) => checked(x)) { ok(ys) => println(\"ok\"), err(e) => println(\"short:\" + e) } }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "fan.map"), "fan.map must auto-link the fan_map self-host");
+    if let Some(out) = build_and_run("fan_map_int", &render_wasm_program(&prog)) {
+        assert_eq!(out, "2,6\nshort:neg");
+    }
+}
+
+#[test]
 fn higher_order_result_traverse_matches_call_indirect() {
     // A fallible list traverse over a funcref callback — `match f(x) { ok => .., err => .. }` where
     // `f` is invoked via CallIndirect. The trust-spine seeds the CallIndirect result's read-shape and

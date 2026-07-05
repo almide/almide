@@ -259,7 +259,26 @@ impl LowerCtx {
             // WASI fd-0 $read_n_bytes floor), so its prim is in the program map and the transitive
             // cap_witness counts Stdin. Returns a heap Bytes block (flat Drop, no nested handles).
             || (module == "io" && func == "read_n_bytes");
-        if !purity::is_pure(module, func) && !is_admitted_effectful {
+        // `fan.map` is a compiler-known concurrency primitive whose WASM lowering is a SEQUENTIAL
+        // fallible traverse (pure control flow — it reaches NO host capability; the CALLBACK's caps
+        // are counted transitively through the lifted funcref, exactly like `list.map`). Admit it ONLY
+        // for the monomorphization the `fan_map` self-host provides — `List[Int]` in, an `(Int) ->
+        // Result[Int, String]` callback — so any OTHER element pairing stays walled (never linked to
+        // the wrong-typed self-host = never invalid wasm). The result `Result[List[Int], String]` is
+        // matched/`!`-unwrapped by the caller (the auto-`!` desugar).
+        let is_admitted_fan_map = {
+            use almide_lang::types::constructor::TypeConstructorId as TC;
+            module == "fan"
+                && func == "map"
+                && args.len() == 2
+                && matches!(&args[0].ty, Ty::Applied(TC::List, a) if a.len() == 1 && matches!(a[0], Ty::Int))
+                && matches!(&args[1].ty, Ty::Fn { params, ret }
+                    if params.len() == 1
+                        && matches!(params[0], Ty::Int)
+                        && matches!(&**ret, Ty::Applied(TC::Result, r)
+                            if r.len() == 2 && matches!(r[0], Ty::Int) && matches!(r[1], Ty::String)))
+        };
+        if !purity::is_pure(module, func) && !is_admitted_effectful && !is_admitted_fan_map {
             return Err(LowerError::Unsupported(format!(
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
             )));

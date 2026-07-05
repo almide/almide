@@ -1467,6 +1467,13 @@ fn desugar_match_subject_hoist(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
         let is_computed_call = matches!(
             &subject.kind,
             IrExprKind::Call { target: almide_ir::CallTarget::Computed { .. }, .. }
+        ) || matches!(
+            &subject.kind,
+            // `fan.map` (a compiler intrinsic lowered to a self-host Result call) as a match subject —
+            // hoist it so the bind seeds its cap-as-tag read-shape, then `match $t { ok/err }` lowers
+            // (its auto-`!` desugars to exactly this match).
+            IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. }
+                if module.as_str() == "fan" && func.as_str() == "map"
         );
         if (has_literal_arm
             && !is_pure_match_subject(subject)

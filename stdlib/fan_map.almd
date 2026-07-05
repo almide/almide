@@ -1,0 +1,17 @@
+// fan_map — SELF-HOSTED `fan.map` over `List[Int]` with an `(Int) -> Result[Int, String]` callback,
+// the WASM (single-threaded) semantics of the fan-out `fan.map`: apply `f` to each element IN LIST
+// ORDER, collect the ok values, and SHORT-CIRCUIT on the FIRST err (its Err is the whole result — a
+// deterministic order, byte-identical to v0's thread-joined-in-order collection). The callback is a
+// funcref invoked via `Op::CallIndirect`; the fallible traverse returns `Result[List[Int], String]`
+// (the caller's auto-`!` unwraps it in effect context). `xs` is read-only; `acc` grows a fresh owned
+// list. Monomorphic (Int→Int) — other element pairings stay walled at the call site.
+
+fn __fan_map_go(xs: List[Int], f: (Int) -> Result[Int, String], i: Int, acc: List[Int]) -> Result[List[Int], String] =
+  if i >= list.len(xs) then ok(acc)
+  else match f(list.get(xs, i) ?? 0) {
+    ok(y) => __fan_map_go(xs, f, i + 1, acc + [y]),
+    err(e) => err(e),
+  }
+
+fn fan_map(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[List[Int], String] =
+  __fan_map_go(xs, f, 0, [])

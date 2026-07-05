@@ -73,6 +73,11 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // len@4=1 + @12=msg + tag@16=1). So a `match`/`!` over it reads tag @16, exactly like
             // fs.write — same Ok-has-no-payload discipline, same flat DropListStr for both arms.
             | ("fs", "remove_all")
+            // `fan.map` returns the cap-as-tag `Result[List[Int], String]` (the self-host `fan_map`
+            // builds it with the ordinary `ok(acc)`/`err(e)` ctors — a heap-Ok Result in the exact
+            // `materialize_result_str` layout, like `fs.list_dir`'s `Result[List[String], String]`).
+            // So a `match`/`!` over it reads tag @16 + binds the @12 payload list handle.
+            | ("fan", "map")
     )
 }
 
