@@ -1,0 +1,25 @@
+// wasm:enabled
+// Locks in `${Option[List[Int]]}` — a NESTED compound interp, v0's `some([1, 2, 3])` / `none` (the
+// inner list renders like `${list}`, wrapped in `some(…)`). Two gaps close together: (1) constructing
+// `some([…])` — the OptionSome heap-payload materializer now admits a scalar-list literal (incl the
+// empty `some([])`); (2) rendering it — the self-host `option.to_string_li`. Byte-identical to v0.
+
+fn describe(o: Option[List[Int]]) -> String = match o {
+  some(v) => "len " + int.to_string(list.len(v))
+  none => "empty"
+}
+
+effect fn main() -> Unit = {
+  let a: Option[List[Int]] = some([1, 2, 3])
+  let b: Option[List[Int]] = none
+  let c: Option[List[Int]] = some([])
+  let d: Option[List[Int]] = some([-5, 42, 0])
+  println("${a}")
+  println("${b}")
+  println("${c}")
+  println("${d}")
+  println("opt=${a}!")
+  // the constructed Some list is also usable directly
+  println(describe(a))
+  println(describe(c))
+}

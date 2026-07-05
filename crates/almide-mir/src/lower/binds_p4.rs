@@ -700,6 +700,16 @@ impl LowerCtx {
                     | IrExprKind::OptionNone
                     | IrExprKind::ResultOk { .. }
                     | IrExprKind::ResultErr { .. } => self.try_lower_option_ctor(expr, &expr.ty)?,
+                    // A SCALAR-element LIST-literal Some payload (`some([1, 2, 3])`, `some([])`) — build
+                    // the fresh owned block (0-length for the empty case, which `try_lower_scalar_list_
+                    // construct` declines), moved into the Some slot; `materialize_opt_str_some`'s
+                    // heap_elem_lists drop frees it flat (a scalar-element list has no nested ownership).
+                    IrExprKind::List { elements }
+                        if matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                            if a.len() == 1 && !is_heap_ty(&a[0])) =>
+                    {
+                        self.try_lower_scalar_list_slots(elements)?
+                    }
                     _ => return None,
                 };
                 // materialize_opt_str_some tracks materialized_options + heap_elem_lists.

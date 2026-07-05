@@ -496,6 +496,11 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
             Ty::String => ("option", "to_string_s"),
             Ty::Float => ("option", "to_string_f"),
             Ty::Bool => ("option", "to_string_b"),
+            // `${Option[List[Int]]}` → `some([1, 2, 3])` / `none` — the inner list renders like
+            // `${list}`, wrapped in `some(…)`. A deeper element routes to the UNLINKED `_x`.
+            Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::Int) => {
+                ("option", "to_string_li")
+            }
             _ => ("option", "to_string_x"),
         },
         // `${Result[T, E]}` renders v0's `ok(<T>)` / `err(<E>)`, routed per (T, E) pair (err is almost

@@ -1532,6 +1532,23 @@ fn set_interp_self_hosts_via_to_list() {
 }
 
 #[test]
+fn option_list_int_interp_and_construction() {
+    // `${Option[List[Int]]}` → `some([1, 2, 3])` / `none` (nested compound). Two gaps close: the
+    // OptionSome heap materializer now admits a scalar-list literal (incl the empty `some([])`), and
+    // the self-host `option.to_string_li` renders it. A constructed Some list is also matchable.
+    let src = "fn describe(o: Option[List[Int]]) -> String = match o { some(v) => int.to_string(list.len(v)), none => \"none\" }\n\
+        effect fn main() -> Unit = {\n\
+        let a: Option[List[Int]] = some([1, 2, 3]) let b: Option[List[Int]] = none let c: Option[List[Int]] = some([])\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\")\n\
+        println(describe(a) + \",\" + describe(c)) }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "option.to_string_li"), "Option[List[Int]] interp must auto-link option.to_string_li");
+    if let Some(out) = build_and_run("option_list_interp", &render_wasm_program(&prog)) {
+        assert_eq!(out, "some([1, 2, 3])\nnone\nsome([])\n3,0");
+    }
+}
+
+#[test]
 fn noncapturing_lambda_returned_as_funcref() {
     // A function RETURNING a non-capturing lambda / a bare fn reference — the trust-spine lifts it to
     // a table slot and returns the scalar funcref; the caller tracks the bound result so `f(args)`
