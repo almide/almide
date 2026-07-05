@@ -1499,6 +1499,21 @@ fn nonempty_map_literal_materializes_via_from_list() {
 }
 
 #[test]
+fn map_interp_self_hosts_via_keys_values() {
+    // `${Map[String, Int]}` renders v0's `["k": v, …]` (empty → `[:]`; keys quoted). `map.to_string`
+    // reads keys/values via the callable `map.keys`/`map.values` (unblocked by the map-literal
+    // materialization fix) and renders each entry inline; both owned lists drop at scope end.
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Map[String, Int] = [\"x\": 1, \"y\": 2] let b: Map[String, Int] = [:] let c: Map[String, Int] = [\"n\": -5]\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"m=${a}!\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "map.to_string"), "Map[String,Int] interp must auto-link map.to_string");
+    if let Some(out) = build_and_run("map_interp", &render_wasm_program(&prog)) {
+        assert_eq!(out, "[\"x\": 1, \"y\": 2]\n[:]\n[\"n\": -5]\nm=[\"x\": 1, \"y\": 2]!");
+    }
+}
+
+#[test]
 fn set_interp_self_hosts_via_to_list() {
     // `${Set[Int]}` renders v0's `set.from_list([<elems>])` (insertion order, dedup). `set.to_string`
     // reads the elements via the callable `set.to_list` and renders the body inline like

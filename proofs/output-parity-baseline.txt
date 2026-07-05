@@ -9,6 +9,7 @@ spec/lang/codec_method_roundtrip_wasm.almd
 spec/lang/codec_option_field_wasm.almd
 spec/lang/guarded_variant_match_wasm.almd
 spec/lang/map_literal_wasm.almd
+spec/lang/map_interp_wasm.almd
 spec/lang/option_interp_wasm.almd
 spec/lang/result_interp_wasm.almd
 spec/lang/set_interp_wasm.almd

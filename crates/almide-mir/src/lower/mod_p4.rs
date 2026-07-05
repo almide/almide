@@ -517,7 +517,14 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
         // Map top-level `to_string` is not self-hosted → the synthesized call is UNLINKED, so the
         // using function walls at render (never a wrong byte). Keep routing it so the gate accounts the
         // same call name the lowering emits (mir == ir), exactly as before.
-        Ty::Applied(TypeConstructorId::Map, _) => ("map", "to_string"),
+        // `${Map[K, V]}` renders v0's `["k": v, …]` (insertion order; empty → `[:]`). Self-hosted for
+        // (String, Int); any other pairing routes to the UNLINKED `map.to_string_x` (walls cleanly).
+        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
+            match (&args[0], &args[1]) {
+                (Ty::String, Ty::Int) => ("map", "to_string"),
+                _ => ("map", "to_string_x"),
+            }
+        }
         // Tuple / Record / variant / any other type has no self-hosted `to_string` yet.
         // Route to an UNLINKED `to_string` so the interp DESUGARS to a real CallFn that the
         // render wall REJECTS (the function walls cleanly) — NEVER leave it Opaque, which
