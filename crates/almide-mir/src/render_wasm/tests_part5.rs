@@ -1482,6 +1482,21 @@ fn option_interp_self_hosts_per_element_type() {
 }
 
 #[test]
+fn set_interp_self_hosts_via_to_list() {
+    // `${Set[Int]}` renders v0's `set.from_list([<elems>])` (insertion order, dedup). `set.to_string`
+    // reads the elements via the callable `set.to_list` and renders the body inline like
+    // `list.to_string`; the owned `set.to_list` result is dropped at scope end (no leak).
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Set[Int] = set.from_list([3, 1, 2, 1]) let b: Set[Int] = set.from_list([]) let c: Set[Int] = set.from_list([-5, 10])\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"s=${a}!\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "set.to_string"), "Set[Int] interp must auto-link set.to_string");
+    if let Some(out) = build_and_run("set_interp", &render_wasm_program(&prog)) {
+        assert_eq!(out, "set.from_list([3, 1, 2])\nset.from_list([])\nset.from_list([-5, 10])\ns=set.from_list([3, 1, 2])!");
+    }
+}
+
+#[test]
 fn result_interp_self_hosts_per_element_pair() {
     // `${Result[Int, String]}` / `${Result[String, String]}` render v0's `ok(<T>)` / `err(<E>)` via a
     // per-(T,E) self-host (`result.to_string` / `result.to_string_ss`); a String payload is quoted +
