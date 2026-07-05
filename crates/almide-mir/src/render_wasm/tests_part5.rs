@@ -1468,13 +1468,16 @@ fn option_interp_self_hosts_per_element_type() {
         println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"v=${a}!\")\n\
         let s: Option[String] = some(\"hi\") let q: Option[String] = some(\"a \\\"b\\\"\") let sn: Option[String] = none\n\
         println(\"${s}\") println(\"${q}\") println(\"${sn}\")\n\
+        let fa: Option[Float] = some(3.5) let fb: Option[Float] = some(3.0)\n\
+        println(\"${fa}\") println(\"${fb}\")\n\
         let t: Option[Bool] = some(true) let f: Option[Bool] = none\n\
         println(\"${t}\") println(\"${f}\") }\n";
     let prog = lower_source(src);
     assert!(prog.functions.iter().any(|f| f.name == "option.to_string"), "Option[Int] interp must auto-link option.to_string");
     assert!(prog.functions.iter().any(|f| f.name == "option.to_string_s"), "Option[String] interp must auto-link option.to_string_s");
+    assert!(prog.functions.iter().any(|f| f.name == "option.to_string_f"), "Option[Float] interp must auto-link option.to_string_f");
     if let Some(out) = build_and_run("option_interp", &render_wasm_program(&prog)) {
-        assert_eq!(out, "some(42)\nsome(-7)\nnone\nv=some(42)!\nsome(\"hi\")\nsome(\"a \\\"b\\\"\")\nnone\nsome(true)\nnone");
+        assert_eq!(out, "some(42)\nsome(-7)\nnone\nv=some(42)!\nsome(\"hi\")\nsome(\"a \\\"b\\\"\")\nnone\nsome(3.5)\nsome(3)\nsome(true)\nnone");
     }
 }
 

@@ -1,0 +1,42 @@
+// option_to_string_f — `option.to_string_f` over `Option[Float]`, byte-matching v0's `some(3.5)` /
+// `some(3)` (integer-valued floats DROP the trailing `.0`) / `none`. The inner Float uses the
+// compound Display (`float.to_string` — Dragon4 — then strip a trailing `.0`), the same drop-`.0`
+// form a `${float}` scalar / List[Float] element / record Float field uses. `float.to_string` is a
+// callable intrinsic; the strip logic is inlined (a self-host module cannot share internal fns).
+
+// Does the `n`-byte string at `src` end in ".0"? (n >= 2 and last two bytes are '.' '0'.)
+fn __otsf_ends_dot0(src: Int, n: Int) -> Bool =
+  if n < 2 then false
+  else if prim.load8(src + n - 2) != 46 then false     // not '.'
+  else prim.load8(src + n - 1) == 48                   // last byte is '0'
+
+// Copy `n` bytes from `src` to `dst`; return the address past the last byte.
+fn __otsf_bcopy(src: Int, dst: Int, n: Int) -> Int =
+  if n <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __otsf_bcopy(src + 1, dst + 1, n - 1)
+  }
+
+// Build `some(<compound v>)` for a present payload Float v.
+fn __otsf_some(v: Float) -> String = {
+  let s = float.to_string(v)
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let w = if __otsf_ends_dot0(sh + 12, n) then n - 2 else n
+  let buf = prim.alloc_str(6 + w)              // "some(" (5) + <w bytes> + ')' (1)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 115)                        // 's'
+  prim.store8(base + 1, 111)                    // 'o'
+  prim.store8(base + 2, 109)                    // 'm'
+  prim.store8(base + 3, 101)                    // 'e'
+  prim.store8(base + 4, 40)                     // '('
+  let after = __otsf_bcopy(sh + 12, base + 5, w)
+  prim.store8(after, 41)                        // ')'
+  buf
+}
+
+fn option_to_string_f(o: Option[Float]) -> String = match o {
+  some(v) => __otsf_some(v),
+  none => "none",
+}

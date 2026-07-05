@@ -18,6 +18,12 @@ effect fn main() -> Unit = {
   println("${s}")
   println("${sq}")
   println("${sn}")
+  let fa: Option[Float] = some(3.5)
+  let fb: Option[Float] = some(3.0)
+  let fc: Option[Float] = none
+  println("${fa}")
+  println("${fb}")
+  println("${fc}")
   let t: Option[Bool] = some(true)
   let f: Option[Bool] = some(false)
   let n: Option[Bool] = none
