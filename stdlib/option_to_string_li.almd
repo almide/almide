@@ -1,0 +1,90 @@
+// option_to_string_li — `option.to_string_li` over `Option[List[Int]]`, byte-matching v0's
+// `some([1, 2, 3])` / `none`. The inner `List[Int]` renders exactly like `${list}` (signed decimals,
+// `, ` joined, `[` … `]`), wrapped in `some(` … `)`. The `some(v)` arm borrows the payload list
+// (read-only slot reads); `none` is the bare word. The int/list helpers mirror `list_to_string`.
+
+fn __otsli_digits(n: Int, acc: Int) -> Int =
+  if n < 10 then acc + 1
+  else __otsli_digits(n / 10, acc + 1)
+
+// Negative path WITHOUT negating (i64::MIN safe, #660): count digits of n <= 0 directly.
+fn __otsli_count_neg(n: Int, acc: Int) -> Int =
+  if n > 0 - 10 then acc + 1
+  else __otsli_count_neg(n / 10, acc + 1)
+
+fn __otsli_int_width(v: Int) -> Int =
+  if v < 0 then __otsli_count_neg(v, 0) + 1
+  else __otsli_digits(v, 0)
+
+fn __otsli_fill_digits(n: Int, pos: Int) -> Int =
+  if n < 10 then {
+    prim.store8(pos, 48 + n)
+    pos + 1
+  } else {
+    let p = __otsli_fill_digits(n / 10, pos)
+    prim.store8(p, 48 + (n % 10))
+    p + 1
+  }
+
+// Fill the digits of n <= 0 WITHOUT negating: magnitude digit = -(n % 10) ∈ [0, 9].
+fn __otsli_fill_neg(n: Int, pos: Int) -> Int =
+  if n > 0 - 10 then {
+    prim.store8(pos, 48 + (0 - n))
+    pos + 1
+  } else {
+    let p = __otsli_fill_neg(n / 10, pos)
+    prim.store8(p, 48 + (0 - (n % 10)))
+    p + 1
+  }
+
+fn __otsli_fill_int(v: Int, pos: Int) -> Int =
+  if v < 0 then {
+    prim.store8(pos, 45)                 // '-'
+    __otsli_fill_neg(v, pos + 1)
+  } else __otsli_fill_digits(v, pos)
+
+fn __otsli_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let v = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __otsli_body_len(addr, count, i + 1, acc + sep + __otsli_int_width(v))
+  }
+
+fn __otsli_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)               // ','
+      prim.store8(pos + 1, 32)           // ' '
+      pos + 2
+    } else pos
+    let v = prim.load64(addr + i * 8)
+    let pos2 = __otsli_fill_int(v, pos1)
+    __otsli_fill_body(addr, count, i + 1, pos2)
+  }
+
+// Build `some([<list body>])` for a present payload List[Int].
+fn __otsli_some(v: List[Int]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __otsli_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(8 + body)     // "some([" (6) + body + "])" (2)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 115)                 // 's'
+  prim.store8(base + 1, 111)             // 'o'
+  prim.store8(base + 2, 109)             // 'm'
+  prim.store8(base + 3, 101)             // 'e'
+  prim.store8(base + 4, 40)              // '('
+  prim.store8(base + 5, 91)              // '['
+  let after = __otsli_fill_body(addr, count, 0, base + 6)
+  prim.store8(after, 93)                 // ']'
+  prim.store8(after + 1, 41)             // ')'
+  buf
+}
+
+fn option_to_string_li(o: Option[List[Int]]) -> String = match o {
+  some(v) => __otsli_some(v),
+  none => "none",
+}

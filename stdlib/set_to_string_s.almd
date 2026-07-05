@@ -1,0 +1,111 @@
+// set_to_string_s — `set.to_string_s` over `Set[String]`, byte-matching v0's
+// `set.from_list(["a", "b"])` (insertion order; empty → `set.from_list([])`). Elements come from the
+// callable `set.to_list` (a `List[String]`, insertion-ordered); each is quoted+escaped exactly like a
+// `List[String]` element, joined by `, `, wrapped in `set.from_list([` … `])`. Two passes keep the
+// alloc exact; the escape helpers mirror `list_to_string_s`.
+
+fn __stss_is_escaped(b: Int) -> Bool =
+  if b == 92 then true
+  else if b == 34 then true
+  else if b == 10 then true
+  else if b == 13 then true
+  else if b == 9 then true
+  else false
+
+fn __stss_esc_len(src: Int, slen: Int, i: Int, acc: Int) -> Int =
+  if i >= slen then acc
+  else {
+    let b = prim.load8(src + i)
+    let w = if __stss_is_escaped(b) then 2 else 1
+    __stss_esc_len(src, slen, i + 1, acc + w)
+  }
+
+fn __stss_esc_char(b: Int) -> Int =
+  if b == 10 then 110
+  else if b == 13 then 114
+  else if b == 9 then 116
+  else b
+
+fn __stss_fill_esc(src: Int, slen: Int, i: Int, pos: Int) -> Int =
+  if i >= slen then pos
+  else {
+    let b = prim.load8(src + i)
+    let pos1 = if __stss_is_escaped(b) then {
+      prim.store8(pos, 92)
+      prim.store8(pos + 1, __stss_esc_char(b))
+      pos + 2
+    } else {
+      prim.store8(pos, b)
+      pos + 1
+    }
+    __stss_fill_esc(src, slen, i + 1, pos1)
+  }
+
+fn __stss_elem_width(elem: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  2 + __stss_esc_len(elem + 12, slen, 0, 0)
+}
+
+fn __stss_fill_elem(elem: Int, pos: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  prim.store8(pos, 34)
+  let mid = __stss_fill_esc(elem + 12, slen, 0, pos + 1)
+  prim.store8(mid, 34)
+  mid + 1
+}
+
+fn __stss_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let elem = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __stss_body_len(addr, count, i + 1, acc + sep + __stss_elem_width(elem))
+  }
+
+fn __stss_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)               // ','
+      prim.store8(pos + 1, 32)           // ' '
+      pos + 2
+    } else pos
+    let elem = prim.load64(addr + i * 8)
+    let pos2 = __stss_fill_elem(elem, pos1)
+    __stss_fill_body(addr, count, i + 1, pos2)
+  }
+
+fn __stss_prefix(base: Int) -> Int = {
+  prim.store8(base, 115)                 // 's'
+  prim.store8(base + 1, 101)             // 'e'
+  prim.store8(base + 2, 116)             // 't'
+  prim.store8(base + 3, 46)              // '.'
+  prim.store8(base + 4, 102)             // 'f'
+  prim.store8(base + 5, 114)             // 'r'
+  prim.store8(base + 6, 111)             // 'o'
+  prim.store8(base + 7, 109)             // 'm'
+  prim.store8(base + 8, 95)              // '_'
+  prim.store8(base + 9, 108)             // 'l'
+  prim.store8(base + 10, 105)            // 'i'
+  prim.store8(base + 11, 115)            // 's'
+  prim.store8(base + 12, 116)            // 't'
+  prim.store8(base + 13, 40)             // '('
+  prim.store8(base + 14, 91)             // '['
+  base + 15
+}
+
+fn set_to_string_s(s: Set[String]) -> String = {
+  let xs = set.to_list(s)
+  let h = prim.handle(xs)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __stss_body_len(addr, count, 0, 0)
+  let total = 17 + body                  // "set.from_list([" (15) + body + "])" (2)
+  let buf = prim.alloc_str(total)
+  let base = prim.handle(buf) + 12
+  let start = __stss_prefix(base)
+  let after = __stss_fill_body(addr, count, 0, start)
+  prim.store8(after, 93)                 // ']'
+  prim.store8(after + 1, 41)             // ')'
+  buf
+}

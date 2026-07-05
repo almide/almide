@@ -1,0 +1,359 @@
+// prim — the PRIMITIVE FLOOR: raw memory access + the fd_write host call, the
+// minimal trusted surface the self-hosted runtime (print/string/list/…) is written
+// over. The bodies are v1 MIR PRIMITIVE OPS, mapped by module name in the v1
+// lowering — never hand-written wasm. This is the §4.1 "~20-op provable floor".
+//
+// UNSAFE: addresses are unchecked and the MIR is i64-uniform (the i32 wasm memory
+// boundary wraps at the op). For runtime/stdlib authors only.
+//
+// (The @intrinsic symbol is a v0-codegen placeholder; v1 recognizes these by the
+// `prim` module name, not the symbol, and emits Op::Prim.)
+
+// Reinterpret a heap handle (any heap value: String / List / Map pointer) as an Int
+// address — the bridge that lets all address math be ordinary Int arithmetic. Generic
+// over the heap type `A` so list/map self-host fns can take a handle too; UNSAFE (a
+// scalar `A` would reinterpret its value as an address).
+@intrinsic("almide_rt_prim_handle")
+fn handle[A](ptr: A) -> Int = _
+
+// Load 1 byte at `addr`, zero-extended to Int.
+@intrinsic("almide_rt_prim_load8")
+fn load8(addr: Int) -> Int = _
+
+// Load 4 bytes at `addr`, zero-extended to Int.
+@intrinsic("almide_rt_prim_load32")
+fn load32(addr: Int) -> Int = _
+
+// Load 8 bytes (a full i64 — a List/Map element slot) at `addr`.
+@intrinsic("almide_rt_prim_load64")
+fn load64(addr: Int) -> Int = _
+
+// Store the low 4 bytes of `val` at `addr`.
+@intrinsic("almide_rt_prim_store32")
+fn store32(addr: Int, val: Int) -> Unit = _
+
+// Store the low byte of `val` at `addr`.
+@intrinsic("almide_rt_prim_store8")
+fn store8(addr: Int, val: Int) -> Unit = _
+
+// Store a full i64 (`val`) at `addr` — a List/Map element slot.
+@intrinsic("almide_rt_prim_store64")
+fn store64(addr: Int, val: Int) -> Unit = _
+
+// Bitwise i64 ops (the int.band/bor/bxor/bshl/bshr floor). Pure scalar arithmetic.
+@intrinsic("almide_rt_prim_band")
+fn band(a: Int, b: Int) -> Int = _
+@intrinsic("almide_rt_prim_bor")
+fn bor(a: Int, b: Int) -> Int = _
+@intrinsic("almide_rt_prim_bxor")
+fn bxor(a: Int, b: Int) -> Int = _
+@intrinsic("almide_rt_prim_bshl")
+fn bshl(n: Int, bits: Int) -> Int = _
+@intrinsic("almide_rt_prim_bshr")
+fn bshr(n: Int, bits: Int) -> Int = _
+// LOGICAL (zero-filling) shift right — the value is shifted as a u64 (i64.shr_u).
+@intrinsic("almide_rt_prim_bshr_u")
+fn bshr_u(n: Int, bits: Int) -> Int = _
+
+// Allocate a runtime-sized OWNED String of `byte_len` bytes (rc=1, length set, data
+// uninitialized). The string builders (int.to_string, concat) fill the bytes via
+// `store8` and return it — an owned heap value, moved out / dropped like any String.
+@intrinsic("almide_rt_prim_alloc_str")
+fn alloc_str(byte_len: Int) -> String = _
+
+// Allocate a runtime-sized OWNED Bytes block of `n` bytes — physically the same byte block as
+// `alloc_str`, only typed `Bytes`. Filled via store8; read via load8. A flat heap value.
+@intrinsic("almide_rt_prim_alloc_bytes")
+fn alloc_bytes(n: Int) -> Bytes = _
+
+// Allocate a runtime-sized OWNED List[Int] of `n` i64 slots (rc=1, len=cap=n, elements
+// uninitialized). The list builders (list.reverse/take/drop) fill the slots via `store64`
+// and return it — an owned heap value, moved out / dropped like any List.
+@intrinsic("almide_rt_prim_alloc_list")
+fn alloc_list(n: Int) -> List[Int] = _
+
+// Allocate a runtime-sized OWNED `List[Float]` of `n` i64 slots — physically IDENTICAL to
+// `alloc_list` (a plain, non-nested-ownership block; drops as a flat block), but typed as
+// List[Float] so a float-array builder can return it. Each f64 element occupies its 8-byte
+// slot as raw BITS, stored via `store64(addr, prim.fbits(x))`. A dedicated name (not a generic
+// `alloc_list[A]`) keeps scalar scratch-list element inference unambiguous for `alloc_list`.
+@intrinsic("almide_rt_prim_alloc_list")
+fn alloc_list_f64(n: Int) -> List[Float] = _
+
+// Allocate a runtime-sized OWNED `Set[Int]` of `n` i64 slots — physically IDENTICAL to
+// `alloc_list` (a plain block [rc][len][cap][data]; drops as a flat block), but typed as
+// Set[Int] so a set builder can return it. A v1 Set[Int] IS a v1 List block with unique,
+// insertion-ordered Int elements; the builder over-allocs `n`, fills the unique elements, and
+// patches the len field via store32. A dedicated name keeps `alloc_list`'s inference clean.
+@intrinsic("almide_rt_prim_alloc_list")
+fn alloc_set(n: Int) -> Set[Int] = _
+
+// Allocate a runtime-sized OWNED `Map[Int,Int]` of `slots` i64 slots — physically IDENTICAL to
+// `alloc_list` (a plain block; drops flat), but typed as Map[Int,Int]. A v1 Map[Int,Int] IS a
+// v1 List block of PAIRED slots [rc][len][cap][k0,v0,k1,v1,...] (16 bytes/entry, key then value,
+// insertion-ordered like v0's Vec<(K,V)>); the builder passes `slots = 2 * entry_capacity`, fills
+// entries, and patches the len field to the ENTRY count via store32. Scalar k/v, no nested
+// ownership. A dedicated name keeps `alloc_list`'s scratch-list inference unambiguous.
+@intrinsic("almide_rt_prim_alloc_list")
+fn alloc_map(slots: Int) -> Map[Int, Int] = _
+
+// Allocate a runtime-sized OWNED `Map[String, String]` of `slots` NESTED-ownership slots —
+// physically a DynListStr (each i64 slot an owned String handle, freed recursively by DropListStr).
+// A Map[String,String] interleaves keys and values [k0,v0,k1,v1,...] — ALL slots are String
+// handles, so the uniform DropListStr frees every key + value. `slots = 2 * entry_capacity`; the
+// `len` header carries the SLOT count (so DropListStr frees them all), and map.len reads len/2.
+@intrinsic("almide_rt_prim_alloc_list_str")
+fn alloc_map_str(slots: Int) -> Map[String, String] = _
+
+// Allocate a runtime-sized OWNED `Map[String, Int]` (the heap-KEY, scalar-VALUE map — serves
+// Map[String,Int] AND Map[String,Float], one i64 value slot either way) — physically a DynListStr
+// (nested-ownership, freed recursively by DropListStr). Layout: `entries` String-handle KEY slots
+// then `entries` i64 VALUE slots; `slots = 2 * entries` is the FULL alloc (so `cap` lets the free-
+// list reuse the block), while map.set stores `len` = `entries` so DropListStr frees ONLY the key
+// handles and never touches the scalar value region.
+@intrinsic("almide_rt_prim_alloc_list_str")
+fn alloc_map_skv(slots: Int) -> Map[String, Int] = _
+
+// Allocate a runtime-sized OWNED `Value` block (the dynamic data model) — physically a v1 List
+// block, but typed Value. A SCALAR Value (Null/Bool/Int/Float) reuses the layout as
+// [rc][len@4 = TAG][cap@8][payload@12]: the `len` field carries the variant TAG (0=Null, 1=Bool,
+// 2=Int, 3=Float) and the first 8-byte slot holds the scalar payload (Bool 0/1, Int, or f64 BITS).
+// Drops as a flat block (scalar payload, no nested ownership). Str/Array/Object (heap payloads)
+// are a later refinement. `slots`=1 gives one payload slot; the caller patches the tag via store32.
+@intrinsic("almide_rt_prim_alloc_list")
+fn alloc_value(slots: Int) -> Value = _
+
+// Allocate a runtime-sized OWNED `List[String]` of `n` slots (Machinery 2: a NESTED-
+// ownership list). Fill via `store_str`, which MOVES each owned String into a slot; the
+// whole list is freed recursively (each element String + the block) at scope end.
+// Generic over the heap element type `A` (String, but also List[Int] for a List[List[Int]], etc.)
+// — the block is the same DynListStr (each slot a heap handle, freed recursively).
+@intrinsic("almide_rt_prim_alloc_list_str")
+fn alloc_list_str[A](n: Int) -> List[A] = _
+
+// Allocate a runtime-sized OWNED `Set[A]` of `n` NESTED-ownership slots — physically IDENTICAL to
+// `alloc_list_str` (DynListStr; each slot an owned heap handle, freed recursively via DropListStr),
+// but typed Set[A] so a heap-element set builder (Set[String]) can return it. Fill via store_str
+// (which MOVES each owned element in); over-alloc `n`, patch the len field to the unique count.
+@intrinsic("almide_rt_prim_alloc_list_str")
+fn alloc_set_str[A](n: Int) -> Set[A] = _
+
+// Store heap `piece`'s handle at the slot byte-address `addr` AND CONSUME `piece` (its ownership
+// MOVES into the list). After this the piece is dead in the caller — the list owns it and frees it
+// on its recursive drop. (`addr` = handle(list) + 12 + i*8.) Generic over any heap element type.
+@intrinsic("almide_rt_prim_store_str")
+fn store_str[A](addr: Int, piece: A) -> Unit = _
+
+// Load the String handle at slot byte-address `addr` KEEPING its Ptr repr — a BORROW of the slot's
+// String (the dual of store_str's read side), for passing a List[String] element to a closure or a
+// String fn. The list still owns the element; the loaded value is not a second owner.
+@intrinsic("almide_rt_prim_load_str")
+fn load_str(addr: Int) -> String = _
+
+// Load a heap HANDLE (an i32 pointer kept as a heap repr, NOT zero-extended like load64) from a
+// slot, typed as the heap type `A` — the generic sibling of `load_str` (which is fixed to String).
+// `value.as_array` reads its `List[Value]` payload via `load_handle[List[Value]]`; a Value reads a
+// nested `Value` via `load_handle[Value]`. A BORROW of the slot's owned handle (the container keeps
+// ownership through its recursive drop) — like `handle`'s inverse. Lowers to the same `LoadHandle`.
+@intrinsic("almide_rt_prim_load_handle")
+fn load_handle[A](addr: Int) -> A = _
+
+// Raw refcount RELEASE / ACQUIRE of a heap handle (an Int address) — reuse the proven $rc_dec/$rc_inc.
+// The MECHANISM the self-hosted `value.__drop_value` (recursive Value free) + `value.array` (shallow
+// copy = rc_inc each element) are written with. Operating on a RAW Int means the ownership cert sees
+// NO event (a Prim is a no-op in verify_ownership), like `string_eq` — so leak/double-free safety is
+// the differential test's burden, not the cert. Contained to the Value drop/copy routines.
+@intrinsic("almide_rt_prim_rc_dec")
+fn rc_dec(addr: Int) -> Unit = _
+@intrinsic("almide_rt_prim_rc_inc")
+fn rc_inc(addr: Int) -> Unit = _
+
+// The fd_write WASI host call — the only sandbox exit (reaches Stdout). Returns the
+// errno. `iov` points at an iovec array of `count` {ptr,len} pairs; `nw` receives
+// the bytes written.
+@intrinsic("almide_rt_prim_fd_write")
+fn fd_write(fd: Int, iov: Int, count: Int, nw: Int) -> Int = _
+
+// The random_get WASI host call — the ENTROPY sandbox exit (reaches Capability::Entropy).
+// Fills `len` bytes at address `buf` with host randomness; returns the errno (0 = ok).
+@intrinsic("almide_rt_prim_random_get")
+fn random_get(buf: Int, len: Int) -> Int = _
+
+// The args_sizes_get + args_get WASI host calls, packaged as ONE high-level HEAP-RESULT prim
+// — the CLI-ARGS sandbox exit (reaches Capability::CliArgs). Returns a fresh OWNED
+// `List[String]` of the program arguments `argv[1..]` (SKIPS argv[0] = the program path, to
+// match native `env.args`). Reached only by the self-hosted `env.args` (env_args.almd) in the
+// v1 trust-spine wasm backend; the render emits the WASI args_sizes_get/args_get + list-build
+// sequence. No native runtime impl — the native target uses env.args' own @intrinsic.
+@intrinsic("almide_rt_prim_args_get_list")
+fn args_get_list() -> List[String] = _
+
+// The path_open + fd_read WASI host calls, packaged as ONE high-level HEAP-RESULT prim —
+// the FS-READ sandbox exit (reaches Capability::FsRead). Opens the file at `path` (relative
+// to the first preopened dir, leading '/' stripped — the same absolute-path fallback native
+// emit's __resolve_path uses) and reads its bytes, returning a fresh OWNED
+// `Result[String, String]`: `Ok(content)` on success, `Err(message)` on a path_open error.
+// Reached only by the self-hosted `fs.read_text` (fs_read_text.almd) in the v1 trust-spine
+// wasm backend; the render emits the WASI path_open/fd_read + Result-build sequence. No native
+// runtime impl — the native target uses fs.read_text's own @intrinsic.
+@intrinsic("almide_rt_prim_read_text_file")
+fn read_text_file(path: String) -> Result[String, String] = _
+
+// Raw-bytes twin of read_text_file — the SAME WASI path_open/fd_read floor and the
+// same cap-as-tag Result block; only the Ok payload TYPE differs (Bytes, no UTF-8
+// claim). Backs the self-hosted `fs.read_bytes_raw`. Capability::FsRead.
+@intrinsic("almide_rt_prim_read_bytes_file")
+fn read_bytes_file(path: String) -> Result[Bytes, String] = _
+
+// The `read_dir` WASI directory-listing floor — the FIFTH sandbox exit (reaches
+// Capability::FsRead, like read_text_file). Opens the directory at `path` (preopen-relative,
+// same resolution as read_text_file) via path_open(O_DIRECTORY), reads entries via an
+// fd_readdir re-read-on-truncation loop, parses each dirent (skipping `.`/`..`), SORTS the
+// names lexicographically (to byte-match native fs.list_dir's `names.sort()`), and returns a
+// fresh OWNED `Result[List[String], String]`: `Ok([name,…])` on success, `Err(message)` on a
+// path_open error. Reached only by the self-hosted `fs.list_dir` (fs_list_dir.almd) in the v1
+// trust-spine wasm backend; the render emits the WASI path_open/fd_readdir + Result-build
+// sequence. No native runtime impl — the native target uses fs.list_dir's own @intrinsic.
+@intrinsic("almide_rt_prim_read_dir")
+fn read_dir(path: String) -> Result[List[String], String] = _
+
+// The path_open(O_CREAT|O_TRUNC) + fd_write WASI host calls, packaged as ONE high-level
+// HEAP-RESULT prim — the FS-WRITE sandbox exit (reaches Capability::FsWrite, a DISTINCT
+// capability from FsRead: a write is strictly greater authority). Opens (creating +
+// truncating) the file at `path` (preopen-relative, leading '/' stripped — the same
+// resolution read_text_file uses) and writes `content`'s bytes, returning a fresh OWNED
+// `Result[Unit, String]`: `Ok(())` on success, `Err(message)` on a path_open error. Reached
+// only by the self-hosted `fs.write` (fs_write.almd) in the v1 trust-spine wasm backend; the
+// render emits the WASI path_open/fd_write + Result-build sequence. No native runtime impl —
+// the native target uses fs.write's own @intrinsic.
+@intrinsic("almide_rt_prim_write_text_file")
+fn write_text_file(path: String, content: String) -> Result[Unit, String] = _
+
+// The path_create_directory WASI host call, packaged as ONE high-level HEAP-RESULT prim — a
+// FS-WRITE sandbox exit (reaches Capability::FsWrite — a mkdir IS a filesystem write, the SAME
+// capability as write_text_file, NOT a new one). Creates the directory at `path` (preopen-
+// relative, leading '/' stripped — the same resolution read_text_file uses), creating each
+// missing parent segment (recursive); an already-existing dir counts as success. Returns a
+// fresh OWNED `Result[Unit, String]`: `Ok(())` on success, `Err(message)` on a
+// path_create_directory error. Reached only by the self-hosted `fs.mkdir_p` (fs_mkdir_p.almd)
+// in the v1 trust-spine wasm backend; the render emits the WASI path_create_directory +
+// Result-build sequence. No native runtime impl — the native target uses fs.mkdir_p's own
+// @intrinsic.
+@intrinsic("almide_rt_prim_make_dir")
+fn make_dir(path: String) -> Result[Unit, String] = _
+
+// The path_remove_directory / path_unlink_file WASI host calls, packaged as ONE high-level
+// HEAP-RESULT prim — a FS-WRITE sandbox exit (reaches Capability::FsWrite — a recursive remove
+// IS a filesystem write, the SAME capability as write_text_file, NOT a new one). Removes the
+// tree at `path` (preopen-relative, leading '/' stripped — the same resolution read_text_file
+// uses): a directory is emptied RECURSIVELY (each child file unlinked, each child directory
+// removed) then removed, a file is unlinked directly. Returns a fresh OWNED
+// `Result[Unit, String]`: `Ok(())` on success, `Err(message)` on a removal error. Reached only
+// by the self-hosted `fs.remove_all` (fs_remove_all.almd) in the v1 trust-spine wasm backend;
+// the render emits the WASI recursive path_remove_directory/path_unlink_file sequence. No native
+// runtime impl — the native target uses fs.remove_all's own @intrinsic.
+@intrinsic("almide_rt_prim_remove_all")
+fn remove_all(path: String) -> Result[Unit, String] = _
+
+// The fd_read-from-stdin line-read WASI host call, packaged as ONE high-level HEAP-RESULT prim —
+// the STANDARD-INPUT sandbox exit (reaches Capability::Stdin, a DISTINCT capability: reading the
+// operator's input stream is neither a write, a filesystem, an entropy, nor a clock effect).
+// Reads fd 0 byte-by-byte until a '\n' (excluded) or EOF, strips a trailing '\r', and returns a
+// fresh OWNED canonical `String` of that one line (matching native read_line trimmed). Reached
+// only by the self-hosted `io.read_line` (io_read_line.almd) in the v1 trust-spine wasm backend;
+// the render emits the WASI fd_read host loop. No native runtime impl — the native target uses
+// io.read_line's own @intrinsic.
+@intrinsic("almide_rt_prim_read_line")
+fn read_line() -> String = _
+
+// read_n_bytes(n) — read UP TO `n` bytes of standard input (fd 0) and return them as a
+// `List[Int]` (each byte 0..255 as one element; fewer than `n` at EOF). The SIBLING of read_line
+// (which builds a String). Reached only by the self-hosted `io.read_n_bytes` (io_read_n_bytes.almd)
+// in the v1 trust-spine wasm backend; the render emits the WASI fd_read host loop into a List[Int].
+// No native runtime impl — the native target uses io.read_n_bytes's own @intrinsic.
+@intrinsic("almide_rt_prim_read_n_bytes")
+fn read_n_bytes(n: Int) -> List[Int] = _
+
+// The clock_time_get WASI host call — the WALL-CLOCK sandbox exit (reaches Capability::Clock,
+// a DISTINCT capability: a clock read is neither a filesystem nor an entropy effect). Writes
+// the current clock value (nanoseconds) as an i64 at `time_ptr`, returning the i32 errno
+// (zero-extended). `id` selects the clock (0 = CLOCK_REALTIME), `precision` is the requested
+// resolution (ns). Reached only by the self-hosted `env.unix_timestamp`
+// (env_unix_timestamp.almd) in the v1 trust-spine wasm backend; the render emits the WASI
+// clock_time_get host call. No native runtime impl — the native target uses
+// env.unix_timestamp's own @intrinsic.
+@intrinsic("almide_rt_prim_clock_time_get")
+fn clock_time_get(id: Int, precision: Int, time_ptr: Int) -> Int = _
+
+// The FLOAT floor: a `Float` is the i64-uniform value holding the f64 BITS; each op
+// reinterprets i64→f64, computes the wasm f64 instruction, and reinterprets back (a
+// compare / f2i yields a real Int). Pure scalar — the cert is untouched. This is what
+// lets `float.*` / `math.*` (sqrt/floor/min/…) be self-hosted in Almide.
+@intrinsic("almide_rt_prim_fabs")
+fn fabs(x: Float) -> Float = _
+@intrinsic("almide_rt_prim_fsqrt")
+fn fsqrt(x: Float) -> Float = _
+@intrinsic("almide_rt_prim_ffloor")
+fn ffloor(x: Float) -> Float = _
+@intrinsic("almide_rt_prim_fceil")
+fn fceil(x: Float) -> Float = _
+@intrinsic("almide_rt_prim_fneg")
+fn fneg(x: Float) -> Float = _
+@intrinsic("almide_rt_prim_fadd")
+fn fadd(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_fsub")
+fn fsub(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_fmul")
+fn fmul(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_fdiv")
+fn fdiv(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_fmin")
+fn fmin(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_fmax")
+fn fmax(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_fcopysign")
+fn fcopysign(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_flt")
+fn flt(a: Float, b: Float) -> Bool = _
+@intrinsic("almide_rt_prim_fle")
+fn fle(a: Float, b: Float) -> Bool = _
+@intrinsic("almide_rt_prim_fgt")
+fn fgt(a: Float, b: Float) -> Bool = _
+@intrinsic("almide_rt_prim_fge")
+fn fge(a: Float, b: Float) -> Bool = _
+@intrinsic("almide_rt_prim_feq")
+fn feq(a: Float, b: Float) -> Bool = _
+@intrinsic("almide_rt_prim_fne")
+fn fne(a: Float, b: Float) -> Bool = _
+@intrinsic("almide_rt_prim_f2i")
+fn f2i(x: Float) -> Int = _
+@intrinsic("almide_rt_prim_i2f")
+fn i2f(x: Int) -> Float = _
+// Raw f64↔i64 BIT reinterpret (identity in the i64-uniform model — the value IS the bits).
+@intrinsic("almide_rt_prim_fbits")
+fn fbits(x: Float) -> Int = _
+@intrinsic("almide_rt_prim_ffrombits")
+fn ffrombits(b: Int) -> Float = _
+// f32 narrow/widen: a Float32 value is its 32-bit pattern in the low half of the i64 slot.
+@intrinsic("almide_rt_prim_f2f32")
+fn f2f32(x: Float) -> Float32 = _
+@intrinsic("almide_rt_prim_f32_2f")
+fn f32_2f(x: Float32) -> Float = _
+// `bits_to_f32(bits)` = `f32::from_bits(bits as u32) as f64` — the same widen on a raw 32-bit pattern.
+@intrinsic("almide_rt_prim_bits_to_f32")
+fn bits_to_f32(bits: Int) -> Float = _
+// i64 → f32 directly (single rounding) — `n as f32`.
+@intrinsic("almide_rt_prim_i2f32")
+fn i2f32(x: Int) -> Float32 = _
+// Float32 → its 32-bit pattern as Int (identity reinterpret — the f32 bits ARE the low 32).
+@intrinsic("almide_rt_prim_f32bits")
+fn f32bits(x: Float32) -> Int = _
+// Abort: write the message bytes at String-block address `s` to STDERR and
+// exit(1) — the self-host arm of the §13 termination convention (math.pow
+// negative exponent, int.rotate nonpositive width). Never returns.
+@intrinsic("almide_rt_prim_die")
+fn die(s: Int) -> Unit = _
+// Generic-typed sibling of alloc_map_skv — the SAME 2n-slot map block, typed for
+// any key/value pair (map_ivh's Map[Int,String], map_hval's Map[String,List[Int]]).
+@intrinsic("almide_rt_prim_alloc_map_kv")
+fn alloc_map_kv[K, V](slots: Int) -> Map[K, V] = _

@@ -1,0 +1,12 @@
+// json_ctor — SELF-HOSTED json.object / json.array / json.stringify: thin
+// delegations to the PROVEN value_core implementations (the native runtime
+// does exactly the same: `almide_rt_json_stringify` forwards to
+// `almide_rt_value_stringify`, and the ctors are the same Object/Array
+// constructors). Registered as separate impl fns because the auto-link
+// renames one impl to one call name.
+
+fn json_object(entries: List[(String, Value)]) -> Value = value.object(entries)
+
+fn json_array(items: List[Value]) -> Value = value.array(items)
+
+fn json_stringify(v: Value) -> String = value.stringify(v)

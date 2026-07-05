@@ -1,0 +1,104 @@
+// datetime_calendar — SELF-HOSTED datetime.year/month/day/weekday for v1, the civil calendar from
+// a Unix-seconds timestamp (Howard Hinnant's `civil_from_days`), byte-matching runtime/rs/src/
+// datetime.rs. All intermediates stay non-negative after the era adjustment, so plain i64 division
+// equals v0's u64 math. The chain is split into NON-renamed `__c_*` helpers (a registered impl name
+// like `datetime_month` is rewritten to `datetime.month` at link time, so calling it intra-file
+// would dangle — the helpers keep their names). Each public fn recomputes the shared chain (pure,
+// so redundant but correct).
+
+fn __c_z(ts: Int) -> Int = ts / 86400 + 719468
+
+fn __c_era(ts: Int) -> Int = {
+  let z = __c_z(ts)
+  let zadj = if z >= 0 then z else z - 146096
+  zadj / 146097
+}
+
+fn __c_doe(ts: Int) -> Int = {
+  let z = __c_z(ts)
+  let era = __c_era(ts)
+  z - era * 146097
+}
+
+fn __c_yoe(ts: Int) -> Int = {
+  let doe = __c_doe(ts)
+  (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+}
+
+fn __c_doy(ts: Int) -> Int = {
+  let doe = __c_doe(ts)
+  let yoe = __c_yoe(ts)
+  doe - (365 * yoe + yoe / 4 - yoe / 100)
+}
+
+fn __c_mp(ts: Int) -> Int = {
+  let doy = __c_doy(ts)
+  (5 * doy + 2) / 153
+}
+
+// month: mp+3 for mp<10 (Mar..Dec), else mp-9 (Jan/Feb of the next civil year).
+fn __c_m(ts: Int) -> Int = {
+  let mp = __c_mp(ts)
+  if mp < 10 then mp + 3 else mp - 9
+}
+
+fn datetime_month(ts: Int) -> Int = __c_m(ts)
+
+fn datetime_day(ts: Int) -> Int = {
+  let doy = __c_doy(ts)
+  let mp = __c_mp(ts)
+  doy - (153 * mp + 2) / 5 + 1
+}
+
+fn datetime_year(ts: Int) -> Int = {
+  let yoe = __c_yoe(ts)
+  let era = __c_era(ts)
+  let y0 = yoe + era * 400
+  let m = __c_m(ts)
+  if m <= 2 then y0 + 1 else y0
+}
+
+// weekday: days since epoch mod 7, indexed into the week starting Thursday (1970-01-01 = Thursday).
+fn __wd_name(idx: Int) -> String =
+  if idx == 0 then "Thursday"
+  else if idx == 1 then "Friday"
+  else if idx == 2 then "Saturday"
+  else if idx == 3 then "Sunday"
+  else if idx == 4 then "Monday"
+  else if idx == 5 then "Tuesday"
+  else "Wednesday"
+
+fn datetime_weekday(ts: Int) -> String = {
+  let idx = (((ts / 86400) % 7) + 7) % 7
+  __wd_name(idx)
+}
+
+// from_parts: the INVERSE civil algorithm (epoch_from_civil) — (y,m,d) → days since epoch, then
+// *86400 + the time-of-day seconds. Same non-negative-i64 reasoning as the forward direction.
+fn __ep_yadj(y: Int, m: Int) -> Int = if m <= 2 then y - 1 else y
+
+fn __ep_era(y: Int, m: Int) -> Int = {
+  let ya = __ep_yadj(y, m)
+  let eadj = if ya >= 0 then ya else ya - 399
+  eadj / 400
+}
+
+fn __ep_doy(m: Int, d: Int) -> Int = {
+  let mp = if m > 2 then m - 3 else m + 9
+  (153 * mp + 2) / 5 + d - 1
+}
+
+fn __ep_doe(y: Int, m: Int, d: Int) -> Int = {
+  let ya = __ep_yadj(y, m)
+  let era = __ep_era(y, m)
+  let yoe = ya - era * 400
+  let doy = __ep_doy(m, d)
+  yoe * 365 + yoe / 4 - yoe / 100 + doy
+}
+
+fn datetime_from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = {
+  let era = __ep_era(y, m)
+  let doe = __ep_doe(y, m, d)
+  let days = era * 146097 + doe - 719468
+  days * 86400 + h * 3600 + min * 60 + s
+}

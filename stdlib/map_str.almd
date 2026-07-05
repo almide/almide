@@ -1,0 +1,351 @@
+// map_str — SELF-HOSTED Map[String,String] (the heap-key+heap-value map). Physically a DynListStr
+// of INTERLEAVED key+value String handles [k0,v0,k1,v1,...]; every slot is a String, so the uniform
+// DropListStr frees all. The `len` header is the SLOT count (2*entries) so DropListStr frees them
+// all; map.len reads len/2. Entry i: key@(h+12+i*16), value@(+8). Keys compared by byte equality.
+// Insertion-ordered (v0's AlmideMap). __str_eq is duplicated (deduped by name across modules).
+
+fn __str_eq_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else {
+    let ca = prim.load8(pa + i)
+    let cb = prim.load8(pb + i)
+    if ca == cb then __str_eq_bytes(pa, pb, n, i + 1)
+    else false
+  }
+
+fn __str_eq(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  if la != lb then false
+  else __str_eq_bytes(ha + 12, hb + 12, la, 0)
+}
+
+// Index of key k among the first `entries` entries at block-handle h, or -1.
+fn __mstr_find(h: Int, entries: Int, k: String, i: Int) -> Int =
+  if i >= entries then 0 - 1
+  else {
+    let kk = prim.load_str(h + 12 + i * 16)
+    let eq = __str_eq(kk, k)
+    if eq then i
+    else __mstr_find(h, entries, k, i + 1)
+  }
+
+fn map_new_str() -> Map[String, String] = prim.alloc_map_str(0)
+
+fn map_len_str(m: Map[String, String]) -> Int = {
+  let n = prim.load32(prim.handle(m) + 4)
+  n / 2
+}
+
+fn map_is_empty_str(m: Map[String, String]) -> Bool = prim.load32(prim.handle(m) + 4) == 0
+
+fn map_contains_str(m: Map[String, String], k: String) -> Bool = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let entries = n / 2
+  let idx = __mstr_find(h, entries, k, 0)
+  idx >= 0
+}
+
+// Some(a deep COPY of the value) when the key is found; None otherwise (a materialized Option).
+fn __mget_str_none() -> Option[String] = None
+fn __mget_str_some(h: Int, idx: Int) -> Option[String] = {
+  let v = prim.load_str(h + 12 + idx * 16 + 8)
+  let copy = string.repeat(v, 1)
+  Some(copy)
+}
+
+fn map_get_str(m: Map[String, String], k: String) -> Option[String] = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let entries = n / 2
+  let idx = __mstr_find(h, entries, k, 0)
+  if idx < 0 then __mget_str_none()
+  else __mget_str_some(h, idx)
+}
+
+// Deep-copy String `s` into the result slot at `addr` (the copy is created AND consumed here —
+// no cross-branch conditional consume).
+fn __store_copy(addr: Int, s: String) -> Int = {
+  let copy = string.repeat(s, 1)
+  prim.store_str(addr, copy)
+  0
+}
+
+// Store the value slot: a deep copy of `newv` when the key matched (eq), else of the old value.
+fn __mset_value(eq: Bool, addr: Int, newv: String, oldv: String) -> Int =
+  if eq then __store_copy(addr, newv)
+  else __store_copy(addr, oldv)
+
+// Copy every entry (key + value) from sh to rh; the entry whose key equals k gets `newv` as its
+// value (the in-place update), all others keep their old value. Keys are always deep-copied.
+fn __mset_copy(sh: Int, rh: Int, entries: Int, k: String, newv: String, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 16)
+    let _kc = __store_copy(rh + 12 + i * 16, kk)
+    let oldv = prim.load_str(sh + 12 + i * 16 + 8)
+    let eq = __str_eq(kk, k)
+    let _vc = __mset_value(eq, rh + 12 + i * 16 + 8, newv, oldv)
+    __mset_copy(sh, rh, entries, k, newv, i + 1)
+  }
+
+// Append a fresh (k, v) entry at slot `entries` — ONLY when the key was new (idx < 0).
+fn __mset_append(rh: Int, entries: Int, idx: Int, k: String, v: String) -> Int =
+  if idx >= 0 then 0
+  else {
+    let _kc = __store_copy(rh + 12 + entries * 16, k)
+    let _vc = __store_copy(rh + 12 + entries * 16 + 8, v)
+    0
+  }
+
+fn map_set_str(m: Map[String, String], k: String, v: String) -> Map[String, String] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let entries = n / 2
+  let idx = __mstr_find(sh, entries, k, 0)
+  let extra = if idx < 0 then 1 else 0
+  let rentries = entries + extra
+  let rslots = rentries * 2
+  let r = prim.alloc_map_str(rslots)
+  let rh = prim.handle(r)
+  let _c = __mset_copy(sh, rh, entries, k, v, 0)
+  let _a = __mset_append(rh, entries, idx, k, v)
+  prim.store32(rh + 4, rslots)
+  r
+}
+
+// map.keys / map.values — extract each entry's key (even slot) / value (odd slot) into a fresh
+// List[String], deep-copied so the list owns them independently of the map.
+fn __mkeys_fill(sh: Int, oh: Int, entries: Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let k = prim.load_str(sh + 12 + i * 16)
+    let _c = __store_copy(oh + 12 + i * 8, k)
+    __mkeys_fill(sh, oh, entries, i + 1)
+  }
+
+fn map_keys_str(m: Map[String, String]) -> List[String] = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let entries = n / 2
+  let out = prim.alloc_list_str(entries)
+  let oh = prim.handle(out)
+  let _x = __mkeys_fill(h, oh, entries, 0)
+  out
+}
+
+fn __mvalues_fill(sh: Int, oh: Int, entries: Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let v = prim.load_str(sh + 12 + i * 16 + 8)
+    let _c = __store_copy(oh + 12 + i * 8, v)
+    __mvalues_fill(sh, oh, entries, i + 1)
+  }
+
+fn map_values_str(m: Map[String, String]) -> List[String] = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let entries = n / 2
+  let out = prim.alloc_list_str(entries)
+  let oh = prim.handle(out)
+  let _x = __mvalues_fill(h, oh, entries, 0)
+  out
+}
+
+// map.remove — copy every entry EXCEPT the one keyed k (preserving survivors' order); deep copies.
+fn __mremove_fill(sh: Int, rh: Int, entries: Int, k: String, i: Int, w: Int) -> Int =
+  if i >= entries then w
+  else {
+    let kk = prim.load_str(sh + 12 + i * 16)
+    let eq = __str_eq(kk, k)
+    if eq then __mremove_fill(sh, rh, entries, k, i + 1, w)
+    else {
+      let _kc = __store_copy(rh + 12 + w * 16, kk)
+      let vv = prim.load_str(sh + 12 + i * 16 + 8)
+      let _vc = __store_copy(rh + 12 + w * 16 + 8, vv)
+      __mremove_fill(sh, rh, entries, k, i + 1, w + 1)
+    }
+  }
+
+fn map_remove_str(m: Map[String, String], k: String) -> Map[String, String] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let entries = n / 2
+  let r = prim.alloc_map_str(n)
+  let rh = prim.handle(r)
+  let w = __mremove_fill(sh, rh, entries, k, 0, 0)
+  prim.store32(rh + 4, w * 2)
+  r
+}
+
+// map.merge — a's entries (overridden by b where keys overlap), then b's keys not in a. Each value
+// is the FINAL value, deep-copied once (no free-then-replace): for an a-key also in b, copy b's
+// value; else a's. Then append b's new keys.
+fn __mmerge_aval(ah: Int, bh: Int, rh: Int, i: Int, bidx: Int) -> Int =
+  if bidx < 0 then {
+    let av = prim.load_str(ah + 12 + i * 16 + 8)
+    __store_copy(rh + 12 + i * 16 + 8, av)
+  }
+  else {
+    let bv = prim.load_str(bh + 12 + bidx * 16 + 8)
+    __store_copy(rh + 12 + i * 16 + 8, bv)
+  }
+
+fn __mmerge_copya(ah: Int, bh: Int, bentries: Int, rh: Int, aentries: Int, i: Int) -> Int =
+  if i >= aentries then 0
+  else {
+    let k = prim.load_str(ah + 12 + i * 16)
+    let _kc = __store_copy(rh + 12 + i * 16, k)
+    let bidx = __mstr_find(bh, bentries, k, 0)
+    let _vc = __mmerge_aval(ah, bh, rh, i, bidx)
+    __mmerge_copya(ah, bh, bentries, rh, aentries, i + 1)
+  }
+
+fn __mmerge_addnew(ah: Int, aentries: Int, bh: Int, bentries: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= bentries then w
+  else {
+    let k = prim.load_str(bh + 12 + j * 16)
+    let aidx = __mstr_find(ah, aentries, k, 0)
+    if aidx >= 0 then __mmerge_addnew(ah, aentries, bh, bentries, rh, j + 1, w)
+    else {
+      let v = prim.load_str(bh + 12 + j * 16 + 8)
+      let _kc = __store_copy(rh + 12 + w * 16, k)
+      let _vc = __store_copy(rh + 12 + w * 16 + 8, v)
+      __mmerge_addnew(ah, aentries, bh, bentries, rh, j + 1, w + 1)
+    }
+  }
+
+fn map_merge_str(a: Map[String, String], b: Map[String, String]) -> Map[String, String] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let an = prim.load32(ah + 4)
+  let bn = prim.load32(bh + 4)
+  let aentries = an / 2
+  let bentries = bn / 2
+  let cap = (aentries + bentries) * 2
+  let r = prim.alloc_map_str(cap)
+  let rh = prim.handle(r)
+  let _c = __mmerge_copya(ah, bh, bentries, rh, aentries, 0)
+  let w = __mmerge_addnew(ah, aentries, bh, bentries, rh, 0, aentries)
+  prim.store32(rh + 4, w * 2)
+  r
+}
+
+// map.update — if k is present, replace its value with f(old); else the map is unchanged. f is a
+// one-arity closure (String)->String. Entry count never changes. Deep-copy all keys + the unchanged
+// values; for the matching key store f(old) (created + consumed in __store_fv, no conditional consume).
+fn __store_fv(addr: Int, oldv: String, f: (String) -> String) -> Int = {
+  let nv = f(oldv)
+  prim.store_str(addr, nv)
+  0
+}
+
+fn __mupdate_val(eq: Bool, addr: Int, oldv: String, f: (String) -> String) -> Int =
+  if eq then __store_fv(addr, oldv, f)
+  else __store_copy(addr, oldv)
+
+fn __mupdate_copy(sh: Int, rh: Int, entries: Int, k: String, f: (String) -> String, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 16)
+    let _kc = __store_copy(rh + 12 + i * 16, kk)
+    let oldv = prim.load_str(sh + 12 + i * 16 + 8)
+    let eq = __str_eq(kk, k)
+    let _vc = __mupdate_val(eq, rh + 12 + i * 16 + 8, oldv, f)
+    __mupdate_copy(sh, rh, entries, k, f, i + 1)
+  }
+
+fn map_update_str(m: Map[String, String], k: String, f: (String) -> String) -> Map[String, String] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let entries = n / 2
+  let r = prim.alloc_map_str(n)
+  let rh = prim.handle(r)
+  let _c = __mupdate_copy(sh, rh, entries, k, f, 0)
+  prim.store32(rh + 4, n)
+  r
+}
+
+// ── Higher-order Map[String,String] (closures machinery; the predicate f is a TWO-arity closure
+// f : (Key, Value) -> Bool with String args, heap-widened) ── filter keeps matching entries
+// (deep-copied); all/any/count read.
+
+fn __mfilter_fill(sh: Int, rh: Int, entries: Int, f: (String, String) -> Bool, i: Int, w: Int) -> Int =
+  if i >= entries then w
+  else {
+    let k = prim.load_str(sh + 12 + i * 16)
+    let v = prim.load_str(sh + 12 + i * 16 + 8)
+    let keep = f(k, v)
+    if keep then {
+      let _kc = __store_copy(rh + 12 + w * 16, k)
+      let _vc = __store_copy(rh + 12 + w * 16 + 8, v)
+      __mfilter_fill(sh, rh, entries, f, i + 1, w + 1)
+    } else {
+      __mfilter_fill(sh, rh, entries, f, i + 1, w)
+    }
+  }
+
+fn map_filter_str(m: Map[String, String], f: (String, String) -> Bool) -> Map[String, String] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let entries = n / 2
+  let r = prim.alloc_map_str(n)
+  let rh = prim.handle(r)
+  let w = __mfilter_fill(sh, rh, entries, f, 0, 0)
+  prim.store32(rh + 4, w * 2)
+  r
+}
+
+fn __mcount_hits(sh: Int, entries: Int, f: (String, String) -> Bool, i: Int, acc: Int) -> Int =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 16)
+    let v = prim.load_str(sh + 12 + i * 16 + 8)
+    let h = f(k, v)
+    if h then __mcount_hits(sh, entries, f, i + 1, acc + 1)
+    else __mcount_hits(sh, entries, f, i + 1, acc)
+  }
+
+fn map_all_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let entries = n / 2
+  let hits = __mcount_hits(sh, entries, f, 0, 0)
+  hits >= entries
+}
+
+fn map_any_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let entries = n / 2
+  let hits = __mcount_hits(sh, entries, f, 0, 0)
+  hits > 0
+}
+
+fn map_count_str(m: Map[String, String], f: (String, String) -> Bool) -> Int = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let entries = n / 2
+  __mcount_hits(sh, entries, f, 0, 0)
+}
+
+// map.fold — left fold with a THREE-arity closure f : (Acc, Key, Value) -> Acc (Int accumulator;
+// the closure mixes a scalar Acc with two heap String args — the uniform i64 ABI widens the handles).
+fn __mfold_loop(sh: Int, f: (Int, String, String) -> Int, entries: Int, i: Int, acc: Int) -> Int =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 16)
+    let v = prim.load_str(sh + 12 + i * 16 + 8)
+    let nacc = f(acc, k, v)
+    __mfold_loop(sh, f, entries, i + 1, nacc)
+  }
+
+fn map_fold_str(m: Map[String, String], init: Int, f: (Int, String, String) -> Int) -> Int = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let entries = n / 2
+  __mfold_loop(sh, f, entries, 0, init)
+}

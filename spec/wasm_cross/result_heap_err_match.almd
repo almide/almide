@@ -1,0 +1,11 @@
+// @contract: C-106
+// Camp-4 sub-case 1: a `match` over a SCALAR-Ok / HEAP-Err `Result[Int, String]` whose Err arm BINDS
+// + re-wraps the heap String error (`err(e) => err(e)` — the unwrap-`!` early-return shape). Reads the
+// len-as-tag @4 (a scalar result), binds slot-0 @12 as a BORROW, the Err arm auto-Dups the borrowed
+// String before re-wrapping, and the subject drops AFTER the arms (DropListStr frees slot-0 once). v0==v1.
+fn classify(cp: Int) -> Result[Int, String] = if cp >= 65 then ok(cp - 65) else err("bad")
+effect fn run(a: Int) -> Result[Int, String] = { let x = classify(a)!  ok(x + 1) }
+effect fn main() -> Unit = {
+  match run(66) { ok(n) => println("ok:" + int.to_string(n)), err(e) => println("err:" + e) }
+  match run(33) { ok(n) => println("ok:" + int.to_string(n)), err(e) => println("err:" + e) }
+}

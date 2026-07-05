@@ -1,0 +1,62 @@
+// list_fold — SELF-HOSTED `list.product` / `list.max` / `list.min` for v1 over the prim
+// floor: left folds over the i64 element slots. product returns the running product (1 for
+// the empty list); max/min return Some(extremum)/None (None for the empty list, a
+// materialized Option). This monomorphic List[Int] impl serves List[Int] (i64 elements);
+// other element types need a per-type variant. Reads only — `xs` borrowed.
+
+fn __product_fold(h: Int, len: Int, i: Int, acc: Int) -> Int =
+  if i >= len then acc
+  else {
+    let e = prim.load64(h + 12 + i * 8)
+    __product_fold(h, len, i + 1, acc * e)
+  }
+
+fn list_product(xs: List[Int]) -> Int = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  __product_fold(h, len, 0, 1)
+}
+
+fn __max_fold(h: Int, len: Int, i: Int, best: Int) -> Int =
+  if i >= len then best
+  else {
+    let e = prim.load64(h + 12 + i * 8)
+    let nb = if e > best then e else best
+    __max_fold(h, len, i + 1, nb)
+  }
+
+fn __min_fold(h: Int, len: Int, i: Int, best: Int) -> Int =
+  if i >= len then best
+  else {
+    let e = prim.load64(h + 12 + i * 8)
+    let nb = if e < best then e else best
+    __min_fold(h, len, i + 1, nb)
+  }
+
+// The non-empty Some result is built in TAIL position (the materialized-Option layout);
+// the fold seeds from element 0 and runs over the rest.
+fn __lmm_none() -> Option[Int] = None
+fn __lmax_at(h: Int, len: Int) -> Option[Int] = {
+  let first = prim.load64(h + 12)
+  let m = __max_fold(h, len, 1, first)
+  Some(m)
+}
+fn __lmin_at(h: Int, len: Int) -> Option[Int] = {
+  let first = prim.load64(h + 12)
+  let m = __min_fold(h, len, 1, first)
+  Some(m)
+}
+
+fn list_max(xs: List[Int]) -> Option[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then __lmm_none()
+  else __lmax_at(h, len)
+}
+
+fn list_min(xs: List[Int]) -> Option[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then __lmm_none()
+  else __lmin_at(h, len)
+}

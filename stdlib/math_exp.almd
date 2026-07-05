@@ -1,0 +1,78 @@
+// math_exp — SELF-HOSTED math.exp, a FAITHFUL transcription of runtime/rs/src/libm.rs exp (vendored
+// libm 0.2.16). Constants via prim.ffrombits(exact bits); float arithmetic is natural (the Float
+// operators lower to the prim float floor). vscalbn is the single-level form: exp's |k| < 1024 <
+// 2046, so one (x*2^1023, n-1023) / (x*2^-969, n+969) adjustment is exact (the libm triple-nest
+// never deepens in this range — verified by the bit-exact test).
+
+// vscalbn(y, n) for |n| < 2046: y * 2^n with the extreme-exponent split.
+fn __exp_scalbn(y: Float, n: Int) -> Float = {
+  let fexpmax = prim.ffrombits(9214364837600034816)    // 2^1023
+  let fexpmin = prim.ffrombits(4503599627370496)        // 2^-1022
+  let fpowsub = prim.ffrombits(4845873199050653696)     // 2^53
+  if n > 1023 then {
+    let y2 = y * fexpmax
+    let n2 = n - 1023
+    let scale = prim.ffrombits(prim.bshl(1023 + n2, 52))
+    y2 * scale
+  }
+  else if n < 0 - 1022 then {
+    let mul = fexpmin * fpowsub
+    let y2 = y * mul
+    let n2 = n + 969
+    let scale = prim.ffrombits(prim.bshl(1023 + n2, 52))
+    y2 * scale
+  }
+  else {
+    let scale = prim.ffrombits(prim.bshl(1023 + n, 52))
+    y * scale
+  }
+}
+
+// the polynomial + reconstruct, given the reduced x, k, hi, lo.
+fn __exp_poly(x: Float, k: Int, hi: Float, lo: Float) -> Float = {
+  let p1 = prim.ffrombits(4595172819793696062)
+  let p2 = prim.ffrombits(0 - 4654820494858601069)
+  let p3 = prim.ffrombits(4544508515198557740)
+  let p4 = prim.ffrombits(0 - 4702957295668925455)
+  let p5 = prim.ffrombits(4496342204012209360)
+  let xx = x * x
+  let c = x - xx * (p1 + xx * (p2 + xx * (p3 + xx * (p4 + xx * p5))))
+  let y = 1.0 + (x * c / (2.0 - c) - lo + hi)
+  if k == 0 then y else __exp_scalbn(y, k)
+}
+
+// argument reduction (3 cases) → __exp_poly, for |x| < 708.39-ish (the non-special path).
+fn __exp_main(x: Float, hx: Int, sign: Int) -> Float = {
+  let ln2hi = prim.ffrombits(4604418534311723008)
+  let ln2lo = prim.ffrombits(4461442080421002358)
+  let invln2 = prim.ffrombits(4609176140021203710)
+  if hx > 1071001650 then {                              // |x| > 0.5 ln2
+    let half = if sign == 0 then 0.5 else 0.0 - 0.5
+    let k = if hx >= 1072889522 then prim.f2i(invln2 * x + half) else 1 - sign - sign
+    let dk = prim.i2f(k)
+    let hi = x - dk * ln2hi
+    let lo = dk * ln2lo
+    let xr = hi - lo
+    __exp_poly(xr, k, hi, lo)
+  }
+  else if hx > 1043333120 then __exp_poly(x, 0, x, 0.0)  // |x| > 2^-28
+  else 1.0 + x                                            // tiny: 1 + x
+}
+
+fn math_exp(x: Float) -> Float = {
+  let bits = prim.fbits(x)
+  let u32 = prim.band(prim.bshr(bits, 32), 4294967295)
+  let sign = prim.bshr(u32, 31)
+  let hx = prim.band(u32, 2147483647)
+  if hx >= 1082531627 then {                             // |x| >= 708.39...
+    let isnan = prim.fne(x, x)
+    let ovf = prim.ffrombits(4649454530587146735)        // 709.782712893383973096
+    let zth = prim.ffrombits(0 - 4573606559926636463)    // -745.13321910194110842
+    let fexpmax = prim.ffrombits(9214364837600034816)    // 2^1023
+    if isnan then x
+    else if x > ovf then x * fexpmax                      // overflow -> +inf
+    else if x < zth then 0.0                              // underflow -> 0
+    else __exp_main(x, hx, sign)
+  }
+  else __exp_main(x, hx, sign)
+}

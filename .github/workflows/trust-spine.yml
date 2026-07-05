@@ -1,0 +1,141 @@
+name: Trust Spine (v1)
+
+# Enforce the v1 flight-grade trust spine in CI (weekly indicator ②):
+#   - the Rocq/Coq proof spine compiles, is independently re-checked (coqchk),
+#     and is axiom-clean (Print Assumptions = "Closed under the global context");
+#   - the kernel-proven checker is extracted and re-verifies the per-build
+#     witnesses (the PCC gate), INCLUDING a real .almd taken through the frontend;
+#   - almide-mir's own tests pass.
+# This is `make verify-trust` run on a clean machine — the third-party "make
+# verify". A red run blocks the claim; the trust spine can no longer silently
+# regress.
+#
+# CACHING (the toolchain is heavy: Rocq builds from source, OCaml 5.x, and a
+# large cargo graph via almide-mir's frontend dev-dep). Two durable caches make
+# every run after the first cheap:
+#   1. ~/.opam (OCaml + Rocq) — actions/cache, fixed key; built ONCE.
+#   2. the cargo build — Swatinem/rust-cache.
+
+on:
+  push:
+    branches: [develop-v1]
+    paths:
+      - 'proofs/**'
+      - 'crates/almide-mir/**'
+      - 'Makefile'
+      - '.github/workflows/trust-spine.yml'
+  pull_request:
+    branches: [develop-v1]
+    paths:
+      - 'proofs/**'
+      - 'crates/almide-mir/**'
+      - 'Makefile'
+      - '.github/workflows/trust-spine.yml'
+  workflow_dispatch:
+
+# A burst of pushes to the same ref re-runs the heavy job; cancel the superseded
+# run (the rate-limit lesson from ci.yml).
+concurrency:
+  group: trust-spine-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Bump this suffix to force a clean rebuild of the opam (Rocq) cache.
+  OPAM_CACHE_VERSION: v1
+  OCAML_VERSION: "5.4.1"
+
+jobs:
+  trust-spine:
+    # Skip on the Codeberg/Forgejo mirror; GitHub Actions is the capable CI.
+    if: github.server_url == 'https://github.com'
+    name: Coq proofs + axiom audit + PCC gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # ── Rust toolchain + cargo cache (almide-mir pulls in the frontend) ──
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+          # Key the cache to this job so it doesn't collide with the main CI.
+          prefix-key: "trust-spine"
+
+      # ── opam root (OCaml + Rocq) cache — built ONCE, restored thereafter ──
+      # Self-managed opam (not ocaml/setup-ocaml) so a single actions/cache owns
+      # ~/.opam end-to-end with a stable key.
+      # Restore now; SAVE only at the end on success (below) so a half-built or
+      # broken opam root is never cached.
+      - name: Restore opam root (OCaml + Rocq)
+        id: opam-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq9-${{ env.OPAM_CACHE_VERSION }}
+
+      - name: Install opam + wabt (wat2wasm for the A2 byte-binding grounding)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends opam wabt
+
+      - name: Build opam switch + Rocq (cache miss only)
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        run: |
+          opam init --bare --disable-sandboxing -y
+          opam switch create "${OCAML_VERSION}" -y
+          eval "$(opam env)"
+          # opam's published rocq-prover has no 9.1.1 (the local trusted base is a
+          # source build); CI re-derives on the latest opam 9.x — the proofs use
+          # only the Rocq-9 `From Stdlib Require` stdlib + basic List/Arith, stable
+          # across 9.x. The canonical trusted base stays 9.1.1 (TRUSTED_BASE.md).
+          opam install -y "rocq-prover>=9.0.0"
+
+      # coqc/coqchk are what proofs/*.sh invoke. Rocq 9 may expose the prover as
+      # `rocq compile` / `rocq check`; install guarded shims iff the classic
+      # binaries are absent, so the scripts work either way.
+      - name: Ensure coqc / coqchk on PATH
+        run: |
+          eval "$(opam env)"
+          BIN="$HOME/.local/bin"; mkdir -p "$BIN"
+          if ! command -v coqc >/dev/null 2>&1; then
+            printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"
+            echo "installed coqc shim → rocq compile"
+          fi
+          if ! command -v coqchk >/dev/null 2>&1; then
+            printf '#!/bin/sh\nexec rocq check "$@"\n' > "$BIN/coqchk"; chmod +x "$BIN/coqchk"
+            echo "installed coqchk shim → rocq check"
+          fi
+          echo "$BIN" >> "$GITHUB_PATH"
+
+      - name: Toolchain diagnostic
+        run: |
+          eval "$(opam env)"
+          echo "rocq:     $(command -v rocq || echo MISSING)"
+          echo "coqc:     $(command -v coqc || echo MISSING)"
+          echo "coqchk:   $(command -v coqchk || echo MISSING)"
+          echo "ocamlopt: $(command -v ocamlopt || echo MISSING)"
+          coqc --version || true
+          coqchk --version || true
+          ocamlopt --version || true
+          cargo --version
+
+      - name: make verify-trust (proof spine + axiom audit + PCC gate + tests)
+        run: |
+          eval "$(opam env)"
+          make verify-trust
+
+      - name: make receipt (the honest claim bundle)
+        run: |
+          eval "$(opam env)"
+          make receipt
+
+      # Save the opam (Rocq) root ONLY after a green run and only on a miss, so
+      # the cache always holds a known-good toolchain.
+      - name: Save opam root (OCaml + Rocq)
+        if: success() && steps.opam-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq9-${{ env.OPAM_CACHE_VERSION }}

@@ -1,0 +1,14 @@
+// @contract: C-104
+// A tail-recursive accumulator whose loop body has a LET-BOUND heap-result `if` (base64 encode_chunks:
+// `let c2 = if remaining>1 then … else …`). Pre-desugaring before the TCO tail-duplicates the
+// continuation (the recursive call + accumulator append) into each arm, turning it into BRANCHED
+// recursion the TCO's tco_collect handles (it recurses both if arms) — the let-bound `if` is eliminated.
+// Byte-matches v0.
+local fn build(n: Int, pos: Int, acc: String) -> String =
+  if pos >= n then acc
+  else {
+    let c0 = "a"
+    let c1 = if pos > 1 then "B" else "b"
+    build(n, pos + 1, acc + c0 + c1)
+  }
+fn main() -> Unit = { println(build(4, 0, "")) }

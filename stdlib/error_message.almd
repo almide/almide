@@ -1,0 +1,25 @@
+// error_message — SELF-HOSTED `error.message(r)` for v1 = Ok → "" , Err → a COPY of the message (v0's
+// `match r { Ok(_) => String::new(), Err(e) => e.clone() }`). A SCALAR Result[Int,String] (len-as-
+// tag): len 0 = Ok (the "" arm), len != 0 = Err (slot 0 is the message String handle). `r` borrowed;
+// the result is a fresh owned String (never reads the Ok payload, so any Result[T,String] is fine).
+fn __emsg_copy(blen: Int, src: Int, dst: Int, i: Int) -> Int =
+  if i >= blen then 0
+  else {
+    prim.store8(dst + i, prim.load8(src + i))
+    __emsg_copy(blen, src, dst, i + 1)
+  }
+
+fn __emsg_err(msg_h: Int) -> String = {
+  let blen = prim.load32(msg_h + 4)
+  let out = prim.alloc_str(blen)
+  let dh = prim.handle(out) + 12
+  let _c = __emsg_copy(blen, msg_h + 12, dh, 0)
+  out
+}
+
+fn error_message(r: Result[Int, String]) -> String = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let msg_h = prim.load64(h + 12)
+  if len == 0 then "" else __emsg_err(msg_h)
+}

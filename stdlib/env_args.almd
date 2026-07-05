@@ -1,0 +1,11 @@
+// env_args — SELF-HOSTED `env.args()` over the WASI CLI-args floor (prim.args_get_list),
+// the v1 trust-spine realization of the effectful `env.args`. Returns the program's
+// command-line arguments `argv[1..]` (SKIPPING argv[0] = the program path), matching native
+// `env.args` (std::env::args() with the binary name removed). The prim packages the
+// `args_sizes_get` + `args_get` WASI sequence and the `List[String]` construction; the
+// result is a fresh OWNED `List[String]` (each element an owned String), dropped at scope
+// end (recursive DropListStr — no leak). Because this body reaches prim.args_get_list, its
+// cap_witness carries Capability::CliArgs — so a caller is caps-verified ONLY if it declares
+// CliArgs (an `effect fn`); a pure `fn` reaching it is a frontend error AND would REJECT at
+// the gate.
+effect fn env_args() -> List[String] = prim.args_get_list()

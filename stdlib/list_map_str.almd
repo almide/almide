@@ -1,0 +1,21 @@
+// list_map_str — SELF-HOSTED list.map over a List[String] (the repr-poly variant of list.map; the
+// dispatch routes here when the result element type is heap). Builds a fresh DynListStr (nested
+// ownership) and fills slot i with f(xs[i]): each input element is BORROWED via prim.load_str (the
+// list keeps owning it), passed to the closure f over the uniform-i64 heap-arg ABI, and f's FRESH
+// owned String result is MOVED into the result via prim.store_str. Source borrowed; result owned.
+
+fn __mapstr_fill(dh: Int, sh: Int, f: (String) -> String, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let y = f(x)
+    prim.store_str(dh + 12 + i * 8, y)
+    __mapstr_fill(dh, sh, f, n, i + 1)
+  }
+
+fn list_map_str(xs: List[String], f: (String) -> String) -> List[String] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list_str(n)
+  let _x = __mapstr_fill(prim.handle(buf), prim.handle(xs), f, n, 0)
+  buf
+}

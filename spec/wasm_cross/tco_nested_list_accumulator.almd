@@ -1,0 +1,21 @@
+// @contract: C-104
+// A tail-recursive List[Int] accumulator grown via a let-bound, NESTED heap-result `if` with an inner
+// let (base64 decode_chunks's new_acc). Three desugars compose: the let-bound-if pre-desugar branches
+// the recursion; flatten-let-block hoists `let new_acc = { let b1=…; acc+[..,b1] }` to `let b1=…; let
+// new_acc = acc+[..,b1]`; inline-tail-accumulator inlines the single-use new_acc into `recurse(.., acc
+// +[..])` so is_self_append admits it. v0==v1.
+local fn build(n: Int, pos: Int, acc: List[Int]) -> List[Int] = {
+  if pos >= n then acc
+  else {
+    let r = n - pos
+    let new_acc = if r >= 2 then {
+      let b1 = pos + 1
+      if r >= 3 then acc + [pos, b1, pos + 2] else acc + [pos, b1]
+    } else acc + [pos]
+    build(n, pos + 3, new_acc)
+  }
+}
+fn main() -> Unit = {
+  println(int.to_string(list.len(build(7, 0, []))))
+  println(int.to_string(list.len(build(4, 0, []))))
+}

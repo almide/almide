@@ -27,5 +27,4 @@ pub mod builder;
 
 pub use layout::LayoutRegistry;
 pub use builder::WasmBuilder;
-pub use builder::{Imm32, Imm64, Local};
 pub use ir::verify_func_stack;

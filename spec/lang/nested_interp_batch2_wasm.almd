@@ -1,0 +1,23 @@
+// wasm:enabled
+// More nested-compound interps (all byte-identical to v0):
+//   Option[Option[List[Int]]]           → some(some([1, 2])) / some(none) / none
+//   Option[Result[List[Int], String]]   → some(ok([1, 2])) / some(err("<q>")) / none
+//   Result[Option[List[String]], String]→ ok(some(["a"])) / ok(none) / err("<q>")
+//   Result[Map[String, Int], String]    → ok(["a": 1]) / err("<q>")   (ResultOk map materialization)
+effect fn main() -> Unit = {
+  let a: Option[Option[List[Int]]] = some(some([1, -2, 3]))
+  let b: Option[Option[List[Int]]] = some(none)
+  let c: Option[Option[List[Int]]] = none
+  println("${a}") println("${b}") println("${c}")
+  let d: Option[Result[List[Int], String]] = some(ok([10, 20]))
+  let e: Option[Result[List[Int], String]] = some(err("boom"))
+  let f: Option[Result[List[Int], String]] = none
+  println("${d}") println("${e}") println("${f}")
+  let g: Result[Option[List[String]], String] = ok(some(["x", "y\"z"]))
+  let h: Result[Option[List[String]], String] = ok(none)
+  let i: Result[Option[List[String]], String] = err("oops")
+  println("${g}") println("${h}") println("${i}")
+  let j: Result[Map[String, Int], String] = ok(["a": 1, "b": -7])
+  let k: Result[Map[String, Int], String] = err("bad map")
+  println("${j}") println("${k}")
+}

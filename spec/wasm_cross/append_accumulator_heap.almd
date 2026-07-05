@@ -1,0 +1,20 @@
+// @contract: C-105
+// HEAP-ELEMENT append-accumulator TCO (option C, widening the proven chain to owned-handle elements).
+// `acc + [s]` over a `List[String]` (each slot an OWNED String handle) lowers like the scalar case —
+// a fresh owned slot, drop-old/acquire-new per iteration, cert `i(id)m` — but the concat is the
+// rc-incrementing `__list_concat_rc`: the new list ACQUIRES its own reference per element (prim.rc_inc,
+// cert-invisible), so the source's recursive `DropListStr` frees only its own refs. The list BLOCK's
+// `i(id)m` is the proven part; per-element leak-safety is the differential byte-match's burden.
+// (O(n^2) copy like v0; n kept small.)
+fn build_s(n: Int, acc: List[String]) -> List[String] =
+  if n <= 0 then acc
+  else build_s(n - 1, acc + ["x"])
+
+fn extend_s(n: Int, acc: List[String]) -> List[String] =
+  if n <= 0 then acc
+  else extend_s(n - 1, acc + ["ab"])
+
+fn main() -> Unit = {
+  println(int.to_string(list.len(build_s(4, []))))            // 4
+  println(list.join(extend_s(3, ["seed"]), ","))             // seed,ab,ab,ab
+}

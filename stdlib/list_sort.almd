@@ -1,0 +1,148 @@
+// list_sort — SELF-HOSTED `list.sort` for v1 over the prim floor: copy the elements into a
+// fresh List[Int] (prim.alloc_list) and selection-sort it in place by ascending i64 value.
+// Sound + loop-bounded (i64 value copies, no new heap elements). List[Int] only: a heap-
+// element list would be sorted by HANDLE address, not value — a per-type refinement. O(n^2)
+// with O(n) recursion depth (very long lists may exhaust the stack; TCO is a later add).
+
+fn __sort_load(h: Int, i: Int) -> Int = prim.load64(h + 12 + i * 8)
+
+// Index of the minimum element in [i, n), scanning j from `i+1`, best starting at `i`.
+fn __sort_min(h: Int, n: Int, j: Int, best: Int) -> Int =
+  if j >= n then best
+  else {
+    let e = __sort_load(h, j)
+    let be = __sort_load(h, best)
+    let nb = if e < be then j else best
+    __sort_min(h, n, j + 1, nb)
+  }
+
+// Selection-sort the buffer at handle `h` (n elements) in place.
+fn __sort_sel(h: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let mi = __sort_min(h, n, i + 1, i)
+    let a = __sort_load(h, i)
+    let b = __sort_load(h, mi)
+    prim.store64(h + 12 + i * 8, b)
+    prim.store64(h + 12 + mi * 8, a)
+    __sort_sel(h, n, i + 1)
+  }
+
+fn __sort_copy(srch: Int, dsth: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(srch + 12 + i * 8)
+    prim.store64(dsth + 12 + i * 8, e)
+    __sort_copy(srch, dsth, n, i + 1)
+  }
+
+fn list_sort(xs: List[Int]) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list(n)
+  let bh = prim.handle(buf)
+  let _c = __sort_copy(h, bh, n, 0)
+  let _s = __sort_sel(bh, n, 0)
+  buf
+}
+
+// list.sort over a List[String] — sort by STRING CONTENT (lexicographic byte order, matching v0's
+// Rust String Ord), NOT by handle address (which the generic list_sort compares → arbitrary order,
+// the silent bug). A String is a handle; bytes at h+12, byte length at h+4. rc-copy the handles to
+// co-own (the result is a List[String] → recursive DropListStr; without rc_inc the result+source
+// double-free at scale), then selection-sort in place by content (handle swaps, no rc change).
+fn __strcmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int =
+  if k >= la then (if k >= lb then 0 else 0 - 1)
+  else if k >= lb then 1
+  else {
+    let ca = prim.load8(ah + 12 + k)
+    let cb = prim.load8(bh + 12 + k)
+    if ca < cb then 0 - 1
+    else if ca > cb then 1
+    else __strcmp_at(ah, bh, la, lb, k + 1)
+  }
+
+fn __strcmp(ah: Int, bh: Int) -> Int =
+  __strcmp_at(ah, bh, prim.load32(ah + 4), prim.load32(bh + 4), 0)
+
+// Takes the list HANDLES (srch/dsth), adds the +12 data offset itself — mirrors __sort_copy.
+fn __sort_copy_rc(srch: Int, dsth: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(srch + 12 + i * 8)
+    prim.rc_inc(e)
+    prim.store64(dsth + 12 + i * 8, e)
+    __sort_copy_rc(srch, dsth, n, i + 1)
+  }
+
+fn __sort_min_str(h: Int, n: Int, j: Int, best: Int) -> Int =
+  if j >= n then best
+  else {
+    let ej = prim.load64(h + 12 + j * 8)
+    let eb = prim.load64(h + 12 + best * 8)
+    let nb = if __strcmp(ej, eb) < 0 then j else best
+    __sort_min_str(h, n, j + 1, nb)
+  }
+
+fn __sort_sel_str(h: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let mi = __sort_min_str(h, n, i + 1, i)
+    let a = prim.load64(h + 12 + i * 8)
+    let b = prim.load64(h + 12 + mi * 8)
+    prim.store64(h + 12 + i * 8, b)
+    prim.store64(h + 12 + mi * 8, a)
+    __sort_sel_str(h, n, i + 1)
+  }
+
+fn list_sort_str(xs: List[String]) -> List[String] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __sort_copy_rc(h, bh, n, 0)
+  let _s = __sort_sel_str(bh, n, 0)
+  buf
+}
+
+// list.min / list.max over a List[String] — by CONTENT (like sort), not handle address (the generic
+// list_min/list_max compared the i64 handle → wrong element, a silent bug). Find the min/max INDEX by
+// __strcmp, then return Some(a fresh DEEP COPY of that element) via string.repeat — single-owned, the
+// source keeps its ref (the __get_str_some pattern; v0 clones too). Empty → None.
+fn __min_idx_str(h: Int, len: Int, i: Int, best: Int) -> Int =
+  if i >= len then best
+  else {
+    let e = prim.load64(h + 12 + i * 8)
+    let be = prim.load64(h + 12 + best * 8)
+    let nb = if __strcmp(e, be) < 0 then i else best
+    __min_idx_str(h, len, i + 1, nb)
+  }
+
+fn __max_idx_str(h: Int, len: Int, i: Int, best: Int) -> Int =
+  if i >= len then best
+  else {
+    let e = prim.load64(h + 12 + i * 8)
+    let be = prim.load64(h + 12 + best * 8)
+    let nb = if __strcmp(e, be) > 0 then i else best
+    __max_idx_str(h, len, i + 1, nb)
+  }
+
+// Some(a fresh DEEP COPY of element i) — mirrors list_get_str's __get_str_some (the else-arm must be a
+// CALL returning Option[String], not an inline Some(call) which walls the heap-result-if).
+fn __idx_str_some(h: Int, i: Int) -> Option[String] = {
+  let x = prim.load_str(h + 12 + i * 8)
+  let copy = string.repeat(x, 1)
+  Some(copy)
+}
+
+fn list_min_str(xs: List[String]) -> Option[String] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __idx_str_some(h, __min_idx_str(h, len, 1, 0))
+}
+
+fn list_max_str(xs: List[String]) -> Option[String] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __idx_str_some(h, __max_idx_str(h, len, 1, 0))
+}

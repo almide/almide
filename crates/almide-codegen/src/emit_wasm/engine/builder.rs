@@ -18,32 +18,6 @@ fn ma(offset: u32, ty: MemType) -> wasm_encoder::MemArg {
     wasm_encoder::MemArg { offset: offset as u64, align: ty.align_exp(), memory_index: 0 }
 }
 
-// ── ValueObjects for WASM numeric operands ───────────────────────────────
-// A raw integer can NEVER be passed where one of these is expected — that is a
-// compile error — so a bare "magic number" cannot reach a builder/macro call.
-// The number lives only inside the explicit `Local(n)` / `Imm32(n)` constructor
-// (typically a named const), making every operand intentional and greppable.
-
-/// A WASM local-variable index.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Local(pub u32);
-/// A 32-bit WASM immediate constant value.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Imm32(pub i32);
-/// A 64-bit WASM immediate constant value.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Imm64(pub i64);
-
-impl Local {
-    #[inline] pub const fn idx(self) -> u32 { self.0 }
-}
-impl Imm32 {
-    #[inline] pub const fn val(self) -> i32 { self.0 }
-}
-impl Imm64 {
-    #[inline] pub const fn val(self) -> i64 { self.0 }
-}
-
 impl<'a> WasmBuilder<'a> {
     pub fn new(f: &'a mut TrackedFunction, reg: &'a LayoutRegistry) -> Self {
         Self { f, reg }
@@ -72,15 +46,15 @@ impl<'a> WasmBuilder<'a> {
     /// Element address. Stack: `[base, index] → [addr]`
     pub fn elem_addr(&mut self, layout: LayoutId, field: FieldId, stride: u32) -> &mut Self {
         let off = self.reg.fixed_offset(layout, field);
-        self.i32c(Imm32(stride as i32)).mul().add();
-        if off != 0 { self.i32c(Imm32(off as i32)).add(); }
+        self.i32c(stride as i32).mul().add();
+        if off != 0 { self.i32c(off as i32).add(); }
         self
     }
 
     /// Compute field address (not load value). Stack: `[base] → [base + offset]`
     pub fn field_addr(&mut self, layout: LayoutId, field: FieldId) -> &mut Self {
         let off = self.reg.fixed_offset(layout, field);
-        if off != 0 { self.i32c(Imm32(off as i32)).add(); }
+        if off != 0 { self.i32c(off as i32).add(); }
         self
     }
 
@@ -89,14 +63,14 @@ impl<'a> WasmBuilder<'a> {
         let mf = self.reg.field(layout, field);
         match &mf.offset {
             FieldOffset::Fixed(n) => {
-                if *n != 0 { self.i32c(Imm32(*n as i32)).add(); }
+                if *n != 0 { self.i32c(*n as i32).add(); }
             }
             FieldOffset::AfterDynamic { base, size_field } => {
                 let size_off = self.reg.fixed_offset(layout, *size_field);
                 let size_ty = self.reg.field(layout, *size_field).ty;
-                self.tee(Local(temp)).emit_load(size_off, size_ty);
-                self.get(Local(temp)).add();
-                if *base != 0 { self.i32c(Imm32(*base as i32)).add(); }
+                self.tee(temp).emit_load(size_off, size_ty);
+                self.get(temp).add();
+                if *base != 0 { self.i32c(*base as i32).add(); }
             }
         }
         self
@@ -141,18 +115,18 @@ impl<'a> WasmBuilder<'a> {
         let data_off = self.reg.fixed_offset(LIST, list::DATA);
         let len_ty = self.reg.field(LIST, list::LEN).ty;
 
-        self.i32c(Imm32(0)).set(Local(idx));
+        self.i32c(0).set(idx);
         self.block(|w| { w.loop_(|w| {
-            w.get(Local(idx)).get(Local(list)).emit_load(len_off, len_ty);
+            w.get(idx).get(list).emit_load(len_off, len_ty);
             w.ge_u().br_if(1);
 
-            w.get(Local(list)).i32c(Imm32(data_off as i32)).add();
-            w.get(Local(idx)).i32c(Imm32(stride as i32)).mul().add();
-            w.set(Local(elem));
+            w.get(list).i32c(data_off as i32).add();
+            w.get(idx).i32c(stride as i32).mul().add();
+            w.set(elem);
 
             body(w);
 
-            w.get(Local(idx)).i32c(Imm32(1)).add().set(Local(idx));
+            w.get(idx).i32c(1).add().set(idx);
             w.br(0);
         }); });
     }
@@ -171,23 +145,23 @@ impl<'a> WasmBuilder<'a> {
         let tags_off = self.reg.fixed_offset(SWISS_MAP, map::TAGS);
 
         // Dense entries base = map + header + cap + cap*INDEX_SLOT_SIZE (after tags + index).
-        self.get(Local(map)).emit_load(cap_off, cap_ty).set(Local(cap_l));
-        self.get(Local(map)).i32c(Imm32(tags_off as i32)).add()
-            .get(Local(cap_l)).add()
-            .get(Local(cap_l)).i32c(Imm32(map::INDEX_SLOT_SIZE as i32)).mul().add()
-            .set(Local(eb));
+        self.get(map).emit_load(cap_off, cap_ty).set(cap_l);
+        self.get(map).i32c(tags_off as i32).add()
+            .get(cap_l).add()
+            .get(cap_l).i32c(map::INDEX_SLOT_SIZE as i32).mul().add()
+            .set(eb);
         // Reuse cap_l to hold the len bound (cap only needed for the base above).
-        self.get(Local(map)).emit_load(len_off, len_ty).set(Local(cap_l));
-        self.i32c(Imm32(0)).set(Local(idx));
+        self.get(map).emit_load(len_off, len_ty).set(cap_l);
+        self.i32c(0).set(idx);
 
         self.block(|w| { w.loop_(|w| {
-            w.get(Local(idx)).get(Local(cap_l)).ge_u().br_if(1);
+            w.get(idx).get(cap_l).ge_u().br_if(1);
 
-            w.get(Local(eb)).get(Local(idx)).i32c(Imm32(entry_stride as i32)).mul().add().set(Local(entry));
+            w.get(eb).get(idx).i32c(entry_stride as i32).mul().add().set(entry);
 
             body(w);
 
-            w.get(Local(idx)).i32c(Imm32(1)).add().set(Local(idx));
+            w.get(idx).i32c(1).add().set(idx);
             w.br(0);
         }); });
     }
@@ -207,10 +181,10 @@ impl<'a> WasmBuilder<'a> {
         let cap_off = self.reg.fixed_offset(layout, FieldId(1)); // CAP is always field 1
         let cap_ty = self.reg.field(layout, FieldId(1)).ty;
 
-        self.get(Local(len)).i32c(Imm32(stride as i32)).mul().i32c(Imm32(hdr as i32)).add();
-        self.call(alloc_fn).tee(Local(out));
-        self.get(Local(len)).emit_store(len_off, len_ty);
-        self.get(Local(out)).get(Local(len)).emit_store(cap_off, cap_ty);
+        self.get(len).i32c(stride as i32).mul().i32c(hdr as i32).add();
+        self.call(alloc_fn).tee(out);
+        self.get(len).emit_store(len_off, len_ty);
+        self.get(out).get(len).emit_store(cap_off, cap_ty);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -218,19 +192,19 @@ impl<'a> WasmBuilder<'a> {
     // ════════════════════════════════════════════════════════════════
 
     pub fn rc_inc(&mut self, ptr: u32, fn_idx: u32) -> &mut Self {
-        self.get(Local(ptr)).call(fn_idx)
+        self.get(ptr).call(fn_idx)
     }
 
     pub fn rc_dec(&mut self, ptr: u32, fn_idx: u32) -> &mut Self {
-        self.get(Local(ptr)).call(fn_idx)
+        self.get(ptr).call(fn_idx)
     }
 
     /// COW check: if rc > 1, clone.
     pub fn cow_check(&mut self, ptr: u32, clone: impl FnOnce(&mut Self)) {
         let neg = self.reg.alloc_header_neg_offset(alloc::RC);
         let rc_ty = self.reg.field(ALLOC_HEADER, alloc::RC).ty;
-        self.get(Local(ptr)).i32c(Imm32(neg as i32)).sub().emit_load(0, rc_ty);
-        self.i32c(Imm32(1)).gt_u();
+        self.get(ptr).i32c(neg as i32).sub().emit_load(0, rc_ty);
+        self.i32c(1).gt_u();
         self.if_void(clone, |_| {});
     }
 
@@ -266,15 +240,15 @@ impl<'a> WasmBuilder<'a> {
     pub fn raw(&mut self, i: Instruction<'_>) -> &mut Self { self.f.instruction(&i); self }
 
     // locals / globals
-    pub fn get(&mut self, l: Local) -> &mut Self { self.f.instruction(&Instruction::LocalGet(l.idx())); self }
-    pub fn set(&mut self, l: Local) -> &mut Self { self.f.instruction(&Instruction::LocalSet(l.idx())); self }
-    pub fn tee(&mut self, l: Local) -> &mut Self { self.f.instruction(&Instruction::LocalTee(l.idx())); self }
+    pub fn get(&mut self, l: u32) -> &mut Self { self.f.instruction(&Instruction::LocalGet(l)); self }
+    pub fn set(&mut self, l: u32) -> &mut Self { self.f.instruction(&Instruction::LocalSet(l)); self }
+    pub fn tee(&mut self, l: u32) -> &mut Self { self.f.instruction(&Instruction::LocalTee(l)); self }
     pub fn gget(&mut self, g: u32) -> &mut Self { self.f.instruction(&Instruction::GlobalGet(g)); self }
     pub fn gset(&mut self, g: u32) -> &mut Self { self.f.instruction(&Instruction::GlobalSet(g)); self }
 
     // constants
-    pub fn i32c(&mut self, v: Imm32) -> &mut Self { self.f.instruction(&Instruction::I32Const(v.val())); self }
-    pub fn i64c(&mut self, v: Imm64) -> &mut Self { self.f.instruction(&Instruction::I64Const(v.val())); self }
+    pub fn i32c(&mut self, v: i32) -> &mut Self { self.f.instruction(&Instruction::I32Const(v)); self }
+    pub fn i64c(&mut self, v: i64) -> &mut Self { self.f.instruction(&Instruction::I64Const(v)); self }
     pub fn f64c(&mut self, v: f64) -> &mut Self { self.f.instruction(&Instruction::F64Const(v.into())); self }
 
     // i32 ops
@@ -326,9 +300,9 @@ mod tests {
         let mut f = func();
         let mut w = WasmBuilder::new(&mut f, &reg);
         // String LEN @ 0, align=2; CAP @ 4, align=2; DATA @ 8, align=0
-        w.get(Local(0)).field_load(STRING, string::LEN);
-        w.get(Local(0)).field_load(STRING, string::CAP);
-        w.get(Local(0)).field_load(STRING, string::DATA);
+        w.get(0).field_load(STRING, string::LEN);
+        w.get(0).field_load(STRING, string::CAP);
+        w.get(0).field_load(STRING, string::DATA);
     }
 
     #[test]
@@ -353,7 +327,7 @@ mod tests {
         let reg = LayoutRegistry::new();
         let mut f = func();
         let mut w = WasmBuilder::new(&mut f, &reg);
-        w.list_foreach(0, 1, 2, 4, |w| { w.get(Local(1)).emit_load(0, MemType::I32).drop_(); });
+        w.list_foreach(0, 1, 2, 4, |w| { w.get(1).emit_load(0, MemType::I32).drop_(); });
     }
 
     #[test]
@@ -361,7 +335,7 @@ mod tests {
         let reg = LayoutRegistry::new();
         let mut f = func();
         let mut w = WasmBuilder::new(&mut f, &reg);
-        w.map_foreach(0, 1, 2, 3, 4, 8, |w| { w.get(Local(1)).emit_load(0, MemType::I32).drop_(); });
+        w.map_foreach(0, 1, 2, 3, 4, 8, |w| { w.get(1).emit_load(0, MemType::I32).drop_(); });
     }
 
     #[test]
@@ -369,7 +343,7 @@ mod tests {
         let reg = LayoutRegistry::new();
         let mut f = func();
         let mut w = WasmBuilder::new(&mut f, &reg);
-        w.get(Local(0)).dyn_field_addr(1, SWISS_MAP, map::ENTRIES);
+        w.get(0).dyn_field_addr(1, SWISS_MAP, map::ENTRIES);
     }
 
     // ── Perceus integration tests ──
@@ -382,7 +356,7 @@ mod tests {
         let rc_dec_fn = 12;
         // Typed RcDec for List[String]: iterate elements, rc_dec each
         w.list_foreach(0, 1, 2, MemType::I32.byte_size(), |w| {
-            w.get(Local(1)).emit_load(0, MemType::I32); // load element ptr
+            w.get(1).emit_load(0, MemType::I32); // load element ptr
             w.call(rc_dec_fn);
         });
         w.rc_dec(0, rc_dec_fn);
@@ -395,7 +369,7 @@ mod tests {
         let mut w = WasmBuilder::new(&mut f, &reg);
         let rc_dec_fn = 12;
         // Load env_ptr from closure pair, then rc_dec it
-        w.get(Local(0)).field_load(CLOSURE_PAIR, closure::ENV_PTR);
+        w.get(0).field_load(CLOSURE_PAIR, closure::ENV_PTR);
         w.call(rc_dec_fn);
         w.rc_dec(0, rc_dec_fn);
     }
@@ -407,9 +381,9 @@ mod tests {
         let mut w = WasmBuilder::new(&mut f, &reg);
         let rc_dec_fn = 12;
         // Option[String]: if tag == Some(1), dec the payload
-        w.get(Local(0)).field_load(OPTION, tagged::TAG);
+        w.get(0).field_load(OPTION, tagged::TAG);
         w.if_void(|w| {
-            w.get(Local(0)).field_load(OPTION, tagged::PAYLOAD);
+            w.get(0).field_load(OPTION, tagged::PAYLOAD);
             w.call(rc_dec_fn);
         }, |_| {});
         w.rc_dec(0, rc_dec_fn);
@@ -421,8 +395,8 @@ mod tests {
         let mut f = func();
         let mut w = WasmBuilder::new(&mut f, &reg);
         // Load variant tag via layout, no hardcoded 0 offset
-        w.get(Local(0)).field_load(VARIANT, tagged::TAG);
-        w.i32c(Imm32(1)).eq(); // check if tag == 1
+        w.get(0).field_load(VARIANT, tagged::TAG);
+        w.i32c(1).eq(); // check if tag == 1
         w.drop_();
     }
 
@@ -435,9 +409,9 @@ mod tests {
         let entry_stride = 8; // key:i32 + val:i32
         // Map[String, String]: iterate entries, dec both key and val
         w.map_foreach(0, 1, 2, 3, 4, entry_stride, |w| {
-            w.get(Local(1)).emit_load(0, MemType::I32).call(rc_dec_fn); // key
+            w.get(1).emit_load(0, MemType::I32).call(rc_dec_fn); // key
             let val_off = MemType::I32.byte_size();
-            w.get(Local(1)).emit_load(val_off, MemType::I32).call(rc_dec_fn); // val
+            w.get(1).emit_load(val_off, MemType::I32).call(rc_dec_fn); // val
         });
         w.rc_dec(0, rc_dec_fn);
     }

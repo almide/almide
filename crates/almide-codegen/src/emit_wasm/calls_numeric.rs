@@ -1,36 +1,9 @@
 //! Float, Int, and Math stdlib call dispatch for WASM codegen.
 
-use crate::emit_wasm::engine::{Imm32, Imm64, Local};
 use super::FuncCompiler;
 use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use wasm_encoder::Instruction;
-
-// ── Named immediates ─────────────────────────────────────────────────────────
-/// Number of bits in an i64 register.
-const I64_BITS: i64 = 64;
-/// Highest bit index in an i64 (= I64_BITS - 1); used in `63 - clz(n)`.
-const I64_MAX_BIT_IDX: i64 = 63;
-/// Number of bytes in an i64; also the byte_swap loop iteration count.
-const I64_BYTES: i64 = 8;
-/// Base for hexadecimal numeral system.
-const HEX_BASE: i64 = 16;
-/// Mask retaining the low 32 bits of an i64 (u32 range).
-const U32_MASK: i64 = 0xFFFF_FFFF;
-/// Mask retaining the low 8 bits of an i64/i32 (one byte).
-const LOW_BYTE_MASK_I64: i64 = 0xFF;
-/// ASCII code point for '0' (i32); used for digit '0'–'9' in hex output.
-const ASCII_ZERO: i32 = 48;
-/// Offset from a hex digit value (10..=15) to its lowercase ASCII letter
-/// ('a'=97, 97-10=87). Used in `to_hex` for letters a–f.
-const HEX_LETTER_OFFSET: i32 = 87;
-/// Decimal base; used to distinguish digit digits (< 10) from letter digits (>= 10).
-const DECIMAL_BASE: i32 = 10;
-/// Max bytes needed for an i64 hex string (16 hex digits + headroom = 20).
-const HEX_BUF_BYTES: i32 = 20;
-/// Loop start index for `factorial`: multiply from 2 upward.
-const FACTORIAL_START: i64 = 2;
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Bit width at and above which a `bits`-wide mask saturates to "all ones".
 /// `int.wrap_*` / `int.rotate_*` model an N-bit register; for `bits >= 64` the
@@ -54,11 +27,11 @@ impl FuncCompiler<'_> {
         // val_if_true when cond != 0. cond = (bits >= FULL_WIDTH_BITS).
         wasm!(self.func, {
             // val_if_true = u64::MAX  (saturated mask for bits >= 64)
-            i64_const(Imm64(FULL_WIDTH_MASK));
+            i64_const(FULL_WIDTH_MASK);
             // val_if_false = (1 << bits) - 1   (valid only for 0 <= bits < 64)
-            i64_const(Imm64(1)); local_get(Local(bits_local)); i64_shl; i64_const(Imm64(1)); i64_sub;
+            i64_const(1); local_get(bits_local); i64_shl; i64_const(1); i64_sub;
             // cond
-            local_get(Local(bits_local)); i64_const(Imm64(FULL_WIDTH_BITS)); i64_ge_s;
+            local_get(bits_local); i64_const(FULL_WIDTH_BITS); i64_ge_s;
             select;
         });
     }
@@ -76,22 +49,22 @@ impl FuncCompiler<'_> {
         let a = self.scratch.alloc_f64();
         let b = self.scratch.alloc_f64();
         self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(a)); });
+        wasm!(self.func, { local_set(a); });
         self.emit_expr(&args[1]);
-        wasm!(self.func, { local_set(Local(b)); });
+        wasm!(self.func, { local_set(b); });
         wasm!(self.func, {
             // if a != a (a is NaN) { b }
-            local_get(Local(a)); local_get(Local(a)); f64_ne;
+            local_get(a); local_get(a); f64_ne;
             if_f64;
-              local_get(Local(b));
+              local_get(b);
             else_;
               // else if b != b (b is NaN) { a }
-              local_get(Local(b)); local_get(Local(b)); f64_ne;
+              local_get(b); local_get(b); f64_ne;
               if_f64;
-                local_get(Local(a));
+                local_get(a);
               else_;
                 // strict comparison; for max: a < b ? b : a; for min: b < a ? b : a
-                local_get(Local(a)); local_get(Local(b));
+                local_get(a); local_get(b);
         });
         if is_max {
             wasm!(self.func, { f64_lt; }); // a < b
@@ -100,9 +73,9 @@ impl FuncCompiler<'_> {
         }
         wasm!(self.func, {
                 if_f64;
-                  local_get(Local(b));
+                  local_get(b);
                 else_;
-                  local_get(Local(a));
+                  local_get(a);
                 end;
               end;
             end;
@@ -136,10 +109,10 @@ impl FuncCompiler<'_> {
                 let tmp = self.scratch.alloc_f64();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(tmp));
-                    local_get(Local(tmp)); // x
+                    local_set(tmp);
+                    local_get(tmp); // x
                     f64_abs; f64_const(0.5); f64_add; f64_floor; // floor(abs(x)+0.5)
-                    local_get(Local(tmp)); // x (for sign)
+                    local_get(tmp); // x (for sign)
                     f64_copysign; // copysign(magnitude, sign)
                 });
                 self.scratch.free_f64(tmp);
@@ -173,13 +146,13 @@ impl FuncCompiler<'_> {
                 let tmp = self.scratch.alloc_f64();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(tmp));
+                    local_set(tmp);
                     // if x != x { x (NaN) } else { copysign(1.0, x) }
-                    local_get(Local(tmp)); local_get(Local(tmp)); f64_ne;
+                    local_get(tmp); local_get(tmp); f64_ne;
                     if_f64;
-                      local_get(Local(tmp));
+                      local_get(tmp);
                     else_;
-                      f64_const(1.0); local_get(Local(tmp)); f64_copysign;
+                      f64_const(1.0); local_get(tmp); f64_copysign;
                     end;
                 });
                 self.scratch.free_f64(tmp);
@@ -202,21 +175,21 @@ impl FuncCompiler<'_> {
                 let lo = self.scratch.alloc_f64();
                 let hi = self.scratch.alloc_f64();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(n)); });
+                wasm!(self.func, { local_set(n); });
                 self.emit_expr(&args[1]);
-                wasm!(self.func, { local_set(Local(lo)); });
+                wasm!(self.func, { local_set(lo); });
                 self.emit_expr(&args[2]);
                 wasm!(self.func, {
-                    local_set(Local(hi));
-                    local_get(Local(n)); local_get(Local(lo)); f64_lt;
+                    local_set(hi);
+                    local_get(n); local_get(lo); f64_lt;
                     if_f64;
-                      local_get(Local(lo));
+                      local_get(lo);
                     else_;
-                      local_get(Local(n)); local_get(Local(hi)); f64_gt;
+                      local_get(n); local_get(hi); f64_gt;
                       if_f64;
-                        local_get(Local(hi));
+                        local_get(hi);
                       else_;
-                        local_get(Local(n));
+                        local_get(n);
                       end;
                     end;
                 });
@@ -229,9 +202,9 @@ impl FuncCompiler<'_> {
                 let tmp = self.scratch.alloc_f64();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(tmp));
-                    local_get(Local(tmp));
-                    local_get(Local(tmp));
+                    local_set(tmp);
+                    local_get(tmp);
+                    local_get(tmp);
                     f64_ne;
                 });
                 self.scratch.free_f64(tmp);
@@ -276,12 +249,12 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 let s = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(s));
-                    local_get(Local(s)); i64_const(Imm64(0)); i64_lt_s;
+                    local_set(s);
+                    local_get(s); i64_const(0); i64_lt_s;
                     if_i64;
-                      i64_const(Imm64(0)); local_get(Local(s)); i64_sub;
+                      i64_const(0); local_get(s); i64_sub;
                     else_;
-                      local_get(Local(s));
+                      local_get(s);
                     end;
                 });
                 self.scratch.free_i64(s);
@@ -292,9 +265,9 @@ impl FuncCompiler<'_> {
                 let a = self.scratch.alloc_i64();
                 let b = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(a)); local_set(Local(b));
-                    local_get(Local(b)); local_get(Local(a)); i64_lt_s;
-                    if_i64; local_get(Local(b)); else_; local_get(Local(a)); end;
+                    local_set(a); local_set(b);
+                    local_get(b); local_get(a); i64_lt_s;
+                    if_i64; local_get(b); else_; local_get(a); end;
                 });
                 self.scratch.free_i64(b);
                 self.scratch.free_i64(a);
@@ -305,9 +278,9 @@ impl FuncCompiler<'_> {
                 let a = self.scratch.alloc_i64();
                 let b = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(a)); local_set(Local(b));
-                    local_get(Local(b)); local_get(Local(a)); i64_gt_s;
-                    if_i64; local_get(Local(b)); else_; local_get(Local(a)); end;
+                    local_set(a); local_set(b);
+                    local_get(b); local_get(a); i64_gt_s;
+                    if_i64; local_get(b); else_; local_get(a); end;
                 });
                 self.scratch.free_i64(b);
                 self.scratch.free_i64(a);
@@ -321,16 +294,16 @@ impl FuncCompiler<'_> {
                 let lo = self.scratch.alloc_i64();
                 let n = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(hi));       // hi
-                    local_set(Local(lo));   // lo
-                    local_set(Local(n));   // n
+                    local_set(hi);       // hi
+                    local_set(lo);   // lo
+                    local_set(n);   // n
                     // min(n, hi)
-                    local_get(Local(n)); local_get(Local(hi)); i64_lt_s;
-                    if_i64; local_get(Local(n)); else_; local_get(Local(hi)); end;
+                    local_get(n); local_get(hi); i64_lt_s;
+                    if_i64; local_get(n); else_; local_get(hi); end;
                     // max(lo, result)
-                    local_set(Local(n)); // temp = min(n, hi)
-                    local_get(Local(lo)); local_get(Local(n)); i64_gt_s;
-                    if_i64; local_get(Local(lo)); else_; local_get(Local(n)); end;
+                    local_set(n); // temp = min(n, hi)
+                    local_get(lo); local_get(n); i64_gt_s;
+                    if_i64; local_get(lo); else_; local_get(n); end;
                 });
                 self.scratch.free_i64(n);
                 self.scratch.free_i64(lo);
@@ -367,15 +340,15 @@ impl FuncCompiler<'_> {
             }
             "bnot" => {
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i64_const(Imm64(-1)); i64_xor; });
+                wasm!(self.func, { i64_const(-1); i64_xor; });
             }
             "to_u32" => {
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i64_const(Imm64(U32_MASK)); i64_and; });
+                wasm!(self.func, { i64_const(0xFFFFFFFF); i64_and; });
             }
             "to_u8" => {
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i64_const(Imm64(LOW_BYTE_MASK_I64)); i64_and; });
+                wasm!(self.func, { i64_const(0xFF); i64_and; });
             }
             "count_leading_zeros" => {
                 self.emit_expr(&args[0]);
@@ -396,21 +369,21 @@ impl FuncCompiler<'_> {
                 let i = self.scratch.alloc_i64();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(src));
-                    i64_const(Imm64(0)); local_set(Local(dst));
-                    i64_const(Imm64(0)); local_set(Local(i));
+                    local_set(src);
+                    i64_const(0); local_set(dst);
+                    i64_const(0); local_set(i);
                     block_empty; loop_empty;
-                        local_get(Local(i)); i64_const(Imm64(I64_BITS)); i64_ge_s; br_if(1);
+                        local_get(i); i64_const(64); i64_ge_s; br_if(1);
                         // dst = (dst << 1) | (src & 1)
-                        local_get(Local(dst)); i64_const(Imm64(1)); i64_shl;
-                        local_get(Local(src)); i64_const(Imm64(1)); i64_and;
-                        i64_or; local_set(Local(dst));
+                        local_get(dst); i64_const(1); i64_shl;
+                        local_get(src); i64_const(1); i64_and;
+                        i64_or; local_set(dst);
                         // src >>= 1
-                        local_get(Local(src)); i64_const(Imm64(1)); i64_shr_u; local_set(Local(src));
-                        local_get(Local(i)); i64_const(Imm64(1)); i64_add; local_set(Local(i));
+                        local_get(src); i64_const(1); i64_shr_u; local_set(src);
+                        local_get(i); i64_const(1); i64_add; local_set(i);
                         br(0);
                     end; end;
-                    local_get(Local(dst));
+                    local_get(dst);
                 });
                 self.scratch.free_i64(i);
                 self.scratch.free_i64(dst);
@@ -423,21 +396,21 @@ impl FuncCompiler<'_> {
                 let i = self.scratch.alloc_i64();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(src));
-                    i64_const(Imm64(0)); local_set(Local(dst));
-                    i64_const(Imm64(0)); local_set(Local(i));
+                    local_set(src);
+                    i64_const(0); local_set(dst);
+                    i64_const(0); local_set(i);
                     block_empty; loop_empty;
-                        local_get(Local(i)); i64_const(Imm64(I64_BYTES)); i64_ge_s; br_if(1);
+                        local_get(i); i64_const(8); i64_ge_s; br_if(1);
                         // dst = (dst << 8) | (src & 0xFF)
-                        local_get(Local(dst)); i64_const(Imm64(I64_BYTES)); i64_shl;
-                        local_get(Local(src)); i64_const(Imm64(LOW_BYTE_MASK_I64)); i64_and;
-                        i64_or; local_set(Local(dst));
+                        local_get(dst); i64_const(8); i64_shl;
+                        local_get(src); i64_const(0xFF); i64_and;
+                        i64_or; local_set(dst);
                         // src >>= 8
-                        local_get(Local(src)); i64_const(Imm64(I64_BYTES)); i64_shr_u; local_set(Local(src));
-                        local_get(Local(i)); i64_const(Imm64(1)); i64_add; local_set(Local(i));
+                        local_get(src); i64_const(8); i64_shr_u; local_set(src);
+                        local_get(i); i64_const(1); i64_add; local_set(i);
                         br(0);
                     end; end;
-                    local_get(Local(dst));
+                    local_get(dst);
                 });
                 self.scratch.free_i64(i);
                 self.scratch.free_i64(dst);
@@ -448,12 +421,12 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 let n = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(n));
-                    local_get(Local(n)); i64_eqz;
+                    local_set(n);
+                    local_get(n); i64_eqz;
                     if_i64;
-                        i64_const(Imm64(0));
+                        i64_const(0);
                     else_;
-                        i64_const(Imm64(I64_BITS)); local_get(Local(n)); i64_clz; i64_sub;
+                        i64_const(64); local_get(n); i64_clz; i64_sub;
                     end;
                 });
                 self.scratch.free_i64(n);
@@ -463,12 +436,12 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 let n = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(n));
-                    local_get(Local(n)); i64_const(Imm64(0)); i64_le_s;
+                    local_set(n);
+                    local_get(n); i64_const(0); i64_le_s;
                     if_i64;
-                        i64_const(Imm64(-1));
+                        i64_const(-1);
                     else_;
-                        i64_const(Imm64(I64_MAX_BIT_IDX)); local_get(Local(n)); i64_clz; i64_sub;
+                        i64_const(63); local_get(n); i64_clz; i64_sub;
                     end;
                 });
                 self.scratch.free_i64(n);
@@ -478,13 +451,13 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 let n = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(n));
-                    local_get(Local(n)); i64_const(Imm64(1)); i64_le_s;
+                    local_set(n);
+                    local_get(n); i64_const(1); i64_le_s;
                     if_i64;
-                        i64_const(Imm64(0));
+                        i64_const(0);
                     else_;
-                        i64_const(Imm64(I64_BITS));
-                        local_get(Local(n)); i64_const(Imm64(1)); i64_sub; i64_clz;
+                        i64_const(64);
+                        local_get(n); i64_const(1); i64_sub; i64_clz;
                         i64_sub;
                     end;
                 });
@@ -495,14 +468,14 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 let n = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(n));
-                    local_get(Local(n)); i64_const(Imm64(1)); i64_le_s;
+                    local_set(n);
+                    local_get(n); i64_const(1); i64_le_s;
                     if_i64;
-                        i64_const(Imm64(1));
+                        i64_const(1);
                     else_;
-                        i64_const(Imm64(1));
-                        i64_const(Imm64(I64_BITS));
-                        local_get(Local(n)); i64_const(Imm64(1)); i64_sub; i64_clz;
+                        i64_const(1);
+                        i64_const(64);
+                        local_get(n); i64_const(1); i64_sub; i64_clz;
                         i64_sub;
                         i64_shl;
                     end;
@@ -514,13 +487,13 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 let n = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(n));
-                    local_get(Local(n)); i64_const(Imm64(0)); i64_le_s;
+                    local_set(n);
+                    local_get(n); i64_const(0); i64_le_s;
                     if_i64;
-                        i64_const(Imm64(0));
+                        i64_const(0);
                     else_;
-                        i64_const(Imm64(1));
-                        i64_const(Imm64(I64_MAX_BIT_IDX)); local_get(Local(n)); i64_clz; i64_sub;
+                        i64_const(1);
+                        i64_const(63); local_get(n); i64_clz; i64_sub;
                         i64_shl;
                     end;
                 });
@@ -533,7 +506,7 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { i64_add; });
                 self.emit_expr(&args[2]);
-                wasm!(self.func, { local_set(Local(bits)); });
+                wasm!(self.func, { local_set(bits); });
                 self.emit_wrap_mask(bits);
                 wasm!(self.func, { i64_and; });
                 self.scratch.free_i64(bits);
@@ -545,7 +518,7 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { i64_mul; });
                 self.emit_expr(&args[2]);
-                wasm!(self.func, { local_set(Local(bits)); });
+                wasm!(self.func, { local_set(bits); });
                 self.emit_wrap_mask(bits);
                 wasm!(self.func, { i64_and; });
                 self.scratch.free_i64(bits);
@@ -560,58 +533,58 @@ impl FuncCompiler<'_> {
                 let n64 = self.scratch.alloc_i64();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(n64));
-                    local_get(Local(n64)); i64_eqz;
+                    local_set(n64);
+                    local_get(n64); i64_eqz;
                     if_i32;
-                      i32_const(Imm32(1)); call(self.emitter.rt.string_alloc); local_set(Local(buf));
-                      local_get(Local(buf)); i32_const(Imm32(1)); i32_store(0);
-                      local_get(Local(buf)); i32_const(Imm32(1)); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
-                      local_get(Local(buf)); i32_const(Imm32(ASCII_ZERO)); i32_store8(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
-                      local_get(Local(buf));
+                      i32_const(1); call(self.emitter.rt.string_alloc); local_set(buf);
+                      local_get(buf); i32_const(1); i32_store(0);
+                      local_get(buf); i32_const(1); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
+                      local_get(buf); i32_const(48); i32_store8(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
+                      local_get(buf);
                     else_;
                       // Alloc temp buffer for reversed digits
-                      i32_const(Imm32(HEX_BUF_BYTES)); call(self.emitter.rt.alloc); local_set(Local(buf)); // buf
-                      i32_const(Imm32(0)); local_set(Local(count)); // count
+                      i32_const(20); call(self.emitter.rt.alloc); local_set(buf); // buf
+                      i32_const(0); local_set(count); // count
                 });
                 wasm!(self.func, {
                       block_empty; loop_empty;
-                        local_get(Local(n64)); i64_eqz; br_if(1);
-                        local_get(Local(n64)); i64_const(Imm64(HEX_BASE)); i64_rem_u; i32_wrap_i64;
-                        local_set(Local(digit)); // digit
-                        local_get(Local(digit)); i32_const(Imm32(DECIMAL_BASE)); i32_lt_u;
-                        if_i32; local_get(Local(digit)); i32_const(Imm32(ASCII_ZERO)); i32_add;
-                        else_; local_get(Local(digit)); i32_const(Imm32(HEX_LETTER_OFFSET)); i32_add; end;
-                        local_set(Local(digit)); // char
-                        local_get(Local(buf)); local_get(Local(count)); i32_add;
-                        local_get(Local(digit)); i32_store8(0);
-                        local_get(Local(count)); i32_const(Imm32(1)); i32_add; local_set(Local(count));
-                        local_get(Local(n64)); i64_const(Imm64(HEX_BASE)); i64_div_u; local_set(Local(n64));
+                        local_get(n64); i64_eqz; br_if(1);
+                        local_get(n64); i64_const(16); i64_rem_u; i32_wrap_i64;
+                        local_set(digit); // digit
+                        local_get(digit); i32_const(10); i32_lt_u;
+                        if_i32; local_get(digit); i32_const(48); i32_add;
+                        else_; local_get(digit); i32_const(87); i32_add; end;
+                        local_set(digit); // char
+                        local_get(buf); local_get(count); i32_add;
+                        local_get(digit); i32_store8(0);
+                        local_get(count); i32_const(1); i32_add; local_set(count);
+                        local_get(n64); i64_const(16); i64_div_u; local_set(n64);
                         br(0);
                       end; end;
                 });
                 wasm!(self.func, {
                       // Alloc result string: [len][cap][data...]
-                      i32_const(Imm32(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32));
-                      local_get(Local(count)); i32_add;
-                      call(self.emitter.rt.alloc); local_set(Local(digit));
-                      local_get(Local(digit)); local_get(Local(count)); i32_store(0); // len
-                      local_get(Local(digit)); local_get(Local(count));
+                      i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32);
+                      local_get(count); i32_add;
+                      call(self.emitter.rt.alloc); local_set(digit);
+                      local_get(digit); local_get(count); i32_store(0); // len
+                      local_get(digit); local_get(count);
                       i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as u32); // cap
                       // Copy reversed
-                      i32_const(Imm32(0)); local_set(Local(idx));
+                      i32_const(0); local_set(idx);
                       block_empty; loop_empty;
-                        local_get(Local(idx)); local_get(Local(count)); i32_ge_u; br_if(1);
-                        local_get(Local(digit));
-                        i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32));
-                        i32_add; local_get(Local(idx)); i32_add;
-                        local_get(Local(buf));
-                        local_get(Local(count)); i32_const(Imm32(1)); i32_sub; local_get(Local(idx)); i32_sub;
+                        local_get(idx); local_get(count); i32_ge_u; br_if(1);
+                        local_get(digit);
+                        i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
+                        i32_add; local_get(idx); i32_add;
+                        local_get(buf);
+                        local_get(count); i32_const(1); i32_sub; local_get(idx); i32_sub;
                         i32_add; i32_load8_u(0);
                         i32_store8(0);
-                        local_get(Local(idx)); i32_const(Imm32(1)); i32_add; local_set(Local(idx));
+                        local_get(idx); i32_const(1); i32_add; local_set(idx);
                         br(0);
                       end; end;
-                      local_get(Local(digit));
+                      local_get(digit);
                     end;
                 });
                 self.scratch.free_i64(n64);
@@ -661,43 +634,43 @@ impl FuncCompiler<'_> {
                 let mask = self.scratch.alloc_i64();
                 let v = self.scratch.alloc_i64();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(a)); });
+                wasm!(self.func, { local_set(a); });
                 self.emit_expr(&args[1]);
                 // n = n % bits (needs bits first)
-                wasm!(self.func, { local_set(Local(n)); });
+                wasm!(self.func, { local_set(n); });
                 self.emit_expr(&args[2]);
                 wasm!(self.func, {
-                    local_set(Local(bits));
+                    local_set(bits);
                     // if bits <= 0 { abort("rotate width must be positive") }
-                    local_get(Local(bits)); i64_const(Imm64(0)); i64_le_s;
+                    local_get(bits); i64_const(0); i64_le_s;
                     if_empty;
-                      i32_const(Imm32(rot_width_msg)); call(div_trap);
+                      i32_const(rot_width_msg); call(div_trap);
                     end;
                 });
                 // mask = wrap_mask(bits)  (u64::MAX for bits >= 64)
                 self.emit_wrap_mask(bits);
                 wasm!(self.func, {
-                    local_set(Local(mask));
+                    local_set(mask);
                     // v = a & mask
-                    local_get(Local(a)); local_get(Local(mask)); i64_and; local_set(Local(v));
+                    local_get(a); local_get(mask); i64_and; local_set(v);
                     // n = n % bits
-                    local_get(Local(n)); local_get(Local(bits)); i64_rem_s; local_set(Local(n));
+                    local_get(n); local_get(bits); i64_rem_s; local_set(n);
                 });
                 if is_left {
                     wasm!(self.func, {
                         // (v << n) | (v >> (bits - n))
-                        local_get(Local(v)); local_get(Local(n)); i64_shl;
-                        local_get(Local(v)); local_get(Local(bits)); local_get(Local(n)); i64_sub; i64_shr_u;
+                        local_get(v); local_get(n); i64_shl;
+                        local_get(v); local_get(bits); local_get(n); i64_sub; i64_shr_u;
                         i64_or;
-                        local_get(Local(mask)); i64_and;
+                        local_get(mask); i64_and;
                     });
                 } else {
                     wasm!(self.func, {
                         // (v >> n) | (v << (bits - n))
-                        local_get(Local(v)); local_get(Local(n)); i64_shr_u;
-                        local_get(Local(v)); local_get(Local(bits)); local_get(Local(n)); i64_sub; i64_shl;
+                        local_get(v); local_get(n); i64_shr_u;
+                        local_get(v); local_get(bits); local_get(n); i64_sub; i64_shl;
                         i64_or;
-                        local_get(Local(mask)); i64_and;
+                        local_get(mask); i64_and;
                     });
                 }
                 self.scratch.free_i64(v);
@@ -757,10 +730,10 @@ impl FuncCompiler<'_> {
                     _ => {
                         let s = self.scratch.alloc_i64();
                         wasm!(self.func, {
-                            local_set(Local(s));
-                            local_get(Local(s)); i64_const(Imm64(0)); i64_lt_s;
-                            if_i64; i64_const(Imm64(0)); local_get(Local(s)); i64_sub;
-                            else_; local_get(Local(s)); end;
+                            local_set(s);
+                            local_get(s); i64_const(0); i64_lt_s;
+                            if_i64; i64_const(0); local_get(s); i64_sub;
+                            else_; local_get(s); end;
                         });
                         self.scratch.free_i64(s);
                     }
@@ -772,9 +745,9 @@ impl FuncCompiler<'_> {
                 let a = self.scratch.alloc_i64();
                 let b = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(a)); local_set(Local(b));
-                    local_get(Local(b)); local_get(Local(a)); i64_gt_s;
-                    if_i64; local_get(Local(b)); else_; local_get(Local(a)); end;
+                    local_set(a); local_set(b);
+                    local_get(b); local_get(a); i64_gt_s;
+                    if_i64; local_get(b); else_; local_get(a); end;
                 });
                 self.scratch.free_i64(b);
                 self.scratch.free_i64(a);
@@ -785,9 +758,9 @@ impl FuncCompiler<'_> {
                 let a = self.scratch.alloc_i64();
                 let b = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(a)); local_set(Local(b));
-                    local_get(Local(b)); local_get(Local(a)); i64_lt_s;
-                    if_i64; local_get(Local(b)); else_; local_get(Local(a)); end;
+                    local_set(a); local_set(b);
+                    local_get(b); local_get(a); i64_lt_s;
+                    if_i64; local_get(b); else_; local_get(a); end;
                 });
                 self.scratch.free_i64(b);
                 self.scratch.free_i64(a);
@@ -805,13 +778,13 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 let s = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(s));
-                    local_get(Local(s)); i64_const(Imm64(0)); i64_lt_s;
-                    if_i64; i64_const(Imm64(-1));
+                    local_set(s);
+                    local_get(s); i64_const(0); i64_lt_s;
+                    if_i64; i64_const(-1);
                     else_;
-                      local_get(Local(s)); i64_const(Imm64(0)); i64_gt_s;
-                      if_i64; i64_const(Imm64(1));
-                      else_; i64_const(Imm64(0));
+                      local_get(s); i64_const(0); i64_gt_s;
+                      if_i64; i64_const(1);
+                      else_; i64_const(0);
                       end;
                     end;
                 });
@@ -834,33 +807,33 @@ impl FuncCompiler<'_> {
                 let base = self.scratch.alloc_i64();
                 let result = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(exp));
-                    local_set(Local(base));
+                    local_set(exp);
+                    local_set(base);
                     // if exp < 0 { abort("negative exponent") }
-                    local_get(Local(exp)); i64_const(Imm64(0)); i64_lt_s;
+                    local_get(exp); i64_const(0); i64_lt_s;
                     if_empty;
-                      i32_const(Imm32(neg_exp_msg)); call(div_trap);
+                      i32_const(neg_exp_msg); call(div_trap);
                     end;
-                    i64_const(Imm64(1)); local_set(Local(result));   // result = 1
+                    i64_const(1); local_set(result);   // result = 1
                     // exponentiation by squaring; exp treated as an unsigned count
                     block_empty; loop_empty;
-                      local_get(Local(exp)); i64_eqz; br_if(1);          // while exp != 0
+                      local_get(exp); i64_eqz; br_if(1);          // while exp != 0
                       // if exp & 1 == 1 { result *= base }
-                      local_get(Local(exp)); i64_const(Imm64(1)); i64_and; i64_const(Imm64(1)); i64_eq;
+                      local_get(exp); i64_const(1); i64_and; i64_const(1); i64_eq;
                       if_empty;
-                        local_get(Local(result)); local_get(Local(base)); i64_mul; local_set(Local(result));
+                        local_get(result); local_get(base); i64_mul; local_set(result);
                       end;
                       // exp >>= 1  (logical: exp is a non-negative count here)
-                      local_get(Local(exp)); i64_const(Imm64(1)); i64_shr_u; local_set(Local(exp));
+                      local_get(exp); i64_const(1); i64_shr_u; local_set(exp);
                       // if exp != 0 { base *= base }   (avoid a final useless square)
-                      local_get(Local(exp)); i64_eqz;
+                      local_get(exp); i64_eqz;
                       if_empty;
                       else_;
-                        local_get(Local(base)); local_get(Local(base)); i64_mul; local_set(Local(base));
+                        local_get(base); local_get(base); i64_mul; local_set(base);
                       end;
                       br(0);
                     end; end;
-                    local_get(Local(result));
+                    local_get(result);
                 });
                 self.scratch.free_i64(result);
                 self.scratch.free_i64(base);
@@ -879,16 +852,16 @@ impl FuncCompiler<'_> {
                 let result = self.scratch.alloc_i64();
                 let i = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(n)); // n
-                    i64_const(Imm64(1)); local_set(Local(result)); // result
-                    i64_const(Imm64(FACTORIAL_START)); local_set(Local(i)); // i
+                    local_set(n); // n
+                    i64_const(1); local_set(result); // result
+                    i64_const(2); local_set(i); // i
                     block_empty; loop_empty;
-                      local_get(Local(i)); local_get(Local(n)); i64_gt_s; br_if(1);
-                      local_get(Local(result)); local_get(Local(i)); i64_mul; local_set(Local(result));
-                      local_get(Local(i)); i64_const(Imm64(1)); i64_add; local_set(Local(i));
+                      local_get(i); local_get(n); i64_gt_s; br_if(1);
+                      local_get(result); local_get(i); i64_mul; local_set(result);
+                      local_get(i); i64_const(1); i64_add; local_set(i);
                       br(0);
                     end; end;
-                    local_get(Local(result));
+                    local_get(result);
                 });
                 self.scratch.free_i64(i);
                 self.scratch.free_i64(result);
@@ -904,23 +877,23 @@ impl FuncCompiler<'_> {
                 let result = self.scratch.alloc_i64();
                 let i = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(Local(k));       // k
-                    local_set(Local(n));   // n
-                    i64_const(Imm64(1)); local_set(Local(result)); // result
-                    i64_const(Imm64(0)); local_set(Local(i)); // i
+                    local_set(k);       // k
+                    local_set(n);   // n
+                    i64_const(1); local_set(result); // result
+                    i64_const(0); local_set(i); // i
                     block_empty; loop_empty;
-                      local_get(Local(i)); local_get(Local(k)); i64_ge_s; br_if(1);
+                      local_get(i); local_get(k); i64_ge_s; br_if(1);
                       // result = result * (n - i) / (i + 1)
-                      local_get(Local(result));
-                      local_get(Local(n)); local_get(Local(i)); i64_sub;
+                      local_get(result);
+                      local_get(n); local_get(i); i64_sub;
                       i64_mul;
-                      local_get(Local(i)); i64_const(Imm64(1)); i64_add;
+                      local_get(i); i64_const(1); i64_add;
                       i64_div_s;
-                      local_set(Local(result));
-                      local_get(Local(i)); i64_const(Imm64(1)); i64_add; local_set(Local(i));
+                      local_set(result);
+                      local_get(i); i64_const(1); i64_add; local_set(i);
                       br(0);
                     end; end;
-                    local_get(Local(result));
+                    local_get(result);
                 });
                 self.scratch.free_i64(i);
                 self.scratch.free_i64(result);
@@ -945,40 +918,40 @@ impl FuncCompiler<'_> {
                 let ag = self.scratch.alloc_f64();
                 self.emit_expr(&args[0]);
                 // Lanczos computes Γ(x+1), shift by -1 to get Γ(x)
-                wasm!(self.func, { f64_const(1.0); f64_sub; local_set(Local(x)); });
+                wasm!(self.func, { f64_const(1.0); f64_sub; local_set(x); });
                 let coeffs: [f64; 9] = [
                     0.99999999999980993, 676.5203681218851, -1259.1392167224028,
                     771.32342877765313, -176.61502916214059, 12.507343278686905,
                     -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
                 ];
-                wasm!(self.func, { f64_const(coeffs[0]); local_set(Local(ag)); });
+                wasm!(self.func, { f64_const(coeffs[0]); local_set(ag); });
                 for (i, &c) in coeffs[1..].iter().enumerate() {
                     wasm!(self.func, {
-                        local_get(Local(ag));
+                        local_get(ag);
                         f64_const(c);
-                        local_get(Local(x)); f64_const((i + 1) as f64); f64_add;
+                        local_get(x); f64_const((i + 1) as f64); f64_add;
                         f64_div;
                         f64_add;
-                        local_set(Local(ag));
+                        local_set(ag);
                     });
                 }
                 wasm!(self.func, {
-                    local_get(Local(x)); f64_const(LANCZOS_G_OFFSET); f64_add; local_set(Local(t));
+                    local_get(x); f64_const(LANCZOS_G_OFFSET); f64_add; local_set(t);
                 });
                 // Reuse ag as final result: ag = ln(ag)
                 wasm!(self.func, {
-                    local_get(Local(ag)); call(self.emitter.rt.math_log); local_set(Local(ag));
+                    local_get(ag); call(self.emitter.rt.math_log); local_set(ag);
                 });
                 // result = 0.5*ln(2π) + (x+0.5)*ln(t) - t + ag
                 // Reuse t slot: compute ln(t) and store back
                 wasm!(self.func, {
                     f64_const(HALF_LN_2PI);
-                    local_get(Local(x)); f64_const(0.5); f64_add;
-                    local_get(Local(t)); call(self.emitter.rt.math_log);
+                    local_get(x); f64_const(0.5); f64_add;
+                    local_get(t); call(self.emitter.rt.math_log);
                     f64_mul;
                     f64_add;
-                    local_get(Local(t)); f64_sub;
-                    local_get(Local(ag)); f64_add;
+                    local_get(t); f64_sub;
+                    local_get(ag); f64_add;
                 });
                 self.scratch.free_f64(ag);
                 self.scratch.free_f64(t);

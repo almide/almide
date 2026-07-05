@@ -1,0 +1,21 @@
+// @contract: C-105
+// MUTUAL-RECURSION INLINING (the yaml parser-loop shape, `flow_rec ⇄ flow_step`). `frec` tail-calls a
+// sibling `fstep` that tail-calls `frec` back — a mutual pair the append-accumulator TCO cannot see (it
+// fires only on a SELF-call). The program pre-pass `inline_mutual_tail_recursion` inlines the
+// single-call sibling `fstep` into `frec` (substituting its params by the call args) and drops it, so
+// `frec` becomes DIRECT self-recursive → the TCO fires → the `acc + [","]` heap-element append lowers on
+// the proven `i(id)m` slot. GUARDED: the inline is applied only because `frec` walls without it and
+// lowers with it (an already-lowering function is never touched — no regression). Semantics-preserving,
+// so this byte-matches the v0 oracle running the original mutual pair.
+fn frec(s: String, pos: Int, acc: List[String]) -> List[String] =
+  if pos >= string.len(s) then acc
+  else fstep(s, pos, acc, string.get(s, pos) ?? "")
+fn fstep(s: String, pos: Int, acc: List[String], c: String) -> List[String] =
+  if c == "," then frec(s, pos + 1, acc + [","])
+  else frec(s, pos + 1, acc)
+
+fn main() -> Unit = {
+  println(int.to_string(list.len(frec("a,b,c", 0, []))))   // 2  (two commas)
+  println(int.to_string(list.len(frec("", 0, []))))        // 0
+  println(int.to_string(list.len(frec("x,y,z,w", 0, []))))// 3
+}

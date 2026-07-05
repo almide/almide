@@ -1,0 +1,13 @@
+// fs_read_bytes — SELF-HOSTED `fs.read_bytes(path)` over the SAME WASI file-read floor
+// as fs.read_text/read_bytes_raw (prim.read_bytes_file). v0's `fs.read_bytes` returns
+// `Result[List[Int], String]` — one i64 slot per byte — so the raw Bytes Ok payload is
+// EXPANDED via the self-hosted bytes.to_list; the Err message passes through unchanged
+// (the prim's WASI errno→native wording, byte-matching v0's std::fs::read errors).
+// Capability::FsRead via the prim, exactly like the read_text twin.
+effect fn fs_read_bytes(path: String) -> Result[List[Int], String] = {
+  let r = prim.read_bytes_file(path)
+  match r {
+    ok(b) => ok(bytes.to_list(b))
+    err(e) => err(e)
+  }
+}

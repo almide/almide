@@ -1,0 +1,19 @@
+// wasm:enabled
+// Locks in `${Result[List[String], String]}` — v0's `ok(["a", "b"])` / `err("<quoted>")`. The Ok
+// List[String] renders like `${list}` (each element quoted+escaped, `, ` joined, `[…]`) wrapped in
+// `ok(…)`; the Err string quoted. `result.to_string_ls` reuses `result_to_string`'s `__rts_esc_*`
+// string helpers. Byte-identical to v0 --target wasm.
+
+fn tag(r: Result[List[String], String]) -> Int = match r { ok(v) => list.len(v), err(e) => 0 - 1 }
+
+effect fn main() -> Unit = {
+  let a: Result[List[String], String] = ok(["a", "b", "c"])
+  let b: Result[List[String], String] = err("parse failed")
+  let c: Result[List[String], String] = ok([])
+  let d: Result[List[String], String] = ok(["he said \"hi\"", "tab\ttab"])
+  println("${a}")
+  println("${b}")
+  println("${c}")
+  println("${d}")
+  println(int.to_string(tag(a)) + "," + int.to_string(tag(b)) + "," + int.to_string(tag(c)))
+}

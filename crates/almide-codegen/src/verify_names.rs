@@ -34,23 +34,31 @@ struct DeclIndex {
     bare: HashSet<Sym>,
     /// base name → qualified decl keys ("m.Cfg") that own it
     qualified: std::collections::HashMap<String, Vec<String>>,
+    /// qualified decl key → structural fingerprint (see
+    /// `IrTypeDecl::structural_fingerprint`) — lets the repair treat a bare
+    /// reference whose owners are all STRUCTURAL TWINS as unambiguous.
+    fingerprints: std::collections::HashMap<String, String>,
 }
 
 fn index_decls(program: &IrProgram) -> DeclIndex {
     let mut bare = HashSet::new();
     let mut qualified: std::collections::HashMap<String, Vec<String>> = Default::default();
-    let mut add = |name: Sym| {
-        let s = name.as_str();
+    let mut fingerprints: std::collections::HashMap<String, String> = Default::default();
+    let mut add = |td: &almide_ir::IrTypeDecl| {
+        let s = td.name.as_str();
         match s.rsplit_once('.') {
-            Some((_, base)) => qualified.entry(base.to_string()).or_default().push(s.to_string()),
-            None => { bare.insert(name); }
+            Some((_, base)) => {
+                qualified.entry(base.to_string()).or_default().push(s.to_string());
+                fingerprints.insert(s.to_string(), td.structural_fingerprint());
+            }
+            None => { bare.insert(td.name); }
         }
     };
-    for td in &program.type_decls { add(td.name); }
+    for td in &program.type_decls { add(td); }
     for m in &program.modules {
-        for td in &m.type_decls { add(td.name); }
+        for td in &m.type_decls { add(td); }
     }
-    DeclIndex { bare, qualified }
+    DeclIndex { bare, qualified, fingerprints }
 }
 
 struct TyChecker<'a> {
@@ -216,10 +224,33 @@ pub fn collect_unresolvable_names(program: &IrProgram) -> Vec<UnresolvableName> 
 fn build_repair_map(decls: &DeclIndex) -> std::collections::HashMap<Sym, Sym> {
     let mut map = std::collections::HashMap::new();
     for (base, owners) in &decls.qualified {
-        if owners.len() == 1 && !decls.bare.contains(&almide_base::intern::sym(base)) {
+        if decls.bare.contains(&almide_base::intern::sym(base)) {
+            continue;
+        }
+        if owners.len() == 1 {
             map.insert(
                 almide_base::intern::sym(base),
                 almide_base::intern::sym(&owners[0]),
+            );
+            continue;
+        }
+        // Multiple owners that are ALL STRUCTURAL TWINS (same fingerprint) are
+        // one type to the checker — it unifies same-shape records freely, and
+        // the flatten pass merges them into one canonical struct. A bare
+        // reference to such a base is therefore unambiguous: pick the first
+        // (sorted) owner; the flatten twin-merge maps every owner to the same
+        // canonical name anyway. (almai: 8 provider modules + the package root
+        // each declare identical Tool/ToolCall/Usage/LLMResponse — bare refs in
+        // its spec files used to trip the gate.)
+        let mut sorted: Vec<&String> = owners.iter().collect();
+        sorted.sort();
+        let first_fp = decls.fingerprints.get(sorted[0]);
+        if first_fp.is_some()
+            && sorted.iter().all(|o| decls.fingerprints.get(*o) == first_fp)
+        {
+            map.insert(
+                almide_base::intern::sym(base),
+                almide_base::intern::sym(sorted[0]),
             );
         }
     }
@@ -483,13 +514,27 @@ mod tests {
 
     #[test]
     fn repair_leaves_ambiguous_bare_ref_for_the_gate() {
+        // The two owners must have DIFFERENT shapes: same-shape twins are merged by the
+        // structural twin-merge (the checker unifies them), so a bare ref to them IS
+        // unambiguous and repair legitimately completes it. Genuine ambiguity = two
+        // qualified owners whose fingerprints differ.
         let mut program = IrProgram::default();
         program.modules.push(module_with_decl("m.Cfg"));
-        program.modules.push(module_with_decl("n.Cfg"));
+        let mut n = module_with_decl("n.Cfg");
+        if let IrTypeDeclKind::Record { fields } = &mut n.type_decls[0].kind {
+            fields.push(almide_ir::IrFieldDecl {
+                name: sym("extra"),
+                ty: Ty::Int,
+                default: None,
+                alias: None,
+                attrs: vec![],
+            });
+        }
+        program.modules.push(n);
         program.var_table.alloc(sym("v"), named("Cfg"), Mutability::Let, None);
         repair_bare_type_names(&mut program);
         assert_eq!(program.var_table.entries[0].ty, named("Cfg"),
-            "two qualified owners — repair must not guess");
+            "two different-shaped qualified owners — repair must not guess");
         assert_eq!(collect_unresolvable_names(&program).len(), 1,
             "ambiguous bare ref is still rejected by the gate");
     }

@@ -1,0 +1,30 @@
+// @contract: C-109
+// base64 ENCODE running on v1 (the real almide/base64 encode path, decode omitted): a const string
+// module-global alphabet (Init::Str), encode_with -> encode_chunks (a tail-recursive String
+// accumulator with multi-concat `acc + c0+c1+c2+c3` AND let-bound heap-result `if`s for the pad
+// chars). All four mechanisms compose. Byte-matches canonical base64.
+let STANDARD = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local fn encode_chunks(input: List[Int], pos: Int, alpha: String, pad: Bool, acc: String) -> String = {
+  let len = list.len(input)
+  if pos >= len then acc
+  else {
+    let remaining = len - pos
+    let b0 = list.get_or(input, pos, 0)
+    let b1 = list.get_or(input, pos + 1, 0)
+    let b2 = list.get_or(input, pos + 2, 0)
+    let c0 = string.get(alpha, int.bshr(b0, 2)) ?? ""
+    let c1 = string.get(alpha, int.bor(int.bshl(int.band(b0, 3), 4), int.bshr(b1, 4))) ?? ""
+    let c2 = if remaining > 1 then string.get(alpha, int.bor(int.bshl(int.band(b1, 15), 2), int.bshr(b2, 6))) ?? ""
+             else if pad then "=" else ""
+    let c3 = if remaining > 2 then string.get(alpha, int.band(b2, 63)) ?? ""
+             else if pad then "=" else ""
+    encode_chunks(input, pos + 3, alpha, pad, acc + c0 + c1 + c2 + c3)
+  }
+}
+fn encode(input: String) -> String = encode_chunks(string.to_bytes(input), 0, STANDARD, true, "")
+fn main() -> Unit = {
+  println(encode("a"))
+  println(encode("ab"))
+  println(encode("hello"))
+  println(encode("Many hands make light work."))
+}

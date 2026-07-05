@@ -1,0 +1,18 @@
+// @contract: C-106
+// A record returned via a heap-result `if` (rsa's der_read_tl shape — an anonymous record whose
+// else-arm is a `var`+`for` block). Each arm constructs the record and MOVES IT OUT; the Record arm
+// in lower_heap_result_arm materializes it (scalar fast path / general construct) with a per-arm
+// drop frame. Works for both anonymous and named records. Byte-matches v0.
+fn tl(x: Int) -> { tag: Int, len: Int, hdr: Int } =
+  if x < 0x80 then { tag: 1, len: x, hdr: 2 }
+  else {
+    var len = 0
+    for i in 0..2 { len = len + x }
+    { tag: 1, len: len, hdr: 3 }
+  }
+fn main() -> Unit = {
+  let a = tl(5)
+  let b = tl(200)
+  println(int.to_string(a.len) + "," + int.to_string(a.hdr))
+  println(int.to_string(b.len) + "," + int.to_string(b.hdr))
+}

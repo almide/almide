@@ -1,0 +1,8 @@
+// @contract: C-100
+fn chk(s: String) -> String = if string.is_alphanumeric(s) then "y" else "n"
+effect fn main() -> Unit = {
+  println(chk("abc123"))
+  println(chk("ab-c"))
+  println(chk(""))
+  println(chk("Z9"))
+}

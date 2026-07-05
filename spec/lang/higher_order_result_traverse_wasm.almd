@@ -1,0 +1,27 @@
+// wasm:enabled
+// Locks in a HIGHER-ORDER function that MATCHES over a funcref callback's Result result — `match f(x)
+// { ok => .., err => .. }` where `f` is a function-typed param invoked via `Op::CallIndirect`. The
+// trust-spine now (1) seeds the CallIndirect result's read-shape so the match reads its real tag and
+// (2) hoists a computed-call match subject to a `let`. Together these lower a fallible list traverse
+// (apply f to each element, collect ok values, short-circuit on the first err) — the same sequential
+// semantics `fan.map` has on wasm. Byte-identical to v0 --target wasm.
+
+fn go(xs: List[Int], f: (Int) -> Result[Int, String], i: Int, acc: List[Int]) -> Result[List[Int], String] =
+  if i >= list.len(xs) then ok(acc)
+  else match f(list.get(xs, i) ?? 0) {
+    ok(y) => go(xs, f, i + 1, acc + [y]),
+    err(e) => err(e),
+  }
+
+fn traverse(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[List[Int], String] = go(xs, f, 0, [])
+
+fn show(r: Result[List[Int], String]) -> String = match r {
+  ok(ys) => "ok:" + int.to_string(list.len(ys)) + ":" + int.to_string(list.sum(ys)),
+  err(e) => "err:" + e,
+}
+
+effect fn main() -> Unit = {
+  println(show(traverse([1, 2, 3, 4], (x) => ok(x * 2))))
+  println(show(traverse([1, -2, 3], (x) => if x > 0 then ok(x) else err("neg"))))
+  println(show(traverse([], (x) => ok(x))))
+}

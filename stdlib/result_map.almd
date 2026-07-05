@@ -1,0 +1,162 @@
+// result_map — SELF-HOSTED result.map(r, f) = r.map(f): Ok(x) → Ok(f(x)), Err(e) → Err(e). The
+// closure f is applied ONLY to the Ok value (via a heap-result helper call, so the closure call is
+// not in an OptionSome/ResultOk scalar position). The Err message is PRESERVED by deep-copying it
+// (v0's map keeps the same Err) — a borrowed Result's slot-0 String is copied into a fresh owned
+// Err, so single ownership holds (no double-free with the input). `r` is borrowed; result owned.
+
+fn __rbcopy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let b = prim.load8(src + i)
+    prim.store8(dst + i, b)
+    __rbcopy(dst, src, n, i + 1)
+  }
+
+// Deep-copy the String at byte address `mh` (the Result's slot-0 message handle).
+fn __rcopy_at(mh: Int) -> String = {
+  let blen = prim.load32(mh + 4)
+  let out = prim.alloc_str(blen)
+  let _x = __rbcopy(prim.handle(out) + 12, mh + 12, blen, 0)
+  out
+}
+
+// Ok(f(x)) — the closure applied on the Ok arm only (a heap-result helper isolates the call).
+fn __res_map_ok(x: Int, f: (Int) -> Int) -> Result[Int, String] = {
+  let y = f(x)
+  Ok(y)
+}
+
+fn result_map(r: Result[Int, String], f: (Int) -> Int) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then __res_map_ok(x, f) else Err(__rcopy_at(x))
+}
+
+// result.flat_map(r, f) = r.and_then(f): Ok(x) → f(x) (an Result itself), Err(e) → Err(e). The
+// closure RETURNS a Result (heap-result CallIndirect), invoked ONLY on the Ok arm; its fresh owned
+// result is moved straight out. The Err message is preserved by deep copy, as in result.map.
+fn __res_flatmap_ok(x: Int, f: (Int) -> Result[Int, String]) -> Result[Int, String] = {
+  let r = f(x)
+  r
+}
+
+fn result_flat_map(r: Result[Int, String], f: (Int) -> Result[Int, String]) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then __res_flatmap_ok(x, f) else Err(__rcopy_at(x))
+}
+
+// result.to_err_option(r) = r.err(): Ok → None, Err(e) → Some(e). Builds an Option[String] (the
+// Err message deep-copied into Some, as v0 clones it). The Some owns a fresh copy — single owner,
+// no double-free with the borrowed input. `r` is borrowed; the Option is freshly owned.
+fn result_to_err_option(r: Result[Int, String]) -> Option[String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then None else Some(__rcopy_at(x))
+}
+
+// result.unwrap_or_else(r, f) = r.unwrap_or_else(f): Ok(x) → x, Err(e) → f(e). The closure takes
+// the Err message (a HEAP arg — the uniform-i64 closure ABI) and returns a scalar. f is invoked
+// ONLY on the Err arm, over a deep COPY of the message (so f borrows a value the input still owns);
+// the copy is freed at the helper's scope end. `r` is borrowed; the result is a scalar Int.
+fn __res_unwrap_else(emsg: Int, f: (String) -> Int) -> Int = {
+  let e = __rcopy_at(emsg)
+  let y = f(e)
+  y
+}
+
+fn result_unwrap_or_else(r: Result[Int, String], f: (String) -> Int) -> Int = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then x else __res_unwrap_else(x, f)
+}
+
+// result.map_err(r, f) = r.map_err(f): Ok(x) → Ok(x), Err(e) → Err(f(e)). The closure maps the Err
+// message (a HEAP String arg) to a new String (heap result), invoked ONLY on the Err arm over a
+// deep COPY of the message. The closure's fresh result is moved into the new Err (an owned Var, so
+// the Err materializes); the copy `e` is freed at the helper's scope end.
+fn __res_maperr_err(emsg: Int, f: (String) -> String) -> Result[Int, String] = {
+  let e = __rcopy_at(emsg)
+  let new = f(e)
+  Err(new)
+}
+
+fn result_map_err(r: Result[Int, String], f: (String) -> String) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then Ok(x) else __res_maperr_err(x, f)
+}
+
+// result.filter(r, pred, err_val) = Ok(v) kept iff pred(v) (else Err(err_val)); Err(e) propagated.
+// SCALAR Result[Int, String] (len-as-tag). The closure is invoked ONLY on the Ok arm (single-level
+// `if p` — the proven heap-result Var-cond, as in option.filter). Both the kept-fail err_val and the
+// propagated message are deep-COPIED (borrowed → single ownership). Helpers isolate each arm so the
+// arms are plain calls.
+fn __rfil_err_val(err_val: String) -> Result[Int, String] = {
+  let copy = string.repeat(err_val, 1)
+  Err(copy)
+}
+fn __rfil_propagate(emsg: Int) -> Result[Int, String] = {
+  let copy = __rcopy_at(emsg)
+  Err(copy)
+}
+fn __rfil_ok(v: Int, pred: (Int) -> Bool, err_val: String) -> Result[Int, String] = {
+  let p = pred(v)
+  if p then Ok(v) else __rfil_err_val(err_val)
+}
+fn result_filter(r: Result[Int, String], pred: (Int) -> Bool, err_val: String) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then __rfil_ok(x, pred, err_val) else __rfil_propagate(x)
+}
+
+// result.or_else(r, f) = Ok(v) kept, Err(e) → f(e) (the recovery closure, given a deep COPY of the
+// error). SCALAR Result[Int, String]; the closure RETURNS a Result, invoked via a heap-result
+// CallIndirect ONLY on the Err arm (the proven heap-result call-arm). `r` borrowed; f's fresh result
+// moved straight out.
+fn __ror_recover(emsg: Int, f: (String) -> Result[Int, String]) -> Result[Int, String] = {
+  let e = __rcopy_at(emsg)
+  let r = f(e)
+  r
+}
+fn result_or_else(r: Result[Int, String], f: (String) -> Result[Int, String]) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then Ok(x) else __ror_recover(x, f)
+}
+
+// result.flatten(r) = Result[Result[Int,String],String] → Result[Int,String]: Ok(inner) → the inner
+// Result (rebuilt, no ownership transfer — r borrowed), Err(e) → Err(copy e). r is the HEAP-Ok Result
+// (tag @16; slot0 @12 = the inner Result handle for Ok / the msg handle for Err). The inner is a
+// SCALAR Result (len-as-tag @4). Non-recursive helpers isolate each arm. (Constructing an Ok(Err(..))
+// input leaks the inner String — DropListStr is flat on slot0 — so loops use Ok(Ok)/Err inputs.)
+fn __rfl_ok_inner(inner_h: Int) -> Result[Int, String] = {
+  let iv = prim.load64(inner_h + 12)
+  Ok(iv)
+}
+fn __rfl_err_at(msg_h: Int) -> Result[Int, String] = {
+  let copy = __rcopy_at(msg_h)
+  Err(copy)
+}
+fn __rfl_inner(inner_h: Int) -> Result[Int, String] = {
+  let ilen = prim.load32(inner_h + 4)
+  let imsg = prim.load64(inner_h + 12)
+  if ilen == 0 then __rfl_ok_inner(inner_h) else __rfl_err_at(imsg)
+}
+fn __rfl_outer_ok(rh: Int) -> Result[Int, String] = {
+  let inner_h = prim.load64(rh + 12)
+  __rfl_inner(inner_h)
+}
+fn result_flatten(r: Result[Result[Int, String], String]) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  let rmsg = prim.load64(h + 12)
+  if tag == 0 then __rfl_outer_ok(h) else __rfl_err_at(rmsg)
+}

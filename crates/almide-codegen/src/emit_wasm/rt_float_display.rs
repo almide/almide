@@ -17,7 +17,6 @@
 //! it returns the driver's string pointer unchanged. Output uses the standard
 //! `[len:i32][cap:i32][data:u8...]` string layout.
 
-use crate::emit_wasm::engine::{Imm32, Local};
 use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::ValType;
 use super::TrackedFunction as Function;
@@ -66,37 +65,37 @@ pub(super) fn compile(emitter: &mut WasmEmitter) {
     const I: u32 = 5;
 
     wasm!(f, {
-        local_get(Local(F)); call(to_string); local_set(Local(SRC));
-        local_get(Local(SRC)); i32_load(0); local_set(Local(LEN));
+        local_get(F); call(to_string); local_set(SRC);
+        local_get(SRC); i32_load(0); local_set(LEN);
         // Keep the driver's string verbatim unless it ends in exactly `.0`:
         //   len >= 2  &&  data[len-2] == '.'  &&  data[len-1] == '0'
-        local_get(Local(LEN)); i32_const(Imm32(DOT_ZERO_LEN)); i32_ge_s;
-        local_get(Local(SRC)); i32_const(Imm32(data_off)); i32_add;
-          local_get(Local(LEN)); i32_add; i32_const(Imm32(DOT_ZERO_LEN)); i32_sub;
-          i32_load8_u(0); i32_const(Imm32(BYTE_DOT)); i32_eq;
+        local_get(LEN); i32_const(DOT_ZERO_LEN); i32_ge_s;
+        local_get(SRC); i32_const(data_off); i32_add;
+          local_get(LEN); i32_add; i32_const(DOT_ZERO_LEN); i32_sub;
+          i32_load8_u(0); i32_const(BYTE_DOT); i32_eq;
         i32_and;
-        local_get(Local(SRC)); i32_const(Imm32(data_off)); i32_add;
-          local_get(Local(LEN)); i32_add; i32_const(Imm32(1)); i32_sub;
-          i32_load8_u(0); i32_const(Imm32(BYTE_ZERO)); i32_eq;
+        local_get(SRC); i32_const(data_off); i32_add;
+          local_get(LEN); i32_add; i32_const(1); i32_sub;
+          i32_load8_u(0); i32_const(BYTE_ZERO); i32_eq;
         i32_and;
         if_i32;
           // out_len = len - 2; allocate header + out_len, copy the prefix bytes.
-          local_get(Local(LEN)); i32_const(Imm32(DOT_ZERO_LEN)); i32_sub; local_set(Local(OUT_LEN));
-          local_get(Local(OUT_LEN)); i32_const(Imm32(hdr)); i32_add; call(alloc); local_set(Local(OUT));
-          local_get(Local(OUT)); local_get(Local(OUT_LEN)); i32_store(0);
-          local_get(Local(OUT)); local_get(Local(OUT_LEN)); i32_store(cap_off, 0);
-          i32_const(Imm32(0)); local_set(Local(I));
+          local_get(LEN); i32_const(DOT_ZERO_LEN); i32_sub; local_set(OUT_LEN);
+          local_get(OUT_LEN); i32_const(hdr); i32_add; call(alloc); local_set(OUT);
+          local_get(OUT); local_get(OUT_LEN); i32_store(0);
+          local_get(OUT); local_get(OUT_LEN); i32_store(cap_off, 0);
+          i32_const(0); local_set(I);
           block_empty; loop_empty;
-            local_get(Local(I)); local_get(Local(OUT_LEN)); i32_ge_u; br_if(1);
-            local_get(Local(OUT)); i32_const(Imm32(data_off)); i32_add; local_get(Local(I)); i32_add;
-            local_get(Local(SRC)); i32_const(Imm32(data_off)); i32_add; local_get(Local(I)); i32_add;
+            local_get(I); local_get(OUT_LEN); i32_ge_u; br_if(1);
+            local_get(OUT); i32_const(data_off); i32_add; local_get(I); i32_add;
+            local_get(SRC); i32_const(data_off); i32_add; local_get(I); i32_add;
             i32_load8_u(0); i32_store8(0);
-            local_get(Local(I)); i32_const(Imm32(1)); i32_add; local_set(Local(I));
+            local_get(I); i32_const(1); i32_add; local_set(I);
             br(0);
           end; end;
-          local_get(Local(OUT));
+          local_get(OUT);
         else_;
-          local_get(Local(SRC));
+          local_get(SRC);
         end;
         end;
     });

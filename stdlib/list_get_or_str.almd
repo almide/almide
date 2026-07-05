@@ -1,0 +1,27 @@
+// list_get_or_str — SELF-HOSTED `list.get_or` over a List[String], returning a String (the repr-
+// aware sibling of list_get_or, whose i64-slot read returns an i64 where an i32 handle is expected).
+// An in-bounds element is returned as a fresh DEEP COPY (the list keeps owning the original, so the
+// result is single-owned — no double-free); out of bounds returns a deep copy of `default`. Source
+// borrowed; result owned. Element handle lives in the i64 slot at LIST_HEADER + i*ELEM_SIZE.
+//
+// Structured as a SINGLE 2-arm heap-result `if` over two call arms (the form v1 lowers): the index
+// is bounds-checked into a Bool first (a nested `if`/`or` chain in cond position does not lower, so
+// `in_bounds` is computed by two flat scalar comparisons combined arithmetically), then the taken
+// arm copies either the element (a BORROW via prim.load_str) or the default.
+fn __gos_copy(s: String) -> String = string.repeat(s, 1)
+
+// The in-bounds element, deep-copied. `i` is known valid when this arm is taken.
+fn __gos_elem(h: Int, i: Int) -> String = {
+  let x = prim.load_str(h + 12 + i * 8)
+  __gos_copy(x)
+}
+
+fn list_get_or_str(xs: List[String], i: Int, default: String) -> String = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let ge0 = if i >= 0 then 1 else 0
+  let lt_len = if i < len then 1 else 0
+  let in_bounds = ge0 * lt_len
+  if in_bounds == 1 then __gos_elem(h, i)
+  else __gos_copy(default)
+}

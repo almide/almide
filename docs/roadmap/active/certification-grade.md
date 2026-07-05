@@ -5,11 +5,9 @@
 > 5 メカニズムのうち工学で取れるものを全て取り込み、[trust-layer](trust-layer.md) の
 > L2/L3 を「認証級」の定義に引き上げる。証明書そのもの (TÜV 監査・DO-330 TQL) は
 > 商業オプションとして分離 — ここで作るのはその前提となる証拠体系。
-> **North star (2026-06-11)**: 最終到達点は「航空認証申請者に選ばれる信頼水準」だが、
-> 売る本命はエージェント基盤 — 航空は『機械が書いたソフトも認証級に達しうる』を証す
-> **信用の錨**であって商業的終点ではない。全体計画 = flight-grade program
-> ([tracking issue #586](https://github.com/almide/almide/issues/586)、label `flight-grade`)。
-> 本 roadmap はその工学パート (Category A) の中核。
+> **実地監査所見**: [flight-evidence-gaps](flight-evidence-gaps.md) — 2026-07-03 の
+> ハンズオン改修で観測した証拠体系の穴 7 件（F1 oracle 循環は CG-1 の、F2 カバレッジ錯覚は
+> evidence ladder の、それぞれ実測された裏付け）。
 > **Active scope: CG-1** — ALS (Almide Language Specification) + reference interpreter
 > の規範化 + 契約の spec-keying。
 > **Exit criteria (CG-1)**: 全 active 契約が ALS の節を `spec` フィールドで参照し、
@@ -129,11 +127,8 @@ belt の思想をビルド単位の証明に拡張: 「この .wasm はこの検
 - **証明書の取得それ自体** (TÜV / DO-330 監査) — 監査対応・LTS 保証・賠償責任は
   組織の問題で、工学では買えない。Ferrocene も AdaCore もこれを売る会社として存在する。
   カテゴリ確立後の商業オプションとして分離
-- **フライトソフトウェア市場への今の参入** — 順序の問題であって航空の放棄ではない
-  (航空は上記の通り信用の錨)。当面の買い手はエージェント基盤・スマートコントラクト・
-  サプライチェーン (EU CRA) で、ここが資金とサービス履歴の発生源。規制産業は
-  dossier が揃ってから、はしごを下から登る: 地上ツール → 宇宙/UAS → DAL-D/C → DAL-A
-  ([#583](https://github.com/almide/almide/issues/583))
+- **フライトソフトウェア市場への参入** — 買い手はエージェント基盤。規制産業向けは
+  dossier が揃ってからの選択肢
 - **CompCert 級フルコンパイラ証明** — データ付きで棄却済み。CG-4 で代替
 
 ## 先行者の地図 — 何を借りるか

@@ -1,0 +1,62 @@
+// math_int — SELF-HOSTED scalar Int math (abs/max/min/sign/pow) for v1, plain scalar
+// if/arithmetic — NO heap, NO prim floor. Matches v0's i64 ops.
+// The runtime linker auto-includes the ones a program calls (all share this file).
+
+fn math_abs(n: Int) -> Int = if n < 0 then 0 - n else n
+
+fn math_max(a: Int, b: Int) -> Int = if a > b then a else b
+
+fn math_min(a: Int, b: Int) -> Int = if a < b then a else b
+
+fn math_sign(n: Int) -> Int =
+  if n > 0 then 1
+  else if n < 0 then 0 - 1
+  else 0
+
+// math.pow via exponentiation-by-squaring expressed with `% 2` (is-odd) and `/ 2` (halve)
+// — the SAME algorithm + wrapped i64 result as v0 (`e & 1` / `e >>= 1`), in O(log exp).
+// exp >= 0 byte-matches v0; v0 ABORTS on a negative exponent (an error path), which this
+// returns 1 for instead (no infinite loop) — the value path is exact.
+fn __pow_sq(b: Int, e: Int, acc: Int) -> Int =
+  if e <= 0 then acc
+  else {
+    let acc2 = if e % 2 == 1 then acc * b else acc
+    __pow_sq(b * b, e / 2, acc2)
+  }
+
+fn math_pow(base: Int, exp: Int) -> Int = {
+  // §13 termination convention (C-035 kin): a negative exponent has no integer
+  // result — abort with the native-identical stderr line + exit 1.
+  if exp < 0 then prim.die(prim.handle("Error: negative exponent\n")) else ()
+  __pow_sq(base, exp, 1)
+}
+
+// math.factorial = (1..=n).product(): n! for n>=1, and 1 for n<=1 (the empty product,
+// matching v0's empty inclusive range). Wraps like v0's i64 product for large n.
+fn __fact(n: Int, acc: Int) -> Int =
+  if n <= 1 then acc
+  else __fact(n - 1, acc * n)
+
+fn math_factorial(n: Int) -> Int = __fact(n, 1)
+
+// math.choose = C(n,k): 0 when k<0 or k>n, else the running product (n-i)/(i+1) over
+// i in 0..min(k,n-k). Multiply-before-divide keeps each step an exact integer (the
+// running value is always a binomial coefficient), matching v0 exactly.
+fn __choose_loop(n: Int, k: Int, i: Int, result: Int) -> Int =
+  if i >= k then result
+  else {
+    let term = n - i
+    let num = result * term
+    let denom = i + 1
+    let r2 = num / denom
+    __choose_loop(n, k, i + 1, r2)
+  }
+
+fn math_choose(n: Int, k: Int) -> Int =
+  if k < 0 then 0
+  else if k > n then 0
+  else {
+    let nk = n - k
+    let k2 = if k < nk then k else nk
+    __choose_loop(n, k2, 0, 1)
+  }

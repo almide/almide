@@ -1,0 +1,40 @@
+// wasm:enabled
+// A standalone fixture locking in `ok(<user-variant ctor>)` in Result-Ok position — the derived
+// variant-decode `ok(Pair(_e0, _e1))` / `ok(Plain)` shape. The variant is MATERIALIZED (the same
+// tagged block a `let p = Pair(..)` builds, with its recursive `$__drop_<V>` drop) and wrapped in
+// the Result, so the consumer's `match r { ok(v) => match v { Pair(n, s) => .. } }` reads a real
+// variant block — byte-identical to v0 `--target wasm`. Without this the ctor emitted a dangling
+// `CallFn "Pair"`.
+type Shape =
+  | Pair(Int, String)
+  | Solo(Int)
+  | Plain
+
+fn build(tag: Int, n: Int, s: String) -> Result[Shape, String] =
+  if tag == 0 then ok(Pair(n, s))
+  else if tag == 1 then ok(Solo(n))
+  else if tag == 2 then ok(Plain)
+  else err("bad tag")
+
+effect fn main() -> Unit = {
+  match build(0, 7, "x") {
+    ok(v) => match v {
+      Pair(n, s) => println("pair " + int.to_string(n) + " " + s),
+      Solo(n) => println("solo " + int.to_string(n)),
+      Plain => println("plain"),
+    }
+    err(e) => println("err " + e)
+  }
+  match build(1, 42, "") {
+    ok(v) => match v { Pair(n, s) => println("pair"), Solo(n) => println("solo " + int.to_string(n)), Plain => println("plain") }
+    err(e) => println("err " + e)
+  }
+  match build(2, 0, "") {
+    ok(v) => match v { Pair(n, s) => println("pair"), Solo(n) => println("solo"), Plain => println("plain") }
+    err(e) => println("err " + e)
+  }
+  match build(9, 0, "") {
+    ok(v) => match v { Pair(n, s) => println("pair"), Solo(n) => println("solo"), Plain => println("plain") }
+    err(e) => println("err " + e)
+  }
+}

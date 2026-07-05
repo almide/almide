@@ -1,0 +1,40 @@
+// list_find — SELF-HOSTED `list.find` for v1 over the prim floor + closures + materialized
+// Options. Returns Some(first x where f(x)) / None, short-circuiting at the first match. The
+// Some/None and the recursive step are each built in TAIL position via helper fns, so every
+// Option-returning `if` selects between two bare CALLS (the call-arm heap-result-if pattern,
+// same as list.max/min) — the heap-result-if does NOT handle a block-with-statements arm, so
+// the per-element load+predicate lives in its own `__find_step` whose tail IS that `if`. The
+// predicate f is invoked via CallIndirect. List[Int]; source borrowed.
+
+fn __find_none() -> Option[Int] = None
+fn __find_some(x: Int) -> Option[Int] = Some(x)
+
+fn __find_step(sh: Int, f: (Int) -> Bool, n: Int, i: Int) -> Option[Int] = {
+  let x = prim.load64(sh + 12 + i * 8)
+  let h = f(x)
+  if h then __find_some(x) else __find_scan(sh, f, n, i + 1)
+}
+
+fn __find_scan(sh: Int, f: (Int) -> Bool, n: Int, i: Int) -> Option[Int] =
+  if i >= n then __find_none() else __find_step(sh, f, n, i)
+
+fn list_find(xs: List[Int], f: (Int) -> Bool) -> Option[Int] = {
+  let n = list.len(xs)
+  __find_scan(prim.handle(xs), f, n, 0)
+}
+
+// find_index: the same scan, but the Some payload is the INDEX i (not the element). Reuses
+// __find_none / __find_some (Some of an Int — here the index) and the split-helper shape.
+fn __fi_step(sh: Int, f: (Int) -> Bool, n: Int, i: Int) -> Option[Int] = {
+  let x = prim.load64(sh + 12 + i * 8)
+  let h = f(x)
+  if h then __find_some(i) else __fi_scan(sh, f, n, i + 1)
+}
+
+fn __fi_scan(sh: Int, f: (Int) -> Bool, n: Int, i: Int) -> Option[Int] =
+  if i >= n then __find_none() else __fi_step(sh, f, n, i)
+
+fn list_find_index(xs: List[Int], f: (Int) -> Bool) -> Option[Int] = {
+  let n = list.len(xs)
+  __fi_scan(prim.handle(xs), f, n, 0)
+}

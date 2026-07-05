@@ -1,0 +1,134 @@
+// string_search — SELF-HOSTED byte-search string predicates for v1 over the prim floor:
+// `string.starts_with` / `string.ends_with` / `string.contains`. All are pure BYTE scans
+// (no allocation) sharing one `__byte_eq` comparison — byte-level matching is string-level
+// because every affix/needle is itself a complete valid UTF-8 String (UTF-8 is self-
+// synchronizing). Reads only — args borrowed. Cert-untouching (no heap Alloc).
+
+// True iff the `n` bytes at address `a` equal the `n` bytes at address `b`.
+fn __byte_eq(a: Int, b: Int, n: Int) -> Bool =
+  if n <= 0 then true
+  else {
+    let x = prim.load8(a)
+    let y = prim.load8(b)
+    if x == y then __byte_eq(a + 1, b + 1, n - 1)
+    else false
+  }
+
+fn string_starts_with(s: String, prefix: String) -> Bool = {
+  let hs = prim.handle(s)
+  let hp = prim.handle(prefix)
+  let slen = prim.load32(hs + 4)            // byte length at LIST_LEN_OFFSET(4)
+  let plen = prim.load32(hp + 4)
+  if plen > slen then false
+  else __byte_eq(hs + 12, hp + 12, plen)    // compare from the data start (LIST_HEADER 12)
+}
+
+fn string_ends_with(s: String, suffix: String) -> Bool = {
+  let hs = prim.handle(s)
+  let hp = prim.handle(suffix)
+  let slen = prim.load32(hs + 4)
+  let plen = prim.load32(hp + 4)
+  if plen > slen then false
+  else __byte_eq(hs + 12 + (slen - plen), hp + 12, plen)  // compare from the tail
+}
+
+// Scan each start position; at each, byte-compare `nlen` bytes against the needle.
+fn __contains_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Bool =
+  if pos + nlen > slen then false
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then true
+    else __contains_scan(sbase, slen, nbase, nlen, pos + 1)
+  }
+
+fn string_contains(s: String, needle: String) -> Bool = {
+  let hs = prim.handle(s)
+  let hn = prim.handle(needle)
+  let slen = prim.load32(hs + 4)
+  let nlen = prim.load32(hn + 4)
+  if nlen <= 0 then true                     // every string contains the empty needle
+  else __contains_scan(hs + 12, slen, hn + 12, nlen, 0)
+}
+
+// Count codepoints (UTF-8 start bytes, i.e. bytes whose top bits are NOT 10xxxxxx) in the
+// first `n` bytes from `base` — the same decode `string.len` uses.
+fn __cp_count(base: Int, n: Int) -> Int =
+  if n <= 0 then 0
+  else {
+    let b = prim.load8(base)
+    let step = if b / 64 == 2 then 0 else 1   // 64..=127 region 2 == continuation byte
+    let rest = __cp_count(base + 1, n - 1)
+    step + rest
+  }
+
+// Count NON-OVERLAPPING needle matches from `pos`, skipping past each match (v0 semantics:
+// `s.matches(needle).count()`).
+fn __count_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int, acc: Int) -> Int =
+  if pos + nlen > slen then acc
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then __count_scan(sbase, slen, nbase, nlen, pos + nlen, acc + 1)
+    else __count_scan(sbase, slen, nbase, nlen, pos + 1, acc)
+  }
+
+fn string_count(s: String, needle: String) -> Int = {
+  let hs = prim.handle(s)
+  let hn = prim.handle(needle)
+  let slen = prim.load32(hs + 4)
+  let nlen = prim.load32(hn + 4)
+  if nlen <= 0 then {
+    let c = __cp_count(hs + 12, slen)         // empty needle matches at each char boundary
+    c + 1
+  }
+  else __count_scan(hs + 12, slen, hn + 12, nlen, 0, 0)
+}
+
+// BYTE position of the first needle match from `pos`, or -1 if none (the empty needle
+// matches at 0). Reuses __byte_eq.
+fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Int =
+  if pos + nlen > slen then -1
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then pos
+    else __find_byte(sbase, slen, nbase, nlen, pos + 1)
+  }
+
+// The Option result is built in TAIL position by these helpers (so a `match` over
+// string.index_of's result executes via the materialized-Option layout). __io_at converts
+// the byte position to a CODEPOINT index (v0 returns the char index, not the byte offset).
+fn __io_none() -> Option[Int] = None
+fn __io_at(base: Int, bpos: Int) -> Option[Int] = {
+  let cp = __cp_count(base, bpos)
+  Some(cp)
+}
+
+fn string_index_of(s: String, needle: String) -> Option[Int] = {
+  let hs = prim.handle(s)
+  let hn = prim.handle(needle)
+  let slen = prim.load32(hs + 4)
+  let nlen = prim.load32(hn + 4)
+  let bpos = __find_byte(hs + 12, slen, hn + 12, nlen, 0)
+  if bpos < 0 then __io_none()
+  else __io_at(hs + 12, bpos)
+}
+
+// BYTE position of the LAST needle match at or before `pos`, or -1 if none — scan
+// backward from the last possible start. The empty needle matches at `slen` (v0
+// rfind("") = Some(len)). Reuses __byte_eq.
+fn __rfind_byte(sbase: Int, nbase: Int, nlen: Int, pos: Int) -> Int =
+  if pos < 0 then -1
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then pos
+    else __rfind_byte(sbase, nbase, nlen, pos - 1)
+  }
+
+fn string_last_index_of(s: String, needle: String) -> Option[Int] = {
+  let hs = prim.handle(s)
+  let hn = prim.handle(needle)
+  let slen = prim.load32(hs + 4)
+  let nlen = prim.load32(hn + 4)
+  let bpos = __rfind_byte(hs + 12, hn + 12, nlen, slen - nlen)
+  if bpos < 0 then __io_none()
+  else __io_at(hs + 12, bpos)
+}

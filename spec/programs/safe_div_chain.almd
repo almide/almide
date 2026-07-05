@@ -1,0 +1,8 @@
+fn safe_div(a: Int, b: Int) -> Option[Int] = if b == 0 then None else Some(a / b)
+fn describe(a: Int, b: Int) -> String =
+  match safe_div(a, b) { Some(q) => "q=" + int.to_string(q), None => "div by zero" }
+fn main() -> Unit = {
+  println(describe(20, 4))
+  println(describe(7, 0))
+  println(int.to_string(safe_div(100, 5) ?? -1))
+}

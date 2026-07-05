@@ -1,0 +1,27 @@
+// list_filter_str — SELF-HOSTED list.filter over a List[String] (the repr-poly _str variant). Like
+// list_filter, over-allocate a DynListStr of the source length, keep each element whose predicate
+// f(x) is true (single pass — f called once per element), packing matches from slot 0, then patch
+// the result's len header to the match count (spare capacity reclaimed by cap). Each KEPT element is
+// DEEP-COPIED (string.repeat ·1) into the result so it is single-owned (the source still owns the
+// original — no double-free). Source borrowed; result owned.
+
+fn __filterstr_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let keep = f(x)
+    if keep then {
+      let copy = string.repeat(x, 1)
+      prim.store_str(dh + 12 + di * 8, copy)
+      __filterstr_fill(dh, sh, f, n, i + 1, di + 1)
+    }
+    else __filterstr_fill(dh, sh, f, n, i + 1, di)
+  }
+
+fn list_filter_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list_str(n)
+  let count = __filterstr_fill(prim.handle(buf), prim.handle(xs), f, n, 0, 0)
+  prim.store32(prim.handle(buf) + 4, count)
+  buf
+}

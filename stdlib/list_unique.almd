@@ -1,0 +1,43 @@
+// list_unique — SELF-HOSTED `list.unique` for v1 over the prim floor: keep the FIRST
+// occurrence of each distinct value, dropping all later duplicates (v0 keeps insertion
+// order). Two passes over the i64 slots: count the first-occurrences, then fill a fresh
+// List[Int] (prim.alloc_list). Sound + loop-bounded (i64 value copies, no element leak);
+// List[Int] only (heap elements compare by handle). O(n^2); `xs` borrowed, result owned.
+
+// Is xs[i] the FIRST occurrence of its value (no earlier element equals it)?
+fn __uniq_first(sh: Int, v: Int, i: Int, j: Int) -> Bool =
+  if j >= i then true
+  else {
+    let e = prim.load64(sh + 12 + j * 8)
+    if e == v then false
+    else __uniq_first(sh, v, i, j + 1)
+  }
+
+fn __uniq_count(sh: Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    let f = __uniq_first(sh, v, i, 0)
+    let keep = if f then 1 else 0
+    __uniq_count(sh, n, i + 1, acc + keep)
+  }
+
+fn __uniq_fill(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    let f = __uniq_first(sh, v, i, 0)
+    if f then {
+      prim.store64(dh + 12 + di * 8, v)
+      __uniq_fill(sh, dh, n, i + 1, di + 1)
+    } else __uniq_fill(sh, dh, n, i + 1, di)
+  }
+
+fn list_unique(xs: List[Int]) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let count = __uniq_count(h, n, 0, 0)
+  let buf = prim.alloc_list(count)
+  let _f = __uniq_fill(h, prim.handle(buf), n, 0, 0)
+  buf
+}

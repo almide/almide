@@ -13,7 +13,6 @@
 //!   `\\ \" \n \r \t`  (every other byte is copied verbatim).
 //! Output (and input) use the standard `[len:i32][cap:i32][data:u8...]` layout.
 
-use crate::emit_wasm::engine::{Imm32, Local};
 use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::ValType;
 use super::TrackedFunction as Function;
@@ -74,77 +73,77 @@ pub(super) fn compile(emitter: &mut WasmEmitter) {
     const ESC: u32 = 7;
 
     wasm!(f, {
-        local_get(Local(S)); i32_load(0); local_set(Local(IN_LEN));
+        local_get(S); i32_load(0); local_set(IN_LEN);
         // ── Pass 1: out_len = sum over bytes (escapable → 2, else → 1) ──
-        i32_const(Imm32(0)); local_set(Local(OUT_LEN));
-        i32_const(Imm32(0)); local_set(Local(I));
+        i32_const(0); local_set(OUT_LEN);
+        i32_const(0); local_set(I);
         block_empty; loop_empty;
-          local_get(Local(I)); local_get(Local(IN_LEN)); i32_ge_u; br_if(1);
-          local_get(Local(S)); i32_const(Imm32(data_off)); i32_add; local_get(Local(I)); i32_add;
-          i32_load8_u(0); local_set(Local(B));
+          local_get(I); local_get(IN_LEN); i32_ge_u; br_if(1);
+          local_get(S); i32_const(data_off); i32_add; local_get(I); i32_add;
+          i32_load8_u(0); local_set(B);
           // escapable = b==\\ || b=='"' || b=='\n' || b=='\r' || b=='\t'
-          local_get(Local(OUT_LEN));
-          local_get(Local(B)); i32_const(Imm32(BYTE_BACKSLASH)); i32_eq;
-          local_get(Local(B)); i32_const(Imm32(BYTE_QUOTE)); i32_eq; i32_or;
-          local_get(Local(B)); i32_const(Imm32(BYTE_NL)); i32_eq; i32_or;
-          local_get(Local(B)); i32_const(Imm32(BYTE_CR)); i32_eq; i32_or;
-          local_get(Local(B)); i32_const(Imm32(BYTE_TAB)); i32_eq; i32_or;
+          local_get(OUT_LEN);
+          local_get(B); i32_const(BYTE_BACKSLASH); i32_eq;
+          local_get(B); i32_const(BYTE_QUOTE); i32_eq; i32_or;
+          local_get(B); i32_const(BYTE_NL); i32_eq; i32_or;
+          local_get(B); i32_const(BYTE_CR); i32_eq; i32_or;
+          local_get(B); i32_const(BYTE_TAB); i32_eq; i32_or;
           // escapable ? 2 : 1  →  1 + escapable
-          i32_const(Imm32(1)); i32_add;
-          i32_add; local_set(Local(OUT_LEN));
-          local_get(Local(I)); i32_const(Imm32(1)); i32_add; local_set(Local(I));
+          i32_const(1); i32_add;
+          i32_add; local_set(OUT_LEN);
+          local_get(I); i32_const(1); i32_add; local_set(I);
           br(0);
         end; end;
         // ── Allocate result: header + quotes + escaped bytes ──
-        local_get(Local(OUT_LEN)); i32_const(Imm32(QUOTE_LEN)); i32_add; i32_const(Imm32(hdr)); i32_add;
-        call(alloc); local_set(Local(OUT));
+        local_get(OUT_LEN); i32_const(QUOTE_LEN); i32_add; i32_const(hdr); i32_add;
+        call(alloc); local_set(OUT);
         // len = cap = out_len + 2  (write both header words like __string_alloc)
-        local_get(Local(OUT)); local_get(Local(OUT_LEN)); i32_const(Imm32(QUOTE_LEN)); i32_add; i32_store(0);
-        local_get(Local(OUT)); local_get(Local(OUT_LEN)); i32_const(Imm32(QUOTE_LEN)); i32_add; i32_store(cap_off, 0);
+        local_get(OUT); local_get(OUT_LEN); i32_const(QUOTE_LEN); i32_add; i32_store(0);
+        local_get(OUT); local_get(OUT_LEN); i32_const(QUOTE_LEN); i32_add; i32_store(cap_off, 0);
         // w = out + DATA; write opening quote.
-        local_get(Local(OUT)); i32_const(Imm32(data_off)); i32_add; local_set(Local(W));
-        local_get(Local(W)); i32_const(Imm32(BYTE_QUOTE)); i32_store8(0);
-        local_get(Local(W)); i32_const(Imm32(1)); i32_add; local_set(Local(W));
+        local_get(OUT); i32_const(data_off); i32_add; local_set(W);
+        local_get(W); i32_const(BYTE_QUOTE); i32_store8(0);
+        local_get(W); i32_const(1); i32_add; local_set(W);
         // ── Pass 2: copy/escape each byte ──
-        i32_const(Imm32(0)); local_set(Local(I));
+        i32_const(0); local_set(I);
         block_empty; loop_empty;
-          local_get(Local(I)); local_get(Local(IN_LEN)); i32_ge_u; br_if(1);
-          local_get(Local(S)); i32_const(Imm32(data_off)); i32_add; local_get(Local(I)); i32_add;
-          i32_load8_u(0); local_set(Local(B));
+          local_get(I); local_get(IN_LEN); i32_ge_u; br_if(1);
+          local_get(S); i32_const(data_off); i32_add; local_get(I); i32_add;
+          i32_load8_u(0); local_set(B);
           // esc = post-backslash char, or 0 if this byte is copied verbatim.
           //   \\ , "  → the literal byte itself (a backslash precedes it)
           //   \n      → 'n' , \r → 'r' , \t → 't'
-          i32_const(Imm32(0)); local_set(Local(ESC));
-          local_get(Local(B)); i32_const(Imm32(BYTE_BACKSLASH)); i32_eq;
-          local_get(Local(B)); i32_const(Imm32(BYTE_QUOTE)); i32_eq; i32_or;
+          i32_const(0); local_set(ESC);
+          local_get(B); i32_const(BYTE_BACKSLASH); i32_eq;
+          local_get(B); i32_const(BYTE_QUOTE); i32_eq; i32_or;
           if_empty;
-            local_get(Local(B)); local_set(Local(ESC));          // self-quoting: \\ , \"
+            local_get(B); local_set(ESC);          // self-quoting: \\ , \"
           else_;
-            local_get(Local(B)); i32_const(Imm32(BYTE_NL)); i32_eq;
-            if_empty; i32_const(Imm32(CHAR_N)); local_set(Local(ESC)); end;
-            local_get(Local(B)); i32_const(Imm32(BYTE_CR)); i32_eq;
-            if_empty; i32_const(Imm32(CHAR_R)); local_set(Local(ESC)); end;
-            local_get(Local(B)); i32_const(Imm32(BYTE_TAB)); i32_eq;
-            if_empty; i32_const(Imm32(CHAR_T)); local_set(Local(ESC)); end;
+            local_get(B); i32_const(BYTE_NL); i32_eq;
+            if_empty; i32_const(CHAR_N); local_set(ESC); end;
+            local_get(B); i32_const(BYTE_CR); i32_eq;
+            if_empty; i32_const(CHAR_R); local_set(ESC); end;
+            local_get(B); i32_const(BYTE_TAB); i32_eq;
+            if_empty; i32_const(CHAR_T); local_set(ESC); end;
           end;
           // esc == 0 → copy byte verbatim; esc != 0 → write '\\' then esc.
-          local_get(Local(ESC)); i32_eqz;
+          local_get(ESC); i32_eqz;
           if_empty;
             // verbatim byte (esc == 0)
-            local_get(Local(W)); local_get(Local(B)); i32_store8(0);
-            local_get(Local(W)); i32_const(Imm32(1)); i32_add; local_set(Local(W));
+            local_get(W); local_get(B); i32_store8(0);
+            local_get(W); i32_const(1); i32_add; local_set(W);
           else_;
             // escaped pair: backslash + esc char
-            local_get(Local(W)); i32_const(Imm32(BYTE_BACKSLASH)); i32_store8(0);
-            local_get(Local(W)); i32_const(Imm32(1)); i32_add; local_get(Local(ESC)); i32_store8(0);
-            local_get(Local(W)); i32_const(Imm32(QUOTE_LEN)); i32_add; local_set(Local(W));
+            local_get(W); i32_const(BYTE_BACKSLASH); i32_store8(0);
+            local_get(W); i32_const(1); i32_add; local_get(ESC); i32_store8(0);
+            local_get(W); i32_const(QUOTE_LEN); i32_add; local_set(W);
           end;
-          local_get(Local(I)); i32_const(Imm32(1)); i32_add; local_set(Local(I));
+          local_get(I); i32_const(1); i32_add; local_set(I);
           br(0);
         end; end;
         // closing quote
-        local_get(Local(W)); i32_const(Imm32(BYTE_QUOTE)); i32_store8(0);
-        local_get(Local(OUT));
+        local_get(W); i32_const(BYTE_QUOTE); i32_store8(0);
+        local_get(OUT);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));

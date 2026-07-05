@@ -9,44 +9,8 @@
 //!   [tag:i32=5][payload:i32 (list ptr -> List[Value])] = array
 //!   [tag:i32=6][payload:i32 (list ptr -> List[(String, Value)])] = object
 
-use crate::emit_wasm::engine::{Imm32, Local};
 use super::FuncCompiler;
 use almide_ir::IrExpr;
-
-// ── Value type tags ────────────────────────────────────────────────────────
-// Stored as i32 at offset 0 of every Value heap cell (tagged union).
-// See module-level doc comment for the full tag table.
-const VAL_TAG_INT:    i32 = 2; // Value::Int   — payload: i64 at offset 4
-const VAL_TAG_FLOAT:  i32 = 3; // Value::Float — payload: f64 at offset 4
-const VAL_TAG_STRING: i32 = 4; // Value::Str   — payload: string ptr (i32) at offset 4
-const VAL_TAG_ARRAY:  i32 = 5; // Value::Array — payload: list ptr (i32) at offset 4
-const VAL_TAG_OBJECT: i32 = 6; // Value::Object — payload: pairs-list ptr (i32) at offset 4
-
-// ── Value heap cell allocation sizes (bytes) ───────────────────────────────
-// null / JpRoot:        [tag:i32]                    =  4 bytes
-// bool / str / array / object: [tag:i32][payload:i32] =  8 bytes
-// int / float:          [tag:i32][payload:i64|f64]   = 12 bytes
-const VAL_ALLOC_NULL: i32 = 4;  // tag-only cell
-const VAL_ALLOC_PTR:  i32 = 8;  // tag + one i32 field
-const VAL_ALLOC_I64:  i32 = 12; // tag + one i64/f64 field
-
-// ── JsonPath node allocation size (bytes) ──────────────────────────────────
-// JpField / JpIndex: [tag:i32][parent:i32][name_or_idx:i32] = 12 bytes
-const JP_NODE_ALLOC: i32 = 12;
-
-// ── List element strides (bytes per element in list data arrays) ───────────
-const PTR_STRIDE: i32 = 4; // pointer-sized element (i32 / heap ptr)
-const I64_STRIDE: i32 = 8; // 64-bit element (i64 / f64)
-
-// ── ASCII constants used in key-case transforms ────────────────────────────
-const ASCII_UNDERSCORE:  i32 = 95; // '_'
-const ASCII_UPPER_A:     i32 = 65; // 'A'
-const ASCII_UPPER_Z:     i32 = 90; // 'Z'
-const ASCII_CASE_OFFSET: i32 = 32; // 'a' - 'A': additive distance upper↔lower
-
-// ── Buffer over-allocation factor for snake_case expansion ────────────────
-// Worst case: every char becomes '_' + lowercase → 2× source length.
-const SNAKE_BUF_FACTOR: i32 = 2;
 
 impl FuncCompiler<'_> {
     /// Dispatch a `value.*` module call.
@@ -56,9 +20,9 @@ impl FuncCompiler<'_> {
                 // value.null() -> Value: alloc [tag=0], size=4
                 let s = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(Imm32(VAL_ALLOC_NULL)); call(self.emitter.rt.alloc); local_set(Local(s));
-                    local_get(Local(s)); i32_const(Imm32(0)); i32_store(0); // tag = 0 (null)
-                    local_get(Local(s));
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(s);
+                    local_get(s); i32_const(0); i32_store(0); // tag = 0 (null)
+                    local_get(s);
                 });
                 self.scratch.free_i32(s);
             }
@@ -68,11 +32,11 @@ impl FuncCompiler<'_> {
                 let ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(val));
-                    i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(ptr));
-                    local_get(Local(ptr)); i32_const(Imm32(1)); i32_store(0); // tag = 1 (bool)
-                    local_get(Local(ptr)); local_get(Local(val)); i32_store(4); // payload
-                    local_get(Local(ptr));
+                    local_set(val);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(ptr);
+                    local_get(ptr); i32_const(1); i32_store(0); // tag = 1 (bool)
+                    local_get(ptr); local_get(val); i32_store(4); // payload
+                    local_get(ptr);
                 });
                 self.scratch.free_i32(ptr);
                 self.scratch.free_i32(val);
@@ -83,11 +47,11 @@ impl FuncCompiler<'_> {
                 let ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(val));
-                    i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(ptr));
-                    local_get(Local(ptr)); i32_const(Imm32(VAL_TAG_INT)); i32_store(0); // tag = 2 (int)
-                    local_get(Local(ptr)); local_get(Local(val)); i64_store(4); // payload
-                    local_get(Local(ptr));
+                    local_set(val);
+                    i32_const(12); call(self.emitter.rt.alloc); local_set(ptr);
+                    local_get(ptr); i32_const(2); i32_store(0); // tag = 2 (int)
+                    local_get(ptr); local_get(val); i64_store(4); // payload
+                    local_get(ptr);
                 });
                 self.scratch.free_i32(ptr);
                 self.scratch.free_i64(val);
@@ -98,11 +62,11 @@ impl FuncCompiler<'_> {
                 let ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(val));
-                    i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(ptr));
-                    local_get(Local(ptr)); i32_const(Imm32(VAL_TAG_FLOAT)); i32_store(0); // tag = 3 (float)
-                    local_get(Local(ptr)); local_get(Local(val)); f64_store(4); // payload
-                    local_get(Local(ptr));
+                    local_set(val);
+                    i32_const(12); call(self.emitter.rt.alloc); local_set(ptr);
+                    local_get(ptr); i32_const(3); i32_store(0); // tag = 3 (float)
+                    local_get(ptr); local_get(val); f64_store(4); // payload
+                    local_get(ptr);
                 });
                 self.scratch.free_i32(ptr);
                 self.scratch.free_f64(val);
@@ -113,11 +77,11 @@ impl FuncCompiler<'_> {
                 let ptr = self.scratch.alloc_i32();
                 self.emit_stored_field(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(val));
-                    i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(ptr));
-                    local_get(Local(ptr)); i32_const(Imm32(VAL_TAG_STRING)); i32_store(0); // tag = 4 (string)
-                    local_get(Local(ptr)); local_get(Local(val)); i32_store(4); // payload = str ptr
-                    local_get(Local(ptr));
+                    local_set(val);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(ptr);
+                    local_get(ptr); i32_const(4); i32_store(0); // tag = 4 (string)
+                    local_get(ptr); local_get(val); i32_store(4); // payload = str ptr
+                    local_get(ptr);
                 });
                 self.scratch.free_i32(ptr);
                 self.scratch.free_i32(val);
@@ -128,11 +92,11 @@ impl FuncCompiler<'_> {
                 let ptr = self.scratch.alloc_i32();
                 self.emit_stored_field(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(val));
-                    i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(ptr));
-                    local_get(Local(ptr)); i32_const(Imm32(VAL_TAG_ARRAY)); i32_store(0); // tag = 5 (array)
-                    local_get(Local(ptr)); local_get(Local(val)); i32_store(4); // payload = list ptr
-                    local_get(Local(ptr));
+                    local_set(val);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(ptr);
+                    local_get(ptr); i32_const(5); i32_store(0); // tag = 5 (array)
+                    local_get(ptr); local_get(val); i32_store(4); // payload = list ptr
+                    local_get(ptr);
                 });
                 self.scratch.free_i32(ptr);
                 self.scratch.free_i32(val);
@@ -143,11 +107,11 @@ impl FuncCompiler<'_> {
                 let ptr = self.scratch.alloc_i32();
                 self.emit_stored_field(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(val));
-                    i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(ptr));
-                    local_get(Local(ptr)); i32_const(Imm32(VAL_TAG_OBJECT)); i32_store(0); // tag = 6 (object)
-                    local_get(Local(ptr)); local_get(Local(val)); i32_store(4); // payload = list ptr
-                    local_get(Local(ptr));
+                    local_set(val);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(ptr);
+                    local_get(ptr); i32_const(6); i32_store(0); // tag = 6 (object)
+                    local_get(ptr); local_get(val); i32_store(4); // payload = list ptr
+                    local_get(ptr);
                 });
                 self.scratch.free_i32(ptr);
                 self.scratch.free_i32(val);
@@ -200,30 +164,30 @@ impl FuncCompiler<'_> {
                 let result = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(v));
-                    local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_FLOAT)); i32_eq;
+                    local_set(v);
+                    local_get(v); i32_load(0); i32_const(3); i32_eq;
                     if_i32;
-                      i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(result));
-                      local_get(Local(result)); i32_const(Imm32(0)); i32_store(0); // ok
-                      local_get(Local(result)); local_get(Local(v)); f64_load(4); f64_store(4);
-                      local_get(Local(result));
+                      i32_const(12); call(self.emitter.rt.alloc); local_set(result);
+                      local_get(result); i32_const(0); i32_store(0); // ok
+                      local_get(result); local_get(v); f64_load(4); f64_store(4);
+                      local_get(result);
                     else_;
                       // #658: a JSON integer is a valid Float — widen Int→f64 so
                       // Codec roundtrips stay total (mirrors native as_float).
-                      local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_INT)); i32_eq;
+                      local_get(v); i32_load(0); i32_const(2); i32_eq;
                       if_i32;
-                        i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(0)); i32_store(0); // ok
-                        local_get(Local(result)); local_get(Local(v)); i64_load(4); f64_convert_i64_s; f64_store(4);
-                        local_get(Local(result));
+                        i32_const(12); call(self.emitter.rt.alloc); local_set(result);
+                        local_get(result); i32_const(0); i32_store(0); // ok
+                        local_get(result); local_get(v); i64_load(4); f64_convert_i64_s; f64_store(4);
+                        local_get(result);
                       else_;
                 });
                 let err_msg = self.emitter.intern_string("expected Float");
                 wasm!(self.func, {
-                      i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                      local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-                      local_get(Local(result)); i32_const(Imm32(err_msg as i32)); i32_store(4);
-                      local_get(Local(result));
+                      i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+                      local_get(result); i32_const(1); i32_store(0);
+                      local_get(result); i32_const(err_msg as i32); i32_store(4);
+                      local_get(result);
                       end;
                     end;
                 });
@@ -237,21 +201,25 @@ impl FuncCompiler<'_> {
                 let result = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(v));
-                    local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_ARRAY)); i32_eq;
+                    local_set(v);
+                    local_get(v); i32_load(0); i32_const(5); i32_eq;
                     if_i32;
-                      i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                      local_get(Local(result)); i32_const(Imm32(0)); i32_store(0); // ok
-                      local_get(Local(result)); local_get(Local(v)); i32_load(4); i32_store(4);
-                      local_get(Local(result));
+                      i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+                      local_get(result); i32_const(0); i32_store(0); // ok
+                      // SHARE: the payload list stays owned by the Value — the
+                      // Result box must own its own +1 (#668 class), like
+                      // emit_value_as_type's pointer-tag rule.
+                      local_get(result); local_get(v); i32_load(4);
+                      call(self.emitter.rt.rc_inc); i32_store(4);
+                      local_get(result);
                     else_;
                 });
                 let err_msg = self.emitter.intern_string("expected Array");
                 wasm!(self.func, {
-                      i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                      local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-                      local_get(Local(result)); i32_const(Imm32(err_msg as i32)); i32_store(4);
-                      local_get(Local(result));
+                      i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+                      local_get(result); i32_const(1); i32_store(0);
+                      local_get(result); i32_const(err_msg as i32); i32_store(4);
+                      local_get(result);
                     end;
                 });
                 self.scratch.free_i32(result);
@@ -327,7 +295,7 @@ impl FuncCompiler<'_> {
                 // exactly one, matching native.
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    i32_const(Imm32(0));
+                    i32_const(0);
                     call(self.emitter.rt.json_stringify_pretty);
                 });
             }
@@ -336,9 +304,9 @@ impl FuncCompiler<'_> {
                 // json.root() → JpRoot: alloc [tag:i32=0], 4 bytes
                 let ptr = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(Imm32(VAL_ALLOC_NULL)); call(self.emitter.rt.alloc); local_set(Local(ptr));
-                    local_get(Local(ptr)); i32_const(Imm32(0)); i32_store(0); // tag = 0 (root)
-                    local_get(Local(ptr));
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(ptr);
+                    local_get(ptr); i32_const(0); i32_store(0); // tag = 0 (root)
+                    local_get(ptr);
                 });
                 self.scratch.free_i32(ptr);
             }
@@ -348,15 +316,15 @@ impl FuncCompiler<'_> {
                 let name = self.scratch.alloc_i32();
                 let ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(parent)); });
+                wasm!(self.func, { local_set(parent); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    local_set(Local(name));
-                    i32_const(Imm32(JP_NODE_ALLOC)); call(self.emitter.rt.alloc); local_set(Local(ptr));
-                    local_get(Local(ptr)); i32_const(Imm32(1)); i32_store(0);  // tag = 1 (field)
-                    local_get(Local(ptr)); local_get(Local(parent)); i32_store(4);  // parent ptr
-                    local_get(Local(ptr)); local_get(Local(name)); i32_store(8);    // field name str
-                    local_get(Local(ptr));
+                    local_set(name);
+                    i32_const(12); call(self.emitter.rt.alloc); local_set(ptr);
+                    local_get(ptr); i32_const(1); i32_store(0);  // tag = 1 (field)
+                    local_get(ptr); local_get(parent); i32_store(4);  // parent ptr
+                    local_get(ptr); local_get(name); i32_store(8);    // field name str
+                    local_get(ptr);
                 });
                 self.scratch.free_i32(ptr);
                 self.scratch.free_i32(name);
@@ -369,15 +337,15 @@ impl FuncCompiler<'_> {
                 let idx = self.scratch.alloc_i32();
                 let ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(parent)); });
+                wasm!(self.func, { local_set(parent); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(Local(idx));
-                    i32_const(Imm32(JP_NODE_ALLOC)); call(self.emitter.rt.alloc); local_set(Local(ptr));
-                    local_get(Local(ptr)); i32_const(Imm32(VAL_TAG_INT)); i32_store(0);  // tag = 2 (index)
-                    local_get(Local(ptr)); local_get(Local(parent)); i32_store(4);  // parent ptr
-                    local_get(Local(ptr)); local_get(Local(idx)); i32_store(8);     // array index
-                    local_get(Local(ptr));
+                    i32_wrap_i64; local_set(idx);
+                    i32_const(12); call(self.emitter.rt.alloc); local_set(ptr);
+                    local_get(ptr); i32_const(2); i32_store(0);  // tag = 2 (index)
+                    local_get(ptr); local_get(parent); i32_store(4);  // parent ptr
+                    local_get(ptr); local_get(idx); i32_store(8);     // array index
+                    local_get(ptr);
                 });
                 self.scratch.free_i32(ptr);
                 self.scratch.free_i32(idx);
@@ -412,1609 +380,8 @@ impl FuncCompiler<'_> {
             ),
         }
     }
-
-    /// value.get(v, key) -> Result[Value, String]
-    /// Check tag==6 (object), iterate pairs list for matching key.
-    /// value.get(v, key) -> Option[Value]
-    /// Check tag==6 (object), iterate pairs list for matching key.
-    /// Returns some(value_ptr) or none(0).
-    fn emit_value_get(&mut self, args: &[IrExpr]) {
-        let v = self.scratch.alloc_i32();
-        let key = self.scratch.alloc_i32();
-        let list = self.scratch.alloc_i32();
-        let len = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-        let pair_ptr = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(v)); });
-        self.emit_expr(&args[1]);
-        wasm!(self.func, {
-            local_set(Local(key));
-            i32_const(Imm32(0)); local_set(Local(result)); // none by default
-            // Check tag == 6 (object)
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_OBJECT)); i32_eq;
-            if_empty;
-              // It's an object: iterate pairs
-              local_get(Local(v)); i32_load(4); local_set(Local(list));
-              local_get(Local(list)); i32_load(0); local_set(Local(len));
-              i32_const(Imm32(0)); local_set(Local(i));
-              block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-                local_get(Local(list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                i32_load(0); local_set(Local(pair_ptr));
-                local_get(Local(pair_ptr)); i32_load(0);
-                local_get(Local(key));
-                call(self.emitter.rt.string.eq);
-                if_empty;
-                  // Found: some(value) — alloc Option box with value ptr.
-                  // SHARE: the boxed pointer is an interior reference into a
-                  // Value tree the caller still owns — dup it.
-                  i32_const(Imm32(VAL_ALLOC_NULL)); call(self.emitter.rt.alloc); local_set(Local(result));
-                  local_get(Local(result));
-                  local_get(Local(pair_ptr)); i32_load(4); call(self.emitter.rt.rc_inc);
-                  i32_store(0);
-                  br(2);
-                end;
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-                br(0);
-              end; end;
-            end;
-            local_get(Local(result)); // 0 = none, or some ptr
-        });
-
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(pair_ptr);
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(len);
-        self.scratch.free_i32(list);
-        self.scratch.free_i32(key);
-        self.scratch.free_i32(v);
-    }
-
-    /// value.as_string / value.as_bool: check tag, return ok(payload) or err.
-    /// For tag=4 (string) payload is i32 at offset 4.
-    /// For tag=1 (bool) payload is i32 at offset 4.
-    fn emit_value_as_type(&mut self, args: &[IrExpr], expected_tag: i32, type_name: &str) {
-        let v = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]);
-        wasm!(self.func, {
-            local_set(Local(v));
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(expected_tag)); i32_eq;
-            if_i32;
-              // Correct tag: return ok(payload at offset 4). The STRING
-              // payload is an interior pointer into the surviving Value —
-              // dup it (scalar tags copy by value).
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(0)); i32_store(0); // ok
-              local_get(Local(result));
-              local_get(Local(v)); i32_load(4);
-        });
-        if expected_tag == VAL_TAG_STRING || expected_tag == VAL_TAG_ARRAY {
-            // tags 4 (string) and 5 (array) carry POINTER payloads; bool
-            // shares the 4-byte size but is a scalar — key on the TAG.
-            wasm!(self.func, { call(self.emitter.rt.rc_inc); });
-        }
-        wasm!(self.func, {
-              i32_store(4);
-              local_get(Local(result));
-            else_;
-              // Wrong tag: return err("expected <type>")
-        });
-        let err_msg = self.emitter.intern_string(&format!("expected {}", type_name));
-        wasm!(self.func, {
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(1)); i32_store(0); // err
-              local_get(Local(result)); i32_const(Imm32(err_msg as i32)); i32_store(4);
-              local_get(Local(result));
-            end;
-        });
-
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(v);
-    }
-
-    /// value.as_int: check tag==2, return ok(i64) or err.
-    /// Result layout for Int: [tag:i32][padding:4][i64:8] = 16 bytes
-    fn emit_value_as_int(&mut self, args: &[IrExpr]) {
-        let v = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]);
-        wasm!(self.func, {
-            local_set(Local(v));
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_INT)); i32_eq;
-            if_i32;
-              // tag==2 (int): payload is i64 at offset 4
-              i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(0)); i32_store(0); // ok tag
-              local_get(Local(result)); local_get(Local(v)); i64_load(4); i64_store(4); // i64 payload at offset 4
-              local_get(Local(result));
-            else_;
-        });
-        let err_msg = self.emitter.intern_string("expected Int");
-        wasm!(self.func, {
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(1)); i32_store(0); // err
-              local_get(Local(result)); i32_const(Imm32(err_msg as i32)); i32_store(4);
-              local_get(Local(result));
-            end;
-        });
-
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(v);
-    }
-
-    /// json.get_string / get_int / get_bool / get_float / get_array
-    /// Returns Option[T]: get value by key, check type tag, unwrap payload.
-    fn emit_json_get_typed(&mut self, func: &str, args: &[IrExpr]) {
-        let expected_tag: i32 = match func {
-            "get_string" => VAL_TAG_STRING,
-            "get_int"    => VAL_TAG_INT,
-            "get_float"  => VAL_TAG_FLOAT,
-            "get_bool"   => 1,
-            "get_array"  => VAL_TAG_ARRAY,
-            _            => VAL_TAG_STRING,
-        };
-
-        // First do json.get(v, key) → Option[Value]
-        // Then check the Value's tag matches expected
-        let v = self.scratch.alloc_i32();
-        let key = self.scratch.alloc_i32();
-        let list = self.scratch.alloc_i32();
-        let len = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-        let pair_ptr = self.scratch.alloc_i32();
-        let found_val = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(v)); });
-        self.emit_expr(&args[1]);
-        wasm!(self.func, {
-            local_set(Local(key));
-            i32_const(Imm32(0)); local_set(Local(found_val));
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_OBJECT)); i32_eq;
-            if_empty;
-              local_get(Local(v)); i32_load(4); local_set(Local(list));
-              local_get(Local(list)); i32_load(0); local_set(Local(len));
-              i32_const(Imm32(0)); local_set(Local(i));
-              block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-                local_get(Local(list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                i32_load(0); local_set(Local(pair_ptr));
-                local_get(Local(pair_ptr)); i32_load(0);
-                local_get(Local(key));
-                call(self.emitter.rt.string.eq);
-                if_empty;
-                  // Found key. Check tag.
-                  local_get(Local(pair_ptr)); i32_load(4); local_set(Local(found_val)); // value ptr
-                  local_get(Local(found_val)); i32_load(0); i32_const(Imm32(expected_tag)); i32_ne;
-                  if_empty;
-                    i32_const(Imm32(0)); local_set(Local(found_val)); // wrong type → none
-                  end;
-                  br(2);
-                end;
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-                br(0);
-              end; end;
-            end;
-        });
-
-        // found_val is Value ptr (with matching tag) or 0.
-        // Return Option[T]: some = alloc box with payload, none = 0.
-        // For all types, we alloc a box and copy the payload.
-        let payload_size: u32 = match func {
-            "get_int"   => I64_STRIDE as u32,  // i64
-            "get_float" => I64_STRIDE as u32,  // f64
-            _           => PTR_STRIDE as u32,  // i32 (string ptr, bool, list ptr)
-        };
-        let option_box = self.scratch.alloc_i32();
-        wasm!(self.func, {
-            local_get(Local(found_val)); i32_eqz;
-            if_i32; i32_const(Imm32(0)); // none
-            else_;
-              i32_const(Imm32(payload_size as i32)); call(self.emitter.rt.alloc); local_set(Local(option_box));
-              local_get(Local(option_box));
-              local_get(Local(found_val));
-        });
-        // Copy payload from Value offset 4 to option box offset 0.
-        // get_string/get_array box an INTERIOR POINTER into the surviving
-        // Value tree → dup (SHARE). get_int/get_float are 8-byte scalars;
-        // get_bool is a 4-byte scalar — key on the FUNC, not the size.
-        let payload_is_ptr = matches!(func, "get_string" | "get_array");
-        match payload_size {
-            8 => { wasm!(self.func, { i64_load(4); i64_store(0); }); }
-            _ if payload_is_ptr => { wasm!(self.func, { i32_load(4); call(self.emitter.rt.rc_inc); i32_store(0); }); }
-            _ => { wasm!(self.func, { i32_load(4); i32_store(0); }); }
-        }
-        wasm!(self.func, {
-              local_get(Local(option_box));
-            end;
-        });
-        self.scratch.free_i32(option_box);
-
-        self.scratch.free_i32(found_val);
-        self.scratch.free_i32(pair_ptr);
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(len);
-        self.scratch.free_i32(list);
-        self.scratch.free_i32(key);
-        self.scratch.free_i32(v);
-    }
-
-    /// json.as_string / as_int / as_bool / as_float / as_array → Option[T]
-    /// (json module returns Option, value module returns Result — handled separately)
-    fn emit_json_as_typed(&mut self, func: &str, args: &[IrExpr]) {
-        let expected_tag: i32 = match func {
-            "as_string" => VAL_TAG_STRING,
-            "as_int"    => VAL_TAG_INT,
-            "as_float"  => VAL_TAG_FLOAT,
-            "as_bool"   => 1,
-            "as_array"  => VAL_TAG_ARRAY,
-            _           => VAL_TAG_STRING,
-        };
-        let payload_size: u32 = match func {
-            "as_int"   => I64_STRIDE as u32,
-            "as_float" => I64_STRIDE as u32,
-            _          => PTR_STRIDE as u32,
-        };
-        // #658: json.as_float widens a JSON Int to Float, matching the native
-        // almide_json_as_float oracle (a JSON number is type-agnostic).
-        let coerce_int = func == "as_float";
-        let v = self.scratch.alloc_i32();
-        let option_box = self.scratch.alloc_i32();
-        self.emit_expr(&args[0]);
-        wasm!(self.func, {
-            local_set(Local(v));
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(expected_tag)); i32_eq;
-            if_i32;
-              // Matching tag: alloc option box, copy payload
-              i32_const(Imm32(payload_size as i32)); call(self.emitter.rt.alloc); local_set(Local(option_box));
-              local_get(Local(option_box));
-              local_get(Local(v));
-        });
-        match payload_size {
-            8 => { wasm!(self.func, { i64_load(4); i64_store(0); }); }
-            _ => { wasm!(self.func, { i32_load(4); i32_store(0); }); }
-        }
-        wasm!(self.func, {
-              local_get(Local(option_box));
-            else_;
-        });
-        if coerce_int {
-            wasm!(self.func, {
-              local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_INT)); i32_eq;
-              if_i32;
-                i32_const(Imm32(I64_STRIDE)); call(self.emitter.rt.alloc); local_set(Local(option_box));
-                local_get(Local(option_box)); local_get(Local(v)); i64_load(4); f64_convert_i64_s; f64_store(0);
-                local_get(Local(option_box));
-              else_;
-                i32_const(Imm32(0)); // none
-              end;
-            });
-        } else {
-            wasm!(self.func, { i32_const(Imm32(0)); }); // none
-        }
-        wasm!(self.func, {
-            end;
-        });
-        self.scratch.free_i32(option_box);
-        self.scratch.free_i32(v);
-    }
-
-    /// json.keys(v: Value) → List[String]: extract keys from object
-    fn emit_json_keys(&mut self, args: &[IrExpr]) {
-        let v = self.scratch.alloc_i32();
-        let list = self.scratch.alloc_i32();
-        let len = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]);
-        wasm!(self.func, {
-            local_set(Local(v));
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_OBJECT)); i32_eq;
-            if_i32;
-              local_get(Local(v)); i32_load(4); local_set(Local(list));
-              local_get(Local(list)); i32_load(0); local_set(Local(len));
-              // Alloc result list
-              i32_const(Imm32(VAL_ALLOC_NULL)); local_get(Local(len)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-              call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); local_get(Local(len)); i32_store(0);
-              i32_const(Imm32(0)); local_set(Local(i));
-              block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-                // result[i] = pair[i].key
-                local_get(Local(result)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                local_get(Local(list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                i32_load(0); // pair ptr
-                i32_load(0); // key string ptr
-                i32_store(0); // store in result
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-                br(0);
-              end; end;
-              local_get(Local(result));
-            else_;
-              // Not an object: return empty list
-              i32_const(Imm32(VAL_ALLOC_NULL)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-              local_get(Local(result));
-            end;
-        });
-
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(len);
-        self.scratch.free_i32(list);
-        self.scratch.free_i32(v);
-    }
-
-    /// value.field(v, key) -> Result[Value, String]
-    fn emit_value_field_result(&mut self, args: &[IrExpr]) {
-        let v = self.scratch.alloc_i32();
-        let key = self.scratch.alloc_i32();
-        let list = self.scratch.alloc_i32();
-        let len = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-        let pair_ptr = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(v)); });
-        self.emit_expr(&args[1]);
-        wasm!(self.func, {
-            local_set(Local(key));
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_OBJECT)); i32_ne;
-            if_i32;
-        });
-        let err_msg = self.emitter.intern_string("expected Object");
-        wasm!(self.func, {
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-              local_get(Local(result)); i32_const(Imm32(err_msg as i32)); i32_store(4);
-              local_get(Local(result));
-            else_;
-              local_get(Local(v)); i32_load(4); local_set(Local(list));
-              local_get(Local(list)); i32_load(0); local_set(Local(len));
-              i32_const(Imm32(0)); local_set(Local(i));
-              i32_const(Imm32(0)); local_set(Local(result));
-              block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-                local_get(Local(list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                i32_load(0); local_set(Local(pair_ptr));
-                local_get(Local(pair_ptr)); i32_load(0);
-                local_get(Local(key));
-                call(self.emitter.rt.string.eq);
-                if_empty;
-                  i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                  local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                  local_get(Local(result)); local_get(Local(pair_ptr)); i32_load(4); i32_store(4);
-                  br(2);
-                end;
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-                br(0);
-              end; end;
-              local_get(Local(result)); i32_eqz;
-              if_empty;
-        });
-        // Mirror the native oracle's `format!("missing field '{}'", key)` exactly
-        // (runtime/rs/src/value.rs::almide_rt_value_field) so Codec decode errors
-        // are byte-identical across targets (#657). The key is a runtime string,
-        // so build the message with two __concat_str calls.
-        let mf_prefix = self.emitter.intern_string("missing field '");
-        let mf_suffix = self.emitter.intern_string("'");
-        wasm!(self.func, {
-                i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-                local_get(Local(result));
-                  i32_const(Imm32(mf_prefix as i32)); local_get(Local(key)); call(self.emitter.rt.concat_str);
-                  i32_const(Imm32(mf_suffix as i32)); call(self.emitter.rt.concat_str);
-                i32_store(4);
-              end;
-              local_get(Local(result));
-            end;
-        });
-
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(pair_ptr);
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(len);
-        self.scratch.free_i32(list);
-        self.scratch.free_i32(key);
-        self.scratch.free_i32(v);
-    }
-
-    /// almide_rt_value_tagged_variant(v: Value) → Result[(String, Value), String]
-    /// Extract variant tag name and payload from encoded Value object.
-    /// Format: {"CaseName": payload_value} — first key is the tag, its value is payload.
-    pub(super) fn emit_value_tagged_variant(&mut self, args: &[IrExpr]) {
-        let v = self.scratch.alloc_i32();
-        let list = self.scratch.alloc_i32();
-        let pair_ptr = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]);
-        wasm!(self.func, {
-            local_set(Local(v));
-            // Must be object (tag 6) with at least 1 pair
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_OBJECT)); i32_ne;
-            if_i32;
-        });
-        let err_msg = self.emitter.intern_string("not a tagged variant");
-        wasm!(self.func, {
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-              local_get(Local(result)); i32_const(Imm32(err_msg as i32)); i32_store(4);
-              local_get(Local(result));
-            else_;
-              // Get first pair: key = tag name, value = payload
-              local_get(Local(v)); i32_load(4); local_set(Local(list)); // pairs list
-              local_get(Local(list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add; i32_load(0); local_set(Local(pair_ptr)); // first pair tuple
-              // Build tuple (tag_name: String, payload: Value)
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); local_get(Local(pair_ptr)); i32_load(0); i32_store(0); // tag name string
-              local_get(Local(result)); local_get(Local(pair_ptr)); i32_load(4); i32_store(4); // payload value
-              // Build ok(tuple)
-              local_get(Local(result)); local_set(Local(pair_ptr)); // save tuple ptr
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(0)); i32_store(0); // tag = ok
-              local_get(Local(result)); local_get(Local(pair_ptr)); i32_store(4);
-              local_get(Local(result));
-            end;
-        });
-
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(pair_ptr);
-        self.scratch.free_i32(list);
-        self.scratch.free_i32(v);
-    }
-
-    /// value.to_camel_case / to_snake_case: transform object keys
-    /// to_camel = true: snake_case → camelCase
-    /// to_camel = false: camelCase → snake_case
-    fn emit_value_key_transform(&mut self, args: &[IrExpr], to_camel: bool) {
-        // If not an object, return as-is
-        let v = self.scratch.alloc_i32();
-        let old_list = self.scratch.alloc_i32();
-        let new_list = self.scratch.alloc_i32();
-        let len = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-        let old_pair = self.scratch.alloc_i32();
-        let new_pair = self.scratch.alloc_i32();
-        let old_key = self.scratch.alloc_i32();
-        let new_key = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-        // String transform locals
-        let src_len = self.scratch.alloc_i32();
-        let j = self.scratch.alloc_i32();
-        let dst_pos = self.scratch.alloc_i32();
-        let ch = self.scratch.alloc_i32();
-        let dst_buf = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]);
-        wasm!(self.func, {
-            local_set(Local(v));
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_OBJECT)); i32_ne;
-            if_i32; local_get(Local(v)); // not object → return as-is
-            else_;
-              local_get(Local(v)); i32_load(4); local_set(Local(old_list));
-              local_get(Local(old_list)); i32_load(0); local_set(Local(len));
-              // Alloc new pairs list
-              i32_const(Imm32(VAL_ALLOC_NULL)); local_get(Local(len)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-              call(self.emitter.rt.alloc); local_set(Local(new_list));
-              local_get(Local(new_list)); local_get(Local(len)); i32_store(0);
-              i32_const(Imm32(0)); local_set(Local(i));
-              block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-                // Get old pair
-                local_get(Local(old_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                i32_load(0); local_set(Local(old_pair));
-                local_get(Local(old_pair)); i32_load(0); local_set(Local(old_key));
-                // Transform key
-                local_get(Local(old_key)); i32_load(0); local_set(Local(src_len)); // key string len
-                // Alloc dst buffer (max 2x src_len for snake_case expansion)
-                i32_const(Imm32(VAL_ALLOC_NULL)); local_get(Local(src_len)); i32_const(Imm32(SNAKE_BUF_FACTOR)); i32_mul; i32_add;
-                call(self.emitter.rt.alloc); local_set(Local(dst_buf));
-                i32_const(Imm32(0)); local_set(Local(j)); // src index
-                i32_const(Imm32(0)); local_set(Local(dst_pos)); // dst index
-        });
-
-        if to_camel {
-            // snake_case → camelCase: skip '_', capitalize next
-            wasm!(self.func, {
-                block_empty; loop_empty;
-                  local_get(Local(j)); local_get(Local(src_len)); i32_ge_u; br_if(1);
-                  local_get(Local(old_key)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add; local_get(Local(j)); i32_add; i32_load8_u(0);
-                  local_set(Local(ch));
-                  local_get(Local(ch)); i32_const(Imm32(ASCII_UNDERSCORE)); i32_eq; // '_'
-                  if_empty;
-                    // Skip underscore, capitalize next char
-                    local_get(Local(j)); i32_const(Imm32(1)); i32_add; local_set(Local(j));
-                    local_get(Local(j)); local_get(Local(src_len)); i32_lt_u;
-                    if_empty;
-                      local_get(Local(dst_buf)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add; local_get(Local(dst_pos)); i32_add;
-                      local_get(Local(old_key)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add; local_get(Local(j)); i32_add; i32_load8_u(0);
-                      i32_const(Imm32(ASCII_CASE_OFFSET)); i32_sub; // to uppercase
-                      i32_store8(0);
-                      local_get(Local(dst_pos)); i32_const(Imm32(1)); i32_add; local_set(Local(dst_pos));
-                    end;
-                  else_;
-                    // Copy char as-is
-                    local_get(Local(dst_buf)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add; local_get(Local(dst_pos)); i32_add;
-                    local_get(Local(ch));
-                    i32_store8(0);
-                    local_get(Local(dst_pos)); i32_const(Imm32(1)); i32_add; local_set(Local(dst_pos));
-                  end;
-                  local_get(Local(j)); i32_const(Imm32(1)); i32_add; local_set(Local(j));
-                  br(0);
-                end; end;
-            });
-        } else {
-            // camelCase → snake_case: insert '_' before uppercase, lowercase
-            wasm!(self.func, {
-                block_empty; loop_empty;
-                  local_get(Local(j)); local_get(Local(src_len)); i32_ge_u; br_if(1);
-                  local_get(Local(old_key)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add; local_get(Local(j)); i32_add; i32_load8_u(0);
-                  local_set(Local(ch));
-                  // Check if uppercase (A=65..Z=90)
-                  local_get(Local(ch)); i32_const(Imm32(ASCII_UPPER_A)); i32_ge_u;
-                  local_get(Local(ch)); i32_const(Imm32(ASCII_UPPER_Z)); i32_le_u;
-                  i32_and;
-                  if_empty;
-                    // Insert underscore then lowercase char
-                    local_get(Local(dst_buf)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add; local_get(Local(dst_pos)); i32_add;
-                    i32_const(Imm32(ASCII_UNDERSCORE)); i32_store8(0); // '_'
-                    local_get(Local(dst_pos)); i32_const(Imm32(1)); i32_add; local_set(Local(dst_pos));
-                    local_get(Local(dst_buf)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add; local_get(Local(dst_pos)); i32_add;
-                    local_get(Local(ch)); i32_const(Imm32(ASCII_CASE_OFFSET)); i32_add; // to lowercase
-                    i32_store8(0);
-                    local_get(Local(dst_pos)); i32_const(Imm32(1)); i32_add; local_set(Local(dst_pos));
-                  else_;
-                    local_get(Local(dst_buf)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add; local_get(Local(dst_pos)); i32_add;
-                    local_get(Local(ch)); i32_store8(0);
-                    local_get(Local(dst_pos)); i32_const(Imm32(1)); i32_add; local_set(Local(dst_pos));
-                  end;
-                  local_get(Local(j)); i32_const(Imm32(1)); i32_add; local_set(Local(j));
-                  br(0);
-                end; end;
-            });
-        }
-
-        wasm!(self.func, {
-                // Set dst string length
-                local_get(Local(dst_buf)); local_get(Local(dst_pos)); i32_store(0);
-                local_get(Local(dst_buf)); local_set(Local(new_key));
-                // Build new pair (new_key, old_value)
-                i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(new_pair));
-                local_get(Local(new_pair)); local_get(Local(new_key)); i32_store(0);
-                local_get(Local(new_pair)); local_get(Local(old_pair)); i32_load(4); i32_store(4);
-                // Store in new list
-                local_get(Local(new_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                local_get(Local(new_pair)); i32_store(0);
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-                br(0);
-              end; end;
-              // Build new Value object
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(VAL_TAG_OBJECT)); i32_store(0); // tag = object
-              local_get(Local(result)); local_get(Local(new_list)); i32_store(4);
-              local_get(Local(result));
-            end;
-        });
-
-        self.scratch.free_i32(dst_buf);
-        self.scratch.free_i32(ch);
-        self.scratch.free_i32(dst_pos);
-        self.scratch.free_i32(j);
-        self.scratch.free_i32(src_len);
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(new_key);
-        self.scratch.free_i32(old_key);
-        self.scratch.free_i32(new_pair);
-        self.scratch.free_i32(old_pair);
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(len);
-        self.scratch.free_i32(new_list);
-        self.scratch.free_i32(old_list);
-        self.scratch.free_i32(v);
-    }
-
-    /// value.pick / value.omit: filter object keys
-    /// pick=true: keep only keys in list, pick=false: remove keys in list
-    fn emit_value_pick_omit(&mut self, args: &[IrExpr], is_pick: bool) {
-        let v = self.scratch.alloc_i32();
-        let keys = self.scratch.alloc_i32();
-        let old_list = self.scratch.alloc_i32();
-        let old_len = self.scratch.alloc_i32();
-        let keys_len = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-        let j = self.scratch.alloc_i32();
-        let pair_ptr = self.scratch.alloc_i32();
-        let found = self.scratch.alloc_i32();
-        let new_list = self.scratch.alloc_i32();
-        let count = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]); // v: Value (object)
-        wasm!(self.func, { local_set(Local(v)); });
-        self.emit_expr(&args[1]); // keys: List[String]
-        wasm!(self.func, {
-            local_set(Local(keys));
-            // Not an object? return as-is
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_OBJECT)); i32_ne;
-            if_i32; local_get(Local(v));
-            else_;
-              local_get(Local(v)); i32_load(4); local_set(Local(old_list));
-              local_get(Local(old_list)); i32_load(0); local_set(Local(old_len));
-              local_get(Local(keys)); i32_load(0); local_set(Local(keys_len));
-              // First pass: count matching pairs
-              i32_const(Imm32(0)); local_set(Local(count));
-              i32_const(Imm32(0)); local_set(Local(i));
-              block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(old_len)); i32_ge_u; br_if(1);
-                local_get(Local(old_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                i32_load(0); local_set(Local(pair_ptr));
-                // Check if key is in keys list
-                i32_const(Imm32(0)); local_set(Local(found));
-                i32_const(Imm32(0)); local_set(Local(j));
-                block_empty; loop_empty;
-                  local_get(Local(j)); local_get(Local(keys_len)); i32_ge_u; br_if(1);
-                  local_get(Local(pair_ptr)); i32_load(0);
-                  local_get(Local(keys)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                  local_get(Local(j)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                  i32_load(0);
-                  call(self.emitter.rt.string.eq);
-                  if_empty;
-                    i32_const(Imm32(1)); local_set(Local(found));
-                    br(2);
-                  end;
-                  local_get(Local(j)); i32_const(Imm32(1)); i32_add; local_set(Local(j));
-                  br(0);
-                end; end;
-        });
-        // pick: include if found, omit: include if NOT found
-        if is_pick {
-            wasm!(self.func, {
-                local_get(Local(found));
-                if_empty; local_get(Local(count)); i32_const(Imm32(1)); i32_add; local_set(Local(count)); end;
-            });
-        } else {
-            wasm!(self.func, {
-                local_get(Local(found)); i32_eqz;
-                if_empty; local_get(Local(count)); i32_const(Imm32(1)); i32_add; local_set(Local(count)); end;
-            });
-        }
-        wasm!(self.func, {
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-                br(0);
-              end; end;
-              // Alloc new list
-              i32_const(Imm32(VAL_ALLOC_NULL)); local_get(Local(count)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-              call(self.emitter.rt.alloc); local_set(Local(new_list));
-              local_get(Local(new_list)); local_get(Local(count)); i32_store(0);
-              // Second pass: copy matching pairs
-              i32_const(Imm32(0)); local_set(Local(i));
-              i32_const(Imm32(0)); local_set(Local(count)); // reuse as write index
-              block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(old_len)); i32_ge_u; br_if(1);
-                local_get(Local(old_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                i32_load(0); local_set(Local(pair_ptr));
-                i32_const(Imm32(0)); local_set(Local(found));
-                i32_const(Imm32(0)); local_set(Local(j));
-                block_empty; loop_empty;
-                  local_get(Local(j)); local_get(Local(keys_len)); i32_ge_u; br_if(1);
-                  local_get(Local(pair_ptr)); i32_load(0);
-                  local_get(Local(keys)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                  local_get(Local(j)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                  i32_load(0);
-                  call(self.emitter.rt.string.eq);
-                  if_empty;
-                    i32_const(Imm32(1)); local_set(Local(found));
-                    br(2);
-                  end;
-                  local_get(Local(j)); i32_const(Imm32(1)); i32_add; local_set(Local(j));
-                  br(0);
-                end; end;
-        });
-        if is_pick {
-            wasm!(self.func, { local_get(Local(found)); });
-        } else {
-            wasm!(self.func, { local_get(Local(found)); i32_eqz; });
-        }
-        wasm!(self.func, {
-                if_empty;
-                  local_get(Local(new_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                  local_get(Local(count)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                  local_get(Local(pair_ptr)); i32_store(0);
-                  local_get(Local(count)); i32_const(Imm32(1)); i32_add; local_set(Local(count));
-                end;
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-                br(0);
-              end; end;
-              // Build result object
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(VAL_TAG_OBJECT)); i32_store(0);
-              local_get(Local(result)); local_get(Local(new_list)); i32_store(4);
-              local_get(Local(result));
-            end;
-        });
-
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(new_list);
-        self.scratch.free_i32(count);
-        self.scratch.free_i32(found);
-        self.scratch.free_i32(pair_ptr);
-        self.scratch.free_i32(j);
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(keys_len);
-        self.scratch.free_i32(old_len);
-        self.scratch.free_i32(old_list);
-        self.scratch.free_i32(keys);
-        self.scratch.free_i32(v);
-    }
-
-    /// value.merge(a: Value, b: Value) -> Value
-    /// Merge two objects. Keys from b override keys from a.
-    fn emit_value_merge(&mut self, args: &[IrExpr]) {
-        let a = self.scratch.alloc_i32();
-        let b = self.scratch.alloc_i32();
-        let a_list = self.scratch.alloc_i32();
-        let b_list = self.scratch.alloc_i32();
-        let a_len = self.scratch.alloc_i32();
-        let b_len = self.scratch.alloc_i32();
-        let new_list = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-        let j = self.scratch.alloc_i32();
-        let count = self.scratch.alloc_i32();
-        let pair_ptr = self.scratch.alloc_i32();
-        let found = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(a)); });
-        self.emit_expr(&args[1]);
-        wasm!(self.func, {
-            local_set(Local(b));
-            local_get(Local(a)); i32_load(4); local_set(Local(a_list));
-            local_get(Local(b)); i32_load(4); local_set(Local(b_list));
-            local_get(Local(a_list)); i32_load(0); local_set(Local(a_len));
-            local_get(Local(b_list)); i32_load(0); local_set(Local(b_len));
-            // Max possible pairs = a_len + b_len
-            i32_const(Imm32(VAL_ALLOC_NULL)); local_get(Local(a_len)); local_get(Local(b_len)); i32_add; i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-            call(self.emitter.rt.alloc); local_set(Local(new_list));
-            i32_const(Imm32(0)); local_set(Local(count));
-            // Copy all from a that are NOT in b
-            i32_const(Imm32(0)); local_set(Local(i));
-            block_empty; loop_empty;
-              local_get(Local(i)); local_get(Local(a_len)); i32_ge_u; br_if(1);
-              local_get(Local(a_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-              local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-              i32_load(0); local_set(Local(pair_ptr));
-              // Check if key exists in b
-              i32_const(Imm32(0)); local_set(Local(found));
-              i32_const(Imm32(0)); local_set(Local(j));
-              block_empty; loop_empty;
-                local_get(Local(j)); local_get(Local(b_len)); i32_ge_u; br_if(1);
-                local_get(Local(pair_ptr)); i32_load(0);
-                local_get(Local(b_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                local_get(Local(j)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                i32_load(0); i32_load(0); // b pair key
-                call(self.emitter.rt.string.eq);
-                if_empty; i32_const(Imm32(1)); local_set(Local(found)); br(2); end;
-                local_get(Local(j)); i32_const(Imm32(1)); i32_add; local_set(Local(j));
-                br(0);
-              end; end;
-              local_get(Local(found)); i32_eqz;
-              if_empty;
-                local_get(Local(new_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                local_get(Local(count)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                local_get(Local(pair_ptr)); i32_store(0);
-                local_get(Local(count)); i32_const(Imm32(1)); i32_add; local_set(Local(count));
-              end;
-              local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-              br(0);
-            end; end;
-            // Copy all from b
-            i32_const(Imm32(0)); local_set(Local(i));
-            block_empty; loop_empty;
-              local_get(Local(i)); local_get(Local(b_len)); i32_ge_u; br_if(1);
-              local_get(Local(new_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-              local_get(Local(count)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-              local_get(Local(b_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-              local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-              i32_load(0); i32_store(0);
-              local_get(Local(count)); i32_const(Imm32(1)); i32_add; local_set(Local(count));
-              local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-              br(0);
-            end; end;
-            // Set actual count
-            local_get(Local(new_list)); local_get(Local(count)); i32_store(0);
-            // Build result
-            i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-            local_get(Local(result)); i32_const(Imm32(VAL_TAG_OBJECT)); i32_store(0);
-            local_get(Local(result)); local_get(Local(new_list)); i32_store(4);
-            local_get(Local(result));
-        });
-
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(found);
-        self.scratch.free_i32(pair_ptr);
-        self.scratch.free_i32(count);
-        self.scratch.free_i32(j);
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(new_list);
-        self.scratch.free_i32(b_len);
-        self.scratch.free_i32(a_len);
-        self.scratch.free_i32(b_list);
-        self.scratch.free_i32(a_list);
-        self.scratch.free_i32(b);
-        self.scratch.free_i32(a);
-    }
-
-    // ── Codec helper functions ──────────────────────────────────────
-
-    /// Dispatch __encode_option_*, __decode_option_*, __decode_default_*, __encode_list_*, __decode_list_*
-    pub(super) fn emit_codec_helper(&mut self, name: &str, args: &[IrExpr]) {
-        if let Some(suffix) = name.strip_prefix("__encode_option_") {
-            self.emit_encode_option(args, suffix);
-        } else if let Some(suffix) = name.strip_prefix("__decode_option_") {
-            self.emit_decode_option(args, suffix);
-        } else if let Some(suffix) = name.strip_prefix("__decode_default_") {
-            self.emit_decode_default(args, suffix);
-        } else if let Some(suffix) = name.strip_prefix("__encode_list_") {
-            self.emit_encode_list(args, suffix);
-        } else if let Some(suffix) = name.strip_prefix("__decode_list_") {
-            self.emit_decode_list(args, suffix);
-        } else {
-            for arg in args { self.emit_expr(arg); }
-            wasm!(self.func, { unreachable; });
-        }
-    }
-
-    /// __encode_option_T(opt: Option[T]) -> Value
-    /// None -> value.null, Some(v) -> value.T(v)
-    fn emit_encode_option(&mut self, args: &[IrExpr], suffix: &str) {
-        let opt = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-        self.emit_expr(&args[0]);
-        wasm!(self.func, {
-            local_set(Local(opt));
-            // Option layout: ptr==0 → None, ptr!=0 → Some (payload at offset 0, no tag)
-            local_get(Local(opt)); i32_const(Imm32(0)); i32_ne;
-            if_i32;
-        });
-        // Some: wrap payload as Value
-        match suffix {
-            "string" => {
-                wasm!(self.func, {
-                    i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                    local_get(Local(result)); i32_const(Imm32(VAL_TAG_STRING)); i32_store(0); // tag = string
-                    local_get(Local(result)); local_get(Local(opt)); i32_load(0); i32_store(4); // payload at offset 0
-                    local_get(Local(result));
-                });
-            }
-            "int" => {
-                wasm!(self.func, {
-                    i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(result));
-                    local_get(Local(result)); i32_const(Imm32(VAL_TAG_INT)); i32_store(0); // tag = int
-                    local_get(Local(result)); local_get(Local(opt)); i64_load(0); i64_store(4); // payload at offset 0
-                    local_get(Local(result));
-                });
-            }
-            "float" => {
-                wasm!(self.func, {
-                    i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(result));
-                    local_get(Local(result)); i32_const(Imm32(VAL_TAG_FLOAT)); i32_store(0); // tag = float
-                    local_get(Local(result)); local_get(Local(opt)); f64_load(0); f64_store(4); // payload at offset 0
-                    local_get(Local(result));
-                });
-            }
-            "bool" => {
-                wasm!(self.func, {
-                    i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                    local_get(Local(result)); i32_const(Imm32(1)); i32_store(0); // tag = bool
-                    local_get(Local(result)); local_get(Local(opt)); i32_load(0); i32_store(4); // payload at offset 0
-                    local_get(Local(result));
-                });
-            }
-            _ => {
-                // Named type: payload is a pointer at offset 0
-                wasm!(self.func, {
-                    local_get(Local(opt)); i32_load(0);
-                });
-                let encode_name = format!("{}.encode", suffix);
-                if let Some(&func_idx) = self.emitter.func_map.get(encode_name.as_str()) {
-                    wasm!(self.func, { call(func_idx); });
-                } else {
-                    wasm!(self.func, { drop; i32_const(Imm32(VAL_ALLOC_NULL)); call(self.emitter.rt.alloc); local_set(Local(result)); local_get(Local(result)); i32_const(Imm32(0)); i32_store(0); local_get(Local(result)); });
-                }
-            }
-        }
-        wasm!(self.func, {
-            else_;
-              // None: return value.null
-              i32_const(Imm32(VAL_ALLOC_NULL)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(0)); i32_store(0); // tag = null
-              local_get(Local(result));
-            end;
-        });
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(opt);
-    }
-
-    /// __decode_option_T(v: Value, key: String) -> Result[Option[T], String]
-    /// Missing/null → ok(None), present → ok(Some(as_T(field)?))
-    fn emit_decode_option(&mut self, args: &[IrExpr], suffix: &str) {
-        // Step 1: look up key in object — re-implement value.field inline
-        // but treat missing/null as ok(None) instead of err
-        let v = self.scratch.alloc_i32();
-        let key = self.scratch.alloc_i32();
-        let list = self.scratch.alloc_i32();
-        let len = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-        let pair_ptr = self.scratch.alloc_i32();
-        let found = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]); // v: Value
-        wasm!(self.func, { local_set(Local(v)); });
-        self.emit_expr(&args[1]); // key: String
-        wasm!(self.func, {
-            local_set(Local(key));
-            // v must be object
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_OBJECT)); i32_ne;
-            if_i32;
-        });
-        let err_msg = self.emitter.intern_string("expected Object");
-        wasm!(self.func, {
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(1)); i32_store(0); // err
-              local_get(Local(result)); i32_const(Imm32(err_msg as i32)); i32_store(4);
-              local_get(Local(result));
-            else_;
-              local_get(Local(v)); i32_load(4); local_set(Local(list));
-              local_get(Local(list)); i32_load(0); local_set(Local(len));
-              i32_const(Imm32(0)); local_set(Local(i));
-              i32_const(Imm32(0)); local_set(Local(found)); // 0 = not found
-              block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-                local_get(Local(list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                i32_load(0); local_set(Local(pair_ptr));
-                local_get(Local(pair_ptr)); i32_load(0);
-                local_get(Local(key));
-                call(self.emitter.rt.string.eq);
-                if_empty;
-                  local_get(Local(pair_ptr)); i32_load(4); local_set(Local(found)); // found = value ptr
-                  br(2);
-                end;
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-                br(0);
-              end; end;
-              // found == 0 → missing → ok(None)
-              // found != 0 && tag == 0 (null) → ok(None)
-              // found != 0 && tag != 0 → ok(Some(as_T(found)?))
-              // Use nested if to avoid loading from null pointer
-              local_get(Local(found)); i32_eqz;
-              if_i32;
-                i32_const(Imm32(1)); // use_none = true
-              else_;
-                local_get(Local(found)); i32_load(0); i32_eqz; // tag == null?
-              end;
-              if_i32;
-                // Missing or null → ok(None)
-                // Option None = [tag=0], wrapped in Result ok: [tag=0][option_ptr]
-        });
-        // Build None Option (= null pointer 0) wrapped in ok Result
-        let none_opt = self.scratch.alloc_i32();
-        wasm!(self.func, {
-                // Option None = pointer 0
-                // Wrap in ok Result: [tag=0][payload=0]
-                i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                local_get(Local(result)); i32_const(Imm32(0)); i32_store(0); // Result ok
-                local_get(Local(result)); i32_const(Imm32(0)); i32_store(4); // Option None = 0
-                local_get(Local(result));
-              else_;
-                // Found value with non-null type → extract and wrap in Some
-        });
-        // Type-specific extraction: check tag, get payload
-        let some_opt = self.scratch.alloc_i32();
-        match suffix {
-            "string" => {
-                // Value tag 4 = string, payload i32 at +4
-                // Option[String] Some = heap ptr → [string_ptr:i32] (no tag, ptr != 0 = Some)
-                wasm!(self.func, {
-                    local_get(Local(found)); i32_load(0); i32_const(Imm32(VAL_TAG_STRING)); i32_ne;
-                    if_i32;
-                });
-                let type_err = self.emitter.intern_string("expected Str");
-                wasm!(self.func, {
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-                        local_get(Local(result)); i32_const(Imm32(type_err as i32)); i32_store(4);
-                        local_get(Local(result));
-                    else_;
-                        // Some: alloc payload only (no tag)
-                        i32_const(Imm32(VAL_ALLOC_NULL)); call(self.emitter.rt.alloc); local_set(Local(some_opt));
-                        local_get(Local(some_opt)); local_get(Local(found)); i32_load(4); i32_store(0); // string ptr
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(0)); i32_store(0); // ok
-                        local_get(Local(result)); local_get(Local(some_opt)); i32_store(4);
-                        local_get(Local(result));
-                    end;
-                });
-            }
-            "int" => {
-                wasm!(self.func, {
-                    local_get(Local(found)); i32_load(0); i32_const(Imm32(VAL_TAG_INT)); i32_ne;
-                    if_i32;
-                });
-                let type_err = self.emitter.intern_string("expected Int");
-                wasm!(self.func, {
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-                        local_get(Local(result)); i32_const(Imm32(type_err as i32)); i32_store(4);
-                        local_get(Local(result));
-                    else_;
-                        i32_const(Imm32(I64_STRIDE)); call(self.emitter.rt.alloc); local_set(Local(some_opt));
-                        local_get(Local(some_opt)); local_get(Local(found)); i64_load(4); i64_store(0); // i64 payload
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                        local_get(Local(result)); local_get(Local(some_opt)); i32_store(4);
-                        local_get(Local(result));
-                    end;
-                });
-            }
-            "float" => {
-                // #658: accept both Float (tag 3) and Int (tag 2, widened to f64).
-                let type_err = self.emitter.intern_string("expected Float");
-                wasm!(self.func, {
-                    local_get(Local(found)); i32_load(0); i32_const(Imm32(VAL_TAG_FLOAT)); i32_eq;
-                    if_i32;
-                        i32_const(Imm32(I64_STRIDE)); call(self.emitter.rt.alloc); local_set(Local(some_opt));
-                        local_get(Local(some_opt)); local_get(Local(found)); f64_load(4); f64_store(0);
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                        local_get(Local(result)); local_get(Local(some_opt)); i32_store(4);
-                        local_get(Local(result));
-                    else_;
-                      local_get(Local(found)); i32_load(0); i32_const(Imm32(VAL_TAG_INT)); i32_eq;
-                      if_i32;
-                        i32_const(Imm32(I64_STRIDE)); call(self.emitter.rt.alloc); local_set(Local(some_opt));
-                        local_get(Local(some_opt)); local_get(Local(found)); i64_load(4); f64_convert_i64_s; f64_store(0);
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                        local_get(Local(result)); local_get(Local(some_opt)); i32_store(4);
-                        local_get(Local(result));
-                      else_;
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-                        local_get(Local(result)); i32_const(Imm32(type_err as i32)); i32_store(4);
-                        local_get(Local(result));
-                      end;
-                    end;
-                });
-            }
-            "bool" => {
-                wasm!(self.func, {
-                    local_get(Local(found)); i32_load(0); i32_const(Imm32(1)); i32_ne;
-                    if_i32;
-                });
-                let type_err = self.emitter.intern_string("expected Bool");
-                wasm!(self.func, {
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-                        local_get(Local(result)); i32_const(Imm32(type_err as i32)); i32_store(4);
-                        local_get(Local(result));
-                    else_;
-                        i32_const(Imm32(VAL_ALLOC_NULL)); call(self.emitter.rt.alloc); local_set(Local(some_opt));
-                        local_get(Local(some_opt)); local_get(Local(found)); i32_load(4); i32_store(0);
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                        local_get(Local(result)); local_get(Local(some_opt)); i32_store(4);
-                        local_get(Local(result));
-                    end;
-                });
-            }
-            _ => {
-                // Named type: call Type.decode(found_value)
-                wasm!(self.func, { local_get(Local(found)); });
-                let decode_name = format!("{}.decode", suffix);
-                if let Some(&func_idx) = self.emitter.func_map.get(decode_name.as_str()) {
-                    // Type.decode returns Result[T, String]
-                    // On ok, wrap in Some; on err, propagate
-                    let decode_result = self.scratch.alloc_i32();
-                    wasm!(self.func, {
-                        call(func_idx); local_set(Local(decode_result));
-                        local_get(Local(decode_result)); i32_load(0); i32_const(Imm32(0)); i32_eq;
-                        if_i32;
-                          // Option Some = a block whose offset 0 IS the payload ptr
-                          // (no tag — matches the encode/primitive layout). Storing a
-                          // spurious tag here made the re-encode read `1` as the
-                          // payload pointer → garbage (新②).
-                          i32_const(Imm32(VAL_ALLOC_NULL)); call(self.emitter.rt.alloc); local_set(Local(some_opt));
-                          local_get(Local(some_opt)); local_get(Local(decode_result)); i32_load(4); i32_store(0);
-                          i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                          local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                          local_get(Local(result)); local_get(Local(some_opt)); i32_store(4);
-                          local_get(Local(result));
-                        else_;
-                          local_get(Local(decode_result)); // propagate err
-                        end;
-                    });
-                    self.scratch.free_i32(decode_result);
-                } else {
-                    wasm!(self.func, { drop; unreachable; });
-                }
-            }
-        }
-        wasm!(self.func, {
-              end;
-            end;
-        });
-
-        self.scratch.free_i32(some_opt);
-        self.scratch.free_i32(none_opt);
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(found);
-        self.scratch.free_i32(pair_ptr);
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(len);
-        self.scratch.free_i32(list);
-        self.scratch.free_i32(key);
-        self.scratch.free_i32(v);
-    }
-
-    /// __decode_default_T(v: Value, key: String, default: T) -> Result[T, String]
-    /// Missing/null → ok(default), present → ok(as_T(field)?)
-    fn emit_decode_default(&mut self, args: &[IrExpr], suffix: &str) {
-        let v = self.scratch.alloc_i32();
-        let key = self.scratch.alloc_i32();
-        let list = self.scratch.alloc_i32();
-        let len = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-        let pair_ptr = self.scratch.alloc_i32();
-        let found = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-        // Save default value based on type
-        let default_local = match suffix {
-            "int" => self.scratch.alloc_i64(),
-            "float" => self.scratch.alloc_f64(),
-            _ => self.scratch.alloc_i32(), // string, bool
-        };
-
-        self.emit_expr(&args[0]); // v
-        wasm!(self.func, { local_set(Local(v)); });
-        self.emit_expr(&args[1]); // key
-        wasm!(self.func, { local_set(Local(key)); });
-        self.emit_expr(&args[2]); // default value
-        wasm!(self.func, {
-            local_set(Local(default_local));
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_OBJECT)); i32_ne;
-            if_i32;
-        });
-        let err_msg = self.emitter.intern_string("expected Object");
-        wasm!(self.func, {
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-              local_get(Local(result)); i32_const(Imm32(err_msg as i32)); i32_store(4);
-              local_get(Local(result));
-            else_;
-              local_get(Local(v)); i32_load(4); local_set(Local(list));
-              local_get(Local(list)); i32_load(0); local_set(Local(len));
-              i32_const(Imm32(0)); local_set(Local(i));
-              i32_const(Imm32(0)); local_set(Local(found));
-              block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-                local_get(Local(list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                i32_load(0); local_set(Local(pair_ptr));
-                local_get(Local(pair_ptr)); i32_load(0);
-                local_get(Local(key));
-                call(self.emitter.rt.string.eq);
-                if_empty;
-                  local_get(Local(pair_ptr)); i32_load(4); local_set(Local(found));
-                  br(2);
-                end;
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-                br(0);
-              end; end;
-              // found==0 or null → use default
-              local_get(Local(found)); i32_eqz;
-              if_i32;
-                i32_const(Imm32(1));
-              else_;
-                local_get(Local(found)); i32_load(0); i32_eqz;
-              end;
-              if_i32;
-        });
-        // Return ok(default)
-        match suffix {
-            "string" | "bool" => {
-                wasm!(self.func, {
-                    i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                    local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                    local_get(Local(result)); local_get(Local(default_local)); i32_store(4);
-                    local_get(Local(result));
-                });
-            }
-            "int" => {
-                wasm!(self.func, {
-                    i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(result));
-                    local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                    local_get(Local(result)); local_get(Local(default_local)); i64_store(4);
-                    local_get(Local(result));
-                });
-            }
-            "float" => {
-                wasm!(self.func, {
-                    i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(result));
-                    local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                    local_get(Local(result)); local_get(Local(default_local)); f64_store(4);
-                    local_get(Local(result));
-                });
-            }
-            _ => {
-                wasm!(self.func, {
-                    i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                    local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                    local_get(Local(result)); local_get(Local(default_local)); i32_store(4);
-                    local_get(Local(result));
-                });
-            }
-        }
-        wasm!(self.func, {
-              else_;
-        });
-        // Extract value by type
-        match suffix {
-            "string" => {
-                wasm!(self.func, {
-                    local_get(Local(found)); i32_load(0); i32_const(Imm32(VAL_TAG_STRING)); i32_ne;
-                    if_i32;
-                });
-                let te = self.emitter.intern_string("expected Str");
-                wasm!(self.func, {
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-                        local_get(Local(result)); i32_const(Imm32(te as i32)); i32_store(4);
-                        local_get(Local(result));
-                    else_;
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                        local_get(Local(result)); local_get(Local(found)); i32_load(4); i32_store(4);
-                        local_get(Local(result));
-                    end;
-                });
-            }
-            "int" => {
-                wasm!(self.func, {
-                    local_get(Local(found)); i32_load(0); i32_const(Imm32(VAL_TAG_INT)); i32_ne;
-                    if_i32;
-                });
-                let te = self.emitter.intern_string("expected Int");
-                wasm!(self.func, {
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-                        local_get(Local(result)); i32_const(Imm32(te as i32)); i32_store(4);
-                        local_get(Local(result));
-                    else_;
-                        i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                        local_get(Local(result)); local_get(Local(found)); i64_load(4); i64_store(4);
-                        local_get(Local(result));
-                    end;
-                });
-            }
-            "float" => {
-                // #658: widen a JSON Int (tag 2) to Float, like native as_float.
-                let te = self.emitter.intern_string("expected Float");
-                wasm!(self.func, {
-                    local_get(Local(found)); i32_load(0); i32_const(Imm32(VAL_TAG_FLOAT)); i32_eq;
-                    if_i32;
-                        i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                        local_get(Local(result)); local_get(Local(found)); f64_load(4); f64_store(4);
-                        local_get(Local(result));
-                    else_;
-                      local_get(Local(found)); i32_load(0); i32_const(Imm32(VAL_TAG_INT)); i32_eq;
-                      if_i32;
-                        i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                        local_get(Local(result)); local_get(Local(found)); i64_load(4); f64_convert_i64_s; f64_store(4);
-                        local_get(Local(result));
-                      else_;
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-                        local_get(Local(result)); i32_const(Imm32(te as i32)); i32_store(4);
-                        local_get(Local(result));
-                      end;
-                    end;
-                });
-            }
-            "bool" => {
-                wasm!(self.func, {
-                    local_get(Local(found)); i32_load(0); i32_const(Imm32(1)); i32_ne;
-                    if_i32;
-                });
-                let te = self.emitter.intern_string("expected Bool");
-                wasm!(self.func, {
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-                        local_get(Local(result)); i32_const(Imm32(te as i32)); i32_store(4);
-                        local_get(Local(result));
-                    else_;
-                        i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                        local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-                        local_get(Local(result)); local_get(Local(found)); i32_load(4); i32_store(4);
-                        local_get(Local(result));
-                    end;
-                });
-            }
-            other => {
-                panic!(
-                    "[ICE] emit_wasm: no WASM dispatch for `value.{}` — \
-                     add an arm in emit_value_call or resolve upstream",
-                    other
-                );
-            }
-        }
-        wasm!(self.func, {
-              end;
-            end;
-        });
-
-        match suffix {
-            "int" => self.scratch.free_i64(default_local),
-            "float" => self.scratch.free_f64(default_local),
-            _ => self.scratch.free_i32(default_local),
-        }
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(found);
-        self.scratch.free_i32(pair_ptr);
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(len);
-        self.scratch.free_i32(list);
-        self.scratch.free_i32(key);
-        self.scratch.free_i32(v);
-    }
-
-    /// __encode_list_T(xs: List[T]) -> Value (array of Value)
-    fn emit_encode_list(&mut self, args: &[IrExpr], suffix: &str) {
-        let xs = self.scratch.alloc_i32();
-        let len = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-        let val_list = self.scratch.alloc_i32();
-        let elem = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]);
-        wasm!(self.func, {
-            local_set(Local(xs));
-            local_get(Local(xs)); i32_load(0); local_set(Local(len));
-            // Alloc value list: [len:i32][ptr0][ptr1]...
-            i32_const(Imm32(VAL_ALLOC_NULL)); local_get(Local(len)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-            call(self.emitter.rt.alloc); local_set(Local(val_list));
-            local_get(Local(val_list)); local_get(Local(len)); i32_store(0);
-            i32_const(Imm32(0)); local_set(Local(i));
-            block_empty; loop_empty;
-              local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-        });
-        // Read element from source list
-        let _elem_stride = match suffix {
-            "int" => 8, "float" => 8, _ => 4,
-        };
-        match suffix {
-            "string" => {
-                wasm!(self.func, {
-                    local_get(Local(xs)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                    local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                    i32_load(0); local_set(Local(elem));
-                    i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                    local_get(Local(result)); i32_const(Imm32(VAL_TAG_STRING)); i32_store(0); // string tag
-                    local_get(Local(result)); local_get(Local(elem)); i32_store(4);
-                });
-            }
-            "int" => {
-                let elem64 = self.scratch.alloc_i64();
-                wasm!(self.func, {
-                    local_get(Local(xs)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                    local_get(Local(i)); i32_const(Imm32(I64_STRIDE)); i32_mul; i32_add;
-                    i64_load(0); local_set(Local(elem64));
-                    i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(result));
-                    local_get(Local(result)); i32_const(Imm32(VAL_TAG_INT)); i32_store(0); // int tag
-                    local_get(Local(result)); local_get(Local(elem64)); i64_store(4);
-                });
-                self.scratch.free_i64(elem64);
-            }
-            "float" => {
-                let elem_f = self.scratch.alloc_f64();
-                wasm!(self.func, {
-                    local_get(Local(xs)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                    local_get(Local(i)); i32_const(Imm32(I64_STRIDE)); i32_mul; i32_add;
-                    f64_load(0); local_set(Local(elem_f));
-                    i32_const(Imm32(VAL_ALLOC_I64)); call(self.emitter.rt.alloc); local_set(Local(result));
-                    local_get(Local(result)); i32_const(Imm32(VAL_TAG_FLOAT)); i32_store(0); // float tag
-                    local_get(Local(result)); local_get(Local(elem_f)); f64_store(4);
-                });
-                self.scratch.free_f64(elem_f);
-            }
-            "bool" => {
-                wasm!(self.func, {
-                    local_get(Local(xs)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                    local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                    i32_load(0); local_set(Local(elem));
-                    i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-                    local_get(Local(result)); i32_const(Imm32(1)); i32_store(0); // bool tag
-                    local_get(Local(result)); local_get(Local(elem)); i32_store(4);
-                });
-            }
-            _ => {
-                // Named type: call Type.encode(elem)
-                wasm!(self.func, {
-                    local_get(Local(xs)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                    local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                    i32_load(0);
-                });
-                let encode_name = format!("{}.encode", suffix);
-                if let Some(&func_idx) = self.emitter.func_map.get(encode_name.as_str()) {
-                    wasm!(self.func, { call(func_idx); local_set(Local(result)); });
-                } else {
-                    wasm!(self.func, { local_set(Local(result)); }); // passthrough ptr
-                }
-            }
-        }
-        wasm!(self.func, {
-              // Store value in val_list
-              local_get(Local(val_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-              local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-              local_get(Local(result)); i32_store(0);
-              local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-              br(0);
-            end; end;
-            // Wrap in Value array: [tag=5][list_ptr]
-            i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-            local_get(Local(result)); i32_const(Imm32(VAL_TAG_ARRAY)); i32_store(0); // array tag
-            local_get(Local(result)); local_get(Local(val_list)); i32_store(4);
-            local_get(Local(result));
-        });
-
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(elem);
-        self.scratch.free_i32(val_list);
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(len);
-        self.scratch.free_i32(xs);
-    }
-
-    /// __decode_list_T(v: Value) -> Result[List[T], String]
-    fn emit_decode_list(&mut self, args: &[IrExpr], suffix: &str) {
-        let v = self.scratch.alloc_i32();
-        let arr_list = self.scratch.alloc_i32();
-        let len = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-        let out_list = self.scratch.alloc_i32();
-        let elem_val = self.scratch.alloc_i32();
-        let result = self.scratch.alloc_i32();
-
-        self.emit_expr(&args[0]);
-        wasm!(self.func, {
-            local_set(Local(v));
-            // Must be array (tag 5)
-            local_get(Local(v)); i32_load(0); i32_const(Imm32(VAL_TAG_ARRAY)); i32_ne;
-            if_i32;
-        });
-        let err_msg = self.emitter.intern_string("expected Array");
-        let elem_size: u32 = match suffix {
-            "int" | "float" => I64_STRIDE as u32, _ => PTR_STRIDE as u32,
-        };
-        wasm!(self.func, {
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(1)); i32_store(0);
-              local_get(Local(result)); i32_const(Imm32(err_msg as i32)); i32_store(4);
-              local_get(Local(result));
-            else_;
-              local_get(Local(v)); i32_load(4); local_set(Local(arr_list));
-              local_get(Local(arr_list)); i32_load(0); local_set(Local(len));
-              // Alloc output list
-              i32_const(Imm32(VAL_ALLOC_NULL)); local_get(Local(len)); i32_const(Imm32(elem_size as i32)); i32_mul; i32_add;
-              call(self.emitter.rt.alloc); local_set(Local(out_list));
-              local_get(Local(out_list)); local_get(Local(len)); i32_store(0);
-              i32_const(Imm32(0)); local_set(Local(i));
-              block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-                // Get Value element from array
-                local_get(Local(arr_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                i32_load(0); local_set(Local(elem_val));
-        });
-        // Extract typed value from Value element
-        match suffix {
-            "string" => {
-                wasm!(self.func, {
-                    local_get(Local(out_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                    local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                    local_get(Local(elem_val)); i32_load(4); // string ptr from Value
-                    i32_store(0);
-                });
-            }
-            "int" => {
-                wasm!(self.func, {
-                    local_get(Local(out_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                    local_get(Local(i)); i32_const(Imm32(I64_STRIDE)); i32_mul; i32_add;
-                    local_get(Local(elem_val)); i64_load(4); // i64 from Value
-                    i64_store(0);
-                });
-            }
-            "float" => {
-                wasm!(self.func, {
-                    local_get(Local(out_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                    local_get(Local(i)); i32_const(Imm32(I64_STRIDE)); i32_mul; i32_add;
-                    local_get(Local(elem_val)); f64_load(4);
-                    f64_store(0);
-                });
-            }
-            "bool" => {
-                wasm!(self.func, {
-                    local_get(Local(out_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                    local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                    local_get(Local(elem_val)); i32_load(4); // bool (0/1)
-                    i32_store(0);
-                });
-            }
-            _ => {
-                // Named type: call Type.decode(elem_val), unwrap ok
-                let decode_name = format!("{}.decode", suffix);
-                if let Some(&func_idx) = self.emitter.func_map.get(decode_name.as_str()) {
-                    let dr = self.scratch.alloc_i32();
-                    wasm!(self.func, {
-                        local_get(Local(elem_val)); call(func_idx); local_set(Local(dr));
-                        local_get(Local(out_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                        local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                        local_get(Local(dr)); i32_load(4); // ok payload (pointer)
-                        i32_store(0);
-                    });
-                    self.scratch.free_i32(dr);
-                } else {
-                    wasm!(self.func, {
-                        local_get(Local(out_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32)); i32_add;
-                        local_get(Local(i)); i32_const(Imm32(PTR_STRIDE)); i32_mul; i32_add;
-                        local_get(Local(elem_val));
-                        i32_store(0);
-                    });
-                }
-            }
-        }
-        wasm!(self.func, {
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-                br(0);
-              end; end;
-              // Wrap in ok Result
-              i32_const(Imm32(VAL_ALLOC_PTR)); call(self.emitter.rt.alloc); local_set(Local(result));
-              local_get(Local(result)); i32_const(Imm32(0)); i32_store(0);
-              local_get(Local(result)); local_get(Local(out_list)); i32_store(4);
-              local_get(Local(result));
-            end;
-        });
-
-        self.scratch.free_i32(result);
-        self.scratch.free_i32(elem_val);
-        self.scratch.free_i32(out_list);
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(len);
-        self.scratch.free_i32(arr_list);
-        self.scratch.free_i32(v);
-    }
 }
+
+include!("calls_value_p2.rs");
+include!("calls_value_p3.rs");
+include!("calls_value_p4.rs");

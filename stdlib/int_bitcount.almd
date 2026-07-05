@@ -1,0 +1,82 @@
+// int_bitcount — SELF-HOSTED `int.pop_count` / `count_trailing_zeros` /
+// `count_leading_zeros` for v1, composed from the prim bitwise floor (bshr/band). Each
+// inspects bit i via `(n >> i) & 1` (the arithmetic shift's sign extension is masked off by
+// the & 1, so bit i is read correctly for any i in 0..64). Matches v0's u64 count_ones /
+// trailing_zeros / leading_zeros (n is reinterpreted as u64). Cert-untouching (scalar).
+
+// pop_count: number of set bits across all 64 positions.
+fn __pc(n: Int, i: Int, acc: Int) -> Int =
+  if i >= 64 then acc
+  else {
+    let sh = prim.bshr(n, i)
+    let bit = prim.band(sh, 1)
+    __pc(n, i + 1, acc + bit)
+  }
+
+fn int_pop_count(n: Int) -> Int = __pc(n, 0, 0)
+
+// count_trailing_zeros: index of the lowest set bit, or 64 when n == 0.
+fn __ctz(n: Int, i: Int) -> Int =
+  if i >= 64 then 64
+  else {
+    let sh = prim.bshr(n, i)
+    let bit = prim.band(sh, 1)
+    if bit == 1 then i
+    else __ctz(n, i + 1)
+  }
+
+fn int_count_trailing_zeros(n: Int) -> Int = __ctz(n, 0)
+
+// count_leading_zeros: 63 - (highest set bit index), or 64 when n == 0. Scans from bit 63.
+fn __clz(n: Int, i: Int) -> Int =
+  if i < 0 then 64
+  else {
+    let sh = prim.bshr(n, i)
+    let bit = prim.band(sh, 1)
+    if bit == 1 then 63 - i
+    else __clz(n, i - 1)
+  }
+
+fn int_count_leading_zeros(n: Int) -> Int = __clz(n, 63)
+
+// bit_width: bits needed to represent n (0 for n==0), = 64 - leading_zeros for n != 0.
+fn int_bit_width(n: Int) -> Int =
+  if n == 0 then 0
+  else {
+    let lz = __clz(n, 63)
+    64 - lz
+  }
+
+// log2_floor: floor(log2(n)) for n > 0 (= highest set bit index), -1 for n <= 0.
+fn int_log2_floor(n: Int) -> Int =
+  if n <= 0 then 0 - 1
+  else {
+    let lz = __clz(n, 63)
+    63 - lz
+  }
+
+// log2_ceil: ceil(log2(n)) for n > 1 (= bit_width(n-1)), 0 for n <= 1.
+fn int_log2_ceil(n: Int) -> Int =
+  if n <= 1 then 0
+  else {
+    let lz = __clz(n - 1, 63)
+    64 - lz
+  }
+
+// next_power_of_two: smallest power of 2 >= n (1 for n <= 1) = 1 << bit_width(n-1).
+fn int_next_power_of_two(n: Int) -> Int =
+  if n <= 1 then 1
+  else {
+    let lz = __clz(n - 1, 63)
+    let w = 64 - lz
+    prim.bshl(1, w)
+  }
+
+// prev_power_of_two: largest power of 2 <= n (0 for n <= 0) = 1 << log2_floor(n).
+fn int_prev_power_of_two(n: Int) -> Int =
+  if n <= 0 then 0
+  else {
+    let lz = __clz(n, 63)
+    let lf = 63 - lz
+    prim.bshl(1, lf)
+  }

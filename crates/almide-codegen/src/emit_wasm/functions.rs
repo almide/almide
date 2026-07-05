@@ -6,7 +6,6 @@ use wasm_encoder::{Function, ValType};
 use almide_ir::{IrFunction, IrExpr, IrExprKind, IrStmt, IrStmtKind, VarTable};
 
 use super::{CompiledFunc, FuncCompiler, WasmEmitter};
-use super::engine::{Imm32, Local};
 use super::statements::collect_locals;
 
 /// Check if a function body uses stdlib calls, closures, or complex operations
@@ -121,22 +120,11 @@ fn compile_function_inner(
     // (#417) and falls back to the native build. These margins cover realistic
     // functions; the exact fix is a two-pass emit that sizes caps to the measured
     // high-water mark. Unused scratch locals are zero-cost declarations.
-    //
-    // Function-scope heap reclamation (below) draws ONE i32 scratch slot that
-    // stays live across the entire body (it holds the entry heap frontier), so it
-    // is NOT freed before the body's own temporaries are allocated. Reserve that
-    // slot on top of the body budget in BOTH branches — otherwise a body that
-    // already peaks at the minimal i32 cap overflows by exactly one once the
-    // reclamation slot is taken first (codegen_borrow_test / protocol_stress_test:
-    // body needs 4, +1 frontier slot = 5 > 4). The reserve is unconditional because
-    // eligibility is decided after the compiler is built; an unused extra i32 local
-    // is a zero-cost declaration.
-    const FN_SCOPE_FRONTIER_SLOTS: usize = 1;
     let (scratch_i32_cap, scratch_i64_cap, scratch_f64_cap, scratch_v128_cap) = if needs_full_scratch {
-        (64 + FN_SCOPE_FRONTIER_SLOTS, 48usize, 48usize, 8usize)
+        (64usize, 48usize, 48usize, 8usize)
     } else {
         // Minimal: enough for basic match/if temporaries
-        (4 + FN_SCOPE_FRONTIER_SLOTS, 2usize, 2usize, 0usize)
+        (4usize, 2usize, 2usize, 0usize)
     };
     let scratch_i32_base = param_count + local_decls.len() as u32;
     for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
@@ -162,6 +150,7 @@ fn compile_function_inner(
         var_table: _var_table,
         stub_ret_ty: almide_lang::types::Ty::Unit,
         current_module_name: module_name,
+        live_heap: Vec::new(),
     };
 
     if let Some(init_idx) = init_globals_idx {
@@ -172,45 +161,7 @@ fn compile_function_inner(
         wasm!(compiler.func, { call(compiler.emitter.rt.init_preopen_dirs); });
     }
 
-    // Function-scope heap reclamation (the non-loop analog of iter_scope). When a
-    // function returns a SCALAR (no heap escapes through the return), allocates
-    // heap, and never writes outer heap, roll the bump pointer back to entry on
-    // exit. Sequential calls then bump into the just-reclaimed WARM region instead
-    // of growing into cold (page-faulting) pages — this is what made `data |>
-    // list.map` ~4× slower than rustc when called once per benchmark: the result
-    // leaked and every call hit fresh memory, while a loop's iter_scope already
-    // recovered it. The scalar result sits on the wasm value stack, untouched by
-    // the global resets. The escape guard (`expr_writes_outer_heap`, hardened in
-    // #643) keeps any in-place-mutated / outer-stored heap out of the rollback.
-    let fn_scope = matches!(
-        func.ret_ty,
-        almide_lang::types::Ty::Int
-            | almide_lang::types::Ty::Bool
-            | almide_lang::types::Ty::Float
-            | almide_lang::types::Ty::Unit
-    ) && compiler.expr_allocates_heap(&func.body)
-        && !compiler.expr_writes_outer_heap(&func.body);
-    let fn_scope_local = if fn_scope {
-        let sl = compiler.scratch.alloc_i32();
-        wasm!(compiler.func, { global_get(compiler.emitter.heap_ptr_global); local_set(Local(sl)); });
-        Some(sl)
-    } else {
-        None
-    };
-
     compiler.emit_expr(&func.body);
-
-    // Restore the bump frontier + forget the free list (every node freed in the
-    // body points into the region being reclaimed — the same wholesale-forget the
-    // loop iter_scope relies on). Global sets do not disturb the stacked result.
-    if let Some(sl) = fn_scope_local {
-        wasm!(compiler.func, {
-            local_get(Local(sl));
-            global_set(compiler.emitter.heap_ptr_global);
-            i32_const(Imm32(0));
-            global_set(compiler.emitter.free_list_global);
-        });
-    }
 
     // Perceus function-exit rc_dec is now handled by PerceusPass (IR-level RcDec nodes)
 

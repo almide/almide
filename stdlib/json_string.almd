@@ -1,0 +1,35 @@
+// json_string — SELF-HOSTED Str-payload `json.*` over the SHARED Value repr (value_core's block:
+// [rc][len@4 = TAG][cap@8][payload@12], tag 4 = Str). json's Value IS value's Value, so from_string
+// is byte-identical to value.str: it builds a Value that OWNS a fresh DEEP COPY of `s` stored
+// (consumed) into the +12 payload slot via prim.store_str; the runtime-tag-dispatched DropValue
+// frees it when the Value is released.
+//
+// as_string returns json's Option contract: Some(a fresh DEEP COPY of the payload String) when the
+// Value is a Str (tag 4), else None. The Value keeps owning the original payload, so the returned
+// String is single-owned (no double-free). This is the repr-poly Option[String] materialization
+// (a 0-or-1-element DynListStr), exactly like list.get_str — a `match` / `??` over it EXECUTES.
+
+fn json_from_string(s: String) -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 4)         // tag = Str
+  let copy = string.repeat(s, 1)
+  prim.store_str(h + 12, copy)   // MOVE the owned copy into the Value's payload slot
+  v
+}
+
+// Some(deep copy of the payload) — the Str case (tag is 4 when this is called). Reads the payload
+// as a BORROW (prim.load_str), deep-copies it into a fresh owned String wrapped in Some. Mirrors
+// list_get_str's __get_str_some: a helper-call tail keeps the accessor body a minimal let-chain so
+// the materialized-Option lowering admits it (brick #46).
+fn __jas_some(h: Int) -> Option[String] = {
+  let x = prim.load_str(h + 12)
+  let copy = string.repeat(x, 1)
+  Some(copy)
+}
+
+fn json_as_string(v: Value) -> Option[String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag == 4 then __jas_some(h) else None
+}

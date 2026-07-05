@@ -1,0 +1,20 @@
+// wasm:enabled
+// Float-list nested interps + a map i64::MIN regression, byte-identical to v0:
+//   Option[List[Float]]         → some([1.5, 2]) / some([]) / none   (float drop-.0, callable float.to_string)
+//   Result[List[Float], String] → ok([1.5, 100]) / ok([]) / err("<q>")
+//   ${Map[String, Int]} with i64::MIN — the negate-free path (was "-0", another Bug A instance).
+
+effect fn main() -> Unit = {
+  let a: Option[List[Float]] = some([1.5, 2.0, -3.25])
+  let b: Option[List[Float]] = some([])
+  let c: Option[List[Float]] = none
+  let d: Option[List[Float]] = some([100.0, 0.5, -0.0])
+  println("${a}") println("${b}") println("${c}") println("${d}")
+  let e: Result[List[Float], String] = ok([1.5, 100.0])
+  let f: Result[List[Float], String] = ok([])
+  let g: Result[List[Float], String] = err("bad \"f\"")
+  let h: Result[List[Float], String] = ok([-2.5, 3.14, 7.0])
+  println("${e}") println("${f}") println("${g}") println("${h}")
+  let m: Map[String, Int] = ["min": 0 - 9223372036854775807 - 1, "z": 0]
+  println("${m}")
+}

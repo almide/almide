@@ -1,0 +1,13 @@
+// @contract: C-099
+// Option[scalar] == / != : branchless masked compare over the materialized 0-or-1-element layout
+// (tag=len@4, scalar payload@12; eq = tags-equal AND (both-None OR payload-eq)). Was both-arms-
+// linearized (silent — ran both branches). Byte-matches native. (some-vs-none / none-vs-none also
+// verified; this fixture keeps to the multi-let-friendly subset.)
+effect fn main() -> Unit = {
+  let a: Option[Int] = some(5)
+  let b: Option[Int] = some(5)
+  let c: Option[Int] = some(7)
+  println(if a == b then "T" else "F")
+  println(if a == c then "T" else "F")
+  println(if a != c then "T" else "F")
+}

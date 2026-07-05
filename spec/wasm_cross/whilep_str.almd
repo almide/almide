@@ -1,0 +1,12 @@
+// @contract: C-101
+// list.take_while / drop_while over a List[String] — rc-correct heap variants (each kept String is
+// DEEP-COPIED so result + source can both drop without a double-free, the bug the generic i64 impl
+// had — a runtime trap). take_while keeps the leading run, drop_while drops it. Byte-matches native.
+fn lens(xs: List[String]) -> String = list.join(xs, ",")
+effect fn main() -> Unit = {
+  let xs = ["aa", "bb", "ccc", "dd"]
+  println(lens(xs |> list.take_while((s) => string.len(s) == 2)))
+  println(lens(xs |> list.drop_while((s) => string.len(s) == 2)))
+  let ys = ["ccc", "aa"]
+  println("[" + lens(ys |> list.take_while((s) => string.len(s) == 2)) + "]")
+}

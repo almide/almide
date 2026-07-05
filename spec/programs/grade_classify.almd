@@ -1,0 +1,9 @@
+fn grade(score: Int) -> String =
+  if score >= 90 then "A"
+  else if score >= 80 then "B"
+  else if score >= 70 then "C"
+  else "F"
+fn main() -> Unit = {
+  let scores = [95, 82, 71, 55, 88]
+  for s in scores { println(int.to_string(s) + " -> " + grade(s)) }
+}

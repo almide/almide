@@ -1,0 +1,73 @@
+// list_flatten — SELF-HOSTED list.flatten for v1: List[List[Int]] -> List[Int], concatenating all
+// sublists in order. The outer list's slots hold sublist HANDLES (read via load64, then used as
+// addresses for the sublist's len/elements) — the same type-agnostic handle reads as list.join.
+// The result is a fresh owned List[Int] (DynList, scalar elements); the input is borrowed. A
+// monomorphic List[Int] impl serves any List[List[T]] at the wasm level (handles are i32).
+
+// Total element count across all sublists.
+fn __flat_total(oh: Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let subh = prim.load64(oh + 12 + i * 8)
+    let sl = prim.load32(subh + 4)
+    __flat_total(oh, n, i + 1, acc + sl)
+  }
+
+// Copy a sublist's `sl` elements into dst starting at write offset `off`; return the advanced offset.
+fn __flat_copy_sub(dh: Int, subh: Int, sl: Int, j: Int, off: Int) -> Int =
+  if j >= sl then off
+  else {
+    let v = prim.load64(subh + 12 + j * 8)
+    prim.store64(dh + 12 + off * 8, v)
+    __flat_copy_sub(dh, subh, sl, j + 1, off + 1)
+  }
+
+// Walk the outer list, copying each sublist in order; return the total written.
+fn __flat_fill(dh: Int, oh: Int, n: Int, i: Int, off: Int) -> Int =
+  if i >= n then off
+  else {
+    let subh = prim.load64(oh + 12 + i * 8)
+    let sl = prim.load32(subh + 4)
+    let off1 = __flat_copy_sub(dh, subh, sl, 0, off)
+    __flat_fill(dh, oh, n, i + 1, off1)
+  }
+
+fn list_flatten(xss: List[Int]) -> List[Int] = {
+  let oh = prim.handle(xss)
+  let n = prim.load32(oh + 4)
+  let total = __flat_total(oh, n, 0, 0)
+  let buf = prim.alloc_list(total)
+  let _x = __flat_fill(prim.handle(buf), oh, n, 0, 0)
+  buf
+}
+
+// HEAP-element flatten (`List[List[String]]`, `List[List[(F,F)]]` — the fft merge):
+// identical walk, but each copied slot is a HANDLE the result must CO-OWN — rc_inc
+// on copy, so the result's recursive/flat drop and the sources' drops each release
+// exactly their own reference.
+fn __flat_copy_sub_rc(dh: Int, subh: Int, sl: Int, j: Int, off: Int) -> Int =
+  if j >= sl then off
+  else {
+    let v = prim.load64(subh + 12 + j * 8)
+    prim.rc_inc(v)
+    prim.store64(dh + 12 + off * 8, v)
+    __flat_copy_sub_rc(dh, subh, sl, j + 1, off + 1)
+  }
+
+fn __flat_fill_rc(dh: Int, oh: Int, n: Int, i: Int, off: Int) -> Int =
+  if i >= n then off
+  else {
+    let subh = prim.load64(oh + 12 + i * 8)
+    let sl = prim.load32(subh + 4)
+    let off1 = __flat_copy_sub_rc(dh, subh, sl, 0, off)
+    __flat_fill_rc(dh, oh, n, i + 1, off1)
+  }
+
+fn list_flatten_rc(xss: List[Int]) -> List[Int] = {
+  let oh = prim.handle(xss)
+  let n = prim.load32(oh + 4)
+  let total = __flat_total(oh, n, 0, 0)
+  let buf = prim.alloc_list(total)
+  let _x = __flat_fill_rc(prim.handle(buf), oh, n, 0, 0)
+  buf
+}

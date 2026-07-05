@@ -1,0 +1,7 @@
+fn parse_or_zero(s: String) -> Int = int.parse(s) ?? 0
+fn main() -> Unit = {
+  let parts = ["10", "20", "x", "30"]
+  let nums = list.map(parts, (s) => parse_or_zero(s))
+  let total = list.fold(nums, 0, (a, n) => a + n)
+  println("sum=" + int.to_string(total))
+}

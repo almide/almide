@@ -1,0 +1,59 @@
+// wasm:enabled
+// A standalone fixture locking in heap-result `match` over an Option / Result subject whose arms
+// carry GUARDS and LITERAL payloads — a `classify`-style function. The trust-spine regroups these
+// into constructor dispatch + a scalar payload sub-match (`some(n) if g` → `some($p) => match $p { n
+// if g => .. }`), so the guarded-variant case reduces to the already-proven variant-tag dispatch and
+// scalar guard/literal chain. Byte-identical to v0 --target wasm; a guard/literal must select the
+// exact arm (a linearization that ran every arm would silently pick the wrong one).
+
+fn olabel(x: Option[Int]) -> String = match x {
+  some(n) if n > 100 => "big",
+  some(n) if n > 0 => "pos",
+  some(0) => "zero",
+  some(_) => "neg",
+  none => "none",
+}
+
+fn rlabel(r: Result[Int, String]) -> String = match r {
+  ok(v) if v > 0 => "ok-pos",
+  ok(0) => "ok-zero",
+  ok(_) => "ok-neg",
+  err(e) if string.len(e) > 5 => "err-long",
+  err(_) => "err-short",
+}
+
+fn sclass(r: Result[String, String]) -> String = match r {
+  ok("good") => "GOOD",
+  ok(_) => "OK",
+  err("bad") => "BAD",
+  err(_) => "ERR",
+}
+
+type Tok = Word(String) | Num(Int)
+fn tclass(t: Tok) -> String = match t {
+  Word("hi") => "HI",
+  Word(_)    => "W",
+  Num(7)     => "SEVEN",
+  Num(_)     => "N",
+}
+
+effect fn main() -> Unit = {
+  println(olabel(some(200)))
+  println(olabel(some(5)))
+  println(olabel(some(0)))
+  println(olabel(some(-3)))
+  println(olabel(none))
+  println(rlabel(ok(7)))
+  println(rlabel(ok(0)))
+  println(rlabel(ok(-1)))
+  println(rlabel(err("longmsg")))
+  println(rlabel(err("no")))
+  println(sclass(ok("good")))
+  println(sclass(ok("x")))
+  println(sclass(err("bad")))
+  println(sclass(err("y")))
+  println(tclass(Word("hi")))
+  println(tclass(Word("z")))
+  println(tclass(Num(7)))
+  println(tclass(Num(3)))
+}

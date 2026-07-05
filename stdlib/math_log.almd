@@ -1,0 +1,197 @@
+// math_log — SELF-HOSTED math.log (natural) for v1, a FAITHFUL transcription of runtime/rs/src/
+// libm.rs (vendored libm 0.2.16) so the f64 ops are bit-identical to v0. The 2^k(1+f) reduction is
+// done with the prim bit floor (fbits/ffrombits/bshl/bshr/band/bor); the degree-14 Remez polynomial
+// is natural float arithmetic (Float operators now lower to the prim float floor). The decimal
+// constants round-trip to the exact libm f64 bits.
+
+// unsigned upper 32 bits of the f64 bit pattern.
+fn __log_u32(bits: Int) -> Int = prim.band(prim.bshr(bits, 32), 4294967295)
+
+// log(+-0) = -inf ; log(negative) = NaN — produced by the same expressions as v0.
+fn __log_zero(x: Float) -> Float = {
+  let neg1 = 0.0 - 1.0
+  neg1 / (x * x)
+}
+fn __log_nan(x: Float) -> Float = (x - x) / 0.0
+
+// The shared reduction + polynomial (libm.rs lines 977-993), given the (possibly subnormal-scaled)
+// bit pattern, its upper-32, and the initial k.
+fn __log_main(bits: Int, hx0: Int, k0: Int) -> Float = {
+  let ln2hi = prim.ffrombits(4604418534311723008)
+  let ln2lo = prim.ffrombits(4461442080421002358)
+  let lg1 = prim.ffrombits(4604180019048437139)
+  let lg2 = prim.ffrombits(4600877379321592324)
+  let lg3 = prim.ffrombits(4598818590951641945)
+  let lg4 = prim.ffrombits(4597174411056806063)
+  let lg5 = prim.ffrombits(4595719342595441630)
+  let lg6 = prim.ffrombits(4594685411790997151)
+  let lg7 = prim.ffrombits(4594499633228436036)
+  let hx = hx0 + 614242                               // 0x3ff00000 - 0x3fe6a09e
+  let k = k0 + prim.bshr(hx, 20) - 1023               // ((hx>>20) as i32) - 0x3ff
+  let hxm = prim.band(hx, 1048575) + 1072079006       // (hx & 0x000fffff) + 0x3fe6a09e
+  let ui = prim.bor(prim.bshl(hxm, 32), prim.band(bits, 4294967295))
+  let x = prim.ffrombits(ui)
+  let f = x - 1.0
+  let hfsq = 0.5 * f * f
+  let s = f / (2.0 + f)
+  let z = s * s
+  let w = z * z
+  let t1 = w * (lg2 + w * (lg4 + w * lg6))
+  let t2 = z * (lg1 + w * (lg3 + w * (lg5 + w * lg7)))
+  let r = t2 + t1
+  let dk = prim.i2f(k)
+  s * (hfsq + r) + dk * ln2lo - hfsq + f + dk * ln2hi
+}
+
+// subnormal positive: scale x by 2^54, recompute the bit pattern, then the main path with k0 = -54.
+fn __log_sub(x: Float) -> Float = {
+  let x1p54 = prim.ffrombits(4850376798678024192)    // 2^54 = 0x4350000000000000
+  let xs = x * x1p54
+  let bits = prim.fbits(xs)
+  __log_main(bits, __log_u32(bits), 0 - 54)
+}
+
+fn math_log(x: Float) -> Float = {
+  let bits = prim.fbits(x)
+  let hx = __log_u32(bits)
+  if hx < 1048576 then {
+    let shifted = prim.bshl(bits, 1)
+    if shifted == 0 then __log_zero(x)
+    else if hx >= 2147483648 then __log_nan(x)
+    else __log_sub(x)
+  }
+  else if hx >= 2147483648 then __log_nan(x)
+  else if hx >= 2146435072 then x
+  else {
+    let low = prim.band(bits, 4294967295)
+    if hx == 1072693248 then (if low == 0 then 0.0 else __log_main(bits, hx, 0))
+    else __log_main(bits, hx, 0)
+  }
+}
+
+// ── log2 (shares log's reduction + Remez poly; an extended-precision hi/lo combine via IVLN2) ──
+fn __log2_main(bits: Int, hx0: Int, k0: Int) -> Float = {
+  let ivln2hi = prim.ffrombits(4609176140020449280)
+  let ivln2lo = prim.ffrombits(4460540536611119616)
+  let lg1 = prim.ffrombits(4604180019048437139)
+  let lg2 = prim.ffrombits(4600877379321592324)
+  let lg3 = prim.ffrombits(4598818590951641945)
+  let lg4 = prim.ffrombits(4597174411056806063)
+  let lg5 = prim.ffrombits(4595719342595441630)
+  let lg6 = prim.ffrombits(4594685411790997151)
+  let lg7 = prim.ffrombits(4594499633228436036)
+  let hx = hx0 + 614242
+  let k = k0 + prim.bshr(hx, 20) - 1023
+  let hxm = prim.band(hx, 1048575) + 1072079006
+  let ui0 = prim.bor(prim.bshl(hxm, 32), prim.band(bits, 4294967295))
+  let x = prim.ffrombits(ui0)
+  let f = x - 1.0
+  let hfsq = 0.5 * f * f
+  let s = f / (2.0 + f)
+  let z = s * s
+  let w = z * z
+  let t1 = w * (lg2 + w * (lg4 + w * lg6))
+  let t2 = z * (lg1 + w * (lg3 + w * (lg5 + w * lg7)))
+  let r = t2 + t1
+  let hi0 = f - hfsq
+  let mask = prim.bshl(0 - 1, 32)
+  let hi = prim.ffrombits(prim.band(prim.fbits(hi0), mask))
+  let lo = f - hi - hfsq + s * (hfsq + r)
+  let valhi = hi * ivln2hi
+  let vallo = (lo + hi) * ivln2lo + lo * ivln2hi
+  let y = prim.i2f(k)
+  let w2 = y + valhi
+  let adj = (y - w2) + valhi
+  let vallo2 = vallo + adj
+  vallo2 + w2
+}
+
+fn __log2_sub(x: Float) -> Float = {
+  let x1p54 = prim.ffrombits(4850376798678024192)
+  let xs = x * x1p54
+  let bits = prim.fbits(xs)
+  __log2_main(bits, __log_u32(bits), 0 - 54)
+}
+
+fn math_log2(x: Float) -> Float = {
+  let bits = prim.fbits(x)
+  let hx = __log_u32(bits)
+  if hx < 1048576 then {
+    let shifted = prim.bshl(bits, 1)
+    if shifted == 0 then __log_zero(x)
+    else if hx >= 2147483648 then __log_nan(x)
+    else __log2_sub(x)
+  }
+  else if hx >= 2147483648 then __log_nan(x)
+  else if hx >= 2146435072 then x
+  else {
+    let low = prim.band(bits, 4294967295)
+    if hx == 1072693248 then (if low == 0 then 0.0 else __log2_main(bits, hx, 0))
+    else __log2_main(bits, hx, 0)
+  }
+}
+
+// ── log10 (shares log's reduction + Remez poly; hi/lo combine via IVLN10 + LOG10_2) ──
+fn __log10_main(bits: Int, hx0: Int, k0: Int) -> Float = {
+  let ivln10hi = prim.ffrombits(4601495173784928256)
+  let ivln10lo = prim.ffrombits(4448312028596710869)
+  let log102hi = prim.ffrombits(4599094494223097856)
+  let log102lo = prim.ffrombits(4420844829172378422)
+  let lg1 = prim.ffrombits(4604180019048437139)
+  let lg2 = prim.ffrombits(4600877379321592324)
+  let lg3 = prim.ffrombits(4598818590951641945)
+  let lg4 = prim.ffrombits(4597174411056806063)
+  let lg5 = prim.ffrombits(4595719342595441630)
+  let lg6 = prim.ffrombits(4594685411790997151)
+  let lg7 = prim.ffrombits(4594499633228436036)
+  let hx = hx0 + 614242
+  let k = k0 + prim.bshr(hx, 20) - 1023
+  let hxm = prim.band(hx, 1048575) + 1072079006
+  let ui0 = prim.bor(prim.bshl(hxm, 32), prim.band(bits, 4294967295))
+  let x = prim.ffrombits(ui0)
+  let f = x - 1.0
+  let hfsq = 0.5 * f * f
+  let s = f / (2.0 + f)
+  let z = s * s
+  let w = z * z
+  let t1 = w * (lg2 + w * (lg4 + w * lg6))
+  let t2 = z * (lg1 + w * (lg3 + w * (lg5 + w * lg7)))
+  let r = t2 + t1
+  let hi0 = f - hfsq
+  let mask = prim.bshl(0 - 1, 32)
+  let hi = prim.ffrombits(prim.band(prim.fbits(hi0), mask))
+  let lo = f - hi - hfsq + s * (hfsq + r)
+  let valhi = hi * ivln10hi
+  let dk = prim.i2f(k)
+  let y = dk * log102hi
+  let vallo = dk * log102lo + (lo + hi) * ivln10lo + lo * ivln10hi
+  let w2 = y + valhi
+  let adj = (y - w2) + valhi
+  let vallo2 = vallo + adj
+  vallo2 + w2
+}
+
+fn __log10_sub(x: Float) -> Float = {
+  let x1p54 = prim.ffrombits(4850376798678024192)
+  let xs = x * x1p54
+  let bits = prim.fbits(xs)
+  __log10_main(bits, __log_u32(bits), 0 - 54)
+}
+
+fn math_log10(x: Float) -> Float = {
+  let bits = prim.fbits(x)
+  let hx = __log_u32(bits)
+  if hx < 1048576 then {
+    let shifted = prim.bshl(bits, 1)
+    if shifted == 0 then __log_zero(x)
+    else if hx >= 2147483648 then __log_nan(x)
+    else __log10_sub(x)
+  }
+  else if hx >= 2147483648 then __log_nan(x)
+  else if hx >= 2146435072 then x
+  else {
+    let low = prim.band(bits, 4294967295)
+    if hx == 1072693248 then (if low == 0 then 0.0 else __log10_main(bits, hx, 0))
+    else __log10_main(bits, hx, 0)
+  }
+}

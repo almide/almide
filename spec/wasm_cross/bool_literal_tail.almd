@@ -1,0 +1,15 @@
+// @contract: C-116
+// A function whose body IS a bare Bool literal (`fn t() = true`, or a constant/param-ignoring
+// predicate `(x) => true` for list.all/any/count) must RETURN that 0/1 — not the deferred-Const ZERO
+// it used to fall into in tail position (which made `(x) => true` return FALSE, a SILENT MISCOMPILE of
+// every constant-true predicate, e.g. list.all((x)=>true) wrongly = false). Bool is an i64 0/1 → ConstInt.
+fn always_true() -> Bool = true
+fn always_false() -> Bool = false
+effect fn main() -> Unit = {
+  if always_true() then println("t-T") else println("t-F")
+  if always_false() then println("f-T") else println("f-F")
+  if [1, 2, 3] |> list.all((x) => true) then println("all-T") else println("all-F")
+  if [1, 2, 3] |> list.any((x) => false) then println("any-T") else println("any-F")
+  println(int.to_string([1, 2, 3, 4] |> list.count((x) => true)))
+  if [2, 4, 6] |> list.all((x) => x > 1) then println("real-T") else println("real-F")
+}

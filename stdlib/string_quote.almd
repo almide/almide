@@ -1,0 +1,61 @@
+// string_quote — SELF-HOSTED `string.quote`, the SINGLE-value QUOTED+ESCAPED repr v0 uses
+// for a String ELEMENT/FIELD inside a record/tuple/list (the `${record}` / `${tuple}` form).
+// v0 renders a nested string via `almide_repr_str`:
+//   "\"" + s with { \ → \\, " → \", \n → \n, \r → \r, \t → \t } + "\""
+// other bytes (incl. multibyte UTF-8) pass through verbatim. This is the SAME quote+escape
+// `list_to_string_s` (`__ltss_fill_elem`) does per List[String] element, here as a single-
+// value formatter so a record/tuple String field byte-matches v0 (`name: "alice"`).
+// `s` borrowed (bytes read, not moved); the result is a fresh owned String.
+
+// Does byte b need a backslash escape? (\ " \n \r \t) → it contributes 2 output bytes.
+fn __sq_is_escaped(b: Int) -> Bool =
+  if b == 92 then true                // '\'
+  else if b == 34 then true           // '"'
+  else if b == 10 then true           // '\n'
+  else if b == 13 then true           // '\r'
+  else if b == 9 then true            // '\t'
+  else false
+
+// The escape letter for an escaped control byte (n/r/t); a literal \ or " escapes to ITSELF.
+fn __sq_esc_char(b: Int) -> Int =
+  if b == 10 then 110                 // 'n'
+  else if b == 13 then 114            // 'r'
+  else if b == 9 then 116             // 't'
+  else b                              // '\' and '"' escape to themselves
+
+// Escaped byte width of the slen bytes at `src`: each escaped byte counts 2, others 1.
+fn __sq_esc_len(src: Int, slen: Int, i: Int, acc: Int) -> Int =
+  if i >= slen then acc
+  else {
+    let b = prim.load8(src + i)
+    let w = if __sq_is_escaped(b) then 2 else 1
+    __sq_esc_len(src, slen, i + 1, acc + w)
+  }
+
+// Copy+escape the slen bytes at `src` to `dst`; return the address past the last written byte.
+fn __sq_fill_esc(src: Int, slen: Int, i: Int, pos: Int) -> Int =
+  if i >= slen then pos
+  else {
+    let b = prim.load8(src + i)
+    let pos1 = if __sq_is_escaped(b) then {
+      prim.store8(pos, 92)            // '\'
+      prim.store8(pos + 1, __sq_esc_char(b))
+      pos + 2
+    } else {
+      prim.store8(pos, b)
+      pos + 1
+    }
+    __sq_fill_esc(src, slen, i + 1, pos1)
+  }
+
+fn string_quote(s: String) -> String = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let total = 2 + __sq_esc_len(sh + 12, slen, 0, 0)
+  let buf = prim.alloc_str(total)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 34)              // opening '"'
+  let mid = __sq_fill_esc(sh + 12, slen, 0, base + 1)
+  prim.store8(mid, 34)               // closing '"'
+  buf
+}

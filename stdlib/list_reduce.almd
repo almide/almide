@@ -1,0 +1,46 @@
+// list_reduce — SELF-HOSTED `list.reduce` for v1: a left fold with NO seed — None on the
+// empty list, else Some(fold of xs[1..] starting from xs[0]). Combines the two-arity closure
+// (f: (Acc, Int) -> Acc via $closure_fn2) with the call-arm materialized-Option result (the
+// Some/None tail-position helpers, like list.find/max). List[Int]/Int; source borrowed.
+
+fn __reduce_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    __reduce_loop(sh, f, n, i + 1, nacc)
+  }
+
+fn __reduce_none() -> Option[Int] = None
+fn __reduce_some(sh: Int, f: (Int, Int) -> Int, n: Int) -> Option[Int] = {
+  let first = prim.load64(sh + 12)
+  let r = __reduce_loop(sh, f, n, 1, first)
+  Some(r)
+}
+
+fn list_reduce(xs: List[Int], f: (Int, Int) -> Int) -> Option[Int] = {
+  let n = list.len(xs)
+  if n <= 0 then __reduce_none() else __reduce_some(prim.handle(xs), f, n)
+}
+
+// ── The HEAP-accumulator (List[String]) reduce. The Option-wrapping `if` MUST be the function TAIL
+// (the ownership checker accepts a heap-result `if` only at the function return — a bound/consumed one
+// leaves the merged handle untracked). So this is a self-host fn whose body IS the tail-`if`, and the
+// accumulator is a WHILE loop `acc = f(acc, x)` — the proven loop-carried i(id)m slot with a closure-
+// call producer (#738 Path C, the loop-accumulator closure-call lever). The seed is a deep COPY of
+// xs[0] (string.repeat ·1, single-owned, so reduce([x]) == Some(x)); the loop folds xs[1..]. f borrows
+// acc + the element and returns a fresh String; the slot drops the old + rebinds. Source borrowed.
+fn list_reduce_str(xs: List[String], f: (String, String) -> String) -> Option[String] = {
+  let n = list.len(xs)
+  if n <= 0 then None
+  else {
+    let h = prim.handle(xs)
+    var acc = string.repeat(prim.load_str(h + 12), 1)
+    var i = 1
+    while i < n {
+      acc = f(acc, prim.load_str(h + 12 + i * 8))
+      i = i + 1
+    }
+    Some(acc)
+  }
+}

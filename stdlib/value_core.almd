@@ -1,0 +1,999 @@
+// value_core — SELF-HOSTED scalar `Value` constructors for v1 (the dynamic data model used by
+// Codec/json). A SCALAR Value (Null/Bool/Int/Float) is a v1 block [rc][len@4 = TAG][cap@8][
+// payload@12]: the `len` header field carries the variant TAG (0=Null, 1=Bool, 2=Int, 3=Float),
+// the 8-byte payload slot holds the scalar value (Bool 0/1, Int, or f64 BITS). Drops flat (scalar
+// payload, no nested ownership). Str/Array/Object (heap payloads, tags 4/5/6) are a refinement.
+
+fn value_null() -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 0)        // tag = Null
+  v
+}
+
+fn value_int(n: Int) -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 2)        // tag = Int
+  prim.store64(h + 12, n)       // payload
+  v
+}
+
+fn value_bool(b: Bool) -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 1)        // tag = Bool
+  let bi = if b then 1 else 0
+  prim.store64(h + 12, bi)      // payload 0/1
+  v
+}
+
+fn value_float(f: Float) -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 3)        // tag = Float
+  let bits = prim.fbits(f)
+  prim.store64(h + 12, bits)    // payload = f64 BITS
+  v
+}
+
+// ── Scalar extractors (Result[T, String]) ── read the tag; Ok(payload) on a match, else
+// Err("expected T") with v0's exact message (the materialized Result machinery, match-executable).
+
+fn value_as_int(v: Value) -> Result[Int, String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  let n = prim.load64(h + 12)
+  if tag == 2 then Ok(n)
+  else Err("expected Int")
+}
+
+fn value_as_bool(v: Value) -> Result[Bool, String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  let raw = prim.load64(h + 12)
+  let b = raw != 0
+  if tag == 1 then Ok(b)
+  else Err("expected Bool")
+}
+
+// A JSON number has no int/float split, so an integer Value is a valid Float — widen it
+// (Value::Int(n) => Ok(n as f64)), matching v0's value.as_float (#658).
+fn __vf_frombits(raw: Int) -> Result[Float, String] = {
+  let f = prim.ffrombits(raw)
+  Ok(f)
+}
+fn __vf_fromint(raw: Int) -> Result[Float, String] = {
+  let f = prim.i2f(raw)
+  Ok(f)
+}
+fn value_as_float(v: Value) -> Result[Float, String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  let raw = prim.load64(h + 12)
+  if tag == 3 then __vf_frombits(raw)
+  else if tag == 2 then __vf_fromint(raw)
+  else Err("expected Float")
+}
+
+// value.str — a heap-payload Value (tag 4 = Str). The Value OWNS a fresh DEEP COPY of `s` stored
+// (consumed) into the +12 payload slot via prim.store_str; the runtime-tag-dispatched DropValue
+// frees it when the Value is released. (value.as_string is deferred — it returns Result[String,
+// String], a heap-Ok-payload Result the current len-as-tag Result layout doesn't yet reclaim.)
+fn value_str(s: String) -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 4)        // tag = Str
+  let copy = string.repeat(s, 1)
+  prim.store_str(h + 12, copy)  // MOVE the owned copy into the Value's payload slot
+  v
+}
+
+// value.as_string — Ok(a fresh deep COPY of the payload String) when the Value is a Str (tag 4),
+// else Err("expected Str"). Returns the HEAP-Ok Result[String, String] (a 1-slot DynListStr owning
+// the one String in slot 0's low 32 bits, the Ok/Err tag in slot 0's high 32 bits) — a `match` over
+// it reads the high half and binds the slot-0 String handle.
+fn __vstr_ok(h: Int) -> Result[String, String] = {
+  let s = prim.load_str(h + 12)
+  let copy = string.repeat(s, 1)
+  Ok(copy)
+}
+// COMPOUND Value model (Array tag-5: value.array / __drop_value / value.as_array). THE LAYOUT BRICK
+// read side is now OPEN: a heap-Result-of-Value (`value.get` → Result[Value,String]) and
+// heap-Result-of-List (`value.as_array` → Result[List[Value],String]) round-trip through BOTH a
+// `match` (tag@16 read + @12 payload bound as a borrow, classified into value_result_results /
+// value_result_lists for the recursive drop) AND a `??` (routed to result.value_unwrap_or /
+// result.list_value_unwrap_or / result.str_unwrap_or — the working match read reused). Verified
+// byte-match v0 + leak-loop clean + corpus-wall ACCEPT. STILL a separate gap: the OPTION-of-Value
+// read (`list.get(rows, i)` → Option[Value]; the match some-arm uses scalar_bind, which rejects a
+// heap Value payload), and nested list.map over List[Value] — both needed for csv stringify_records.
+
+fn value_as_string(v: Value) -> Result[String, String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag == 4 then __vstr_ok(h)
+  else Err("expected Str")
+}
+
+// ── COMPOUND Value: Array (tag 5) — SELF-CONTAINED block [rc@0][tag=5 @4][len@8][elem@12+i*8].
+// `value.array(items)` allocs an n-slot Value, writes tag/len, and SHALLOW-COPIES each element
+// handle in (`rc_inc` — the Array shares the element Values; v0's `Array(items.clone())` is the
+// same shared-immutable copy). The recursive free `__drop_value` traverses tag-5 elements at the
+// LAST ref (rc==1). Both routines operate on RAW handles (Int) so their ownership cert is EMPTY
+// (a Prim is a checker no-op) — leak/double-free safety is the leak-loop's burden, the SAME trust
+// level as the inline DropListStr. `prim.rc_inc`/`rc_dec` are whitelisted to exactly these names.
+
+// Shallow-copy n element handles from a List[Value] `src` block into an Array `dst` block, rc_inc'ing
+// each (the Array becomes a co-owner; the source list keeps its own refs, freed at its scope end).
+fn __varr_copy(src: Int, dst: Int, i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let e = prim.load64(src + 12 + i * 8)
+    prim.rc_inc(e)
+    prim.store64(dst + 12 + i * 8, e)
+    __varr_copy(src, dst, i + 1, n)
+  }
+
+fn value_array(items: List[Value]) -> Value = {
+  let ih = prim.handle(items)
+  let n = prim.load32(ih + 4)
+  let v = prim.alloc_value(n)
+  let vh = prim.handle(v)
+  prim.store32(vh + 4, 5)            // tag = Array
+  prim.store32(vh + 8, n)            // len (reuses the cap slot @8)
+  __varr_copy(ih, vh, 0, n)
+  v
+}
+
+// value.object — a tag-6 Object Value: `alloc_value(2n)` (2 i64 slots per pair), @8 = the PAIR count
+// n, slot layout key@12+(2i)*8 (String handle) / value@12+(2i+1)*8 (Value handle). Each pair's key +
+// value are SHALLOW-COPIED in via rc_inc (the Object co-owns them; the source `pairs` list keeps its
+// own refs, freed at its scope end), exactly like value.array's element copy. The recursive
+// __drop_value (tag 6 → __vdrop_obj) frees them at the Object's last ref.
+fn __vobj_fill(ph: Int, vh: Int, i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let tup = prim.load64(ph + 12 + i * 8)   // the i-th (String, Value) tuple block
+    let key = prim.load64(tup + 12)          // tuple slot 0 = the key String handle
+    let val = prim.load64(tup + 20)          // tuple slot 1 = the value Value handle
+    prim.rc_inc(key)
+    prim.rc_inc(val)
+    prim.store64(vh + 12 + (2 * i) * 8, key)
+    prim.store64(vh + 12 + (2 * i + 1) * 8, val)
+    __vobj_fill(ph, vh, i + 1, n)
+  }
+
+fn value_object(pairs: List[(String, Value)]) -> Value = {
+  let ph = prim.handle(pairs)
+  let n = prim.load32(ph + 4)
+  let v = prim.alloc_value(2 * n)
+  let vh = prim.handle(v)
+  prim.store32(vh + 4, 6)            // tag = Object
+  prim.store32(vh + 8, 2 * n)        // SLOT count @8 (= the alloc size, what the free reclaims); the
+  __vobj_fill(ph, vh, 0, n)          // pair count is slot_count/2 (2 slots per pair: key + value).
+  v
+}
+
+// json.keys — the Object's keys as a fresh `List[String]` (each key SHALLOW-COPIED via the
+// `acc + [k]` list-concat rc_inc; the returned list co-owns each, freed by its scope-end DropListStr).
+fn __vobj_keys(v: Value, i: Int, n: Int, acc: List[String]) -> List[String] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    __vobj_keys(v, i + 1, n, acc + [k])
+  }
+
+fn json_keys(v: Value) -> List[String] = {
+  let h = prim.handle(v)
+  let n = prim.load32(h + 8) / 2     // @8 is the SLOT count (2 per pair); the pair count is /2
+  __vobj_keys(v, 0, n, [])
+}
+
+// value.eq — deep structural equality of two Values, byte-matching v0's derived PartialEq on Value
+// (so `value_a == value_b` lowers to a scalar Bool and the surrounding `if` BRANCHES instead of
+// linearizing both arms — the silent both-arms miscompile). Tag @4: 0 null, 1 bool, 2 int, 3 float,
+// 4 str, 5 array, 6 object. Scalars compare by value (float via f64 `==`, so NaN≠NaN and -0.0==0.0,
+// matching Rust f64 PartialEq); str by content; array element-wise; object pairwise IN ORDER (v0's
+// Vec<(String,Value)> PartialEq is order-sensitive). Recursive (mutually with __varr_eq/__vobj_eq);
+// reads only (both Values BORROWED), allocates nothing → no ownership event.
+// String content equality, value_core-LOCAL (string.eq is a cross-module call the value_core
+// type-checker cannot resolve). Two String values: equal byte length + equal bytes.
+fn __veq_str_bytes(pa: Int, pb: Int, n: Int, k: Int) -> Bool =
+  if k >= n then true
+  else if prim.load8(pa + k) == prim.load8(pb + k) then __veq_str_bytes(pa, pb, n, k + 1) else false
+
+fn __veq_strval(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  if la != lb then false else __veq_str_bytes(ha + 12, hb + 12, la, 0)
+}
+
+fn __varr_eq(a: Value, b: Value, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let ha = prim.handle(a)
+    let hb = prim.handle(b)
+    let ea: Value = prim.load_handle(ha + 12 + i * 8)
+    let eb: Value = prim.load_handle(hb + 12 + i * 8)
+    if value_eq(ea, eb) then __varr_eq(a, b, i + 1, n) else false
+  }
+
+fn __vobj_eq(a: Value, b: Value, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let ha = prim.handle(a)
+    let hb = prim.handle(b)
+    let ka: String = prim.load_handle(ha + 12 + (2 * i) * 8)
+    let kb: String = prim.load_handle(hb + 12 + (2 * i) * 8)
+    let va: Value = prim.load_handle(ha + 12 + (2 * i + 1) * 8)
+    let vb: Value = prim.load_handle(hb + 12 + (2 * i + 1) * 8)
+    if __veq_strval(ka, kb) and value_eq(va, vb) then __vobj_eq(a, b, i + 1, n) else false
+  }
+
+// list.eq over List[Int] / List[String] / List[Value] — same length + element-wise equality (v0's
+// Vec PartialEq). Without these `list_a == list_b` did not lower to a scalar cond, so an `if list==list`
+// fell to the both-arms linearization (silent both-run). Int by i64 value; String by content
+// (__veq_strval); Value by deep value_eq. Read-only (both lists BORROWED), no ownership event.
+fn __leq_int(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else if prim.load64(ah + 12 + i * 8) == prim.load64(bh + 12 + i * 8) then __leq_int(ah, bh, i + 1, n)
+  else false
+
+fn list_eq_int(a: List[Int], b: List[Int]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_int(ha, hb, 0, prim.load32(ha + 4))
+}
+
+fn __leq_float(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else if prim.ffrombits(prim.load64(ah + 12 + i * 8)) == prim.ffrombits(prim.load64(bh + 12 + i * 8)) then __leq_float(ah, bh, i + 1, n)
+  else false
+
+fn list_eq_float(a: List[Float], b: List[Float]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_float(ha, hb, 0, prim.load32(ha + 4))
+}
+
+fn list_eq_bool(a: List[Bool], b: List[Bool]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_int(ha, hb, 0, prim.load32(ha + 4))
+}
+
+fn __leq_str(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let sa: String = prim.load_handle(ah + 12 + i * 8)
+    let sb: String = prim.load_handle(bh + 12 + i * 8)
+    if __veq_strval(sa, sb) then __leq_str(ah, bh, i + 1, n) else false
+  }
+
+fn list_eq_str(a: List[String], b: List[String]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_str(ha, hb, 0, prim.load32(ha + 4))
+}
+
+fn __leq_val(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let va: Value = prim.load_handle(ah + 12 + i * 8)
+    let vb: Value = prim.load_handle(bh + 12 + i * 8)
+    if value_eq(va, vb) then __leq_val(ah, bh, i + 1, n) else false
+  }
+
+fn list_eq_value(a: List[Value], b: List[Value]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_val(ha, hb, 0, prim.load32(ha + 4))
+}
+
+fn value_eq(a: Value, b: Value) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let ta = prim.load32(ha + 4)
+  let tb = prim.load32(hb + 4)
+  if ta != tb then false
+  else if ta == 0 then true
+  else if ta == 1 then prim.load64(ha + 12) == prim.load64(hb + 12)
+  else if ta == 2 then prim.load64(ha + 12) == prim.load64(hb + 12)
+  else if ta == 3 then prim.ffrombits(prim.load64(ha + 12)) == prim.ffrombits(prim.load64(hb + 12))
+  else if ta == 4 then __veq_strval(prim.load_str(ha + 12), prim.load_str(hb + 12))
+  else if ta == 5 then (if prim.load32(ha + 8) == prim.load32(hb + 8) then __varr_eq(a, b, 0, prim.load32(ha + 8)) else false)
+  else if ta == 6 then (if prim.load32(ha + 8) == prim.load32(hb + 8) then __vobj_eq(a, b, 0, prim.load32(ha + 8) / 2) else false)
+  else false
+}
+
+// list.set over a List[Value] (toml set_in_aot_last's `list.set(items, idx, …)`). A Value element is an
+// i32 handle in the 8-byte slot (like a String), so the slot copy rc_incs to CO-OWN each element; BUT
+// the REPLACED element must be freed RECURSIVELY via __drop_value — a flat rc_dec would free an
+// Object/Array element's block while LEAKING its nested children (the very reason this lives in
+// value_core, where __drop_value is in scope, not in list_modify). The result is a List[Value] so it
+// drops via the recursive DropListValue. v0 indexes `i as usize`, so negative/>=len silently no-ops.
+fn __lsv_copy(src: Int, dst: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(src + i * 8)
+    prim.rc_inc(e)
+    prim.store64(dst + i * 8, e)
+    __lsv_copy(src, dst, n, i + 1)
+  }
+
+fn __lsv_set(bh: Int, n: Int, i: Int, x: Value) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else {
+    let old: Value = prim.load_handle(bh + 12 + i * 8)
+    __drop_value(old)
+    let xh = prim.handle(x)
+    prim.rc_inc(xh)
+    prim.store64(bh + 12 + i * 8, xh)
+    0
+  }
+
+fn list_set_value(xs: List[Value], i: Int, x: Value) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __lsv_copy(h + 12, bh + 12, n, 0)
+  let _s = __lsv_set(bh, n, i, x)
+  buf
+}
+
+// list.insert / list.remove_at / list.swap over a List[Value] — the rc-aware counterparts of the
+// generic i64 list_insert/list_remove_at/list_swap (which copy slots WITHOUT rc_inc → the result and
+// source co-reference each Value handle un-incremented → DOUBLE-FREE when both lists drop, OR an i32/i64
+// type mismatch for the typed `x` of insert). Each rc_incs every COPIED element (__lsv_copy) so the
+// result co-owns; the removed element (remove_at) is simply not copied → freed once by the source's
+// DropListValue; swap reorders already-copied handles (no rc change). v0 clamps insert idx to [0,n] and
+// no-ops an out-of-range remove/swap. The result is a List[Value] → recursive DropListValue.
+fn __lsv_insert_fill(srcbase: Int, dstbase: Int, n: Int, idx: Int, x: Value) -> Int = {
+  let _a = __lsv_copy(srcbase, dstbase, idx, 0)
+  let xh = prim.handle(x)
+  prim.rc_inc(xh)
+  prim.store64(dstbase + idx * 8, xh)
+  let _b = __lsv_copy(srcbase + idx * 8, dstbase + (idx + 1) * 8, n - idx, 0)
+  0
+}
+
+fn list_insert_value(xs: List[Value], i: Int, x: Value) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let idx = if i < 0 then n else (if i > n then n else i)
+  let buf = prim.alloc_list_str(n + 1)
+  let bh = prim.handle(buf)
+  let _r = __lsv_insert_fill(h + 12, bh + 12, n, idx, x)
+  buf
+}
+
+fn __lsv_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int =
+  if oob == 1 then __lsv_copy(srcbase, dstbase, n, 0)
+  else {
+    let _a = __lsv_copy(srcbase, dstbase, i, 0)
+    let i1 = i + 1
+    __lsv_copy(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
+  }
+
+fn list_remove_at_value(xs: List[Value], i: Int) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let oob = if i < 0 then 1 else (if i >= n then 1 else 0)
+  let newlen = if oob == 1 then n else n - 1
+  let buf = prim.alloc_list_str(newlen)
+  let bh = prim.handle(buf)
+  let _r = __lsv_remove_fill(h + 12, bh + 12, n, i, oob)
+  buf
+}
+
+fn __lsv_swap_slots(bh: Int, n: Int, i: Int, j: Int) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else if j < 0 then 0
+  else if j >= n then 0
+  else {
+    let ai = bh + 12 + i * 8
+    let aj = bh + 12 + j * 8
+    let vi = prim.load64(ai)
+    let vj = prim.load64(aj)
+    prim.store64(ai, vj)
+    prim.store64(aj, vi)
+    0
+  }
+
+fn list_swap_value(xs: List[Value], i: Int, j: Int) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __lsv_copy(h + 12, bh + 12, n, 0)
+  let _s = __lsv_swap_slots(bh, n, i, j)
+  buf
+}
+
+// value.merge — the SHALLOW Object merge v0 does (almide_rt_value_merge): when BOTH a and b are tag-6
+// Objects, the result keeps a's keys IN A'S POSITIONS with b's value overriding where b has the same
+// key, then APPENDS b's keys not in a (b's order) — exactly v0's `pa[pos] = (k, v)` else `pa.push`.
+// Otherwise → b. set_nested supplies the recursion (it merges a freshly-built single-key nested object
+// into root), so this stays one level. LEAK-FREE by the value_object/__vobj_fill discipline: the result
+// Object block is built DIRECTLY (prim.alloc_value) and every key/value handle written in is acquired
+// with EXACTLY ONE prim.rc_inc — never the over-counting tuple+list-concat+value.object chain (which
+// rc_inc'd a second time). a and b stay BORROWED; the result owns one fresh ref per slot, freed once by
+// its scope-end __vdrop_obj. The in-a-position fill matches v0 byte-for-byte (overriding keys do NOT move).
+fn __vmerge_bnew(a: Value, b: Value, j: Int, nb: Int, na: Int, acc: Int) -> Int =
+  if j >= nb then acc
+  else {
+    let bh = prim.handle(b)
+    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
+    let inc = if __vobj_find(a, bk, 0, na) < 0 then 1 else 0
+    __vmerge_bnew(a, b, j + 1, nb, na, acc + inc)
+  }
+
+fn __vmerge_fill_a(a: Value, b: Value, dst: Value, i: Int, na: Int, nb: Int) -> Unit =
+  if i >= na then ()
+  else {
+    let ah = prim.handle(a)
+    let dh = prim.handle(dst)
+    let key = prim.load64(ah + 12 + (2 * i) * 8)
+    let ak: String = prim.load_handle(ah + 12 + (2 * i) * 8)
+    let bidx = __vobj_find(b, ak, 0, nb)
+    let val = if bidx < 0 then prim.load64(ah + 12 + (2 * i + 1) * 8)
+              else prim.load64(prim.handle(b) + 12 + (2 * bidx + 1) * 8)
+    prim.rc_inc(key)
+    prim.rc_inc(val)
+    prim.store64(dh + 12 + (2 * i) * 8, key)
+    prim.store64(dh + 12 + (2 * i + 1) * 8, val)
+    __vmerge_fill_a(a, b, dst, i + 1, na, nb)
+  }
+
+fn __vmerge_app_b(a: Value, b: Value, dst: Value, j: Int, nb: Int, na: Int, w: Int) -> Unit =
+  if j >= nb then ()
+  else {
+    let bh = prim.handle(b)
+    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
+    if __vobj_find(a, bk, 0, na) < 0 then {
+      let dh = prim.handle(dst)
+      let kh = prim.load64(bh + 12 + (2 * j) * 8)
+      let vh = prim.load64(bh + 12 + (2 * j + 1) * 8)
+      prim.rc_inc(kh)
+      prim.rc_inc(vh)
+      prim.store64(dh + 12 + (2 * w) * 8, kh)
+      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+      __vmerge_app_b(a, b, dst, j + 1, nb, na, w + 1)
+    } else __vmerge_app_b(a, b, dst, j + 1, nb, na, w)
+  }
+
+fn value_merge(a: Value, b: Value) -> Value = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  if prim.load32(ah + 4) == 6 and prim.load32(bh + 4) == 6 then {
+    let na = prim.load32(ah + 8) / 2
+    let nb = prim.load32(bh + 8) / 2
+    let total = na + __vmerge_bnew(a, b, 0, nb, na, 0)
+    let dst = prim.alloc_value(2 * total)
+    let dh = prim.handle(dst)
+    prim.store32(dh + 4, 6)
+    prim.store32(dh + 8, 2 * total)
+    __vmerge_fill_a(a, b, dst, 0, na, nb)
+    __vmerge_app_b(a, b, dst, 0, nb, na, na)
+    dst
+  } else b
+}
+
+fn __vobj_find(v: Value, key: String, i: Int, n: Int) -> Int =
+  if i >= n then 0 - 1
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    if k == key then i else __vobj_find(v, key, i + 1, n)
+  }
+
+fn value_get(v: Value, key: String) -> Result[Value, String] = {
+  let h = prim.handle(v)
+  let n = prim.load32(h + 8) / 2
+  let idx = __vobj_find(v, key, 0, n)
+  if idx < 0 then Err("missing field '" + key + "'")
+  else {
+    let val: Value = prim.load_handle(h + 12 + (2 * idx + 1) * 8)
+    Ok(val)
+  }
+}
+
+// value.field — the Codec-derive field accessor. IDENTICAL to value.get EXCEPT it first
+// checks the Object tag (6): a non-Object subject is `Err("expected Object")` (v0
+// almide_rt_value_field), where value.get would scan a scalar's garbage header. The
+// found/missing behaviour + error text ("missing field '<k>'") mirror v0 exactly, so a
+// derived `decode`'s `value.field(_v, "k")?` byte-matches. Ok payload is a fresh co-owned
+// Value (bare-Var arm auto-acquire; the Result frees via its own DropResultValue).
+fn value_field(v: Value, key: String) -> Result[Value, String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag != 6 then Err("expected Object")
+  else {
+    let n = prim.load32(h + 8) / 2
+    let idx = __vobj_find(v, key, 0, n)
+    if idx < 0 then Err("missing field '" + key + "'")
+    else {
+      let val: Value = prim.load_handle(h + 12 + (2 * idx + 1) * 8)
+      Ok(val)
+    }
+  }
+}
+
+// The Value-payload `??` (`value.get(o,k) ?? value.null()`): a Result[Value,String] unwrap, routed
+// here so it reuses the working Value-Ok match read (the `ok(v) => v` bare-Var arm auto-acquires a
+// fresh co-owned reference; the Result `r` is freed by its own scope-end DropResultValue). A call
+// returning a fresh owned Value sidesteps the bind-position heap-result-`if` rc bookkeeping, exactly
+// like `option.unwrap_or_str` does for the String payload.
+fn result_value_unwrap_or(r: Result[Value, String], d: Value) -> Value =
+  match r {
+    ok(v) => v,
+    err(e) => d,
+  }
+
+// The List[Value]-payload `??` (`value.as_array(v) ?? []`): a Result[List[Value],String] unwrap,
+// the SAME mechanism as result_value_unwrap_or but the Ok arm is a List[Value] (freed recursively by
+// DropResultListValue). Reuses the working List-Ok match read; the `ok(v) => v` arm acquires a fresh
+// co-owned list. The first line of csv stringify_records.
+fn result_list_value_unwrap_or(r: Result[List[Value], String], d: List[Value]) -> List[Value] =
+  match r {
+    ok(v) => v,
+    err(e) => d,
+  }
+
+// The String-payload Result `??` (`value.as_string(x) ?? ""`): a Result[String,String] unwrap, the
+// SAME helper pattern — the Ok arm acquires a fresh co-owned String, the Err drops the message. csv
+// stringify_records' inner cell projection (`value.as_string(value.get(row,h) ?? value.null()) ?? ""`).
+fn result_str_unwrap_or(r: Result[String, String], d: String) -> String =
+  match r {
+    ok(v) => v,
+    err(e) => d,
+  }
+
+// The Value-payload OPTION `??` (`list.get(rows, i) ?? value.object([])`): an Option[Value] unwrap.
+// Written via PRIM (not `match o { some(v) => v, … }`) because the value-match Some-arm uses
+// scalar_bind, which rejects a heap Value payload — but the heap-result-`if` over the len-as-tag
+// (Some = len@4 ≠ 0, payload @12) is EXACTLY the proven value.get shape: the `else`/Some arm loads the
+// @12 Value and the bare-Var tail auto-acquires (Dup), the `then`/None arm returns the fallback.
+fn option_value_unwrap_or(o: Option[Value], d: Value) -> Value = {
+  let h = prim.handle(o)
+  let tag = prim.load32(h + 4)
+  if tag == 0 then d
+  else {
+    let v: Value = prim.load_handle(h + 12)
+    v
+  }
+}
+
+// `?? d` over an Option[List[String]] (`list.get_liststr(rows, i) ?? []`): the SAME len-as-tag prim
+// shape as option_value_unwrap_or, with a List[String] payload — the Some arm loads the @12 inner-list
+// handle and the bare-Var tail auto-acquires (Dup), the None arm returns the fallback.
+fn option_liststr_unwrap_or(o: Option[List[String]], d: List[String]) -> List[String] = {
+  let h = prim.handle(o)
+  let tag = prim.load32(h + 4)
+  if tag == 0 then d
+  else {
+    let v: List[String] = prim.load_handle(h + 12)
+    v
+  }
+}
+
+// `?? d` over an Option[List[Value]] (`json.as_array(v) ?? []`): the SAME len-as-tag prim shape as
+// option_liststr_unwrap_or, with a List[Value] payload — the Some arm loads the @12 inner-list handle
+// and the bare-Var tail auto-acquires (Dup, freed recursively by DropListValue), the None arm returns
+// the fallback. Mirrors result_list_value_unwrap_or's List[Value] Ok-acquire; the root of get_arr.
+fn option_listvalue_unwrap_or(o: Option[List[Value]], d: List[Value]) -> List[Value] = {
+  let h = prim.handle(o)
+  let tag = prim.load32(h + 4)
+  if tag == 0 then d
+  else {
+    let v: List[Value] = prim.load_handle(h + 12)
+    v
+  }
+}
+
+// list.get / first / last over a List[Value] → Option[Value]. The repr-poly `_str` variants DEEP-COPY
+// the element as a String (`string.repeat`), which corrupts a dynamic Value (an Object copied as a
+// string is empty). The Value accessor instead SHARES the element: `Some(@i)` Dup's the Value handle
+// (rc_inc, shallow — the list keeps owning the original; the Option co-owns), exactly value.get's Ok.
+fn __get_value_some(h: Int, i: Int) -> Option[Value] = {
+  let v: Value = prim.load_handle(h + 12 + i * 8)
+  Some(v)
+}
+
+fn list_get_value(xs: List[Value], i: Int) -> Option[Value] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if i < 0 then None
+  else if i >= len then None
+  else __get_value_some(h, i)
+}
+
+fn list_first_value(xs: List[Value]) -> Option[Value] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __get_value_some(h, 0)
+}
+
+fn list_last_value(xs: List[Value]) -> Option[Value] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __get_value_some(h, len - 1)
+}
+
+// list.get / first / last over a List[List[String]] → Option[List[String]]. Same SHARE-by-handle
+// discipline as the Value accessor above, for a NESTED-heap element: the repr-poly `_str` variant
+// would DEEP-COPY the element as a String (`string.repeat`), reading a List[String] block's length
+// word as a byte count — garbage. Here `prim.load_handle` reads the element handle and the
+// `List[String]` binding Dup's it (rc_inc the block; the list keeps owning, the Option co-owns), and
+// the result's DropListStr drop frees the block's strings only when its rc reaches 0.
+fn __get_liststr_some(h: Int, i: Int) -> Option[List[String]] = {
+  let v: List[String] = prim.load_handle(h + 12 + i * 8)
+  Some(v)
+}
+
+fn list_get_liststr(xs: List[List[String]], i: Int) -> Option[List[String]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if i < 0 then None
+  else if i >= len then None
+  else __get_liststr_some(h, i)
+}
+
+fn list_first_liststr(xs: List[List[String]]) -> Option[List[String]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __get_liststr_some(h, 0)
+}
+
+fn list_last_liststr(xs: List[List[String]]) -> Option[List[String]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __get_liststr_some(h, len - 1)
+}
+
+// list.take / list.drop over a List[List[String]] → a sublist that SHARES the inner-list elements by
+// handle (rc_inc + raw store64, like __varr_copy), NOT the `_str` variant's `string.repeat` deep-copy
+// which would read an inner List[String] block as a byte string (garbage / trap). Source borrowed; the
+// result co-owns each kept inner list (freed at its last ref via the source's / result's own drop).
+fn __ldls_share(src: Int, dst: Int, start: Int, count: Int, i: Int) -> Unit =
+  if i >= count then ()
+  else {
+    let e = prim.load64(src + 12 + (start + i) * 8)
+    prim.rc_inc(e)
+    prim.store64(dst + 12 + i * 8, e)
+    __ldls_share(src, dst, start, count, i + 1)
+  }
+
+fn list_take_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let count = if n < 0 then len else if n > len then len else n
+  let buf = prim.alloc_list_str(count)
+  __ldls_share(h, prim.handle(buf), 0, count, 0)
+  buf
+}
+
+fn list_drop_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let start = if n < 0 then len else if n > len then len else n
+  let count = len - start
+  let buf = prim.alloc_list_str(count)
+  __ldls_share(h, prim.handle(buf), start, count, 0)
+  buf
+}
+
+// value.stringify — the recursive JSON serializer, byte-identical to v0's runtime
+// (`almide_rt_value_stringify`): tag-dispatch; scalars rendered directly, Str quoted+escaped,
+// Array/Object joined with "," (no spaces). Escape replaces `\` FIRST (so the backslashes it
+// introduces are not re-escaped), then `"`/newline/CR/tab — v0's exact order.
+fn __json_quote(s: String) -> String = {
+  let e1 = string.replace(s, "\\", "\\\\")
+  let e2 = string.replace(e1, "\"", "\\\"")
+  let e3 = string.replace(e2, "\n", "\\n")
+  let e4 = string.replace(e3, "\r", "\\r")
+  let e5 = string.replace(e4, "\t", "\\t")
+  "\"" + e5 + "\""
+}
+
+// The "," separator before element `i` — "" for the first, "," for the rest. A SCALAR `if` picks
+// the repeat count (k), so the separator is `string.repeat(",", k)` — a call result, not a
+// heap-result `if` (which the scalar-while loop body cannot yet bind; see v1-parser-tco-lever.md).
+fn __vstr_sep(i: Int) -> String = {
+  let k = if i == 0 then 0 else 1
+  string.repeat(",", k)
+}
+
+// Array elements joined by "," — a String ACCUMULATOR recursion (base returns the carried `acc`,
+// the [..] wrap is the caller's); value_stringify is called on each (borrowed) element.
+fn __vstr_arr(v: Value, i: Int, n: Int, acc: String) -> String =
+  if i >= n then acc
+  else {
+    let e: Value = prim.load_handle(prim.handle(v) + 12 + i * 8)
+    let piece = __vstr_sep(i) + value_stringify(e)
+    __vstr_arr(v, i + 1, n, acc + piece)
+  }
+
+// Object pairs joined by "," as `"key":value` — key escaped+quoted, value recursively stringified.
+fn __vstr_obj(v: Value, i: Int, n: Int, acc: String) -> String =
+  if i >= n then acc
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let val: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    let piece = __vstr_sep(i) + __json_quote(k) + ":" + value_stringify(val)
+    __vstr_obj(v, i + 1, n, acc + piece)
+  }
+
+fn value_stringify(v: Value) -> String = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag == 0 then "null"
+  else if tag == 1 then (if prim.load64(h + 12) != 0 then "true" else "false")
+  else if tag == 2 then int.to_string(prim.load64(h + 12))
+  else if tag == 3 then __vstr_float(prim.ffrombits(prim.load64(h + 12)))
+  else if tag == 4 then __json_quote(prim.load_str(h + 12))
+  else if tag == 5 then "[" + __vstr_arr(v, 0, prim.load32(h + 8), "") + "]"
+  else if tag == 6 then "{" + __vstr_obj(v, 0, prim.load32(h + 8) / 2, "") + "}"
+  else "null"
+}
+
+// Float inside a stringified Value renders as Rust's raw `{}` (the native
+// oracle: `format!("{}", f)` — "15000000000", "-0"), NOT float.to_string's
+// ".0"-suffixed form. float.to_string IS `{}` plus a ".0" appended to
+// integral finite values, and `{}` itself never ends in ".0" (it prints the
+// shorter "X"), so stripping that suffix reproduces `{}` exactly.
+fn __vstr_float(f: Float) -> String = {
+  let s = float.to_string(f)
+  if string.ends_with(s, ".0") then string.drop_end(s, 2) else s
+}
+
+// Recursively release each element Value of a tag-5 Array (called only at the Array's last ref).
+fn __vdrop_arr(v: Value, i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let h = prim.handle(v)
+    let e: Value = prim.load_handle(h + 12 + i * 8)
+    __drop_value(e)
+    __vdrop_arr(v, i + 1, n)
+  }
+
+// The runtime-tag-dispatched RECURSIVE Value free (the render of `Op::DropValue` calls this). At the
+// LAST ref (rc==1): tag 5 (Array) frees each element Value recursively; tag 4 (Str) frees the one
+// String payload; tag < 4 (scalar) owns nothing. THEN release the block. Unit self-recursion (via
+// __vdrop_arr) is NOT heap-result, so the self-rec guard does not apply — it lowers.
+fn __drop_value(v: Value) -> Unit = {
+  let h = prim.handle(v)
+  if prim.load32(h + 0) == 1 then {
+    let tag = prim.load32(h + 4)
+    if tag == 5 then __vdrop_arr(v, 0, prim.load32(h + 8))
+    else if tag == 6 then __vdrop_obj(v, 0, prim.load32(h + 8) / 2)
+    else if tag == 4 then prim.rc_dec(prim.load64(h + 12))
+    else ()
+  } else ()
+  prim.rc_dec(h)
+}
+
+// Recursively release each (key String, value Value) pair of a tag-6 Object (called only at the
+// Object's last ref). The block has 2 slots per pair: key @12+(2i)*8 (String, flat rc_dec), value
+// @12+(2i+1)*8 (Value, recursive __drop_value so a nested Array/Object payload frees too).
+fn __vdrop_obj(v: Value, i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let h = prim.handle(v)
+    prim.rc_dec(prim.load64(h + 12 + (2 * i) * 8))
+    let val: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    __drop_value(val)
+    __vdrop_obj(v, i + 1, n)
+  }
+
+// The RECURSIVE free of a `List[Value]` (the render of `Op::DropListValue` calls this). A List[Value]
+// is a DynListStr block [rc@0][len@4][cap@8][elem@12+i*8] whose slots hold OWNED Value handles. At the
+// LAST ref (rc==1) each element is released via `__drop_value` (tag-dispatched, so a Str/Array element's
+// nested payload is freed too — a flat per-slot rc_dec would leak it), THEN the list block is released.
+fn __vdrop_list(xs: List[Value], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let h = prim.handle(xs)
+    let e: Value = prim.load_handle(h + 12 + i * 8)
+    __drop_value(e)
+    __vdrop_list(xs, i + 1, n)
+  }
+
+fn __drop_list_value(xs: List[Value]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __vdrop_list(xs, 0, prim.load32(h + 4)) else ()
+  prim.rc_dec(h)
+}
+
+// The RECURSIVE free of a `List[(String, Value)]` (the render of `Op::DropListStrValue` calls this). Each
+// element slot @12+i*8 holds an owned (String, Value) TUPLE block [rc@0][len@4][cap@8][str@12][val@20]. At
+// the list's LAST ref (rc==1) every tuple is released: at the TUPLE's own last ref (rc==1) its String slot
+// is rc_dec'd (flat) and its Value slot is freed RECURSIVELY via __drop_value (tag-dispatched, so a nested
+// Array/Str Value frees too — a flat per-slot rc_dec would leak it), then the tuple block; THEN the list
+// block. The per-tuple rc==1 guard is what makes a SHARED tuple (rc>1 — `__list_concat_rc` rc_inc'd it as
+// the new list co-owns it) defer its inner free to the last owner: no double-free, no leak.
+fn __svdrop_list(xs: List[(String, Value)], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let lh = prim.handle(xs)
+    let tup: (String, Value) = prim.load_handle(lh + 12 + i * 8)
+    let th = prim.handle(tup)
+    if prim.load32(th + 0) == 1 then {
+      prim.rc_dec(prim.load64(th + 12))
+      let vv: Value = prim.load_handle(th + 20)
+      __drop_value(vv)
+    } else ()
+    prim.rc_dec(th)
+    __svdrop_list(xs, i + 1, n)
+  }
+
+fn __drop_list_str_value(xs: List[(String, Value)]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __svdrop_list(xs, 0, prim.load32(h + 4)) else ()
+  prim.rc_dec(h)
+}
+
+// The RECURSIVE free of a STANDALONE (Value, Int) tuple block [rc@0][len@4][cap@8][value@12][int@20]
+// (the render of a `value_tuple` DropVariant calls this — the yaml/cm2 effect-fn tuple-RESULT
+// accumulator shape `(value.object(..), pos)`). At the tuple's LAST ref (rc==1) the Value slot @12 is
+// freed RECURSIVELY via __drop_value (a nested Array/Object/Str payload frees too — a flat rc_dec would
+// leak it); the Int @20 is a scalar (no free). Then the tuple block. The rc==1 guard defers a SHARED
+// tuple's inner free to its last owner: no double-free, no leak. prim-only ⇒ empty cert (trusted free).
+fn __drop_value_tuple(t: (Value, Int)) -> Unit = {
+  let h = prim.handle(t)
+  if prim.load32(h + 0) == 1 then {
+    let vv: Value = prim.load_handle(h + 12)
+    __drop_value(vv)
+  } else ()
+  prim.rc_dec(h)
+}
+
+// The (List[Value], Int) tuple counterpart of __drop_value_tuple (toml collect_array_items's
+// `ok((items, np))` where items: List[Value]). At the tuple's LAST ref (rc==1) the List[Value] slot
+// @12 is freed RECURSIVELY via __drop_list_value (each element Value freed by tag — a flat rc_dec
+// would leak the element Values); the Int @20 is scalar. Then the tuple block. prim-only ⇒ empty cert.
+fn __drop_list_value_tuple(t: (List[Value], Int)) -> Unit = {
+  let h = prim.handle(t)
+  if prim.load32(h + 0) == 1 then {
+    let lv: List[Value] = prim.load_handle(h + 12)
+    __drop_list_value(lv)
+  } else ()
+  prim.rc_dec(h)
+}
+
+// The (String, String) tuple-list counterpart of __svdrop_list / __drop_list_str_value (the
+// map.entries / render_attrs shape). At the list's last ref each tuple is freed at its OWN last ref
+// (rc_dec BOTH String slots @ th+12 and @ th+20 — vs the (String,Value) version's __drop_value @20),
+// then the tuple block; then the list block. The per-tuple rc==1 guard makes a SHARED tuple (rc>1,
+// __list_concat_rc rc_inc'd) drop safely. prim-only ⇒ empty cert (a trusted free, leak-loop verified).
+fn __ssdrop_list(xs: List[(String, String)], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let lh = prim.handle(xs)
+    let tup: (String, String) = prim.load_handle(lh + 12 + i * 8)
+    let th = prim.handle(tup)
+    if prim.load32(th + 0) == 1 then {
+      prim.rc_dec(prim.load64(th + 12))
+      prim.rc_dec(prim.load64(th + 20))
+    } else ()
+    prim.rc_dec(th)
+    __ssdrop_list(xs, i + 1, n)
+  }
+
+fn __drop_list_str_str(xs: List[(String, String)]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __ssdrop_list(xs, 0, prim.load32(h + 4)) else ()
+  prim.rc_dec(h)
+}
+
+// map.entries over a Map[String,String] (the map_str module — interleaved 16-byte entries: key @
+// 12+i*16, value @ 12+i*16+8, both owned). Builds a List[(String,String)] of rc-SHARED (key, value)
+// tuples: `acc + [(k, v)]` Dup's each map String into the tuple's co-ref (the map keeps its own ref;
+// each tuple's drop rc_dec's them; balanced). The render_attrs source.
+fn map_entries_str(m: Map[String, String]) -> List[(String, String)] =
+  __ment_build(m, prim.load32(prim.handle(m) + 4) / 2, 0, [])
+
+fn __ment_build(m: Map[String, String], n: Int, i: Int, acc: List[(String, String)]) -> List[(String, String)] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(m)
+    let k: String = prim.load_str(h + 12 + i * 16)
+    let v: String = prim.load_str(h + 12 + i * 16 + 8)
+    __ment_build(m, n, i + 1, acc + [(k, v)])
+  }
+
+// value.as_array — read the tag; a tag-5 Array yields `Ok(<a fresh List[Value] of its elements>)`,
+// else `Err("expected Array")`. The fresh list SHALLOW-COPIES the Array's inline element handles
+// (`__vfill` + rc_inc), so the array stays valid; the returned Result OWNS the list (freed
+// recursively by `__drop_result_lv` at the caller's scope end — see Op::DropResultListValue).
+
+// Copy the n inline element handles of a tag-5 Array `v` into a fresh List[Value] `dst`, rc_inc'ing
+// each (both the array and the new list own a ref; each frees its own at its scope end).
+fn __vfill(v: Value, dst: List[Value], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let vh = prim.handle(v)
+    let e = prim.load64(vh + 12 + i * 8)
+    prim.rc_inc(e)
+    let dh = prim.handle(dst)
+    prim.store64(dh + 12 + i * 8, e)
+    __vfill(v, dst, i + 1, n)
+  }
+
+fn __varr_to_list(v: Value) -> List[Value] = {
+  let vh = prim.handle(v)
+  let n = prim.load32(vh + 8)         // Array len @8
+  let lst: List[Value] = prim.alloc_list_str(n)
+  let lh = prim.handle(lst)
+  prim.store32(lh + 4, n)             // List len @4
+  __vfill(v, lst, 0, n)
+  lst
+}
+
+fn value_as_array(v: Value) -> Result[List[Value], String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag == 5 then Ok(__varr_to_list(v))
+  else Err("expected Array")
+}
+
+// The RECURSIVE free of a `value.as_array` Result (the render of `Op::DropResultListValue` calls
+// this). The Result is a 1-slot cap-as-tag DynListStr `[rc@0][len@4=1][cap@8][@12 payload][@16 tag]`:
+// @16 = 0 (Ok, payload @12 = a List[Value]) or 1 (Err, payload @12 = the String). At the LAST ref
+// (rc==1): Ok → free the list recursively via `__drop_list_value`; Err → free the String; THEN free
+// the Result block. A flat `DropListStr` would only rc_dec @12 (the list block), LEAKING its elements.
+fn __drop_result_lv(r: Result[List[Value], String]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 0) == 1 then {
+    if prim.load32(h + 16) == 0 then {
+      let lst: List[Value] = prim.load_handle(h + 12)
+      __drop_list_value(lst)
+    } else prim.rc_dec(prim.load64(h + 12))
+  } else ()
+  prim.rc_dec(h)
+}
+
+// The RECURSIVE free of a `Result[Value, String]` (the render of `Op::DropResultValue` calls this) —
+// the `ok(value.array(...))` shape. The cap-as-tag 1-slot block [rc@0][len@4=1][cap@8][@12 payload]
+// [@16 tag]: at the last ref (rc==1), Ok (tag 0) frees the Value @12 RECURSIVELY via `__drop_value`
+// (a nested Array/Str payload frees too — a flat per-slot `rc_dec` would leak it), Err (tag 1) frees
+// the String @12; THEN the block. The Value-payload counterpart of `__drop_result_lv`.
+fn __drop_result_value(r: Result[Value, String]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 0) == 1 then {
+    if prim.load32(h + 16) == 0 then {
+      let v: Value = prim.load_handle(h + 12)
+      __drop_value(v)
+    } else prim.rc_dec(prim.load64(h + 12))
+  } else ()
+  prim.rc_dec(h)
+}
+
+// list.get_or over a List[Value] → the ELEMENT directly (not an Option). The
+// repr-poly `_str` deep copy (string.repeat) corrupts a dynamic Value block, so
+// SHARE the element exactly like list.get_value's Some arm (the borrowed handle
+// is auto-acquired on return; the list keeps owning the original).
+fn __get_or_value_elem(h: Int, i: Int) -> Value = {
+  let v: Value = prim.load_handle(h + 12 + i * 8)
+  v
+}
+
+fn list_get_or_value(xs: List[Value], i: Int, default: Value) -> Value = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if i < 0 then default
+  else if i >= len then default
+  else __get_or_value_elem(h, i)
+}

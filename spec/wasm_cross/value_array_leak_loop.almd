@@ -1,0 +1,16 @@
+// @contract: C-103
+// LEAK GATE for the self-hosted recursive Value drop (the ONE trusted-base addition). A create+drop
+// loop of `value.array` whose elements include a Str Value (so the 3-LEVEL recursive free
+// Array -> element-Value -> String is exercised). The allocator has a free list, so a leak-free drop
+// keeps memory in page 1 and the loop COMPLETES ("done"); a leak grows past 64KB and TRAPS (OOB)
+// well before 20000 iters (~320 would already exhaust a leaking 64KB). Byte-matches v0 ("done").
+fn use_arr(a: Value) -> Int = 0
+fn main() -> Unit = {
+  var i = 0
+  while i < 20000 {
+    let a = value.array([value.int(i), value.str("x"), value.int(i)])
+    let _ = use_arr(a)
+    i = i + 1
+  }
+  println("done")
+}

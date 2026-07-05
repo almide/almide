@@ -1,0 +1,16 @@
+// @contract: C-108
+// An unwrap-`!` INSIDE an `if` arm (base64 decode_chunks: `let v1 = if remaining > 1 then
+// char_to_val(..)! else 0`). The desugar lifts the `!` out of the arm — `if c then e! else d` becomes
+// `let $r = if c then e else ok(d); let v = $r!` — which the let-bound-if pre-desugar + the let-unwrap
+// desugar then handle. Byte-matches v0 (the `!` early-returns the Err identically).
+fn classify(cp: Int) -> Result[Int, String] = if cp >= 65 then ok(cp - 65) else err("bad")
+effect fn dec(a: Int, has_b: Bool, b: Int) -> Result[Int, String] = {
+  let x = classify(a)!
+  let y = if has_b then classify(b)! else 0
+  ok(x + y)
+}
+effect fn main() -> Unit = {
+  match dec(66, true, 67) { ok(n) => println("ok:" + int.to_string(n)), err(e) => println("err:" + e) }
+  match dec(66, false, 0) { ok(n) => println("ok:" + int.to_string(n)), err(e) => println("err:" + e) }
+  match dec(66, true, 33) { ok(n) => println("ok:" + int.to_string(n)), err(e) => println("err:" + e) }
+}

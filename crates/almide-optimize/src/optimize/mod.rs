@@ -6,6 +6,7 @@
 /// Pass 2: Dead code elimination -- remove unused bindings with pure values.
 /// Pass 3: Constant propagation -- replace vars bound to literals with the literal.
 
+mod branch_lift;
 mod dce;
 mod propagate;
 
@@ -34,7 +35,15 @@ pub fn optimize_program(program: &mut IrProgram) {
     // Pass 4: dead code elimination again (propagation may create new dead bindings)
     dce::eliminate_dead_code(program);
 
-    // Recompute use-counts for downstream consumers (mono, borrow analysis)
+    // Pass 5: branch-lift — hoist heap-typed `let`-bound `if`/`match` into tail
+    // helper functions so the v1 trust-spine wasm renderer can lower them (it
+    // walls on a let-bound heap-result branch; the tail helper is a proven shape).
+    // Runs AFTER DCE so it only rewrites binds that survived; the synthesized
+    // helper's call site keeps the captured vars live (use-counts recomputed below).
+    branch_lift::lift_heap_branch_binds(program);
+
+    // Recompute use-counts for downstream consumers (mono, borrow analysis). This
+    // also re-counts the `Var` args the branch-lift inserted at each helper call.
     compute_use_counts(program);
 }
 

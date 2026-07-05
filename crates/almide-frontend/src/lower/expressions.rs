@@ -354,12 +354,47 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             }).collect();
             ctx.mk(IrExprKind::Match { subject: Box::new(s), arms: ir_arms }, ty, span)
         }
+        ast::ExprKind::IfLet { name, scrutinee, then, else_ } => {
+            // Swift-style implicit-unwrap if-let desugars to a 2-arm match on the
+            // scrutinee's Option/Result: `name` binds the inner value in the Some/Ok
+            // arm; the wildcard arm is the else branch. The wrapper (Some vs Ok) is
+            // chosen from the (now-inferred) scrutinee type.
+            let s = lower_expr(ctx, scrutinee);
+            let subject_ty = if let IrExprKind::Var { id } = &s.kind {
+                let vt_ty = &ctx.var_table.get(*id).ty;
+                if matches!(vt_ty, Ty::Applied(_, _)) && !matches!(&s.ty, Ty::Applied(_, _)) {
+                    vt_ty.clone()
+                } else {
+                    s.ty.clone()
+                }
+            } else {
+                s.ty.clone()
+            };
+            let s = if subject_ty != s.ty { IrExpr { ty: subject_ty.clone(), ..s } } else { s };
+            let inner = ast::Pattern::Ident { name: *name };
+            let bind_pat = match &subject_ty {
+                Ty::Applied(TypeConstructorId::Result, _) => {
+                    ast::Pattern::Ok { inner: Box::new(inner) }
+                }
+                _ => ast::Pattern::Some { inner: Box::new(inner) },
+            };
+            ctx.push_scope();
+            let pat1 = lower_pattern(ctx, &bind_pat, &subject_ty);
+            let body1 = lower_expr(ctx, then);
+            ctx.pop_scope();
+            let arm1 = IrMatchArm { pattern: pat1, guard: None, body: body1 };
+            ctx.push_scope();
+            let pat2 = lower_pattern(ctx, &ast::Pattern::Wildcard, &subject_ty);
+            let body2 = lower_expr(ctx, else_);
+            ctx.pop_scope();
+            let arm2 = IrMatchArm { pattern: pat2, guard: None, body: body2 };
+            ctx.mk(IrExprKind::Match { subject: Box::new(s), arms: vec![arm1, arm2] }, ty, span)
+        }
         ast::ExprKind::Block { stmts, expr, .. } => {
             ctx.push_scope();
-            let ir_stmts: Vec<IrStmt> = stmts.iter().map(|s| lower_stmt(ctx, s)).collect();
-            let ir_expr = expr.as_ref().map(|e| Box::new(lower_expr(ctx, e)));
+            let body = lower_block_body(ctx, stmts, expr.as_deref(), &ty, span);
             ctx.pop_scope();
-            ctx.mk(IrExprKind::Block { stmts: ir_stmts, expr: ir_expr }, ty, span)
+            body
         }
 
         ast::ExprKind::Fan { exprs, .. } => {
@@ -690,6 +725,66 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
     }
 }
 
+/// Lower a block body (stmts + optional tail), desugaring `guard let`. A `guard let
+/// name = scrutinee else { alt }` binds `name` for the REST of the block, so everything
+/// after it (the remaining stmts + the tail) becomes the Some/Ok arm of a match on the
+/// scrutinee, and `alt` the wildcard arm. Statements before the guard stay as block
+/// stmts. Recurses so multiple guard-lets nest. Without a guard-let it lowers normally.
+/// The caller owns the block scope (push/pop around this).
+fn lower_block_body(
+    ctx: &mut LowerCtx,
+    stmts: &[ast::Stmt],
+    tail: Option<&ast::Expr>,
+    ty: &Ty,
+    span: Option<ast::Span>,
+) -> IrExpr {
+    if let Some(i) = stmts.iter().position(|s| matches!(s, ast::Stmt::GuardLet { .. })) {
+        let pre: Vec<IrStmt> = stmts[..i].iter().map(|s| lower_stmt(ctx, s)).collect();
+        let (name, scrutinee, else_) = match &stmts[i] {
+            ast::Stmt::GuardLet { name, scrutinee, else_, .. } => (*name, scrutinee, else_),
+            _ => unreachable!(),
+        };
+        let s = lower_expr(ctx, scrutinee);
+        let subject_ty = if let IrExprKind::Var { id } = &s.kind {
+            let vt_ty = &ctx.var_table.get(*id).ty;
+            if matches!(vt_ty, Ty::Applied(_, _)) && !matches!(&s.ty, Ty::Applied(_, _)) {
+                vt_ty.clone()
+            } else {
+                s.ty.clone()
+            }
+        } else {
+            s.ty.clone()
+        };
+        let s = if subject_ty != s.ty { IrExpr { ty: subject_ty.clone(), ..s } } else { s };
+        let inner = ast::Pattern::Ident { name };
+        let bind_pat = match &subject_ty {
+            Ty::Applied(TypeConstructorId::Result, _) => {
+                ast::Pattern::Ok { inner: Box::new(inner) }
+            }
+            _ => ast::Pattern::Some { inner: Box::new(inner) },
+        };
+        // Some/Ok arm: bind name, then the rest of the block (recurse for nested guards).
+        ctx.push_scope();
+        let pat1 = lower_pattern(ctx, &bind_pat, &subject_ty);
+        let rest = lower_block_body(ctx, &stmts[i + 1..], tail, ty, span);
+        ctx.pop_scope();
+        let arm1 = IrMatchArm { pattern: pat1, guard: None, body: rest };
+        // Wildcard arm: the else branch (must diverge).
+        ctx.push_scope();
+        let pat2 = lower_pattern(ctx, &ast::Pattern::Wildcard, &subject_ty);
+        let alt = lower_expr(ctx, else_);
+        ctx.pop_scope();
+        let arm2 = IrMatchArm { pattern: pat2, guard: None, body: alt };
+        let match_expr =
+            ctx.mk(IrExprKind::Match { subject: Box::new(s), arms: vec![arm1, arm2] }, ty.clone(), span);
+        ctx.mk(IrExprKind::Block { stmts: pre, expr: Some(Box::new(match_expr)) }, ty.clone(), span)
+    } else {
+        let ir_stmts: Vec<IrStmt> = stmts.iter().map(|s| lower_stmt(ctx, s)).collect();
+        let ir_expr = tail.map(|e| Box::new(lower_expr(ctx, e)));
+        ctx.mk(IrExprKind::Block { stmts: ir_stmts, expr: ir_expr }, ty.clone(), span)
+    }
+}
+
 /// Lower pipe expression, unwrapping postfix operators (??, !, ?) on the RHS
 /// so the pipe targets the inner Call. e.g. `xs |> list.find(p) ?? fallback`
 /// becomes `list.find(xs, p) ?? fallback` rather than treating `??` as part of the pipe target.
@@ -748,6 +843,34 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             let ir_left = lower_expr(ctx, left);
             let target = lower_call_target(ctx, right);
             ctx.mk(IrExprKind::Call { target, args: vec![ir_left], type_args: vec![] }, ty, span)
+        }
+        // `a |> (n) => body` — INLINE the immediately-applied lambda to `{ let n = a; body }`.
+        // A pipe RHS lambda is applied exactly once, so binding its single param to the piped value
+        // and evaluating the body is identical on BOTH targets — and it avoids a Computed-callee
+        // call, which v1 MIR cannot lower as a first-class closure (it silently mis-lowered
+        // `5 |> (n) => n * n` to 0). Multi-param / zero-param lambdas keep the Computed-call form.
+        ast::ExprKind::Lambda { params, body, .. } if params.len() == 1 => {
+            let ir_left = lower_expr(ctx, left);
+            let p = &params[0];
+            let param_ty = p
+                .ty
+                .as_ref()
+                .map(|te| resolve_type_expr(te))
+                .unwrap_or_else(|| ctx.expr_ty(left));
+            ctx.push_scope();
+            let var = ctx.define_var(&p.name, param_ty.clone(), Mutability::Let, span.clone());
+            let ir_body = lower_expr(ctx, body);
+            ctx.pop_scope();
+            let bind = IrStmt {
+                kind: IrStmtKind::Bind {
+                    var,
+                    mutability: Mutability::Let,
+                    ty: param_ty,
+                    value: ir_left,
+                },
+                span: span.clone(),
+            };
+            ctx.mk(IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(ir_body)) }, ty, span)
         }
         _ => {
             let ir_left = lower_expr(ctx, left);

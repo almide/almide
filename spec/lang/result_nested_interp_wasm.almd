@@ -1,0 +1,30 @@
+// wasm:enabled
+// Locks in the RESULT-outer nested `${…}` interps — v0's `ok(<inner>)` / `err("<quoted>")`:
+//   Result[Bool, String]                → ok(true) / ok(false) / err("…")
+//   Result[List[Bool], String]          → ok([true, false]) / ok([]) / err("…")
+//   Result[Option[Int], String]         → ok(some(5)) / ok(none) / err("…")
+//   Result[Option[String], String]      → ok(some("q")) / ok(none) / err("…")
+//   Result[Result[Int, String], String] → ok(ok(7)) / ok(err("…")) / err("…")
+// Two compiler gaps closed together: the ResultOk heap materializer now admits a NESTED Option/Result
+// ctor Ok payload (construction), and the nested-payload bind seeds its read-shape via seed_variant_
+// param (so an inner `match` reads a cap-as-tag inner correctly). Byte-identical to v0 --target wasm.
+
+effect fn main() -> Unit = {
+  let b1: Result[Bool, String] = ok(true)
+  let b2: Result[Bool, String] = err("bad bool")
+  println("${b1}") println("${b2}")
+  let l1: Result[List[Bool], String] = ok([true, false, true])
+  let l2: Result[List[Bool], String] = ok([])
+  println("${l1}") println("${l2}")
+  let o1: Result[Option[Int], String] = ok(some(0 - 9))
+  let o2: Result[Option[Int], String] = ok(none)
+  let o3: Result[Option[Int], String] = err("no int")
+  println("${o1}") println("${o2}") println("${o3}")
+  let s1: Result[Option[String], String] = ok(some("he said \"hi\""))
+  let s2: Result[Option[String], String] = ok(none)
+  println("${s1}") println("${s2}")
+  let r1: Result[Result[Int, String], String] = ok(ok(7))
+  let r2: Result[Result[Int, String], String] = ok(err("inner"))
+  let r3: Result[Result[Int, String], String] = err("outer")
+  println("${r1}") println("${r2}") println("${r3}")
+}

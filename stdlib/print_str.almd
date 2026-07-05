@@ -1,0 +1,25 @@
+// print_str — the SELF-HOSTED `println` implementation for v1, written in ALMIDE
+// over the `prim` primitive floor (raw memory + the fd_write host call). The v1
+// lowering emits `println(s)` as a `PrintStr` runtime call that renders to
+// `(call $print_str ...)`; this is that callee's BODY — compiled through v1's own
+// lower→MIR→render pipeline, so there is NO hand-written wasm for it (the §4.1
+// discipline). The v1 runtime linker auto-includes this when a program prints.
+//
+// It writes the string's UTF-8 bytes + a trailing "\n" to stdout via a 2-element
+// iovec `fd_write` (zero-copy — the OS gathers; no byte-copy loop). Addresses match
+// the preamble layout: NWRITTEN@0, IOVEC@8 (two {ptr,len} pairs), SCRATCH@768
+// (512..768 is the fixed fs-errno message region — do NOT write below 768).
+fn print_str(s: String) -> Unit = {
+  let h = prim.handle(s)        // i64 address of the [rc][len][cap][bytes] block
+  let len = prim.load32(h + 4)  // header len (LIST_LEN_OFFSET)
+  let data = h + 12             // byte start (LIST_HEADER)
+  // Write the string bytes, then the newline — two single-iovec fd_writes (the
+  // proven $print_int pattern; a 2-element iovec is not reliably gathered here).
+  prim.store32(8, data)         // iovec = { the string bytes, len }
+  prim.store32(12, len)
+  let _w0 = prim.fd_write(1, 8, 1, 0)  // fd_write(stdout, iovec@8, count 1, nwritten@0)
+  prim.store8(768, 10)          // "\n" at scratch 768
+  prim.store32(8, 768)          // iovec = { the newline, 1 }
+  prim.store32(12, 1)
+  let _w1 = prim.fd_write(1, 8, 1, 0)
+}

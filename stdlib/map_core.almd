@@ -1,0 +1,280 @@
+// map_core — SELF-HOSTED Map[Int,Int] core for v1. A v1 `Map[Int,Int]` IS a v1 List block of
+// PAIRED slots [rc][len@4 = ENTRY count][cap@8][k0@12,v0@20,k1@28,v1@36,...] — entry i has its
+// key at h+12+i*16 and value at h+12+i*16+8. INSERTION-ORDERED (v0's AlmideMap = Vec<(K,V)>:
+// set updates a key's value in place keeping its position, appends new keys; remove preserves
+// survivors' order; keys/values iterate insertion order). Int keys+values only (both scalar);
+// String keys/values are a heap-element refinement. Source borrowed; constructed maps owned.
+
+// Index of key k among the first `len` entries at block-handle h, or -1 if absent.
+fn __map_find(h: Int, len: Int, k: Int, i: Int) -> Int =
+  if i >= len then 0 - 1
+  else {
+    let kk = prim.load64(h + 12 + i * 16)
+    if kk == k then i
+    else __map_find(h, len, k, i + 1)
+  }
+
+fn map_new() -> Map[Int, Int] = prim.alloc_map(0)
+
+fn map_len(m: Map[Int, Int]) -> Int = prim.load32(prim.handle(m) + 4)
+
+fn map_is_empty(m: Map[Int, Int]) -> Bool = prim.load32(prim.handle(m) + 4) == 0
+
+fn map_contains(m: Map[Int, Int], k: Int) -> Bool = {
+  let h = prim.handle(m)
+  let len = prim.load32(h + 4)
+  let idx = __map_find(h, len, k, 0)
+  idx >= 0
+}
+
+fn map_get_or(m: Map[Int, Int], k: Int, default: Int) -> Int = {
+  let h = prim.handle(m)
+  let len = prim.load32(h + 4)
+  let idx = __map_find(h, len, k, 0)
+  if idx < 0 then default
+  else prim.load64(h + 12 + idx * 16 + 8)
+}
+
+// Copy all `len` entries (key+value pairs) from sh to rh.
+fn __map_copy(sh: Int, rh: Int, len: Int, i: Int) -> Int =
+  if i >= len then 0
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    prim.store64(rh + 12 + i * 16, k)
+    prim.store64(rh + 12 + i * 16 + 8, v)
+    __map_copy(sh, rh, len, i + 1)
+  }
+
+// Put (k,v) into the copied result rh (holding `len` entries): if idx>=0 overwrite that entry's
+// value in place (len unchanged); else append a fresh entry (len+1). Returns the new entry count.
+fn __map_put(rh: Int, len: Int, idx: Int, k: Int, v: Int) -> Int =
+  if idx < 0 then {
+    prim.store64(rh + 12 + len * 16, k)
+    prim.store64(rh + 12 + len * 16 + 8, v)
+    len + 1
+  }
+  else {
+    prim.store64(rh + 12 + idx * 16 + 8, v)
+    len
+  }
+
+fn map_set(m: Map[Int, Int], k: Int, v: Int) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let slots = (len + 1) * 2
+  let r = prim.alloc_map(slots)
+  let rh = prim.handle(r)
+  let _c = __map_copy(sh, rh, len, 0)
+  let idx = __map_find(sh, len, k, 0)
+  let w = __map_put(rh, len, idx, k, v)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Copy all entries EXCEPT the one keyed k (preserving survivors' order); return the new count.
+fn __map_remove_fill(sh: Int, len: Int, rh: Int, k: Int, i: Int, w: Int) -> Int =
+  if i >= len then w
+  else {
+    let kk = prim.load64(sh + 12 + i * 16)
+    if kk == k then __map_remove_fill(sh, len, rh, k, i + 1, w)
+    else {
+      let vv = prim.load64(sh + 12 + i * 16 + 8)
+      prim.store64(rh + 12 + w * 16, kk)
+      prim.store64(rh + 12 + w * 16 + 8, vv)
+      __map_remove_fill(sh, len, rh, k, i + 1, w + 1)
+    }
+  }
+
+fn map_remove(m: Map[Int, Int], k: Int) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let slots = len * 2
+  let r = prim.alloc_map(slots)
+  let rh = prim.handle(r)
+  let w = __map_remove_fill(sh, len, rh, k, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Copy each entry's key into the List block oh.
+fn __map_keys_fill(sh: Int, oh: Int, len: Int, i: Int) -> Int =
+  if i >= len then 0
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    prim.store64(oh + 12 + i * 8, k)
+    __map_keys_fill(sh, oh, len, i + 1)
+  }
+
+fn map_keys(m: Map[Int, Int]) -> List[Int] = {
+  let h = prim.handle(m)
+  let len = prim.load32(h + 4)
+  let out = prim.alloc_list(len)
+  let oh = prim.handle(out)
+  let _x = __map_keys_fill(h, oh, len, 0)
+  out
+}
+
+// Copy each entry's value into the List block oh.
+fn __map_values_fill(sh: Int, oh: Int, len: Int, i: Int) -> Int =
+  if i >= len then 0
+  else {
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    prim.store64(oh + 12 + i * 8, v)
+    __map_values_fill(sh, oh, len, i + 1)
+  }
+
+fn map_values(m: Map[Int, Int]) -> List[Int] = {
+  let h = prim.handle(m)
+  let len = prim.load32(h + 4)
+  let out = prim.alloc_list(len)
+  let oh = prim.handle(out)
+  let _x = __map_values_fill(h, oh, len, 0)
+  out
+}
+
+// map.get — Some(value) when the key is present, None otherwise (a materialized Option[Int]).
+// Each arm is built in a HELPER TAIL (the materialized-Option layout, mirroring list.max/min:
+// a `__none()` helper for None, a `__some_at` helper for Some), so the result is a real Option.
+fn __map_none() -> Option[Int] = None
+fn __map_get_some(h: Int, idx: Int) -> Option[Int] = {
+  let v = prim.load64(h + 12 + idx * 16 + 8)
+  Some(v)
+}
+
+fn map_get(m: Map[Int, Int], k: Int) -> Option[Int] = {
+  let h = prim.handle(m)
+  let len = prim.load32(h + 4)
+  let idx = __map_find(h, len, k, 0)
+  if idx < 0 then __map_none()
+  else __map_get_some(h, idx)
+}
+
+// map.merge — clone a, then insert every entry of b (b's keys override a's value in place,
+// b's new keys append). Result order: a's order (overridden values) then b's new keys (b order).
+fn __map_merge_addb(rh: Int, bh: Int, blen: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
+  else {
+    let k = prim.load64(bh + 12 + j * 16)
+    let v = prim.load64(bh + 12 + j * 16 + 8)
+    let idx = __map_find(rh, w, k, 0)
+    let w2 = __map_put(rh, w, idx, k, v)
+    __map_merge_addb(rh, bh, blen, j + 1, w2)
+  }
+
+fn map_merge(a: Map[Int, Int], b: Map[Int, Int]) -> Map[Int, Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let slots = (alen + blen) * 2
+  let r = prim.alloc_map(slots)
+  let rh = prim.handle(r)
+  let _c = __map_copy(ah, rh, alen, 0)
+  let w = __map_merge_addb(rh, bh, blen, 0, alen)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// map.update — if k is present, replace its value with f(old); else the map is unchanged. f is a
+// one-arity closure (Int)->Int invoked via CallIndirect. update never changes the entry count.
+fn __map_update_at(rh: Int, idx: Int, f: (Int) -> Int) -> Int =
+  if idx < 0 then 0
+  else {
+    let old = prim.load64(rh + 12 + idx * 16 + 8)
+    let nv = f(old)
+    prim.store64(rh + 12 + idx * 16 + 8, nv)
+    0
+  }
+
+fn map_update(m: Map[Int, Int], k: Int, f: (Int) -> Int) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let slots = len * 2
+  let r = prim.alloc_map(slots)
+  let rh = prim.handle(r)
+  let _c = __map_copy(sh, rh, len, 0)
+  let idx = __map_find(sh, len, k, 0)
+  let _u = __map_update_at(rh, idx, f)
+  prim.store32(rh + 4, len)
+  r
+}
+
+// ── Higher-order Map[Int,Int] (closures machinery) ── the predicate f is a TWO-arity closure
+// f : (Key, Value) -> Bool invoked via CallIndirect $closure_fn2. A pure predicate byte-matches
+// v0 (single pass, insertion order). filter keeps a subset of entries (still unique keys).
+
+fn __map_filter_fill(sh: Int, len: Int, rh: Int, f: (Int, Int) -> Bool, i: Int, w: Int) -> Int =
+  if i >= len then w
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    let keep = f(k, v)
+    if keep then {
+      prim.store64(rh + 12 + w * 16, k)
+      prim.store64(rh + 12 + w * 16 + 8, v)
+      __map_filter_fill(sh, len, rh, f, i + 1, w + 1)
+    } else {
+      __map_filter_fill(sh, len, rh, f, i + 1, w)
+    }
+  }
+
+fn map_filter(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let slots = len * 2
+  let r = prim.alloc_map(slots)
+  let rh = prim.handle(r)
+  let w = __map_filter_fill(sh, len, rh, f, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Sum the predicate's 0/1 over all entries → the hit COUNT (a Bool is an i64 0/1).
+fn __map_count_hits(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int, acc: Int) -> Int =
+  if i >= len then acc
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    let h = f(k, v)
+    if h then __map_count_hits(sh, len, f, i + 1, acc + 1)
+    else __map_count_hits(sh, len, f, i + 1, acc)
+  }
+
+fn map_all(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Bool = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let hits = __map_count_hits(sh, len, f, 0, 0)
+  hits >= len
+}
+
+fn map_any(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Bool = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let hits = __map_count_hits(sh, len, f, 0, 0)
+  hits > 0
+}
+
+fn map_count(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Int = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  __map_count_hits(sh, len, f, 0, 0)
+}
+
+// map.fold — left fold with a THREE-arity closure f : (Acc, Key, Value) -> Acc (v0's
+// fold(m, init, f), acc first). Int accumulator. The closure dispatches via $closure_fn3 (the
+// render generates one closure type per arity that appears — 3-arity needs no new machinery).
+fn __map_fold_loop(sh: Int, f: (Int, Int, Int) -> Int, len: Int, i: Int, acc: Int) -> Int =
+  if i >= len then acc
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    let nacc = f(acc, k, v)
+    __map_fold_loop(sh, f, len, i + 1, nacc)
+  }
+
+fn map_fold(m: Map[Int, Int], init: Int, f: (Int, Int, Int) -> Int) -> Int = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  __map_fold_loop(sh, f, len, 0, init)
+}

@@ -17,7 +17,6 @@
 //!   regex.split(pattern, text)         → List[String]
 //!   regex.captures(pattern, text)      → Option[List[String]]  (None when ncap==0)
 
-use crate::emit_wasm::engine::{Imm32, Local};
 use super::FuncCompiler;
 use almide_ir::IrExpr;
 
@@ -25,8 +24,6 @@ use almide_ir::IrExpr;
 const RX_CAP_BYTES: i32 = 8;
 /// Bytes per list/buffer pointer slot.
 const PTR_BYTES: i32 = 4;
-/// Extra segment slots in the split buffer: trailing segment + one for boundary.
-const SPLIT_SEG_OVERHEAD: i32 = 2;
 
 impl FuncCompiler<'_> {
     /// Dispatch a `regex.*` module call.
@@ -55,10 +52,10 @@ impl FuncCompiler<'_> {
         let ncap_global = self.emitter.rt.regex.ncap_global;
         let alloc = self.emitter.rt.alloc;
         wasm!(self.func, {
-            local_get(Local(pat)); call(compile); local_set(Local(alts));
-            global_get(ncap_global); local_set(Local(ncap));
+            local_get(pat); call(compile); local_set(alts);
+            global_get(ncap_global); local_set(ncap);
             // caps = alloc(ncap * RX_CAP_BYTES)  (ncap may be 0 → 0-byte alloc, fine)
-            local_get(Local(ncap)); i32_const(Imm32(RX_CAP_BYTES)); i32_mul; call(alloc); local_set(Local(caps));
+            local_get(ncap); i32_const(RX_CAP_BYTES); i32_mul; call(alloc); local_set(caps);
         });
     }
 
@@ -71,14 +68,14 @@ impl FuncCompiler<'_> {
         let ncap = self.scratch.alloc_i32();
 
         self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(pat)); });
+        wasm!(self.func, { local_set(pat); });
         self.emit_expr(&args[1]);
-        wasm!(self.func, { local_set(Local(text)); });
+        wasm!(self.func, { local_set(text); });
         self.emit_compile_pattern(pat, alts, caps, ncap);
         wasm!(self.func, {
-            local_get(Local(alts)); local_get(Local(text)); i32_const(Imm32(0)); local_get(Local(caps)); local_get(Local(ncap));
+            local_get(alts); local_get(text); i32_const(0); local_get(caps); local_get(ncap);
             call(self.emitter.rt.regex.find_at);
-            i32_const(Imm32(-1)); i32_ne;
+            i32_const(-1); i32_ne;
         });
 
         self.scratch.free_i32(ncap);
@@ -99,17 +96,17 @@ impl FuncCompiler<'_> {
         let end_pos = self.scratch.alloc_i32();
 
         self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(pat)); });
+        wasm!(self.func, { local_set(pat); });
         self.emit_expr(&args[1]);
-        wasm!(self.func, { local_set(Local(text)); });
+        wasm!(self.func, { local_set(text); });
         self.emit_compile_pattern(pat, alts, caps, ncap);
         wasm!(self.func, {
-            local_get(Local(alts)); local_get(Local(text)); i32_const(Imm32(0)); local_get(Local(caps)); local_get(Local(ncap));
+            local_get(alts); local_get(text); i32_const(0); local_get(caps); local_get(ncap);
             call(self.emitter.rt.regex.match_alts);
-            local_set(Local(end_pos));
+            local_set(end_pos);
             // full_match = end_pos != -1 && end_pos == byte_len
-            local_get(Local(end_pos)); i32_const(Imm32(-1)); i32_ne;
-            local_get(Local(end_pos)); local_get(Local(text)); i32_load(0); i32_eq;
+            local_get(end_pos); i32_const(-1); i32_ne;
+            local_get(end_pos); local_get(text); i32_load(0); i32_eq;
             i32_and;
         });
 
@@ -134,25 +131,25 @@ impl FuncCompiler<'_> {
         let opt_ptr = self.scratch.alloc_i32();
 
         self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(pat)); });
+        wasm!(self.func, { local_set(pat); });
         self.emit_expr(&args[1]);
-        wasm!(self.func, { local_set(Local(text)); });
+        wasm!(self.func, { local_set(text); });
         self.emit_compile_pattern(pat, alts, caps, ncap);
         wasm!(self.func, {
-            local_get(Local(alts)); local_get(Local(text)); i32_const(Imm32(0)); local_get(Local(caps)); local_get(Local(ncap));
+            local_get(alts); local_get(text); i32_const(0); local_get(caps); local_get(ncap);
             call(self.emitter.rt.regex.find_at);
-            local_set(Local(end_pos));
-            local_get(Local(end_pos)); i32_const(Imm32(-1)); i32_eq;
+            local_set(end_pos);
+            local_get(end_pos); i32_const(-1); i32_eq;
             if_i32;
-                i32_const(Imm32(0)); // none
+                i32_const(0); // none
             else_;
-                global_get(self.emitter.rt.regex.match_start_global); local_set(Local(match_start));
-                local_get(Local(text)); local_get(Local(match_start)); local_get(Local(end_pos));
+                global_get(self.emitter.rt.regex.match_start_global); local_set(match_start);
+                local_get(text); local_get(match_start); local_get(end_pos);
                 call(self.emitter.rt.string.slice);
-                local_set(Local(str_ptr));
-                i32_const(Imm32(PTR_BYTES)); call(self.emitter.rt.alloc); local_set(Local(opt_ptr));
-                local_get(Local(opt_ptr)); local_get(Local(str_ptr)); i32_store(0);
-                local_get(Local(opt_ptr));
+                local_set(str_ptr);
+                i32_const(4); call(self.emitter.rt.alloc); local_set(opt_ptr);
+                local_get(opt_ptr); local_get(str_ptr); i32_store(0);
+                local_get(opt_ptr);
             end;
         });
 
@@ -191,62 +188,62 @@ impl FuncCompiler<'_> {
         let list_data = self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32;
 
         self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(pat)); });
+        wasm!(self.func, { local_set(pat); });
         self.emit_expr(&args[1]);
-        wasm!(self.func, { local_set(Local(text)); });
+        wasm!(self.func, { local_set(text); });
         self.emit_compile_pattern(pat, alts, caps, ncap);
         wasm!(self.func, {
-            local_get(Local(text)); i32_load(0); local_set(Local(text_len));
+            local_get(text); i32_load(0); local_set(text_len);
             // upper bound: at most text_len+1 matches → buffer of (text_len+1) ptrs
-            local_get(Local(text_len)); i32_const(Imm32(1)); i32_add; i32_const(Imm32(PTR_BYTES)); i32_mul;
-            call(self.emitter.rt.alloc); local_set(Local(buf));
-            i32_const(Imm32(0)); local_set(Local(count));
-            i32_const(Imm32(0)); local_set(Local(pos));
+            local_get(text_len); i32_const(1); i32_add; i32_const(PTR_BYTES); i32_mul;
+            call(self.emitter.rt.alloc); local_set(buf);
+            i32_const(0); local_set(count);
+            i32_const(0); local_set(pos);
 
             block_empty; loop_empty;
-                local_get(Local(pos)); local_get(Local(text_len)); i32_gt_u; br_if(1);
-                local_get(Local(alts)); local_get(Local(text)); local_get(Local(pos)); local_get(Local(caps)); local_get(Local(ncap));
+                local_get(pos); local_get(text_len); i32_gt_u; br_if(1);
+                local_get(alts); local_get(text); local_get(pos); local_get(caps); local_get(ncap);
                 call(self.emitter.rt.regex.find_at);
-                local_set(Local(end_pos));
-                local_get(Local(end_pos)); i32_const(Imm32(-1)); i32_eq; br_if(1);
-                global_get(self.emitter.rt.regex.match_start_global); local_set(Local(match_start));
+                local_set(end_pos);
+                local_get(end_pos); i32_const(-1); i32_eq; br_if(1);
+                global_get(self.emitter.rt.regex.match_start_global); local_set(match_start);
                 // slice the match
-                local_get(Local(text)); local_get(Local(match_start)); local_get(Local(end_pos));
+                local_get(text); local_get(match_start); local_get(end_pos);
                 call(self.emitter.rt.string.slice);
-                local_set(Local(str_ptr));
-                local_get(Local(buf)); local_get(Local(count)); i32_const(Imm32(PTR_BYTES)); i32_mul; i32_add;
-                local_get(Local(str_ptr)); i32_store(0);
-                local_get(Local(count)); i32_const(Imm32(1)); i32_add; local_set(Local(count));
+                local_set(str_ptr);
+                local_get(buf); local_get(count); i32_const(PTR_BYTES); i32_mul; i32_add;
+                local_get(str_ptr); i32_store(0);
+                local_get(count); i32_const(1); i32_add; local_set(count);
                 // advance: zero-width → +1 scalar width; else → end
-                local_get(Local(end_pos)); local_get(Local(match_start)); i32_eq;
+                local_get(end_pos); local_get(match_start); i32_eq;
                 if_empty;
                     // zero-width: if at end, stop; else advance one scalar
-                    local_get(Local(end_pos)); local_get(Local(text_len)); i32_ge_u;
+                    local_get(end_pos); local_get(text_len); i32_ge_u;
                     if_empty; br(3); end; // break loop
-                    local_get(Local(text)); local_get(Local(end_pos));
-                    call(self.emitter.rt.string.utf8_width); local_set(Local(width));
-                    local_get(Local(end_pos)); local_get(Local(width)); i32_add; local_set(Local(pos));
+                    local_get(text); local_get(end_pos);
+                    call(self.emitter.rt.string.utf8_width); local_set(width);
+                    local_get(end_pos); local_get(width); i32_add; local_set(pos);
                 else_;
-                    local_get(Local(end_pos)); local_set(Local(pos));
+                    local_get(end_pos); local_set(pos);
                 end;
                 br(0);
             end; end;
 
             // build result list
-            local_get(Local(count)); i32_const(Imm32(PTR_BYTES)); i32_mul; i32_const(Imm32(list_hdr)); i32_add;
-            call(self.emitter.rt.alloc); local_set(Local(result));
-            local_get(Local(result)); local_get(Local(count)); i32_store(0);
-            i32_const(Imm32(0)); local_set(Local(pos));
+            local_get(count); i32_const(PTR_BYTES); i32_mul; i32_const(list_hdr); i32_add;
+            call(self.emitter.rt.alloc); local_set(result);
+            local_get(result); local_get(count); i32_store(0);
+            i32_const(0); local_set(pos);
             block_empty; loop_empty;
-                local_get(Local(pos)); local_get(Local(count)); i32_ge_u; br_if(1);
-                local_get(Local(result)); i32_const(Imm32(list_data)); i32_add;
-                local_get(Local(pos)); i32_const(Imm32(PTR_BYTES)); i32_mul; i32_add;
-                local_get(Local(buf)); local_get(Local(pos)); i32_const(Imm32(PTR_BYTES)); i32_mul; i32_add; i32_load(0);
+                local_get(pos); local_get(count); i32_ge_u; br_if(1);
+                local_get(result); i32_const(list_data); i32_add;
+                local_get(pos); i32_const(PTR_BYTES); i32_mul; i32_add;
+                local_get(buf); local_get(pos); i32_const(PTR_BYTES); i32_mul; i32_add; i32_load(0);
                 i32_store(0);
-                local_get(Local(pos)); i32_const(Imm32(1)); i32_add; local_set(Local(pos));
+                local_get(pos); i32_const(1); i32_add; local_set(pos);
                 br(0);
             end; end;
-            local_get(Local(result));
+            local_get(result);
         });
 
         self.scratch.free_i32(width);
@@ -286,70 +283,70 @@ impl FuncCompiler<'_> {
         let empty_str = self.emitter.intern_string("");
 
         self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(pat)); });
+        wasm!(self.func, { local_set(pat); });
         self.emit_expr(&args[1]);
-        wasm!(self.func, { local_set(Local(text)); });
+        wasm!(self.func, { local_set(text); });
         self.emit_expr(&args[2]);
-        wasm!(self.func, { local_set(Local(repl)); });
+        wasm!(self.func, { local_set(repl); });
         self.emit_compile_pattern(pat, alts, caps, ncap);
         wasm!(self.func, {
-            local_get(Local(text)); i32_load(0); local_set(Local(text_len));
-            i32_const(Imm32(empty_str as i32)); local_set(Local(result));
-            i32_const(Imm32(0)); local_set(Local(pos));
+            local_get(text); i32_load(0); local_set(text_len);
+            i32_const(empty_str as i32); local_set(result);
+            i32_const(0); local_set(pos);
 
             block_empty; loop_empty;
                 // pos > text_len → done
-                local_get(Local(pos)); local_get(Local(text_len)); i32_gt_u;
+                local_get(pos); local_get(text_len); i32_gt_u;
                 if_empty; br(2); end;
 
-                local_get(Local(alts)); local_get(Local(text)); local_get(Local(pos)); local_get(Local(caps)); local_get(Local(ncap));
+                local_get(alts); local_get(text); local_get(pos); local_get(caps); local_get(ncap);
                 call(self.emitter.rt.regex.find_at);
-                local_set(Local(end_pos));
-                local_get(Local(end_pos)); i32_const(Imm32(-1)); i32_eq;
+                local_set(end_pos);
+                local_get(end_pos); i32_const(-1); i32_eq;
                 if_empty;
                     // no more matches: append rest of text and break
-                    local_get(Local(text)); local_get(Local(pos)); local_get(Local(text_len));
-                    call(self.emitter.rt.string.slice); local_set(Local(segment));
-                    local_get(Local(result)); local_get(Local(segment));
-                    call(self.emitter.rt.concat_str); local_set(Local(result));
+                    local_get(text); local_get(pos); local_get(text_len);
+                    call(self.emitter.rt.string.slice); local_set(segment);
+                    local_get(result); local_get(segment);
+                    call(self.emitter.rt.concat_str); local_set(result);
                     br(2);
                 end;
 
-                global_get(self.emitter.rt.regex.match_start_global); local_set(Local(match_start));
+                global_get(self.emitter.rt.regex.match_start_global); local_set(match_start);
                 // append text[pos..match_start]
-                local_get(Local(text)); local_get(Local(pos)); local_get(Local(match_start));
-                call(self.emitter.rt.string.slice); local_set(Local(segment));
-                local_get(Local(result)); local_get(Local(segment));
-                call(self.emitter.rt.concat_str); local_set(Local(result));
+                local_get(text); local_get(pos); local_get(match_start);
+                call(self.emitter.rt.string.slice); local_set(segment);
+                local_get(result); local_get(segment);
+                call(self.emitter.rt.concat_str); local_set(result);
                 // append replacement (verbatim)
-                local_get(Local(result)); local_get(Local(repl));
-                call(self.emitter.rt.concat_str); local_set(Local(result));
+                local_get(result); local_get(repl);
+                call(self.emitter.rt.concat_str); local_set(result);
 
                 // advance: zero-width → emit one scalar of text then +width
-                local_get(Local(end_pos)); local_get(Local(match_start)); i32_eq;
+                local_get(end_pos); local_get(match_start); i32_eq;
                 if_empty;
                     // if end < text_len, append the scalar at `end`
-                    local_get(Local(end_pos)); local_get(Local(text_len)); i32_lt_u;
+                    local_get(end_pos); local_get(text_len); i32_lt_u;
                     if_empty;
-                        local_get(Local(text)); local_get(Local(end_pos));
-                        call(self.emitter.rt.string.utf8_width); local_set(Local(width));
-                        local_get(Local(text)); local_get(Local(end_pos));
-                        local_get(Local(end_pos)); local_get(Local(width)); i32_add;
-                        call(self.emitter.rt.string.slice); local_set(Local(segment));
-                        local_get(Local(result)); local_get(Local(segment));
-                        call(self.emitter.rt.concat_str); local_set(Local(result));
-                        local_get(Local(end_pos)); local_get(Local(width)); i32_add; local_set(Local(pos));
+                        local_get(text); local_get(end_pos);
+                        call(self.emitter.rt.string.utf8_width); local_set(width);
+                        local_get(text); local_get(end_pos);
+                        local_get(end_pos); local_get(width); i32_add;
+                        call(self.emitter.rt.string.slice); local_set(segment);
+                        local_get(result); local_get(segment);
+                        call(self.emitter.rt.concat_str); local_set(result);
+                        local_get(end_pos); local_get(width); i32_add; local_set(pos);
                     else_;
                         // end == text_len: advance past end to terminate
-                        local_get(Local(end_pos)); i32_const(Imm32(1)); i32_add; local_set(Local(pos));
+                        local_get(end_pos); i32_const(1); i32_add; local_set(pos);
                     end;
                 else_;
-                    local_get(Local(end_pos)); local_set(Local(pos));
+                    local_get(end_pos); local_set(pos);
                 end;
                 br(0);
             end; end;
 
-            local_get(Local(result));
+            local_get(result);
         });
 
         self.scratch.free_i32(width);
@@ -382,29 +379,29 @@ impl FuncCompiler<'_> {
         let after = self.scratch.alloc_i32();
 
         self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(pat)); });
+        wasm!(self.func, { local_set(pat); });
         self.emit_expr(&args[1]);
-        wasm!(self.func, { local_set(Local(text)); });
+        wasm!(self.func, { local_set(text); });
         self.emit_expr(&args[2]);
-        wasm!(self.func, { local_set(Local(repl)); });
+        wasm!(self.func, { local_set(repl); });
         self.emit_compile_pattern(pat, alts, caps, ncap);
         wasm!(self.func, {
-            local_get(Local(text)); i32_load(0); local_set(Local(text_len));
-            local_get(Local(alts)); local_get(Local(text)); i32_const(Imm32(0)); local_get(Local(caps)); local_get(Local(ncap));
+            local_get(text); i32_load(0); local_set(text_len);
+            local_get(alts); local_get(text); i32_const(0); local_get(caps); local_get(ncap);
             call(self.emitter.rt.regex.find_at);
-            local_set(Local(end_pos));
-            local_get(Local(end_pos)); i32_const(Imm32(-1)); i32_eq;
+            local_set(end_pos);
+            local_get(end_pos); i32_const(-1); i32_eq;
             if_i32;
-                local_get(Local(text)); // no match → text as-is
+                local_get(text); // no match → text as-is
             else_;
-                global_get(self.emitter.rt.regex.match_start_global); local_set(Local(match_start));
-                local_get(Local(text)); i32_const(Imm32(0)); local_get(Local(match_start));
-                call(self.emitter.rt.string.slice); local_set(Local(before));
-                local_get(Local(text)); local_get(Local(end_pos)); local_get(Local(text_len));
-                call(self.emitter.rt.string.slice); local_set(Local(after));
-                local_get(Local(before)); local_get(Local(repl));
+                global_get(self.emitter.rt.regex.match_start_global); local_set(match_start);
+                local_get(text); i32_const(0); local_get(match_start);
+                call(self.emitter.rt.string.slice); local_set(before);
+                local_get(text); local_get(end_pos); local_get(text_len);
+                call(self.emitter.rt.string.slice); local_set(after);
+                local_get(before); local_get(repl);
                 call(self.emitter.rt.concat_str);
-                local_get(Local(after));
+                local_get(after);
                 call(self.emitter.rt.concat_str);
             end;
         });
@@ -445,53 +442,53 @@ impl FuncCompiler<'_> {
         let list_data = self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32;
 
         self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(pat)); });
+        wasm!(self.func, { local_set(pat); });
         self.emit_expr(&args[1]);
-        wasm!(self.func, { local_set(Local(text)); });
+        wasm!(self.func, { local_set(text); });
         self.emit_compile_pattern(pat, alts, caps, ncap);
         wasm!(self.func, {
-            local_get(Local(text)); i32_load(0); local_set(Local(text_len));
+            local_get(text); i32_load(0); local_set(text_len);
             // upper bound on segments: text_len+2
-            local_get(Local(text_len)); i32_const(Imm32(SPLIT_SEG_OVERHEAD)); i32_add; i32_const(Imm32(PTR_BYTES)); i32_mul;
-            call(self.emitter.rt.alloc); local_set(Local(buf));
-            i32_const(Imm32(0)); local_set(Local(count));
-            i32_const(Imm32(0)); local_set(Local(pos));
+            local_get(text_len); i32_const(2); i32_add; i32_const(PTR_BYTES); i32_mul;
+            call(self.emitter.rt.alloc); local_set(buf);
+            i32_const(0); local_set(count);
+            i32_const(0); local_set(pos);
 
             block_empty; loop_empty;
-                local_get(Local(pos)); local_get(Local(text_len)); i32_gt_u; br_if(1);
+                local_get(pos); local_get(text_len); i32_gt_u; br_if(1);
 
-                local_get(Local(alts)); local_get(Local(text)); local_get(Local(pos)); local_get(Local(caps)); local_get(Local(ncap));
+                local_get(alts); local_get(text); local_get(pos); local_get(caps); local_get(ncap);
                 call(self.emitter.rt.regex.find_at);
-                local_set(Local(end_pos));
-                local_get(Local(end_pos)); i32_const(Imm32(-1)); i32_eq;
+                local_set(end_pos);
+                local_get(end_pos); i32_const(-1); i32_eq;
                 if_empty;
                     // no more matches: push rest and break
-                    local_get(Local(text)); local_get(Local(pos)); local_get(Local(text_len));
-                    call(self.emitter.rt.string.slice); local_set(Local(segment));
-                    local_get(Local(buf)); local_get(Local(count)); i32_const(Imm32(PTR_BYTES)); i32_mul; i32_add;
-                    local_get(Local(segment)); i32_store(0);
-                    local_get(Local(count)); i32_const(Imm32(1)); i32_add; local_set(Local(count));
+                    local_get(text); local_get(pos); local_get(text_len);
+                    call(self.emitter.rt.string.slice); local_set(segment);
+                    local_get(buf); local_get(count); i32_const(PTR_BYTES); i32_mul; i32_add;
+                    local_get(segment); i32_store(0);
+                    local_get(count); i32_const(1); i32_add; local_set(count);
                     br(2);
                 end;
 
-                global_get(self.emitter.rt.regex.match_start_global); local_set(Local(match_start));
+                global_get(self.emitter.rt.regex.match_start_global); local_set(match_start);
 
                 // zero-width at current pos: take one scalar, move on
-                local_get(Local(end_pos)); local_get(Local(match_start)); i32_eq;
-                local_get(Local(match_start)); local_get(Local(pos)); i32_eq;
+                local_get(end_pos); local_get(match_start); i32_eq;
+                local_get(match_start); local_get(pos); i32_eq;
                 i32_and;
                 if_empty;
-                    local_get(Local(pos)); local_get(Local(text_len)); i32_lt_u;
+                    local_get(pos); local_get(text_len); i32_lt_u;
                     if_empty;
-                        local_get(Local(text)); local_get(Local(pos));
-                        call(self.emitter.rt.string.utf8_width); local_set(Local(width));
-                        local_get(Local(text)); local_get(Local(pos));
-                        local_get(Local(pos)); local_get(Local(width)); i32_add;
-                        call(self.emitter.rt.string.slice); local_set(Local(segment));
-                        local_get(Local(buf)); local_get(Local(count)); i32_const(Imm32(PTR_BYTES)); i32_mul; i32_add;
-                        local_get(Local(segment)); i32_store(0);
-                        local_get(Local(count)); i32_const(Imm32(1)); i32_add; local_set(Local(count));
-                        local_get(Local(pos)); local_get(Local(width)); i32_add; local_set(Local(pos));
+                        local_get(text); local_get(pos);
+                        call(self.emitter.rt.string.utf8_width); local_set(width);
+                        local_get(text); local_get(pos);
+                        local_get(pos); local_get(width); i32_add;
+                        call(self.emitter.rt.string.slice); local_set(segment);
+                        local_get(buf); local_get(count); i32_const(PTR_BYTES); i32_mul; i32_add;
+                        local_get(segment); i32_store(0);
+                        local_get(count); i32_const(1); i32_add; local_set(count);
+                        local_get(pos); local_get(width); i32_add; local_set(pos);
                         // continue loop: 2 `if`s deep (if(zerowidth)/if(pos<len)),
                         // loop is the 3rd level → br(2).
                         br(2);
@@ -502,30 +499,30 @@ impl FuncCompiler<'_> {
                 end;
 
                 // normal: push text[pos..match_start], advance to end
-                local_get(Local(text)); local_get(Local(pos)); local_get(Local(match_start));
-                call(self.emitter.rt.string.slice); local_set(Local(segment));
-                local_get(Local(buf)); local_get(Local(count)); i32_const(Imm32(PTR_BYTES)); i32_mul; i32_add;
-                local_get(Local(segment)); i32_store(0);
-                local_get(Local(count)); i32_const(Imm32(1)); i32_add; local_set(Local(count));
-                local_get(Local(end_pos)); local_set(Local(pos));
+                local_get(text); local_get(pos); local_get(match_start);
+                call(self.emitter.rt.string.slice); local_set(segment);
+                local_get(buf); local_get(count); i32_const(PTR_BYTES); i32_mul; i32_add;
+                local_get(segment); i32_store(0);
+                local_get(count); i32_const(1); i32_add; local_set(count);
+                local_get(end_pos); local_set(pos);
                 br(0);
             end; end;
 
             // build result list
-            local_get(Local(count)); i32_const(Imm32(PTR_BYTES)); i32_mul; i32_const(Imm32(list_hdr)); i32_add;
-            call(self.emitter.rt.alloc); local_set(Local(result));
-            local_get(Local(result)); local_get(Local(count)); i32_store(0);
-            i32_const(Imm32(0)); local_set(Local(pos));
+            local_get(count); i32_const(PTR_BYTES); i32_mul; i32_const(list_hdr); i32_add;
+            call(self.emitter.rt.alloc); local_set(result);
+            local_get(result); local_get(count); i32_store(0);
+            i32_const(0); local_set(pos);
             block_empty; loop_empty;
-                local_get(Local(pos)); local_get(Local(count)); i32_ge_u; br_if(1);
-                local_get(Local(result)); i32_const(Imm32(list_data)); i32_add;
-                local_get(Local(pos)); i32_const(Imm32(PTR_BYTES)); i32_mul; i32_add;
-                local_get(Local(buf)); local_get(Local(pos)); i32_const(Imm32(PTR_BYTES)); i32_mul; i32_add; i32_load(0);
+                local_get(pos); local_get(count); i32_ge_u; br_if(1);
+                local_get(result); i32_const(list_data); i32_add;
+                local_get(pos); i32_const(PTR_BYTES); i32_mul; i32_add;
+                local_get(buf); local_get(pos); i32_const(PTR_BYTES); i32_mul; i32_add; i32_load(0);
                 i32_store(0);
-                local_get(Local(pos)); i32_const(Imm32(1)); i32_add; local_set(Local(pos));
+                local_get(pos); i32_const(1); i32_add; local_set(pos);
                 br(0);
             end; end;
-            local_get(Local(result));
+            local_get(result);
         });
 
         self.scratch.free_i32(width);
@@ -566,53 +563,53 @@ impl FuncCompiler<'_> {
         let empty_str = self.emitter.intern_string("");
 
         self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(Local(pat)); });
+        wasm!(self.func, { local_set(pat); });
         self.emit_expr(&args[1]);
-        wasm!(self.func, { local_set(Local(text)); });
+        wasm!(self.func, { local_set(text); });
         self.emit_compile_pattern(pat, alts, caps, ncap);
         wasm!(self.func, {
             // ncap == 0 → None
-            local_get(Local(ncap)); i32_eqz;
+            local_get(ncap); i32_eqz;
             if_i32;
-                i32_const(Imm32(0));
+                i32_const(0);
             else_;
-                local_get(Local(alts)); local_get(Local(text)); i32_const(Imm32(0)); local_get(Local(caps)); local_get(Local(ncap));
+                local_get(alts); local_get(text); i32_const(0); local_get(caps); local_get(ncap);
                 call(self.emitter.rt.regex.find_at);
-                local_set(Local(end_pos));
-                local_get(Local(end_pos)); i32_const(Imm32(-1)); i32_eq;
+                local_set(end_pos);
+                local_get(end_pos); i32_const(-1); i32_eq;
                 if_i32;
-                    i32_const(Imm32(0)); // None
+                    i32_const(0); // None
                 else_;
                     // build list of ncap strings
-                    local_get(Local(ncap)); i32_const(Imm32(PTR_BYTES)); i32_mul; i32_const(Imm32(list_hdr)); i32_add;
-                    call(self.emitter.rt.alloc); local_set(Local(list_ptr));
-                    local_get(Local(list_ptr)); local_get(Local(ncap)); i32_store(0);
-                    i32_const(Imm32(0)); local_set(Local(i));
+                    local_get(ncap); i32_const(PTR_BYTES); i32_mul; i32_const(list_hdr); i32_add;
+                    call(self.emitter.rt.alloc); local_set(list_ptr);
+                    local_get(list_ptr); local_get(ncap); i32_store(0);
+                    i32_const(0); local_set(i);
                     block_empty; loop_empty;
-                        local_get(Local(i)); local_get(Local(ncap)); i32_ge_u; br_if(1);
-                        local_get(Local(caps)); local_get(Local(i)); i32_const(Imm32(RX_CAP_BYTES)); i32_mul; i32_add; i32_load(0);
-                        local_set(Local(grp_start));
-                        local_get(Local(caps)); local_get(Local(i)); i32_const(Imm32(RX_CAP_BYTES)); i32_mul; i32_add; i32_load(4);
-                        local_set(Local(grp_end));
+                        local_get(i); local_get(ncap); i32_ge_u; br_if(1);
+                        local_get(caps); local_get(i); i32_const(RX_CAP_BYTES); i32_mul; i32_add; i32_load(0);
+                        local_set(grp_start);
+                        local_get(caps); local_get(i); i32_const(RX_CAP_BYTES); i32_mul; i32_add; i32_load(4);
+                        local_set(grp_end);
                         // unset (-1) → empty string
-                        local_get(Local(grp_start)); i32_const(Imm32(-1)); i32_eq;
+                        local_get(grp_start); i32_const(-1); i32_eq;
                         if_i32;
-                            i32_const(Imm32(empty_str as i32));
+                            i32_const(empty_str as i32);
                         else_;
-                            local_get(Local(text)); local_get(Local(grp_start)); local_get(Local(grp_end));
+                            local_get(text); local_get(grp_start); local_get(grp_end);
                             call(self.emitter.rt.string.slice);
                         end;
-                        local_set(Local(str_ptr));
-                        local_get(Local(list_ptr)); i32_const(Imm32(list_data)); i32_add;
-                        local_get(Local(i)); i32_const(Imm32(PTR_BYTES)); i32_mul; i32_add;
-                        local_get(Local(str_ptr)); i32_store(0);
-                        local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
+                        local_set(str_ptr);
+                        local_get(list_ptr); i32_const(list_data); i32_add;
+                        local_get(i); i32_const(PTR_BYTES); i32_mul; i32_add;
+                        local_get(str_ptr); i32_store(0);
+                        local_get(i); i32_const(1); i32_add; local_set(i);
                         br(0);
                     end; end;
                     // wrap in Option some
-                    i32_const(Imm32(PTR_BYTES)); call(self.emitter.rt.alloc); local_set(Local(opt_ptr));
-                    local_get(Local(opt_ptr)); local_get(Local(list_ptr)); i32_store(0);
-                    local_get(Local(opt_ptr));
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(opt_ptr);
+                    local_get(opt_ptr); local_get(list_ptr); i32_store(0);
+                    local_get(opt_ptr);
                 end;
             end;
         });

@@ -1,0 +1,22 @@
+// @contract: C-116
+// float.parse on the IEEE 754 special values inf / infinity / nan (case-insensitive, optional sign) —
+// Rust's strtod accepts these; the v1 self-host float_parse used to reject them as "invalid float
+// literal" (a native-vs-v1 divergence). The values are built by RUNTIME division (1/0 = +inf, 0/0 =
+// nan), byte-identical to Rust on both targets. Normal floats + junk (infx/na) are unaffected.
+fn show(s: String) -> String = match float.parse(s) {
+  ok(v) => float.to_string(v),
+  err(e) => "ERR",
+}
+effect fn main() -> Unit = {
+  println(show("inf"))
+  println(show("-inf"))
+  println(show("Infinity"))
+  println(show("INF"))
+  println(show("nan"))
+  println(show("NaN"))
+  println(show("  +inf  "))
+  println(show("3.14"))
+  println(show("1e3"))
+  println(show("infx"))
+  println(show("na"))
+}

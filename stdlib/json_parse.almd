@@ -1,0 +1,341 @@
+// json_parse — SELF-HOSTED `json.parse(text)`: a pure-Almide recursive-descent
+// NORMATIVE SPEC: ALS-T3 (docs/specs/als/text-and-numbers.md §T3) — conformance is judged against that section's
+// rules and its pinned fixture, NOT against any other implementation (F1: no oracle circularity).
+// JSON parser over the prim byte floor, transcribed clause-for-clause from the
+// native oracle (`runtime/rs/src/json.rs::almide_rt_json_parse`) so the v1
+// trust spine lowers it through the PROVEN pipeline with NO hand-written wasm
+// runtime to drift. The last leg of the json codec cascade (parse → accessors →
+// ctors → stringify) that puts porta's read_message on the VERIFIED
+// render_program path.
+//
+// Positions are BYTE offsets internally (prim.load8 — O(1); the first version
+// used char-indexed string.get + per-char string concat, O(n²), and timed out
+// on a multi-KB glTF document). The oracle's positions are CHAR indices, so an
+// error message converts its byte offset with one linear count at ERROR time
+// only. Oracle-faithful details (all deliberate, covered by the fixtures):
+//   - parse_string never fails: an unterminated string yields what was read;
+//     unknown escapes and invalid \uXXXX units are silently dropped; a
+//     high+low surrogate pair joins into one astral codepoint (#651).
+//   - whitespace is char::is_whitespace (Unicode) — ASCII fast path, decode
+//     only for lead bytes >= 0xC2.
+//   - trailing separators are lenient exactly where the oracle is; `{x: 1}`
+//     hunts the key through parse_string unconditionally.
+//   - numbers: `-?digits[.digits][eE[+-]digits]`; any fraction/exponent makes
+//     a Float, else Int; parse errors pass the Rust error message through.
+
+fn json_parse(text: String) -> Result[Value, String] = {
+  let h = prim.handle(text)
+  let blen = prim.load32(h + 4)
+  match __jp_value(h + 12, blen, 0) {
+    ok(r) => {
+      let (v, _p) = r
+      ok(v)
+    }
+    err(e) => err(e)
+  }
+}
+
+// ── low-level helpers (byte floor) ──
+
+// Decode the UTF-8 codepoint at base+p → (codepoint, byte length).
+fn __jp_cp(base: Int, p: Int) -> (Int, Int) = {
+  let b0 = prim.load8(base + p)
+  if b0 < 128 then (b0, 1)
+  else if b0 < 224 then ((b0 - 192) * 64 + (prim.load8(base + p + 1) - 128), 2)
+  else if b0 < 240 then ((b0 - 224) * 4096 + (prim.load8(base + p + 1) - 128) * 64 + (prim.load8(base + p + 2) - 128), 3)
+  else ((b0 - 240) * 262144 + (prim.load8(base + p + 1) - 128) * 4096 + (prim.load8(base + p + 2) - 128) * 64 + (prim.load8(base + p + 3) - 128), 4)
+}
+
+// The CHAR index of byte offset `p` (count non-continuation bytes) — only for
+// the oracle's `at pos N` error message, linear once per error.
+fn __jp_charpos(base: Int, p: Int, i: Int, acc: Int) -> Int =
+  if i >= p then acc
+  else {
+    let b = prim.load8(base + i)
+    let is_cont = b >= 128 and b < 192
+    __jp_charpos(base, p, i + 1, if is_cont then acc else acc + 1)
+  }
+
+// A fresh String copy of bytes [from, to) — for number slices.
+fn __jp_copy_bytes(src: Int, dst: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.store8(dst + i, prim.load8(src + i))
+    __jp_copy_bytes(src, dst, n, i + 1)
+  }
+
+fn __jp_substr(base: Int, from: Int, to: Int) -> String = {
+  let n = if to > from then to - from else 0
+  let s = prim.alloc_str(n)
+  let _c = __jp_copy_bytes(base + from, prim.handle(s) + 12, n, 0)
+  s
+}
+
+// char::is_whitespace for a decoded codepoint (the same 25-codepoint set as
+// string.trim's oracle-derived table).
+fn __jp_is_uws(c: Int) -> Bool =
+  if c == 32 then true
+  else if c >= 9 and c <= 13 then true
+  else if c == 133 then true
+  else if c == 160 then true
+  else if c == 5760 then true
+  else if c >= 8192 and c <= 8202 then true
+  else if c == 8232 then true
+  else if c == 8233 then true
+  else if c == 8239 then true
+  else if c == 8287 then true
+  else if c == 12288 then true
+  else false
+
+// Skip Unicode whitespace from byte offset p. ASCII fast path; a lead byte
+// >= 0xC2 decodes (NBSP/ideographic space etc.), anything else stops.
+fn __jp_ws(base: Int, len: Int, p: Int) -> Int =
+  if p >= len then p
+  else {
+    let b = prim.load8(base + p)
+    if b == 32 or (b >= 9 and b <= 13) then __jp_ws(base, len, p + 1)
+    else if b >= 194 then {
+      let (cp, l) = __jp_cp(base, p)
+      if __jp_is_uws(cp) then __jp_ws(base, len, p + l) else p
+    }
+    else p
+  }
+
+// ── the value grammar ──
+
+fn __jp_value(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
+  let q = __jp_ws(base, len, p)
+  if q >= len then err("unexpected end of input")
+  else {
+    let b = prim.load8(base + q)
+    if b == 34 then {
+      let (s, np) = __jp_string(base, len, q)
+      ok((value.str(s), np))
+    }
+    else if b == 123 then {
+      let q2 = __jp_ws(base, len, q + 1)
+      if q2 < len and prim.load8(base + q2) == 125 then {
+        let empty: List[(String, Value)] = []
+        ok((value.object(empty), q2 + 1))
+      }
+      else {
+        let acc0: List[(String, Value)] = []
+        __jp_object(base, len, q2, acc0)
+      }
+    }
+    else if b == 91 then {
+      let q2 = __jp_ws(base, len, q + 1)
+      if q2 < len and prim.load8(base + q2) == 93 then {
+        let empty: List[Value] = []
+        ok((value.array(empty), q2 + 1))
+      }
+      else {
+        let acc0: List[Value] = []
+        __jp_array(base, len, q2, acc0)
+      }
+    }
+    else if b == 116 or b == 102 then __jp_bool(base, len, q)
+    else if b == 110 then __jp_null(base, len, q)
+    else if b == 45 or (b >= 48 and b <= 57) then __jp_number(base, len, q)
+    else {
+      let (cp, _l) = __jp_cp(base, q)
+      let cpos = __jp_charpos(base, q, 0, 0)
+      err("unexpected char '" + string.from_codepoint(cp) + "' at pos " + int.to_string(cpos))
+    }
+  }
+}
+
+// ── strings ──
+// One pass: over-allocate (decoded output is never longer than the raw span),
+// write bytes through a cursor, then patch the String's len header — the same
+// write-cursor + len-patch discipline as list.filter. p is at the opening `"`
+// (or whatever byte the object-key path hands it — consumed unconditionally,
+// like the oracle's parse_string).
+
+fn __jp_string(base: Int, len: Int, p: Int) -> (String, Int) = {
+  let buf = prim.alloc_str(if len > p + 1 then len - p - 1 else 0)
+  let dh = prim.handle(buf) + 12
+  let (np, outn) = __jp_str_fill(base, len, p + 1, dh, 0)
+  prim.store32(prim.handle(buf) + 4, outn)
+  (buf, np)
+}
+
+// Returns (position after the closing quote / end, bytes written).
+fn __jp_str_fill(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) =
+  if p >= len then (p, o)
+  else {
+    let b = prim.load8(base + p)
+    if b == 34 then (p + 1, o)
+    else if b == 92 then {
+      let e = if p + 1 < len then prim.load8(base + p + 1) else 0
+      if e == 110 then { prim.store8(dh + o, 10) __jp_str_fill(base, len, p + 2, dh, o + 1) }
+      else if e == 116 then { prim.store8(dh + o, 9) __jp_str_fill(base, len, p + 2, dh, o + 1) }
+      else if e == 114 then { prim.store8(dh + o, 13) __jp_str_fill(base, len, p + 2, dh, o + 1) }
+      else if e == 98 then { prim.store8(dh + o, 8) __jp_str_fill(base, len, p + 2, dh, o + 1) }
+      else if e == 102 then { prim.store8(dh + o, 12) __jp_str_fill(base, len, p + 2, dh, o + 1) }
+      else if e == 34 then { prim.store8(dh + o, 34) __jp_str_fill(base, len, p + 2, dh, o + 1) }
+      else if e == 92 then { prim.store8(dh + o, 92) __jp_str_fill(base, len, p + 2, dh, o + 1) }
+      else if e == 47 then { prim.store8(dh + o, 47) __jp_str_fill(base, len, p + 2, dh, o + 1) }
+      else if e == 117 then __jp_str_u(base, len, p, dh, o)
+      else __jp_str_fill(base, len, p + 2, dh, o)
+    }
+    else {
+      prim.store8(dh + o, b)
+      __jp_str_fill(base, len, p + 1, dh, o + 1)
+    }
+  }
+
+// \uXXXX at p (p = the backslash). The oracle advances past the 4 hex digits
+// UNCONDITIONALLY, writes only when they parse; a D800–DBFF unit followed by a
+// \uDC00–DFFF unit joins into one astral codepoint; lone/invalid surrogates
+// are dropped.
+fn __jp_str_u(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) = {
+  let unit = __jp_hex4(base, len, p + 2)
+  if unit < 0 then __jp_str_fill(base, len, p + 6, dh, o)
+  else if unit >= 55296 and unit <= 56319
+    and p + 8 <= len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then {
+    let lo = __jp_hex4(base, len, p + 8)
+    if lo >= 56320 and lo <= 57343 then {
+      let cp = 65536 + (unit - 55296) * 1024 + (lo - 56320)
+      let w = __jp_utf8_write(dh, o, cp)
+      __jp_str_fill(base, len, p + 12, dh, o + w)
+    }
+    else __jp_str_fill(base, len, p + 6, dh, o)
+  }
+  else if unit >= 55296 and unit <= 57343 then __jp_str_fill(base, len, p + 6, dh, o)
+  else {
+    let w = __jp_utf8_write(dh, o, unit)
+    __jp_str_fill(base, len, p + 6, dh, o + w)
+  }
+}
+
+// Encode codepoint `cp` as UTF-8 at dh+o; returns the byte count written.
+fn __jp_utf8_write(dh: Int, o: Int, cp: Int) -> Int =
+  if cp < 128 then {
+    prim.store8(dh + o, cp)
+    1
+  }
+  else if cp < 2048 then {
+    prim.store8(dh + o, 192 + cp / 64)
+    prim.store8(dh + o + 1, 128 + cp % 64)
+    2
+  }
+  else if cp < 65536 then {
+    prim.store8(dh + o, 224 + cp / 4096)
+    prim.store8(dh + o + 1, 128 + (cp / 64) % 64)
+    prim.store8(dh + o + 2, 128 + cp % 64)
+    3
+  }
+  else {
+    prim.store8(dh + o, 240 + cp / 262144)
+    prim.store8(dh + o + 1, 128 + (cp / 4096) % 64)
+    prim.store8(dh + o + 2, 128 + (cp / 64) % 64)
+    prim.store8(dh + o + 3, 128 + cp % 64)
+    4
+  }
+
+// Exactly 4 ASCII hex digits at base+p → the code unit; anything else → -1.
+// (from_str_radix rejects whitespace/`0x`, so this is hand-rolled.)
+fn __jp_hex_digit(b: Int) -> Int =
+  if b >= 48 and b <= 57 then b - 48
+  else if b >= 97 and b <= 102 then b - 87
+  else if b >= 65 and b <= 70 then b - 55
+  else 0 - 1
+
+fn __jp_hex4(base: Int, len: Int, p: Int) -> Int =
+  if p + 4 > len then 0 - 1
+  else {
+    let a = __jp_hex_digit(prim.load8(base + p))
+    let b = __jp_hex_digit(prim.load8(base + p + 1))
+    let c = __jp_hex_digit(prim.load8(base + p + 2))
+    let d = __jp_hex_digit(prim.load8(base + p + 3))
+    if a < 0 or b < 0 or c < 0 or d < 0 then 0 - 1
+    else ((a * 16 + b) * 16 + c) * 16 + d
+  }
+
+// ── numbers ──
+
+fn __jp_digits(base: Int, len: Int, p: Int) -> Int =
+  if p < len and prim.load8(base + p) >= 48 and prim.load8(base + p) <= 57 then __jp_digits(base, len, p + 1)
+  else p
+
+fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
+  let p1 = if prim.load8(base + p) == 45 then p + 1 else p
+  let p2 = __jp_digits(base, len, p1)
+  let has_frac = p2 < len and prim.load8(base + p2) == 46
+  let p3 = if has_frac then __jp_digits(base, len, p2 + 1) else p2
+  let eb = if p3 < len then prim.load8(base + p3) else 0
+  let has_exp = eb == 101 or eb == 69
+  let p4 = if has_exp then {
+    let ps = p3 + 1
+    let sb = if ps < len then prim.load8(base + ps) else 0
+    let ps2 = if sb == 43 or sb == 45 then ps + 1 else ps
+    __jp_digits(base, len, ps2)
+  } else p3
+  let s = __jp_substr(base, p, p4)
+  if has_frac or has_exp then
+    match float.parse(s) {
+      ok(f) => ok((value.float(f), p4))
+      err(m) => err(m)
+    }
+  else
+    match int.parse(s) {
+      ok(n) => ok((value.int(n), p4))
+      err(m) => err(m)
+    }
+}
+
+// ── literals ──
+
+fn __jp_lit_at(base: Int, len: Int, p: Int, b0: Int, b1: Int, b2: Int, b3: Int) -> Bool =
+  p + 4 <= len
+    and prim.load8(base + p) == b0
+    and prim.load8(base + p + 1) == b1
+    and prim.load8(base + p + 2) == b2
+    and prim.load8(base + p + 3) == b3
+
+fn __jp_bool(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] =
+  if __jp_lit_at(base, len, p, 116, 114, 117, 101) then ok((value.bool(true), p + 4))
+  else if __jp_lit_at(base, len, p, 102, 97, 108, 115) and p + 5 <= len and prim.load8(base + p + 4) == 101 then
+    ok((value.bool(false), p + 5))
+  else err("expected bool")
+
+fn __jp_null(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] =
+  if __jp_lit_at(base, len, p, 110, 117, 108, 108) then ok((value.null(), p + 4))
+  else err("expected null")
+
+// ── collections ──
+
+// p is at the first element (post-`[`, post-ws, non-`]`).
+fn __jp_array(base: Int, len: Int, p: Int, acc: List[Value]) -> Result[(Value, Int), String] =
+  match __jp_value(base, len, p) {
+    ok(r) => {
+      let (v, np) = r
+      let q = __jp_ws(base, len, np)
+      let b = if q < len then prim.load8(base + q) else 0
+      if b == 44 then __jp_array(base, len, q + 1, acc + [v])
+      else if b == 93 then ok((value.array(acc + [v]), q + 1))
+      else ok((value.array(acc + [v]), q))
+    }
+    err(e) => err(e)
+  }
+
+// p is at the first key (post-`{`, post-ws, non-`}`). The oracle re-skips ws
+// at the loop head and consumes `:` only if present.
+fn __jp_object(base: Int, len: Int, p: Int, acc: List[(String, Value)]) -> Result[(Value, Int), String] = {
+  let q = __jp_ws(base, len, p)
+  let (k, kp) = __jp_string(base, len, q)
+  let q2 = __jp_ws(base, len, kp)
+  let q3 = if q2 < len and prim.load8(base + q2) == 58 then q2 + 1 else q2
+  match __jp_value(base, len, q3) {
+    ok(r) => {
+      let (v, np) = r
+      let q4 = __jp_ws(base, len, np)
+      let b = if q4 < len then prim.load8(base + q4) else 0
+      if b == 44 then __jp_object(base, len, q4 + 1, acc + [(k, v)])
+      else if b == 125 then ok((value.object(acc + [(k, v)]), q4 + 1))
+      else ok((value.object(acc + [(k, v)]), q4))
+    }
+    err(e) => err(e)
+  }
+}

@@ -31,15 +31,5 @@ almide = { path = "../.." }
 # minimizer paths need to build those literal values directly.
 serde_json = "1"
 
-[target.'cfg(unix)'.dependencies]
-# Process-group teardown. A hung child (e.g. `almide run` waiting on a
-# generated native binary that loops forever) spawns grandchildren that
-# inherit our captured stdout pipe; killing only the direct child leaves
-# them alive holding the pipe, so the reader thread never sees EOF and
-# the worker wedges (the nightly campaign's exit-143 stall). We spawn
-# each child as its own process-group leader and `kill(-pgid)` the whole
-# tree on timeout — which needs `libc::kill`.
-libc = "0.2"
-
 [profile.release]
 opt-level = 2

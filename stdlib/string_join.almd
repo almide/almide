@@ -1,0 +1,64 @@
+// string_join — SELF-HOSTED `string.join(parts, sep)` for v1 over the prim floor. Concatenate
+// the List[String] `parts` with `sep` between them. The parts are READ ONLY (the slot holds
+// each element's i64-widened handle; prim.load64 reads it as an Int address, then its len/
+// bytes via prim.load32/load8) — NO ownership change, so no nested-drop concern; `parts` stays
+// owned by the caller. The result is a fresh owned String. Source + parts borrowed.
+
+fn __bcopy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let b = prim.load8(src + i)
+    prim.store8(dst + i, b)
+    __bcopy(dst, src, n, i + 1)
+  }
+
+// Total byte length: sum of each element's byte length, plus sep_len for every gap (count-1).
+fn __join_totlen(ph: Int, count: Int, sep_len: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let elem = prim.load64(ph + 12 + i * 8)
+    let elen = prim.load32(elem + 4)
+    let gap = if i > 0 then sep_len else 0
+    __join_totlen(ph, count, sep_len, i + 1, acc + gap + elen)
+  }
+
+// Copy sep into the result before a non-first element; return the advanced write offset.
+fn __join_sep(rh: Int, seph: Int, sep_len: Int, i: Int, off: Int) -> Int =
+  if i > 0 then {
+    let _x = __bcopy(rh + 12 + off, seph + 12, sep_len, 0)
+    off + sep_len
+  } else off
+
+fn __join_fill(rh: Int, ph: Int, count: Int, seph: Int, sep_len: Int, i: Int, off: Int) -> Int =
+  if i >= count then off
+  else {
+    let off1 = __join_sep(rh, seph, sep_len, i, off)
+    let elem = prim.load64(ph + 12 + i * 8)
+    let elen = prim.load32(elem + 4)
+    let _x = __bcopy(rh + 12 + off1, elem + 12, elen, 0)
+    __join_fill(rh, ph, count, seph, sep_len, i + 1, off1 + elen)
+  }
+
+fn string_join(parts: List[String], sep: String) -> String = {
+  let ph = prim.handle(parts)
+  let count = prim.load32(ph + 4)
+  let seph = prim.handle(sep)
+  let sep_len = prim.load32(seph + 4)
+  let total = __join_totlen(ph, count, sep_len, 0, 0)
+  let result = prim.alloc_str(total)
+  let _x = __join_fill(prim.handle(result), ph, count, seph, sep_len, 0, 0)
+  result
+}
+
+// list.join(xs, sep) is identical to string.join (v0 both = `xs.join(sep)`) — same read-only
+// fold over the List[String] parts, reusing the same helpers. Parts/sep borrowed; result owned.
+fn list_join(parts: List[String], sep: String) -> String = {
+  let ph = prim.handle(parts)
+  let count = prim.load32(ph + 4)
+  let seph = prim.handle(sep)
+  let sep_len = prim.load32(seph + 4)
+  let total = __join_totlen(ph, count, sep_len, 0, 0)
+  let result = prim.alloc_str(total)
+  let _x = __join_fill(prim.handle(result), ph, count, seph, sep_len, 0, 0)
+  result
+}

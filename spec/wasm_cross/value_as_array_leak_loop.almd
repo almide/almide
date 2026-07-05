@@ -1,0 +1,13 @@
+// @contract: C-103
+// LEAK GATE for the value.as_array Result drop ($__drop_result_lv): the 3-LEVEL recursive free
+// Result -> List[Value] -> element-Value -> String. A create+drop loop completes "done" if leak-free,
+// OOB-traps past 64KB if leaking (the cert canNOT see this leak). Byte-matches v0 ("done").
+fn drain(v: Value) -> Int = match value.as_array(v) { ok(items) => list.len(items), err(_) => 0 }
+fn main() -> Unit = {
+  var i = 0
+  while i < 20000 {
+    let n = drain(value.array([value.int(i), value.str("x"), value.int(i)]))
+    i = i + 1
+  }
+  println("done")
+}

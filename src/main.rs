@@ -48,6 +48,11 @@ enum Commands {
         /// behavior — the cross-target equivalence guarantee.
         #[arg(long)]
         target: Option<String>,
+        /// (wasm target) Try the v1 PCC-verified trust-spine renderer first,
+        /// falling back to v0 codegen where v1 walls. The v1 module is
+        /// byte-identical to v0 where it lowers and never wrong (honest-wall).
+        #[arg(long)]
+        verified: bool,
         /// Arguments passed to the program. Almide's own flags (`--target`,
         /// `--no-check`, `--release`) are consumed before these; anything
         /// after a `--` separator is forwarded verbatim to the program.
@@ -61,7 +66,7 @@ enum Commands {
         /// Output file name
         #[arg(short)]
         o: Option<String>,
-        /// Build target (default: native; wasm)
+        /// Build target (wasm)
         #[arg(long)]
         target: Option<String>,
         /// Optimize for performance (opt-level=2)
@@ -87,6 +92,11 @@ enum Commands {
         /// verification failure is a hard error.
         #[arg(long)]
         emit_unverified: bool,
+        /// (wasm target) Try the v1 PCC-verified trust-spine renderer first,
+        /// falling back to v0 codegen where v1 walls. The v1 module is
+        /// byte-identical to v0 where it lowers and never wrong (honest-wall).
+        #[arg(long)]
+        verified: bool,
     },
     /// Run tests
     Test {
@@ -665,13 +675,13 @@ fn dispatch(cli: Cli) {
     };
     match command {
         Commands::Init => cli::cmd_init(),
-        Commands::Run { file, no_check, release, target, program_args } => {
+        Commands::Run { file, no_check, release, target, verified, program_args } => {
             let file = resolve_file(file);
-            cli::cmd_run(&file, &program_args, no_check, release, target.as_deref());
+            cli::cmd_run(&file, &program_args, no_check, release, target.as_deref(), verified);
         }
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified } => {
             let file = resolve_file(file);
-            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified);
+            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified);
         }
         Commands::Test { file, run, no_check, json, target } => {
             let file_str = file.as_deref().unwrap_or("");

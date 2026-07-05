@@ -1,11 +1,5 @@
 //! IrStmt → WASM instruction emission + local variable pre-scanning.
 
-// ── Named constants for WASM immediate operands ─────────────────────────────
-/// Minimum string buffer capacity used in the inline grow path:
-/// `new_cap = max(cap * 2, STRING_MIN_GROW_CAP)`.
-use crate::emit_wasm::engine::{Imm32, Imm64, Local};
-const STRING_MIN_GROW_CAP: i32 = 16;
-
 use std::collections::HashMap;
 
 use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
@@ -22,7 +16,7 @@ impl FuncCompiler<'_> {
     /// Returns true if resolved, false if not found.
     fn emit_var_get(&mut self, var: &VarId) -> bool {
         if let Some(&local_idx) = self.var_map.get(&var.0) {
-            wasm!(self.func, { local_get(Local(local_idx)); });
+            wasm!(self.func, { local_get(local_idx); });
             return true;
         }
         // §522 class kill: ONE global resolution (id → alias → origin-key →
@@ -73,12 +67,12 @@ impl FuncCompiler<'_> {
 
     /// Set a scratch local from the stack.
     fn emit_set_scratch(&mut self, idx: u32, _ty: &Ty) {
-        wasm!(self.func, { local_set(Local(idx)); });
+        wasm!(self.func, { local_set(idx); });
     }
 
     /// Get a scratch local onto the stack.
     fn emit_get_scratch(&mut self, idx: u32, _ty: &Ty) {
-        wasm!(self.func, { local_get(Local(idx)); });
+        wasm!(self.func, { local_get(idx); });
     }
 }
 
@@ -99,10 +93,10 @@ impl FuncCompiler<'_> {
                     let cell_size = values::byte_size(effective_ty);
                     let local_idx = self.var_map[&var.0];
                     wasm!(self.func, {
-                        i32_const(Imm32(cell_size as i32));
+                        i32_const(cell_size as i32);
                         call(self.emitter.rt.alloc);
-                        local_set(Local(local_idx));
-                        local_get(Local(local_idx));
+                        local_set(local_idx);
+                        local_get(local_idx);
                     });
                     self.emit_expr(value);
                     self.emit_store_at(effective_ty, 0);
@@ -111,8 +105,20 @@ impl FuncCompiler<'_> {
                     // Perceus rc_inc is now handled by PerceusPass (IR-level RcInc node)
                     if let Some(_vt) = values::ty_to_valtype(effective_ty) {
                         let local_idx = self.var_map[&var.0];
-                        wasm!(self.func, { local_set(Local(local_idx)); });
+                        wasm!(self.func, { local_set(local_idx); });
                     }
+                }
+                // EARLY-RETURN LEAK FIX: now that `var` is bound (after its value — so a
+                // Try/Unwrap INSIDE the value did not yet see it), track it as an owned
+                // heap local so a later Try/Unwrap/Fan early-return frees it (see
+                // emit_early_return_decs). Exclude env-borrows (the closure env owns them)
+                // and donate-only `__*` temps (they never get their own dec → decing one
+                // would free a donated ref). It will be removed on its Perceus RcDec.
+                if Self::is_heap_type(effective_ty)
+                    && !matches!(value.kind, IrExprKind::EnvLoad { .. })
+                    && !is_donate_temp(self.var_table.get(*var).name.as_str())
+                {
+                    self.live_heap.push(*var);
                 }
             }
 
@@ -133,56 +139,56 @@ impl FuncCompiler<'_> {
                                         let len_l = self.scratch.alloc_i32();
                                         let cap_l = self.scratch.alloc_i32();
                                         wasm!(self.func, {
-                                            local_get(Local(local_idx)); local_tee(Local(s));
-                                            i32_load(0); local_tee(Local(len_l));
-                                            local_get(Local(s));
+                                            local_get(local_idx); local_tee(s);
+                                            i32_load(0); local_tee(len_l);
+                                            local_get(s);
                                             i32_load(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32);
-                                            local_tee(Local(cap_l));
+                                            local_tee(cap_l);
                                             i32_lt_u;
                                             if_empty;
                                               // Fast: in-place byte store (ptr unchanged, no local_set needed)
-                                              local_get(Local(s));
-                                              i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32));
+                                              local_get(s);
+                                              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
                                               i32_add;
-                                              local_get(Local(len_l));
+                                              local_get(len_l);
                                               i32_add;
-                                              i32_const(Imm32(byte as i32));
+                                              i32_const(byte as i32);
                                               i32_store8(0);
-                                              local_get(Local(s));
-                                              local_get(Local(len_l)); i32_const(Imm32(1)); i32_add;
+                                              local_get(s);
+                                              local_get(len_l); i32_const(1); i32_add;
                                               i32_store(0);
                                             else_;
                                               // Inline grow: new_cap = max(cap*2, 16)
-                                              local_get(Local(cap_l)); i32_const(Imm32(1)); i32_shl; local_tee(Local(cap_l));
-                                              i32_const(Imm32(STRING_MIN_GROW_CAP)); i32_lt_u;
-                                              if_empty; i32_const(Imm32(STRING_MIN_GROW_CAP)); local_set(Local(cap_l)); end;
+                                              local_get(cap_l); i32_const(1); i32_shl; local_tee(cap_l);
+                                              i32_const(16); i32_lt_u;
+                                              if_empty; i32_const(16); local_set(cap_l); end;
                                               // Alloc new buffer
-                                              local_get(Local(cap_l));
-                                              i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32));
+                                              local_get(cap_l);
+                                              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
                                               i32_add;
-                                              call(self.emitter.rt.alloc); local_tee(Local(s));
+                                              call(self.emitter.rt.alloc); local_tee(s);
                                               // Copy old data
-                                              i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add;
-                                              local_get(Local(local_idx));
-                                              i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add;
-                                              local_get(Local(len_l));
+                                              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                                              local_get(local_idx);
+                                              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                                              local_get(len_l);
                                               memory_copy;
                                               // Write new byte
-                                              local_get(Local(s));
-                                              i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32));
+                                              local_get(s);
+                                              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
                                               i32_add;
-                                              local_get(Local(len_l)); i32_add;
-                                              i32_const(Imm32(byte as i32));
+                                              local_get(len_l); i32_add;
+                                              i32_const(byte as i32);
                                               i32_store8(0);
                                               // Set len and cap
-                                              local_get(Local(s));
-                                              local_get(Local(len_l)); i32_const(Imm32(1)); i32_add;
+                                              local_get(s);
+                                              local_get(len_l); i32_const(1); i32_add;
                                               i32_store(0);
-                                              local_get(Local(s));
-                                              local_get(Local(cap_l));
+                                              local_get(s);
+                                              local_get(cap_l);
                                               i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32);
                                               // Update local (ptr changed)
-                                              local_get(Local(s)); local_set(Local(local_idx));
+                                              local_get(s); local_set(local_idx);
                                             end;
                                         });
                                         self.scratch.free_i32(cap_l);
@@ -192,13 +198,54 @@ impl FuncCompiler<'_> {
                                     }
                                 }
                                 // General case
-                                wasm!(self.func, { local_get(Local(local_idx)); });
+                                wasm!(self.func, { local_get(local_idx); });
                                 self.emit_expr(right);
                                 wasm!(self.func, {
                                     call(self.emitter.rt.string_append);
-                                    local_set(Local(local_idx));
+                                    local_set(local_idx);
                                 });
                                 return;
+                            }
+                        }
+                    }
+                }
+                // Peephole: x = bytes.set(x, i, v) → in-place byte store. The
+                // oracle `bytes.set` is VALUE-returning (native CLONES), so the
+                // in-place fast path is valid ONLY for a self-update whose target
+                // is provably unaliased: not COW-marked (AliasCowPass marks
+                // copy-aliased and param-reachable bytes.set targets) and not a
+                // shared-cell capture. Everything else takes the general
+                // emit_bytes_call path, which clones a shared input.
+                if let IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, args, .. } = &value.kind {
+                    if module.as_str() == "bytes" && func.as_str() == "set" && args.len() == 3 {
+                        if let IrExprKind::Var { id } = &args[0].kind {
+                            if *id == *var
+                                && !self.emitter.needs_cow.contains(&var.0)
+                                && !self.emitter.mutable_captures.contains(&var.0)
+                            {
+                                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                    let idx = self.scratch.alloc_i32();
+                                    let val = self.scratch.alloc_i32();
+                                    self.emit_expr(&args[1]);
+                                    wasm!(self.func, { i32_wrap_i64; local_set(idx); });
+                                    self.emit_expr(&args[2]);
+                                    wasm!(self.func, {
+                                        i32_wrap_i64; local_set(val);
+                                        // bounds check: idx < len (mirrors bytes.set)
+                                        local_get(idx); local_get(local_idx); i32_load(0); i32_lt_u;
+                                        if_empty;
+                                          local_get(local_idx);
+                                          i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
+                                          i32_add; local_get(idx); i32_add;
+                                          local_get(val);
+                                          i32_store8(0);
+                                        end;
+                                        // ptr unchanged — no local_set needed
+                                    });
+                                    self.scratch.free_i32(val);
+                                    self.scratch.free_i32(idx);
+                                    return;
+                                }
                             }
                         }
                     }
@@ -234,14 +281,14 @@ impl FuncCompiler<'_> {
                     self.emit_expr(value);
                 } else if is_cell {
                     // Cell: local holds ptr, store new value into cell
-                    wasm!(self.func, { local_get(Local(local_idx)); });
+                    wasm!(self.func, { local_get(local_idx); });
                     self.emit_expr(value);
                     let ty = &self.var_table.get(*var).ty;
                     self.emit_store_at(ty, 0);
                 } else {
                     // Perceus Assign rc_dec is now handled by PerceusPass (IR-level RcDec before Assign)
                     self.emit_expr(value);
-                    wasm!(self.func, { local_set(Local(local_idx)); });
+                    wasm!(self.func, { local_set(local_idx); });
                 }
             }
 
@@ -335,7 +382,7 @@ impl FuncCompiler<'_> {
             IrStmtKind::RcInc { var } => {
                 if let Some(&local_idx) = self.var_map.get(&var.0) {
                     wasm!(self.func, {
-                        local_get(Local(local_idx));
+                        local_get(local_idx);
                         call(self.emitter.rt.rc_inc);
                         drop;
                     });
@@ -371,7 +418,7 @@ impl FuncCompiler<'_> {
                         // ptr) is read as the element count, so the element-drop loop
                         // decrefs garbage addresses → trap. List[Int] (Copy elems, no
                         // element drop) survived; List[String] trapped. (Closure v2 P6.)
-                        wasm!(self.func, { local_get(Local(local_idx)); call(self.emitter.rt.rc_dec); });
+                        wasm!(self.func, { local_get(local_idx); call(self.emitter.rt.rc_dec); });
                     } else {
                         let ty = &self.var_table.get(*var).ty;
                         self.emit_typed_rc_dec(ty, local_idx);
@@ -381,7 +428,7 @@ impl FuncCompiler<'_> {
                     // scratch local loaded from the global (symmetric with
                     // the Inc arm above).
                     let tmp = self.scratch.alloc_i32();
-                    wasm!(self.func, { global_get(global_idx); local_set(Local(tmp)); });
+                    wasm!(self.func, { global_get(global_idx); local_set(tmp); });
                     let ty = self.var_table.get(*var).ty.clone();
                     self.emit_typed_rc_dec(&ty, tmp);
                     self.scratch.free_i32(tmp);
@@ -395,6 +442,10 @@ impl FuncCompiler<'_> {
                         var.0
                     );
                 }
+                // EARLY-RETURN LEAK FIX: this heap local is now dropped — it is no longer
+                // live, so a Try/Unwrap/Fan early-return AFTER this point must not free it
+                // again (the retain is a no-op for vars never tracked, e.g. globals).
+                self.live_heap.retain(|v| *v != *var);
             }
             IrStmtKind::Comment { .. } => {
                 // No-op in WASM
@@ -403,7 +454,7 @@ impl FuncCompiler<'_> {
             IrStmtKind::BindDestructure { pattern, value } => {
                 self.emit_expr(value);
                 let scratch = self.scratch.alloc_i32();
-                wasm!(self.func, { local_set(Local(scratch)); });
+                wasm!(self.func, { local_set(scratch); });
                 // Recursive so a NESTED sub-pattern (`let (a, (b, c)) = …`) binds
                 // its leaves instead of leaving them zeroed (#654); mirrors the
                 // local pre-scan in `scan_destructure_pattern`.
@@ -421,7 +472,7 @@ impl FuncCompiler<'_> {
                 let elem_size = if is_bytes { 1u32 } else { super::values::byte_size(&value.ty) };
                 // Resolve list pointer: local var or module-level global
                 let has_ptr = if let Some(&local_idx) = self.var_map.get(&target.0) {
-                    wasm!(self.func, { local_get(Local(local_idx)); });
+                    wasm!(self.func, { local_get(local_idx); });
                     // Shared-cell capture: the local holds the CELL pointer; deref it
                     // to the list pointer. The element store is in place (same list),
                     // so no write-back to the cell is needed. (Closure v2 P6.)
@@ -451,26 +502,26 @@ impl FuncCompiler<'_> {
                     // the list pointer, GUARD the index on the full i64
                     // (negative / >= 2^32 caught, no truncation), then store.
                     let ptr_l = self.scratch.alloc_i32();
-                    wasm!(self.func, { local_set(Local(ptr_l)); });
+                    wasm!(self.func, { local_set(ptr_l); });
                     let oob_msg = self.emitter.intern_string("Error: index out of bounds\n") as i32;
                     let div_trap = self.emitter.rt.div_trap;
                     let idx64 = self.scratch.alloc_i64();
                     if let IrExprKind::LitInt { value: idx_val } = &index.kind {
-                        wasm!(self.func, { i64_const(Imm64(*idx_val)); local_set(Local(idx64)); });
+                        wasm!(self.func, { i64_const(*idx_val); local_set(idx64); });
                     } else {
                         self.emit_expr(index);
                         if matches!(&index.ty, almide_lang::types::Ty::Int) {
-                            wasm!(self.func, { local_set(Local(idx64)); });
+                            wasm!(self.func, { local_set(idx64); });
                         } else {
-                            wasm!(self.func, { i64_extend_i32_s; local_set(Local(idx64)); });
+                            wasm!(self.func, { i64_extend_i32_s; local_set(idx64); });
                         }
                     }
                     self.emit_index_bound_guard(idx64, ptr_l, oob_msg, div_trap);
                     // addr = ptr + data_off + idx * elem_size
-                    wasm!(self.func, { local_get(Local(ptr_l)); i32_const(Imm32(data_off as i32)); i32_add;
-                                       local_get(Local(idx64)); i32_wrap_i64; });
+                    wasm!(self.func, { local_get(ptr_l); i32_const(data_off as i32); i32_add;
+                                       local_get(idx64); i32_wrap_i64; });
                     if elem_size > 1 {
-                        wasm!(self.func, { i32_const(Imm32(elem_size as i32)); i32_mul; });
+                        wasm!(self.func, { i32_const(elem_size as i32); i32_mul; });
                     }
                     wasm!(self.func, { i32_add; });
                     self.emit_expr(value);
@@ -503,33 +554,33 @@ impl FuncCompiler<'_> {
                 let elem_size = values::byte_size(&elem_ty) as i32;
                 if self.emit_var_get(target) {
                     let list_ptr = self.scratch.alloc_i32();
-                    wasm!(self.func, { local_set(Local(list_ptr)); });
+                    wasm!(self.func, { local_set(list_ptr); });
                     let addr_a = self.scratch.alloc_i32();
                     let addr_b = self.scratch.alloc_i32();
                     let tmp = self.scratch_for_ty(&elem_ty);
 
-                    wasm!(self.func, { local_get(Local(list_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add; });
+                    wasm!(self.func, { local_get(list_ptr); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; });
                     self.emit_expr(a);
                     if matches!(&a.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
-                    wasm!(self.func, { i32_const(Imm32(elem_size)); i32_mul; i32_add; local_set(Local(addr_a)); });
+                    wasm!(self.func, { i32_const(elem_size); i32_mul; i32_add; local_set(addr_a); });
 
-                    wasm!(self.func, { local_get(Local(list_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add; });
+                    wasm!(self.func, { local_get(list_ptr); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; });
                     self.emit_expr(b);
                     if matches!(&b.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
-                    wasm!(self.func, { i32_const(Imm32(elem_size)); i32_mul; i32_add; local_set(Local(addr_b)); });
+                    wasm!(self.func, { i32_const(elem_size); i32_mul; i32_add; local_set(addr_b); });
 
                     // tmp = *addr_a
-                    wasm!(self.func, { local_get(Local(addr_a)); });
+                    wasm!(self.func, { local_get(addr_a); });
                     self.emit_load_at(&elem_ty, 0);
                     self.emit_set_scratch(tmp, &elem_ty);
 
                     // *addr_a = *addr_b
-                    wasm!(self.func, { local_get(Local(addr_a)); local_get(Local(addr_b)); });
+                    wasm!(self.func, { local_get(addr_a); local_get(addr_b); });
                     self.emit_load_at(&elem_ty, 0);
                     self.emit_store_at(&elem_ty, 0);
 
                     // *addr_b = tmp
-                    wasm!(self.func, { local_get(Local(addr_b)); });
+                    wasm!(self.func, { local_get(addr_b); });
                     self.emit_get_scratch(tmp, &elem_ty);
                     self.emit_store_at(&elem_ty, 0);
 
@@ -547,7 +598,7 @@ impl FuncCompiler<'_> {
                 let use_shift = (elem_size as u32).is_power_of_two() && elem_shift > 0;
                 if self.emit_var_get(target) {
                     let list_local = self.scratch.alloc_i32();
-                    wasm!(self.func, { local_set(Local(list_local)); });
+                    wasm!(self.func, { local_set(list_local); });
                     let lo = self.scratch.alloc_i32();
                     let hi = self.scratch.alloc_i32();
                     let addr_lo = self.scratch.alloc_i32();
@@ -555,52 +606,52 @@ impl FuncCompiler<'_> {
                     let tmp = self.scratch_for_ty(&elem_ty);
 
                     // lo = 0; hi = end (as i32)
-                    wasm!(self.func, { i32_const(Imm32(0)); local_set(Local(lo)); });
+                    wasm!(self.func, { i32_const(0); local_set(lo); });
                     self.emit_expr(end);
                     if matches!(&end.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
-                    wasm!(self.func, { local_set(Local(hi)); });
+                    wasm!(self.func, { local_set(hi); });
 
                     let base_ptr = self.scratch.alloc_i32();
-                    wasm!(self.func, { local_get(Local(list_local)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add; local_set(Local(base_ptr)); });
+                    wasm!(self.func, { local_get(list_local); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; local_set(base_ptr); });
                     wasm!(self.func, {
                         block_empty;
                         loop_empty;
-                        local_get(Local(lo)); local_get(Local(hi)); i32_ge_s; br_if(1);
+                        local_get(lo); local_get(hi); i32_ge_s; br_if(1);
                     });
                     // addr_lo = base + lo << shift (using local.tee)
-                    wasm!(self.func, { local_get(Local(base_ptr)); local_get(Local(lo)); });
+                    wasm!(self.func, { local_get(base_ptr); local_get(lo); });
                     if use_shift {
-                        wasm!(self.func, { i32_const(Imm32(elem_shift as i32)); i32_shl; });
+                        wasm!(self.func, { i32_const(elem_shift as i32); i32_shl; });
                     } else {
-                        wasm!(self.func, { i32_const(Imm32(elem_size)); i32_mul; });
+                        wasm!(self.func, { i32_const(elem_size); i32_mul; });
                     }
-                    wasm!(self.func, { i32_add; local_tee(Local(addr_lo)); });
+                    wasm!(self.func, { i32_add; local_tee(addr_lo); });
                     // addr_hi = base + hi << shift
-                    wasm!(self.func, { local_get(Local(base_ptr)); local_get(Local(hi)); });
+                    wasm!(self.func, { local_get(base_ptr); local_get(hi); });
                     if use_shift {
-                        wasm!(self.func, { i32_const(Imm32(elem_shift as i32)); i32_shl; });
+                        wasm!(self.func, { i32_const(elem_shift as i32); i32_shl; });
                     } else {
-                        wasm!(self.func, { i32_const(Imm32(elem_size)); i32_mul; });
+                        wasm!(self.func, { i32_const(elem_size); i32_mul; });
                     }
-                    wasm!(self.func, { i32_add; local_tee(Local(addr_hi)); });
+                    wasm!(self.func, { i32_add; local_tee(addr_hi); });
                     // tmp = *addr_lo (addr_hi still on stack — save it, load from addr_lo)
                     // Stack: [addr_hi]. Save addr_hi, load *addr_lo
                     wasm!(self.func, { drop; }); // clear stack from tee
-                    wasm!(self.func, { local_get(Local(addr_lo)); });
+                    wasm!(self.func, { local_get(addr_lo); });
                     self.emit_load_at(&elem_ty, 0);
                     self.emit_set_scratch(tmp, &elem_ty);
                     // *addr_lo = *addr_hi
-                    wasm!(self.func, { local_get(Local(addr_lo)); local_get(Local(addr_hi)); });
+                    wasm!(self.func, { local_get(addr_lo); local_get(addr_hi); });
                     self.emit_load_at(&elem_ty, 0);
                     self.emit_store_at(&elem_ty, 0);
                     // *addr_hi = tmp
-                    wasm!(self.func, { local_get(Local(addr_hi)); });
+                    wasm!(self.func, { local_get(addr_hi); });
                     self.emit_get_scratch(tmp, &elem_ty);
                     self.emit_store_at(&elem_ty, 0);
                     // lo++; hi--
                     wasm!(self.func, {
-                        local_get(Local(lo)); i32_const(Imm32(1)); i32_add; local_set(Local(lo));
-                        local_get(Local(hi)); i32_const(Imm32(1)); i32_sub; local_set(Local(hi));
+                        local_get(lo); i32_const(1); i32_add; local_set(lo);
+                        local_get(hi); i32_const(1); i32_sub; local_set(hi);
                         br(0);
                         end; // loop
                         end; // block
@@ -621,31 +672,31 @@ impl FuncCompiler<'_> {
                 let elem_size = values::byte_size(&elem_ty) as i32;
                 if self.emit_var_get(target) {
                     let list_local = self.scratch.alloc_i32();
-                    wasm!(self.func, { local_set(Local(list_local)); });
+                    wasm!(self.func, { local_set(list_local); });
                     let tmp = self.scratch_for_ty(&elem_ty);
                     let base = self.scratch.alloc_i32();
                     let end_i32 = self.scratch.alloc_i32();
 
-                    wasm!(self.func, { local_get(Local(list_local)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add; local_set(Local(base)); });
+                    wasm!(self.func, { local_get(list_local); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; local_set(base); });
                     self.emit_expr(end);
                     if matches!(&end.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
-                    wasm!(self.func, { local_set(Local(end_i32)); });
+                    wasm!(self.func, { local_set(end_i32); });
 
                     // tmp = xs[0]
-                    wasm!(self.func, { local_get(Local(base)); });
+                    wasm!(self.func, { local_get(base); });
                     self.emit_load_at(&elem_ty, 0);
                     self.emit_set_scratch(tmp, &elem_ty);
 
                     // memory.copy: dst=base, src=base+elem_size, len=end*elem_size
                     wasm!(self.func, {
-                        local_get(Local(base));
-                        local_get(Local(base)); i32_const(Imm32(elem_size)); i32_add;
-                        local_get(Local(end_i32)); i32_const(Imm32(elem_size)); i32_mul;
+                        local_get(base);
+                        local_get(base); i32_const(elem_size); i32_add;
+                        local_get(end_i32); i32_const(elem_size); i32_mul;
                         memory_copy;
                     });
 
                     // xs[end] = tmp
-                    wasm!(self.func, { local_get(Local(base)); local_get(Local(end_i32)); i32_const(Imm32(elem_size)); i32_mul; i32_add; });
+                    wasm!(self.func, { local_get(base); local_get(end_i32); i32_const(elem_size); i32_mul; i32_add; });
                     self.emit_get_scratch(tmp, &elem_ty);
                     self.emit_store_at(&elem_ty, 0);
 
@@ -661,21 +712,21 @@ impl FuncCompiler<'_> {
                 let dst_ok = self.emit_var_get(dst);
                 if dst_ok {
                     let dst_ptr = self.scratch.alloc_i32();
-                    wasm!(self.func, { local_set(Local(dst_ptr)); });
+                    wasm!(self.func, { local_set(dst_ptr); });
                     let src_ok = self.emit_var_get(src);
                     if src_ok {
                         let src_ptr = self.scratch.alloc_i32();
-                        wasm!(self.func, { local_set(Local(src_ptr)); });
+                        wasm!(self.func, { local_set(src_ptr); });
                         let elem_ty = self.list_elem_ty_var(*dst);
                         let elem_size = values::byte_size(&elem_ty) as i32;
                         wasm!(self.func, {
-                            local_get(Local(dst_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                            local_get(Local(src_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
+                            local_get(dst_ptr); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
+                            local_get(src_ptr); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         });
                         self.emit_expr(len);
                         if matches!(&len.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
                         wasm!(self.func, {
-                            i32_const(Imm32(elem_size)); i32_mul;
+                            i32_const(elem_size); i32_mul;
                             memory_copy;
                         });
                         self.scratch.free_i32(src_ptr);
@@ -711,13 +762,13 @@ impl FuncCompiler<'_> {
                         // captured-and-shared map is updated, not a local copy that
                         // local_set would discard (the outer scope keeps the old map).
                         let cell_local = has_local.unwrap();
-                        wasm!(self.func, { local_get(Local(cell_local)); });
+                        wasm!(self.func, { local_get(cell_local); });
                         self.emit_map_call("set", &set_args);
                         wasm!(self.func, { i32_store(0); });
                     } else {
                         self.emit_map_call("set", &set_args);
                         if let Some(local_idx) = has_local {
-                            wasm!(self.func, { local_set(Local(local_idx)); });
+                            wasm!(self.func, { local_set(local_idx); });
                         } else if let Some(g) = global_idx {
                             wasm!(self.func, { global_set(g); });
                         }
@@ -726,889 +777,7 @@ impl FuncCompiler<'_> {
             }
         }
     }
-
-    pub(super) fn is_heap_type(ty: &Ty) -> bool {
-        // `Ty::Named` (declared nominal record/variant) is a heap pointer — include
-        // it so a record FIELD that is itself a declared type is recursively dec'd
-        // by `emit_typed_rc_dec`. Mirrors pass_perceus::is_heap_type.
-        matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Named(..) | Ty::Unknown)
-    }
-
-    /// Perceus Rule 3: type-specialized rc_dec.
-    /// For compound types, recursively rc_dec children before freeing the parent.
-    /// All offsets derived from LayoutRegistry — zero magic numbers.
-    pub(super) fn emit_typed_rc_dec(&mut self, ty: &Ty, local_idx: u32) {
-        use almide_lang::types::TypeConstructorId;
-        use super::engine::{WasmBuilder, layout::*};
-
-        // A declared nominal record/variant (`type P = {...}`) is `Ty::Named`;
-        // resolve it to its structural fields so the child-recursion below frees its
-        // heap fields. Without this, Named hits the `_ => false` (childless) arm and
-        // its String / nested-heap fields leak. An opaque alias with no registered
-        // fields (`type H = String`) resolves to none and falls through to a plain
-        // dec of the aliased heap block, which is correct.
-        if let Ty::Named(..) = ty {
-            let fields = self.extract_record_fields(ty);
-            if !fields.is_empty() {
-                let rec = Ty::Record {
-                    fields: fields.into_iter()
-                        .map(|(n, t)| (almide_base::intern::sym(n.as_str()), t))
-                        .collect(),
-                };
-                self.emit_typed_rc_dec(&rec, local_idx);
-                return;
-            }
-        }
-
-        let rc_dec_fn = self.emitter.rt.rc_dec;
-        let rc_neg = self.emitter.layout_reg.alloc_header_neg_offset(alloc::RC);
-
-        // if ptr != null {
-        wasm!(self.func, { local_get(Local(local_idx)); if_empty; });
-
-        let has_children = match ty {
-            Ty::Applied(TypeConstructorId::List, args)
-            | Ty::Applied(TypeConstructorId::Set, args) =>
-                args.first().map_or(false, |t| Self::is_heap_type(t)),
-            Ty::Applied(TypeConstructorId::Option, args) =>
-                args.first().map_or(false, |t| Self::is_heap_type(t)),
-            Ty::Applied(TypeConstructorId::Result, args) =>
-                args.iter().any(|t| Self::is_heap_type(t)),
-            Ty::Applied(TypeConstructorId::Map, args) =>
-                args.iter().any(|t| Self::is_heap_type(t)),
-            Ty::Record { fields } =>
-                fields.iter().any(|(_, t)| Self::is_heap_type(t)),
-            Ty::Tuple(tys) =>
-                tys.iter().any(|t| Self::is_heap_type(t)),
-            Ty::Fn { .. } => true,
-            _ => false,
-        };
-
-        if has_children {
-            // if rc <= 1 (about to die) { drop children }
-            {
-                let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-                w.get(Local(local_idx)).i32c(Imm32(rc_neg as i32)).sub().emit_load(0, MemType::I32);
-                w.i32c(Imm32(1)).raw(wasm_encoder::Instruction::I32LeU);
-                w.raw(wasm_encoder::Instruction::If(wasm_encoder::BlockType::Empty));
-            }
-
-            match ty {
-                // ── List/Set[HeapType]: iterate elements, rc_dec each. Set has the
-                // identical [len][elem0..] layout, so the List element-walk applies ──
-                Ty::Applied(TypeConstructorId::List, args)
-                | Ty::Applied(TypeConstructorId::Set, args) => {
-                    let elem_size = super::values::byte_size(&args[0]);
-                    let elem = self.scratch.alloc_i32();
-                    let idx = self.scratch.alloc_i32();
-                    {
-                        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-                        w.list_foreach(local_idx, elem, idx, elem_size, |w| {
-                            w.get(Local(elem)).emit_load(0, MemType::I32);
-                            w.if_void(
-                                |w| { w.get(Local(elem)).emit_load(0, MemType::I32).call(rc_dec_fn); },
-                                |_| {},
-                            );
-                        });
-                    }
-                    self.scratch.free_i32(idx);
-                    self.scratch.free_i32(elem);
-                }
-                // ── Option[HeapType]: if Some, dec payload ──
-                // The Option ABI is a NULLABLE box with the payload at offset 0
-                // and no tag (none = null ptr) — see every Option constructor
-                // and calls_option.rs is_some/unwrap. The tagged [TAG][PAYLOAD]
-                // shape that used to live here read 4 bytes PAST the 4-byte box
-                // and rc_dec'd neighbouring-allocation garbage; once that
-                // garbage exceeded the heap top it bypassed the header guard
-                // and trapped OOB (#470 — only surfaced on large heaps).
-                Ty::Applied(TypeConstructorId::Option, args) => {
-                    if Self::is_heap_type(&args[0]) {
-                        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-                        w.get(Local(local_idx)).emit_load(0, MemType::I32);
-                        w.if_void(
-                            |w| { w.get(Local(local_idx)).emit_load(0, MemType::I32).call(rc_dec_fn); },
-                            |_| {},
-                        );
-                    }
-                }
-                // ── Result[T, E]: dec matching variant's payload ──
-                Ty::Applied(TypeConstructorId::Result, args) => {
-                    for (i, arg) in args.iter().enumerate() {
-                        if Self::is_heap_type(arg) {
-                            let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-                            w.get(Local(local_idx)).field_load(RESULT, tagged::TAG);
-                            w.i32c(Imm32(i as i32)).eq();
-                            w.if_void(|w| {
-                                w.get(Local(local_idx)).field_load(RESULT, tagged::PAYLOAD);
-                                w.if_void(
-                                    |w| { w.get(Local(local_idx)).field_load(RESULT, tagged::PAYLOAD).call(rc_dec_fn); },
-                                    |_| {},
-                                );
-                            }, |_| {});
-                        }
-                    }
-                }
-                // ── Record: dec each heap-typed field ──
-                // Fields are walked in GIVEN (declaration) order — the same
-                // order construction (emit_record), member access
-                // (field_offset), and spread use. The original name-sorted
-                // walk computed WRONG offsets whenever alphabetical order
-                // diverged from declaration order with mixed field sizes,
-                // assembling fake pointers out of neighboring bytes
-                // (sized_int_record_fields trap) or silently leaking.
-                Ty::Record { fields } => {
-                    let mut offset = 0u32;
-                    for (_, field_ty) in fields {
-                        if Self::is_heap_type(field_ty) {
-                            let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-                            w.get(Local(local_idx)).emit_load(offset, MemType::I32);
-                            w.if_void(
-                                |w| { w.get(Local(local_idx)).emit_load(offset, MemType::I32).call(rc_dec_fn); },
-                                |_| {},
-                            );
-                        }
-                        offset += super::values::byte_size(field_ty);
-                    }
-                }
-                // ── Tuple: dec each heap-typed element (positional, no name sort) ──
-                Ty::Tuple(tys) => {
-                    let mut offset = 0u32;
-                    for elem_ty in tys {
-                        if Self::is_heap_type(elem_ty) {
-                            let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-                            w.get(Local(local_idx)).emit_load(offset, MemType::I32);
-                            w.if_void(
-                                |w| { w.get(Local(local_idx)).emit_load(offset, MemType::I32).call(rc_dec_fn); },
-                                |_| {},
-                            );
-                        }
-                        offset += super::values::byte_size(elem_ty);
-                    }
-                }
-                // ── Map[K, V]: Swiss Table iteration, dec live entries ──
-                Ty::Applied(TypeConstructorId::Map, args) => {
-                    let key_ty = args.get(0);
-                    let val_ty = args.get(1);
-                    let key_heap = key_ty.map_or(false, |t| Self::is_heap_type(t));
-                    let val_heap = val_ty.map_or(false, |t| Self::is_heap_type(t));
-                    if key_heap || val_heap {
-                        let key_size = key_ty.map_or(8, |t| super::values::byte_size(t));
-                        let val_size = val_ty.map_or(8, |t| super::values::byte_size(t));
-                        let entry_stride = key_size + val_size;
-                        let entry = self.scratch.alloc_i32();
-                        let cap_l = self.scratch.alloc_i32();
-                        let eb = self.scratch.alloc_i32();
-                        let idx = self.scratch.alloc_i32();
-                        {
-                            let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-                            w.map_foreach(local_idx, entry, cap_l, eb, idx, entry_stride, |w| {
-                                if key_heap {
-                                    w.get(Local(entry)).emit_load(0, MemType::I32);
-                                    w.if_void(
-                                        |w| { w.get(Local(entry)).emit_load(0, MemType::I32).call(rc_dec_fn); },
-                                        |_| {},
-                                    );
-                                }
-                                if val_heap {
-                                    w.get(Local(entry)).emit_load(key_size, MemType::I32);
-                                    w.if_void(
-                                        |w| { w.get(Local(entry)).emit_load(key_size, MemType::I32).call(rc_dec_fn); },
-                                        |_| {},
-                                    );
-                                }
-                            });
-                        }
-                        self.scratch.free_i32(idx);
-                        self.scratch.free_i32(eb);
-                        self.scratch.free_i32(cap_l);
-                        self.scratch.free_i32(entry);
-                    }
-                }
-                // ── Fn (closure): dec env_ptr ──
-                Ty::Fn { .. } => {
-                    let env = self.scratch.alloc_i32();
-                    {
-                        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-                        w.get(Local(local_idx)).field_load(CLOSURE_PAIR, closure::ENV_PTR).set(Local(env));
-                        w.get(Local(env));
-                        w.if_void(|w| { w.get(Local(env)).call(rc_dec_fn); }, |_| {});
-                    }
-                    self.scratch.free_i32(env);
-                }
-                _ => {}
-            }
-
-            wasm!(self.func, { end; }); // end RC==1 check
-        }
-        // rc_dec the parent
-        wasm!(self.func, { local_get(Local(local_idx)); call(rc_dec_fn); });
-        wasm!(self.func, { end; }); // end non-null check
-    }
-
-    /// Compute drop schedule for a block: maps statement index → list of local indices to rc_dec.
-    /// For each heap-typed Bind in the block, finds the last statement that references it.
-    /// Variables used in the tail expression or not locally bound are excluded.
-    pub(super) fn compute_block_drop_schedule(
-        &self,
-        stmts: &[IrStmt],
-        tail: Option<&IrExpr>,
-    ) -> HashMap<usize, Vec<u32>> {
-        // Collect heap-typed locals bound in THIS block
-        let mut block_locals: HashMap<VarId, u32> = HashMap::new(); // var → wasm local index
-        for stmt in stmts {
-            if let IrStmtKind::Bind { var, ty, .. } = &stmt.kind {
-                if Self::is_heap_type(ty) {
-                    if let Some(&idx) = self.var_map.get(&var.0) {
-                        block_locals.insert(*var, idx);
-                    }
-                }
-            }
-        }
-        if block_locals.is_empty() { return HashMap::new(); }
-
-        // Find variables used in tail expression — don't drop those (they're returned)
-        let mut tail_vars: std::collections::HashSet<VarId> = std::collections::HashSet::new();
-        if let Some(tail) = tail {
-            collect_var_refs(tail, &mut tail_vars);
-        }
-
-        // For each block-local, find the last statement index where it's referenced
-        let mut last_use: HashMap<VarId, usize> = HashMap::new();
-        for (i, stmt) in stmts.iter().enumerate() {
-            let mut refs = std::collections::HashSet::new();
-            collect_stmt_var_refs(stmt, &mut refs);
-            for var in &refs {
-                if block_locals.contains_key(var) {
-                    last_use.insert(*var, i);
-                }
-            }
-        }
-
-        // Build schedule: stmt_index → [local_indices to drop]
-        let mut schedule: HashMap<usize, Vec<u32>> = HashMap::new();
-        for (var, stmt_idx) in &last_use {
-            // Skip if used in tail or if this is the binding statement itself
-            if tail_vars.contains(var) { continue; }
-            if let Some(&local_idx) = block_locals.get(var) {
-                // Don't drop at the bind statement — the value was just created
-                let bind_idx = stmts.iter().position(|s| {
-                    matches!(&s.kind, IrStmtKind::Bind { var: v, .. } if *v == *var)
-                });
-                if bind_idx == Some(*stmt_idx) { continue; } // only use is the bind itself
-                schedule.entry(*stmt_idx).or_default().push(local_idx);
-            }
-        }
-        schedule
-    }
-
-    /// Check if an expression writes to outer-scope mutable variables with heap types.
-    /// Used by auto-scope to determine if heap_restore is safe.
-    pub(super) fn expr_writes_outer_heap(&self, expr: &IrExpr) -> bool {
-        struct HeapWriteScanner<'a> {
-            var_table: &'a almide_ir::VarTable,
-            mut_sigs: &'a std::collections::HashMap<String, Vec<bool>>,
-            found: bool,
-        }
-        impl IrVisitor for HeapWriteScanner<'_> {
-            fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
-                if self.found { return; }
-                match &stmt.kind {
-                    IrStmtKind::Assign { var, .. }
-                    | IrStmtKind::MapInsert { target: var, .. }
-                    | IrStmtKind::IndexAssign { target: var, .. }
-                    | IrStmtKind::FieldAssign { target: var, .. } => {
-                        // Escape check must be CONSERVATIVE: anything that is
-                        // not provably a scalar may point into the iteration
-                        // arena, and a heap_restore would free it while live.
-                        // `is_heap_type` is the wrong predicate here — it
-                        // misses nominal types (json.Value, user types, Bytes),
-                        // which is how a `var gltf = json.null(); while {...
-                        // gltf = parsed ...}` loop got its tree reclaimed and
-                        // overwritten by the next allocation (#470).
-                        let ty = &self.var_table.get(*var).ty;
-                        let scalar = matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit);
-                        if !scalar {
-                            self.found = true;
-                        }
-                    }
-                    _ => {}
-                }
-                walk_stmt(self, stmt);
-            }
-            fn visit_expr(&mut self, expr: &IrExpr) {
-                if self.found { return; }
-                // In-place stdlib mutators (`list.push`, `map.insert`,
-                // `string.push`, bytes builders) reallocate `args[0]`'s heap
-                // backing through its shared pointer. When the mutated binding
-                // is declared OUTSIDE the loop, that fresh backing is allocated
-                // in the iteration arena yet escapes it — a heap_restore then
-                // reclaims a live object and the next allocation reuses its
-                // address (a spurious double-free at teardown, #643). These are
-                // CALLS, not assignment statements, so the stmt scan above
-                // misses them; mirror its conservative non-scalar test here.
-                if let IrExprKind::RuntimeCall { symbol, args } = &expr.kind {
-                    if crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str()) {
-                        // args[0] may be a bare Var (`list.push(out, …)`) OR a
-                        // field/element of one (`list.push(b.xs, …)` on a `mut
-                        // b`): the realloc'd backing escapes through the rooted
-                        // binding either way. #693 only matched a bare Var, so a
-                        // MEMBER target slipped through and the fn/iter-scope
-                        // reclamation freed a live field buffer — slabhra's tape
-                        // `push_node`, where `list.push(t.depth, …)` traps after
-                        // teardown reuses the address (#705). Walk the
-                        // member/index chain to its root variable.
-                        let mut root = args.first().map(|a| &a.kind);
-                        while let Some(
-                            IrExprKind::Member { object, .. }
-                            | IrExprKind::TupleIndex { object, .. }
-                            | IrExprKind::IndexAccess { object, .. },
-                        ) = root {
-                            root = Some(&object.kind);
-                        }
-                        if let Some(IrExprKind::Var { id }) = root {
-                            let ty = &self.var_table.get(*id).ty;
-                            let scalar = matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit);
-                            if !scalar {
-                                self.found = true;
-                                return;
-                            }
-                        }
-                    }
-                }
-                // A USER function with a `mut` parameter fed an outer-scope var
-                // (`op.add(t, …)` where `t` is the tape) may realloc the field it
-                // mutates; the new buffer escapes via `t`. The stdlib-mutator
-                // check above misses it because the mutation happens one frame
-                // down. mut_param_sigs gives each callee's per-param `mut` flags.
-                if let IrExprKind::Call { target, args, .. } = &expr.kind {
-                    let key = match target {
-                        almide_ir::CallTarget::Named { name } => Some(name.to_string()),
-                        almide_ir::CallTarget::Module { module, func, .. } =>
-                            Some(format!("{}::{}", module, func)),
-                        _ => None,
-                    };
-                    if let Some(sig) = key.and_then(|k| self.mut_sigs.get(&k)) {
-                        for (i, arg) in args.iter().enumerate() {
-                            if !sig.get(i).copied().unwrap_or(false) { continue; }
-                            // arg in a `mut` slot — escape if it is rooted at a var
-                            let mut root = Some(&arg.kind);
-                            while let Some(
-                                IrExprKind::Member { object, .. }
-                                | IrExprKind::TupleIndex { object, .. }
-                                | IrExprKind::IndexAccess { object, .. },
-                            ) = root {
-                                root = Some(&object.kind);
-                            }
-                            if matches!(root, Some(IrExprKind::Var { .. })) {
-                                self.found = true;
-                                return;
-                            }
-                        }
-                    }
-                }
-                walk_expr(self, expr);
-            }
-        }
-        let mut scanner = HeapWriteScanner {
-            var_table: self.var_table,
-            mut_sigs: &self.emitter.mut_param_sigs,
-            found: false,
-        };
-        scanner.visit_expr(expr);
-        scanner.found
-    }
-
-    /// Check if an expression allocates heap memory (string/list/record construction,
-    /// or calls returning heap types). Used to decide if iter_scope is worthwhile.
-    pub(super) fn expr_allocates_heap(&self, expr: &IrExpr) -> bool {
-        struct AllocScanner { found: bool }
-        impl IrVisitor for AllocScanner {
-            fn visit_expr(&mut self, expr: &IrExpr) {
-                if self.found { return; }
-                match &expr.kind {
-                    // Direct heap allocations
-                    IrExprKind::LitStr { .. }
-                    | IrExprKind::StringInterp { .. }
-                    | IrExprKind::List { .. }
-                    | IrExprKind::Record { .. }
-                    | IrExprKind::MapLiteral { .. } => {
-                        self.found = true;
-                        return;
-                    }
-                    // Calls that return heap types
-                    IrExprKind::Call { .. } | IrExprKind::TailCall { .. }
-                    | IrExprKind::RuntimeCall { .. } => {
-                        if FuncCompiler::is_heap_type(&expr.ty) {
-                            self.found = true;
-                            return;
-                        }
-                    }
-                    // String concat
-                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
-                        self.found = true;
-                        return;
-                    }
-                    _ => {}
-                }
-                walk_expr(self, expr);
-            }
-            fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
-                if self.found { return; }
-                walk_stmt(self, stmt);
-            }
-        }
-        let mut scanner = AllocScanner { found: false };
-        scanner.visit_expr(expr);
-        scanner.found
-    }
-
 }
 
-/// Infer the type of a bind value from its IR expression structure.
-/// Used when value.ty and stmt ty are both Unknown.
-fn infer_bind_type(expr: &IrExpr) -> Ty {
-    match &expr.kind {
-        IrExprKind::LitInt { .. } => Ty::Int,
-        IrExprKind::LitFloat { .. } => Ty::Float,
-        IrExprKind::LitBool { .. } => Ty::Bool,
-        IrExprKind::LitStr { .. } => Ty::String,
-        // TupleIndex: infer from parent tuple type
-        IrExprKind::TupleIndex { object, index } => {
-            if let Ty::Tuple(elems) = &object.ty {
-                elems.get(*index).cloned().unwrap_or(Ty::Unknown)
-            } else {
-                Ty::Unknown
-            }
-        }
-        // BinOp: infer from operation kind
-        IrExprKind::BinOp { op, .. } => op.result_ty().unwrap_or(Ty::Unknown),
-        // Try/Unwrap/ToOption: unwrap inner type
-        IrExprKind::Try { expr: inner }
-        | IrExprKind::Unwrap { expr: inner }
-        | IrExprKind::ToOption { expr: inner } => {
-            infer_bind_type(inner)
-        }
-        IrExprKind::UnwrapOr { expr: inner, .. } => {
-            infer_bind_type(inner)
-        }
-        // Call: infer return type from module+func name
-        IrExprKind::Call { target, .. } => {
-            match target {
-                almide_ir::CallTarget::Module { module, func, .. } => {
-                    match (module.as_str(), func.as_str()) {
-                        ("random", "int") | ("datetime", _)
-                        | ("env", "unix_timestamp") | ("env", "millis")
-                        | ("list", "len") | ("string", "len") | ("map", "len") => Ty::Int,
-                        ("random", "float") => Ty::Float,
-                        _ => Ty::Unknown,
-                    }
-                }
-                _ => Ty::Unknown,
-            }
-        }
-        _ => Ty::Unknown,
-    }
-}
-
-/// Result of pre-scanning a function body for local variables.
-pub struct LocalScanResult {
-    pub binds: Vec<(VarId, ValType)>,
-}
-
-/// Pre-scan a function body to collect all local variable bindings
-/// and count scratch local depth.
-pub fn collect_locals(
-    body: &IrExpr,
-    var_table: &almide_ir::VarTable,
-    record_fields: &RecordFieldLookup,
-    variant_info: &VariantInfoLookup,
-) -> LocalScanResult {
-    let mut binds = Vec::new();
-    scan_expr(body, &mut binds, var_table, record_fields, variant_info);
-    LocalScanResult { binds }
-}
-
-impl FuncCompiler<'_> {
-    /// Bind every leaf of a let-destructure pattern, recursing into nested
-    /// tuple/record sub-patterns. `base_local` holds the aggregate pointer for a
-    /// Tuple/RecordPattern, or the scalar/pointer value for a `Bind`. Mirrors
-    /// `scan_destructure_pattern` (which pre-allocates the leaf locals); without
-    /// the recursion a nested sub-pattern left its leaves zeroed (#654).
-    fn emit_bind_destructure(&mut self, pattern: &almide_ir::IrPattern, base_local: u32, base_ty: &Ty) {
-        match pattern {
-            almide_ir::IrPattern::Bind { var, .. } => {
-                if let Some(&local_idx) = self.var_map.get(&var.0) {
-                    wasm!(self.func, { local_get(Local(base_local)); local_set(Local(local_idx)); });
-                }
-            }
-            almide_ir::IrPattern::Tuple { elements } => {
-                let elem_types = if let Ty::Tuple(tys) = base_ty { tys.clone() } else { vec![] };
-                let mut offset = 0u32;
-                for (i, elem_pat) in elements.iter().enumerate() {
-                    let elem_ty = elem_types.get(i).cloned().unwrap_or(Ty::Int);
-                    self.emit_destructure_elem(elem_pat, base_local, offset, &elem_ty);
-                    offset += super::values::byte_size(&elem_ty);
-                }
-            }
-            almide_ir::IrPattern::RecordPattern { fields, .. } => {
-                let record_fields = self.extract_record_fields(base_ty);
-                for pf in fields {
-                    if let Some((offset, field_ty)) = super::values::field_offset(&record_fields, &pf.name) {
-                        if let Some(sub) = &pf.pattern {
-                            self.emit_destructure_elem(sub, base_local, offset, &field_ty);
-                        } else if let Some(&local_idx) = self.find_var_by_field(&pf.name, &record_fields) {
-                            wasm!(self.func, { local_get(Local(base_local)); });
-                            self.emit_load_at(&field_ty, offset);
-                            wasm!(self.func, { local_set(Local(local_idx)); });
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Bind a sub-pattern living at `offset` from `base_local`. A leaf `Bind`
-    /// loads the scalar/pointer directly; a nested aggregate loads its pointer
-    /// and recurses with it as the new base.
-    fn emit_destructure_elem(&mut self, pat: &almide_ir::IrPattern, base_local: u32, offset: u32, elem_ty: &Ty) {
-        match pat {
-            almide_ir::IrPattern::Bind { var, .. } => {
-                if let Some(&local_idx) = self.var_map.get(&var.0) {
-                    wasm!(self.func, { local_get(Local(base_local)); });
-                    self.emit_load_at(elem_ty, offset);
-                    wasm!(self.func, { local_set(Local(local_idx)); });
-                }
-            }
-            almide_ir::IrPattern::Tuple { .. } | almide_ir::IrPattern::RecordPattern { .. } => {
-                let sub = self.scratch.alloc_i32();
-                wasm!(self.func, { local_get(Local(base_local)); });
-                self.emit_load_at(elem_ty, offset);
-                wasm!(self.func, { local_set(Local(sub)); });
-                self.emit_bind_destructure(pat, sub, elem_ty);
-                self.scratch.free_i32(sub);
-            }
-            _ => {}
-        }
-    }
-}
-
-// ── LocalScanner: IrVisitor-based local variable collector ──────────
-//
-// Collects all local variable bindings in a function body for WASM local
-// allocation. Uses walk_expr/walk_stmt for exhaustive traversal; only
-// overrides ForIn, Match (which register bindings) and Bind/BindDestructure.
-
-struct LocalScanner<'a> {
-    locals: &'a mut Vec<(VarId, ValType)>,
-    vt: &'a almide_ir::VarTable,
-    record_fields: &'a RecordFieldLookup,
-    variant_info: &'a VariantInfoLookup,
-}
-
-impl IrVisitor for LocalScanner<'_> {
-    fn visit_expr(&mut self, expr: &IrExpr) {
-        match &expr.kind {
-            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-                let elem_ty = match &iterable.ty {
-                    almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
-                    almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::Map, args) if args.len() == 2 =>
-                        almide_lang::types::Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
-                    _ => self.vt.get(*var).ty.clone(),
-                };
-                self.locals.push((*var, values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I64)));
-                if let Some(tuple_vars) = var_tuple {
-                    for tv in tuple_vars {
-                        let tv_type = values::ty_to_valtype(&self.vt.get(*tv).ty).unwrap_or(ValType::I64);
-                        self.locals.push((*tv, tv_type));
-                    }
-                }
-                self.visit_expr(iterable);
-                for stmt in body { self.visit_stmt(stmt); }
-            }
-            IrExprKind::Match { subject, arms } => {
-                self.visit_expr(subject);
-                let resolved_ty = resolve_scan_subject_ty(subject, arms, self.vt);
-                for arm in arms {
-                    scan_pattern(&arm.pattern, &resolved_ty, self.locals, self.vt, self.record_fields, self.variant_info);
-                    self.visit_expr(&arm.body);
-                }
-            }
-            _ => walk_expr(self, expr),
-        }
-    }
-
-    fn visit_stmt(&mut self, stmt: &IrStmt) {
-        match &stmt.kind {
-            IrStmtKind::Bind { var, ty, value, .. } => {
-                let effective_ty = if let IrExprKind::Try { expr: inner }
-                    | IrExprKind::Unwrap { expr: inner } = &value.kind {
-                    if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, args) = &value.ty {
-                        args.first().cloned().unwrap_or(value.ty.clone())
-                    } else if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, args) = &inner.ty {
-                        args.first().cloned().unwrap_or(value.ty.clone())
-                    } else {
-                        value.ty.clone()
-                    }
-                } else {
-                    value.ty.clone()
-                };
-                let resolved_ty = if !effective_ty.is_unresolved() {
-                    effective_ty
-                } else if !ty.is_unresolved() {
-                    ty.clone()
-                } else {
-                    infer_bind_type(value)
-                };
-                if let Some(vt_wasm) = values::ty_to_valtype(&resolved_ty) {
-                    self.locals.push((*var, vt_wasm));
-                }
-                self.visit_expr(value);
-            }
-            IrStmtKind::BindDestructure { pattern, value } => {
-                scan_destructure_pattern(pattern, &value.ty, self.locals, self.vt, self.record_fields, self.variant_info);
-                self.visit_expr(value);
-            }
-            _ => walk_stmt(self, stmt),
-        }
-    }
-}
-
-fn scan_expr(
-    expr: &IrExpr,
-    locals: &mut Vec<(VarId, ValType)>,
-    vt: &almide_ir::VarTable,
-    record_fields: &RecordFieldLookup,
-    variant_info: &VariantInfoLookup,
-) {
-    LocalScanner { locals, vt, record_fields, variant_info }.visit_expr(expr);
-}
-
-/// Resolve match subject type, fixing IR type inference gaps.
-fn resolve_scan_subject_ty(subject: &IrExpr, arms: &[almide_ir::IrMatchArm], vt: &almide_ir::VarTable) -> almide_lang::types::Ty {
-    let has_container = arms.iter().any(|a| matches!(
-        &a.pattern,
-        almide_ir::IrPattern::Ok { .. } | almide_ir::IrPattern::Err { .. }
-        | almide_ir::IrPattern::Some { .. } | almide_ir::IrPattern::None
-    ));
-    if has_container && !matches!(&subject.ty, almide_lang::types::Ty::Applied(_, _)) {
-        if let IrExprKind::Var { id } = &subject.kind {
-            let info = vt.get(*id);
-            if matches!(&info.ty, almide_lang::types::Ty::Applied(_, _)) {
-                return info.ty.clone();
-            }
-        }
-    }
-    subject.ty.clone()
-}
-
-/// Scan a destructuring pattern (let (a, b) = ...) for variable bindings.
-fn scan_destructure_pattern(
-    pattern: &almide_ir::IrPattern,
-    value_ty: &almide_lang::types::Ty,
-    locals: &mut Vec<(VarId, ValType)>,
-    vt: &almide_ir::VarTable,
-    record_fields: &RecordFieldLookup,
-    variant_info: &VariantInfoLookup,
-) {
-    match pattern {
-        almide_ir::IrPattern::Tuple { elements } => {
-            let elem_types = if let almide_lang::types::Ty::Tuple(tys) = value_ty { tys.clone() } else { vec![] };
-            for (i, elem) in elements.iter().enumerate() {
-                let elem_ty = elem_types.get(i).cloned().unwrap_or(almide_lang::types::Ty::Int);
-                scan_destructure_pattern(elem, &elem_ty, locals, vt, record_fields, variant_info);
-            }
-        }
-        almide_ir::IrPattern::Bind { var, .. } => {
-            if let Some(val_type) = values::ty_to_valtype(value_ty) {
-                locals.push((*var, val_type));
-            }
-        }
-        almide_ir::IrPattern::RecordPattern { fields, .. } => {
-            // Record destructure: resolve field types from value_ty (authoritative).
-            // Uses extract_record_fields for full generic substitution.
-            let resolved_fields = extract_record_fields(value_ty, record_fields, variant_info);
-            let existing_ids: std::collections::HashSet<u32> = locals.iter().map(|(v, _)| v.0).collect();
-            for field in fields {
-                // Resolve field type from the record type (not VarTable -- VarTable may have stale types)
-                let field_ty = resolved_fields.iter()
-                    .find(|(n, _)| n == &field.name)
-                    .map(|(_, t)| t.clone())
-                    .unwrap_or(almide_lang::types::Ty::Int);
-                if let Some(pat) = &field.pattern {
-                    scan_destructure_pattern(pat, &field_ty, locals, vt, record_fields, variant_info);
-                } else {
-                    // Implicit bind: field name = var name. Look up VarId from VarTable.
-                    // Use field_ty from the record type for the WASM local declaration.
-                    for i in (0..vt.len()).rev() {
-                        let info = vt.get(almide_ir::VarId(i as u32));
-                        if info.name == field.name && !existing_ids.contains(&(i as u32)) {
-                            if let Some(val_type) = values::ty_to_valtype(&field_ty) {
-                                locals.push((almide_ir::VarId(i as u32), val_type));
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Scan a match pattern for variable bindings.
-fn scan_pattern(
-    pattern: &almide_ir::IrPattern,
-    subject_ty: &almide_lang::types::Ty,
-    locals: &mut Vec<(VarId, ValType)>,
-    vt: &almide_ir::VarTable,
-    record_fields: &RecordFieldLookup,
-    variant_info: &VariantInfoLookup,
-) {
-    match pattern {
-        almide_ir::IrPattern::Bind { var, ty } => {
-            // Use pattern's own type (set by lowering, updated by mono) — no VarTable dependency
-            let effective_ty = if matches!(ty, almide_lang::types::Ty::Unknown) { subject_ty } else { ty };
-            if let Some(val_type) = values::ty_to_valtype(effective_ty) {
-                locals.push((*var, val_type));
-            }
-        }
-        almide_ir::IrPattern::Constructor { name: _ctor_name, args } => {
-            // Resolve field types from subject_ty's type_args for generic variants
-            let subject_type_args: Vec<almide_lang::types::Ty> = match subject_ty {
-                almide_lang::types::Ty::Named(_, args) if !args.is_empty() => args.clone(),
-                almide_lang::types::Ty::Applied(_, args) if !args.is_empty() => args.clone(),
-                almide_lang::types::Ty::Variant { .. } => {
-                    // Use pattern.ty (set by mono substitute_pattern_types) — no VarTable
-                    for arg in args.iter() {
-                        if let almide_ir::IrPattern::Bind { var, ty } = arg {
-                            let effective_ty = if ty.is_unresolved() {
-                                &vt.get(*var).ty // fallback only
-                            } else { ty };
-                            if let Some(val_type) = values::ty_to_valtype(effective_ty) {
-                                locals.push((*var, val_type));
-                            }
-                        }
-                    }
-                    return;
-                }
-                _ => vec![],
-            };
-            for (_i, arg) in args.iter().enumerate() {
-                if let almide_ir::IrPattern::Bind { var, ty: pat_ty } = arg {
-                    // Use pattern.ty first (set by mono), fall back to VarTable + substitution
-                    let resolved = if !pat_ty.is_unresolved()
-                        && !matches!(pat_ty, almide_lang::types::Ty::Named(n, a) if a.is_empty() && n.len() <= 2 && n.chars().next().map_or(false, |c| c.is_uppercase()))
-                    {
-                        pat_ty.clone()
-                    } else if !subject_type_args.is_empty() {
-                        let var_ty = vt.get(*var).ty.clone();
-                        let mut gnames = Vec::new();
-                        super::expressions::collect_type_param_names(&var_ty, &mut gnames);
-                        if gnames.is_empty() { var_ty } else {
-                            super::expressions::substitute_type_params(&var_ty, &gnames, &subject_type_args)
-                        }
-                    } else { vt.get(*var).ty.clone() };
-                    if let Some(val_type) = values::ty_to_valtype(&resolved) {
-                        locals.push((*var, val_type));
-                    }
-                } else {
-                    scan_pattern(arg, subject_ty, locals, vt, record_fields, variant_info);
-                }
-            }
-        }
-        almide_ir::IrPattern::Tuple { elements } => {
-            let elem_types = if let almide_lang::types::Ty::Tuple(tys) = subject_ty { tys.clone() } else { vec![] };
-            for (i, elem) in elements.iter().enumerate() {
-                let et = elem_types.get(i).cloned().unwrap_or(subject_ty.clone());
-                scan_pattern(elem, &et, locals, vt, record_fields, variant_info);
-            }
-        }
-        almide_ir::IrPattern::Some { inner } | almide_ir::IrPattern::Ok { inner } => {
-            let inner_ty = if let almide_lang::types::Ty::Applied(_, args) = subject_ty {
-                args.first().cloned().unwrap_or(subject_ty.clone())
-            } else {
-                // subject_ty is not Applied — try VarTable for inner binding
-                if let almide_ir::IrPattern::Bind { var, .. } = inner.as_ref() {
-                    let vt_ty = &vt.get(*var).ty;
-                    if !vt_ty.is_unresolved() {
-                        vt_ty.clone()
-                    } else { subject_ty.clone() }
-                } else { subject_ty.clone() }
-            };
-            scan_pattern(inner, &inner_ty, locals, vt, record_fields, variant_info);
-        }
-        almide_ir::IrPattern::Err { inner } => {
-            let inner_ty = if let almide_lang::types::Ty::Applied(_, args) = subject_ty {
-                args.get(1).cloned().unwrap_or(subject_ty.clone())
-            } else {
-                if let almide_ir::IrPattern::Bind { var, .. } = inner.as_ref() {
-                    let vt_ty = &vt.get(*var).ty;
-                    if !vt_ty.is_unresolved() {
-                        vt_ty.clone()
-                    } else { subject_ty.clone() }
-                } else { subject_ty.clone() }
-            };
-            scan_pattern(inner, &inner_ty, locals, vt, record_fields, variant_info);
-        }
-        almide_ir::IrPattern::RecordPattern { name: _, fields, .. } => {
-            // For pattern=None fields, the binding is implicit (field name = var name).
-            // The lowerer has already allocated VarIds for these in the VarTable.
-            // Search from the END of VarTable to find the most recent (correct scope) VarId,
-            // and skip VarIds already registered in locals to avoid duplicates.
-            // Resolve field types from subject_ty (structural or nominal) so local
-            // valtypes match the actual value layout — falls back to VarTable only
-            // when the record type cannot be resolved.
-            let resolved_fields = extract_record_fields(subject_ty, record_fields, variant_info);
-            let existing_ids: std::collections::HashSet<u32> = locals.iter().map(|(v, _)| v.0).collect();
-            for field in fields {
-                if let Some(pat) = &field.pattern {
-                    scan_pattern(pat, subject_ty, locals, vt, record_fields, variant_info);
-                } else {
-                    // Implicit bind: find VarId by field name, searching from end (most recent scope)
-                    for i in (0..vt.len()).rev() {
-                        let info = vt.get(almide_ir::VarId(i as u32));
-                        if info.name == field.name && !existing_ids.contains(&(i as u32)) {
-                            let field_ty = resolved_fields.iter()
-                                .find(|(n, _)| n == &field.name)
-                                .map(|(_, t)| t.clone())
-                                .unwrap_or_else(|| info.ty.clone());
-                            if let Some(val_type) = values::ty_to_valtype(&field_ty) {
-                                locals.push((almide_ir::VarId(i as u32), val_type));
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Collect all VarId references in an expression.
-fn collect_var_refs(expr: &IrExpr, refs: &mut std::collections::HashSet<VarId>) {
-    struct VarCollector<'a> { refs: &'a mut std::collections::HashSet<VarId> }
-    impl IrVisitor for VarCollector<'_> {
-        fn visit_expr(&mut self, expr: &IrExpr) {
-            if let IrExprKind::Var { id } = &expr.kind { self.refs.insert(*id); }
-            walk_expr(self, expr);
-        }
-        fn visit_stmt(&mut self, stmt: &IrStmt) { walk_stmt(self, stmt); }
-    }
-    VarCollector { refs }.visit_expr(expr);
-}
-
-/// Collect all VarId references in a statement.
-fn collect_stmt_var_refs(stmt: &IrStmt, refs: &mut std::collections::HashSet<VarId>) {
-    struct VarCollector<'a> { refs: &'a mut std::collections::HashSet<VarId> }
-    impl IrVisitor for VarCollector<'_> {
-        fn visit_expr(&mut self, expr: &IrExpr) {
-            if let IrExprKind::Var { id } = &expr.kind { self.refs.insert(*id); }
-            walk_expr(self, expr);
-        }
-        fn visit_stmt(&mut self, stmt: &IrStmt) { walk_stmt(self, stmt); }
-    }
-    VarCollector { refs }.visit_stmt(stmt);
-}
+include!("statements_p2.rs");
+include!("statements_p3.rs");

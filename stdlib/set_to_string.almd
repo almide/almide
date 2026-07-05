@@ -1,0 +1,100 @@
+// set_to_string — SELF-HOSTED `${Set[Int]}` interpolation, byte-matching v0's `set.from_list([3, 1,
+// 2])` (the constructor form, insertion order preserved). The elements come from `set.to_list` (a
+// callable stdlib fn that yields a `List[Int]` in insertion order); the `[...]` body is then rendered
+// inline exactly like `list_to_string` (signed decimals, `, ` separators) and wrapped in
+// `set.from_list(` … `)`. Two passes (measure, fill) keep the alloc exact.
+
+fn __sts_digits(n: Int, acc: Int) -> Int =
+  if n < 10 then acc + 1
+  else __sts_digits(n / 10, acc + 1)
+
+fn __sts_count_neg(n: Int, acc: Int) -> Int =
+  if n > 0 - 10 then acc + 1
+  else __sts_count_neg(n / 10, acc + 1)
+
+fn __sts_int_width(v: Int) -> Int =
+  if v < 0 then __sts_count_neg(v, 0) + 1
+  else __sts_digits(v, 0)
+
+fn __sts_fill_digits(n: Int, pos: Int) -> Int =
+  if n < 10 then {
+    prim.store8(pos, 48 + n)
+    pos + 1
+  } else {
+    let p = __sts_fill_digits(n / 10, pos)
+    prim.store8(p, 48 + (n % 10))
+    p + 1
+  }
+
+fn __sts_fill_neg(n: Int, pos: Int) -> Int =
+  if n > 0 - 10 then {
+    prim.store8(pos, 48 + (0 - n))
+    pos + 1
+  } else {
+    let p = __sts_fill_neg(n / 10, pos)
+    prim.store8(p, 48 + (0 - (n % 10)))
+    p + 1
+  }
+
+fn __sts_fill_int(v: Int, pos: Int) -> Int =
+  if v < 0 then {
+    prim.store8(pos, 45)               // '-'
+    __sts_fill_neg(v, pos + 1)
+  } else __sts_fill_digits(v, pos)
+
+fn __sts_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let v = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __sts_body_len(addr, count, i + 1, acc + sep + __sts_int_width(v))
+  }
+
+fn __sts_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)             // ','
+      prim.store8(pos + 1, 32)         // ' '
+      pos + 2
+    } else pos
+    let v = prim.load64(addr + i * 8)
+    let pos2 = __sts_fill_int(v, pos1)
+    __sts_fill_body(addr, count, i + 1, pos2)
+  }
+
+// Write the 15-byte prefix "set.from_list([" at `base`.
+fn __sts_prefix(base: Int) -> Int = {
+  prim.store8(base, 115)               // 's'
+  prim.store8(base + 1, 101)           // 'e'
+  prim.store8(base + 2, 116)           // 't'
+  prim.store8(base + 3, 46)            // '.'
+  prim.store8(base + 4, 102)           // 'f'
+  prim.store8(base + 5, 114)           // 'r'
+  prim.store8(base + 6, 111)           // 'o'
+  prim.store8(base + 7, 109)           // 'm'
+  prim.store8(base + 8, 95)            // '_'
+  prim.store8(base + 9, 108)           // 'l'
+  prim.store8(base + 10, 105)          // 'i'
+  prim.store8(base + 11, 115)          // 's'
+  prim.store8(base + 12, 116)          // 't'
+  prim.store8(base + 13, 40)           // '('
+  prim.store8(base + 14, 91)           // '['
+  base + 15
+}
+
+fn set_to_string(s: Set[Int]) -> String = {
+  let xs = set.to_list(s)
+  let h = prim.handle(xs)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __sts_body_len(addr, count, 0, 0)
+  let total = 17 + body                // "set.from_list([" (15) + body + "])" (2)
+  let buf = prim.alloc_str(total)
+  let base = prim.handle(buf) + 12
+  let start = __sts_prefix(base)
+  let after = __sts_fill_body(addr, count, 0, start)
+  prim.store8(after, 93)               // ']'
+  prim.store8(after + 1, 41)           // ')'
+  buf
+}

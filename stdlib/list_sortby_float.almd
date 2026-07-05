@@ -1,0 +1,83 @@
+// list_sortby_float — SELF-HOSTED `list.sort_by` with a FLOAT key, ordered by IEEE-754 totalOrder
+// (f64::total_cmp; see list_sort_float for the bit-key). Like list_sortby (a stable insertion sort
+// by a cached key, the key fn called EXACTLY ONCE per element), but the cached key is the f64 key's
+// MONOTONE totalOrder transform — so the insertion sort's plain signed `>` IS the totalOrder swap
+// test (v0 pre-transforms the same way). The element slots are opaque i64 (any element type, e.g.
+// a List[R] of records); only the KEY is Float. Scratch key list owned + dropped; result owned.
+
+fn __ftotal_sb(b: Int) -> Int = {
+  let s = prim.bshr(b, 63)
+  let m = prim.bshr_u(s, 1)
+  prim.bxor(b, m)
+}
+
+fn __sbf_init(bh: Int, sh: Int, kh: Int, f: (Int) -> Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    let raw = f(v)
+    let k = __ftotal_sb(raw)
+    prim.store64(bh + 12 + i * 8, v)
+    prim.store64(kh + 12 + i * 8, k)
+    __sbf_init(bh, sh, kh, f, n, i + 1)
+  }
+
+fn __sbf_shift(bh: Int, kh: Int, j: Int, k: Int) -> Int =
+  if j <= 0 then j
+  else {
+    let kp = prim.load64(kh + 12 + (j - 1) * 8)
+    if kp > k then {
+      let vp = prim.load64(bh + 12 + (j - 1) * 8)
+      prim.store64(bh + 12 + j * 8, vp)
+      prim.store64(kh + 12 + j * 8, kp)
+      __sbf_shift(bh, kh, j - 1, k)
+    } else {
+      j
+    }
+  }
+
+fn __sbf_insert(bh: Int, kh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(bh + 12 + i * 8)
+    let k = prim.load64(kh + 12 + i * 8)
+    let pos = __sbf_shift(bh, kh, i, k)
+    prim.store64(bh + 12 + pos * 8, v)
+    prim.store64(kh + 12 + pos * 8, k)
+    __sbf_insert(bh, kh, n, i + 1)
+  }
+
+fn list_sort_by_float(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list(n)
+  let keys = prim.alloc_list(n)
+  let _a = __sbf_init(prim.handle(buf), prim.handle(xs), prim.handle(keys), f, n, 0)
+  let _b = __sbf_insert(prim.handle(buf), prim.handle(keys), n, 0)
+  buf
+}
+
+// HEAP-element variant (`sort_by(rs, (r) => r.v)` over a List[R] of records):
+// identical sort, but each element handle copied into the result is ACQUIRED
+// (rc_inc) — the result list CO-OWNS every element, so both lists' recursive
+// drops are balanced (the raw-copy variant double-freed: rc_dec trap in
+// __drop_list_R, the list_float_total_order teardown).
+fn __sbfr_init(bh: Int, sh: Int, kh: Int, f: (Int) -> Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    let raw = f(v)
+    let k = __ftotal_sb(raw)
+    prim.rc_inc(v)
+    prim.store64(bh + 12 + i * 8, v)
+    prim.store64(kh + 12 + i * 8, k)
+    __sbfr_init(bh, sh, kh, f, n, i + 1)
+  }
+
+fn list_sort_by_float_rc(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list(n)
+  let keys = prim.alloc_list(n)
+  let _a = __sbfr_init(prim.handle(buf), prim.handle(xs), prim.handle(keys), f, n, 0)
+  let _b = __sbf_insert(prim.handle(buf), prim.handle(keys), n, 0)
+  buf
+}

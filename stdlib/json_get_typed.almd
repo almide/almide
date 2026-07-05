@@ -1,0 +1,74 @@
+// json_get_typed — SELF-HOSTED key-based typed `json.get_<T>(j, key)` over `value.get`
+// (Result[Value, String], wasm-linked) composed with the per-type `value.as_<T>` accessor
+// (Result[T, String], wasm-linked): the field is fetched, then coerced to the requested
+// type; a missing key OR a type mismatch yields None. Byte-identical to the
+// `almide_json_get_<T>` intrinsics across all cases (absent key, present-but-wrong-type,
+// present-matching, null), so the v1 trust spine lowers the ubiquitous
+// `json.get_string(v,k) ?? ""` / `json.get_bool(v,k) ?? false` / `json.get_array(v,k) ?? []`
+// accessor family through the PROVEN `value.get` + `value.as_*` + Option-ctor path with NO
+// hand-written wasm runtime to drift from the native oracle.
+//
+// SHAPE: each accessor is a single `match value.get(...)` whose Ok arm tail-calls a flat
+// `Result[T] -> Option[T]` adapter (`__r2o*`) — the minimal-body form the materialized-Option
+// lowering admits (brick #46: a heap Option-returning named-call tail), exactly like
+// json_string's `__jas_some` helper split.
+
+fn __r2o_str(r: Result[String, String]) -> Option[String] =
+  match r {
+    ok(s) => Some(s)
+    err(_) => None
+  }
+
+fn __r2o_int(r: Result[Int, String]) -> Option[Int] =
+  match r {
+    ok(n) => Some(n)
+    err(_) => None
+  }
+
+fn __r2o_float(r: Result[Float, String]) -> Option[Float] =
+  match r {
+    ok(f) => Some(f)
+    err(_) => None
+  }
+
+fn __r2o_bool(r: Result[Bool, String]) -> Option[Bool] =
+  match r {
+    ok(b) => Some(b)
+    err(_) => None
+  }
+
+fn __r2o_arr(r: Result[List[Value], String]) -> Option[List[Value]] =
+  match r {
+    ok(a) => Some(a)
+    err(_) => None
+  }
+
+fn json_get_string(j: Value, key: String) -> Option[String] =
+  match value.get(j, key) {
+    ok(v) => __r2o_str(value.as_string(v))
+    err(_) => None
+  }
+
+fn json_get_int(j: Value, key: String) -> Option[Int] =
+  match value.get(j, key) {
+    ok(v) => __r2o_int(value.as_int(v))
+    err(_) => None
+  }
+
+fn json_get_float(j: Value, key: String) -> Option[Float] =
+  match value.get(j, key) {
+    ok(v) => __r2o_float(value.as_float(v))
+    err(_) => None
+  }
+
+fn json_get_bool(j: Value, key: String) -> Option[Bool] =
+  match value.get(j, key) {
+    ok(v) => __r2o_bool(value.as_bool(v))
+    err(_) => None
+  }
+
+fn json_get_array(j: Value, key: String) -> Option[List[Value]] =
+  match value.get(j, key) {
+    ok(v) => __r2o_arr(value.as_array(v))
+    err(_) => None
+  }

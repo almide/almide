@@ -1,0 +1,53 @@
+// int_checked — SELF-HOSTED `int.to_{int,uint}{8,16,32,64}_checked` for v1: a range-checked narrow
+// returning `Some(n)` when `n` fits the target's N-bit range, `None` otherwise. v0 returns
+// `Some(int.to_intN(n))`, but the conversion is reached ONLY for in-range `n`, where
+// `int.toIntN(n) == n` exactly — so `Some(n)` is byte-identical. Pure scalar Option[Int]
+// (Int8/UInt8/… are i64-repr) over the materialized-Option machinery; cert-untouching. The `or` of
+// the two bounds is written as a nested `if` (v1 does not lower `or`); `n` is a scalar copy.
+
+fn int_to_int8_checked(n: Int) -> Option[Int] =
+  if n < -128 then None
+  else if n > 127 then None
+  else Some(n)
+
+fn int_to_int16_checked(n: Int) -> Option[Int] =
+  if n < -32768 then None
+  else if n > 32767 then None
+  else Some(n)
+
+fn int_to_int32_checked(n: Int) -> Option[Int] =
+  if n < -2147483648 then None
+  else if n > 2147483647 then None
+  else Some(n)
+
+fn int_to_uint8_checked(n: Int) -> Option[Int] =
+  if n < 0 then None
+  else if n > 255 then None
+  else Some(n)
+
+fn int_to_uint16_checked(n: Int) -> Option[Int] =
+  if n < 0 then None
+  else if n > 65535 then None
+  else Some(n)
+
+fn int_to_uint32_checked(n: Int) -> Option[Int] =
+  if n < 0 then None
+  else if n > 4294967295 then None
+  else Some(n)
+
+// Only the sign bit can fail for Int → UInt64 (|Int64| ≤ UInt64::MAX), so just reject negatives.
+fn int_to_uint64_checked(n: Int) -> Option[Int] =
+  if n < 0 then None
+  else Some(n)
+
+// int.to_float32_checked(n) -> Some(n as f32) iff it round-trips exactly (|n| <= 2^24), else None.
+// The conversions are INLINED as the prim floor (i2f32 = `n as f32`, f32_2f = widen to f64, f2i =
+// `as i64`) — avoids any cross/intra-file link. Flat-arm materialized Option[Float32].
+fn int_to_float32_checked(n: Int) -> Option[Float32] = {
+  let f = prim.i2f32(n)
+  let back = prim.f32_2f(f)
+  let r = prim.f2i(back)
+  let eq = r == n
+  if eq then Some(f)
+  else None
+}

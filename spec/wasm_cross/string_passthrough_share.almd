@@ -1,0 +1,29 @@
+// @contract: C-121
+// String runtime fns with an input-pass-through fast path — `string.replace`
+// (no occurrence), `string.replace_first` (miss), `string.pad_start` /
+// `string.pad_end` (width already satisfied), `string.capitalize` (empty input)
+// — must hand the caller its OWN reference (+1). The WASM emitter previously
+// returned the input string borrowed, so every no-match link in a pipe chain
+// added an extra Dec of the SAME buffer: a 3-link no-match `string.replace`
+// chain (svg escape_attr) under-flowed the refcount and trapped __rc_dec.
+
+fn escape(s: String) -> String =
+  s |> string.replace("&", "&amp;")
+    |> string.replace("<", "&lt;")
+    |> string.replace(">", "&gt;")
+    |> string.replace("\"", "&quot;")
+
+fn main() -> Unit = {
+  // 4-link chain, all no-match: every link passes the input through.
+  println(escape("plain"))
+  // Mixed: one hit, three no-match.
+  println(escape("a<b"))
+  // replace_first miss.
+  println(string.replace_first("hello", "zz", "yy"))
+  // pad_start / pad_end with width already satisfied.
+  println(string.pad_start("wide", 2, " "))
+  println(string.pad_end("wide", 3, " "))
+  // capitalize of the empty string (pass-through) and a normal one.
+  println("[${string.capitalize("")}]")
+  println(string.capitalize("ok"))
+}

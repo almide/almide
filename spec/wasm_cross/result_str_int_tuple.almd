@@ -1,0 +1,21 @@
+// @contract: C-107
+// Result[(String, Int), String] producer + match-consumer (toml parse_key_part's `ok((slice, pos))`
+// shape). The Ok payload is a (String heap + Int scalar) tuple: producing `ok((s, n))` (tail) and
+// match-consuming it must drop the wrapper + the tuple's String recursively (Op::DropResultStrInt),
+// not a flat DropListStr that would leak the String. Leak-free at scale (the loop) + byte-matches v0.
+fn parse_kv(p: Int) -> Result[(String, Int), String] =
+  ok(("key", p + 1))
+
+fn always_err(p: Int) -> Result[(String, Int), String] =
+  err("bad")
+
+effect fn main() -> Unit = {
+  match parse_kv(40) {
+    ok(t) => { let (s, n) = t  println(s + ":" + int.to_string(n)) },
+    err(e) => println("E:" + e)
+  }
+  match always_err(0) {
+    ok(t) => { let (s, n) = t  println(s) },
+    err(e) => println("E:" + e)
+  }
+}

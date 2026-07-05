@@ -1,0 +1,25 @@
+// @contract: C-104
+// The EFFECT-fn collect_seq/collect_map shape (yaml): a tail-self-recursive effect fn returning a
+// (Value, Int) TUPLE, accumulating a List[Value] via `items + [val]`, where each step DESTRUCTURES an
+// effect-fn `!` result (`let (val, next) = dash_item(..)!`) and the base builds `value.array(items)`.
+// Exercises the whole 5-brick effect-fn tuple-result TCO (tco_empty_for Value/Tuple + the Value-tuple
+// result-accumulator routing + the (Value,scalar) construct/destructure + the recursive
+// __drop_value_tuple). Byte-matches v0 (`3` then `3`).
+local effect fn dash_item(lines: List[String], pos: Int) -> (Value, Int) =
+  (value.str(list.get(lines, pos) ?? ""), pos + 1)
+
+local effect fn cs(lines: List[String], pos: Int, items: List[Value]) -> (Value, Int) =
+  if pos >= list.len(lines) then (value.array(items), pos)
+  else {
+    let (val, next) = dash_item(lines, pos)!
+    cs(lines, next, items + [val])!
+  }
+
+effect fn main() -> Unit = {
+  let (v, n) = cs(["a", "b", "c"], 0, [])!
+  println(int.to_string(n))
+  match value.as_array(v) {
+    ok(arr) => println(int.to_string(list.len(arr))),
+    err(_) => println("err"),
+  }
+}

@@ -1,0 +1,31 @@
+// string_repeat — the SELF-HOSTED `string.repeat(s, n)` for v1, written in ALMIDE over
+// the prim floor + the runtime-sized owned alloc `prim.alloc_str`. The v1 lowering maps
+// `string.repeat(s, n)` to `(call $string.repeat s n)`; this is that callee's body. The
+// runtime linker auto-includes it (+ helpers) when a program calls string.repeat.
+//
+// Allocates a new String of `len(s) * n` bytes (an owned rc=1 block) and copies s's
+// bytes n times into it. Byte-level — encoding-agnostic, exactly like v0's `s.repeat(n)`.
+
+// Copy `len` bytes from `src` to `dst`; returns the address just past the last byte.
+fn __str_copy(src: Int, dst: Int, len: Int) -> Int =
+  if len <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __str_copy(src + 1, dst + 1, len - 1)
+  }
+
+// Write `count` copies of the `slen`-byte block at `src` starting at `dst`.
+fn __str_repeat(src: Int, dst: Int, slen: Int, count: Int) -> Int =
+  if count <= 0 then dst
+  else {
+    let next = __str_copy(src, dst, slen)
+    __str_repeat(src, next, slen, count - 1)
+  }
+
+fn string_repeat(s: String, n: Int) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)              // byte length at LIST_LEN_OFFSET(4)
+  let buf = prim.alloc_str(slen * n)         // owned rc=1 String, slen*n bytes
+  let _e = __str_repeat(h + 12, prim.handle(buf) + 12, slen, n)
+  buf
+}

@@ -1,0 +1,32 @@
+// string_len — the SELF-HOSTED `string.len` for v1, written in ALMIDE over the `prim`
+// floor. The v1 lowering maps the `string.len(s)` stdlib call to `(call $string.len s)`;
+// this is that callee's body — compiled through v1's own pipeline, NO hand-written wasm.
+// The runtime linker auto-includes it (+ its helper) when a program calls string.len.
+//
+// v0's string.len returns the CODEPOINT count (`s.chars().count()`), NOT the byte
+// length, so this decodes UTF-8: every byte that is NOT a continuation byte
+// (10xxxxxx, i.e. `byte / 64 == 2`) starts a new codepoint. Reads only — `s` is
+// borrowed, no allocation.
+
+// Count codepoint-start bytes in [addr, end).
+fn __strlen_count(addr: Int, end: Int, n: Int) -> Int =
+  if addr >= end then n
+  else {
+    let b = prim.load8(addr)
+    let step = if b / 64 == 2 then 0 else 1   // continuation byte (128..191) → not a start
+    __strlen_count(addr + 1, end, n + step)
+  }
+
+fn string_len(s: String) -> Int = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)              // byte length at LIST_LEN_OFFSET(4)
+  __strlen_count(h + 12, h + 12 + blen, 0)   // data at LIST_HEADER(12)
+}
+
+// string.length — an explicit-name alias of string.len (both map to almide_rt_string_len, the
+// codepoint count); reuses the same UTF-8 codepoint-start counter.
+fn string_length(s: String) -> Int = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  __strlen_count(h + 12, h + 12 + blen, 0)
+}

@@ -1,0 +1,11 @@
+// fs_read_text — SELF-HOSTED `fs.read_text(path)` over the WASI file-read floor
+// (prim.read_text_file), the v1 trust-spine realization of the effectful `fs.read_text`.
+// Opens the file at `path` and reads its bytes, returning `Ok(content)` on success or
+// `Err(message)` on a path_open error, matching native `fs.read_text`
+// (std::fs::read_to_string). The prim packages the `path_open` + `fd_read` WASI sequence and
+// the `Result[String, String]` construction (the cap-as-tag block — payload @12, Ok/Err tag
+// @16); the result is a fresh OWNED Result whose one payload String is dropped at scope end
+// (DropListStr — no leak). Because this body reaches prim.read_text_file, its cap_witness
+// carries Capability::FsRead — so a caller is caps-verified ONLY if it declares FsRead (an
+// `effect fn`); a pure `fn` reaching it is a frontend error AND would REJECT at the gate.
+effect fn fs_read_text(path: String) -> Result[String, String] = prim.read_text_file(path)

@@ -1,0 +1,41 @@
+// option_collect — SELF-HOSTED `option.collect`: List[Option[Int]] → Option[List[Int]], Some([all
+// values]) when EVERY element is Some, else None (first None short-circuits). Two passes over the
+// List[Option] (each slot @12+i*8 is an Option HANDLE; its len @4 is the Some/None tag, value @12):
+// pass 1 checks all-Some, pass 2 fills a fresh List[Int]. `xs` borrowed; the List[Int] is freshly
+// owned (Option[List[Int]] drops via DropListStr → the flat List[Int] freed in one rc_dec). Int only.
+
+fn __ocol_all(xh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 1
+  else {
+    let off = 12 + i * 8
+    let addr = xh + off
+    let opt_h = prim.load64(addr)
+    let olen = prim.load32(opt_h + 4)
+    if olen == 0 then 0
+    else __ocol_all(xh, n, i + 1)
+  }
+
+fn __ocol_fill(xh: Int, dh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let off = 12 + i * 8
+    let addr = xh + off
+    let opt_h = prim.load64(addr)
+    let v = prim.load64(opt_h + 12)
+    prim.store64(dh + off, v)
+    __ocol_fill(xh, dh, n, i + 1)
+  }
+
+fn __ocol_some(xh: Int, n: Int) -> Option[List[Int]] = {
+  let lst = prim.alloc_list(n)
+  let dh = prim.handle(lst)
+  let _f = __ocol_fill(xh, dh, n, 0)
+  Some(lst)
+}
+
+fn option_collect(xs: List[Option[Int]]) -> Option[List[Int]] = {
+  let xh = prim.handle(xs)
+  let n = prim.load32(xh + 4)
+  let all = __ocol_all(xh, n, 0)
+  if all == 0 then None else __ocol_some(xh, n)
+}

@@ -1,0 +1,564 @@
+// result_to_string — SELF-HOSTED `${Result[T, E]}` interpolation, byte-matching v0's `ok(<T>)` /
+// `err(<E>)`. Two element pairings the trust-spine self-hosts (routed per (T,E) like the List family):
+//   result.to_string     : Result[Int, String]    — ok(<decimal>)   / err("<quoted>")
+//   result.to_string_ss  : Result[String, String]  — ok("<quoted>")  / err("<quoted>")
+// A String payload is quoted+escaped exactly as a `List[String]` element (v0's almide_repr_str). The
+// escape helpers mirror `list_to_string_s`; both variants live in ONE file so they share them.
+
+fn __rts_is_escaped(b: Int) -> Bool =
+  if b == 92 then true
+  else if b == 34 then true
+  else if b == 10 then true
+  else if b == 13 then true
+  else if b == 9 then true
+  else false
+
+fn __rts_esc_len(src: Int, slen: Int, i: Int, acc: Int) -> Int =
+  if i >= slen then acc
+  else {
+    let b = prim.load8(src + i)
+    let w = if __rts_is_escaped(b) then 2 else 1
+    __rts_esc_len(src, slen, i + 1, acc + w)
+  }
+
+fn __rts_esc_char(b: Int) -> Int =
+  if b == 10 then 110
+  else if b == 13 then 114
+  else if b == 9 then 116
+  else b
+
+fn __rts_fill_esc(src: Int, slen: Int, i: Int, pos: Int) -> Int =
+  if i >= slen then pos
+  else {
+    let b = prim.load8(src + i)
+    let pos1 = if __rts_is_escaped(b) then {
+      prim.store8(pos, 92)
+      prim.store8(pos + 1, __rts_esc_char(b))
+      pos + 2
+    } else {
+      prim.store8(pos, b)
+      pos + 1
+    }
+    __rts_fill_esc(src, slen, i + 1, pos1)
+  }
+
+// Build `err("<escaped e>")`.
+fn __rts_err(e: String) -> String = {
+  let h = prim.handle(e)
+  let slen = prim.load32(h + 4)
+  let src = h + 12
+  let body = __rts_esc_len(src, slen, 0, 0)
+  let buf = prim.alloc_str(7 + body)   // "err(" (4) + '"' + body + '"' + ')'
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 101)               // 'e'
+  prim.store8(base + 1, 114)           // 'r'
+  prim.store8(base + 2, 114)           // 'r'
+  prim.store8(base + 3, 40)            // '('
+  prim.store8(base + 4, 34)            // '"'
+  let mid = __rts_fill_esc(src, slen, 0, base + 5)
+  prim.store8(mid, 34)                 // '"'
+  prim.store8(mid + 1, 41)             // ')'
+  buf
+}
+
+// Build `ok("<escaped v>")`.
+fn __rts_ok_s(v: String) -> String = {
+  let h = prim.handle(v)
+  let slen = prim.load32(h + 4)
+  let src = h + 12
+  let body = __rts_esc_len(src, slen, 0, 0)
+  let buf = prim.alloc_str(6 + body)   // "ok(" (3) + '"' + body + '"' + ')'
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 111)               // 'o'
+  prim.store8(base + 1, 107)           // 'k'
+  prim.store8(base + 2, 40)            // '('
+  prim.store8(base + 3, 34)            // '"'
+  let mid = __rts_fill_esc(src, slen, 0, base + 4)
+  prim.store8(mid, 34)                 // '"'
+  prim.store8(mid + 1, 41)             // ')'
+  buf
+}
+
+// `ok([1, 2, 3])` over a List[Int] Ok payload — the inner list renders like `${list}` (signed
+// decimals, `, ` joined), wrapped in `ok(` … `)`. The int/list helpers mirror `list_to_string`.
+fn __rts_digits(n: Int, acc: Int) -> Int =
+  if n < 10 then acc + 1
+  else __rts_digits(n / 10, acc + 1)
+
+// Negative path WITHOUT negating (i64::MIN safe, #660): count digits of n <= 0 directly.
+fn __rts_count_neg(n: Int, acc: Int) -> Int =
+  if n > 0 - 10 then acc + 1
+  else __rts_count_neg(n / 10, acc + 1)
+
+fn __rts_int_width(v: Int) -> Int =
+  if v < 0 then __rts_count_neg(v, 0) + 1
+  else __rts_digits(v, 0)
+
+fn __rts_fill_digits(n: Int, pos: Int) -> Int =
+  if n < 10 then {
+    prim.store8(pos, 48 + n)
+    pos + 1
+  } else {
+    let p = __rts_fill_digits(n / 10, pos)
+    prim.store8(p, 48 + (n % 10))
+    p + 1
+  }
+
+// Fill the digits of n <= 0 WITHOUT negating: magnitude digit = -(n % 10) ∈ [0, 9].
+fn __rts_fill_neg(n: Int, pos: Int) -> Int =
+  if n > 0 - 10 then {
+    prim.store8(pos, 48 + (0 - n))
+    pos + 1
+  } else {
+    let p = __rts_fill_neg(n / 10, pos)
+    prim.store8(p, 48 + (0 - (n % 10)))
+    p + 1
+  }
+
+fn __rts_fill_int(v: Int, pos: Int) -> Int =
+  if v < 0 then {
+    prim.store8(pos, 45)
+    __rts_fill_neg(v, pos + 1)
+  } else __rts_fill_digits(v, pos)
+
+fn __rts_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let v = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __rts_body_len(addr, count, i + 1, acc + sep + __rts_int_width(v))
+  }
+
+fn __rts_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let v = prim.load64(addr + i * 8)
+    let pos2 = __rts_fill_int(v, pos1)
+    __rts_fill_body(addr, count, i + 1, pos2)
+  }
+
+fn __rts_ok_li(v: List[Int]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __rts_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(6 + body)     // "ok([" (4) + body + "])" (2)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 111)                 // 'o'
+  prim.store8(base + 1, 107)             // 'k'
+  prim.store8(base + 2, 40)              // '('
+  prim.store8(base + 3, 91)              // '['
+  let after = __rts_fill_body(addr, count, 0, base + 4)
+  prim.store8(after, 93)                 // ']'
+  prim.store8(after + 1, 41)             // ')'
+  buf
+}
+
+fn result_to_string(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok(" + int.to_string(v) + ")",
+  err(e) => __rts_err(e),
+}
+
+fn result_to_string_li(r: Result[List[Int], String]) -> String = match r {
+  ok(v) => __rts_ok_li(v),
+  err(e) => __rts_err(e),
+}
+
+// `ok(["a", "b"])` over a List[String] Ok payload — each element quoted+escaped like a `${list}`
+// element (reusing the `__rts_esc_*` string helpers above), `, ` joined, wrapped in `ok([` … `])`.
+fn __rts_ls_elem_width(elem: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  2 + __rts_esc_len(elem + 12, slen, 0, 0)
+}
+
+fn __rts_ls_fill_elem(elem: Int, pos: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  prim.store8(pos, 34)                 // opening '"'
+  let mid = __rts_fill_esc(elem + 12, slen, 0, pos + 1)
+  prim.store8(mid, 34)                 // closing '"'
+  mid + 1
+}
+
+fn __rts_ls_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let elem = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __rts_ls_body_len(addr, count, i + 1, acc + sep + __rts_ls_elem_width(elem))
+  }
+
+fn __rts_ls_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)             // ','
+      prim.store8(pos + 1, 32)         // ' '
+      pos + 2
+    } else pos
+    let elem = prim.load64(addr + i * 8)
+    let pos2 = __rts_ls_fill_elem(elem, pos1)
+    __rts_ls_fill_body(addr, count, i + 1, pos2)
+  }
+
+fn __rts_ok_ls(v: List[String]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __rts_ls_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(6 + body)   // "ok([" (4) + body + "])" (2)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 111)               // 'o'
+  prim.store8(base + 1, 107)           // 'k'
+  prim.store8(base + 2, 40)            // '('
+  prim.store8(base + 3, 91)            // '['
+  let after = __rts_ls_fill_body(addr, count, 0, base + 4)
+  prim.store8(after, 93)               // ']'
+  prim.store8(after + 1, 41)           // ')'
+  buf
+}
+
+fn result_to_string_ls(r: Result[List[String], String]) -> String = match r {
+  ok(v) => __rts_ok_ls(v),
+  err(e) => __rts_err(e),
+}
+
+// A BARE quoted+escaped string `"<escaped>"` (no ok/err wrapper) — for composing nested reprs by
+// concatenation (`"ok(some(" + __rts_quote(w) + "))"`).
+fn __rts_quote(s: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let src = h + 12
+  let body = __rts_esc_len(src, slen, 0, 0)
+  let buf = prim.alloc_str(2 + body)   // '"' + body + '"'
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 34)                // '"'
+  let mid = __rts_fill_esc(src, slen, 0, base + 1)
+  prim.store8(mid, 34)                 // '"'
+  buf
+}
+
+// `ok(true)` / `ok(false)` over a Bool Ok payload (no allocation for the payload — the two forms are
+// static words).
+fn result_to_string_b(r: Result[Bool, String]) -> String = match r {
+  ok(v) => if v then "ok(true)" else "ok(false)",
+  err(e) => __rts_err(e),
+}
+
+// `ok(some(5))` / `ok(none)` / `err("<quoted>")` over `Result[Option[Int], String]` — a high-level
+// nested match; the inner Int via int.to_string, the Err quoted.
+fn result_to_string_oi(r: Result[Option[Int], String]) -> String = match r {
+  ok(o) => match o {
+    some(w) => "ok(some(" + int.to_string(w) + "))",
+    none => "ok(none)",
+  },
+  err(e) => __rts_err(e),
+}
+
+// `ok(some("a"))` / `ok(none)` / `err("<quoted>")` over `Result[Option[String], String]` — the inner
+// String quoted+escaped via __rts_quote.
+fn result_to_string_os(r: Result[Option[String], String]) -> String = match r {
+  ok(o) => match o {
+    some(w) => "ok(some(" + __rts_quote(w) + "))",
+    none => "ok(none)",
+  },
+  err(e) => __rts_err(e),
+}
+
+// `ok(ok(5))` / `ok(err("<quoted>"))` / `err("<quoted>")` over `Result[Result[Int, String], String]`.
+fn result_to_string_ri(r: Result[Result[Int, String], String]) -> String = match r {
+  ok(inner) => match inner {
+    ok(w) => "ok(ok(" + int.to_string(w) + "))",
+    err(ie) => "ok(" + __rts_err(ie) + ")",
+  },
+  err(e) => __rts_err(e),
+}
+
+// `ok([true, false])` over a List[Bool] Ok payload — the two Bool forms are static words (`true`=4,
+// `false`=5), `, ` joined, wrapped in `ok([` … `])`.
+fn __rts_bool_width(b: Int) -> Int = if b == 0 then 5 else 4
+
+fn __rts_fill_bool(b: Int, pos: Int) -> Int =
+  if b == 0 then {
+    prim.store8(pos, 102)              // 'f'
+    prim.store8(pos + 1, 97)           // 'a'
+    prim.store8(pos + 2, 108)          // 'l'
+    prim.store8(pos + 3, 115)          // 's'
+    prim.store8(pos + 4, 101)          // 'e'
+    pos + 5
+  } else {
+    prim.store8(pos, 116)              // 't'
+    prim.store8(pos + 1, 114)          // 'r'
+    prim.store8(pos + 2, 117)          // 'u'
+    prim.store8(pos + 3, 101)          // 'e'
+    pos + 4
+  }
+
+fn __rts_lb_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let b = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __rts_lb_body_len(addr, count, i + 1, acc + sep + __rts_bool_width(b))
+  }
+
+fn __rts_lb_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)             // ','
+      prim.store8(pos + 1, 32)         // ' '
+      pos + 2
+    } else pos
+    let b = prim.load64(addr + i * 8)
+    let pos2 = __rts_fill_bool(b, pos1)
+    __rts_lb_fill_body(addr, count, i + 1, pos2)
+  }
+
+fn __rts_ok_lb(v: List[Bool]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __rts_lb_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(6 + body)   // "ok([" (4) + body + "])" (2)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 111)               // 'o'
+  prim.store8(base + 1, 107)           // 'k'
+  prim.store8(base + 2, 40)            // '('
+  prim.store8(base + 3, 91)            // '['
+  let after = __rts_lb_fill_body(addr, count, 0, base + 4)
+  prim.store8(after, 93)               // ']'
+  prim.store8(after + 1, 41)           // ')'
+  buf
+}
+
+fn result_to_string_lb(r: Result[List[Bool], String]) -> String = match r {
+  ok(v) => __rts_ok_lb(v),
+  err(e) => __rts_err(e),
+}
+
+// `ok(3.5)` / `ok(4)` / `err("<quoted>")` over `Result[Float, String]`. The Ok Float renders like a
+// `${float}` element: `float.to_string` (Dragon4) with an integer-valued trailing ".0" STRIPPED
+// (mirrors option.to_string_f / list_to_string_f). `float.to_string` is a callable intrinsic.
+fn __rts_ends_dot0(src: Int, n: Int) -> Bool =
+  if n < 2 then false
+  else if prim.load8(src + n - 2) != 46 then false
+  else prim.load8(src + n - 1) == 48
+
+fn __rts_bcopy(src: Int, dst: Int, n: Int) -> Int =
+  if n <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __rts_bcopy(src + 1, dst + 1, n - 1)
+  }
+
+fn __rts_ok_float(v: Float) -> String = {
+  let s = float.to_string(v)
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let w = if __rts_ends_dot0(sh + 12, n) then n - 2 else n
+  let buf = prim.alloc_str(4 + w)      // "ok(" (3) + w + ")" (1)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 111)               // 'o'
+  prim.store8(base + 1, 107)           // 'k'
+  prim.store8(base + 2, 40)            // '('
+  let after = __rts_bcopy(sh + 12, base + 3, w)
+  prim.store8(after, 41)               // ')'
+  buf
+}
+
+fn result_to_string_f(r: Result[Float, String]) -> String = match r {
+  ok(v) => __rts_ok_float(v),
+  err(e) => __rts_err(e),
+}
+
+// `ok(some([1, 2]))` / `ok(none)` / `err("<quoted>")` over `Result[Option[List[Int]], String]` — the
+// inner Option[List[Int]] matched, its list rendered as a BARE `[…]` via the shared int helpers.
+fn __rts_intlist_bare(v: List[Int]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __rts_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(2 + body)   // "[" + body + "]"
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 91)                // '['
+  let after = __rts_fill_body(addr, count, 0, base + 1)
+  prim.store8(after, 93)               // ']'
+  buf
+}
+
+fn result_to_string_oli(r: Result[Option[List[Int]], String]) -> String = match r {
+  ok(o) => match o {
+    some(v) => "ok(some(" + __rts_intlist_bare(v) + "))",
+    none => "ok(none)",
+  },
+  err(e) => __rts_err(e),
+}
+
+// `ok([1.5, 100])` over a List[Float] Ok payload — each element `float.to_string` with a trailing ".0"
+// stripped (mirrors list_to_string_f), `, ` joined, wrapped in `ok([` … `])`. Slots hold f64 BITS
+// (prim.load64 → prim.ffrombits). Reuses __rts_ends_dot0 / __rts_bcopy.
+fn __rts_lf_elem_width(bits: Int) -> Int = {
+  let x = prim.ffrombits(bits)
+  let s = float.to_string(x)
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  if __rts_ends_dot0(sh + 12, n) then n - 2 else n
+}
+
+fn __rts_lf_fill_elem(bits: Int, pos: Int) -> Int = {
+  let x = prim.ffrombits(bits)
+  let s = float.to_string(x)
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let w = if __rts_ends_dot0(sh + 12, n) then n - 2 else n
+  __rts_bcopy(sh + 12, pos, w)
+}
+
+fn __rts_lf_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let bits = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __rts_lf_body_len(addr, count, i + 1, acc + sep + __rts_lf_elem_width(bits))
+  }
+
+fn __rts_lf_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let bits = prim.load64(addr + i * 8)
+    let pos2 = __rts_lf_fill_elem(bits, pos1)
+    __rts_lf_fill_body(addr, count, i + 1, pos2)
+  }
+
+fn __rts_ok_lf(v: List[Float]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __rts_lf_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(6 + body)   // "ok([" (4) + body + "])" (2)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 111)               // 'o'
+  prim.store8(base + 1, 107)           // 'k'
+  prim.store8(base + 2, 40)            // '('
+  prim.store8(base + 3, 91)            // '['
+  let after = __rts_lf_fill_body(addr, count, 0, base + 4)
+  prim.store8(after, 93)               // ']'
+  prim.store8(after + 1, 41)           // ')'
+  buf
+}
+
+fn result_to_string_lf(r: Result[List[Float], String]) -> String = match r {
+  ok(v) => __rts_ok_lf(v),
+  err(e) => __rts_err(e),
+}
+
+// A BARE `["a", "b"]` string-list (reuses the __rts_ls_* string-element helpers) — for composing
+// `ok(some(["a", "b"]))`.
+fn __rts_strlist_bare(v: List[String]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __rts_ls_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(2 + body)   // "[" + body + "]"
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 91)                // '['
+  let after = __rts_ls_fill_body(addr, count, 0, base + 1)
+  prim.store8(after, 93)               // ']'
+  buf
+}
+
+// `ok(some(["a", "b"]))` / `ok(none)` / `err("<quoted>")` over `Result[Option[List[String]], String]`.
+fn result_to_string_osl(r: Result[Option[List[String]], String]) -> String = match r {
+  ok(o) => match o {
+    some(v) => "ok(some(" + __rts_strlist_bare(v) + "))",
+    none => "ok(none)",
+  },
+  err(e) => __rts_err(e),
+}
+
+// `ok(["a": 1, "b": 2])` / `ok([:])` / `err("<quoted>")` over `Result[Map[String, Int], String]` — the
+// inner map via map.keys / map.values (reuses __rts_esc for keys, __rts int helpers for values),
+// wrapped in `ok(` … `)`.
+fn __rts_map_key_width(elem: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  2 + __rts_esc_len(elem + 12, slen, 0, 0)
+}
+
+fn __rts_map_body_len(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let v = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __rts_map_key_width(kelem) + 2 + __rts_int_width(v)
+    __rts_map_body_len(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
+
+fn __rts_map_fill_key(elem: Int, pos: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  prim.store8(pos, 34)
+  let mid = __rts_fill_esc(elem + 12, slen, 0, pos + 1)
+  prim.store8(mid, 34)
+  mid + 1
+}
+
+fn __rts_map_fill_body(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __rts_map_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)                // ':'
+    prim.store8(pos2 + 1, 32)            // ' '
+    let v = prim.load64(vaddr + i * 8)
+    let pos3 = __rts_fill_int(v, pos2 + 2)
+    __rts_map_fill_body(kaddr, vaddr, count, i + 1, pos3)
+  }
+
+fn __rts_ok_map(m: Map[String, Int]) -> String = {
+  let ks = map.keys(m)
+  let vs = map.values(m)
+  let hk = prim.handle(ks)
+  let hv = prim.handle(vs)
+  let count = prim.load32(hk + 4)
+  if count == 0 then "ok([:])"
+  else {
+    let kaddr = hk + 12
+    let vaddr = hv + 12
+    let body = __rts_map_body_len(kaddr, vaddr, count, 0, 0)
+    let buf = prim.alloc_str(body + 6)   // "ok([" (4) + body + "])" (2)
+    let base = prim.handle(buf) + 12
+    prim.store8(base, 111)               // 'o'
+    prim.store8(base + 1, 107)           // 'k'
+    prim.store8(base + 2, 40)            // '('
+    prim.store8(base + 3, 91)            // '['
+    let after = __rts_map_fill_body(kaddr, vaddr, count, 0, base + 4)
+    prim.store8(after, 93)               // ']'
+    prim.store8(after + 1, 41)           // ')'
+    buf
+  }
+}
+
+fn result_to_string_msi(r: Result[Map[String, Int], String]) -> String = match r {
+  ok(m) => __rts_ok_map(m),
+  err(e) => __rts_err(e),
+}
+
+fn result_to_string_ss(r: Result[String, String]) -> String = match r {
+  ok(v) => __rts_ok_s(v),
+  err(e) => __rts_err(e),
+}

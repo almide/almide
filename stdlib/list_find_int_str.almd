@@ -1,0 +1,28 @@
+// list_find_int_str — SELF-HOSTED `list.find` over a `List[(Int, String)]` (the `enumerate |> find`
+// shape) for the v1 wasm spine. The (Int,String) counterpart of `list_find_str` (list_str.almd): it
+// loads each element as a TUPLE HANDLE (prim.load_handle @ +12+i*8) instead of a String, hands it to
+// the predicate closure `f` (which reads the tuple's fields, e.g. `e.1`), and returns the FIRST
+// matching tuple as `Option[(Int, String)]` (or `None`). Same borrow-then-Some discipline as
+// list_find_str (the matched element aliases the source; the materialized Option co-owns it).
+
+fn __lfis_none() -> Option[(Int, String)] = None
+fn __lfis_some(x: (Int, String)) -> Option[(Int, String)] = Some(x)
+
+// Split so the lets live in a function BODY and the heap-result `if` is its TAIL (mirrors
+// list_find_str's flat helper-tail shape — a block with lets as a heap-result-if arm does not lower).
+fn __list_find_is_at(h: Int, f: ((Int, String)) -> Bool, n: Int, i: Int) -> Option[(Int, String)] = {
+  let x: (Int, String) = prim.load_handle(h + 12 + i * 8)
+  let hit = f(x)
+  if hit then __lfis_some(x)
+  else __list_find_is_loop(h, f, n, i + 1)
+}
+
+fn __list_find_is_loop(h: Int, f: ((Int, String)) -> Bool, n: Int, i: Int) -> Option[(Int, String)] =
+  if i >= n then __lfis_none()
+  else __list_find_is_at(h, f, n, i)
+
+fn list_find_int_str(xs: List[(Int, String)], f: ((Int, String)) -> Bool) -> Option[(Int, String)] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  __list_find_is_loop(h, f, n, 0)
+}

@@ -1,0 +1,22 @@
+// option_unwrap_or_str — SELF-HOSTED `Option[String] ?? default` (the heap-payload form of the
+// `??` operator / option.unwrap_or). A materialized Option[String] is a 0-or-1-element DynListStr
+// (Some = len 1 with the String handle in slot 0 @12, None = len 0). Returns a FRESH owned String:
+// a deep COPY of the Some payload, else a deep COPY of the default. Both operands are BORROWED
+// (read via prim / copied), so the caller keeps owning them; the result is single-owned.
+//
+// This is the function the MIR `??` lowering routes a heap-String UnwrapOr to (control.rs
+// try_lower_option_unwrap_or) — a CALL returning a fresh owned String sidesteps the bind-position
+// heap-result-`if` cert problem (a call result is a clean `i`, bound + dropped like any heap value).
+
+// Some(deep copy of slot-0) — the len==1 case. Reads the payload as a BORROW (prim.load_str), then
+// deep-copies it into a fresh owned String (the helper-call tail keeps the body a heap-result if).
+fn __ouos_some(h: Int) -> String = {
+  let s = prim.load_str(h + 12)
+  string.repeat(s, 1)
+}
+
+fn option_unwrap_or_str(o: Option[String], default: String) -> String = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  if len == 1 then __ouos_some(h) else string.repeat(default, 1)
+}

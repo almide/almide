@@ -1,0 +1,19 @@
+// @contract: C-107
+// Result[(List[String], Int), String] producer + match-consumer (toml parse_key's `ok((keys, pos))`).
+// The Ok tuple's slot0 is a List[String], freed RECURSIVELY (each element String + the List block +
+// the tuple block) via Op::DropResultListStrInt — a flat DropListStr would leak the element Strings.
+fn parse_key(p: Int) -> Result[(List[String], Int), String] = {
+  let keys = ["alpha", "beta"]
+  if p < 0 then err("neg") else ok((keys, p + 1))
+}
+
+effect fn main() -> Unit = {
+  match parse_key(20) {
+    ok(t) => { let (ks, n) = t  println(list.join(ks, ".") + " @ " + int.to_string(n)) },
+    err(e) => println("E:" + e)
+  }
+  match parse_key(0 - 1) {
+    ok(t) => { let (ks, n) = t  println("ok") },
+    err(e) => println("E:" + e)
+  }
+}

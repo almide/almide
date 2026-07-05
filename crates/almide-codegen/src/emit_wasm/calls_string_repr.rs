@@ -20,7 +20,6 @@
 //! pointer on the stack. Strings are joined with `__concat_str` and interned
 //! literal separators (`[`, `, `, `]`, `: `, `some(`, …).
 
-use crate::emit_wasm::engine::{Imm32, Local};
 use super::FuncCompiler;
 use almide_lang::types::Ty;
 use almide_lang::types::constructor::TypeConstructorId;
@@ -63,7 +62,7 @@ impl FuncCompiler<'_> {
                 let t = self.emitter.intern_string("true");
                 let f = self.emitter.intern_string("false");
                 wasm!(self.func, {
-                    if_i32; i32_const(Imm32(t as i32)); else_; i32_const(Imm32(f as i32)); end;
+                    if_i32; i32_const(t as i32); else_; i32_const(f as i32); end;
                 });
             }
             // ── Containers ──
@@ -201,36 +200,36 @@ impl FuncCompiler<'_> {
         let concat = self.emitter.rt.concat_str;
 
         wasm!(self.func, {
-            local_set(Local(lst));
-            local_get(Local(lst)); i32_load(0); local_set(Local(len));
+            local_set(lst);
+            local_get(lst); i32_load(0); local_set(len);
             // Empty → exact literal (`[]`, `[:]` is map-only, `set.from_list([])`).
-            local_get(Local(len)); i32_eqz;
+            local_get(len); i32_eqz;
             if_i32;
-              i32_const(Imm32(empty_s));
+              i32_const(empty_s);
             else_;
-              i32_const(Imm32(open_s)); local_set(Local(acc));
-              i32_const(Imm32(0)); local_set(Local(i));
+              i32_const(open_s); local_set(acc);
+              i32_const(0); local_set(i);
               block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
+                local_get(i); local_get(len); i32_ge_u; br_if(1);
                 // separator before every element except the first
-                local_get(Local(i)); i32_eqz;
+                local_get(i); i32_eqz;
                 if_empty; else_;
-                  local_get(Local(acc)); i32_const(Imm32(sep_s)); call(concat); local_set(Local(acc));
+                  local_get(acc); i32_const(sep_s); call(concat); local_set(acc);
                 end;
                 // acc = acc ++ repr(elem[i])
-                local_get(Local(acc));
+                local_get(acc);
                 // load elem[i] onto stack: addr = lst + data_off + i*elem_size
-                local_get(Local(lst)); i32_const(Imm32(data_off)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(elem_size)); i32_mul; i32_add;
+                local_get(lst); i32_const(data_off); i32_add;
+                local_get(i); i32_const(elem_size); i32_mul; i32_add;
             });
             self.emit_load_at(elem_ty, 0);
             self.emit_repr_value(elem_ty);
             wasm!(self.func, {
-                call(concat); local_set(Local(acc));
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
+                call(concat); local_set(acc);
+                local_get(i); i32_const(1); i32_add; local_set(i);
                 br(0);
               end; end;
-              local_get(Local(acc)); i32_const(Imm32(close_s)); call(concat);
+              local_get(acc); i32_const(close_s); call(concat);
             end;
         });
 
@@ -270,49 +269,49 @@ impl FuncCompiler<'_> {
         let concat = self.emitter.rt.concat_str;
 
         wasm!(self.func, {
-            local_set(Local(m));
-            local_get(Local(m)); i32_load(0); local_set(Local(len));
-            local_get(Local(m)); i32_load(cap_off); local_set(Local(cap));
+            local_set(m);
+            local_get(m); i32_load(0); local_set(len);
+            local_get(m); i32_load(cap_off); local_set(cap);
         });
         self.emit_dict_entries_base(m, cap);
         wasm!(self.func, {
-            local_set(Local(eb));
-            local_get(Local(len)); i32_eqz;
+            local_set(eb);
+            local_get(len); i32_eqz;
             if_i32;
-              i32_const(Imm32(empty_s));
+              i32_const(empty_s);
             else_;
-              i32_const(Imm32(open_s)); local_set(Local(acc));
-              i32_const(Imm32(0)); local_set(Local(i));
+              i32_const(open_s); local_set(acc);
+              i32_const(0); local_set(i);
               block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-                local_get(Local(i)); i32_eqz;
+                local_get(i); local_get(len); i32_ge_u; br_if(1);
+                local_get(i); i32_eqz;
                 if_empty; else_;
-                  local_get(Local(acc)); i32_const(Imm32(sep_s)); call(concat); local_set(Local(acc));
+                  local_get(acc); i32_const(sep_s); call(concat); local_set(acc);
                 end;
                 // entry = eb + i*es
-                local_get(Local(eb)); local_get(Local(i)); i32_const(Imm32(es)); i32_mul; i32_add;
-                local_set(Local(entry));
+                local_get(eb); local_get(i); i32_const(es); i32_mul; i32_add;
+                local_set(entry);
                 // acc ++ repr(key)
-                local_get(Local(acc));
-                local_get(Local(entry));
+                local_get(acc);
+                local_get(entry);
         });
         self.emit_load_at(&key_ty, 0);
         self.emit_repr_value(&key_ty);
         wasm!(self.func, {
                 call(concat);
-                i32_const(Imm32(kv_s)); call(concat); local_set(Local(acc));
+                i32_const(kv_s); call(concat); local_set(acc);
                 // acc ++ repr(value)   (value at entry + ks)
-                local_get(Local(acc));
-                local_get(Local(entry)); i32_const(Imm32(ks as i32)); i32_add;
+                local_get(acc);
+                local_get(entry); i32_const(ks as i32); i32_add;
         });
         self.emit_load_at(&val_ty, 0);
         self.emit_repr_value(&val_ty);
         wasm!(self.func, {
-                call(concat); local_set(Local(acc));
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
+                call(concat); local_set(acc);
+                local_get(i); i32_const(1); i32_add; local_set(i);
                 br(0);
               end; end;
-              local_get(Local(acc)); i32_const(Imm32(close_s)); call(concat);
+              local_get(acc); i32_const(close_s); call(concat);
             end;
         });
 
@@ -337,24 +336,24 @@ impl FuncCompiler<'_> {
         let concat = self.emitter.rt.concat_str;
 
         wasm!(self.func, {
-            local_set(Local(tp));
-            i32_const(Imm32(open_s)); local_set(Local(acc));
+            local_set(tp);
+            i32_const(open_s); local_set(acc);
         });
         let mut offset = 0u32;
         for (idx, elem_ty) in elems.iter().enumerate() {
             if idx > 0 {
-                wasm!(self.func, { local_get(Local(acc)); i32_const(Imm32(sep_s)); call(concat); local_set(Local(acc)); });
+                wasm!(self.func, { local_get(acc); i32_const(sep_s); call(concat); local_set(acc); });
             }
             wasm!(self.func, {
-                local_get(Local(acc));
-                local_get(Local(tp)); i32_const(Imm32(offset as i32)); i32_add;
+                local_get(acc);
+                local_get(tp); i32_const(offset as i32); i32_add;
             });
             self.emit_load_at(elem_ty, 0);
             self.emit_repr_value(elem_ty);
-            wasm!(self.func, { call(concat); local_set(Local(acc)); });
+            wasm!(self.func, { call(concat); local_set(acc); });
             offset += values::byte_size(elem_ty);
         }
-        wasm!(self.func, { local_get(Local(acc)); i32_const(Imm32(close_s)); call(concat); });
+        wasm!(self.func, { local_get(acc); i32_const(close_s); call(concat); });
 
         self.scratch.free_i32(acc);
         self.scratch.free_i32(tp);
@@ -371,19 +370,19 @@ impl FuncCompiler<'_> {
         let concat = self.emitter.rt.concat_str;
 
         wasm!(self.func, {
-            local_set(Local(opt));
-            local_get(Local(opt)); i32_eqz;
+            local_set(opt);
+            local_get(opt); i32_eqz;
             if_i32;
-              i32_const(Imm32(none_s));
+              i32_const(none_s);
             else_;
-              i32_const(Imm32(some_s));
-              local_get(Local(opt));
+              i32_const(some_s);
+              local_get(opt);
         });
         self.emit_load_at(inner_ty, 0);
         self.emit_repr_value(inner_ty);
         wasm!(self.func, {
               call(concat);
-              i32_const(Imm32(close_s)); call(concat);
+              i32_const(close_s); call(concat);
             end;
         });
 
@@ -401,25 +400,25 @@ impl FuncCompiler<'_> {
         let concat = self.emitter.rt.concat_str;
 
         wasm!(self.func, {
-            local_set(Local(res));
+            local_set(res);
             // tag == 0 → ok branch
-            local_get(Local(res)); i32_load(0); i32_eqz;
+            local_get(res); i32_load(0); i32_eqz;
             if_i32;
-              i32_const(Imm32(ok_s));
-              local_get(Local(res));
+              i32_const(ok_s);
+              local_get(res);
         });
         self.emit_load_at(ok_ty, RESULT_PAYLOAD_OFFSET);
         self.emit_repr_value(ok_ty);
         wasm!(self.func, {
-              call(concat); i32_const(Imm32(close_s)); call(concat);
+              call(concat); i32_const(close_s); call(concat);
             else_;
-              i32_const(Imm32(err_s));
-              local_get(Local(res));
+              i32_const(err_s);
+              local_get(res);
         });
         self.emit_load_at(err_ty, RESULT_PAYLOAD_OFFSET);
         self.emit_repr_value(err_ty);
         wasm!(self.func, {
-              call(concat); i32_const(Imm32(close_s)); call(concat);
+              call(concat); i32_const(close_s); call(concat);
             end;
         });
 
@@ -482,8 +481,8 @@ impl FuncCompiler<'_> {
         let concat = self.emitter.rt.concat_str;
 
         wasm!(self.func, {
-            local_set(Local(rec));
-            i32_const(Imm32(open_s)); local_set(Local(acc));
+            local_set(rec);
+            i32_const(open_s); local_set(acc);
         });
         for (render_idx, &(field_idx, field_off)) in placed.iter().enumerate() {
             let (fname, fty) = &fields[field_idx];
@@ -492,15 +491,15 @@ impl FuncCompiler<'_> {
             let label = format!("{}{}: ", if render_idx > 0 { ", " } else { "" }, fname);
             let label_s = self.emitter.intern_string(&label) as i32;
             wasm!(self.func, {
-                local_get(Local(acc)); i32_const(Imm32(label_s)); call(concat); local_set(Local(acc));
-                local_get(Local(acc));
-                local_get(Local(rec)); i32_const(Imm32(field_off as i32)); i32_add;
+                local_get(acc); i32_const(label_s); call(concat); local_set(acc);
+                local_get(acc);
+                local_get(rec); i32_const(field_off as i32); i32_add;
             });
             self.emit_load_at(fty, 0);
             self.emit_repr_value(fty);
-            wasm!(self.func, { call(concat); local_set(Local(acc)); });
+            wasm!(self.func, { call(concat); local_set(acc); });
         }
-        wasm!(self.func, { local_get(Local(acc)); i32_const(Imm32(close_s)); call(concat); });
+        wasm!(self.func, { local_get(acc); i32_const(close_s); call(concat); });
 
         self.scratch.free_i32(acc);
         self.scratch.free_i32(rec);
@@ -556,8 +555,8 @@ impl FuncCompiler<'_> {
         let val = self.scratch.alloc_i32();
         let tag = self.scratch.alloc_i32();
         wasm!(self.func, {
-            local_set(Local(val));
-            local_get(Local(val)); i32_load(0); local_set(Local(tag)); // tag @ cell start
+            local_set(val);
+            local_get(val); i32_load(0); local_set(tag); // tag @ cell start
         });
 
         let n = cases.len();
@@ -566,7 +565,7 @@ impl FuncCompiler<'_> {
             if !is_last {
                 // if tag == case.tag { <case> } else { …next… }
                 wasm!(self.func, {
-                    local_get(Local(tag)); i32_const(Imm32(case.tag as i32)); i32_eq;
+                    local_get(tag); i32_const(case.tag as i32); i32_eq;
                     if_i32;
                 });
             }
@@ -592,7 +591,7 @@ impl FuncCompiler<'_> {
     fn emit_repr_variant_case(&mut self, val: u32, payload_off: u32, ctor: &str, fields: &[(String, Ty)]) {
         if fields.is_empty() {
             let name_s = self.emitter.intern_string(ctor) as i32;
-            wasm!(self.func, { i32_const(Imm32(name_s)); });
+            wasm!(self.func, { i32_const(name_s); });
             return;
         }
 
@@ -607,7 +606,7 @@ impl FuncCompiler<'_> {
 
         let acc = self.scratch.alloc_i32();
         let concat = self.emitter.rt.concat_str;
-        wasm!(self.func, { i32_const(Imm32(open_s)); local_set(Local(acc)); });
+        wasm!(self.func, { i32_const(open_s); local_set(acc); });
 
         let mut offset = payload_off;
         for (idx, (fname, fty)) in fields.iter().enumerate() {
@@ -619,18 +618,18 @@ impl FuncCompiler<'_> {
             };
             if !label.is_empty() {
                 let label_s = self.emitter.intern_string(&label) as i32;
-                wasm!(self.func, { local_get(Local(acc)); i32_const(Imm32(label_s)); call(concat); local_set(Local(acc)); });
+                wasm!(self.func, { local_get(acc); i32_const(label_s); call(concat); local_set(acc); });
             }
             wasm!(self.func, {
-                local_get(Local(acc));
-                local_get(Local(val)); i32_const(Imm32(offset as i32)); i32_add;
+                local_get(acc);
+                local_get(val); i32_const(offset as i32); i32_add;
             });
             self.emit_load_at(fty, 0);
             self.emit_repr_value(fty);
-            wasm!(self.func, { call(concat); local_set(Local(acc)); });
+            wasm!(self.func, { call(concat); local_set(acc); });
             offset += values::byte_size(fty);
         }
-        wasm!(self.func, { local_get(Local(acc)); i32_const(Imm32(close_s)); call(concat); });
+        wasm!(self.func, { local_get(acc); i32_const(close_s); call(concat); });
         self.scratch.free_i32(acc);
     }
 }

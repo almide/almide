@@ -1,0 +1,36 @@
+// list_uniqueby — SELF-HOSTED `list.unique_by` for v1 over the prim floor + closures. Keep
+// the FIRST element of each distinct key f(x). With no hash map in the self-host floor, an
+// element i is kept iff its key does NOT appear among the earlier elements [0..i) — checked
+// by a full count (symmetric tail-recursion, the proven shape). Over-allocate, pack the kept
+// elements, patch the result len. The key fn f: (Int)->Int is PURE by contract (it is called
+// O(n^2) times here vs v0's once-per-element hash — same RESULT for a pure key). List[Int].
+
+fn __ub_count(sh: Int, f: (Int) -> Int, k: Int, j: Int, i: Int, acc: Int) -> Int =
+  if j >= i then acc
+  else {
+    let xj = prim.load64(sh + 12 + j * 8)
+    let kj = f(xj)
+    if kj == k then __ub_count(sh, f, k, j + 1, i, acc + 1)
+    else __ub_count(sh, f, k, j + 1, i, acc)
+  }
+
+fn __ub_fill(dh: Int, sh: Int, f: (Int) -> Int, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let k = f(x)
+    let c = __ub_count(sh, f, k, 0, i, 0)
+    if c > 0 then __ub_fill(dh, sh, f, n, i + 1, di)
+    else {
+      prim.store64(dh + 12 + di * 8, x)
+      __ub_fill(dh, sh, f, n, i + 1, di + 1)
+    }
+  }
+
+fn list_unique_by(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list(n)
+  let cnt = __ub_fill(prim.handle(buf), prim.handle(xs), f, n, 0, 0)
+  prim.store32(prim.handle(buf) + 4, cnt)
+  buf
+}

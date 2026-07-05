@@ -1,0 +1,13 @@
+// @contract: C-099
+// value.eq (Value == Value) — deep structural equality. WITHOUT this the heap `==` did not lower to a
+// scalar cond, so `if value_a == value_b …` fell to the both-arms linearization and ran BOTH arms (a
+// silent control-flow miscompile). Now it branches correctly. Byte-matches v0's Value PartialEq.
+fn cmp(a: Value, b: Value) -> String = if a == b then "T" else "F"
+effect fn main() -> Unit = {
+  println(cmp(value.int(1), value.int(1)) + cmp(value.int(1), value.int(2)))
+  println(cmp(value.str("x"), value.str("x")) + cmp(value.str("xy"), value.str("xz")))
+  println(cmp(value.array([value.int(1), value.int(2)]), value.array([value.int(1), value.int(2)])))
+  println(cmp(value.object([("a", value.int(1))]), value.object([("a", value.int(2))])))
+  println(cmp(value.object([("a", value.array([value.int(1)]))]), value.object([("a", value.array([value.int(1)]))])))
+  println(cmp(value.int(1), value.str("1")))
+}

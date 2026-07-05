@@ -1,0 +1,77 @@
+// datetime_format — SELF-HOSTED datetime.to_iso for v1. v0 = format!("{:04}-{:02}-{:02}T{:02}:
+// {:02}:{:02}Z", y, m, d, h, mi, s). The layout is CONSTANT-width (20 bytes), so NO runtime concat:
+// allocate a 20-byte String and store each ASCII byte (zero-padded digit or separator) at its fixed
+// offset — the proven int_to_string / base64 digit-writing discipline. Components come from the
+// already-self-hosted datetime.year/month/day (datetime_calendar) and hour/minute/second
+// (datetime_arith) — all CROSS-file, so no intra-file link cycle. SCOPE: {:04} matches v0 for years
+// 0..9999 (a 5-digit year would overflow the fixed buffer — the same documented edge as to_string).
+
+// Write n (>= 0) as `width` zero-padded decimal digits ending at pos+width-1 (least-significant
+// last). Returns Int (the __itos_fill discipline: a Unit return would elide the call).
+fn __iso_pad(pos: Int, width: Int, n: Int) -> Int =
+  if width <= 0 then 0
+  else {
+    let digit = n % 10
+    prim.store8(pos + width - 1, 48 + digit)
+    __iso_pad(pos, width - 1, n / 10)
+  }
+
+fn datetime_to_iso(ts: Int) -> String = {
+  let y = datetime.year(ts)
+  let mo = datetime.month(ts)
+  let d = datetime.day(ts)
+  let h = datetime.hour(ts)
+  let mi = datetime.minute(ts)
+  let s = datetime.second(ts)
+  let out = prim.alloc_str(20)
+  let base = prim.handle(out) + 12
+  let _y = __iso_pad(base, 4, y)
+  prim.store8(base + 4, 45)              // '-'
+  let _mo = __iso_pad(base + 5, 2, mo)
+  prim.store8(base + 7, 45)              // '-'
+  let _d = __iso_pad(base + 8, 2, d)
+  prim.store8(base + 10, 84)             // 'T'
+  let _h = __iso_pad(base + 11, 2, h)
+  prim.store8(base + 13, 58)             // ':'
+  let _mi = __iso_pad(base + 14, 2, mi)
+  prim.store8(base + 16, 58)             // ':'
+  let _s = __iso_pad(base + 17, 2, s)
+  prim.store8(base + 19, 90)             // 'Z'
+  out
+}
+
+// Build n (>= 0) as a fresh `width`-byte zero-padded decimal String (reusing the proven __iso_pad).
+// __dt_pad(2, 7) = "07", __dt_pad(4, 1970) = "1970". A value wider than `width` keeps only its low
+// `width` digits — fine for the conventional date-field ranges below.
+fn __dt_pad(width: Int, n: Int) -> String = {
+  let out = prim.alloc_str(width)
+  let _x = __iso_pad(prim.handle(out) + 12, width, n)
+  out
+}
+
+// datetime.format(ts, pattern): substitute the 6 fixed ASCII tokens in `pattern` with the
+// zero-padded date fields, in v0's SEQUENTIAL .replace() order (YYYY then MM/DD/HH/mm/ss). Each
+// field is built by __dt_pad and substituted by the already-self-hosted string.replace (cross-file
+// — no intra-file link cycle), exactly mirroring v0's `pattern.replace("YYYY", &format!("{:04}", y))
+// .replace("MM", ...)...`. SCOPE: byte-matches v0 for year 0..9999 (a 5-digit year exceeds the
+// 4-wide field, the same documented edge as to_iso) and the <100 field ranges.
+fn datetime_format(ts: Int, pattern: String) -> String = {
+  let y = datetime.year(ts)
+  let mo = datetime.month(ts)
+  let d = datetime.day(ts)
+  let h = datetime.hour(ts)
+  let mi = datetime.minute(ts)
+  let s = datetime.second(ts)
+  let ys = __dt_pad(4, y)
+  let p1 = string.replace(pattern, "YYYY", ys)
+  let ms = __dt_pad(2, mo)
+  let p2 = string.replace(p1, "MM", ms)
+  let ds = __dt_pad(2, d)
+  let p3 = string.replace(p2, "DD", ds)
+  let hs = __dt_pad(2, h)
+  let p4 = string.replace(p3, "HH", hs)
+  let mis = __dt_pad(2, mi)
+  let p5 = string.replace(p4, "mm", mis)
+  let ss = __dt_pad(2, s)
+  string.replace(p5, "ss", ss)
+}

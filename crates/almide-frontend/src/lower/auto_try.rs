@@ -11,6 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 use almide_ir::*;
+use almide_ir::visit::IrVisitor;
 use almide_base::intern::sym;
 use almide_base::intern::Sym;
 use crate::types::{Ty, TypeConstructorId};
@@ -30,6 +31,14 @@ struct TryCtx<'a> {
     /// #558: qualified fn keys (`module.func`) whose FIRST param is
     /// Result/Option — that arg keeps its Result (no auto-?).
     first_arg_unwraps: &'a HashSet<Sym>,
+    /// Usage-based skip set for THIS fn body: vars consumed as a Result
+    /// (`match { ok/err }`, `== ok/err`, `??`). Collected once per body and
+    /// consulted at EVERY Bind depth — VarIds are unique, so one flat set is
+    /// sound. The old per-top-level-Block application missed a `let r = ...;
+    /// match r { ok/err }` inside a match arm (porta mcp handle_tools_call).
+    skip_unwrap: HashSet<u32>,
+    /// ⊆ `skip_unwrap`: consumers that need the FULL Result unconditionally.
+    force_skip: HashSet<u32>,
 }
 
 /// Insert auto-? (Try nodes) in all effect fn bodies of the program.
@@ -47,7 +56,8 @@ pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<
     for func in functions.iter_mut() {
         if func.is_effect && !func.is_test {
             let returns_result = func.ret_ty.is_result();
-            let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, first_arg_unwraps };
+            let (skip_unwrap, force_skip) = collect_result_match_vars(&func.body);
+            let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, first_arg_unwraps, skip_unwrap, force_skip };
             func.body = insert_try_body(std::mem::take(&mut func.body), returns_result, &mut ctx);
         }
     }
@@ -56,7 +66,8 @@ pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<
         for func in functions.iter_mut() {
             if func.is_effect {
                 let returns_result = func.ret_ty.is_result();
-                let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, first_arg_unwraps };
+                let (skip_unwrap, force_skip) = collect_result_match_vars(&func.body);
+                let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, first_arg_unwraps, skip_unwrap, force_skip };
                 func.body = insert_try_body(std::mem::take(&mut func.body), returns_result, &mut ctx);
             }
         }
@@ -67,100 +78,52 @@ fn match_has_result_arms(arms: &[IrMatchArm]) -> bool {
     arms.iter().any(|arm| matches!(&arm.pattern, IrPattern::Ok { .. } | IrPattern::Err { .. }))
 }
 
-fn collect_result_match_vars(stmts: &[IrStmt], tail: Option<&IrExpr>) -> HashSet<u32> {
-    let mut vars = HashSet::new();
-    for s in stmts { collect_result_match_vars_stmt(s, &mut vars); }
-    if let Some(e) = tail { collect_result_match_vars_expr(e, &mut vars); }
-    vars
+fn collect_result_match_vars(body: &IrExpr) -> (HashSet<u32>, HashSet<u32>) {
+    let mut scan = ResultConsumerScan { vars: HashSet::new(), force: HashSet::new() };
+    scan.visit_expr(body);
+    (scan.vars, scan.force)
 }
 
-fn collect_result_match_vars_expr(expr: &IrExpr, vars: &mut HashSet<u32>) {
-    match &expr.kind {
-        IrExprKind::Match { subject, arms } => {
-            if match_has_result_arms(arms) {
-                if let IrExprKind::Var { id } = &subject.kind {
-                    vars.insert(id.0);
+/// `vars` = every var that must stay a Result (the skip set). `force` ⊆ `vars` = the
+/// subset consumed by a Result-`match { ok/err }` or `== ok/err`, which need the FULL
+/// Result UNCONDITIONALLY (the consumer reads both arms). A `??`-only var goes to `vars`
+/// but NOT `force`, so the #629 effect-`Result[Option,_]`-strip rule still applies to it.
+///
+/// Traversal is the exhaustive `IrVisitor` walk — a hand-rolled recursion here
+/// missed value-carrying wrappers, so a consumer nested in one escaped the skip
+/// set and its binding got auto-?'d out from under the match (porta mcp:
+/// `ok(match parsed { ok/err })` sat behind a `ResultOk` → E0308 on native).
+struct ResultConsumerScan {
+    vars: HashSet<u32>,
+    force: HashSet<u32>,
+}
+
+impl almide_ir::visit::IrVisitor for ResultConsumerScan {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            IrExprKind::Match { subject, arms } => {
+                if match_has_result_arms(arms) {
+                    if let IrExprKind::Var { id } = &subject.kind {
+                        self.vars.insert(id.0);
+                        self.force.insert(id.0);
+                    }
                 }
             }
-            for arm in arms { collect_result_match_vars_expr(&arm.body, vars); }
-            collect_result_match_vars_expr(subject, vars);
+            // `r ?? d` keeps `r` a Result (its OK type is the value of `??`). NOT a
+            // `force` var: the #629 effect-Result[Option,_] strip rule still applies.
+            IrExprKind::UnwrapOr { expr: inner, .. } => {
+                if let IrExprKind::Var { id } = &inner.kind { self.vars.insert(id.0); }
+            }
+            // `r == ok(v)` / `r == err(e)` (and `!=`) read the full Result → `force`.
+            IrExprKind::BinOp { op: BinOp::Eq | BinOp::Neq, left, right } => {
+                let is_res = |e: &IrExpr| matches!(&e.kind,
+                    IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. });
+                if is_res(right) { if let IrExprKind::Var { id } = &left.kind { self.vars.insert(id.0); self.force.insert(id.0); } }
+                if is_res(left) { if let IrExprKind::Var { id } = &right.kind { self.vars.insert(id.0); self.force.insert(id.0); } }
+            }
+            _ => {}
         }
-        IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts { collect_result_match_vars_stmt(s, vars); }
-            if let Some(e) = tail { collect_result_match_vars_expr(e, vars); }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            collect_result_match_vars_expr(cond, vars);
-            collect_result_match_vars_expr(then, vars);
-            collect_result_match_vars_expr(else_, vars);
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            collect_result_match_vars_expr(iterable, vars);
-            for s in body { collect_result_match_vars_stmt(s, vars); }
-        }
-        IrExprKind::While { cond, body } => {
-            collect_result_match_vars_expr(cond, vars);
-            for s in body { collect_result_match_vars_stmt(s, vars); }
-        }
-        // `r ?? d` keeps `r` a Result (its OK type is the value of `??`). This is
-        // why a binding USED as a Result must skip the auto-? unwrap — without it,
-        // `r` would be unwrapped to its OK type and `??` would no longer type-check.
-        IrExprKind::UnwrapOr { expr: inner, fallback } => {
-            if let IrExprKind::Var { id } = &inner.kind { vars.insert(id.0); }
-            collect_result_match_vars_expr(inner, vars);
-            collect_result_match_vars_expr(fallback, vars);
-        }
-        // `r == ok(v)` / `r == err(e)` (and `!=`) likewise keep `r` a Result.
-        IrExprKind::BinOp { op: BinOp::Eq | BinOp::Neq, left, right } => {
-            let is_res = |e: &IrExpr| matches!(&e.kind,
-                IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. });
-            if is_res(right) { if let IrExprKind::Var { id } = &left.kind { vars.insert(id.0); } }
-            if is_res(left) { if let IrExprKind::Var { id } = &right.kind { vars.insert(id.0); } }
-            collect_result_match_vars_expr(left, vars);
-            collect_result_match_vars_expr(right, vars);
-        }
-        // Recurse through the remaining compound forms so a `r ?? d` / `r == ok(v)`
-        // nested in a call argument (e.g. `assert_eq(r ?? -1, 42)`) is still found.
-        IrExprKind::BinOp { left, right, .. } => {
-            collect_result_match_vars_expr(left, vars);
-            collect_result_match_vars_expr(right, vars);
-        }
-        IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => {
-            for a in args { collect_result_match_vars_expr(a, vars); }
-        }
-        IrExprKind::UnOp { operand, .. } => collect_result_match_vars_expr(operand, vars),
-        IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
-        | IrExprKind::Clone { expr: inner } | IrExprKind::Borrow { expr: inner, .. } => {
-            collect_result_match_vars_expr(inner, vars);
-        }
-        IrExprKind::Tuple { elements } | IrExprKind::List { elements } => {
-            for e in elements { collect_result_match_vars_expr(e, vars); }
-        }
-        _ => {}
-    }
-}
-
-fn collect_result_match_vars_stmt(stmt: &IrStmt, vars: &mut HashSet<u32>) {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } => collect_result_match_vars_expr(value, vars),
-        IrStmtKind::Expr { expr } => collect_result_match_vars_expr(expr, vars),
-        IrStmtKind::Guard { cond, else_ } => {
-            collect_result_match_vars_expr(cond, vars);
-            collect_result_match_vars_expr(else_, vars);
-        }
-        // Result-usages inside assignment RHS (e.g. `x = (r ?? 0)`) must
-        // feed the skip set too, or `r`'s binding would be unwrapped.
-        IrStmtKind::Assign { value, .. } => collect_result_match_vars_expr(value, vars),
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            collect_result_match_vars_expr(index, vars);
-            collect_result_match_vars_expr(value, vars);
-        }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            collect_result_match_vars_expr(key, vars);
-            collect_result_match_vars_expr(value, vars);
-        }
-        IrStmtKind::FieldAssign { value, .. } => collect_result_match_vars_expr(value, vars),
-        _ => {}
+        almide_ir::visit::walk_expr(self, expr);
     }
 }
 
@@ -168,9 +131,8 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool, ctx: &mut TryCtx) -> I
     if fn_returns_result {
         match expr.kind {
             IrExprKind::Block { stmts, expr: Some(tail) } => {
-                let skip_unwrap = collect_result_match_vars(&stmts, Some(&tail));
                 let stmts = stmts.into_iter()
-                    .map(|s| insert_try_stmt_with_skip(s, &skip_unwrap, ctx))
+                    .map(|s| insert_try_stmt(s, ctx))
                     .collect();
                 let tail = insert_try(*tail, false, ctx);
                 let tail = strip_tail_try(tail);
@@ -185,46 +147,7 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool, ctx: &mut TryCtx) -> I
             }
         }
     }
-    if let IrExprKind::Block { stmts, expr: tail } = expr.kind {
-        let skip_unwrap = collect_result_match_vars(&stmts, tail.as_deref());
-        let stmts = stmts.into_iter()
-            .map(|s| insert_try_stmt_with_skip(s, &skip_unwrap, ctx))
-            .collect();
-        let tail = tail.map(|e| Box::new(insert_try(*e, false, ctx)));
-        return IrExpr {
-            kind: IrExprKind::Block { stmts, expr: tail },
-            ty: expr.ty, span: expr.span, def_id: None,
-        };
-    }
     insert_try(expr, false, ctx)
-}
-
-fn insert_try_stmt_with_skip(stmt: IrStmt, skip: &HashSet<u32>, ctx: &mut TryCtx) -> IrStmt {
-    if let IrStmtKind::Bind { var, value, .. } = &stmt.kind {
-        // A binding consumed by `??` / `== ok(v)` / `match { ok/err }` is kept a
-        // Result so that usage type-checks — BUT only when the binding's value
-        // is genuinely Result-fronted at that consumer. An effect fn that
-        // returns `Option[T]` is lifted to `Result[Option[T], String]`; binding
-        // it and consuming with `??` is an OPTION-fallback, so the auto-? MUST
-        // strip the effect `Result`, leaving `Option[T]` for `??`. Keeping the
-        // `Result` there made native emit invalid Rust and wasm read the wrong
-        // value (#629). So only honor the skip when the value's effect-Result
-        // OK type is itself a Result (a real Result-fallback) or the binding is
-        // an explicitly annotated Result (handled by `annotated_result_vars`).
-        if skip.contains(&var.0)
-            && (ctx.annotated_result_vars.contains(var) || value_ok_is_result(value))
-        {
-            if let IrStmtKind::Bind { var, mutability, ty, value } = stmt.kind {
-                let new_value = insert_try(value, false, ctx);
-                let unwrapped = strip_top_try(new_value);
-                return IrStmt {
-                    kind: IrStmtKind::Bind { var, mutability, ty, value: unwrapped },
-                    span: stmt.span,
-                };
-            }
-        }
-    }
-    insert_try_stmt(stmt, ctx)
 }
 
 /// True when the value is an effect-lifted `Result[OK, _]` whose OK type is
@@ -521,13 +444,37 @@ fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr 
 fn insert_try_stmt(stmt: IrStmt, ctx: &mut TryCtx) -> IrStmt {
     let kind = match stmt.kind {
         IrStmtKind::Bind { var, mutability, ty, value } => {
+            // A binding consumed by `??` / `== ok(v)` / `match { ok/err }` is kept a
+            // Result so that usage type-checks — BUT only when the binding's value
+            // is genuinely Result-fronted at that consumer. An effect fn that
+            // returns `Option[T]` is lifted to `Result[Option[T], String]`; binding
+            // it and consuming with `??` is an OPTION-fallback, so the auto-? MUST
+            // strip the effect `Result`, leaving `Option[T]` for `??`. Keeping the
+            // `Result` there made native emit invalid Rust and wasm read the wrong
+            // value (#629). So only honor the skip when the value's effect-Result
+            // OK type is itself a Result (a real Result-fallback) or the binding is
+            // an explicitly annotated Result (handled by `annotated_result_vars`).
+            // A `match { ok/err }` / `== ok/err` consumer (force) needs the FULL Result
+            // UNCONDITIONALLY — its OK type may be any type (base64 decode's `let bs =
+            // decode_with(..)` is Result[List[Int],String], matched ok/err; the old
+            // value_ok_is_result gate wrongly stripped it to List[Int], so the v1 MIR saw a
+            // non-Result `match` and walled / native emitted invalid Rust). A `??`-only
+            // consumer (skip, not force) keeps the #629 effect-Result[Option,_] strip rule.
+            if ctx.force_skip.contains(&var.0)
+                || (ctx.skip_unwrap.contains(&var.0)
+                    && (ctx.annotated_result_vars.contains(&var) || value_ok_is_result(&value)))
+            {
+                let new_value = insert_try(value, false, ctx);
+                let unwrapped = strip_top_try(new_value);
+                IrStmtKind::Bind { var, mutability, ty, value: unwrapped }
+            }
             // An ANNOTATED-Result binding (`let r: Result[T, E] = step()`)
             // keeps the Result: strip the Try that `insert_try` wrapped
             // around the call. Bind.ty alone cannot decide this — an
             // un-annotated `let v = boom()` where boom DECLARES `-> Result`
             // carries the identical Result Bind.ty but must auto-unwrap, so
             // the lowering records the annotated VarIds explicitly.
-            if ctx.annotated_result_vars.contains(&var) {
+            else if ctx.annotated_result_vars.contains(&var) {
                 let new_value = coerce_to_target(insert_try(value, false, ctx), true);
                 IrStmtKind::Bind { var, mutability, ty, value: new_value }
             } else {

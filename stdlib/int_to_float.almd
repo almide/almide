@@ -1,0 +1,12 @@
+// int_to_float — SELF-HOSTED int.to_float / int.to_float64 for v1. Both are the IEEE-754
+// widening `n as f64`, which is exactly the prim float floor's i2f (i64 -> f64). Pure scalar.
+
+// int.to_float(n) -> n as a Float (f64).
+fn int_to_float(n: Int) -> Float = prim.i2f(n)
+
+// int.to_float64(n) -> n as a Float (f64) — an explicit-width alias of to_float.
+fn int_to_float64(n: Int) -> Float = prim.i2f(n)
+
+// int.to_float32(n) -> `n as f32` — a DIRECT i64 → f32 convert (single rounding, NOT i2f then
+// demote, which would double-round). The Float32 is the f32 pattern in the low half of the slot.
+fn int_to_float32(n: Int) -> Float32 = prim.i2f32(n)

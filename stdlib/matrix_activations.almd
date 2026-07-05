@@ -1,0 +1,339 @@
+// matrix_activations — SELF-HOSTED softmax/gelu/etc. over the v1 Matrix (List[List[Float]]).
+// The WASM oracle (emit_wasm/calls_matrix_p2.rs) computes these with SCALAR arithmetic and
+// `rt.math_exp` (= libm exp, the SAME musl exp `math.exp`/math_exp.almd transcribes), NOT the
+// native SIMD fast-exp. So a faithful transcription in the SAME op order (row-max subtract →
+// per-element exp → LEFT-TO-RIGHT sum → divide) byte-matches v0 `--target wasm`.
+
+// Row max: init from row[0], scan the rest with `>` (NaN-safe: a NaN element leaves max).
+fn __sm_row_max(row: List[Float], n: Int, i: Int, acc: Float) -> Float =
+  if i >= n then acc
+  else {
+    let x = list.get(row, i) ?? acc
+    __sm_row_max(row, n, i + 1, if x > acc then x else acc)
+  }
+
+fn __softmax_row(row: List[Float]) -> List[Float] = {
+  let n = list.len(row)
+  if n == 0 then row
+  else {
+    let mx = __sm_row_max(row, n, 1, list.get(row, 0) ?? 0.0)
+    let exps = row |> list.map((x) => math.exp(x - mx))
+    let s = exps |> list.fold(0.0, (acc, v) => acc + v)
+    if s <= 0.0 or s != s then
+      row |> list.map((_x) => 1.0 / int.to_float(n))
+    else
+      exps |> list.map((v) => v / s)
+  }
+}
+
+fn matrix_softmax_rows(m: List[List[Float]]) -> List[List[Float]] =
+  m |> list.map((row) => __softmax_row(row))
+
+// gelu (tanh approximation) — element-wise. v0 (emit_wasm/calls_matrix_p2.rs "gelu"):
+//   inner   = 0.7978845608028654 * (x + 0.044715 * ((x*x)*x))   // sqrt(2/π)
+//   clamped = max(min(inner, 20), -20)
+//   e2      = exp(2 * clamped)                                    // rt.math_exp = libm
+//   tanh    = (e2 - 1) / (e2 + 1)
+//   y       = 0.5 * ((1 + tanh) * x)
+// The op order (and the (x*x)*x association) is transcribed exactly for a byte-match.
+fn __gelu_scalar(x: Float) -> Float = {
+  let inner = 0.7978845608028654 * (x + 0.044715 * ((x * x) * x))
+  let clamped = float.max(float.min(inner, 20.0), -20.0)
+  let e2 = math.exp(2.0 * clamped)
+  let t = (e2 - 1.0) / (e2 + 1.0)
+  0.5 * ((1.0 + t) * x)
+}
+
+fn __gelu_row(dh: Int, sh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(sh + 12 + i * 8))
+    prim.store64(dh + 12 + i * 8, prim.fbits(__gelu_scalar(x)))
+    __gelu_row(dh, sh, n, i + 1)
+  }
+
+fn __gelu_rows(ho: Int, hm: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let rh = prim.load64(hm + 12 + i * 8)
+    let c = prim.load32(rh + 4)
+    let row = prim.alloc_list_f64(c)
+    let _f = __gelu_row(prim.handle(row), rh, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __gelu_rows(ho, hm, n, i + 1)
+  }
+
+fn matrix_gelu(m: List[List[Float]]) -> List[List[Float]] = {
+  let hm = prim.handle(m)
+  let n = prim.load32(hm + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __gelu_rows(prim.handle(out), hm, n, 0)
+  out
+}
+
+// swiglu_gate(x, w_gate, w_up) — the FFN SwiGLU. x: r×d_in, weights: d_out×d_in, out: r×d_out.
+//   g = Σ_k x[i,k]*w_gate[j,k]   (LEFT-TO-RIGHT accumulate)
+//   u = Σ_k x[i,k]*w_up[j,k]
+//   sig = 1 / (1 + exp(clamp(-g, -40, 40)))
+//   out[i,j] = (g * sig) * u
+// v0 (emit_wasm/calls_matrix_p2.rs "swiglu_gate"); scalar `rt.math_exp` = math.exp. Op order exact.
+fn __sg_dot(ah: Int, bh: Int, n: Int, k: Int, acc: Float) -> Float =
+  if k >= n then acc
+  else {
+    let av = prim.ffrombits(prim.load64(ah + 12 + k * 8))
+    let bv = prim.ffrombits(prim.load64(bh + 12 + k * 8))
+    __sg_dot(ah, bh, n, k + 1, acc + av * bv)
+  }
+
+fn __sg_cell(xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], j: Int, d_in: Int) -> Float = {
+  let wgj = prim.load64(prim.handle(wg) + 12 + j * 8)
+  let wuj = prim.load64(prim.handle(wu) + 12 + j * 8)
+  let g = __sg_dot(xrow_h, wgj, d_in, 0, 0.0)
+  let u = __sg_dot(xrow_h, wuj, d_in, 0, 0.0)
+  let negg = float.max(float.min(0.0 - g, 40.0), -40.0)
+  let sig = 1.0 / (1.0 + math.exp(negg))
+  (g * sig) * u
+}
+
+fn __sg_row_cells(dh: Int, xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], d_out: Int, d_in: Int, j: Int) -> Int =
+  if j >= d_out then 0
+  else {
+    prim.store64(dh + 12 + j * 8, prim.fbits(__sg_cell(xrow_h, wg, wu, j, d_in)))
+    __sg_row_cells(dh, xrow_h, wg, wu, d_out, d_in, j + 1)
+  }
+
+fn __sg_rows(ho: Int, x: List[List[Float]], wg: List[List[Float]], wu: List[List[Float]], r: Int, d_out: Int, d_in: Int, i: Int) -> Int =
+  if i >= r then 0
+  else {
+    let xrow_h = prim.load64(prim.handle(x) + 12 + i * 8)
+    let row = prim.alloc_list_f64(d_out)
+    let _c = __sg_row_cells(prim.handle(row), xrow_h, wg, wu, d_out, d_in, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __sg_rows(ho, x, wg, wu, r, d_out, d_in, i + 1)
+  }
+
+fn matrix_swiglu_gate(x: List[List[Float]], w_gate: List[List[Float]], w_up: List[List[Float]]) -> List[List[Float]] = {
+  let hx = prim.handle(x)
+  let r = prim.load32(hx + 4)
+  // d_in = columns = length of x's first row (0 for an empty matrix).
+  let d_in = if r == 0 then 0 else prim.load32(prim.load64(hx + 12) + 4)
+  let d_out = prim.load32(prim.handle(w_gate) + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(r)
+  let _x = __sg_rows(prim.handle(out), x, w_gate, w_up, r, d_out, d_in, 0)
+  out
+}
+
+// rope_rotate(x, n_heads, head_dim, theta) — RoPE. Per row p (position pos=p), per head h,
+// per pair i (0..head_dim/2): rotate (x[j0], x[j0+1]) where j0 = h*head_dim + 2i, by
+//   inv_freq = exp(-(2i/head_dim) * log(theta)); angle = pos * inv_freq
+//   new_x0 = x0*cos - x1*sin ; new_x1 = x0*sin + x1*cos
+// Non-pair elements copy through. v0 (emit_wasm/calls_matrix_p3.rs "rope_rotate"); scalar
+// rt.math_{exp,log,sin,cos} = the self-hosted math.*; op order transcribed exactly.
+fn __rope_copy(dh: Int, sh: Int, cols: Int, j: Int) -> Int =
+  if j >= cols then 0
+  else { prim.store64(dh + 12 + j * 8, prim.load64(sh + 12 + j * 8)); __rope_copy(dh, sh, cols, j + 1) }
+
+fn __rope_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, log_theta: Float, h: Int, head_dim: Int, half: Int, i_pair: Int) -> Int =
+  if i_pair >= half then 0
+  else {
+    let j0 = h * head_dim + 2 * i_pair
+    let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
+    let x1 = prim.ffrombits(prim.load64(sh + 12 + (j0 + 1) * 8))
+    let two_i_f = int.to_float(2 * i_pair)
+    let inv_freq = math.exp(0.0 - (two_i_f / head_dim_f) * log_theta)
+    let angle = pos_f * inv_freq
+    let s = math.sin(angle)
+    let c = math.cos(angle)
+    prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
+    prim.store64(dh + 12 + (j0 + 1) * 8, prim.fbits(x0 * s + x1 * c))
+    __rope_pairs(dh, sh, pos_f, head_dim_f, log_theta, h, head_dim, half, i_pair + 1)
+  }
+
+fn __rope_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, log_theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int =
+  if h >= n_heads then 0
+  else {
+    let _p = __rope_pairs(dh, sh, pos_f, head_dim_f, log_theta, h, head_dim, half, 0)
+    __rope_heads(dh, sh, pos_f, head_dim_f, log_theta, n_heads, head_dim, half, h + 1)
+  }
+
+fn __rope_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, log_theta: Float, cols: Int, rows: Int, p: Int) -> Int =
+  if p >= rows then 0
+  else {
+    let sh = prim.load64(hx + 12 + p * 8)
+    let row = prim.alloc_list_f64(cols)
+    let dh = prim.handle(row)
+    let _cp = __rope_copy(dh, sh, cols, 0)
+    let _ht = __rope_heads(dh, sh, int.to_float(p), head_dim_f, log_theta, n_heads, head_dim, half, 0)
+    prim.store_str(ho + 12 + p * 8, row)
+    __rope_rows(ho, hx, n_heads, head_dim, half, head_dim_f, log_theta, cols, rows, p + 1)
+  }
+
+fn matrix_rope_rotate(x: List[List[Float]], n_heads: Int, head_dim: Int, theta: Float) -> List[List[Float]] = {
+  let hx = prim.handle(x)
+  let rows = prim.load32(hx + 4)
+  let cols = if rows == 0 then 0 else prim.load32(prim.load64(hx + 12) + 4)
+  let half = head_dim / 2
+  let out: List[List[Float]] = prim.alloc_list_str(rows)
+  let _x = __rope_rows(prim.handle(out), hx, n_heads, head_dim, half, int.to_float(head_dim), math.log(theta), cols, rows, 0)
+  out
+}
+
+// multi_head_attention(q, k, v, n_heads) [+ causal for masked]. Per head h (col range
+// col0=h*dh .. +dh), per query row i: scores[j] = scale*Σ_k q[i,col0+k]*k[j,col0+k]
+// (+ -1e9 if causal && j > (sk-sq)+i); softmax row; out[i,col0+k] = Σ_j (scores[j]/sum)*v[j,col0+k].
+// Heads write DISJOINT columns, so i-outer/h-inner is byte-identical to v0's h-outer/i-inner.
+// v0 (emit_wasm/calls_matrix_p4.rs); scalar rt.math_exp = math.exp; op order transcribed exactly.
+fn __mha_dot(qh: Int, kh: Int, col0: Int, dh: Int, k: Int, acc: Float) -> Float =
+  if k >= dh then acc
+  else {
+    let qv = prim.ffrombits(prim.load64(qh + 12 + (col0 + k) * 8))
+    let kv = prim.ffrombits(prim.load64(kh + 12 + (col0 + k) * 8))
+    __mha_dot(qh, kh, col0, dh, k + 1, acc + qv * kv)
+  }
+
+// scores[j] for j in 0..sk. `mask` = (sk - sq) + i (causal cutoff); pass -1 to disable.
+fn __mha_scores(sch: Int, qh: Int, kmat: List[List[Float]], col0: Int, dh: Int, sk: Int, scale: Float, mask: Int, j: Int) -> Int =
+  if j >= sk then 0
+  else {
+    let kh = prim.load64(prim.handle(kmat) + 12 + j * 8)
+    let dot = __mha_dot(qh, kh, col0, dh, 0, 0.0)
+    let scaled = dot * scale
+    let masked = if mask >= 0 and j > mask then scaled + (0.0 - 1000000000.0) else scaled
+    prim.store64(sch + 12 + j * 8, prim.fbits(masked))
+    __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, j + 1)
+  }
+
+fn __mha_max(sch: Int, sk: Int, j: Int, acc: Float) -> Float =
+  if j >= sk then acc
+  else {
+    let v = prim.ffrombits(prim.load64(sch + 12 + j * 8))
+    __mha_max(sch, sk, j + 1, if v > acc then v else acc)
+  }
+
+fn __mha_exp(sch: Int, sk: Int, mx: Float, j: Int, sum: Float) -> Float =
+  if j >= sk then sum
+  else {
+    let s = prim.ffrombits(prim.load64(sch + 12 + j * 8))
+    let e = math.exp(s - mx)
+    prim.store64(sch + 12 + j * 8, prim.fbits(e))
+    __mha_exp(sch, sk, mx, j + 1, sum + e)
+  }
+
+fn __mha_fill_one(sch: Int, sk: Int, j: Int) -> Int =
+  if j >= sk then 0
+  else { prim.store64(sch + 12 + j * 8, prim.fbits(1.0)); __mha_fill_one(sch, sk, j + 1) }
+
+// out[col0+k] += w * v[j, col0+k] for k in 0..dh (w = scores[j]/sum), accumulated over j.
+fn __mha_acc_cols(oh: Int, vh: Int, col0: Int, dh: Int, w: Float, k: Int) -> Int =
+  if k >= dh then 0
+  else {
+    let old = prim.ffrombits(prim.load64(oh + 12 + (col0 + k) * 8))
+    let vv = prim.ffrombits(prim.load64(vh + 12 + (col0 + k) * 8))
+    prim.store64(oh + 12 + (col0 + k) * 8, prim.fbits(old + vv * w))
+    __mha_acc_cols(oh, vh, col0, dh, w, k + 1)
+  }
+
+fn __mha_out(oh: Int, sch: Int, vmat: List[List[Float]], col0: Int, dh: Int, sk: Int, sum: Float, j: Int) -> Int =
+  if j >= sk then 0
+  else {
+    let w = prim.ffrombits(prim.load64(sch + 12 + j * 8)) / sum
+    let vh = prim.load64(prim.handle(vmat) + 12 + j * 8)
+    let _c = __mha_acc_cols(oh, vh, col0, dh, w, 0)
+    __mha_out(oh, sch, vmat, col0, dh, sk, sum, j + 1)
+  }
+
+fn __mha_heads(oh: Int, qh: Int, kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, sk: Int, sq: Int, i: Int, scale: Float, causal: Bool, h: Int) -> Int =
+  if h >= nh then 0
+  else {
+    let col0 = h * dh
+    let scores = prim.alloc_list_f64(sk)
+    let sch = prim.handle(scores)
+    let mask = if causal then (sk - sq) + i else 0 - 1
+    let _s = __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, 0)
+    let mx = __mha_max(sch, sk, 1, prim.ffrombits(prim.load64(sch + 12)))
+    let sum0 = __mha_exp(sch, sk, mx, 0, 0.0)
+    let bad = sum0 <= 0.0 or sum0 != sum0
+    let sum = if bad then { let _f = __mha_fill_one(sch, sk, 0); int.to_float(sk) } else sum0
+    let _o = __mha_out(oh, sch, vmat, col0, dh, sk, sum, 0)
+    __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, h + 1)
+  }
+
+fn __mha_zero(oh: Int, dm: Int, i: Int) -> Int =
+  if i >= dm then 0
+  else { prim.store64(oh + 12 + i * 8, prim.fbits(0.0)); __mha_zero(oh, dm, i + 1) }
+
+fn __mha_rows(ho: Int, qmat: List[List[Float]], kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, dm: Int, sk: Int, sq: Int, scale: Float, causal: Bool, i: Int) -> Int =
+  if i >= sq then 0
+  else {
+    let qh = prim.load64(prim.handle(qmat) + 12 + i * 8)
+    let row = prim.alloc_list_f64(dm)
+    let oh = prim.handle(row)
+    let _z = __mha_zero(oh, dm, 0)
+    let _h = __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mha_rows(ho, qmat, kmat, vmat, nh, dh, dm, sk, sq, scale, causal, i + 1)
+  }
+
+fn __mha_impl(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int, causal: Bool) -> List[List[Float]] = {
+  let hq = prim.handle(q)
+  let sq = prim.load32(hq + 4)
+  let sk = prim.load32(prim.handle(k) + 4)
+  let dm = if sq == 0 then 0 else prim.load32(prim.load64(hq + 12) + 4)
+  let dh = dm / n_heads
+  let scale = 1.0 / float.sqrt(int.to_float(dh))
+  let out: List[List[Float]] = prim.alloc_list_str(sq)
+  let _x = __mha_rows(prim.handle(out), q, k, v, n_heads, dh, dm, sk, sq, scale, causal, 0)
+  out
+}
+
+fn matrix_multi_head_attention(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int) -> List[List[Float]] =
+  __mha_impl(q, k, v, n_heads, false)
+
+fn matrix_masked_multi_head_attention(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int) -> List[List[Float]] =
+  __mha_impl(q, k, v, n_heads, true)
+
+// from_q1_0_bytes(data, offset, rows, cols) — Q1_0 dequant. 18 bytes / 128 weights:
+// [0..2] fp16 scale (LE), [2..18] 16 sign bytes (LSB-first). bit 1 → +scale, 0 → -scale.
+// v0 (emit_wasm/calls_matrix_p4.rs "from_q1_0_bytes"); pure bit-ops (no exp). Byte data at
+// handle(data)+12+offset. scale recomputed per element (block = k>>7 → identical value).
+fn __q10_scale(base: Int, block_start: Int) -> Float = {
+  let raw = prim.bor(prim.load8(base + block_start), prim.bshl(prim.load8(base + block_start + 1), 8))
+  let sign = prim.band(prim.bshr_u(raw, 15), 1)
+  let expv = prim.band(prim.bshr_u(raw, 10), 31)
+  let mant = prim.band(raw, 1023)
+  let f32bits = if expv == 0 then prim.bshl(sign, 31)
+                else prim.bor(prim.bor(prim.bshl(sign, 31), prim.bshl(expv + 112, 23)), prim.bshl(mant, 13))
+  prim.bits_to_f32(f32bits)
+}
+
+fn __q10_val(base: Int, k: Int) -> Float = {
+  let block_start = prim.bshr_u(k, 7) * 18
+  let scale = __q10_scale(base, block_start)
+  let bits_start = block_start + 2
+  let byte_idx = bits_start + prim.band(prim.bshr_u(k, 3), 15)
+  let bit = prim.band(prim.bshr_u(prim.load8(base + byte_idx), prim.band(k, 7)), 1)
+  if bit == 1 then scale else 0.0 - scale
+}
+
+fn __q10_row(dh: Int, base: Int, row_k0: Int, cols: Int, c: Int) -> Int =
+  if c >= cols then 0
+  else {
+    prim.store64(dh + 12 + c * 8, prim.fbits(__q10_val(base, row_k0 + c)))
+    __q10_row(dh, base, row_k0, cols, c + 1)
+  }
+
+fn __q10_rows(ho: Int, base: Int, rows: Int, cols: Int, r: Int) -> Int =
+  if r >= rows then 0
+  else {
+    let row = prim.alloc_list_f64(cols)
+    let _c = __q10_row(prim.handle(row), base, r * cols, cols, 0)
+    prim.store_str(ho + 12 + r * 8, row)
+    __q10_rows(ho, base, rows, cols, r + 1)
+  }
+
+fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+  let base = prim.handle(data) + 12 + offset
+  let out: List[List[Float]] = prim.alloc_list_str(rows)
+  let _x = __q10_rows(prim.handle(out), base, rows, cols, 0)
+  out
+}

@@ -1,0 +1,14 @@
+// @contract: C-100
+// string.split with an EMPTY separator: Rust's char-boundary split — a leading "", each CHAR, a
+// trailing "" ("abc" -> ["","a","b","c",""], "" -> ["",""], multibyte stays whole). The general
+// loop spins forever on seplen==0, so string_split branches to a dedicated char-boundary path
+// (heap-result tail-if over the two split helpers). Byte-matches native.
+effect fn main() -> Unit = {
+  let a = string.split("abc", "")
+  println(int.to_string(list.len(a)) + ":" + list.join(a, "|"))
+  let b = string.split("", "")
+  println(int.to_string(list.len(b)))
+  let c = string.split("aé", "")
+  println(int.to_string(list.len(c)) + ":" + list.join(c, "|"))
+  println(list.join(string.split("a,b,c", ","), "|"))
+}

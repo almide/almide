@@ -1,0 +1,12 @@
+// @contract: C-101
+// list.insert / remove_at / swap over heap-element lists (List[Value], List[String]). The generic i64
+// impls copy slots without rc_inc (double-free when result+source drop) and i32/i64-mismatch on a typed
+// element; the _value/_str variants rc-copy each element + free the removed one once. v1 self-host.
+effect fn main() -> Unit = {
+  println(value.stringify(value.array(list.insert([value.int(1), value.int(2)], 1, value.int(9)))))
+  println(value.stringify(value.array(list.remove_at([value.int(5), value.int(2), value.int(3)], 1))))
+  println(value.stringify(value.array(list.swap([value.int(7), value.int(2)], 0, 1))))
+  println(list.join(list.insert(["a", "b"], 1, "z"), ","))
+  println(list.join(list.remove_at(["a", "b", "c"], 1), ","))
+  println(list.join(list.swap(["a", "b"], 0, 1), ","))
+}

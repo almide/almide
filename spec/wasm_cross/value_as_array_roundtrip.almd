@@ -1,0 +1,15 @@
+// @contract: C-103
+// value.as_array round-trip: build a tag-5 Array, read it back via the cap@16 Result, bind the
+// `List[Value]` payload (the Camp-4 borrow) + len it; Err arm for a non-Array. Verifies value.array
+// STORES correctly + value.as_array READS correctly + the Ok(items) heap-payload bind + tag dispatch.
+fn arr_len(v: Value) -> Int =
+  match value.as_array(v) { ok(items) => list.len(items), err(_) => 0 - 1 }
+fn comp_int(v: Value) -> Int =
+  match value.as_array(v) { ok(_) => 1, err(_) => 0 }
+fn main() -> Unit = {
+  println(int.to_string(arr_len(value.array([value.int(7), value.int(8), value.int(9)]))))
+  println(int.to_string(arr_len(value.str("hello"))))
+  println(int.to_string(arr_len(value.array([])))) 
+  println(int.to_string(comp_int(value.array([value.int(1)]))))
+  println(int.to_string(comp_int(value.int(42))))
+}

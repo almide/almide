@@ -1,0 +1,84 @@
+// string_take_drop — SELF-HOSTED `string.take/drop/take_end/drop_end` for v1 over the
+// prim floor. All four are CODEPOINT-indexed (#419), matching v0's `chars()` adapters:
+//   take(s, n)      = s.chars().take(n)   — the first n codepoints
+//   drop(s, n)      = s.chars().skip(n)   — all but the first n
+//   take_end(s, n)  = the last n codepoints
+//   drop_end(s, n)  = all but the last n
+// v0 casts n to usize, so a NEGATIVE n becomes a huge count: take treats n<0 as "take
+// all", drop as "drop all" (→ empty), take_end as "the whole string", drop_end as
+// "drop all" (→ empty). Each fn reduces to two codepoint indices [lo, hi) and copies
+// that UTF-8 byte range — self-contained (no other stdlib call, since the production
+// auto-linker is single-pass), mirroring string_slice's proven walk.
+
+fn __td_skip(addr: Int, end: Int) -> Int =
+  if addr >= end then addr
+  else if prim.load8(addr) / 64 == 2 then __td_skip(addr + 1, end)   // continuation byte
+  else addr
+
+// Codepoint count of the byte range [addr, end).
+fn __td_cpcount(addr: Int, end: Int, n: Int) -> Int =
+  if addr >= end then n
+  else {
+    let b = prim.load8(addr)
+    let step = if b / 64 == 2 then 0 else 1   // continuation byte → not a codepoint start
+    __td_cpcount(addr + 1, end, n + step)
+  }
+
+// Byte address of the k-th codepoint start at/after `addr`.
+fn __td_offset(addr: Int, end: Int, k: Int) -> Int =
+  if k <= 0 then addr
+  else if addr >= end then addr
+  else {
+    let next = __td_skip(addr + 1, end)
+    __td_offset(next, end, k - 1)
+  }
+
+fn __td_copy(src: Int, dst: Int, len: Int) -> Int =
+  if len <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __td_copy(src + 1, dst + 1, len - 1)
+  }
+
+fn __td_count(s: String) -> Int = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  __td_cpcount(h + 12, h + 12 + blen, 0)
+}
+
+// Copy codepoints [lo, hi) (already in [0, count]) of s as a fresh owned String.
+fn __td_slice(s: String, lo: Int, hi: Int) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let base = h + 12
+  let byte_lo = __td_offset(base, base + blen, lo)
+  let byte_hi = __td_offset(base, base + blen, hi)
+  let nbytes = if byte_hi > byte_lo then byte_hi - byte_lo else 0
+  let buf = prim.alloc_str(nbytes)
+  let _e = __td_copy(byte_lo, prim.handle(buf) + 12, nbytes)
+  buf
+}
+
+fn string_take(s: String, n: Int) -> String = {
+  let count = __td_count(s)
+  let k = if n < 0 then count else (if n > count then count else n)
+  __td_slice(s, 0, k)
+}
+
+fn string_drop(s: String, n: Int) -> String = {
+  let count = __td_count(s)
+  let k = if n < 0 then count else (if n > count then count else n)
+  __td_slice(s, k, count)
+}
+
+fn string_take_end(s: String, n: Int) -> String = {
+  let count = __td_count(s)
+  let start = if n < 0 then 0 else (if n >= count then 0 else count - n)
+  __td_slice(s, start, count)
+}
+
+fn string_drop_end(s: String, n: Int) -> String = {
+  let count = __td_count(s)
+  let endi = if n < 0 then 0 else (if n >= count then 0 else count - n)
+  __td_slice(s, 0, endi)
+}

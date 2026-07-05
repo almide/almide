@@ -1,0 +1,45 @@
+// float_core — SELF-HOSTED `float.*` core ops for v1 over the Float prim floor. A `Float` is
+// the i64-uniform value holding the f64 BITS; each op is a thin wrapper over a prim that
+// reinterprets i64↔f64 around the wasm f64 instruction. Pure scalar — the cert is untouched
+// (Op::Prim, no ownership). Matches v0's f64 semantics for finite, non-NaN values.
+
+fn float_abs(x: Float) -> Float = prim.fabs(x)
+fn float_sqrt(x: Float) -> Float = prim.fsqrt(x)
+fn float_floor(x: Float) -> Float = prim.ffloor(x)
+fn float_ceil(x: Float) -> Float = prim.fceil(x)
+// float.min/max are NaN-AWARE and resolve ±0 ties to the FIRST operand — NOT the raw
+// wasm f64.min/f64.max instructions (which PROPAGATE NaN and pick ±0 by IEEE magnitude).
+// This is the exact decision tree shared with math.fmin/fmax (math_float.almd): ignore a
+// NaN operand (return the other), and on every non-strict tie (incl. +0.0 == -0.0) keep
+// the first operand. is_nan via fne(x,x); the strict compare via flt/fgt. Matches v0's
+// `float.min`/`float.max` byte-for-byte.
+fn float_min(a: Float, b: Float) -> Float = {
+  let anan = prim.fne(a, a)
+  if anan then b
+  else {
+    let bnan = prim.fne(b, b)
+    if bnan then a
+    else {
+      let agtb = prim.fgt(a, b)
+      if agtb then b else a
+    }
+  }
+}
+
+fn float_max(a: Float, b: Float) -> Float = {
+  let anan = prim.fne(a, a)
+  if anan then b
+  else {
+    let bnan = prim.fne(b, b)
+    if bnan then a
+    else {
+      let altb = prim.flt(a, b)
+      if altb then b else a
+    }
+  }
+}
+fn float_to_int(x: Float) -> Int = prim.f2i(x)
+fn float_from_int(x: Int) -> Float = prim.i2f(x)
+// to_float64 / from_float64 are the f64↔f64 identity (Almide's `Float` IS f64).
+fn float_to_float64(x: Float) -> Float = x
+fn float_from_float64(x: Float) -> Float = x

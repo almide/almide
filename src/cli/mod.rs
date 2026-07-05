@@ -146,7 +146,26 @@ lto = true
 codegen-units = 1
 "#;
 
-const BURN_MATRIX_RUNTIME: &str = include_str!("../../runtime/rs/burn/matrix_burn.rs");
+/// The burn-backed matrix runtime source, with its on-disk `include!` split parts
+/// (`matrix_burn_pN.rs`, kept under the 1000-line limit) INLINED. The generated crate
+/// writes this as one `src/` file, and the part siblings live in `runtime/rs/burn/`
+/// (not the generated `src/`), so the `include!` directives must be resolved here at
+/// embed time — otherwise they dangle (`couldn't read src/matrix_burn_p2.rs`).
+fn burn_matrix_runtime() -> String {
+    include_str!("../../runtime/rs/burn/matrix_burn.rs")
+        .replace(
+            "include!(\"matrix_burn_p2.rs\");",
+            include_str!("../../runtime/rs/burn/matrix_burn_p2.rs"),
+        )
+        .replace(
+            "include!(\"matrix_burn_p3.rs\");",
+            include_str!("../../runtime/rs/burn/matrix_burn_p3.rs"),
+        )
+        .replace(
+            "include!(\"matrix_burn_p4.rs\");",
+            include_str!("../../runtime/rs/burn/matrix_burn_p4.rs"),
+        )
+}
 
 /// Build a Cargo.toml string by inserting native deps into the [dependencies] section.
 fn build_cargo_toml(base_toml: &str, native_deps: &[crate::project::NativeDep]) -> String {
@@ -221,9 +240,8 @@ fn inject_native_modules(code: &mut String, source_root: Option<&std::path::Path
                     .map_err(|e| format!("failed to write native module {}: {}", stem, e))?;
                 mod_decls.push_str(&format!("mod {};\n", stem));
             } else if path.is_dir() {
-                // asset subdirectories (e.g. native/wgsl/*.wgsl) travel with
-                // the modules so include_str!("wgsl/...") resolves in the
-                // generated crate
+                // asset subdirectories (e.g. native/wgsl/*.wgsl) travel with the
+                // modules so include_str!("wgsl/...") resolves in the generated crate
                 copy_dir_recursive(&path, &src_dir.join(entry.file_name()))?;
             }
         }
@@ -755,7 +773,8 @@ fn cargo_build_test_with_native(
 /// helper functions, etc. — it only cares about whether we're between matrix
 /// `pub fn`s.
 fn replace_matrix_runtime(rs_code: &str) -> String {
-    let mut result = String::with_capacity(rs_code.len() + BURN_MATRIX_RUNTIME.len());
+    let burn_runtime = burn_matrix_runtime();
+    let mut result = String::with_capacity(rs_code.len() + burn_runtime.len());
     let mut in_matrix_block = false;
     let mut inserted = false;
 
@@ -764,7 +783,7 @@ fn replace_matrix_runtime(rs_code: &str) -> String {
             in_matrix_block = true;
             if !inserted {
                 result.push_str("// ── burn-backed Matrix runtime (auto-inserted by almide build) ──\n");
-                result.push_str(BURN_MATRIX_RUNTIME);
+                result.push_str(&burn_runtime);
                 result.push('\n');
                 inserted = true;
             }

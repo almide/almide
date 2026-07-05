@@ -1,0 +1,7 @@
+// string_capitalize — SELF-HOSTED `string.capitalize`: uppercase the FIRST char
+// (char::to_uppercase — the same Unicode table string.to_upper already
+// self-hosts), keep the rest verbatim. Exactly the native oracle
+// (`almide_rt_string_capitalize`); an empty string stays empty.
+fn string_capitalize(s: String) -> String =
+  if string.len(s) == 0 then s
+  else string.to_upper(string.take(s, 1)) + string.drop(s, 1)

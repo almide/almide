@@ -1,0 +1,13 @@
+// @contract: C-101
+// list.reduce over a List[String] → Option[String] — a seedless fold (None on empty, else Some of the
+// fold of xs[1..] from xs[0]). The Option-wrapping `if` is the TAIL of the self-host list_reduce_str
+// (the ownership checker accepts a heap-result `if` only at the function return); the accumulator is a
+// while loop `acc = f(acc, x)` — the proven closure-call loop-carried i(id)m slot (#738 Path C). The
+// inline lambda is lifted to a first-class combinator. Byte-matches native; leak-free; cert ACCEPT.
+effect fn main() -> Unit = {
+  println((["a", "b", "c"] |> list.reduce((a, b) => a + b)) ?? "N")
+  println((["solo"] |> list.reduce((a, b) => a + b)) ?? "N")
+  println((["a", "b", "c"] |> list.reduce((a, b) => a + "-" + b)) ?? "N")
+  let e: List[String] = []
+  println((e |> list.reduce((a, b) => a + b)) ?? "EMPTY")
+}

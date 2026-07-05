@@ -1,0 +1,18 @@
+// @contract: C-108
+// A Result-unwrap `e!` INSIDE a self-recursion (toml read_basic's `let (ch,np)=read_escape(..)!`
+// before the recursive call). desugar_let_unwrap turns the `!` into a match with an err-arm early-
+// return; try_tco_rewrite now BAILS on such an `err($x)`-of-a-Var base (the mid-body early-exit a TCO
+// loop can't carry) so the function lowers as REAL recursion (input-bounded, matches v0) instead of
+// walling on a nested-in-loop heap reassign.
+effect fn esc(t: String, p: Int) -> Result[(String, Int), String] = ok(("X", p + 1))
+effect fn rd(t: String, p: Int, buf: String) -> Result[(String, Int), String] = {
+  if p >= string.len(t) then ok((buf, p))
+  else if string.slice(t, p, p + 1) == "y" then {
+    let (ch, np) = esc(t, p + 1)!
+    rd(t, np, buf + ch)
+  }
+  else rd(t, p + 1, buf + string.slice(t, p, p + 1))
+}
+effect fn main() -> Unit = {
+  match rd("ayc", 0, "") { ok(r) => { let (s, n) = r  println(s + ":" + int.to_string(n)) }, err(e) => println("E:" + e) }
+}

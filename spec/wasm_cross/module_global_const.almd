@@ -1,0 +1,12 @@
+// @contract: C-111
+// CONST module-level heap globals materialize as DATA (no runtime call), so a function referencing
+// them lowers (the aes S-box / base64 alphabet shape): a string literal (Init::Str), an int-list
+// literal (Init::IntList), and bytes.from_list([int literals]) (Init::Bytes). A computed global keeps
+// walling (a call the gate's IR count can't see). Byte-matches v0.
+let ALPHA = "ABCDEF"
+let TBL = bytes.from_list([0x10, 0x20, 0x30, 0xFF])
+fn pick(i: Int) -> Int = bytes.read_u8(TBL, i)
+fn main() -> Unit = {
+  println(string.slice(ALPHA, 1, 4))
+  println(int.to_string(pick(0)) + "," + int.to_string(pick(3)))
+}

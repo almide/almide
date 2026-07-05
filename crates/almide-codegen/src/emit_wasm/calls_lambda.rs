@@ -1,16 +1,11 @@
 //! Lambda and closure emission for WASM codegen.
 
-use crate::emit_wasm::engine::{Imm32, Local};
 use almide_ir::VarId;
 use almide_lang::types::Ty;
 use wasm_encoder::ValType;
 
 use super::FuncCompiler;
 use super::values;
-
-// Named constants for WASM immediate values used in closure layout.
-/// Byte size of a closure struct: [table_idx: i32][env_ptr: i32] = 4 + 4 bytes.
-const CLOSURE_BYTES: i32 = 8;
 
 impl FuncCompiler<'_> {
     /// Emit a FnRef as a closure: allocate [wrapper_table_idx, 0] on heap.
@@ -19,19 +14,19 @@ impl FuncCompiler<'_> {
             // Allocate closure: [table_idx: i32][env_ptr: i32] = 8 bytes
             let scratch = self.scratch.alloc_i32();
             wasm!(self.func, {
-                i32_const(Imm32(CLOSURE_BYTES));
+                i32_const(8);
                 call(self.emitter.rt.alloc);
-                local_set(Local(scratch));
+                local_set(scratch);
                 // Store table_idx
-                local_get(Local(scratch));
-                i32_const(Imm32(wrapper_table_idx as i32));
+                local_get(scratch);
+                i32_const(wrapper_table_idx as i32);
                 i32_store(0);
                 // Store env_ptr = 0
-                local_get(Local(scratch));
-                i32_const(Imm32(0));
+                local_get(scratch);
+                i32_const(0);
                 i32_store(4);
                 // Return closure ptr
-                local_get(Local(scratch));
+                local_get(scratch);
             });
             self.scratch.free_i32(scratch);
         } else {
@@ -84,16 +79,16 @@ impl FuncCompiler<'_> {
         if captures.is_empty() {
             // No captures: allocate closure [table_idx, 0]
             wasm!(self.func, {
-                i32_const(Imm32(CLOSURE_BYTES));
+                i32_const(8);
                 call(self.emitter.rt.alloc);
-                local_set(Local(scratch));
-                local_get(Local(scratch));
-                i32_const(Imm32(table_idx as i32));
+                local_set(scratch);
+                local_get(scratch);
+                i32_const(table_idx as i32);
                 i32_store(0);
-                local_get(Local(scratch));
-                i32_const(Imm32(0));
+                local_get(scratch);
+                i32_const(0);
                 i32_store(4);
-                local_get(Local(scratch));
+                local_get(scratch);
             });
             self.scratch.free_i32(scratch);
         } else {
@@ -101,18 +96,18 @@ impl FuncCompiler<'_> {
             let env_size = (captures.len() as u32) * 8;
             let env_scratch = scratch;
             wasm!(self.func, {
-                i32_const(Imm32(env_size as i32));
+                i32_const(env_size as i32);
                 call(self.emitter.rt.alloc);
-                local_set(Local(env_scratch));
+                local_set(env_scratch);
             });
 
             // Store each captured variable into env
             for (ci, (vid, ty)) in captures.iter().enumerate() {
                 let offset = (ci as u32) * 8;
                 let is_cell = self.emitter.mutable_captures.contains(&vid.0);
-                wasm!(self.func, { local_get(Local(env_scratch)); });
+                wasm!(self.func, { local_get(env_scratch); });
                 if let Some(&local_idx) = self.var_map.get(&vid.0) {
-                    wasm!(self.func, { local_get(Local(local_idx)); });
+                    wasm!(self.func, { local_get(local_idx); });
                     if is_cell {
                         // Mutable capture: local is cell ptr (i32), store as i32
                         wasm!(self.func, { i32_store(offset); });
@@ -137,16 +132,16 @@ impl FuncCompiler<'_> {
             // Allocate closure: [table_idx, env_ptr]
             let closure_scratch = self.scratch.alloc_i32();
             wasm!(self.func, {
-                i32_const(Imm32(CLOSURE_BYTES));
+                i32_const(8);
                 call(self.emitter.rt.alloc);
-                local_set(Local(closure_scratch));
-                local_get(Local(closure_scratch));
-                i32_const(Imm32(table_idx as i32));
+                local_set(closure_scratch);
+                local_get(closure_scratch);
+                i32_const(table_idx as i32);
                 i32_store(0);
-                local_get(Local(closure_scratch));
-                local_get(Local(env_scratch));
+                local_get(closure_scratch);
+                local_get(env_scratch);
                 i32_store(4);
-                local_get(Local(closure_scratch));
+                local_get(closure_scratch);
             });
             self.scratch.free_i32(closure_scratch);
             self.scratch.free_i32(env_scratch);
@@ -173,34 +168,34 @@ impl FuncCompiler<'_> {
         if captures.is_empty() {
             // No captures: closure = [table_idx, 0]
             wasm!(self.func, {
-                i32_const(Imm32(CLOSURE_BYTES));
+                i32_const(8);
                 call(self.emitter.rt.alloc);
-                local_set(Local(scratch));
-                local_get(Local(scratch));
-                i32_const(Imm32(table_idx));
+                local_set(scratch);
+                local_get(scratch);
+                i32_const(table_idx);
                 i32_store(0);
-                local_get(Local(scratch));
-                i32_const(Imm32(0));
+                local_get(scratch);
+                i32_const(0);
                 i32_store(4);
-                local_get(Local(scratch));
+                local_get(scratch);
             });
         } else {
             // Allocate env
             let env_size = (captures.len() as u32) * 8;
             let env_scratch = self.scratch.alloc_i32();
             wasm!(self.func, {
-                i32_const(Imm32(env_size as i32));
+                i32_const(env_size as i32);
                 call(self.emitter.rt.alloc);
-                local_set(Local(env_scratch));
+                local_set(env_scratch);
             });
 
             // Store each captured variable into env
             for (ci, (vid, ty)) in captures.iter().enumerate() {
                 let offset = (ci as u32) * 8;
-                wasm!(self.func, { local_get(Local(env_scratch)); });
+                wasm!(self.func, { local_get(env_scratch); });
                 if let Some(&local_idx) = self.var_map.get(&vid.0) {
                     // Perceus closure capture rc_inc is now handled by PerceusPass (IR-level RcInc)
-                    wasm!(self.func, { local_get(Local(local_idx)); });
+                    wasm!(self.func, { local_get(local_idx); });
                     self.emit_store_at(ty, offset);
                 } else if let Some((global_idx, _)) = self.lookup_global(*vid) {
                     // A module-level `let`/`var` captured by the closure lives
@@ -228,16 +223,16 @@ impl FuncCompiler<'_> {
             // Allocate closure pair [table_idx, env_ptr]
             let closure_scratch = self.scratch.alloc_i32();
             wasm!(self.func, {
-                i32_const(Imm32(CLOSURE_BYTES));
+                i32_const(8);
                 call(self.emitter.rt.alloc);
-                local_set(Local(closure_scratch));
-                local_get(Local(closure_scratch));
-                i32_const(Imm32(table_idx));
+                local_set(closure_scratch);
+                local_get(closure_scratch);
+                i32_const(table_idx);
                 i32_store(0);
-                local_get(Local(closure_scratch));
-                local_get(Local(env_scratch));
+                local_get(closure_scratch);
+                local_get(env_scratch);
                 i32_store(4);
-                local_get(Local(closure_scratch));
+                local_get(closure_scratch);
             });
             self.scratch.free_i32(closure_scratch);
             self.scratch.free_i32(env_scratch);

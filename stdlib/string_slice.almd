@@ -1,0 +1,50 @@
+// string_slice — SELF-HOSTED `string.slice(s, start, end)` for v1 over the prim floor.
+// v0 takes CODEPOINT indices, clamped to [0, char_count]: `s.chars().skip(start).take(
+// end-start)`. So this counts codepoints, walks UTF-8 to the byte offsets of the start/
+// end codepoints, allocs that byte range, and copies it. The empty case (start>=end)
+// degrades to alloc_str(0) — NO heap-result `if` needed. Self-contained helpers.
+
+fn __slice_cpcount(addr: Int, end: Int, n: Int) -> Int =
+  if addr >= end then n
+  else {
+    let b = prim.load8(addr)
+    let step = if b / 64 == 2 then 0 else 1   // continuation byte → not a codepoint start
+    __slice_cpcount(addr + 1, end, n + step)
+  }
+
+// Skip UTF-8 continuation bytes (10xxxxxx) to the next codepoint start.
+fn __slice_skip(addr: Int, end: Int) -> Int =
+  if addr >= end then addr
+  else if prim.load8(addr) / 64 == 2 then __slice_skip(addr + 1, end)
+  else addr
+
+// Byte address of the k-th codepoint start at/after `addr` (k codepoints forward).
+fn __slice_offset(addr: Int, end: Int, k: Int) -> Int =
+  if k <= 0 then addr
+  else if addr >= end then addr
+  else {
+    let next = __slice_skip(addr + 1, end)
+    __slice_offset(next, end, k - 1)
+  }
+
+fn __slice_copy(src: Int, dst: Int, len: Int) -> Int =
+  if len <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __slice_copy(src + 1, dst + 1, len - 1)
+  }
+
+fn string_slice(s: String, start: Int, end: Int) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let base = h + 12
+  let count = __slice_cpcount(base, base + blen, 0)
+  let s_idx = if start < 0 then 0 else (if start > count then count else start)
+  let e_idx = if end < 0 then 0 else (if end > count then count else end)
+  let byte_start = __slice_offset(base, base + blen, s_idx)
+  let byte_end = __slice_offset(base, base + blen, e_idx)
+  let nbytes = if byte_end > byte_start then byte_end - byte_start else 0
+  let buf = prim.alloc_str(nbytes)
+  let _e = __slice_copy(byte_start, prim.handle(buf) + 12, nbytes)
+  buf
+}

@@ -41,7 +41,7 @@ impl ImportTable {
     /// Create with Tier 1 auto-imported stdlib modules.
     pub fn new() -> Self {
         let mut stdlib = HashSet::new();
-        for m in &["string", "int", "float", "list", "bytes", "matrix", "map", "set", "option", "result", "value"] {
+        for m in &["string", "int", "float", "list", "bytes", "matrix", "map", "set", "option", "result", "value", "prim"] {
             stdlib.insert(sym(m));
         }
         ImportTable {

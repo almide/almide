@@ -1,0 +1,54 @@
+// list_take_drop — SELF-HOSTED `list.take` / `list.drop` for v1 over the prim floor:
+// allocate a new List[Int] (prim.alloc_list) and copy a contiguous run of i64 elements.
+// take = the first n, drop = all but the first n. The n<0 edges mirror v0's `n as usize`
+// (take(neg)=all, drop(neg)=empty). List[Int] (i64 value copies, fully sound). `xs`
+// borrowed; result owned.
+
+// Copy `count` i64 elements from source index `start` to dest index 0..count.
+fn __copy_slice(srch: Int, dsth: Int, start: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    let e = prim.load64(srch + 12 + (start + i) * 8)
+    prim.store64(dsth + 12 + i * 8, e)
+    __copy_slice(srch, dsth, start, count, i + 1)
+  }
+
+fn __clamp_len(n: Int, len: Int) -> Int =
+  if n < 0 then len            // n<0 → `n as usize` is huge → clamps to len
+  else if n > len then len
+  else n
+
+fn list_take(xs: List[Int], n: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let count = __clamp_len(n, len)
+  let buf = prim.alloc_list(count)
+  let bh = prim.handle(buf)
+  let _x = __copy_slice(h, bh, 0, count, 0)
+  buf
+}
+
+fn list_drop(xs: List[Int], n: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let start = __clamp_len(n, len)
+  let count = len - start
+  let buf = prim.alloc_list(count)
+  let bh = prim.handle(buf)
+  let _x = __copy_slice(h, bh, start, count, 0)
+  buf
+}
+
+// list.slice(xs, start, end) = elements [start, min(end, len)); empty when start >= end.
+// The negative edges mirror v0's `as usize` (negative end -> len, negative start -> empty).
+fn list_slice(xs: List[Int], start: Int, end: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let e = if end < 0 then len else (if end > len then len else end)
+  let s = if start < 0 then len else start
+  let count = if s >= e then 0 else e - s
+  let buf = prim.alloc_list(count)
+  let bh = prim.handle(buf)
+  let _x = __copy_slice(h, bh, s, count, 0)
+  buf
+}

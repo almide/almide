@@ -1,0 +1,14 @@
+// fs_mkdir_p — SELF-HOSTED `fs.mkdir_p(path)` over the WASI directory-create floor
+// (prim.make_dir), the v1 trust-spine realization of the effectful `fs.mkdir_p`.
+// Creates the directory at `path`, including each missing parent segment (recursive),
+// returning `Ok(())` on success (an already-existing dir also counts as success) or
+// `Err(message)` on a path_create_directory error, matching native `fs.mkdir_p`
+// (std::fs::create_dir_all). The prim packages the recursive `path_create_directory` WASI
+// sequence and the `Result[Unit, String]` construction (the cap-as-tag block — Ok carries no
+// payload at len@4=0, Err owns one message String @12, Ok/Err tag @16); the result is a fresh
+// OWNED Result dropped at scope end (the flat DropListStr — Ok frees nothing, Err frees its one
+// message: no leak). Because this body reaches prim.make_dir, its cap_witness carries
+// Capability::FsWrite (a mkdir IS a filesystem write — the SAME capability as fs.write, NOT a
+// new one) — so a caller is caps-verified ONLY if it declares FsWrite (an `effect fn`); a pure
+// `fn` reaching it is a frontend error AND would REJECT at the gate.
+effect fn fs_mkdir_p(path: String) -> Result[Unit, String] = prim.make_dir(path)

@@ -1,0 +1,6 @@
+fn gcd(a: Int, b: Int) -> Int = if b == 0 then a else gcd(b, a % b)
+fn main() -> Unit = {
+  println(int.to_string(gcd(48, 36)))
+  println(int.to_string(gcd(17, 5)))
+  println(int.to_string(gcd(100, 25)))
+}

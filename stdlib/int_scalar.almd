@@ -1,0 +1,15 @@
+// int_scalar — SELF-HOSTED scalar Int ops (abs/min/max/clamp) for v1: plain i64 if/
+// arithmetic, NO heap, NO prim floor. Matches v0's `i64::abs/min/max/clamp`. Cert-
+// untouching (scalar only). The runtime linker auto-includes the ones a program calls.
+
+fn int_abs(n: Int) -> Int = if n < 0 then 0 - n else n
+
+fn int_min(a: Int, b: Int) -> Int = if a < b then a else b
+
+fn int_max(a: Int, b: Int) -> Int = if a > b then a else b
+
+// clamp(n, lo, hi) = max(lo, min(n, hi)) — assumes lo <= hi (v0 i64::clamp).
+fn int_clamp(n: Int, lo: Int, hi: Int) -> Int =
+  if n < lo then lo
+  else if n > hi then hi
+  else n

@@ -1,0 +1,13 @@
+// @contract: C-108
+// An unwrap-`!` nested in a call-argument / ctor-argument / operand position (toml parse_key /
+// collect_array_items shape). The pre-lowering ANF-lift hoists `g(h(..)!)` to `let t = h(..)!; g(t)`
+// so the existing let-unwrap `?`-early-return spine lowers it. Covers ctor-arg + nested-call.
+effect fn h(p: Int) -> Result[Int, String] = if p < 0 then err("neg") else ok(p * 10)
+effect fn wrap_sum(p: Int) -> Result[Int, String] = ok(h(p)! + h(p + 1)!)
+effect fn pass_arg(p: Int) -> Result[String, String] = ok(int.to_string(h(p)!))
+
+effect fn main() -> Unit = {
+  match wrap_sum(3) { ok(v) => println("sum:" + int.to_string(v)), err(e) => println("E:" + e) }
+  match wrap_sum(0 - 1) { ok(v) => println(int.to_string(v)), err(e) => println("E:" + e) }
+  match pass_arg(5) { ok(s) => println("s:" + s), err(e) => println("E:" + e) }
+}

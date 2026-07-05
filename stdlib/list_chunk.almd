@@ -1,0 +1,129 @@
+// list_chunk — SELF-HOSTED list.chunk(xs, n) for v1: split xs into consecutive chunks of size n
+// NORMATIVE SPEC: ALS-T4 (docs/specs/als/text-and-numbers.md §T4) — conformance is judged against that section's
+// rules and its pinned fixture, NOT against any other implementation (F1: no oracle circularity).
+// (the last may be smaller), as v0's `xs.chunks(n)`. Builds a NESTED list: a DynListStr outer (via
+// prim.alloc_list_str) whose slots own each chunk (a fresh List[Int], moved in via prim.store_str).
+// n > 0 (chunks(0) panics in v0). Source borrowed; the whole nested result is freshly owned.
+
+fn __chunk_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(src + i * 8)
+    prim.store64(dst + i * 8, v)
+    __chunk_copy(dst, src, n, i + 1)
+  }
+
+// Build one chunk: a fresh List[Int] holding xs[start .. start+clen].
+fn __chunk_one(sh: Int, start: Int, clen: Int) -> List[Int] = {
+  let c = prim.alloc_list(clen)
+  let _x = __chunk_copy(prim.handle(c) + 12, sh + 12 + start * 8, clen, 0)
+  c
+}
+
+// Fill the outer list: at chunk index ci / source offset `start`, build the chunk + move it in.
+fn __chunk_outer(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> Int =
+  if start >= total then 0
+  else {
+    let rem = total - start
+    let clen = if rem < cn then rem else cn
+    let chunk = __chunk_one(sh, start, clen)
+    prim.store_str(oh + 12 + ci * 8, chunk)
+    __chunk_outer(oh, sh, total, cn, ci + 1, start + cn)
+  }
+
+fn list_chunk(xs: List[Int], n: Int) -> List[List[Int]] = {
+  let sh = prim.handle(xs)
+  let total = prim.load32(sh + 4)
+  // v0 is `xs.chunks(n as usize)`: a NEGATIVE n reinterprets as a huge usize —
+  // one chunk holding everything (never a negative-count alloc trap). n == 0
+  // keeps the genuine div (native `chunks(0)` panics; the trap IS the oracle).
+  let n = if n < 0 then (if total > 0 then total else 1) else n
+  let num = (total + n - 1) / n
+  let outer = prim.alloc_list_str(num)
+  let _x = __chunk_outer(prim.handle(outer), sh, total, n, 0, 0)
+  outer
+}
+
+// ── list.windows / list.window — all CONTIGUOUS (overlapping) sub-slices of length n. v0's
+// xs.windows(n): n > len → [], else len-n+1 windows. window and windows behave identically here
+// (windows(n) already yields nothing for n > len). Each window reuses the chunk-copy helper. ──
+fn __win_outer(oh: Int, sh: Int, n: Int, num: Int, wi: Int) -> Int =
+  if wi >= num then 0
+  else {
+    let w = __chunk_one(sh, wi, n)
+    prim.store_str(oh + 12 + wi * 8, w)
+    __win_outer(oh, sh, n, num, wi + 1)
+  }
+
+fn __do_windows(xs: List[Int], n: Int) -> List[List[Int]] = {
+  let sh = prim.handle(xs)
+  let total = prim.load32(sh + 4)
+  // v0 is `xs.windows(n as usize)`: a NEGATIVE n is a huge usize — n > len → [].
+  let num = if n < 0 or n > total then 0 else total - n + 1
+  let outer = prim.alloc_list_str(num)
+  let _x = __win_outer(prim.handle(outer), sh, n, num, 0)
+  outer
+}
+
+fn list_windows(xs: List[Int], n: Int) -> List[List[Int]] = __do_windows(xs, n)
+fn list_window(xs: List[Int], n: Int) -> List[List[Int]] = __do_windows(xs, n)
+
+// ── The HEAP-element (List[String]) variants → List[List[String]]. Each cell is a String HANDLE, so
+// it is DEEP-COPIED (string.repeat ·1) into the inner chunk — single-owned, the source still owns the
+// original (no double-free). The inner chunk + outer are alloc_list_str blocks. The result is
+// List[List[String]], whose scope-end Op::DropListListStr already recursively frees each cell String,
+// each row block, then the outer (the drop machinery is wired — only this producer was missing). The
+// generic i64 list_chunk flat-copied String handles → a double-free, hence the prior wall. ──
+fn __chunk_copy_str(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load_str(src + i * 8)
+    let copy = string.repeat(x, 1)
+    prim.store_str(dst + i * 8, copy)
+    __chunk_copy_str(dst, src, n, i + 1)
+  }
+
+fn __chunk_one_str(sh: Int, start: Int, clen: Int) -> List[String] = {
+  let c = prim.alloc_list_str(clen)
+  let _x = __chunk_copy_str(prim.handle(c) + 12, sh + 12 + start * 8, clen, 0)
+  c
+}
+
+fn __chunk_outer_str(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> Int =
+  if start >= total then 0
+  else {
+    let rem = total - start
+    let clen = if rem < cn then rem else cn
+    let chunk = __chunk_one_str(sh, start, clen)
+    prim.store_str(oh + 12 + ci * 8, chunk)
+    __chunk_outer_str(oh, sh, total, cn, ci + 1, start + cn)
+  }
+
+fn list_chunk_str(xs: List[String], n: Int) -> List[List[String]] = {
+  let sh = prim.handle(xs)
+  let total = prim.load32(sh + 4)
+  let num = (total + n - 1) / n
+  let outer = prim.alloc_list_str(num)
+  let _x = __chunk_outer_str(prim.handle(outer), sh, total, n, 0, 0)
+  outer
+}
+
+fn __win_outer_str(oh: Int, sh: Int, n: Int, num: Int, wi: Int) -> Int =
+  if wi >= num then 0
+  else {
+    let w = __chunk_one_str(sh, wi, n)
+    prim.store_str(oh + 12 + wi * 8, w)
+    __win_outer_str(oh, sh, n, num, wi + 1)
+  }
+
+fn __do_windows_str(xs: List[String], n: Int) -> List[List[String]] = {
+  let sh = prim.handle(xs)
+  let total = prim.load32(sh + 4)
+  let num = if n > total then 0 else total - n + 1
+  let outer = prim.alloc_list_str(num)
+  let _x = __win_outer_str(prim.handle(outer), sh, n, num, 0)
+  outer
+}
+
+fn list_windows_str(xs: List[String], n: Int) -> List[List[String]] = __do_windows_str(xs, n)
+fn list_window_str(xs: List[String], n: Int) -> List[List[String]] = __do_windows_str(xs, n)

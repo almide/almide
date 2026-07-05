@@ -1,0 +1,23 @@
+// list_zipwith — SELF-HOSTED `list.zip_with` for v1: combine two lists element-wise with a
+// two-arity closure f: (A, B) -> C (here List[Int]×List[Int] -> List[Int] via $closure_fn2).
+// Result length is the MIN of the two lengths (v0's zip stops at the shorter). Reads both
+// sources (borrowed), builds a fresh List[Int] (prim.alloc_list); result owned rc=1.
+
+fn __zipw_fill(dh: Int, ah: Int, bh: Int, f: (Int, Int) -> Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load64(ah + 12 + i * 8)
+    let y = prim.load64(bh + 12 + i * 8)
+    let z = f(x, y)
+    prim.store64(dh + 12 + i * 8, z)
+    __zipw_fill(dh, ah, bh, f, n, i + 1)
+  }
+
+fn list_zip_with(a: List[Int], b: List[Int], f: (Int, Int) -> Int) -> List[Int] = {
+  let na = list.len(a)
+  let nb = list.len(b)
+  let n = if na < nb then na else nb
+  let buf = prim.alloc_list(n)
+  let _x = __zipw_fill(prim.handle(buf), prim.handle(a), prim.handle(b), f, n, 0)
+  buf
+}

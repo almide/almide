@@ -1,0 +1,94 @@
+// list_to_string — SELF-HOSTED `list.to_string` over a `List[Int]`, byte-matching v0's compound
+// repr `[1, 2, 3]` (the `${list}` interpolation form). v0's AlmideRepr for Vec<i64> is:
+//   "[" + elements joined by ", " + "]"        (empty list → "[]")
+// each element rendered as its plain decimal (`format!("{}", i64)`, signed). This is that callee's
+// BODY, compiled through v1's own lower→MIR→render over the prim floor — NO hand-written wasm.
+//
+// Layout (v1 List block): [rc@0][len@4][cap@8][elem0@12][elem1@20]... — 8-byte i64 slots. `xs` is
+// BORROWED (read only, no slot ownership moves); the result is a fresh owned String.
+//
+// Two passes: (1) measure the exact output byte length, (2) fill. Both walk the SAME slots with the
+// SAME per-element width function so the alloc is exact (no over/under-run).
+
+// ── element: signed decimal of an i64 (matches int.to_string / `format!("{}", i64)`) ──
+
+// Decimal digit count of n >= 0 (n==0 → 1).
+fn __lts_digits(n: Int, acc: Int) -> Int =
+  if n < 10 then acc + 1
+  else __lts_digits(n / 10, acc + 1)
+
+// Byte width of element value v: digits, plus 1 for a leading '-' when negative.
+// Negative path WITHOUT negating (i64::MIN safe, #660): count digits of n <= 0 directly.
+fn __lts_count_neg(n: Int, acc: Int) -> Int =
+  if n > 0 - 10 then acc + 1
+  else __lts_count_neg(n / 10, acc + 1)
+
+fn __lts_int_width(v: Int) -> Int =
+  if v < 0 then __lts_count_neg(v, 0) + 1
+  else __lts_digits(v, 0)
+
+// Write the decimal digits of n >= 0 at `pos` (MSD first); return the address past the last byte.
+fn __lts_fill_digits(n: Int, pos: Int) -> Int =
+  if n < 10 then {
+    prim.store8(pos, 48 + n)
+    pos + 1
+  } else {
+    let p = __lts_fill_digits(n / 10, pos)
+    prim.store8(p, 48 + (n % 10))
+    p + 1
+  }
+
+// Fill the digits of n <= 0 WITHOUT negating: magnitude digit = -(n % 10) ∈ [0, 9].
+fn __lts_fill_neg(n: Int, pos: Int) -> Int =
+  if n > 0 - 10 then {
+    prim.store8(pos, 48 + (0 - n))
+    pos + 1
+  } else {
+    let p = __lts_fill_neg(n / 10, pos)
+    prim.store8(p, 48 + (0 - (n % 10)))
+    p + 1
+  }
+
+// Write element value v at `pos`; return the address past the last byte.
+fn __lts_fill_int(v: Int, pos: Int) -> Int =
+  if v < 0 then {
+    prim.store8(pos, 45)              // '-'
+    __lts_fill_neg(v, pos + 1)
+  } else __lts_fill_digits(v, pos)
+
+// ── pass 1: total body byte length = Σ element widths + 2*(count-1) for ", " separators ──
+fn __lts_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let v = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __lts_body_len(addr, count, i + 1, acc + sep + __lts_int_width(v))
+  }
+
+// ── pass 2: fill "[" elements-with-", " "]" into the buffer starting at `pos` ──
+fn __lts_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)            // ','
+      prim.store8(pos + 1, 32)        // ' '
+      pos + 2
+    } else pos
+    let v = prim.load64(addr + i * 8)
+    let pos2 = __lts_fill_int(v, pos1)
+    __lts_fill_body(addr, count, i + 1, pos2)
+  }
+
+fn list_to_string(xs: List[Int]) -> String = {
+  let h = prim.handle(xs)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __lts_body_len(addr, count, 0, 0)
+  let total = body + 2                 // '[' + ']'
+  let buf = prim.alloc_str(total)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 91)               // '['
+  let after = __lts_fill_body(addr, count, 0, base + 1)
+  prim.store8(after, 93)              // ']'
+  buf
+}

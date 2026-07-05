@@ -255,6 +255,24 @@ printf '%s\n' "$CLASSES" | while IFS= read -r cls; do
   printf '  %-16s %s\n' "$cls" "$cnt"
 done
 
+# ── SPEC-KEYING (CG-1 / flight-evidence-gaps F1): a contract carrying a
+# `spec = "ALS-xx"` field must point at a real normative section (`## ALS-xx `
+# heading in docs/specs/als/), so a claim can never reference a spec that does
+# not exist — the third layer of the spec ↔ contract ↔ fixture traceability.
+ALS_DIR="docs/specs/als"
+if [ -d "$ALS_DIR" ]; then
+  specd="$(grep -E '^spec      = ' "$LEDGER" | sed -E 's/^spec      = "([^"]+)"/\1/' | sort -u)"
+  n_specd=0
+  for sec in $specd; do
+    n_specd=$((n_specd + 1))
+    if ! grep -qE "^## $sec( |$)" "$ALS_DIR"/*.md; then
+      echo "::error::contract spec key '$sec' has NO normative section (## $sec) under docs/specs/als/"
+      fail=1
+    fi
+  done
+  echo "spec-keying: $n_specd distinct ALS section(s) referenced; all resolve."
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "::error::contract-ledger gate FAILED — see messages above."
   exit 1

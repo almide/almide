@@ -96,27 +96,15 @@ jobs:
           STATUS=${PIPESTATUS[0]}
           set -e
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-
-      # Count findings in a SEPARATE always()-step. The campaign writes
-      # each finding to disk as it is discovered, so its findings survive
-      # even if the campaign step itself is killed mid-run (an OOM, or the
-      # job timeout). Computing the count here — not inside the campaign
-      # step — is what lets the upload/issue steps still fire after a
-      # crash, instead of silently discarding a night's worth of repros.
-      - name: Collect findings
-        id: collect
-        if: always()
-        run: |
           FINDINGS_DIR="tools/xtarget-fuzz/findings"
           COUNT=0
           if [ -d "$FINDINGS_DIR" ]; then
             COUNT=$(find "$FINDINGS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
           fi
           echo "findings=$COUNT" >> "$GITHUB_OUTPUT"
-          echo "Recorded $COUNT unique finding(s)."
 
       - name: Upload findings
-        if: always() && steps.collect.outputs.findings != '0'
+        if: steps.campaign.outputs.findings != '0'
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-findings-${{ github.run_id }}
@@ -126,11 +114,11 @@ jobs:
           retention-days: 30
 
       - name: Open / update tracking issue
-        if: always() && steps.collect.outputs.findings != '0'
+        if: steps.campaign.outputs.findings != '0'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          COUNT="${{ steps.collect.outputs.findings }}"
+          COUNT="${{ steps.campaign.outputs.findings }}"
           TITLE="Nightly fuzz: $COUNT cross-target finding(s)"
           # Summarize the finding kinds for the issue body.
           SUMMARY=$(find tools/xtarget-fuzz/findings -name meta.txt -exec cat {} \; \

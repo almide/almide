@@ -1,4 +1,4 @@
-// @contract: C-094
+// @contract: C-094, C-126
 // #653: a UFCS protocol-method call on an INFERRED lambda param passed to a
 // higher-order function inside a generic body. The lambda was inferred bottom-up
 // before the HOF's `(T)->U` parameter slot pinned its param, so `e` was a fresh

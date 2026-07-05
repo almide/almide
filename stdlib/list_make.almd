@@ -1,0 +1,58 @@
+// list_make — SELF-HOSTED `list.range` / `list.repeat` for v1 over the prim floor:
+// construct a List[Int] via prim.alloc_list + store64. range(start,end) = the half-open
+// integer run; repeat(x,n) = n copies of x. Both store i64 VALUES (no new heap elements
+// created), so they are fully sound and loop-bounded — even a heap `x` is only aliased
+// (like list.reverse), never freshly allocated, so nothing leaks. Result owned.
+
+fn __range_fill(lh: Int, start: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    prim.store64(lh + 12 + i * 8, start + i)
+    __range_fill(lh, start, count, i + 1)
+  }
+
+fn list_range(start: Int, end: Int) -> List[Int] = {
+  let count = if end > start then end - start else 0
+  let buf = prim.alloc_list(count)
+  let _x = __range_fill(prim.handle(buf), start, count, 0)
+  buf
+}
+
+fn __repeat_fill(lh: Int, x: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.store64(lh + 12 + i * 8, x)
+    __repeat_fill(lh, x, n, i + 1)
+  }
+
+fn list_repeat(x: Int, n: Int) -> List[Int] = {
+  let count = if n > 0 then n else 0
+  let buf = prim.alloc_list(count)
+  let _x = __repeat_fill(prim.handle(buf), x, count, 0)
+  buf
+}
+
+// list.with_capacity(cap) -> a fresh EMPTY list (v0's Vec::with_capacity has len 0). The reserved
+// capacity is not observable in v1 (no self-host `push`), so the byte-matching result is the empty
+// list — list.len = 0.
+fn list_with_capacity(cap: Int) -> List[Int] = prim.alloc_list(0)
+
+// list.repeat over a HEAP element (`list.repeat(h, n_rep)`, h: Matrix — the nn repeat_kv
+// GQA duplication): each slot CO-OWNS the element (rc_inc per copy — the co-own producer
+// pattern), so the result's recursive drop releases exactly the references it holds.
+// The scalar `list_repeat` above ALIASES x raw (sound only for i64 values); routing
+// (`list_heap_call_name`) sends every heap-element repeat here.
+fn __repeat_fill_rc(lh: Int, hx: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.rc_inc(hx)
+    prim.store64(lh + 12 + i * 8, hx)
+    __repeat_fill_rc(lh, hx, n, i + 1)
+  }
+
+fn list_repeat_rc(x: List[Int], n: Int) -> List[List[Int]] = {
+  let count = if n > 0 then n else 0
+  let buf: List[List[Int]] = prim.alloc_list_str(count)
+  let _x = __repeat_fill_rc(prim.handle(buf), prim.handle(x), count, 0)
+  buf
+}

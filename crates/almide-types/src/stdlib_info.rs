@@ -27,6 +27,8 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "int8", "int16", "int32",
     "uint8", "uint16", "uint32", "uint64",
     "float32",
+    // The v1 primitive floor (raw memory + fd_write); v1 maps `prim.*` to MIR ops.
+    "prim",
 ];
 
 /// Bundled modules that should be auto-imported (Tier 1 behavior).
@@ -121,6 +123,9 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "float32" => Some(include_str!("../../../stdlib/float32.almd")),
         "net" => Some(include_str!("../../../stdlib/net.almd")),
         "zlib" => Some(include_str!("../../../stdlib/zlib.almd")),
+        // The v1 primitive floor (raw memory + fd_write). v1 maps `prim.*` to MIR
+        // primitive ops by module name; the @intrinsic symbols are v0 placeholders.
+        "prim" => Some(include_str!("../../../stdlib/prim.almd")),
         _ => None,
     }
 }

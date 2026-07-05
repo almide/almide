@@ -1,0 +1,335 @@
+// float_parse — SELF-HOSTED `float.parse(s)` → Result[Float, String] for the v1 wasm spine.
+// NORMATIVE SPEC: ALS-T2 (docs/specs/als/text-and-numbers.md §T2) — conformance is judged against that section's
+// rules and its pinned fixture, NOT against any other implementation (F1: no oracle circularity).
+// v0 is `s.trim().parse::<f64>()`. FULL IEEE-754 correctly-rounded strtod, two-tier like Rust:
+//  - FAST PATH: <= 15 digits and |net-exp| <= 22 — the mantissa is exact in f64 and 10^k is an
+//    exact f64, so one multiply/divide is correctly rounded (Clinger's safe region).
+//  - SLOW PATH: everything else goes through an 800-digit HIGH-PRECISION DECIMAL (the
+//    Simple Decimal Conversion of go's strconv / Nigel Tao): the digit array is repeatedly
+//    halved/doubled (×2 / ÷2 decimal-digit shifts) into [0.5, 1) × 2^e, denormals clamp the
+//    exponent to -1022 first, 53 more doublings expose the integer mantissa, round-half-even
+//    (with a truncation-sticky bit past 800 digits), and the f64 is assembled bit-exactly via
+//    prim.ffrombits. Denormal min (5e-324), f64 max (1.7976931348623157e308), and 19+-digit
+//    mantissas all round exactly as Rust does. (flight-evidence-gaps F7.)
+// Out-of-grammar input (junk, no digit) returns `err`; "inf"/"infinity"/"nan" parse as IEEE
+// specials. Uses only scalar helpers + position arithmetic + a byte buffer (the v1 subset).
+
+fn __fp_isdigit(b: Int) -> Bool = b >= 48 and b <= 57
+fn __fp_isspace(b: Int) -> Bool = b == 32 or b == 9
+
+// Case-insensitive byte match (Rust's f64 parser accepts "inf"/"Infinity"/"NaN" in any case).
+fn __fp_lc(b: Int) -> Int = if b >= 65 and b <= 90 then b + 32 else b
+fn __fp_eqci(addr: Int, c: Int) -> Bool = __fp_lc(prim.load8(addr)) == c
+
+fn __fp_skip_sp(addr: Int, end: Int) -> Int =
+  if addr < end and __fp_isspace(prim.load8(addr)) then __fp_skip_sp(addr + 1, end) else addr
+
+fn __fp_skip_sp_end(start: Int, end: Int) -> Int =
+  if end > start and __fp_isspace(prim.load8(end - 1)) then __fp_skip_sp_end(start, end - 1) else end
+
+// Address just past a run of decimal digits at `addr`.
+fn __fp_scan_digits(addr: Int, end: Int) -> Int =
+  if addr < end and __fp_isdigit(prim.load8(addr)) then __fp_scan_digits(addr + 1, end) else addr
+
+// Accumulate the decimal digits in [addr, stop) into mantissa `m`.
+fn __fp_acc(addr: Int, stop: Int, m: Int) -> Int =
+  if addr < stop then __fp_acc(addr + 1, stop, m * 10 + (prim.load8(addr) - 48)) else m
+
+// 10.0^k as an EXACT f64 for 0 <= k <= 22 (repeated *10.0; each step is exact in that
+// range; the multiplication sequence 1*10*10*… is identical to the old right-fold form).
+// ACCUMULATOR (tail) recursion so the v1 TCO turns it into a loop — the old
+// `__fp_pow10(k-1) * 10.0` was NOT a tail call and exhausted the call stack on a huge
+// exponent ("1e99999"). k is CAPPED at 400: 10^400 is already +inf in f64 (inf scaling
+// then gives inf / 0 exactly like the true power would), so the cap never changes a result.
+fn __fp_pow10_acc(k: Int, acc: Float) -> Float =
+  if k <= 0 then acc else __fp_pow10_acc(k - 1, acc * 10.0)
+
+fn __fp_pow10(k: Int) -> Float = {
+  let kk = if k > 400 then 400 else k
+  __fp_pow10_acc(kk, 1.0)
+}
+
+// ── HPD: high-precision decimal (slow path) ─────────────────────────────────
+// Layout in an 824-byte buffer: n(count)@hb+0, dp(+100000 biased, load32 is
+// unsigned)@hb+4, trunc@hb+8; digit VALUES (0..9, not ASCII) @hb+16 .. +816.
+// Invariant: value = 0.d[0..n] × 10^dp, d[0] != 0 (no leading zeros), no
+// trailing zeros. All loops are tail recursion (the v1 TCO turns them into
+// wasm loops); multi-value returns are packed into one Int where needed.
+
+fn __hpd_n(hb: Int) -> Int = prim.load32(hb)
+fn __hpd_dp(hb: Int) -> Int = prim.load32(hb + 4) - 100000
+fn __hpd_tr(hb: Int) -> Int = prim.load32(hb + 8)
+fn __hpd_sn(hb: Int, v: Int) -> Unit = prim.store32(hb, v)
+fn __hpd_sdp(hb: Int, v: Int) -> Unit = prim.store32(hb + 4, v + 100000)
+fn __hpd_str8(hb: Int, v: Int) -> Unit = prim.store32(hb + 8, v)
+fn __hpd_d(hb: Int, i: Int) -> Int = prim.load8(hb + 16 + i)
+fn __hpd_sd(hb: Int, i: Int, v: Int) -> Unit = prim.store8(hb + 16 + i, v)
+
+// Trailing-zero trim: the count with zero digits dropped from the tail.
+fn __hpd_trim(hb: Int, m: Int) -> Int =
+  if m > 0 and __hpd_d(hb, m - 1) == 0 then __hpd_trim(hb, m - 1) else m
+
+// Leading-zero strip: shift digits left by the zero-run length, dp follows.
+fn __hpd_lzc(hb: Int, i: Int, n: Int) -> Int =
+  if i < n and __hpd_d(hb, i) == 0 then __hpd_lzc(hb, i + 1, n) else i
+fn __hpd_move(hb: Int, i: Int, sh: Int, n: Int) -> Unit =
+  if i + sh < n then {
+    __hpd_sd(hb, i, __hpd_d(hb, i + sh))
+    __hpd_move(hb, i + 1, sh, n)
+  }
+  else ()
+fn __hpd_strip(hb: Int) -> Unit = {
+  let n = __hpd_n(hb)
+  let sh = __hpd_lzc(hb, 0, n)
+  if sh > 0 then {
+    __hpd_move(hb, 0, sh, n)
+    __hpd_sn(hb, n - sh)
+    __hpd_sdp(hb, __hpd_dp(hb) - sh)
+  }
+  else ()
+}
+
+// ×2 (leftShift(1)): low-to-high digit walk writing to i+1; the final carry
+// (0/1) lands at digit 0. A digit pushed past slot 799 is dropped — sticky
+// trunc if nonzero.
+fn __hpd_lsh1_loop(hb: Int, r: Int, carry: Int) -> Int =
+  if r < 0 then carry
+  else {
+    let v = __hpd_d(hb, r) * 2 + carry
+    if r + 1 < 800 then __hpd_sd(hb, r + 1, v % 10)
+    else (if v % 10 != 0 then __hpd_str8(hb, 1) else ())
+    __hpd_lsh1_loop(hb, r - 1, v / 10)
+  }
+fn __hpd_lsh1(hb: Int) -> Unit = {
+  let n = __hpd_n(hb)
+  let c = __hpd_lsh1_loop(hb, n - 1, 0)
+  __hpd_sd(hb, 0, c)
+  __hpd_sn(hb, (if n + 1 > 800 then 800 else n + 1))
+  __hpd_sdp(hb, __hpd_dp(hb) + 1)
+  __hpd_strip(hb)
+  __hpd_sn(hb, __hpd_trim(hb, __hpd_n(hb)))
+}
+
+// ÷2 (rightShift(1)): prime the accumulator until it reaches 2 (packing
+// r*100+acc into one Int — acc < 20 by construction), then the divide walk.
+fn __hpd_rsh1_prime(hb: Int, r: Int, acc: Int, n: Int) -> Int =
+  if acc < 2 and r < n then __hpd_rsh1_prime(hb, r + 1, acc * 10 + __hpd_d(hb, r), n)
+  else r * 100 + acc
+fn __hpd_rsh1_main(hb: Int, r: Int, acc: Int, w: Int, n: Int) -> Int =
+  if r < n or acc > 0 then {
+    let out = acc / 2
+    let nx = (acc % 2) * 10 + (if r < n then __hpd_d(hb, r) else 0)
+    if w < 800 then __hpd_sd(hb, w, out)
+    else (if out != 0 then __hpd_str8(hb, 1) else ())
+    __hpd_rsh1_main(hb, r + 1, nx, (if w < 800 then w + 1 else w), n)
+  }
+  else w
+fn __hpd_rsh1(hb: Int) -> Unit = {
+  let n = __hpd_n(hb)
+  let pk = __hpd_rsh1_prime(hb, 0, 0, n)
+  __hpd_sdp(hb, __hpd_dp(hb) - (pk / 100 - 1))
+  let w = __hpd_rsh1_main(hb, pk / 100, pk % 100, 0, n)
+  __hpd_sn(hb, __hpd_trim(hb, w))
+  __hpd_strip(hb)
+}
+
+// Normalize into [0.5, 1): halve while >= 0.5, then double while < 0.5
+// (go strconv's two loops); each shift is a factor of 2 tracked in e2.
+fn __hpd_to_half(hb: Int, e2: Int) -> Int =
+  if __hpd_dp(hb) > 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(hb, 0) >= 5)
+  then {
+    __hpd_rsh1(hb)
+    __hpd_to_half(hb, e2 + 1)
+  }
+  else e2
+fn __hpd_from_half(hb: Int, e2: Int) -> Int =
+  if __hpd_dp(hb) < 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(hb, 0) < 5)
+  then {
+    __hpd_lsh1(hb)
+    __hpd_from_half(hb, e2 - 1)
+  }
+  else e2
+
+fn __hpd_rshn(hb: Int, k: Int) -> Unit =
+  if k > 0 then {
+    __hpd_rsh1(hb)
+    __hpd_rshn(hb, k - 1)
+  }
+  else ()
+fn __hpd_lshn(hb: Int, k: Int) -> Unit =
+  if k > 0 then {
+    __hpd_lsh1(hb)
+    __hpd_lshn(hb, k - 1)
+  }
+  else ()
+
+// digits[0..dp) as an integer (dp <= 17 at the call site — fits i64 exactly).
+fn __hpd_ri(hb: Int, i: Int, dp: Int, n: Int, acc: Int) -> Int =
+  if i < dp then __hpd_ri(hb, i + 1, dp, n, acc * 10 + (if i < n then __hpd_d(hb, i) else 0))
+  else acc
+
+// Round-half-even on the fraction past dp: >5 up, <5 down, =5 → up iff any
+// nonzero after OR truncated, else iff the last kept digit is odd.
+fn __hpd_nz_after(hb: Int, i: Int, n: Int) -> Bool =
+  if i < n then (if __hpd_d(hb, i) != 0 then true else __hpd_nz_after(hb, i + 1, n))
+  else false
+fn __hpd_round_up(hb: Int) -> Bool = {
+  let dp = __hpd_dp(hb)
+  let n = __hpd_n(hb)
+  if dp < 0 or dp >= n then false
+  else {
+    let d = __hpd_d(hb, dp)
+    if d > 5 then true
+    else if d < 5 then false
+    else if __hpd_tr(hb) == 1 then true
+    else if __hpd_nz_after(hb, dp + 1, n) then true
+    else dp > 0 and __hpd_d(hb, dp - 1) % 2 == 1
+  }
+}
+
+// Copy source digits [a, b) into the HPD, skipping leading zeros (counted in
+// z — they only move the decimal point) and dropping (sticky) past 800.
+// State pack: w*1000000 + z; z saturates (a smaller-than-10^-330 value is
+// caught by the dp cutoff regardless).
+fn __fp_cpy(hb: Int, a: Int, b: Int, wz: Int) -> Int =
+  if a >= b then wz
+  else {
+    let d = prim.load8(a) - 48
+    let w = wz / 1000000
+    if w == 0 and d == 0 then __fp_cpy(hb, a + 1, b, (if wz % 1000000 < 999999 then wz + 1 else wz))
+    else if w < 800 then {
+      __hpd_sd(hb, w, d)
+      __fp_cpy(hb, a + 1, b, wz + 1000000)
+    }
+    else {
+      if d != 0 then __hpd_str8(hb, 1) else ()
+      __fp_cpy(hb, a + 1, b, wz)
+    }
+  }
+
+fn __hpd_init(hb: Int, p0: Int, i_end: Int, f_start: Int, f_end: Int, ex: Int) -> Unit = {
+  __hpd_str8(hb, 0)
+  let wz = __fp_cpy(hb, f_start, f_end, __fp_cpy(hb, p0, i_end, 0))
+  __hpd_sn(hb, __hpd_trim(hb, wz / 1000000))
+  // CLAMP dp into just past the ±cutoffs before the biased 32-bit store — a
+  // huge exponent ("1e-2147483649") would wrap the u32 slot into a giant
+  // positive dp (0.0 misread as inf). Outside the cutoffs the exact dp is
+  // irrelevant: __fp_exact only compares against -330 / 310.
+  let dp = (i_end - p0) - wz % 1000000 + ex
+  __hpd_sdp(hb, (if dp < 0 - 331 then 0 - 331 else if dp > 311 then 311 else dp))
+}
+
+// value = 0.d × 10^dp → the correctly-rounded f64 (go strconv decimalToFloatBits).
+fn __fp_exact(hb: Int, neg: Bool) -> Float = {
+  let inf = prim.i2f(1) / prim.i2f(0)
+  if __hpd_n(hb) == 0 or __hpd_dp(hb) < 0 - 330 then (if neg then -1.0 * 0.0 else 0.0)
+  else if __hpd_dp(hb) > 310 then (if neg then 0.0 - inf else inf)
+  else {
+    // scale into [0.5, 1) × 2^eb; the f64 binary exponent is eb - 1
+    let eb = __hpd_from_half(hb, __hpd_to_half(hb, 0))
+    let e2 = eb - 1
+    // denormal clamp: below 2^-1022 shrink the mantissa instead of the exponent
+    let e3 = if e2 < 0 - 1022 then 0 - 1022 else e2
+    __hpd_rshn(hb, (if e2 < 0 - 1022 then (0 - 1022) - e2 else 0))
+    if e3 > 1023 then (if neg then 0.0 - inf else inf)
+    else {
+      // expose the 53-bit integer mantissa and round half-even
+      __hpd_lshn(hb, 53)
+      let m0 = __hpd_ri(hb, 0, __hpd_dp(hb), __hpd_n(hb), 0)
+      let m1 = if __hpd_round_up(hb) then m0 + 1 else m0
+      // rounding overflow 2^53 → mantissa 2^52, exponent + 1
+      let m2 = if m1 >= 9007199254740992 then m1 / 2 else m1
+      let e4 = if m1 >= 9007199254740992 then e3 + 1 else e3
+      if e4 > 1023 then (if neg then 0.0 - inf else inf)
+      else {
+        // m2 < 2^52 ⟹ denormal (biased exponent 0, mantissa stored raw)
+        let biased = if m2 < 4503599627370496 then 0 else e4 + 1023
+        let low = if m2 < 4503599627370496 then m2 else m2 - 4503599627370496
+        let bits = low + biased * 4503599627370496
+        let sbits = if neg then bits - 4611686018427387904 - 4611686018427387904 else bits
+        prim.ffrombits(sbits)
+      }
+    }
+  }
+}
+
+fn __fp_slow(p0: Int, i_end: Int, f_start: Int, f_end: Int, ex: Int, neg: Bool) -> Float = {
+  let buf = string.repeat("0", 824)
+  let hb = prim.handle(buf) + 12
+  __hpd_init(hb, p0, i_end, f_start, f_end, ex)
+  __fp_exact(hb, neg)
+}
+
+// v0 trims UNICODE whitespace (`s.trim()`); see string_to_int. (C-021.)
+fn float_parse(s: String) -> Result[Float, String] = {
+  let t = string.trim(s)
+  __fp_raw(t)
+}
+
+fn __fp_raw(s: String) -> Result[Float, String] = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let base = h + 12
+  let st = __fp_skip_sp(base, base + blen)
+  let en = __fp_skip_sp_end(st, base + blen)
+  let neg = st < en and prim.load8(st) == 45
+  let p0 = if st < en and (prim.load8(st) == 45 or prim.load8(st) == 43) then st + 1 else st
+  // IEEE special values (Rust's strtod accepts these): "inf" / "infinity" / "nan", case-insensitive,
+  // the optional sign already folded into neg/p0. Checked before the digit grammar (which rejects them).
+  // Built by RUNTIME division (prim.i2f, NOT folded literals) so the f64 inf/nan bit patterns come from
+  // the hardware — 1/0 = +inf, 0/0 = nan, byte-identical to Rust on both targets; float.to_string
+  // already renders inf/-inf/NaN.
+  let tlen = en - p0
+  let is_inf = (tlen == 3 and __fp_eqci(p0, 105) and __fp_eqci(p0 + 1, 110) and __fp_eqci(p0 + 2, 102))
+    or (tlen == 8 and __fp_eqci(p0, 105) and __fp_eqci(p0 + 1, 110) and __fp_eqci(p0 + 2, 102)
+      and __fp_eqci(p0 + 3, 105) and __fp_eqci(p0 + 4, 110) and __fp_eqci(p0 + 5, 105)
+      and __fp_eqci(p0 + 6, 116) and __fp_eqci(p0 + 7, 121))
+  let is_nan = tlen == 3 and __fp_eqci(p0, 110) and __fp_eqci(p0 + 1, 97) and __fp_eqci(p0 + 2, 110)
+  // integer part
+  let i_end = __fp_scan_digits(p0, en)
+  let icnt = i_end - p0
+  // optional fraction
+  let has_dot = i_end < en and prim.load8(i_end) == 46
+  let f_start = if has_dot then i_end + 1 else i_end
+  let f_end = __fp_scan_digits(f_start, en)
+  let fcnt = f_end - f_start
+  // optional exponent
+  let has_e = f_end < en and (prim.load8(f_end) == 101 or prim.load8(f_end) == 69)
+  let e_sign_pos = f_end + 1
+  let e_neg = has_e and e_sign_pos < en and prim.load8(e_sign_pos) == 45
+  let e_digit_start = if has_e and e_sign_pos < en and (prim.load8(e_sign_pos) == 45 or prim.load8(e_sign_pos) == 43) then e_sign_pos + 1 else e_sign_pos
+  let e_end = if has_e then __fp_scan_digits(e_digit_start, en) else f_end
+  // cap: 9+ exponent digits already exceed every f64 cutoff (±330); an uncapped
+  // accumulator would wrap i64 on "1e99999999999999999999".
+  let e_mag = if has_e then
+    (if e_end - e_digit_start > 8 then 999999999 else __fp_acc(e_digit_start, e_end, 0))
+    else 0
+  let exp = if e_neg then 0 - e_mag else e_mag
+  let e_cnt = if has_e then e_end - e_digit_start else 1
+  let got_digit = icnt + fcnt > 0
+  let consumed_all = e_end >= en
+  let ok_form = got_digit and (e_cnt > 0) and consumed_all
+  if is_inf then {
+    let infv = prim.i2f(1) / prim.i2f(0)
+    if neg then ok(0.0 - infv) else ok(infv)
+  }
+  else if is_nan then ok(prim.i2f(0) / prim.i2f(0))
+  else if not ok_form then
+    (if en <= st then err("cannot parse float from empty string") else err("invalid float literal"))
+  else {
+    let net = exp - fcnt
+    let pos_net = if net >= 0 then net else 0 - net
+    if icnt + fcnt <= 15 and pos_net <= 22 then {
+      // FAST PATH (Clinger): mantissa and 10^k both exact in f64 — one rounding.
+      let mant = __fp_acc(f_start, f_end, __fp_acc(p0, i_end, 0))
+      let mag = prim.i2f(mant)
+      let p10 = __fp_pow10(pos_net)
+      let scaled = if net >= 0 then mag * p10 else mag / p10
+      // `0.0 - 0.0` is +0.0 in IEEE — negation via subtraction CANNOT produce -0.0
+      // ("-0.0" parsed sign-less, #663). Multiply by -1.0 instead: -1.0 * 0.0 = -0.0.
+      let v = if neg then -1.0 * scaled else scaled
+      ok(v)
+    }
+    else ok(__fp_slow(p0, i_end, f_start, f_end, exp, neg))
+  }
+}

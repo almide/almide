@@ -1,0 +1,14 @@
+// wasm:enabled
+// `${Option[Map[String, Int]]}` — v0's `some(["a": 1, "b": 2])` (insertion order) / `none`. The inner
+// map renders via map.keys/map.values (callable, insertion-ordered), wrapped in `some(…)`. The
+// non-empty map is a `map.from_list(…)` computed payload (materialized into the Some slot); an EMPTY
+// `some([:])` walls cleanly (an EmptyMap payload has no computed handle to move — honest wall).
+effect fn main() -> Unit = {
+  let a: Option[Map[String, Int]] = some(["a": 1, "b": 2, "c": -7])
+  let b: Option[Map[String, Int]] = none
+  let d: Option[Map[String, Int]] = some(["k\"x": 0, "big": 9223372036854775807])
+  println("${a}")
+  println("${b}")
+  println("${d}")
+  println("v=${a}!")
+}

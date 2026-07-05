@@ -144,18 +144,6 @@ pub fn run_ladder(
             wasm: None,
         });
     }
-    if native.output_overflow {
-        // A finite generated program that floods stdout past the capture
-        // cap is a runaway (effectively non-terminating output) — bucket
-        // it with hangs, not with build failures.
-        return Outcome::Finding(Finding {
-            rung: Rung::Run,
-            kind: FindingKind::Hang,
-            summary: "native run produced unbounded output (runaway)".into(),
-            native: Some(RunEvidence::from(&native)),
-            wasm: None,
-        });
-    }
     if !native.success() {
         // Distinguish a build/codegen failure from a legitimate runtime
         // error. Both surface as non-zero exit; the generated programs
@@ -203,24 +191,6 @@ pub fn run_ladder(
     // Compare observable behaviour: stdout, exit code, and run-success.
     let nat_ev = RunEvidence::from(&native);
     let wasm_ev = RunEvidence::from(&wasm);
-
-    if wasm.output_overflow && !native.output_overflow {
-        // The classic wasm string-codegen failure: native prints a small
-        // finite result while wasm dumps linear memory unbounded. The cap
-        // already tore it down; record it as the divergence it is rather
-        // than a generic run failure.
-        return Outcome::Finding(Finding {
-            rung: Rung::Run,
-            kind: FindingKind::OutputDivergence,
-            summary: format!(
-                "wasm emitted excessive output ({}B captured, native {}B) — likely a linear-memory dump",
-                wasm_ev.stdout.len(),
-                nat_ev.stdout.len()
-            ),
-            native: Some(nat_ev),
-            wasm: Some(wasm_ev),
-        });
-    }
 
     if !wasm.success() {
         // Native ran cleanly but WASM did not — a run-failure divergence.
@@ -289,9 +259,7 @@ fn parse_then_format(src: &str) -> Option<String> {
 }
 
 /// Build a short, scannable description of an output divergence —
-/// the first line that differs. Each side is truncated so a pathological
-/// line (e.g. a wasm memory dump) cannot bloat the log, the dedup key, or
-/// the findings artifact.
+/// the first line that differs.
 fn divergence_summary(native: &RunEvidence, wasm: &RunEvidence) -> String {
     if native.exit_code != wasm.exit_code {
         return format!(
@@ -301,11 +269,7 @@ fn divergence_summary(native: &RunEvidence, wasm: &RunEvidence) -> String {
     }
     for (n, w) in native.stdout.lines().zip(wasm.stdout.lines()) {
         if n != w {
-            return format!(
-                "stdout differs: native={:?} wasm={:?}",
-                clip(n),
-                clip(w)
-            );
+            return format!("stdout differs: native={n:?} wasm={w:?}");
         }
     }
     format!(
@@ -313,15 +277,4 @@ fn divergence_summary(native: &RunEvidence, wasm: &RunEvidence) -> String {
         native.stdout.len(),
         wasm.stdout.len()
     )
-}
-
-/// Clip one side of a divergence to a bounded prefix (by `char`, so the
-/// boundary is always valid UTF-8), appending an elision marker when cut.
-fn clip(s: &str) -> String {
-    const MAX: usize = 160;
-    if s.chars().count() <= MAX {
-        return s.to_string();
-    }
-    let head: String = s.chars().take(MAX).collect();
-    format!("{head}…(+{} more chars)", s.chars().count() - MAX)
 }

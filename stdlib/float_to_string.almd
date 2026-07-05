@@ -1,0 +1,485 @@
+// float_to_string — SELF-HOSTED `float.to_string`, a FAITHFUL transcription of
+// crates/almide-codegen/src/emit_wasm/rt_dragon.rs (v0's WASM-target dtoa). That reference is the
+// Steele & White / Burger–Dubois "Dragon4" free-format shortest-decimal algorithm with EXACT
+// big-integer arithmetic, validated byte-for-byte against Rust's `format!("{}", x)` over 20M random
+// + boundary f64 values. v0 native uses `format!("{}", n)` (shortest round-trip, fixed notation,
+// never scientific) + a `.0` integer suffix; this port reproduces those exact bytes through v1's
+// own lower→MIR→render pipeline over the `prim` floor — NO hand-written wasm.
+//
+// Pure String building (cert `i`, like int.to_string): no host effect, no caps, no proof touched.
+// The only risk is byte-exactness, caught by the byte-match e2e test.
+//
+// ── Big-integer layout ──
+// A bignum lives in a contiguous scratch block (one prim.alloc_list, read/written by byte address
+// via prim.load32/store32). Each bignum: [len:u32 @ +0][limb_0 @ +4][limb_1 @ +8]... little-endian
+// u32 limbs. NLIMBS=128 limbs cover the widest intermediate (S scaled by 10^k, < ~2150 bits).
+//   BN_HDR    = 4                 (the len word)
+//   BN_BYTES  = 4 + 128*4 = 516
+//   BN_STRIDE = (516 + 15) & ~15 = 528   (16-aligned)
+// Five bignums R, S, MP, MM, TMP at offsets 0, 528, 1056, 1584, 2112; the digit buffer at 2640.
+//   SCRATCH_BYTES = 2640 + 1100 = 3740   → a List[Int] of 468 i64 slots (3744 bytes) is ample.
+// All offsets below are BYTE offsets from the scratch byte-base (handle(block) + 12).
+
+// ───────────────────────── big-integer helpers ─────────────────────────
+// Each takes the absolute BYTE address of a bignum's len word. limb i is at p + 4 + i*4.
+
+// norm(p): drop high zero limbs, keep len >= 1.
+fn __dg_norm_loop(p: Int, len: Int) -> Int = {
+  let stop = if len <= 1 then true else (prim.load32(p + 4 + (len - 1) * 4) != 0)
+  if stop then len
+  else __dg_norm_loop(p, len - 1)
+}
+fn __dg_norm(p: Int) -> Unit = {
+  let len = prim.load32(p)
+  prim.store32(p, __dg_norm_loop(p, len))
+}
+
+// mul_small(p, m): p *= m (m a u32). carry/prod are full i64.
+fn __dg_ms_body(p: Int, m: Int, len: Int, i: Int, carry: Int) -> Int =
+  if i >= len then carry
+  else {
+    let prod = prim.load32(p + 4 + i * 4) * m + carry
+    prim.store32(p + 4 + i * 4, prim.band(prod, 4294967295))
+    __dg_ms_body(p, m, len, i + 1, prim.bshr_u(prod, 32))
+  }
+fn __dg_ms_carry(p: Int, len: Int, carry: Int) -> Int =
+  if carry == 0 then len
+  else {
+    prim.store32(p + 4 + len * 4, prim.band(carry, 4294967295))
+    __dg_ms_carry(p, len + 1, prim.bshr_u(carry, 32))
+  }
+fn __dg_mul_small(p: Int, m: Int) -> Unit = {
+  let len = prim.load32(p)
+  let carry = __dg_ms_body(p, m, len, 0, 0)
+  let len2 = __dg_ms_carry(p, len, carry)
+  prim.store32(p, len2)
+}
+fn __dg_mul10(p: Int) -> Unit = __dg_mul_small(p, 10)
+
+// cmp(a, b) -> -1/0/1. Assumes both normalized.
+fn __dg_cmp_limbs(a: Int, b: Int, i: Int) -> Int =
+  if i == 0 then 0
+  else {
+    let va = prim.load32(a + 4 + (i - 1) * 4)
+    let vb = prim.load32(b + 4 + (i - 1) * 4)
+    if va != vb then (if va < vb then 0 - 1 else 1)
+    else __dg_cmp_limbs(a, b, i - 1)
+  }
+fn __dg_cmp(a: Int, b: Int) -> Int = {
+  let la = prim.load32(a)
+  let lb = prim.load32(b)
+  if la != lb then (if la < lb then 0 - 1 else 1)
+  else __dg_cmp_limbs(a, b, la)
+}
+
+// add(dst, src): dst += src.
+fn __dg_add_body(dst: Int, src: Int, ld: Int, ls: Int, n: Int, i: Int, carry: Int) -> Int =
+  if i >= n then carry
+  else {
+    let a = if i < ld then prim.load32(dst + 4 + i * 4) else 0
+    let b = if i < ls then prim.load32(src + 4 + i * 4) else 0
+    let sum = a + b + carry
+    prim.store32(dst + 4 + i * 4, prim.band(sum, 4294967295))
+    __dg_add_body(dst, src, ld, ls, n, i + 1, prim.bshr_u(sum, 32))
+  }
+fn __dg_add(dst: Int, src: Int) -> Unit = {
+  let ld = prim.load32(dst)
+  let ls = prim.load32(src)
+  let n = if ld >= ls then ld else ls
+  let carry = __dg_add_body(dst, src, ld, ls, n, 0, 0)
+  let n2 = if carry != 0 then {
+    prim.store32(dst + 4 + n * 4, prim.band(carry, 4294967295))
+    n + 1
+  } else n
+  prim.store32(dst, n2)
+}
+
+// sub(dst, src): dst -= src (requires dst >= src). Normalizes.
+fn __dg_sub_body(dst: Int, src: Int, ld: Int, ls: Int, i: Int, borrow: Int) -> Int =
+  if i >= ld then 0
+  else {
+    let b = if i < ls then prim.load32(src + 4 + i * 4) else 0
+    let diff = prim.load32(dst + 4 + i * 4) - b - borrow
+    // diff < 0 → add 2^32, borrow=1 (these are full i64 values, so a plain sign test works).
+    let nb = if diff < 0 then 1 else 0
+    let d2 = if diff < 0 then diff + 4294967296 else diff
+    prim.store32(dst + 4 + i * 4, prim.band(d2, 4294967295))
+    __dg_sub_body(dst, src, ld, ls, i + 1, nb)
+  }
+fn __dg_sub(dst: Int, src: Int) -> Unit = {
+  let ld = prim.load32(dst)
+  let ls = prim.load32(src)
+  let _b = __dg_sub_body(dst, src, ld, ls, 0, 0)
+  __dg_norm(dst)
+}
+
+// copy(dst, src): dst = src.
+fn __dg_copy_limbs(dst: Int, src: Int, len: Int, i: Int) -> Int =
+  if i >= len then 0
+  else {
+    prim.store32(dst + 4 + i * 4, prim.load32(src + 4 + i * 4))
+    __dg_copy_limbs(dst, src, len, i + 1)
+  }
+fn __dg_copy(dst: Int, src: Int) -> Unit = {
+  let len = prim.load32(src)
+  prim.store32(dst, len)
+  let _z = __dg_copy_limbs(dst, src, len, 0)
+}
+
+// shl(p, bits): p <<= bits. limb_shift = bits/32, bit_shift = bits%32.
+fn __dg_shl_move(p: Int, ls: Int, i: Int) -> Int =     // move limbs up by ls, high → low
+  if i == 0 then 0
+  else {
+    prim.store32(p + 4 + (i - 1 + ls) * 4, prim.load32(p + 4 + (i - 1) * 4))
+    __dg_shl_move(p, ls, i - 1)
+  }
+fn __dg_shl_zero(p: Int, ls: Int, i: Int) -> Int =     // zero the low ls limbs
+  if i >= ls then 0
+  else {
+    prim.store32(p + 4 + i * 4, 0)
+    __dg_shl_zero(p, ls, i + 1)
+  }
+fn __dg_shl_bits(p: Int, bs: Int, len: Int, i: Int, carry: Int) -> Int =
+  if i >= len then carry
+  else {
+    let v = prim.load32(p + 4 + i * 4)
+    let lo = prim.band(prim.bshl(v, bs), 4294967295)
+    prim.store32(p + 4 + i * 4, prim.bor(lo, carry))
+    __dg_shl_bits(p, bs, len, i + 1, prim.bshr_u(v, 32 - bs))
+  }
+fn __dg_shl(p: Int, bits: Int) -> Unit = {
+  let len0 = prim.load32(p)
+  let ls = bits / 32
+  let bs = bits % 32
+  // limb shift
+  let len1 = if ls != 0 then {
+    let _m = __dg_shl_move(p, ls, len0)
+    let _z = __dg_shl_zero(p, ls, 0)
+    len0 + ls
+  } else len0
+  // bit shift within limbs
+  let len2 = if bs != 0 then {
+    let carry = __dg_shl_bits(p, bs, len1, ls, 0)
+    if carry != 0 then {
+      prim.store32(p + 4 + len1 * 4, prim.band(carry, 4294967295))
+      len1 + 1
+    } else len1
+  } else len1
+  prim.store32(p, len2)
+  __dg_norm(p)
+}
+
+// Set bignum at byte addr `p` to a small u32 constant (1 limb).
+fn __dg_set_small(p: Int, v: Int) -> Unit = {
+  prim.store32(p, 1)
+  prim.store32(p + 4, v)
+}
+// Set bignum at byte addr `p` to a full u64 (two limbs).
+fn __dg_set_u64(p: Int, val: Int) -> Unit = {
+  let lo = prim.band(val, 4294967295)
+  let hi = prim.bshr_u(val, 32)
+  prim.store32(p + 4, lo)
+  prim.store32(p + 8, hi)
+  let len = if hi == 0 then 1 else 2
+  prim.store32(p, len)
+}
+
+// Is bignum at byte addr `p` zero? (len 1 and limb0 == 0.)
+fn __dg_is_zero(p: Int) -> Bool =
+  if prim.load32(p) != 1 then false
+  else prim.load32(p + 4) == 0
+
+// ───────────────────────── byte / string helpers ─────────────────────────
+
+// Shift the `n` digit bytes at [dp, dp+n) right by 1 (dp[n..1] = dp[n-1..0]); MSD-first so no
+// overwrite. Used by the round-up carry overflow (prepend a leading digit).
+fn __dg_shift_right(dp: Int, n: Int, i: Int) -> Int =
+  if i == 0 then 0
+  else {
+    prim.store8(dp + i, prim.load8(dp + i - 1))
+    __dg_shift_right(dp, n, i - 1)
+  }
+
+// Copy `len` digit bytes from `src` to `dst` ascending (no overlap in render).
+fn __dg_bcopy(src: Int, dst: Int, len: Int) -> Int =
+  if len <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __dg_bcopy(src + 1, dst + 1, len - 1)
+  }
+// Write `count` '0' bytes at `dst`; returns the address just past.
+fn __dg_zeros(dst: Int, count: Int) -> Int =
+  if count <= 0 then dst
+  else {
+    prim.store8(dst, 48)
+    __dg_zeros(dst + 1, count - 1)
+  }
+
+// ───────────────────────── to_string: scale + position ─────────────────────────
+
+// Scale loop when k >= 0: S *= 10, k times.
+fn __dg_scale_up(s: Int, k: Int, i: Int) -> Int =
+  if i >= k then 0
+  else { __dg_mul10(s); __dg_scale_up(s, k, i + 1) }
+// Scale loop when k < 0: R,MP,MM *= 10, (-k) times.
+fn __dg_scale_down(r: Int, mp: Int, mm: Int, nk: Int, i: Int) -> Int =
+  if i >= nk then 0
+  else { __dg_mul10(r); __dg_mul10(mp); __dg_mul10(mm); __dg_scale_down(r, mp, mm, nk, i + 1) }
+
+// Fixup loop 1: while too_big { S *= 10; k++ }.  too_big = even ? (R+MP >= S) : (R+MP > S).
+fn __dg_fix1(r: Int, mp: Int, s: Int, tmp: Int, even: Bool, k: Int) -> Int = {
+  __dg_copy(tmp, r)
+  __dg_add(tmp, mp)
+  let c = __dg_cmp(tmp, s)
+  let too_big = if even then c >= 0 else c > 0
+  if too_big then { __dg_mul10(s); __dg_fix1(r, mp, s, tmp, even, k + 1) }
+  else k
+}
+// Fixup loop 2: while too_small { R,MP,MM *= 10; k-- }.
+// too_small = even ? ((R+MP)*10 <= S) : ((R+MP)*10 < S).
+fn __dg_fix2(r: Int, mp: Int, mm: Int, s: Int, tmp: Int, even: Bool, k: Int) -> Int = {
+  __dg_copy(tmp, r)
+  __dg_add(tmp, mp)
+  __dg_mul10(tmp)
+  let c = __dg_cmp(tmp, s)
+  let too_small = if even then c <= 0 else c < 0
+  if too_small then {
+    __dg_mul10(r); __dg_mul10(mp); __dg_mul10(mm)
+    __dg_fix2(r, mp, mm, s, tmp, even, k - 1)
+  }
+  else k
+}
+
+// One digit's repeated-subtraction: while cmp(R,S) >= 0 { R -= S; d++ }.
+fn __dg_digit(r: Int, s: Int, d: Int) -> Int =
+  if __dg_cmp(r, s) < 0 then d
+  else { __dg_sub(r, s); __dg_digit(r, s, d + 1) }
+
+// Round-up carry propagation over digits[0..dlen). Returns the (possibly incremented) k.
+// At i==0 a carry overflows: shift right, set digits[0]='1', dlen++, k++.
+fn __dg_carry(dp: Int, dlen0: Int, k: Int) -> Int = {
+  let i = dlen0
+  __dg_carry_loop(dp, dlen0, k, i)
+}
+fn __dg_carry_loop(dp: Int, dlen: Int, k: Int, i: Int) -> Int =
+  if i == 0 then {
+    let _s = __dg_shift_right(dp, dlen, dlen)
+    prim.store8(dp, 49)              // '1'
+    k + 1
+  }
+  else {
+    let j = i - 1
+    let c = prim.load8(dp + j)
+    if c == 57 then {                // '9' → '0', carry continues
+      prim.store8(dp + j, 48)
+      __dg_carry_loop(dp, dlen, k, j)
+    }
+    else {
+      prim.store8(dp + j, c + 1)
+      k
+    }
+  }
+
+// round_up decision at termination given the low/high flags and the current R,S,TMP state:
+//   low_t && !high_t → false ; high_t && !low_t → true ; else (2R cmp S) >= 0.
+fn __dg_round_up(r: Int, s: Int, tmp: Int, low_t: Bool, high_t: Bool) -> Bool =
+  if low_t then {
+    if high_t then {
+      __dg_copy(tmp, r)
+      __dg_shl(tmp, 1)
+      __dg_cmp(tmp, s) >= 0
+    }
+    else false
+  }
+  else {
+    if high_t then true
+    else {
+      __dg_copy(tmp, r)
+      __dg_shl(tmp, 1)
+      __dg_cmp(tmp, s) >= 0
+    }
+  }
+
+// Terminate the generation: write the final digit, apply the round-up carry (updating k at kout),
+// and return the final dlen.
+fn __dg_terminate(r: Int, s: Int, tmp: Int, dp: Int, kout: Int, dlen: Int, d: Int, low_t: Bool, high_t: Bool) -> Int = {
+  let round_up = __dg_round_up(r, s, tmp, low_t, high_t)
+  prim.store8(dp + dlen, 48 + d)
+  let dl1 = dlen + 1
+  // k can be NEGATIVE (e.g. 0.001 → k=-2); a 32-bit slot would zero-extend on load and lose the
+  // sign, so thread k through a FULL i64 slot (store64/load64) — sign-preserving.
+  let k = prim.load64(kout)
+  if round_up then {
+    let k2 = __dg_carry(dp, dl1, k)
+    prim.store64(kout, k2)
+    // dlen grew by 1 only if the carry overflowed (digits[0]='1' prepended): k2 > k.
+    if k2 > k then dl1 + 1 else dl1
+  }
+  else {
+    prim.store64(kout, k)
+    dl1
+  }
+}
+
+// The digit-generation loop. Generates digits into dp until the rounding interval closes.
+// The FINAL k is stored at scratch addr `kout`; the return value is the final dlen.
+fn __dg_gen(r: Int, s: Int, mp: Int, mm: Int, tmp: Int, dp: Int, even: Bool, kout: Int, dlen: Int) -> Int = {
+  __dg_mul10(r)
+  __dg_mul10(mp)
+  __dg_mul10(mm)
+  let d = __dg_digit(r, s, 0)
+  // low_t = even ? cmp(R,MM)<=0 : cmp(R,MM)<0
+  let cl = __dg_cmp(r, mm)
+  let low_t = if even then cl <= 0 else cl < 0
+  // high_t = even ? cmp(R+MP,S)>=0 : cmp(R+MP,S)>0
+  __dg_copy(tmp, r)
+  __dg_add(tmp, mp)
+  let ch = __dg_cmp(tmp, s)
+  let high_t = if even then ch >= 0 else ch > 0
+  // continue iff !low_t && !high_t
+  let cont = if low_t then false else (if high_t then false else true)
+  if cont then {
+    prim.store8(dp + dlen, 48 + d)
+    __dg_gen(r, s, mp, mm, tmp, dp, even, kout, dlen + 1)
+  }
+  else __dg_terminate(r, s, tmp, dp, kout, dlen, d, low_t, high_t)
+}
+
+// ───────────────────────── to_string render ─────────────────────────
+// digits in dp (m of them), decimal exponent k, sign neg. Build the String (never scientific):
+//   k <= 0 :  "[-]0." + (-k) zeros + digits
+//   k >= m :  "[-]" + digits + (k-m) zeros + ".0"
+//   else   :  "[-]" + digits[0..k] + "." + digits[k..m]
+fn __dg_render(dp: Int, m: Int, k: Int, neg: Bool) -> String = {
+  let body =
+    if k <= 0 then 2 + (0 - k) + m
+    else if k >= m then k + 2
+    else m + 1
+  // NB: `(if neg ...) + body` as a BinOp operand silently mis-lowers in v1 (the if-in-operand
+  // gap), so bind the sign width FIRST then add — see the dual-oracle byte-match.
+  let sign_w = if neg then 1 else 0
+  let out_len = sign_w + body
+  let buf = prim.alloc_str(out_len)
+  let base = prim.handle(buf) + 12
+  let c0 = if neg then { prim.store8(base, 45); base + 1 } else base   // '-'
+  let _e =
+    if k <= 0 then {
+      prim.store8(c0, 48)            // '0'
+      prim.store8(c0 + 1, 46)        // '.'
+      let c1 = __dg_zeros(c0 + 2, 0 - k)
+      __dg_bcopy(dp, c1, m)
+    }
+    else if k >= m then {
+      let c1 = __dg_bcopy(dp, c0, m)
+      let c2 = __dg_zeros(c1, k - m)
+      prim.store8(c2, 46)            // '.'
+      prim.store8(c2 + 1, 48)        // '0'
+      c2 + 2
+    }
+    else {
+      let c1 = __dg_bcopy(dp, c0, k)
+      prim.store8(c1, 46)            // '.'
+      __dg_bcopy(dp + k, c1 + 1, m - k)
+    }
+  buf
+}
+
+// ───────────────────────── float_to_string ─────────────────────────
+// k estimate = ceil(log10((f64)f) + e*log10(2)). Only needs to be close; the fixups correct it.
+fn __dg_log10(x: Float) -> Float = math.log10(x)
+
+// The Dragon4 main path for a FINITE, NON-ZERO x. Returns the rendered String (a clean tail call
+// to __dg_render), so the float_to_string dispatcher's arms are all single expressions (string
+// literal or one call) — the shape the v1 heap-result-if lowering handles.
+fn __dg_string_main(x: Float) -> String = {
+  let bits0 = prim.fbits(x)
+  let neg = bits0 < 0
+  // |x| bits
+  let bits = prim.band(bits0, 9223372036854775807)   // clear sign (0x7FFF...)
+  let raw_exp = prim.band(prim.bshr_u(bits, 52), 2047)
+  let raw_mant = prim.band(bits, 4503599627370495)
+  // decompose: subnormal → f=raw_mant, e=-1074 ; else f=raw_mant+2^52, e=raw_exp-1075.
+  let ff = if raw_exp == 0 then raw_mant else raw_mant + 4503599627370496
+  let e = if raw_exp == 0 then 0 - 1074 else raw_exp - 1075
+  let even = prim.band(ff, 1) == 0
+  // The asymmetric-low-boundary flag: raw_mant == 0 AND raw_exp > 1. v1 does NOT lower the
+  // `and` OPERATOR (it defers to a Const-0/false), which silently skipped the MP/R/S<<=1
+  // boundary doubling and dropped the last significant digit for powers of two >= 2^64
+  // (e.g. 18446744073709552000.0 → ...550000.0). Express it as a nested `if` (which DOES
+  // lower, via the scalar-if value path) so the flag is REAL — see the dual-oracle byte-match.
+  let low_bnd = if raw_mant == 0 then raw_exp > 1 else false
+
+  // scratch block: 468 i64 slots = 3744 bytes >= SCRATCH_BYTES(3740).
+  let blk = prim.alloc_list(468)
+  let sb = prim.handle(blk) + 12          // byte base of the scratch arena
+  let off_r = sb + 0
+  let off_s = sb + 528
+  let off_mp = sb + 1056
+  let off_mm = sb + 1584
+  let off_tmp = sb + 2112
+  let dp = sb + 2640
+  let kout = sb + 3736                    // a spare i64 slot for the gen-loop's k (past digits cap)
+
+  // R = f ; then per the e sign:
+  __dg_set_u64(off_r, ff)
+  let _init = if e >= 0 then {
+    __dg_shl(off_r, e + 1)                // R <<= e+1
+    __dg_set_small(off_s, 2)              // S = 2
+    __dg_set_small(off_mp, 1)
+    __dg_shl(off_mp, e)                   // MP = 2^e
+    __dg_set_small(off_mm, 1)
+    __dg_shl(off_mm, e)                   // MM = 2^e
+    0
+  } else {
+    __dg_shl(off_r, 1)                    // R <<= 1
+    __dg_set_small(off_s, 1)
+    __dg_shl(off_s, 1 - e)                // S = 1 << (1 - e)
+    __dg_set_small(off_mp, 1)
+    __dg_set_small(off_mm, 1)
+    0
+  }
+  // low boundary: MP <<= 1; R <<= 1; S <<= 1
+  let _lb = if low_bnd then {
+    __dg_shl(off_mp, 1)
+    __dg_shl(off_r, 1)
+    __dg_shl(off_s, 1)
+    0
+  } else 0
+
+  // k estimate = (i32) ceil(log10((f64)f) + e*log10(2)). f is non-negative; (f64)f via i2f.
+  let log10_2 = prim.ffrombits(4599094494223104511)   // 0.301029995663981198...
+  let approx = prim.fadd(__dg_log10(prim.i2f(ff)), prim.fmul(prim.i2f(e), log10_2))
+  let k0 = prim.f2i(prim.fceil(approx))
+
+  // scale: if k>=0 S *= 10^k else R,MP,MM *= 10^(-k)
+  let _sc = if k0 >= 0 then __dg_scale_up(off_s, k0, 0)
+            else __dg_scale_down(off_r, off_mp, off_mm, 0 - k0, 0)
+  // fixups
+  let k1 = __dg_fix1(off_r, off_mp, off_s, off_tmp, even, k0)
+  let k2 = __dg_fix2(off_r, off_mp, off_mm, off_s, off_tmp, even, k1)
+
+  // digit generation. Stash k2 at kout (a FULL i64 slot — k may be negative); gen updates it on round-up.
+  prim.store64(kout, k2)
+  let m = __dg_gen(off_r, off_s, off_mp, off_mm, off_tmp, dp, even, kout, 0)
+  let kf = prim.load64(kout)
+  __dg_render(dp, m, kf, neg)
+}
+
+// NaN / inf dispatch (raw_exp == 2047): "NaN" if mantissa set, else signed inf.
+fn __dg_special(bits0: Int, raw_mant0: Int) -> String =
+  if raw_mant0 != 0 then "NaN"
+  else if bits0 < 0 then "-inf"
+  else "inf"
+
+fn float_to_string(x: Float) -> String = {
+  let bits0 = prim.fbits(x)
+  let raw_exp0 = prim.band(prim.bshr_u(bits0, 52), 2047)
+  let raw_mant0 = prim.band(bits0, 4503599627370495)   // 0xF_FFFF_FFFF_FFFF
+  let is_special = raw_exp0 == 2047
+  let is_zero = prim.feq(x, 0.0)
+  let neg = bits0 < 0
+  // every arm is a single string literal or one call → the heap-result-if lowering handles it.
+  if is_special then __dg_special(bits0, raw_mant0)
+  else if is_zero then (if neg then "-0.0" else "0.0")
+  else __dg_string_main(x)
+}

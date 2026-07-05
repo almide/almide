@@ -1,0 +1,77 @@
+// int_sized — SELF-HOSTED signed narrowing `int.to_int8/16/32/64` for v1 (pure scalar).
+// v0 truncates to N bits with SIGN extension (`n as i8/i16/i32`), widened back to Int:
+// take the low N bits, then if bit N-1 is set, subtract 2^N to sign-extend. to_int64 is
+// the identity. Composed from the prim band floor; cert-untouching (scalar).
+
+fn __sext(low: Int, half: Int, full: Int) -> Int =
+  if low >= half then low - full else low
+
+fn int_to_int8(n: Int) -> Int = {
+  let low = prim.band(n, 255)
+  __sext(low, 128, 256)
+}
+
+fn int_to_int16(n: Int) -> Int = {
+  let low = prim.band(n, 65535)
+  __sext(low, 32768, 65536)
+}
+
+fn int_to_int32(n: Int) -> Int = {
+  let low = prim.band(n, 4294967295)
+  __sext(low, 2147483648, 4294967296)
+}
+
+fn int_to_int64(n: Int) -> Int = n
+
+// The 64-bit conversions are bit-identity (Int/Int64/UInt64 share the i64 repr): v0's
+// `n`, `n as u64`, `n as i64` all keep the bits, so the value byte-matches. Same -> Int
+// shape as to_int8 (the result value is exact; the sign interpretation is the caller's).
+fn int_to_uint64(n: Int) -> Int = n
+fn int_from_int64(n: Int64) -> Int = n
+fn int_from_uint64(n: UInt64) -> Int = n
+
+// Widening sized -> Int: v1 stores every scalar as a (sign/zero-extended) i64, so the
+// widening is the identity — a sized value already IS the i64 v0 produces with `n as i64`.
+fn int_from_int8(n: Int8) -> Int = n
+fn int_from_int16(n: Int16) -> Int = n
+fn int_from_int32(n: Int32) -> Int = n
+fn int_from_uint8(n: UInt8) -> Int = n
+fn int_from_uint16(n: UInt16) -> Int = n
+fn int_from_uint32(n: UInt32) -> Int = n
+
+// Unsigned narrowing: the low N bits, ZERO-extended (v0's `n as u8/u16/u32`). The result
+// is in [0, 2^N) so it is non-negative and its decimal print matches v0. Same band masks
+// as to_u8/to_u32, returned as Int (the value is exact; the unsigned type is the caller's).
+fn int_to_uint8(n: Int) -> Int = prim.band(n, 255)
+fn int_to_uint16(n: Int) -> Int = prim.band(n, 65535)
+fn int_to_uint32(n: Int) -> Int = prim.band(n, 4294967295)
+
+// int.to_int8/16/32_saturating: CLAMP n to the signed N-bit range (v0 returns Int8/16/32
+// but the value — and its decimal print — is exactly the clamp). Pure scalar; the same
+// `-> Int` shape as to_int8 above (the value byte-matches v0). Shared clamp helper.
+fn __sat_clamp(n: Int, lo: Int, hi: Int) -> Int =
+  if n < lo then lo
+  else if n > hi then hi
+  else n
+
+fn int_to_int8_saturating(n: Int) -> Int = {
+  let lo = 0 - 128
+  __sat_clamp(n, lo, 127)
+}
+
+fn int_to_int16_saturating(n: Int) -> Int = {
+  let lo = 0 - 32768
+  __sat_clamp(n, lo, 32767)
+}
+
+fn int_to_int32_saturating(n: Int) -> Int = {
+  let lo = 0 - 2147483648
+  __sat_clamp(n, lo, 2147483647)
+}
+
+// Unsigned saturating: clamp to [0, 2^N-1] (scalar value; UInt64 has no upper i64 cap so
+// it only clamps the negative side). v0's value byte-matches.
+fn int_to_uint8_saturating(n: Int) -> Int = __sat_clamp(n, 0, 255)
+fn int_to_uint16_saturating(n: Int) -> Int = __sat_clamp(n, 0, 65535)
+fn int_to_uint32_saturating(n: Int) -> Int = __sat_clamp(n, 0, 4294967295)
+fn int_to_uint64_saturating(n: Int) -> Int = if n < 0 then 0 else n

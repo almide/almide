@@ -1,0 +1,33 @@
+// list_anyall — SELF-HOSTED `list.any` / `list.all` for v1 over the prim floor + closures.
+// any = ∃ x. f(x); all = ∀ x. f(x). Each scans the whole list, summing the predicate's 0/1
+// result (a Bool is an i64 0/1, so `f(x)` is added directly — no per-element branch) into a
+// hit COUNT, then any = count > 0, all = count == n. The closure f is invoked via
+// CallIndirect through its table slot. For a PURE predicate (the combinator contract) the
+// result byte-matches v0; an impure predicate would see every element (no short-circuit) — a
+// documented refinement. The source is only read (borrowed); nothing allocated, no leak.
+
+fn __count_hits(sh: Int, f: (Int) -> Bool, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let h = f(x)
+    if h then __count_hits(sh, f, n, i + 1, acc + 1)
+    else __count_hits(sh, f, n, i + 1, acc)
+  }
+
+fn list_any(xs: List[Int], f: (Int) -> Bool) -> Bool = {
+  let n = list.len(xs)
+  let hits = __count_hits(prim.handle(xs), f, n, 0, 0)
+  hits > 0
+}
+
+fn list_all(xs: List[Int], f: (Int) -> Bool) -> Bool = {
+  let n = list.len(xs)
+  let hits = __count_hits(prim.handle(xs), f, n, 0, 0)
+  hits >= n
+}
+
+fn list_count(xs: List[Int], f: (Int) -> Bool) -> Int = {
+  let n = list.len(xs)
+  __count_hits(prim.handle(xs), f, n, 0, 0)
+}

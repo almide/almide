@@ -6,12 +6,14 @@
 
 ## Active
 
-20 items
+61 items
 
 | Item | Description |
 |------|-------------|
 | [AlmidePerceusBelt](active/almide-perceus-belt.md) | AlmidePerceusBelt — formal memory safety guarantee for Almide |
+| [Behavioral Contract — 機械生成コードの「機能正しさ」を、王者の土俵を避けて取る層](active/behavioral-contract.md) | 機能正しさを王者(Dafny/F*/SPARK/Lean)の土俵を避けて取る層。C-FAITHFUL の上に C-PRESERVED(差分保存)と C-ASSERTED(批准性質)を積む。仕様の出所を機械生成レジームへずらす戦略。 |
 | [Build Speed: Runtime rlib + Hot-Fn Inlining](active/build-speed-runtime-rlib.md) | Native build-speed — precompiled almide_rt runtime rlib, and recovering the shipping-build inlining gap with #[inline] |
+| [Certificate Format v1 — design](active/certificate-format-v1.md) |  |
 | [Certification-Grade Hardening — 認証級への硬化](active/certification-grade.md) | Certification-grade hardening — adopt the mechanisms of DO-178C / ISO 26262 / IEC 61508 (spec, traceability, coverage, tool qualification, dossier) for the machine-written-software trust layer |
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
 | [Closure Architecture v2](active/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
@@ -22,13 +24,52 @@
 | [Cross-Target Completeness (the Lid)](active/cross-target-completeness.md) | Cross-target completeness lid — the staged path from "all known divergences fixed + byte-diff gate" to structural equivalence (drain → interpreter+fuzz → selfhost → kernel proofs), with the live drain queue |
 | [The Determinism / Purity Belt](active/determinism-belt.md) | Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
+| [Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1](active/effectful-27-blueprint.md) |  |
+| [Flight Evidence Gaps — 実地監査所見台帳](active/flight-evidence-gaps.md) | Hands-on internal audit findings (2026-07-03) — the measured distance between DAL-A philosophy and DAL-A evidence, as 7 findings with corrective work items and acceptance criteria |
+| [Flight Profile — 航空品質への接地分析と2つのキーストーン](active/flight-profile.md) | Flight-grade (DO-178C/DO-333/DO-330) gap analysis for the v1 trust spine — the 6 pillars, what the PCC spine already nails, and the two engineering-closeable keystones (lift loops into Coq for WCET-bounding; productionize MIR→Rust to bind the cert to a Ferrocene-qualified flight target) that converge on one flight stack |
+| [Flight Qualification — DO-178C/DO-330/DO-333 マッピング + 資格化キット(G-F5 + G-F6)](active/flight-qualification.md) | Flight gates G-F5 + G-F6 — how the PCC certificate/receipt maps to DO-178C Table A objectives, the DO-330 "prove-the-checker" tool-qualification argument (compiler→TQL-5 output-verified, checker→qualified-by-proof), the DO-333 formal-methods credit per proven property, and the G-F6 qualification kit as a product (AbsInt/SCADE-KCG model): what's in the kit, the boundary (kit provides vs customer's domain process), and the customer integration story. |
+| [Flight Reference App — PID 制御則カーネル + make verify + receipt(G-F4)](active/flight-reference-app.md) | Flight gate G-F4 — the reference application (a fixed-point Q16.16 PID control-law kernel over a counted sim loop) that passes `make verify` end-to-end, the 7-stage verify pipeline (exist vs gated on keystones), the receipt it emits (C-SAFE/C-PROVEN green, C-WCET/C-FAITHFUL pending), and the de-risking order (Slice 0 scalar-no-print green now → Slice 1 print=G-F0 frontier → Slice 2 keystone-あ unlocks C-WCET → Slice 3 keystone-い unlocks Ferrocene). |
+| [Flight Keystone (い) — v1 MIR → Rust → Ferrocene(忠実性束縛)](active/flight-rust-ferrocene.md) | Concrete implementation design for flight keystone (い) — G-F3: a production v1 MIR→Rust renderer + a rust_pattern faithfulness layer, making Rust→Ferrocene the flight target. The proof is cheap (~75% of the spine is target-agnostic; the faithfulness theorem is `exact eager_copy_refines_safety`); the real cost is the production renderer (~5x render_wasm). Ferrocene owns Rust→machine, so the flight path bypasses the hardest wasm byte-binding proof (Gap 1). |
+| [Almide Flight Profile — 規範仕様(Normative Subset)](active/flight-subset-spec.md) | The normative Almide Flight Profile — the SPARK/Ravenscar-class language subset for flight-grade code, machine-enforced by the per-build certificate (by proof, not review). Feature IN/OUT/RESTRICTED classification, the resolved keystone open questions (Dup-in-loop IN, break/continue OUT, recursion=acyclicity-reject, nested loops IN), the @flight enforcement architecture, the MISRA/Ravenscar mapping, and honest language residuals. |
+| [Flight Keystone (あ) — Counted Loops + Bounded Allocation(WCET-by-construction)](active/flight-wcet-loops.md) | Concrete implementation design for flight keystone (あ) — G-F1/G-F2: counted-loop flight subset + lifting loops into Coq to prove bounded allocation (WCET-by-construction). The counted loop is a SEPARATE structural witness (preserving the flat-fold RC invariant), two Subset.v-shaped properties prove it, and try_lower_scalar_for_range already knows the trip count. |
+| [StringInterp is NOT special syntax — desugar it to `concat + to_string(part)`](active/interp-is-desugar-to-tostring.md) |  |
+| [Issue Ledger Burn-down — 完全性キャンペーンの残量計](active/issue-ledger-burndown.md) |  |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) |  |
+| [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](active/native-boxed-pattern-lowering.md) |  |
 | [Protocols: declared conformance + opt-in `any P`](active/protocol-any-existentials.md) | Declared conformance + opt-in `any P` existentials — take Go's interface-value ergonomics without its implicit-satisfaction and nil-interface traps; the one Swift idea worth stealing, none of the rest |
+| [Receipt Logic — 受領書の論理](active/receipt-logic.md) | Formal foundation for the trust layer — receipt logic: claim types, threat model, trust bases, falsification procedures, completeness relative to use-case |
 | [Trust Layer — 機械が書くソフトウェアの信頼層](active/trust-layer.md) | Category strategy — winning "the trust layer for machine-written software": MWS Trust Levels, receipts, critical path |
 | [Type Where Constraints](active/type-where-constraints.md) | where clauses on type/fn definitions for type constraints |
+| [v0 wasm codegen: Try/Unwrap/Fan early-return heap leak](active/v0-unwrap-early-return-leak.md) |  |
+| [GOAL PROMPT — finish ADT brick 5 (heap-field bind + recursive drop) to the #1 lever](active/v1-adt-brick5-goal.md) |  |
+| [v1 ① — custom ADT (variant) as a first-class value](active/v1-adt-value-model.md) |  |
+| [V1 Backlog — trust spine の残件一覧（優先度付き）](active/v1-backlog.md) | The v1 trust-spine backlog — soundness, drop completeness, self-host surface, walls |
+| [v1 Bolt Backlog(AI-DLC 管理)](active/v1-bolt-backlog.md) | AI-DLC Bolt backlog for the v1 climb — the camps/steps roadmap expressed as intent-driven, time-boxed Bolts (each with intent / Definition-of-Done / gate / deps / status). The construction guardrails are the goal-prompt discipline; each Bolt's exit gate is independent review (reviewer agent + Trust Spine CI + unbiased dual-oracle corpus); humans (Mob) decide at the marked forks. Tracks "あと何 Bolt" to each summit. |
+| [v1 → develop Reflow Strategy](active/v1-develop-reflow.md) | Strategy for flowing the develop-v1 trust spine back into develop — what moves, in what order, and what stays branch-local until its gate exists |
+| [v1 heap-result `if`/`match` execution — design (DE-RISKED: no Coq change)](active/v1-heap-result-control-flow.md) |  |
+| [v1 KGI / KPI スコアボード](active/v1-kgi-kpi.md) | v1 KGI/KPI scoreboard — the terminal goal indicators (trust + writability), the guard invariants that must never degrade (checker size, TB purity, axiom cleanliness, zero claim-drift), and the progress KPIs toward each gap. Weekly fill-in. |
+| [v1 heap-loop-carried ownership — option C (cert-spine extension), the COMPLETENESS fix](active/v1-loop-ownership-cert.md) |  |
+| [Almide v1: MIR を唯一の真とする単一意味論アーキテクチャ](active/v1-mir-architecture.md) |  |
+| [Org byte-verification — every repo's own vectors on both targets](active/v1-org-byte-verification.md) | Org-wide v0==wasm byte-verification sweep and the wasm bug classes it flushed out |
+| [v1 — the parser-TCO lever (the real "heap-result-expr" cross-repo lever)](active/v1-parser-tco-lever.md) |  |
+| [Almide v1 Phase 1: MIR コア + 二レンダラ — 実装設計](active/v1-phase1-mir-core.md) |  |
+| [v1 Proof Architecture — 構想(着地形)](active/v1-proof-architecture.md) | v1 vision — the landed proof architecture: untrusted compiler + two tiny qualified checkers, ALS as normative semantics, single Coq trust base, per-build receipts. Self-contained, terminal-state. |
+| [v1 Proof Spine — #31 progress (全V / leak-freedom / 推移的caps / 抽出穴)](active/v1-proof-spine-progress.md) | v1 proof-spine progress — what of task #31 (全V / leak-freedom / 推移的caps / 抽出穴) is PROVEN vs the honest remaining. Records the CapabilityReach.v transitive-caps theorem (2026-06-21). |
+| [v1 — records feature: svg FULL CONQUEST (goal prompt)](active/v1-records-svg.md) |  |
+| [v1 リリース路線 — 段階リリース計画](active/v1-release-path.md) | v1 リリース路線 — opt-in 検証 codegen(v0 fallback) を beachhead に、カバレッジ→証明書 emit→flight-grade へ段階リリースする計画。4案のメリデメと選定理由、各段の受入基準。 |
+| [v1 stdlib self-host — the machinery phase (Option / List-building / closures)](active/v1-selfhost-machinery.md) |  |
+| [v1 self-host print floor — the ③ observability keystone](active/v1-selfhost-print-floor.md) |  |
+| [v1 trust-spine correctness holes (adversarial sweep 2026-06-27)](active/v1-spine-correctness-holes.md) |  |
+| [v1 System Map — 全体像(mermaid)](active/v1-system-map.md) | v1 system map — mermaid diagrams of the whole trust architecture: each component's what / why / which area it secures, the PCC trust flow, the trust base, the three pillars, the threat model, and the maturity ladder. |
+| [v1 TCO — self-recursive tail calls → scalar-state loop (the yaml parser keystone)](active/v1-tco-self-recursion.md) |  |
+| [V1 → V0 Parity — the completion plan](active/v1-v0-parity.md) | The completion plan to bring the v1 MIR trust-spine to full v0 parity |
+| [v1 dynamic Value model — the yaml keystone (path A: self-host + ONE trusted recursive-drop routine)](active/v1-value-model.md) |  |
+| [柱C extension: bring Value rc into the certified region](active/value-rc-cert.md) |  |
 | [Almide WASM Engine — Complete Redesign](active/wasm-engine-redesign.md) |  |
+| [WASM Reference-Count Frees: the Ownership-Discipline Drain](active/wasm-frees-ownership-discipline.md) |  |
 | [WASM Optimization Roadmap](active/wasm-optimization-roadmap.md) |  |
+| [WASM 所有権 emit 層の機械化 (Perceus drift の構造的封じ込め)](active/wasm-ownership-emit-mechanization.md) |  |
 | [WASM Platform Frontier — beyond core Wasm 3.0](active/wasm-platform-frontier.md) | Post-Wasm-3.0 platform tracking — WASI 0.3 / Component Model, stack switching, shared-everything-threads |
 
 ## On Hold
@@ -70,34 +111,36 @@
 
 ## Done
 
-251 items
+253 items
 
 <details>
-<summary>Show all 251 completed items</summary>
+<summary>Show all 253 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-07-04 | [Crush-Pass Continuation — gguf + Matrix walls closed](done/crush-pass-continuation.md) | gguf ADT walls, the Matrix value model, and coverage pins — all closed; nn walls 0 |
+| 2026-07-02 | [Handoff — porta wall=0 + read_message cross-module on v1 (session record)](done/v1-porta-read-message-handoff.md) | PC-switch handoff: porta wall=0 + read_message cross-module on v1 (steps 1-3 done) |
 | 2026-06-05 | [WASM Remaining 15 Skips — Fix Roadmap](done/wasm-remaining-15.md) | WASM spec skip burndown — fixable skips all resolved, 233/233 wasm-eligible (8 intentional skips) |
 | 2026-06-05 | [Perceus Void Block Stack Balance — CI Blocker](done/wasm-perceus-void-block.md) | StackBalancePass — void-context blocks never leak stack values (wasmtime 45+ strict validation) |
 | 2026-06-02 | [Closure Codegen Cross-Target Gaps](done/closure-codegen-cross-target-gaps.md) | Cross-target (native vs wasm) closure-codegen divergences found by the adversarial differential sweep — all 8 fixed |
 | 2026-05-29 | [WASM Component Model](done/wasm-component-model.md) | WebAssembly Component Model support with WIT bindings |
-| 2026-04-20 | [`almide docs-gen` — llms.txt Auto-Generation](done/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
 | 2026-04-20 | [Whisper in Pure Almide](done/whisper-almide.md) | Whisper speech recognition implemented entirely in Almide |
 | 2026-04-20 | [Variant Exhaustiveness Refinement](done/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
 | 2026-04-20 | [Unify Diagnostic Emission with Docs](done/diagnostic-emit-doc-unification.md) | Unify diagnostic emission sites with their docs/diagnostics/*.md files |
 | 2026-04-20 | [Stdlib Symmetry Audit](done/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
 | 2026-04-20 | [Stdlib Defs / Runtime Consistency Check](done/stdlib-defs-runtime-consistency.md) | CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures |
 | 2026-04-20 | [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](done/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |
-| 2026-04-20 | [Diagnostics: Here / Try / Hint Format](done/diagnostics-here-try-hint.md) | Standardize diagnostics to Here/Try/Hint three-part format with CI-verified hint correctness |
 | 2026-04-20 | [DX & Codegen Papercuts](done/dx-codegen-papercuts.md) | Codegen bugs (effect fn unification) + DX papercuts — A/C landed, B spun off |
-| 2026-04-19 | [bytes: unify bounds-check semantics](done/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |
-| 2026-04-19 | [`cargo test --all` Cache Race](done/cargo-test-cache-race.md) | Fix parallel-cargo-test cache race in fix_test/run_test that masks real failures |
+| 2026-04-20 | [Diagnostics: Here / Try / Hint Format](done/diagnostics-here-try-hint.md) | Standardize diagnostics to Here/Try/Hint three-part format with CI-verified hint correctness |
+| 2026-04-20 | [`almide docs-gen` — llms.txt Auto-Generation](done/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
 | 2026-04-19 | [VarTable Unification](done/var-table-unification.md) | Unify program/module var_tables into a single program-level table |
 | 2026-04-19 | [Stdlib Declarative Unification — Toward a Single Source of Truth](done/stdlib-declarative-unification.md) | Drive stdlib toward a single source-of-truth: `.almd` + multi-target ABI attributes |
 | 2026-04-19 | [Sized Numeric Types](done/sized-numeric-types.md) | Swift-style Int8/Int32/UInt32/Float32 scalar types; unblocks bytes redesign + Matrix[T] dtype |
 | 2026-04-19 | [Dispatch Unification Plan (S3 Phase 1e)](done/dispatch-unification-plan.md) | Unify Rust + WASM stdlib dispatch via IR-level RuntimeCall; attributes become sugar |
 | 2026-04-19 | [Compiler Version Pin](done/compiler-version-pin.md) | minimum compiler version pinning in almide.toml (Cargo rust-version style) |
 | 2026-04-19 | [Codegen Ideal Form](done/codegen-ideal-form.md) | WASM codegen redesign toward declarative dispatch and explicit symbol resolution |
+| 2026-04-19 | [bytes: unify bounds-check semantics](done/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |
+| 2026-04-19 | [`cargo test --all` Cache Race](done/cargo-test-cache-race.md) | Fix parallel-cargo-test cache race in fix_test/run_test that masks real failures |
 | 2026-04-17 | [Option/Result Bundled `.almd` — Not Cosmetic After All](done/option-result-bundled-cleanup.md) | Bundled option/result are signature-override layer; pick a path to consolidate |
 | 2026-04-17 | [Bundled-Almide Stdlib — Ideal Form](done/bundled-almide-ideal-form.md) | Ideal form for bundled-Almide stdlib: one dispatch path, no patch-layer special cases |
 | 2026-04-16 | [Cut v0.14.6 Release](done/release-0.14.6.md) | Cut v0.14.6 release from llm-first-phase2 branch |
@@ -119,11 +162,11 @@
 | 2026-04-03 | [Type Inference Unification for Generic Functions](done/type-inference-unification.md) | Unify inference variables with named TypeVars in generic function bodies |
 | 2026-04-03 | [Test Block Result Semantics](done/test-block-result-semantics.md) | Remove auto-unwrap of effect fn results in test blocks |
 | 2026-04-03 | [Flexible Error Types](done/flexible-error-types.md) | User-defined error types in Result, and test block Result visibility |
-| 2026-04-02 | [`import self` in Dependency Packages Bug](done/import-self-in-dependency-bug.md) | Fix import self resolution in dependency packages (blocks almide-lander) |
 | 2026-04-02 | [Versioned Module Codegen Bug](done/versioned-module-codegen-bug.md) | Fix versioned module name mismatch in codegen for package dependencies |
 | 2026-04-02 | [UFCS Resolution in Dependency Modules](done/ufcs-in-dependency-modules.md) | UFCS method calls fail type resolution in dependency module context |
 | 2026-04-02 | [Pipe Operator Precedence Redesign](done/pipe-operator-precedence.md) | Pipe |> precedence conflicts with + (list concat) and .. (range) |
 | 2026-04-02 | [Almide Native cdylib — Scaffold in Almide, Not Rust](done/almide-native-cdylib.md) | Build .so/.dylib from pure Almide, eliminating Rust scaffolding from lander |
+| 2026-04-02 | [`import self` in Dependency Packages Bug](done/import-self-in-dependency-bug.md) | Fix import self resolution in dependency packages (blocks almide-lander) |
 | 2026-04-01 | [WASM Remaining FS Operations](done/wasm-remaining-fs.md) | Implement remaining filesystem operations for the WASM target |
 | 2026-04-01 | [Typed AST Cache](done/typed-ast-cache.md) | Cache type annotations on AST nodes to eliminate re-inference in lowering |
 | 2026-04-01 | [Type Expressiveness: Business Scenario Comparison](done/type-expressiveness-scenarios.md) | Business scenario comparison of type expressiveness across languages |
@@ -169,14 +212,14 @@
 | 2026-03-20 | [Stdlib Additions — Complete](done/stdlib-additions.md) | Stdlib module additions (set expanded to 20 functions) |
 | 2026-03-20 | [HKT Foundation — Complete](done/hkt-foundation.md) | Higher-kinded type foundation - all phases complete |
 | 2026-03-20 | [Compiler Bugs and Gaps — Status](done/compiler-bugs.md) | Codegen bugs and runtime gaps found while writing 400+ test blocks |
-| 2026-03-19 | [fan.map Concurrency Limit](done/fan-map-limit.md) | Add concurrency limit parameter to fan.map |
 | 2026-03-19 | [Test Architecture Redesign](done/test-architecture-redesign.md) | Separate effect permission from Result auto-unwrap in test infra |
 | 2026-03-19 | [Streaming — WebSocket, SSE, Stream](done/streaming.md) | WebSocket, SSE, and streaming data support |
 | 2026-03-19 | [HKT Foundation — Phase 1-4 + Stream Fusion (All 6 Laws)](done/hkt-foundation-phase1.md) | HKT foundation phases 1-4 with type constructors and algebraic laws |
+| 2026-03-19 | [fan.map Concurrency Limit](done/fan-map-limit.md) | Add concurrency limit parameter to fan.map |
 | 2026-03-19 | [Effect System — Phase 1-2](done/effect-system-phase1-2.md) | Effect inference engine with 7 categories and checker integration |
 | 2026-03-18 | [UFCS for External Libraries](done/ufcs-external.md) | Extend UFCS resolution to external library functions |
-| 2026-03-18 | [Tooling [ON HOLD — items split to active]](done/tooling.md) | Tooling roadmap (LSP, REPL, doc gen, bench) split to active |
 | 2026-03-18 | [TS Edge-Native Deployment](done/ts-edge-native.md) | Native TS output for edge runtimes (Workers, Deno Deploy, Vercel) |
+| 2026-03-18 | [Tooling [ON HOLD — items split to active]](done/tooling.md) | Tooling roadmap (LSP, REPL, doc gen, bench) split to active |
 | 2026-03-18 | [Stdlib Strategy](done/stdlib-strategy.md) | Stdlib expansion strategy via Rust ecosystem wrapping |
 | 2026-03-18 | [Stdlib Architecture: 3-Layer Design](done/stdlib-architecture-3-layer-design.md) | Three-layer stdlib design (core/platform/external) for WASM parity |
 | 2026-03-18 | [Stdlib API Surface Reform](done/stdlib-verb-system.md) | Unified verb system across all stdlib container types |
@@ -208,7 +251,6 @@
 | 2026-03-18 | [Built-in Protocols](done/trait-impl.md) | Built-in protocols (Eq, Hash, Repr, From) with automatic derivation |
 | 2026-03-18 | [Anonymous Record Codegen Fix](done/anon-record-codegen.md) | Fix Rust codegen emitting invalid type for anonymous records |
 | 2026-03-18 | [Almide Runtime](done/almide-runtime.md) | Runtime design targeting best-in-class compiler performance |
-| 2026-03-17 | [almide.lock [DONE — 1.0 Phase III]](done/lockfile.md) | Dependency lockfile with git-based resolution and reproducible builds |
 | 2026-03-17 | [Stdlib Runtime Architecture Reform](done/stdlib-self-hosted-redesign.md) | Self-hosted stdlib with .almd-first design and @extern for host deps |
 | 2026-03-17 | [Stability Contract [DONE — 1.0 Phase II]](done/stability-contract.md) | Backward compatibility policy, edition system, and API freeze |
 | 2026-03-17 | [Runtime Layout Unification](done/runtime-layout.md) | Unify Rust and TS runtime file layout and management |
@@ -220,6 +262,7 @@
 | 2026-03-17 | [Effect Isolation (Security Layer 1)](done/effect-isolation.md) | Static verification that pure functions cannot perform I/O |
 | 2026-03-17 | [CLI-First](done/cli-first.md) | Enable comfortable CLI tool authoring with run, build, and WASM targets |
 | 2026-03-17 | [Borrow/Clone Gaps](done/borrow-clone-gaps.md) | Fix cases where Rust codegen fails to insert necessary clones |
+| 2026-03-17 | [almide.lock [DONE — 1.0 Phase III]](done/lockfile.md) | Dependency lockfile with git-based resolution and reproducible builds |
 | 2026-03-17 | [2026 Ergonomics Roadmap](done/2026-ergonomics.md) | Ergonomics issues found via self-tooling, evaluated against design principles |
 | 2026-03-16 | [Type System Theory Upgrade — HM Integration Plan](done/type-system-theory-upgrade.md) | Hindley-Milner integration plan (type schemes, let-polymorphism) |
 | 2026-03-16 | [TS Target: Result Maintenance (Erasure to Object)](done/ts-result-maintenance.md) | Replace TS Result erasure (throw/catch) with Result objects |
@@ -231,8 +274,8 @@
 | 2026-03-15 | [Unused Variable Warnings](done/unused-variable-warnings.md) | Warn on unused variables and imports, suppressible with _ prefix |
 | 2026-03-15 | [Type System Soundness](done/type-system-soundness.md) | Type system soundness fixes (Unknown propagation, unification, occurs) |
 | 2026-03-15 | [Type System Extensions](done/type-system.md) | Type system extensions (generics migration, inference improvements) |
-| 2026-03-15 | [Tail Call Optimization](done/tail-call-optimization.md) | Self-recursive tail call to labeled loop transformation |
 | 2026-03-15 | [TS/JS Codegen Rewrite](done/ts-codegen-rewrite.md) | Rewrite TS codegen to two-stage pipeline (IR to TsIR to String) |
+| 2026-03-15 | [Tail Call Optimization](done/tail-call-optimization.md) | Self-recursive tail call to labeled loop transformation |
 | 2026-03-15 | [Syntax Sugar](done/syntax-sugar.md) | Syntax sugar (ranges, exhaustiveness check, lambda shorthand) |
 | 2026-03-15 | [RustIR: Rust Codegen Intermediate Representation](done/rust-ir.md) | Two-stage Rust codegen pipeline via RustIR intermediate repr |
 | 2026-03-15 | [Pattern Exhaustiveness Check](done/pattern-exhaustiveness-check.md) | Static exhaustiveness checking for match expressions |
@@ -257,7 +300,6 @@
 | 2026-03-15 | [Clone Reduction Phase 4](done/clone-reduction.md) | Phase 4 clone reduction targeting field-level borrow analysis |
 | 2026-03-15 | [Architecture Hardening](done/architecture-hardening.md) | Fix structural weaknesses in compiler architecture |
 | 2026-03-15 | [--emit-ir: IR JSON Export](done/emit-ir.md) | Export typed IR as JSON via --emit-ir flag |
-| 2026-03-14 | [almide scaffold & Module Proliferation Pipeline [MERGED]](done/scaffold-and-proliferation.md) | Scaffold command and LLM module proliferation pipeline |
 | 2026-03-14 | [UFCS Type Resolution for Ambiguous Methods](done/ufcs-type-resolution.md) | Fix UFCS resolution for ambiguous methods on complex expressions |
 | 2026-03-14 | [Trailing Lambda / Builder DSL [WON'T DO]](done/trailing-lambda-builder.md) | Trailing lambda / builder DSL exploration (rejected) |
 | 2026-03-14 | [Structured Concurrency](done/structured-concurrency.md) | Async model with async fn, await, and async let constructs |
@@ -267,12 +309,13 @@
 | 2026-03-14 | [Codegen Optimization [IN PROGRESS]](done/codegen-optimization.md) | Reduce clone overhead for heap types without exposing ownership |
 | 2026-03-14 | [Codegen IR Redesign](done/ir-redesign.md) | Self-contained typed IR so codegen never references AST |
 | 2026-03-14 | [Bidirectional Type Inference for Lambda Parameters](done/lambda-type-inference.md) | Bidirectional type inference for lambda parameters via two-pass checker |
-| 2026-03-13 | [`import self` — Package Entry Point Access](done/import-self-entry.md) | Allow main.almd to access pub functions from same-package mod.almd |
+| 2026-03-14 | [almide scaffold & Module Proliferation Pipeline [MERGED]](done/scaffold-and-proliferation.md) | Scaffold command and LLM module proliferation pipeline |
 | 2026-03-13 | [Module System v2](done/module-system-v2.md) | File-based module system with visibility controls and mod.almd |
 | 2026-03-13 | [Map Literal Syntax](done/map-literal.md) | Map literal syntax with Swift-style [:] empty map notation |
 | 2026-03-13 | [Hint System Architecture [P0]](done/hint-system.md) | Decouple hint generation from parser into a dedicated system |
 | 2026-03-13 | [Error Recovery](done/error-recovery.md) | Report all errors at once instead of stopping at the first one |
 | 2026-03-13 | [Eq Protocol](done/eq-protocol.md) | Automatic deep equality for all value types without deriving |
+| 2026-03-13 | [`import self` — Package Entry Point Access](done/import-self-entry.md) | Allow main.almd to access pub functions from same-package mod.almd |
 | 2026-03-12 | [While Loop](done/while-loop.md) | Dedicated while loop syntax replacing do-block guard pattern |
 | 2026-03-12 | [Variant Record Fields](done/variant-record-fields.md) | Named fields for enum variants (like Rust struct variants) |
 | 2026-03-12 | [Typed IR](done/typed-ir.md) | Typed intermediate representation between checker and emitters |
@@ -284,19 +327,19 @@
 | 2026-03-12 | [Language Test Coverage (`almide test`)](done/test-coverage.md) | Almide language-level test coverage targets (1500+ cases) |
 | 2026-03-12 | [Default Field Values](done/default-field-values.md) | Default values for record fields to eliminate sentinel value patterns |
 | 2026-03-12 | [Compiler Bugs Found by Test Expansion](done/compiler-bugs-from-tests.md) | Seven compiler bugs discovered during test coverage expansion |
-| 2026-03-11 | [stdin / Interactive I/O](done/stdin-io.md) | stdin reading and interactive I/O via io module |
-| 2026-03-11 | [npm Package Target](done/npm-package-target-target-npm.md) | Compile Almide to publish-ready npm packages via --target npm |
 | 2026-03-11 | [Tuple & Record](done/tuple-record.md) | Named record construction and tuple index access |
 | 2026-03-11 | [String Handling](done/string-handling.md) | Heredoc multi-line strings and raw string literals |
 | 2026-03-11 | [Stdlib Self-Hosting](done/stdlib-self-hosting.md) | Write stdlib in Almide for automatic multi-target support |
 | 2026-03-11 | [Stdlib Gaps](done/stdlib-gaps.md) | Reduce AI-generated boilerplate via new stdlib functions |
 | 2026-03-11 | [Stdlib Completeness](done/stdlib-completeness.md) | Fill stdlib gaps in int, string, list, and map modules |
+| 2026-03-11 | [stdin / Interactive I/O](done/stdin-io.md) | stdin reading and interactive I/O via io module |
 | 2026-03-11 | [Proliferation Blockers](done/proliferation-blockers.md) | Compiler bugs that blocked LLM module generation (all resolved) |
 | 2026-03-11 | [Playground Repair Turn](done/playground-repair.md) | Playground AI-powered error repair and type checker integration |
+| 2026-03-11 | [npm Package Target](done/npm-package-target-target-npm.md) | Compile Almide to publish-ready npm packages via --target npm |
+| 2026-03-11 | [LLM and Immutable Data Structures](done/llm-immutable-patterns.md) | Mitigations for LLM failures with immutable data patterns |
 | 2026-03-11 | [Literal Syntax Gaps](done/literal-syntax-gaps.md) | Cross-language comparison of numeric and collection literal syntax |
 | 2026-03-11 | [List Stdlib Gaps](done/list-stdlib-gaps.md) | Cross-language comparison of missing list module operations |
 | 2026-03-11 | [Language Test Suite](done/language-test-suite.md) | Systematic language feature test suite for regression detection |
-| 2026-03-11 | [LLM and Immutable Data Structures](done/llm-immutable-patterns.md) | Mitigations for LLM failures with immutable data patterns |
 | 2026-03-11 | [HTTP Module](done/http.md) | HTTP server and client module with multithreading support |
 | 2026-03-11 | [Generics](done/generics.md) | Generic functions, records, variants, and recursive generics |
 | 2026-03-11 | [Error Diagnostics](done/error-diagnostics.md) | LLM-critical diagnostics including lost mutation and type mismatch |

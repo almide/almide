@@ -1,0 +1,11 @@
+// json_as_array — SELF-HOSTED `json.as_array(j)` over `value.as_array` (Result[List[Value], String],
+// wasm-linked): Ok(items) → Some, Err → None. Byte-identical to the `almide_json_as_array` intrinsic
+// (a non-array Value → None, an array → Some(elements)), so the v1 trust spine lowers it through the
+// PROVEN `value.as_array` + Option-ctor path with NO hand-written wasm runtime. With its `?? []`
+// routed to `option.listvalue_unwrap_or`, the `json.as_array(…) ?? []` accessor idiom (wasm-bindgen
+// get_arr, the List[Value] sibling of json.get) now EXECUTES on v1.
+fn json_as_array(j: Value) -> Option[List[Value]] =
+  match value.as_array(j) {
+    ok(a) => some(a)
+    err(_) => none
+  }

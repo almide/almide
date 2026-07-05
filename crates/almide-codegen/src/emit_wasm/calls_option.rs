@@ -1,21 +1,10 @@
 //! Option and Result stdlib call dispatch for WASM codegen.
 
-use crate::emit_wasm::engine::{Imm32, Local};
 use super::FuncCompiler;
 use super::values;
 use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use wasm_encoder::ValType;
-
-// ── Immediate constants ──────────────────────────────────────────────────────
-/// Byte width of an i32 / pointer on the WASM heap (used as element stride and
-/// single-pointer allocation size).
-const I32_BYTES: i32 = 4;
-/// Byte size of two consecutive i32 fields (e.g. [tag:i32, ptr:i32] or
-/// [ptr_a:i32, ptr_b:i32]).
-const TWO_I32_BYTES: i32 = 8;
-/// Byte offset of the value payload inside a Result box ([tag:i32][payload…]).
-const RESULT_PAYLOAD_OFFSET: i32 = 4;
 
 impl FuncCompiler<'_> {
     /// Dispatch an option stdlib method call. Returns true if handled.
@@ -24,7 +13,7 @@ impl FuncCompiler<'_> {
             "is_some" => {
                 // is_some(opt) → Bool(i32): ptr != 0
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_const(Imm32(0)); i32_ne; });
+                wasm!(self.func, { i32_const(0); i32_ne; });
             }
             "is_none" => {
                 self.emit_expr(&args[0]);
@@ -33,35 +22,44 @@ impl FuncCompiler<'_> {
             "unwrap_or" => {
                 // unwrap_or(opt, default) → T
                 // if opt != 0 then load *opt else default
-                let inner_ty = self.option_inner_ty(&args[0].ty);
+                // The Option's inner ty can arrive UNRESOLVED when the option
+                // flowed through a generic chain (`list.find |> option.map |>
+                // option.unwrap_or`, nn get_alignment): the emit then picked
+                // the i32 arm while the DEFAULT arg emitted its real i64 —
+                // an if_i32 block with an i64 arm (invalid wasm). The default's
+                // type is authoritative: `unwrap_or(o: Option[T], d: T)`.
+                let inner_ty = {
+                    let t = self.option_inner_ty(&args[0].ty);
+                    if t.is_unresolved() { args[1].ty.clone() } else { t }
+                };
                 let s = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 let vt = values::ty_to_valtype(&inner_ty);
                 match vt {
                     Some(ValType::I64) => {
                         wasm!(self.func, {
-                            local_set(Local(s));
-                            local_get(Local(s)); i32_eqz;
+                            local_set(s);
+                            local_get(s); i32_eqz;
                             if_i64;
                         });
                         self.emit_expr(&args[1]);
                         wasm!(self.func, {
                             else_;
-                              local_get(Local(s));
+                              local_get(s);
                               i64_load(0);
                             end;
                         });
                     }
                     Some(ValType::F64) => {
                         wasm!(self.func, {
-                            local_set(Local(s));
-                            local_get(Local(s)); i32_eqz;
+                            local_set(s);
+                            local_get(s); i32_eqz;
                             if_f64;
                         });
                         self.emit_expr(&args[1]);
                         wasm!(self.func, {
                             else_;
-                              local_get(Local(s));
+                              local_get(s);
                               f64_load(0);
                             end;
                         });
@@ -69,14 +67,14 @@ impl FuncCompiler<'_> {
                     _ => {
                         // i32 (String, Option, etc.)
                         wasm!(self.func, {
-                            local_set(Local(s));
-                            local_get(Local(s)); i32_eqz;
+                            local_set(s);
+                            local_get(s); i32_eqz;
                             if_i32;
                         });
                         self.emit_expr(&args[1]);
                         wasm!(self.func, {
                             else_;
-                              local_get(Local(s));
+                              local_get(s);
                               i32_load(0);
                             end;
                         });
@@ -92,37 +90,37 @@ impl FuncCompiler<'_> {
                 let s = self.scratch.alloc_i32();
                 // Store opt
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(opt)); });
+                wasm!(self.func, { local_set(opt); });
                 // Store closure
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    local_set(Local(closure));
-                    local_get(Local(opt)); i32_eqz; // opt == 0?
+                    local_set(closure);
+                    local_get(opt); i32_eqz; // opt == 0?
                     if_i32;
-                      i32_const(Imm32(0)); // none
+                      i32_const(0); // none
                     else_;
                 });
                 let out_ty = self.fn_ret_ty(&args[1].ty);
                 let out_size = values::byte_size(&out_ty);
                 wasm!(self.func, {
-                    i32_const(Imm32(out_size as i32));
+                    i32_const(out_size as i32);
                     call(self.emitter.rt.alloc);
-                    local_set(Local(s));
-                    local_get(Local(s));
+                    local_set(s);
+                    local_get(s);
                     // env_ptr
-                    local_get(Local(closure)); i32_load(4);
+                    local_get(closure); i32_load(4);
                     // Load inner value
-                    local_get(Local(opt));
+                    local_get(opt);
                 });
                 self.emit_load_at(&inner_ty, 0);
                 // table_idx
                 wasm!(self.func, {
-                    local_get(Local(closure)); i32_load(0);
+                    local_get(closure); i32_load(0);
                 });
                 self.emit_closure_call(&inner_ty, &out_ty);
                 self.emit_store_at(&out_ty, 0);
                 wasm!(self.func, {
-                      local_get(Local(s));
+                      local_get(s);
                     end;
                 });
                 self.scratch.free_i32(s);
@@ -141,21 +139,21 @@ impl FuncCompiler<'_> {
                 let closure = self.scratch.alloc_i32();
                 // Store opt
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(opt)); });
+                wasm!(self.func, { local_set(opt); });
                 // Store closure
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    local_set(Local(closure));
-                    local_get(Local(opt)); i32_eqz; // opt == 0?
+                    local_set(closure);
+                    local_get(opt); i32_eqz; // opt == 0?
                     if_i32;
-                      i32_const(Imm32(0));
+                      i32_const(0);
                     else_;
-                      local_get(Local(closure)); i32_load(4); // env
+                      local_get(closure); i32_load(4); // env
                 });
-                wasm!(self.func, { local_get(Local(opt)); });
+                wasm!(self.func, { local_get(opt); });
                 self.emit_load_at(&inner_ty, 0);
                 wasm!(self.func, {
-                    local_get(Local(closure)); i32_load(0); // table_idx
+                    local_get(closure); i32_load(0); // table_idx
                 });
                 // Result is i32 (Option ptr)
                 self.emit_closure_call(&inner_ty, &Ty::Unknown);
@@ -168,15 +166,15 @@ impl FuncCompiler<'_> {
                 let s = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(s));
-                    local_get(Local(s)); i32_eqz;
+                    local_set(s);
+                    local_get(s); i32_eqz;
                     if_i32;
-                      i32_const(Imm32(0));
+                      i32_const(0);
                     else_;
                       // SHARE: the inner Option is borrowed out of the outer box;
                       // it must own a +1 or the let-bound result double-frees it
                       // against the outer's payload Dec (#666). No-op when inner=0.
-                      local_get(Local(s));
+                      local_get(s);
                       i32_load(0); // inner Option ptr
                       call(self.emitter.rt.rc_inc);
                     end;
@@ -191,22 +189,22 @@ impl FuncCompiler<'_> {
                 let closure = self.scratch.alloc_i32();
                 // Store opt
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(opt)); });
+                wasm!(self.func, { local_set(opt); });
                 // Store closure
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    local_set(Local(closure));
-                    local_get(Local(opt)); i32_eqz; // opt == 0?
+                    local_set(closure);
+                    local_get(opt); i32_eqz; // opt == 0?
                     if_i32;
-                      i32_const(Imm32(0));
+                      i32_const(0);
                     else_;
                       // Call pred(*opt)
-                      local_get(Local(closure)); i32_load(4); // env
+                      local_get(closure); i32_load(4); // env
                 });
-                wasm!(self.func, { local_get(Local(opt)); });
+                wasm!(self.func, { local_get(opt); });
                 self.emit_load_at(&inner_ty, 0);
                 wasm!(self.func, {
-                    local_get(Local(closure)); i32_load(0); // table_idx
+                    local_get(closure); i32_load(0); // table_idx
                 });
                 self.emit_closure_call(&inner_ty, &Ty::Bool);
                 // Result is Bool(i32): if true return opt, else 0.
@@ -216,9 +214,9 @@ impl FuncCompiler<'_> {
                 // double-free it (#666). rc_inc is a no-op on the none(0) branch.
                 wasm!(self.func, {
                       if_i32;
-                        local_get(Local(opt)); call(self.emitter.rt.rc_inc);
+                        local_get(opt); call(self.emitter.rt.rc_inc);
                       else_;
-                        i32_const(Imm32(0));
+                        i32_const(0);
                       end;
                     end;
                 });
@@ -237,33 +235,33 @@ impl FuncCompiler<'_> {
                 let s2 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(s));
-                    local_get(Local(s)); i32_eqz;
+                    local_set(s);
+                    local_get(s); i32_eqz;
                     if_i32;
                       // err(err_msg)
-                      i32_const(Imm32((4 + err_size) as i32));
+                      i32_const((4 + err_size) as i32);
                       call(self.emitter.rt.alloc);
-                      local_set(Local(s2));
-                      local_get(Local(s2)); i32_const(Imm32(1)); i32_store(0); // tag=1
-                      local_get(Local(s2));
+                      local_set(s2);
+                      local_get(s2); i32_const(1); i32_store(0); // tag=1
+                      local_get(s2);
                 });
                 self.emit_expr(&args[1]); // err_msg
                 wasm!(self.func, {
                       i32_store(4);
-                      local_get(Local(s2));
+                      local_get(s2);
                     else_;
                       // ok(*opt)
-                      i32_const(Imm32(alloc_size as i32));
+                      i32_const(alloc_size as i32);
                       call(self.emitter.rt.alloc);
-                      local_set(Local(s2));
-                      local_get(Local(s2)); i32_const(Imm32(0)); i32_store(0); // tag=0
-                      local_get(Local(s2));
-                      local_get(Local(s));
+                      local_set(s2);
+                      local_get(s2); i32_const(0); i32_store(0); // tag=0
+                      local_get(s2);
+                      local_get(s);
                 });
                 self.emit_load_at(&inner_ty, 0);
                 self.emit_store_at(&inner_ty, 4);
                 wasm!(self.func, {
-                      local_get(Local(s2));
+                      local_get(s2);
                     end;
                 });
                 self.scratch.free_i32(s2);
@@ -275,18 +273,18 @@ impl FuncCompiler<'_> {
                 let closure = self.scratch.alloc_i32();
                 // Store opt
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(opt)); });
+                wasm!(self.func, { local_set(opt); });
                 // Store closure
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    local_set(Local(closure));
-                    local_get(Local(opt)); i32_eqz; // opt == 0?
+                    local_set(closure);
+                    local_get(opt); i32_eqz; // opt == 0?
                     if_i32;
                 });
                 // Call f() — thunk returning Option
                 wasm!(self.func, {
-                    local_get(Local(closure)); i32_load(4); // env
-                    local_get(Local(closure)); i32_load(0); // table_idx
+                    local_get(closure); i32_load(4); // env
+                    local_get(closure); i32_load(0); // table_idx
                 });
                 // call_indirect () → i32
                 let ti = self.emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
@@ -295,7 +293,7 @@ impl FuncCompiler<'_> {
                     else_;
                       // SHARE: the some path returns the INPUT box — own a +1 so the
                       // let-bound result doesn't double-free it with the input (#666).
-                      local_get(Local(opt)); call(self.emitter.rt.rc_inc);
+                      local_get(opt); call(self.emitter.rt.rc_inc);
                     end;
                 });
                 self.scratch.free_i32(closure);
@@ -309,38 +307,38 @@ impl FuncCompiler<'_> {
                 let closure = self.scratch.alloc_i32();
                 // Store opt
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(opt)); });
+                wasm!(self.func, { local_set(opt); });
                 // Store closure
                 self.emit_expr(&args[1]);
-                wasm!(self.func, { local_set(Local(closure)); });
+                wasm!(self.func, { local_set(closure); });
                 match vt {
                     ValType::I64 => {
-                        wasm!(self.func, { local_get(Local(opt)); i32_eqz; if_i64; });
+                        wasm!(self.func, { local_get(opt); i32_eqz; if_i64; });
                         // f()
                         wasm!(self.func, {
-                            local_get(Local(closure)); i32_load(4);
-                            local_get(Local(closure)); i32_load(0);
+                            local_get(closure); i32_load(4);
+                            local_get(closure); i32_load(0);
                         });
                         let ti = self.emitter.register_type(vec![ValType::I32], vec![ValType::I64]);
-                        wasm!(self.func, { call_indirect(ti, 0); else_; local_get(Local(opt)); i64_load(0); end; });
+                        wasm!(self.func, { call_indirect(ti, 0); else_; local_get(opt); i64_load(0); end; });
                     }
                     ValType::F64 => {
-                        wasm!(self.func, { local_get(Local(opt)); i32_eqz; if_f64; });
+                        wasm!(self.func, { local_get(opt); i32_eqz; if_f64; });
                         wasm!(self.func, {
-                            local_get(Local(closure)); i32_load(4);
-                            local_get(Local(closure)); i32_load(0);
+                            local_get(closure); i32_load(4);
+                            local_get(closure); i32_load(0);
                         });
                         let ti = self.emitter.register_type(vec![ValType::I32], vec![ValType::F64]);
-                        wasm!(self.func, { call_indirect(ti, 0); else_; local_get(Local(opt)); f64_load(0); end; });
+                        wasm!(self.func, { call_indirect(ti, 0); else_; local_get(opt); f64_load(0); end; });
                     }
                     _ => {
-                        wasm!(self.func, { local_get(Local(opt)); i32_eqz; if_i32; });
+                        wasm!(self.func, { local_get(opt); i32_eqz; if_i32; });
                         wasm!(self.func, {
-                            local_get(Local(closure)); i32_load(4);
-                            local_get(Local(closure)); i32_load(0);
+                            local_get(closure); i32_load(4);
+                            local_get(closure); i32_load(0);
                         });
                         let ti = self.emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
-                        wasm!(self.func, { call_indirect(ti, 0); else_; local_get(Local(opt)); i32_load(0); end; });
+                        wasm!(self.func, { call_indirect(ti, 0); else_; local_get(opt); i32_load(0); end; });
                     }
                 }
                 self.scratch.free_i32(closure);
@@ -354,24 +352,24 @@ impl FuncCompiler<'_> {
                 let s2 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(s));
-                    local_get(Local(s)); i32_eqz;
+                    local_set(s);
+                    local_get(s); i32_eqz;
                     if_i32;
                       // empty list: [len=0][cap=0]
-                      i32_const(Imm32(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32)); call(self.emitter.rt.alloc); local_set(Local(s2));
-                      local_get(Local(s2)); i32_const(Imm32(0)); i32_store(0);
-                      local_get(Local(s2));
+                      i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); call(self.emitter.rt.alloc); local_set(s2);
+                      local_get(s2); i32_const(0); i32_store(0);
+                      local_get(s2);
                     else_;
                       // [len=1, cap=0, elem]
-                      i32_const(Imm32((self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32 + elem_size as i32))); call(self.emitter.rt.alloc); local_set(Local(s2));
-                      local_get(Local(s2)); i32_const(Imm32(1)); i32_store(0);
-                      local_get(Local(s2));
-                      local_get(Local(s));
+                      i32_const((self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32 + elem_size as i32)); call(self.emitter.rt.alloc); local_set(s2);
+                      local_get(s2); i32_const(1); i32_store(0);
+                      local_get(s2);
+                      local_get(s);
                 });
                 self.emit_load_at(&inner_ty, 0);
                 self.emit_store_at(&inner_ty, self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32 as u32);
                 wasm!(self.func, {
-                      local_get(Local(s2));
+                      local_get(s2);
                     end;
                 });
                 self.scratch.free_i32(s2);
@@ -385,15 +383,15 @@ impl FuncCompiler<'_> {
                 let s_tuple = self.scratch.alloc_i32();
                 let s_some = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(sa)); });
+                wasm!(self.func, { local_set(sa); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    local_set(Local(sb));
-                    local_get(Local(sa)); i32_eqz;
-                    local_get(Local(sb)); i32_eqz;
+                    local_set(sb);
+                    local_get(sa); i32_eqz;
+                    local_get(sb); i32_eqz;
                     i32_or;
                     if_i32;
-                      i32_const(Imm32(0));
+                      i32_const(0);
                     else_;
                 });
                 // Allocate tuple and wrap in some
@@ -404,24 +402,24 @@ impl FuncCompiler<'_> {
                 let tuple_size = a_size + b_size;
                 // Tuple ptr
                 wasm!(self.func, {
-                    i32_const(Imm32(tuple_size as i32)); call(self.emitter.rt.alloc);
-                    local_set(Local(s_tuple));
-                    local_get(Local(s_tuple));
-                    local_get(Local(sa));
+                    i32_const(tuple_size as i32); call(self.emitter.rt.alloc);
+                    local_set(s_tuple);
+                    local_get(s_tuple);
+                    local_get(sa);
                 });
                 self.emit_load_at(&a_ty, 0);
                 self.emit_store_at(&a_ty, 0);
-                wasm!(self.func, { local_get(Local(s_tuple)); local_get(Local(sb)); });
+                wasm!(self.func, { local_get(s_tuple); local_get(sb); });
                 self.emit_load_at(&b_ty, 0);
                 self.emit_store_at(&b_ty, a_size as u32);
                 // Wrap tuple in Some: alloc ptr-size, store tuple ptr
                 wasm!(self.func, {
-                    i32_const(Imm32(I32_BYTES)); call(self.emitter.rt.alloc);
-                    local_set(Local(s_some));
-                    local_get(Local(s_some));
-                    local_get(Local(s_tuple));
+                    i32_const(4); call(self.emitter.rt.alloc);
+                    local_set(s_some);
+                    local_get(s_some);
+                    local_get(s_tuple);
                     i32_store(0);
-                    local_get(Local(s_some));
+                    local_get(s_some);
                     end;
                 });
                 self.scratch.free_i32(s_some);
@@ -443,27 +441,33 @@ impl FuncCompiler<'_> {
             }
             "is_err" => {
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_load(0); i32_const(Imm32(0)); i32_ne; });
+                wasm!(self.func, { i32_load(0); i32_const(0); i32_ne; });
             }
             "unwrap_or" => {
                 // unwrap_or(result, default) → T
-                let inner_ty = self.result_ok_ty(&args[0].ty);
+                // Same unresolved-inner fallback as option.unwrap_or: the
+                // default's type is authoritative when the Result flowed
+                // through a generic chain.
+                let inner_ty = {
+                    let t = self.result_ok_ty(&args[0].ty);
+                    if t.is_unresolved() { args[1].ty.clone() } else { t }
+                };
                 let s = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 let vt = values::ty_to_valtype(&inner_ty).unwrap_or(ValType::I32);
                 match vt {
                     ValType::I64 => {
-                        wasm!(self.func, { local_set(Local(s)); local_get(Local(s)); i32_load(0); i32_eqz; if_i64; local_get(Local(s)); i64_load(4); else_; });
+                        wasm!(self.func, { local_set(s); local_get(s); i32_load(0); i32_eqz; if_i64; local_get(s); i64_load(4); else_; });
                         self.emit_expr(&args[1]);
                         wasm!(self.func, { end; });
                     }
                     ValType::F64 => {
-                        wasm!(self.func, { local_set(Local(s)); local_get(Local(s)); i32_load(0); i32_eqz; if_f64; local_get(Local(s)); f64_load(4); else_; });
+                        wasm!(self.func, { local_set(s); local_get(s); i32_load(0); i32_eqz; if_f64; local_get(s); f64_load(4); else_; });
                         self.emit_expr(&args[1]);
                         wasm!(self.func, { end; });
                     }
                     _ => {
-                        wasm!(self.func, { local_set(Local(s)); local_get(Local(s)); i32_load(0); i32_eqz; if_i32; local_get(Local(s)); i32_load(4); else_; });
+                        wasm!(self.func, { local_set(s); local_get(s); i32_load(0); i32_eqz; if_i32; local_get(s); i32_load(4); else_; });
                         self.emit_expr(&args[1]);
                         wasm!(self.func, { end; });
                     }
@@ -477,33 +481,33 @@ impl FuncCompiler<'_> {
                 let closure = self.scratch.alloc_i32();
                 // Store result
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(result)); });
+                wasm!(self.func, { local_set(result); });
                 // Store closure
                 self.emit_expr(&args[1]);
-                wasm!(self.func, { local_set(Local(closure)); });
+                wasm!(self.func, { local_set(closure); });
                 self.emit_result_branch_err(result);
                 wasm!(self.func, {
                     if_i32;
                       // SHARE: err path returns the INPUT box — own a +1 so the
                       // let-bound result doesn't double-free it with the input (#666).
-                      local_get(Local(result)); call(self.emitter.rt.rc_inc); // return err as-is
+                      local_get(result); call(self.emitter.rt.rc_inc); // return err as-is
                     else_;
                 });
                 let out_ty = self.fn_ret_ty(&args[1].ty);
                 let s = self.emit_result_alloc_ok(&out_ty);
                 wasm!(self.func, {
-                    local_get(Local(s));
+                    local_get(s);
                     // env
-                    local_get(Local(closure)); i32_load(4);
+                    local_get(closure); i32_load(4);
                     // Load ok value from result
-                    local_get(Local(result));
+                    local_get(result);
                 });
                 self.emit_load_at(&ok_ty, 4);
                 // table_idx
-                wasm!(self.func, { local_get(Local(closure)); i32_load(0); });
+                wasm!(self.func, { local_get(closure); i32_load(0); });
                 self.emit_closure_call(&ok_ty, &out_ty);
                 self.emit_store_at(&out_ty, 4);
-                wasm!(self.func, { local_get(Local(s)); end; });
+                wasm!(self.func, { local_get(s); end; });
                 self.scratch.free_i32(s);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(result);
@@ -515,30 +519,30 @@ impl FuncCompiler<'_> {
                 let closure = self.scratch.alloc_i32();
                 // Store result
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(result)); });
+                wasm!(self.func, { local_set(result); });
                 // Store closure
                 self.emit_expr(&args[1]);
-                wasm!(self.func, { local_set(Local(closure)); });
+                wasm!(self.func, { local_set(closure); });
                 self.emit_result_branch_ok(result);
                 wasm!(self.func, {
                     if_i32;
                       // SHARE: ok path returns the INPUT box — own a +1 so the
                       // let-bound result doesn't double-free it with the input (#666).
-                      local_get(Local(result)); call(self.emitter.rt.rc_inc); // return ok as-is
+                      local_get(result); call(self.emitter.rt.rc_inc); // return ok as-is
                     else_;
                 });
                 let out_ty = self.fn_ret_ty(&args[1].ty);
                 let s = self.emit_result_alloc_err(&out_ty);
                 wasm!(self.func, {
-                    local_get(Local(s));
-                    local_get(Local(closure)); i32_load(4); // env
+                    local_get(s);
+                    local_get(closure); i32_load(4); // env
                 });
-                wasm!(self.func, { local_get(Local(result)); });
+                wasm!(self.func, { local_get(result); });
                 self.emit_load_at(&err_ty, 4);
-                wasm!(self.func, { local_get(Local(closure)); i32_load(0); });
+                wasm!(self.func, { local_get(closure); i32_load(0); });
                 self.emit_closure_call(&err_ty, &out_ty);
                 self.emit_store_at(&out_ty, 4);
-                wasm!(self.func, { local_get(Local(s)); end; });
+                wasm!(self.func, { local_get(s); end; });
                 self.scratch.free_i32(s);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(result);
@@ -550,22 +554,22 @@ impl FuncCompiler<'_> {
                 let closure = self.scratch.alloc_i32();
                 // Store result
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(result)); });
+                wasm!(self.func, { local_set(result); });
                 // Store closure
                 self.emit_expr(&args[1]);
-                wasm!(self.func, { local_set(Local(closure)); });
+                wasm!(self.func, { local_set(closure); });
                 self.emit_result_branch_err(result);
                 wasm!(self.func, {
                     if_i32;
                       // SHARE: err path returns the INPUT box — own a +1 so the
                       // let-bound result doesn't double-free it with the input (#666).
-                      local_get(Local(result)); call(self.emitter.rt.rc_inc); // return err as-is
+                      local_get(result); call(self.emitter.rt.rc_inc); // return err as-is
                     else_;
-                      local_get(Local(closure)); i32_load(4); // env
+                      local_get(closure); i32_load(4); // env
                 });
-                wasm!(self.func, { local_get(Local(result)); });
+                wasm!(self.func, { local_get(result); });
                 self.emit_load_at(&ok_ty, 4);
-                wasm!(self.func, { local_get(Local(closure)); i32_load(0); });
+                wasm!(self.func, { local_get(closure); i32_load(0); });
                 // Returns Result ptr (i32)
                 self.emit_closure_call(&ok_ty, &Ty::Unknown);
                 wasm!(self.func, { end; });
@@ -580,19 +584,19 @@ impl FuncCompiler<'_> {
                 let s2 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(s));
-                    local_get(Local(s)); i32_load(0); i32_const(Imm32(0)); i32_ne;
+                    local_set(s);
+                    local_get(s); i32_load(0); i32_const(0); i32_ne;
                     if_i32;
-                      i32_const(Imm32(0)); // none
+                      i32_const(0); // none
                     else_;
                       // some(ok_value)
-                      i32_const(Imm32(ok_size as i32)); call(self.emitter.rt.alloc); local_set(Local(s2));
-                      local_get(Local(s2));
-                      local_get(Local(s));
+                      i32_const(ok_size as i32); call(self.emitter.rt.alloc); local_set(s2);
+                      local_get(s2);
+                      local_get(s);
                 });
                 self.emit_load_at(&ok_ty, 4);
                 self.emit_store_at(&ok_ty, 0);
-                wasm!(self.func, { local_get(Local(s2)); end; });
+                wasm!(self.func, { local_get(s2); end; });
                 self.scratch.free_i32(s2);
                 self.scratch.free_i32(s);
             }
@@ -603,18 +607,18 @@ impl FuncCompiler<'_> {
                 let s2 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(s));
-                    local_get(Local(s)); i32_load(0); i32_eqz;
+                    local_set(s);
+                    local_get(s); i32_load(0); i32_eqz;
                     if_i32;
-                      i32_const(Imm32(0)); // none (was ok)
+                      i32_const(0); // none (was ok)
                     else_;
-                      i32_const(Imm32(err_size as i32)); call(self.emitter.rt.alloc); local_set(Local(s2));
-                      local_get(Local(s2));
-                      local_get(Local(s));
+                      i32_const(err_size as i32); call(self.emitter.rt.alloc); local_set(s2);
+                      local_get(s2);
+                      local_get(s);
                 });
                 self.emit_load_at(&err_ty, 4);
                 self.emit_store_at(&err_ty, 0);
-                wasm!(self.func, { local_get(Local(s2)); end; });
+                wasm!(self.func, { local_get(s2); end; });
                 self.scratch.free_i32(s2);
                 self.scratch.free_i32(s);
             }
@@ -625,22 +629,22 @@ impl FuncCompiler<'_> {
                 let closure = self.scratch.alloc_i32();
                 // Store result
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(result)); });
+                wasm!(self.func, { local_set(result); });
                 // Store closure
                 self.emit_expr(&args[1]);
-                wasm!(self.func, { local_set(Local(closure)); });
+                wasm!(self.func, { local_set(closure); });
                 match vt {
                     ValType::I64 => {
-                        wasm!(self.func, { local_get(Local(result)); i32_load(0); i32_eqz; if_i64; local_get(Local(result)); i64_load(4); else_; });
+                        wasm!(self.func, { local_get(result); i32_load(0); i32_eqz; if_i64; local_get(result); i64_load(4); else_; });
                         // f(err)
-                        wasm!(self.func, { local_get(Local(closure)); i32_load(4); local_get(Local(result)); i32_load(4); local_get(Local(closure)); i32_load(0); });
+                        wasm!(self.func, { local_get(closure); i32_load(4); local_get(result); i32_load(4); local_get(closure); i32_load(0); });
                         let err_ty = self.result_err_ty(&args[0].ty);
                         self.emit_closure_call(&err_ty, &ok_ty);
                         wasm!(self.func, { end; });
                     }
                     _ => {
-                        wasm!(self.func, { local_get(Local(result)); i32_load(0); i32_eqz; if_i32; local_get(Local(result)); i32_load(4); else_; });
-                        wasm!(self.func, { local_get(Local(closure)); i32_load(4); local_get(Local(result)); i32_load(4); local_get(Local(closure)); i32_load(0); });
+                        wasm!(self.func, { local_get(result); i32_load(0); i32_eqz; if_i32; local_get(result); i32_load(4); else_; });
+                        wasm!(self.func, { local_get(closure); i32_load(4); local_get(result); i32_load(4); local_get(closure); i32_load(0); });
                         let err_ty = self.result_err_ty(&args[0].ty);
                         self.emit_closure_call(&err_ty, &ok_ty);
                         wasm!(self.func, { end; });
@@ -669,41 +673,41 @@ impl FuncCompiler<'_> {
 
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(rs));
-                    local_get(Local(rs)); i32_load(0); local_set(Local(len));
-                    i32_const(Imm32(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32)); local_get(Local(len)); i32_const(Imm32(ok_size)); i32_mul; i32_add;
-                    call(self.emitter.rt.alloc); local_set(Local(ok_list));
-                    i32_const(Imm32(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32)); local_get(Local(len)); i32_const(Imm32(err_size)); i32_mul; i32_add;
-                    call(self.emitter.rt.alloc); local_set(Local(err_list));
-                    i32_const(Imm32(0)); local_set(Local(ok_cnt));
-                    i32_const(Imm32(0)); local_set(Local(err_cnt));
-                    i32_const(Imm32(0)); local_set(Local(i));
+                    local_set(rs);
+                    local_get(rs); i32_load(0); local_set(len);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(len); i32_const(ok_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(ok_list);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(len); i32_const(err_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(err_list);
+                    i32_const(0); local_set(ok_cnt);
+                    i32_const(0); local_set(err_cnt);
+                    i32_const(0); local_set(i);
                     block_empty; loop_empty;
-                      local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-                      local_get(Local(rs)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                      local_get(Local(i)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add;
-                      i32_load(0); local_set(Local(elem));
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      local_get(rs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
+                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      i32_load(0); local_set(elem);
                 });
                 self.emit_result_sort_into_lists(
                     &ok_ty, &err_ty, ok_size, err_size,
                     ok_list, err_list, ok_cnt, err_cnt, elem,
                 );
                 wasm!(self.func, {
-                      local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
+                      local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    local_get(Local(ok_list)); local_get(Local(ok_cnt)); i32_store(0);
-                    local_get(Local(err_list)); local_get(Local(err_cnt)); i32_store(0);
-                    i32_const(Imm32(TWO_I32_BYTES)); call(self.emitter.rt.alloc); local_set(Local(out));
-                    local_get(Local(err_cnt)); i32_eqz;
+                    local_get(ok_list); local_get(ok_cnt); i32_store(0);
+                    local_get(err_list); local_get(err_cnt); i32_store(0);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(out);
+                    local_get(err_cnt); i32_eqz;
                     if_empty;
-                      local_get(Local(out)); i32_const(Imm32(0)); i32_store(0);
-                      local_get(Local(out)); local_get(Local(ok_list)); i32_store(4);
+                      local_get(out); i32_const(0); i32_store(0);
+                      local_get(out); local_get(ok_list); i32_store(4);
                     else_;
-                      local_get(Local(out)); i32_const(Imm32(1)); i32_store(0);
-                      local_get(Local(out)); local_get(Local(err_list)); i32_store(4);
+                      local_get(out); i32_const(1); i32_store(0);
+                      local_get(out); local_get(err_list); i32_store(4);
                     end;
-                    local_get(Local(out));
+                    local_get(out);
                 });
 
                 self.scratch.free_i32(out);
@@ -736,35 +740,35 @@ impl FuncCompiler<'_> {
 
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(Local(rs));
-                    local_get(Local(rs)); i32_load(0); local_set(Local(len));
-                    i32_const(Imm32(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32)); local_get(Local(len)); i32_const(Imm32(ok_size)); i32_mul; i32_add;
-                    call(self.emitter.rt.alloc); local_set(Local(ok_list));
-                    i32_const(Imm32(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32)); local_get(Local(len)); i32_const(Imm32(err_size)); i32_mul; i32_add;
-                    call(self.emitter.rt.alloc); local_set(Local(err_list));
-                    i32_const(Imm32(0)); local_set(Local(ok_cnt));
-                    i32_const(Imm32(0)); local_set(Local(err_cnt));
-                    i32_const(Imm32(0)); local_set(Local(i));
+                    local_set(rs);
+                    local_get(rs); i32_load(0); local_set(len);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(len); i32_const(ok_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(ok_list);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(len); i32_const(err_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(err_list);
+                    i32_const(0); local_set(ok_cnt);
+                    i32_const(0); local_set(err_cnt);
+                    i32_const(0); local_set(i);
                     block_empty; loop_empty;
-                      local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-                      local_get(Local(rs)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                      local_get(Local(i)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add;
-                      i32_load(0); local_set(Local(elem));
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      local_get(rs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
+                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      i32_load(0); local_set(elem);
                 });
                 self.emit_result_sort_into_lists(
                     &ok_ty, &err_ty, ok_size, err_size,
                     ok_list, err_list, ok_cnt, err_cnt, elem,
                 );
                 wasm!(self.func, {
-                      local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
+                      local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    local_get(Local(ok_list)); local_get(Local(ok_cnt)); i32_store(0);
-                    local_get(Local(err_list)); local_get(Local(err_cnt)); i32_store(0);
-                    i32_const(Imm32(TWO_I32_BYTES)); call(self.emitter.rt.alloc); local_set(Local(tuple_ptr));
-                    local_get(Local(tuple_ptr)); local_get(Local(ok_list)); i32_store(0);
-                    local_get(Local(tuple_ptr)); local_get(Local(err_list)); i32_store(4);
-                    local_get(Local(tuple_ptr));
+                    local_get(ok_list); local_get(ok_cnt); i32_store(0);
+                    local_get(err_list); local_get(err_cnt); i32_store(0);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(tuple_ptr);
+                    local_get(tuple_ptr); local_get(ok_list); i32_store(0);
+                    local_get(tuple_ptr); local_get(err_list); i32_store(4);
+                    local_get(tuple_ptr);
                 });
 
                 self.scratch.free_i32(tuple_ptr);
@@ -800,28 +804,28 @@ impl FuncCompiler<'_> {
                 let out = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(Local(xs)); });
+                wasm!(self.func, { local_set(xs); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    local_set(Local(closure));
-                    local_get(Local(xs)); i32_load(0); local_set(Local(len));
-                    i32_const(Imm32(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32)); local_get(Local(len)); i32_const(Imm32(ok_size)); i32_mul; i32_add;
-                    call(self.emitter.rt.alloc); local_set(Local(ok_list));
-                    i32_const(Imm32(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32)); local_get(Local(len)); i32_const(Imm32(err_size)); i32_mul; i32_add;
-                    call(self.emitter.rt.alloc); local_set(Local(err_list));
-                    i32_const(Imm32(0)); local_set(Local(ok_cnt));
-                    i32_const(Imm32(0)); local_set(Local(err_cnt));
-                    i32_const(Imm32(0)); local_set(Local(i));
+                    local_set(closure);
+                    local_get(xs); i32_load(0); local_set(len);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(len); i32_const(ok_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(ok_list);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(len); i32_const(err_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(err_list);
+                    i32_const(0); local_set(ok_cnt);
+                    i32_const(0); local_set(err_cnt);
+                    i32_const(0); local_set(i);
                     block_empty; loop_empty;
-                      local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
                       // Call closure with xs[i]
-                      local_get(Local(closure)); i32_load(4); // env
-                      local_get(Local(xs)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                      local_get(Local(i)); i32_const(Imm32(es)); i32_mul; i32_add;
+                      local_get(closure); i32_load(4); // env
+                      local_get(xs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
+                      local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, {
-                      local_get(Local(closure)); i32_load(0); // table_idx
+                      local_get(closure); i32_load(0); // table_idx
                 });
                 // call_indirect: (env, elem) -> Result ptr (i32)
                 {
@@ -831,28 +835,28 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { call_indirect(ti, 0); });
                 }
                 wasm!(self.func, {
-                      local_set(Local(res_ptr));
+                      local_set(res_ptr);
                 });
                 self.emit_result_sort_into_lists(
                     &ok_ty, &err_ty, ok_size, err_size,
                     ok_list, err_list, ok_cnt, err_cnt, res_ptr,
                 );
                 wasm!(self.func, {
-                      local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
+                      local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    local_get(Local(ok_list)); local_get(Local(ok_cnt)); i32_store(0);
-                    local_get(Local(err_list)); local_get(Local(err_cnt)); i32_store(0);
-                    i32_const(Imm32(TWO_I32_BYTES)); call(self.emitter.rt.alloc); local_set(Local(out));
-                    local_get(Local(err_cnt)); i32_eqz;
+                    local_get(ok_list); local_get(ok_cnt); i32_store(0);
+                    local_get(err_list); local_get(err_cnt); i32_store(0);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(out);
+                    local_get(err_cnt); i32_eqz;
                     if_empty;
-                      local_get(Local(out)); i32_const(Imm32(0)); i32_store(0);
-                      local_get(Local(out)); local_get(Local(ok_list)); i32_store(4);
+                      local_get(out); i32_const(0); i32_store(0);
+                      local_get(out); local_get(ok_list); i32_store(4);
                     else_;
-                      local_get(Local(out)); i32_const(Imm32(1)); i32_store(0);
-                      local_get(Local(out)); local_get(Local(err_list)); i32_store(4);
+                      local_get(out); i32_const(1); i32_store(0);
+                      local_get(out); local_get(err_list); i32_store(4);
                     end;
-                    local_get(Local(out));
+                    local_get(out);
                 });
 
                 self.scratch.free_i32(out);
@@ -880,8 +884,8 @@ impl FuncCompiler<'_> {
         let size = 4 + values::byte_size(ok_ty);
         let s = self.scratch.alloc_i32();
         wasm!(self.func, {
-            i32_const(Imm32(size as i32)); call(self.emitter.rt.alloc); local_set(Local(s));
-            local_get(Local(s)); i32_const(Imm32(0)); i32_store(0); // tag=0
+            i32_const(size as i32); call(self.emitter.rt.alloc); local_set(s);
+            local_get(s); i32_const(0); i32_store(0); // tag=0
         });
         s
     }
@@ -893,8 +897,8 @@ impl FuncCompiler<'_> {
         let size = 4 + values::byte_size(err_ty);
         let s = self.scratch.alloc_i32();
         wasm!(self.func, {
-            i32_const(Imm32(size as i32)); call(self.emitter.rt.alloc); local_set(Local(s));
-            local_get(Local(s)); i32_const(Imm32(1)); i32_store(0); // tag=1
+            i32_const(size as i32); call(self.emitter.rt.alloc); local_set(s);
+            local_get(s); i32_const(1); i32_store(0); // tag=1
         });
         s
     }
@@ -904,7 +908,7 @@ impl FuncCompiler<'_> {
     /// The "then" branch is the ok path; the "else" branch is the err path.
     fn emit_result_branch_ok(&mut self, result_local: u32) {
         wasm!(self.func, {
-            local_get(Local(result_local)); i32_load(0); i32_eqz;
+            local_get(result_local); i32_load(0); i32_eqz;
         });
     }
 
@@ -912,7 +916,7 @@ impl FuncCompiler<'_> {
     /// The "then" branch is the err path; the "else" branch is the ok path.
     fn emit_result_branch_err(&mut self, result_local: u32) {
         wasm!(self.func, {
-            local_get(Local(result_local)); i32_load(0); i32_const(Imm32(0)); i32_ne;
+            local_get(result_local); i32_load(0); i32_const(0); i32_ne;
         });
     }
 
@@ -938,21 +942,21 @@ impl FuncCompiler<'_> {
         self.emit_result_branch_ok(elem);
         wasm!(self.func, {
             if_empty; // tag==0 → ok
-              local_get(Local(ok_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-              local_get(Local(ok_cnt)); i32_const(Imm32(ok_size)); i32_mul; i32_add;
-              local_get(Local(elem)); i32_const(Imm32(RESULT_PAYLOAD_OFFSET)); i32_add; // Result payload at +4
+              local_get(ok_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
+              local_get(ok_cnt); i32_const(ok_size); i32_mul; i32_add;
+              local_get(elem); i32_const(4); i32_add; // Result payload at +4
         });
         self.emit_elem_copy(ok_ty);
         wasm!(self.func, {
-              local_get(Local(ok_cnt)); i32_const(Imm32(1)); i32_add; local_set(Local(ok_cnt));
+              local_get(ok_cnt); i32_const(1); i32_add; local_set(ok_cnt);
             else_;
-              local_get(Local(err_list)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-              local_get(Local(err_cnt)); i32_const(Imm32(err_size)); i32_mul; i32_add;
-              local_get(Local(elem)); i32_const(Imm32(RESULT_PAYLOAD_OFFSET)); i32_add; // Result payload at +4
+              local_get(err_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
+              local_get(err_cnt); i32_const(err_size); i32_mul; i32_add;
+              local_get(elem); i32_const(4); i32_add; // Result payload at +4
         });
         self.emit_elem_copy(err_ty);
         wasm!(self.func, {
-              local_get(Local(err_cnt)); i32_const(Imm32(1)); i32_add; local_set(Local(err_cnt));
+              local_get(err_cnt); i32_const(1); i32_add; local_set(err_cnt);
             end;
         });
     }

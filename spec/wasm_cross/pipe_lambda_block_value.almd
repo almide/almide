@@ -1,0 +1,22 @@
+// @contract: C-115
+// PIPE-LAMBDA INLINE + BLOCK-VALUED BIND (two pre-existing silent-miscompiles, both fixed here).
+// `x |> (n) => body` was desugared to a Computed-callee call `((n)=>body)(x)`, which v1 MIR cannot
+// lower as a first-class closure — it silently produced 0. The frontend now INLINES it to a block
+// `{ let n = x; body }`. That exercises a BLOCK-VALUED scalar bind (`let a = { let n = …; … }`), which
+// v1 MIR also mis-lowered to 0 (it fell through to the deferred scalar Const) — now lowered by running
+// the block's statements then binding the var to the block tail. Both byte-match v0. (A pipe-lambda in
+// a CALL-ARGUMENT position — `f(x |> g)` — now WALLS rather than mis-lowering: safe, a later ANF-lift.)
+fn main() -> Unit = {
+  // single pipe-lambda (bind position)
+  let a = 5 |> (n) => n * n
+  println(int.to_string(a))                              // 25
+  // chained pipe-lambdas (left-assoc: ((5)²)+1)
+  let b = 5 |> (n) => n * n |> (n) => n + 1
+  println(int.to_string(b))                              // 26
+  // explicit block-valued scalar bind
+  let c = { let n = 7; n * n - 1 }
+  println(int.to_string(c))                              // 48
+  // pipe-lambda whose body is itself a block
+  let d = 3 |> (k) => { let e = k + k; e * e }
+  println(int.to_string(d))                              // 36
+}

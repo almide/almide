@@ -1,0 +1,356 @@
+// set_core — SELF-HOSTED Set[Int] core for v1. A v1 `Set[Int]` IS a v1 List block
+// [rc][len@4][cap@8][data@12] holding UNIQUE, INSERTION-ORDERED Int elements — exactly v0's
+// dense de-duplicated insertion-ordered AlmideSet (native == wasm == self-host observably).
+// from_list dedups (first-seen order); len/is_empty/contains read; to_list copies to a List[Int].
+// Source borrowed; constructed sets/lists owned. Int elements only (scalar slots); Set[String]
+// (heap elements, nested ownership) is a later refinement.
+
+// Is x already among the first `count` Int elements at block-handle `dh`? Linear membership,
+// the same O(n) scan v0's AlmideSet uses.
+fn __set_has(dh: Int, count: Int, x: Int, i: Int) -> Bool =
+  if i >= count then false
+  else {
+    let e = prim.load64(dh + 12 + i * 8)
+    if e == x then true
+    else __set_has(dh, count, x, i + 1)
+  }
+
+// Append each not-yet-present element of list `xh` (length xlen) into the set block `sh`,
+// growing the unique count `w`. Returns the final unique count (= the set's len).
+fn __set_fill(xh: Int, xlen: Int, sh: Int, i: Int, w: Int) -> Int =
+  if i >= xlen then w
+  else {
+    let x = prim.load64(xh + 12 + i * 8)
+    let present = __set_has(sh, w, x, 0)
+    if present then __set_fill(xh, xlen, sh, i + 1, w)
+    else {
+      prim.store64(sh + 12 + w * 8, x)
+      __set_fill(xh, xlen, sh, i + 1, w + 1)
+    }
+  }
+
+fn set_from_list(xs: List[Int]) -> Set[Int] = {
+  let xh = prim.handle(xs)
+  let xlen = prim.load32(xh + 4)
+  let s = prim.alloc_set(xlen)          // over-alloc xlen slots; patch len to the unique count
+  let sh = prim.handle(s)
+  let u = __set_fill(xh, xlen, sh, 0, 0)
+  prim.store32(sh + 4, u)               // len field := unique count
+  s
+}
+
+fn set_len(s: Set[Int]) -> Int = prim.load32(prim.handle(s) + 4)
+
+fn set_is_empty(s: Set[Int]) -> Bool = prim.load32(prim.handle(s) + 4) == 0
+
+fn set_contains(s: Set[Int], x: Int) -> Bool = {
+  let h = prim.handle(s)
+  let len = prim.load32(h + 4)
+  __set_has(h, len, x, 0)
+}
+
+// Copy the set's first `len` Int elements into a fresh List block.
+fn __set_copy(sh: Int, oh: Int, len: Int, i: Int) -> Int =
+  if i >= len then 0
+  else {
+    let e = prim.load64(sh + 12 + i * 8)
+    prim.store64(oh + 12 + i * 8, e)
+    __set_copy(sh, oh, len, i + 1)
+  }
+
+fn set_to_list(s: Set[Int]) -> List[Int] = {
+  let h = prim.handle(s)
+  let len = prim.load32(h + 4)
+  let out = prim.alloc_list(len)
+  let oh = prim.handle(out)
+  let _x = __set_copy(h, oh, len, 0)
+  out
+}
+
+// ── Set algebra (closure-free, Int) ── a and b are already unique; results preserve v0's
+// observable order. Each op over-allocs, fills, and patches len. Helpers share __set_has.
+
+// Append b's elements (handle bh, len blen) NOT already in the a-portion (first `alen` slots of
+// result rh), growing the unique count w. Used by union (a already copied into rh).
+fn __set_addb(alen: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
+  else {
+    let x = prim.load64(bh + 12 + j * 8)
+    let inA = __set_has(rh, alen, x, 0)
+    if inA then __set_addb(alen, bh, blen, rh, j + 1, w)
+    else {
+      prim.store64(rh + 12 + w * 8, x)
+      __set_addb(alen, bh, blen, rh, j + 1, w + 1)
+    }
+  }
+
+fn set_union(a: Set[Int], b: Set[Int]) -> Set[Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let cap = alen + blen
+  let r = prim.alloc_set(cap)
+  let rh = prim.handle(r)
+  let _c = __set_copy(ah, rh, alen, 0)        // a's elements first (a's order)
+  let w = __set_addb(alen, bh, blen, rh, 0, alen)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append a's elements that ARE in b (intersection, a's order).
+fn __set_inter(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, i: Int, w: Int) -> Int =
+  if i >= alen then w
+  else {
+    let x = prim.load64(ah + 12 + i * 8)
+    let inB = __set_has(bh, blen, x, 0)
+    if inB then {
+      prim.store64(rh + 12 + w * 8, x)
+      __set_inter(ah, alen, bh, blen, rh, i + 1, w + 1)
+    }
+    else __set_inter(ah, alen, bh, blen, rh, i + 1, w)
+  }
+
+fn set_intersection(a: Set[Int], b: Set[Int]) -> Set[Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let r = prim.alloc_set(alen)
+  let rh = prim.handle(r)
+  let w = __set_inter(ah, alen, bh, blen, rh, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append a's elements NOT in b (difference, a's order).
+fn __set_diff(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, i: Int, w: Int) -> Int =
+  if i >= alen then w
+  else {
+    let x = prim.load64(ah + 12 + i * 8)
+    let inB = __set_has(bh, blen, x, 0)
+    if inB then __set_diff(ah, alen, bh, blen, rh, i + 1, w)
+    else {
+      prim.store64(rh + 12 + w * 8, x)
+      __set_diff(ah, alen, bh, blen, rh, i + 1, w + 1)
+    }
+  }
+
+fn set_difference(a: Set[Int], b: Set[Int]) -> Set[Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let r = prim.alloc_set(alen)
+  let rh = prim.handle(r)
+  let w = __set_diff(ah, alen, bh, blen, rh, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// All of a's first `alen` elements present in b?
+fn __set_all_in(ah: Int, alen: Int, bh: Int, blen: Int, i: Int) -> Bool =
+  if i >= alen then true
+  else {
+    let x = prim.load64(ah + 12 + i * 8)
+    let inB = __set_has(bh, blen, x, 0)
+    if inB then __set_all_in(ah, alen, bh, blen, i + 1)
+    else false
+  }
+
+fn set_is_subset(a: Set[Int], b: Set[Int]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  __set_all_in(ah, alen, bh, blen, 0)
+}
+
+// None of a's first `alen` elements present in b?
+fn __set_none_in(ah: Int, alen: Int, bh: Int, blen: Int, i: Int) -> Bool =
+  if i >= alen then true
+  else {
+    let x = prim.load64(ah + 12 + i * 8)
+    let inB = __set_has(bh, blen, x, 0)
+    if inB then false
+    else __set_none_in(ah, alen, bh, blen, i + 1)
+  }
+
+fn set_is_disjoint(a: Set[Int], b: Set[Int]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  __set_none_in(ah, alen, bh, blen, 0)
+}
+
+// ── Set construction (closure-free, Int) ── new/insert/remove/symmetric_difference. Each
+// returns a fresh owned Set (v0's insert/remove clone-then-mutate).
+
+// An empty Set[Int] — a 0-length block. alloc_set(0) already sets len=0.
+fn set_new() -> Set[Int] = prim.alloc_set(0)
+
+// Append x to result `rh` (which holds `slen` elements) iff absent; return the new count.
+fn __set_addone(rh: Int, slen: Int, x: Int) -> Int = {
+  let present = __set_has(rh, slen, x, 0)
+  if present then slen
+  else {
+    prim.store64(rh + 12 + slen * 8, x)
+    slen + 1
+  }
+}
+
+fn set_insert(s: Set[Int], x: Int) -> Set[Int] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let cap = slen + 1
+  let r = prim.alloc_set(cap)
+  let rh = prim.handle(r)
+  let _c = __set_copy(sh, rh, slen, 0)
+  let w = __set_addone(rh, slen, x)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Copy s's elements EXCEPT x into result rh (preserving the survivors' order); return the count.
+fn __set_remove_fill(sh: Int, slen: Int, rh: Int, x: Int, i: Int, w: Int) -> Int =
+  if i >= slen then w
+  else {
+    let e = prim.load64(sh + 12 + i * 8)
+    if e == x then __set_remove_fill(sh, slen, rh, x, i + 1, w)
+    else {
+      prim.store64(rh + 12 + w * 8, e)
+      __set_remove_fill(sh, slen, rh, x, i + 1, w + 1)
+    }
+  }
+
+fn set_remove(s: Set[Int], x: Int) -> Set[Int] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let r = prim.alloc_set(slen)
+  let rh = prim.handle(r)
+  let w = __set_remove_fill(sh, slen, rh, x, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append b's elements NOT in the ORIGINAL a (handle ah, len alen), growing count w. Used by
+// symmetric_difference after the a-not-in-b part is already written (disjoint, so no re-dedup).
+fn __set_addb_nota(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
+  else {
+    let x = prim.load64(bh + 12 + j * 8)
+    let inA = __set_has(ah, alen, x, 0)
+    if inA then __set_addb_nota(ah, alen, bh, blen, rh, j + 1, w)
+    else {
+      prim.store64(rh + 12 + w * 8, x)
+      __set_addb_nota(ah, alen, bh, blen, rh, j + 1, w + 1)
+    }
+  }
+
+fn set_symmetric_difference(a: Set[Int], b: Set[Int]) -> Set[Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let cap = alen + blen
+  let r = prim.alloc_set(cap)
+  let rh = prim.handle(r)
+  let w1 = __set_diff(ah, alen, bh, blen, rh, 0, 0)        // a not in b (a's order)
+  let w2 = __set_addb_nota(ah, alen, bh, blen, rh, 0, w1)  // then b not in a (b's order)
+  prim.store32(rh + 4, w2)
+  r
+}
+
+// ── Higher-order Set[Int] (closures machinery) ── the predicate f is invoked via CallIndirect.
+// A pure predicate byte-matches v0 (single pass, no short-circuit). filter keeps a subset of an
+// already-unique set, so the result stays unique (no re-dedup).
+
+fn __set_filter_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let keep = f(x)
+    if keep then {
+      prim.store64(dh + 12 + di * 8, x)
+      __set_filter_fill(dh, sh, f, n, i + 1, di + 1)
+    } else {
+      __set_filter_fill(dh, sh, f, n, i + 1, di)
+    }
+  }
+
+fn set_filter(s: Set[Int], f: (Int) -> Bool) -> Set[Int] = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let r = prim.alloc_set(n)
+  let rh = prim.handle(r)
+  let count = __set_filter_fill(rh, sh, f, n, 0, 0)
+  prim.store32(rh + 4, count)
+  r
+}
+
+// Sum the predicate's 0/1 over all elements (a Bool is an i64 0/1) → the hit COUNT.
+fn __set_count_hits(sh: Int, f: (Int) -> Bool, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let h = f(x)
+    if h then __set_count_hits(sh, f, n, i + 1, acc + 1)
+    else __set_count_hits(sh, f, n, i + 1, acc)
+  }
+
+fn set_all(s: Set[Int], f: (Int) -> Bool) -> Bool = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let hits = __set_count_hits(sh, f, n, 0, 0)
+  hits >= n
+}
+
+fn set_any(s: Set[Int], f: (Int) -> Bool) -> Bool = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let hits = __set_count_hits(sh, f, n, 0, 0)
+  hits > 0
+}
+
+// set.map — apply f to each element, collecting UNIQUE results (f may collapse distinct inputs
+// to the same output, so the mapped values MUST be re-deduped, exactly v0's `.map(f).collect()`
+// into an AlmideSet). Append f(x) iff not already present; first-seen order. Int->Int.
+fn __set_map_fill(dh: Int, sh: Int, f: (Int) -> Int, n: Int, i: Int, w: Int) -> Int =
+  if i >= n then w
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let y = f(x)
+    let present = __set_has(dh, w, y, 0)
+    if present then __set_map_fill(dh, sh, f, n, i + 1, w)
+    else {
+      prim.store64(dh + 12 + w * 8, y)
+      __set_map_fill(dh, sh, f, n, i + 1, w + 1)
+    }
+  }
+
+fn set_map(s: Set[Int], f: (Int) -> Int) -> Set[Int] = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let r = prim.alloc_set(n)
+  let rh = prim.handle(r)
+  let w = __set_map_fill(rh, sh, f, n, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// set.fold — left fold with a TWO-arity closure f : (Acc, Int) -> Acc (acc first, element
+// second — v0's fold(s, init, f)). Int accumulator. The set walk order = insertion order.
+fn __set_fold_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    __set_fold_loop(sh, f, n, i + 1, nacc)
+  }
+
+fn set_fold(s: Set[Int], init: Int, f: (Int, Int) -> Int) -> Int = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  __set_fold_loop(sh, f, n, 0, init)
+}

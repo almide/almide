@@ -78,11 +78,38 @@ impl NanoPass for IrLinkFlattenPass {
 }
 
 fn mangle_qualified_type_names(program: &mut IrProgram) {
-    let mut map: HashMap<String, Sym> = HashMap::new();
+    // STRUCTURAL TWINS — the checker unifies two record/variant decls that share
+    // the same BASE name and the same shape (almai: the root `Message` and every
+    // provider's `Message` are byte-identical and flow into each other freely,
+    // and `check` accepts). Which nominal name a given SITE resolves to is then
+    // an accident of constraint order, so mangling each twin to its own struct
+    // produced `expected almide_rt_openai_Message, found Message` (E0308) on
+    // whichever sites landed on the other twin. Realize the checker's semantics:
+    // map every dotted twin to ONE canonical name — the bare root decl when one
+    // exists with the same fingerprint, else the first twin (sorted) — and
+    // dedup the now-identical decls. Types with a unique shape keep the plain
+    // per-module mangle, so genuinely distinct same-name types stay distinct.
+    // Group decls by (base name, fingerprint).
+    let mut groups: HashMap<(String, String), Vec<String>> = HashMap::new();
     for td in &program.type_decls {
         let n = td.name.as_str();
-        if n.contains('.') {
-            map.insert(n.to_string(), sym(&format!("almide_rt_{}", n.replace('.', "_"))));
+        let base = n.rsplit('.').next().unwrap_or(n).to_string();
+        groups.entry((base, td.structural_fingerprint())).or_default().push(n.to_string());
+    }
+
+    let mut map: HashMap<String, Sym> = HashMap::new();
+    for ((_base, _fp), mut members) in groups {
+        members.sort();
+        // Canonical target: the bare member if present, else the first dotted
+        // member's standard mangle.
+        let canonical: Sym = match members.iter().find(|m| !m.contains('.')) {
+            Some(bare) => sym(bare),
+            None => sym(&format!("almide_rt_{}", members[0].replace('.', "_"))),
+        };
+        for m in &members {
+            if m.contains('.') {
+                map.insert(m.clone(), canonical);
+            }
         }
     }
     if map.is_empty() {
@@ -94,6 +121,12 @@ fn mangle_qualified_type_names(program: &mut IrProgram) {
             td.name = *nn;
         }
         rename_type_decl_kind(&mut td.kind, &map);
+    }
+    // Twin decls now share one canonical name — keep the first, drop the rest
+    // (identical shapes; a second `pub struct Msg` would be E0428).
+    {
+        let mut seen: std::collections::HashSet<Sym> = std::collections::HashSet::new();
+        program.type_decls.retain(|td| seen.insert(td.name));
     }
     for f in &mut program.functions {
         for p in &mut f.params {
@@ -114,6 +147,20 @@ fn mangle_qualified_type_names(program: &mut IrProgram) {
     for d in &mut program.def_table.entries {
         d.ty = rename_ty(&d.ty, &map);
     }
+    // The flatten rename must reach every NAME-KEYED annotation too: the walker
+    // looks up default/boxed fields by the ctor name it sees POST-flatten
+    // (`almide_rt_mod_Type`), while the producing passes registered the
+    // pre-flatten `mod.Type` — so a flattened module type's field DEFAULTS were
+    // silently skipped (almai: `Message { role, content }` missing its
+    // defaulted `tool_calls` → generated-Rust E0063).
+    let remap = |n: &str| map.get(n).map(|s| s.as_str().to_string()).unwrap_or_else(|| n.to_string());
+    let ann = &mut program.codegen_annotations;
+    ann.default_fields = std::mem::take(&mut ann.default_fields).into_iter()
+        .map(|((c, f), e)| ((remap(&c), f), e)).collect();
+    ann.boxed_fields = std::mem::take(&mut ann.boxed_fields).into_iter()
+        .map(|(c, f)| (remap(&c), f)).collect();
+    ann.ctor_to_enum = std::mem::take(&mut ann.ctor_to_enum).into_iter()
+        .map(|(c, e)| (remap(&c), remap(&e))).collect();
 }
 
 fn rename_type_decl_kind(kind: &mut IrTypeDeclKind, map: &HashMap<String, Sym>) {
@@ -225,6 +272,23 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
         }
         IrExprKind::RcWrap { cast_ty: Some(ty), .. } => {
             **ty = rename_ty(ty, map);
+        }
+        // A user package's `@inline_rust` template is raw Rust text that can
+        // reference the package's OWN structs. StdlibLowering requalified those
+        // tokens to the canonical dotted name (`aes.Cfb8State`); mangle them to
+        // the flat struct name here, exactly like every Ty reference. A dotted
+        // token cannot occur in valid Rust, so plain textual replacement is
+        // unambiguous — longest keys first so `m.Cfg` never clips `m.CfgSet`.
+        IrExprKind::InlineRust { template, .. } => {
+            if template.contains('.') {
+                let mut keys: Vec<&String> = map.keys()
+                    .filter(|k| template.contains(k.as_str()))
+                    .collect();
+                keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
+                for k in keys {
+                    *template = template.replace(k.as_str(), map[k].as_str());
+                }
+            }
         }
         _ => {}
     }

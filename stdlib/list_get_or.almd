@@ -1,0 +1,12 @@
+// list_get_or — SELF-HOSTED `list.get_or` for v1 over the prim floor: the i-th element,
+// or `default` when i is out of bounds. Reads the i64 element slot at LIST_HEADER + i*8.
+// Element access without Option (the get-with-default sibling of list.get). This
+// monomorphic List[Int] impl serves List[Int] (i64 elements); other element types need an
+// i32-slot variant (a later refinement). Reads only — `xs` borrowed.
+fn list_get_or(xs: List[Int], i: Int, default: Int) -> Int = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)              // element count at LIST_LEN_OFFSET(4)
+  if i < 0 then default
+  else if i >= len then default
+  else prim.load64(h + 12 + i * 8)          // element i at LIST_HEADER + i*ELEM_SIZE(8)
+}

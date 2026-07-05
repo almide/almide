@@ -1,0 +1,80 @@
+// float_convert — SELF-HOSTED float.to_int8 / to_int16 / to_int32 / to_uint8 / to_uint16 /
+// to_uint32 for v1. Rust's `f as iN` is a SATURATING cast (NaN -> 0, out-of-range -> the type's
+// min/max, otherwise truncate toward zero). prim.f2i gives the i64 saturating truncation; we then
+// clamp to the narrower type's range. (to_int64/to_uint64 = the full-width f2i, handled elsewhere.)
+
+fn float_to_int8(f: Float) -> Int8 = {
+  let t = prim.f2i(f)
+  if t < 0 - 128 then 0 - 128 else (if t > 127 then 127 else t)
+}
+
+fn float_to_int16(f: Float) -> Int16 = {
+  let t = prim.f2i(f)
+  if t < 0 - 32768 then 0 - 32768 else (if t > 32767 then 32767 else t)
+}
+
+fn float_to_int32(f: Float) -> Int32 = {
+  let t = prim.f2i(f)
+  if t < 0 - 2147483648 then 0 - 2147483648 else (if t > 2147483647 then 2147483647 else t)
+}
+
+fn float_to_uint8(f: Float) -> UInt8 = {
+  let t = prim.f2i(f)
+  if t < 0 then 0 else (if t > 255 then 255 else t)
+}
+
+fn float_to_uint16(f: Float) -> UInt16 = {
+  let t = prim.f2i(f)
+  if t < 0 then 0 else (if t > 65535 then 65535 else t)
+}
+
+fn float_to_uint32(f: Float) -> UInt32 = {
+  let t = prim.f2i(f)
+  if t < 0 then 0 else (if t > 4294967295 then 4294967295 else t)
+}
+
+// float.to_int64(f) -> the full-width saturating `f as i64` — exactly the prim float floor's f2i.
+fn float_to_int64(f: Float) -> Int64 = prim.f2i(f)
+
+// float.to_uint64(f) -> the saturating `f as u64` (NaN/negative -> 0, >= 2^64 -> u64::MAX). For
+// f < 2^63 this is f2i; for f in [2^63, 2^64) the value exceeds i64, so split off 2^63 and OR the
+// high bit back in (f2i saturates to i64::MAX for f >= 2^64, which | (1<<63) = u64::MAX). The u64
+// is returned as its i64 bit-pattern (negative for values >= 2^63).
+fn float_to_uint64(f: Float) -> UInt64 = {
+  let lt0 = prim.flt(f, 0.0)
+  if lt0 then 0
+  else {
+    let two62 = prim.bshl(1, 62)        // 2^63 as a Float — built at runtime (the literal
+    let f262 = prim.i2f(two62)          // 9223372036854775808.0 overflows the i64 float-literal
+    let two63 = prim.fadd(f262, f262)   // parser, so add 2^62 + 2^62 instead)
+    let big = prim.fge(f, two63)
+    if big then {
+      let g = prim.fsub(f, two63)
+      let lo = prim.f2i(g)
+      let hibit = prim.bshl(1, 63)
+      prim.bor(lo, hibit)
+    }
+    else prim.f2i(f)
+  }
+}
+
+// float.to_float32(n) = `n as f32` — narrow f64 → f32 (round to nearest). The Float32 IS the f32
+// bit pattern in the low half of the i64 slot. float.from_float32(f) widens it back exactly.
+fn float_to_float32(n: Float) -> Float32 = prim.f2f32(n)
+fn float_from_float32(f: Float32) -> Float = prim.f32_2f(f)
+
+// float.to_float32_checked(n) -> Some(f32) iff the value survives the f64→f32→f64 round-trip
+// exactly (NaN / precision loss → None), matching v0. Flat-arm materialized Option (the proven
+// int_checked shape): the demote/promote/feq are total scalar ops, computed unconditionally. The
+// demote/promote are INLINED as prim ops (not float.to_float32 / float.from_float32) because those
+// live in THIS file — an intra-file module call would re-trigger the auto-linker on float_convert
+// forever (the impl `float_to_float32` is not yet renamed during the recursive lower).
+fn float_to_float32_checked(n: Float) -> Option[Float32] = {
+  let nan = float.is_nan(n)
+  let f = prim.f2f32(n)
+  let back = prim.f32_2f(f)
+  let eq = prim.feq(back, n)
+  if nan then None
+  else if eq then Some(f)
+  else None
+}

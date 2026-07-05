@@ -128,6 +128,36 @@ impl NanoPass for ResultPropagationPass {
             }
         }
 
+        // ── Phase 2b: Repair effect fns whose ret is ALREADY Result ──
+        //
+        // An effect fn declared `-> Result[T, String]` (e.g. `effect fn main()`) was NOT
+        // sig-lifted, so Phase 2 skipped it. But a `match`/`if`-tail body can still arrive
+        // mis-typed as the inner `T`/`Unit` (the frontend types a control-flow tail by its arm
+        // payloads, not the wrapped Result). Left alone, body.ty ≠ ret_ty and emit_wasm emits a
+        // trailing `unreachable` the fall-through reaches (porta read_message cross-module trap).
+        // Re-run the tail-ty fix ONLY on such a mismatch; a body already Result (a bare `ok()`
+        // tail) has body.ty == ret_ty and is untouched.
+        for func in &mut program.functions {
+            if func.is_effect && !func.is_test && wrap_non_result
+                && func.ret_ty.is_result() && !func.body.ty.is_result()
+            {
+                let ok_ty = extract_ok_type(&func.ret_ty);
+                resolve_err_types(&mut func.body, &ok_ty);
+                func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted_fns, &intrinsic_effect_syms);
+            }
+        }
+        for module in &mut program.modules {
+            for func in &mut module.functions {
+                if func.is_effect && !func.is_test && wrap_non_result
+                    && func.ret_ty.is_result() && !func.body.ty.is_result()
+                {
+                    let ok_ty = extract_ok_type(&func.ret_ty);
+                    resolve_err_types(&mut func.body, &ok_ty);
+                    func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted_fns, &intrinsic_effect_syms);
+                }
+            }
+        }
+
         // ── Phase 3: Test-block fan Try insertion ──────────────────
         //
         // Auto-? insertion for effect fn bodies moved to lowering
@@ -230,29 +260,33 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
                 }
             }).collect();
             let wrapped = wrap_tail_in_ok(*tail, lifted, intr);
+            // The block's ty IS its (now Ok-wrapped) tail's ty — NOT `Result[pre_ty]`.
+            // When the tail was ALREADY a Result (an explicit `ok()`/`err()`, or a
+            // `match`/`if` whose arms are), `pre_ty` is the inner T (or a stale `Unit`),
+            // so `Result[pre_ty]` mis-types the body — an effect fn whose tail is a
+            // `match`/`if` (porta read_message) then has body.ty ≠ ret_ty, and emit_wasm
+            // emits a trailing `unreachable` (functions.rs) that the fall-through reaches.
+            let wty = wrapped.ty.clone();
             IrExpr {
                 kind: IrExprKind::Block { stmts, expr: Some(Box::new(wrapped)) },
-                ty: Ty::result(ty, Ty::String), span, def_id: None,
+                ty: wty, span, def_id: None,
             }
         }
-        IrExprKind::If { cond, then, else_ } => IrExpr {
-            kind: IrExprKind::If {
-                cond,
-                then: Box::new(wrap_tail_in_ok(*then, lifted, intr)),
-                else_: Box::new(wrap_tail_in_ok(*else_, lifted, intr)),
-            },
-            ty: Ty::result(ty, Ty::String), span, def_id: None,
-        },
-        IrExprKind::Match { subject, arms } => IrExpr {
-            kind: IrExprKind::Match {
-                subject,
-                arms: arms.into_iter().map(|arm| IrMatchArm {
-                    pattern: arm.pattern, guard: arm.guard,
-                    body: wrap_tail_in_ok(arm.body, lifted, intr),
-                }).collect(),
-            },
-            ty: Ty::result(ty, Ty::String), span, def_id: None,
-        },
+        IrExprKind::If { cond, then, else_ } => {
+            let then = Box::new(wrap_tail_in_ok(*then, lifted, intr));
+            let else_ = Box::new(wrap_tail_in_ok(*else_, lifted, intr));
+            let wty = then.ty.clone();
+            IrExpr { kind: IrExprKind::If { cond, then, else_ }, ty: wty, span, def_id: None }
+        }
+        IrExprKind::Match { subject, arms } => {
+            let arms: Vec<IrMatchArm> = arms.into_iter().map(|arm| IrMatchArm {
+                pattern: arm.pattern, guard: arm.guard,
+                body: wrap_tail_in_ok(arm.body, lifted, intr),
+            }).collect();
+            let wty = arms.first().map(|a| a.body.ty.clone())
+                .unwrap_or_else(|| Ty::result(ty, Ty::String));
+            IrExpr { kind: IrExprKind::Match { subject, arms }, ty: wty, span, def_id: None }
+        }
         // Already Result — don't double-wrap
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => expr,
         // A tail call to an `@intrinsic effect fn` (e.g. `http.serve`) is already
@@ -263,14 +297,18 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
         IrExprKind::RuntimeCall { ref symbol, .. } if intr.contains(symbol.as_str()) => {
             IrExpr { ty: Ty::result(ty, Ty::String), ..expr }
         }
-        // Call to another lifted effect fn — already returns Result
+        // Call to another lifted effect fn — already returns Result.
+        // An effect fn that DECLARES `-> Result[T, String]` was never lifted
+        // (Phase 1 skips is_result rets) so it is NOT in `lifted`, but its
+        // call-site ty IS already Result — wrapping it double-wraps (porta
+        // `__almide_main`'s match arms calling `engine.serve` etc., E0308).
         IrExprKind::Call { ref target, .. } => {
             let callee_name = match target {
                 CallTarget::Named { name } => Some(name.to_string()),
                 CallTarget::Module { func, .. } => Some(func.to_string()),
                 _ => None,
             };
-            if callee_name.as_ref().is_some_and(|n| lifted.contains_key(n)) {
+            if callee_name.as_ref().is_some_and(|n| lifted.contains_key(n)) || ty.is_result() {
                 expr
             } else {
                 let result_ty = Ty::result(ty.clone(), Ty::String);
@@ -308,7 +346,10 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
                 ty: result_ty, span, def_id: None,
             }
         }
-        // Everything else: wrap in Ok(expr)
+        // Everything else: wrap in Ok(expr) — unless the tail is already the
+        // Result this fn returns (a Var re-yielding a bound Result, a runtime
+        // call to a Result-declared effect fn, ...): wrapping would double-wrap.
+        other if ty.is_result() => IrExpr { kind: other, ty, span, def_id: None },
         other => {
             let result_ty = Ty::result(ty.clone(), Ty::String);
             IrExpr {

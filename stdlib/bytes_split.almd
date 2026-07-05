@@ -1,0 +1,142 @@
+// bytes_split — SELF-HOSTED bytes.split / lines / chunks for v1 over the prim floor + the
+// nested-ownership List[Bytes] machinery (prim.alloc_list_str + store_str, the same builder
+// list.map_str uses). Each piece is a FRESH owned Bytes (alloc_bytes + byte-copy) MOVED into the
+// result via store_str; the result list owns + frees them recursively (DropListStr). Source(s)
+// borrowed. Byte-matches runtime/rs/src/bytes.rs.
+
+fn __bsp_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let b = prim.load8(src + i)
+    prim.store8(dst + i, b)
+    __bsp_copy(dst, src, n, i + 1)
+  }
+
+// A fresh owned Bytes = bytes[start .. end] from the block at handle `h`.
+fn __bsp_piece(h: Int, start: Int, end: Int) -> Bytes = {
+  let n = end - start
+  let piece = prim.alloc_bytes(n)
+  let _x = __bsp_copy(prim.handle(piece) + 12, h + 12 + start, n, 0)
+  piece
+}
+
+// ── split ──────────────────────────────────────────────────────────────────────────────────
+// Does sep (seplen bytes at seph+12) occur at byte position p?
+fn __bsp_sep_at(bh: Int, blen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool =
+  if j >= seplen then true
+  else if p + j >= blen then false
+  else {
+    let sb = prim.load8(bh + 12 + p + j)
+    let tb = prim.load8(seph + 12 + j)
+    if sb == tb then __bsp_sep_at(bh, blen, seph, seplen, p, j + 1) else false
+  }
+
+// First byte index >= `from` where sep occurs, or blen if none.
+fn __bsp_find(bh: Int, blen: Int, seph: Int, seplen: Int, from: Int) -> Int =
+  if from + seplen > blen then blen
+  else {
+    let hit = __bsp_sep_at(bh, blen, seph, seplen, from, 0)
+    if hit then from else __bsp_find(bh, blen, seph, seplen, from + 1)
+  }
+
+fn __bsp_count(bh: Int, blen: Int, seph: Int, seplen: Int, from: Int, acc: Int) -> Int =
+  if from + seplen > blen then acc
+  else {
+    let pos = __bsp_find(bh, blen, seph, seplen, from)
+    if pos >= blen then acc else __bsp_count(bh, blen, seph, seplen, pos + seplen, acc + 1)
+  }
+
+fn __bsp_fill(lh: Int, bh: Int, blen: Int, seph: Int, seplen: Int, from: Int, idx: Int) -> Int = {
+  let pos = __bsp_find(bh, blen, seph, seplen, from)
+  let piece = __bsp_piece(bh, from, pos)
+  prim.store_str(lh + 12 + idx * 8, piece)
+  if pos >= blen then idx + 1
+  else __bsp_fill(lh, bh, blen, seph, seplen, pos + seplen, idx + 1)
+}
+
+fn __bsp_whole(bh: Int, blen: Int) -> List[Bytes] = {
+  let result = prim.alloc_list_str(1)
+  let piece = __bsp_piece(bh, 0, blen)
+  prim.store_str(prim.handle(result) + 12, piece)
+  result
+}
+
+fn __bsp_general(bh: Int, blen: Int, seph: Int, seplen: Int) -> List[Bytes] = {
+  let nseps = __bsp_count(bh, blen, seph, seplen, 0, 0)
+  let count = nseps + 1
+  let result = prim.alloc_list_str(count)
+  let _x = __bsp_fill(prim.handle(result), bh, blen, seph, seplen, 0, 0)
+  result
+}
+
+fn bytes_split(b: Bytes, sep: Bytes) -> List[Bytes] = {
+  let bh = prim.handle(b)
+  let blen = prim.load32(bh + 4)
+  let seph = prim.handle(sep)
+  let seplen = prim.load32(seph + 4)
+  if seplen == 0 then __bsp_whole(bh, blen)
+  else __bsp_general(bh, blen, seph, seplen)
+}
+
+// ── lines (split on '\n'=10; final tail pushed only if non-empty; no '\r' strip) ─────────────
+fn __bl_count_nl(bh: Int, blen: Int, i: Int, acc: Int) -> Int =
+  if i >= blen then acc
+  else {
+    let b = prim.load8(bh + 12 + i)
+    if b == 10 then __bl_count_nl(bh, blen, i + 1, acc + 1)
+    else __bl_count_nl(bh, blen, i + 1, acc)
+  }
+
+fn __bl_total(bh: Int, blen: Int) -> Int = {
+  let nl = __bl_count_nl(bh, blen, 0, 0)
+  if blen <= 0 then 0
+  else {
+    let last = prim.load8(bh + 12 + blen - 1)
+    if last == 10 then nl else nl + 1
+  }
+}
+
+fn __bl_find_nl(bh: Int, blen: Int, from: Int) -> Int =
+  if from >= blen then blen
+  else {
+    let b = prim.load8(bh + 12 + from)
+    if b == 10 then from else __bl_find_nl(bh, blen, from + 1)
+  }
+
+fn __bl_fill(lh: Int, bh: Int, blen: Int, from: Int, idx: Int, total: Int) -> Int =
+  if idx >= total then idx
+  else {
+    let nl = __bl_find_nl(bh, blen, from)
+    let piece = __bsp_piece(bh, from, nl)
+    prim.store_str(lh + 12 + idx * 8, piece)
+    __bl_fill(lh, bh, blen, nl + 1, idx + 1, total)
+  }
+
+fn bytes_lines(b: Bytes) -> List[Bytes] = {
+  let bh = prim.handle(b)
+  let blen = prim.load32(bh + 4)
+  let total = __bl_total(bh, blen)
+  let result = prim.alloc_list_str(total)
+  let _x = __bl_fill(prim.handle(result), bh, blen, 0, 0, total)
+  result
+}
+
+// ── chunks (consecutive `size`-byte blocks, last possibly shorter; size<=0 -> []) ────────────
+fn __bc_outer(oh: Int, bh: Int, total: Int, size: Int, ci: Int, start: Int) -> Int =
+  if start >= total then 0
+  else {
+    let rem = total - start
+    let clen = if rem < size then rem else size
+    let chunk = __bsp_piece(bh, start, start + clen)
+    prim.store_str(oh + 12 + ci * 8, chunk)
+    __bc_outer(oh, bh, total, size, ci + 1, start + size)
+  }
+
+fn bytes_chunks(b: Bytes, size: Int) -> List[Bytes] = {
+  let bh = prim.handle(b)
+  let total = prim.load32(bh + 4)
+  let num = if size <= 0 then 0 else (total + size - 1) / size
+  let outer = prim.alloc_list_str(num)
+  let _x = if size <= 0 then 0 else __bc_outer(prim.handle(outer), bh, total, size, 0, 0)
+  outer
+}

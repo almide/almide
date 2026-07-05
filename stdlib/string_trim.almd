@@ -1,0 +1,104 @@
+// string_trim — SELF-HOSTED `string.trim` / `trim_start` / `trim_end` for v1
+// NORMATIVE SPEC: ALS-T1 (docs/specs/als/text-and-numbers.md §T1) — conformance is judged against that section's
+// rules and its pinned fixture, NOT against any other implementation (F1: no oracle circularity).
+// over the prim floor. Trims the full Unicode White_Space set (the 25
+// codepoints of Rust's `char::is_whitespace` — the native oracle `str::trim*`),
+// decoding UTF-8 at the boundaries only; the middle is byte-copied verbatim.
+// (The first version was ASCII-only and left U+00A0/U+3000 etc. in place —
+// the C-021 divergence on the render_program path.) Self-contained helpers.
+
+// Decode the UTF-8 codepoint starting at `addr` → (codepoint, byte length).
+fn __trim_cp(addr: Int) -> (Int, Int) = {
+  let b0 = prim.load8(addr)
+  if b0 < 128 then (b0, 1)
+  else if b0 < 224 then ((b0 - 192) * 64 + (prim.load8(addr + 1) - 128), 2)
+  else if b0 < 240 then ((b0 - 224) * 4096 + (prim.load8(addr + 1) - 128) * 64 + (prim.load8(addr + 2) - 128), 3)
+  else ((b0 - 240) * 262144 + (prim.load8(addr + 1) - 128) * 4096 + (prim.load8(addr + 2) - 128) * 64 + (prim.load8(addr + 3) - 128), 4)
+}
+
+// The byte index where the codepoint containing byte `i` begins: step back
+// over UTF-8 continuation bytes (0b10xxxxxx = 128..191).
+fn __trim_cp_begin(start: Int, i: Int) -> Int =
+  if i <= start then start
+  else {
+    let b = prim.load8(i)
+    if b >= 128 and b < 192 then __trim_cp_begin(start, i - 1) else i
+  }
+
+// Unicode White_Space (char::is_whitespace): TAB..CR, SPACE, NEL, NBSP, OGHAM,
+// U+2000..200A, LINE/PARA SEPARATOR, NNBSP, MMSP, IDEOGRAPHIC SPACE.
+fn __trim_is_uws(c: Int) -> Bool =
+  if c == 32 then true
+  else if c >= 9 and c <= 13 then true
+  else if c == 133 then true
+  else if c == 160 then true
+  else if c == 5760 then true
+  else if c >= 8192 and c <= 8202 then true
+  else if c == 8232 then true
+  else if c == 8233 then true
+  else if c == 8239 then true
+  else if c == 8287 then true
+  else if c == 12288 then true
+  else false
+
+// First non-WS byte address scanning forward from `addr` (codepoint steps).
+fn __trim_start(addr: Int, end: Int) -> Int =
+  if addr >= end then addr
+  else {
+    let (cp, l) = __trim_cp(addr)
+    if __trim_is_uws(cp) then __trim_start(addr + l, end) else addr
+  }
+
+// Address just past the last non-WS codepoint scanning backward from `end`.
+fn __trim_end(start: Int, end: Int) -> Int =
+  if end <= start then end
+  else {
+    let cb = __trim_cp_begin(start, end - 1)
+    let (cp, _l) = __trim_cp(cb)
+    if __trim_is_uws(cp) then __trim_end(start, cb) else end
+  }
+
+fn __trim_copy(src: Int, dst: Int, len: Int) -> Int =
+  if len <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __trim_copy(src + 1, dst + 1, len - 1)
+  }
+
+fn string_trim(s: String) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let base = h + 12
+  let ws_start = __trim_start(base, base + blen)
+  let ws_end = __trim_end(ws_start, base + blen)
+  let nbytes = if ws_end > ws_start then ws_end - ws_start else 0
+  let buf = prim.alloc_str(nbytes)
+  let _e = __trim_copy(ws_start, prim.handle(buf) + 12, nbytes)
+  buf
+}
+
+// Strip Unicode whitespace from the START only (leading), copying the remainder.
+fn string_trim_start(s: String) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let base = h + 12
+  let end = base + blen
+  let ws_start = __trim_start(base, end)
+  let nbytes = end - ws_start
+  let buf = prim.alloc_str(nbytes)
+  let _e = __trim_copy(ws_start, prim.handle(buf) + 12, nbytes)
+  buf
+}
+
+// Strip Unicode whitespace from the END only (trailing), copying the prefix.
+fn string_trim_end(s: String) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let base = h + 12
+  let end = base + blen
+  let ws_end = __trim_end(base, end)
+  let nbytes = ws_end - base
+  let buf = prim.alloc_str(nbytes)
+  let _e = __trim_copy(base, prim.handle(buf) + 12, nbytes)
+  buf
+}

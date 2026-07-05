@@ -1,0 +1,16 @@
+// @contract: C-106
+// HEAP-RESULT-IF in RETURN position whose arms are an append (the flow_rec base case). `collect`'s base
+// `if list.is_empty(acc) then acc else acc + ["end"]` returns a heap-result `if` where one arm MOVES OUT
+// the accumulator (`acc`, a Dup+Consume) and the other a CONCAT (`acc + ["end"]`, a fresh owned list
+// Consume'd). `lower_heap_result_arm` now handles the ConcatList arm (the `"im"` per-arm balance), so the
+// whole mutual-recursive append loop — direct-self-recursion via inlining, TCO'd with the simultaneous
+// scalar update, appending `acc + [string.slice(…)]` per iteration — lowers end-to-end and byte-matches v0.
+fn collect(s: String, pos: Int, acc: List[String]) -> List[String] =
+  if pos >= string.len(s) then { if list.is_empty(acc) then acc else acc + ["end"] }
+  else collect(s, pos + 1, acc + [string.slice(s, pos, pos + 1)])
+
+fn main() -> Unit = {
+  println(list.join(collect("ab", 0, []), "-"))    // a-b-end
+  println(list.join(collect("xyz", 0, []), "-"))   // x-y-z-end
+  println(int.to_string(list.len(collect("", 0, [])))) // 0
+}

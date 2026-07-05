@@ -1,0 +1,47 @@
+// wasm:enabled
+// A standalone fixture locking in derived-Codec DECODE of tagged variants across every payload
+// shape the trust-spine handles: unit (Plain), tuple with scalar/String fields (Pair), a List
+// field (Multi), a nested scalar-record field (Wrap(Color)), and a record-shaped case with a
+// String + nested record (Tag). The decode reads the tag as a plain String (value.keys |> list.get
+// ?? "") and the payload via value.field — no (String, Value) tuple — then `ok(Ctor(..))`
+// materializes the variant (a nested scalar-record field is stored + freed by the masked rc_dec).
+// Encode → decode roundtrip, byte-identical to v0 --target wasm.
+import json
+
+type Color: Codec = { r: Int, g: Int, b: Int }
+type Labeled: Codec = { label: String, n: Int }
+
+type Shape: Codec =
+  | Wrap(Color)
+  | Boxed(Labeled)
+  | Tag { name: String, c: Color }
+  | Multi(List[Int])
+  | Pair(Int, String)
+  | Plain
+
+effect fn main() -> Unit = {
+  match Shape.decode(Shape.encode(Wrap({ r: 1, g: 2, b: 3 }))) {
+    ok(s) => match s { Wrap(c) => println("wrap " + int.to_string(c.g)), _ => println("?") }
+    err(e) => println("err:" + e)
+  }
+  match Shape.decode(Shape.encode(Boxed({ label: "z", n: 8 }))) {
+    ok(s) => match s { Boxed(i) => println("boxed " + i.label + " " + int.to_string(i.n)), _ => println("?") }
+    err(e) => println("err:" + e)
+  }
+  match Shape.decode(Shape.encode(Tag { name: "hi", c: { r: 4, g: 5, b: 6 } })) {
+    ok(s) => match s { Tag { name, c } => println("tag " + name + " " + int.to_string(c.b)), _ => println("?") }
+    err(e) => println("err:" + e)
+  }
+  match Shape.decode(Shape.encode(Multi([1, 2, 3]))) {
+    ok(s) => match s { Multi(xs) => println("multi " + int.to_string(list.len(xs))), _ => println("?") }
+    err(e) => println("err:" + e)
+  }
+  match Shape.decode(Shape.encode(Pair(7, "x"))) {
+    ok(s) => match s { Pair(n, t) => println("pair " + int.to_string(n) + " " + t), _ => println("?") }
+    err(e) => println("err:" + e)
+  }
+  match Shape.decode(Shape.encode(Plain)) {
+    ok(s) => match s { Plain => println("plain"), _ => println("?") }
+    err(e) => println("err:" + e)
+  }
+}

@@ -1,0 +1,15 @@
+// @contract: C-108
+// `let s = e!` — an unwrap-`!` bound to a let in an effect fn (the top cross-repo wall). Desugars to
+// `match e { ok(s) => <rest>, err($x) => err($x) }`: the `!` IS early-return-on-Err, and pushing the
+// continuation into the ok-arm makes the match the tail so the err-arm `err($x)` is the function's
+// return (byte-identical to v0). Verified over a str-result (value.as_string -> Result[String,String]):
+// the Ok payload continues, the Err propagates. v0==v1.
+import json
+effect fn first_str(v: Value) -> Result[String, String] = {
+  let s = value.as_string(v)!
+  ok(s + "!")
+}
+effect fn main() -> Unit = {
+  match first_str(value.str("hi")) { ok(s) => println(s), err(e) => println("E:" + e) }
+  match first_str(value.int(5)) { ok(s) => println(s), err(e) => println("E:" + e) }
+}

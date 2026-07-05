@@ -1,0 +1,98 @@
+// map_ivh — SELF-HOSTED `Map[Int, String]` (SCALAR key / OWNED heap value) for the
+// v1 wasm spine. Layout mirrors map_skv (rc@0, len@4, cap@8, then 2n slots): the n
+// KEYS are RAW i64 @ slots 0..n-1; the n VALUES are OWNED String handles @ slots
+// n..2n-1 — each deep-copied in on `set` (the new entry) or rc-shared (a structural
+// copy keeps co-owning the untouched values), and freed by `$__drop_map_ivh`
+// (rc_dec each value slot + the block; the raw keys carry no ownership).
+// Equality is ORDER-INDEPENDENT: same length and every (k, v) of `a` has a
+// byte-equal value under the same key in `b` (v0's HashMap semantics).
+
+fn map_new_ivh() -> Map[Int, String] = prim.alloc_map_kv(0)
+
+fn __ivh_find(h: Int, n: Int, k: Int, i: Int) -> Int =
+  if i >= n then 0 - 1
+  else if prim.load64(h + 12 + i * 8) == k then i
+  else __ivh_find(h, n, k, i + 1)
+
+// Store a fresh OWNED copy of `s` into the value slot (the map must own its
+// values; the caller's `s` is a borrow).
+fn __ivh_store_val(addr: Int, s: String) -> Int = {
+  let copy = string.repeat(s, 1)
+  prim.store_str(addr, copy)
+  0
+}
+
+// Copy every entry from sh to rh: keys raw; the matched key's value is REPLACED
+// with a fresh copy of `v`, every other value handle is SHARED (rc_inc — the new
+// map co-owns it; both maps' drops rc_dec it once each).
+fn __ivh_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: Int, v: String, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let kk = prim.load64(sh + 12 + i * 8)
+    prim.store64(rh + 12 + i * 8, kk)
+    if kk == k then {
+      let _s = __ivh_store_val(rh + 12 + (rn + i) * 8, v)
+      ()
+    }
+    else {
+      let old = prim.load64(sh + 12 + (n + i) * 8)
+      prim.rc_inc(old)
+      prim.store64(rh + 12 + (rn + i) * 8, old)
+    }
+    __ivh_set_copy(sh, rh, n, rn, k, v, i + 1)
+  }
+
+fn __ivh_set_append(rh: Int, rn: Int, idx: Int, k: Int, v: String) -> Int =
+  if idx >= 0 then 0
+  else {
+    prim.store64(rh + 12 + (rn - 1) * 8, k)
+    __ivh_store_val(rh + 12 + (rn + rn - 1) * 8, v)
+  }
+
+fn map_set_ivh(m: Map[Int, String], k: Int, v: String) -> Map[Int, String] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let idx = __ivh_find(sh, n, k, 0)
+  let rn = if idx < 0 then n + 1 else n
+  let r = prim.alloc_map_kv(rn * 2)
+  let rh = prim.handle(r)
+  let _c = __ivh_set_copy(sh, rh, n, rn, k, v, 0)
+  let _a = __ivh_set_append(rh, rn, idx, k, v)
+  prim.store32(rh + 4, rn)
+  r
+}
+
+fn __ivh_eq_at(ah: Int, an: Int, bh: Int, bn: Int, i: Int) -> Bool =
+  if i >= an then true
+  else {
+    let k = prim.load64(ah + 12 + i * 8)
+    let j = __ivh_find(bh, bn, k, 0)
+    if j < 0 then false
+    else {
+      let va = prim.load_str(ah + 12 + (an + i) * 8)
+      let vb = prim.load_str(bh + 12 + (bn + j) * 8)
+      if va == vb then __ivh_eq_at(ah, an, bh, bn, i + 1) else false
+    }
+  }
+
+fn map_eq_ivh(a: Map[Int, String], b: Map[Int, String]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let an = prim.load32(ah + 4)
+  let bn = prim.load32(bh + 4)
+  if an != bn then false
+  else __ivh_eq_at(ah, an, bh, bn, 0)
+}
+
+fn __ivh_drop_vals(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    prim.rc_dec(prim.load64(h + 12 + (n + i) * 8))
+    __ivh_drop_vals(h, n, i + 1)
+  }
+
+fn __drop_map_ivh(m: Map[Int, String]) -> Unit = {
+  let h = prim.handle(m)
+  if prim.load32(h + 0) == 1 then __ivh_drop_vals(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}

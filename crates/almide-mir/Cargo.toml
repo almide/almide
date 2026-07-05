@@ -1,0 +1,31 @@
+[package]
+name = "almide-mir"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Almide v1 Middle IR — the single source of truth for ownership and layout"
+
+# Greenfield v1: the MIR data model + ownership verifier (lib.rs) are
+# self-contained and auditable. The Core-IR→MIR lowering (lower.rs) consumes the
+# EXISTING frontend IR as a TEMPORARY feeder (the v1 risk-first build order, §6)
+# — these deps go away once the frontend is greenfielded.
+[dependencies]
+almide-ir = { path = "../almide-ir" }
+almide-lang = { path = "../almide-lang" }
+# The v1 execution pipeline (`pipeline::try_render_wasm_source`, the lib form of the
+# render_program example) drives a REAL .almd through the existing frontend pipeline
+# (parse → check → lower → optimize → mono → ir_link) to obtain linked IR, then lowers
+# THAT to MIR and emits a wasm module — so the `almide` CLI can drive the v1 `--verified`
+# codegen path. These deps go away once the frontend is greenfielded. Acyclic: neither
+# almide-frontend nor almide-optimize depends on almide-mir.
+almide-frontend = { path = "../almide-frontend" }
+almide-optimize = { path = "../almide-optimize" }
+
+[dev-dependencies]
+# The workspace-root `almide` binary crate's lib — reused ONLY by the org-sweep
+# examples (`render_program`, `classify_corpus`) for the CANONICAL cross-module
+# discovery (`resolve::resolve_imports_with_deps`), so `import self.<submodule>`
+# resolves its sibling `src/*.almd` exactly like `almide run`/`almide check`. Kept
+# DEV-ONLY so the workspace-root `almide` crate can depend on almide-mir's LIB
+# WITHOUT a cycle (the lib's dependency graph never reaches `almide`).
+almide = { path = "../.." }

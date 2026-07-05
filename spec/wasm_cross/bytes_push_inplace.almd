@@ -1,0 +1,16 @@
+// @contract: C-110
+// The in-place `bytes.push(mut b, val) -> Unit` intrinsic (a `var buf; while { bytes.push(buf, x) }`
+// mutation accumulator — bigint.from_int's shape). v1 has value semantics, so the MIR lowering
+// rewrites `bytes.push(buf, x)` to a functional rebind `buf = bytes.append(buf, x)` (bytes_core's
+// self-hosted append). Byte-matches v0 (length 3 for 0x010203).
+fn fi(n: Int) -> Bytes = {
+  var buf = bytes.new(0)
+  var v = n
+  while v > 0 { bytes.push(buf, int.band(v, 0xFF)); v = int.bshr(v, 8) }
+  buf
+}
+fn main() -> Unit = {
+  let b = fi(0x010203)
+  println(int.to_string(bytes.len(b)))
+  println(int.to_string(bytes.read_u8(b, 0)))
+}

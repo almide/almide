@@ -1,0 +1,15 @@
+// @contract: C-102
+// CALL-RESULT list-element materialization. A `List[String]` literal element may be a STRING-returning
+// MODULE call (`[string.slice(s, 0, 1)]`) or NAMED call, not just a literal/var — the dominant shape in
+// `acc + [string.slice(…)]` accumulators. `try_lower_str_list_literal` lowers it to a fresh OWNED String
+// (via the registered `string.slice` self-host runtime) MOVED into the slot; the list's `DropListStr`
+// frees each at scope end. Byte-matches v0. (The cross-dependent TCO form `f(acc + [string.slice(s,i,…)])`
+// reading the loop index is walled separately — its sequential-update off-by-one is unsound, not this
+// materialization.)
+fn f(xs: List[String], s: String) -> List[String] = xs + [string.slice(s, 0, 1)]
+fn g(s: String) -> List[String] = [string.slice(s, 1, 3)] + ["!"]
+
+fn main() -> Unit = {
+  println(list.join(f(["x", "y"], "abc"), "-"))   // x-y-a
+  println(list.join(g("hello"), "-"))             // el-!
+}

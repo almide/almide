@@ -1,0 +1,14 @@
+// @contract: C-101
+// Ratcheting leak-floor evidence for the value.object co-own producer (__vobj_fill: rc_inc each key +
+// value into the Object block, balanced by __drop_value's recursive __vdrop_obj at the last ref). The
+// element rc is load64-fed (nested), so it rides the cert's trusted/differential floor (柱C Brick 3, the
+// nested-element cert, is a dedicated fresh formal brick); this 5000x loop is the EMPIRICAL gate that the
+// co-own/recursive-drop balance holds (no growth = elements freed). Mirrors value_array_leak_loop.
+effect fn main() -> Unit = {
+  var i = 0
+  while i < 5000 {
+    let o = value.object([("k", value.int(1)), ("m", value.str("x")), ("n", value.array([value.int(2), value.int(3)]))])
+    i = i + 1
+  }
+  println("value-object-leak-clean")
+}

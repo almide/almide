@@ -1,0 +1,26 @@
+// @contract: C-106
+// A heap-result `match` over a str-result (`value.as_string` — Result[String, String]) that
+// BINDS the Ok payload String and a heap result (the `emit` shape): the payload binds as a
+// BORROW of slot-0, the owned subject drops AFTER the arms (not before), and a borrow-or-return
+// of the payload is sound either way. Verifies the str-result Camp-4 resolution byte-for-byte.
+fn describe(v: Value) -> String =
+  match value.as_string(v) {
+    ok(s) => "str[" + s + "]",          // BORROW the payload (passed to concat), result is fresh
+    err(_) => "non-str",
+  }
+
+// A second shape: RETURN the bound payload directly (`ok(s) => s`) — the bare-Var arm must
+// auto-acquire (Dup) so the drop-after frees the original exactly once.
+fn unwrap_or_dash(v: Value) -> String =
+  match value.as_string(v) {
+    ok(s) => s,
+    err(_) => "-",
+  }
+
+fn main() -> Unit = {
+  println(describe(value.str("hello")))
+  println(describe(value.int(42)))
+  println(describe(value.str("")))
+  println(unwrap_or_dash(value.str("world")))
+  println(unwrap_or_dash(value.bool(true)))
+}

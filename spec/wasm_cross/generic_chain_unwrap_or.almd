@@ -1,0 +1,24 @@
+// @contract: C-127
+// `option.unwrap_or` / `result.unwrap_or` at the end of a generic chain
+// (`list.find |> option.map |> option.unwrap_or` — the nn gguf get_alignment
+// shape) must size its payload from the DEFAULT argument when the Option's
+// inner type arrives unresolved: the wasm emit previously picked the i32 arm
+// while the default emitted its real i64 — an `if (result i32)` block with an
+// `i64.const` arm, rejected by structural validation. The default's type is
+// authoritative (`unwrap_or(o: Option[T], d: T)`).
+
+type V = | ValInt(Int) | ValStr(String)
+
+fn get_alignment(metadata: List[(String, V)]) -> Int =
+  list.find(metadata, (entry) => entry.0 == "general.alignment")
+    |> option.map((entry) => match entry.1 {
+      ValInt(n) => n
+      _ => 32
+    })
+    |> option.unwrap_or(32)
+
+fn main() -> Unit = {
+  let md = [("x", ValInt(64)), ("general.alignment", ValInt(16))]
+  println(int.to_string(get_alignment(md)))
+  println(int.to_string(get_alignment([("y", ValStr("s"))])))
+}

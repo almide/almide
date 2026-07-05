@@ -1,0 +1,17 @@
+// @contract: C-107
+// Result[(List[Value], Int), String] producer + match-consumer (toml collect_array_items's
+// `ok((items, np))`). The Ok tuple's slot0 is a List[Value], freed RECURSIVELY (each element Value +
+// the List block + the tuple block) via value_core's $__drop_list_value_tuple (Op::DropResultListValueInt).
+effect fn pv(p: Int) -> Result[(Value, Int), String] = ok((value.int(p * 2), p + 1))
+effect fn collect(p: Int, acc: List[Value]) -> Result[(List[Value], Int), String] =
+  if p >= 3 then ok((acc, p))
+  else {
+    let (v, np) = pv(p)!
+    collect(np, acc + [v])
+  }
+effect fn main() -> Unit = {
+  match collect(0, []) {
+    ok(t) => { let (xs, n) = t  println(int.to_string(list.len(xs)) + " @ " + int.to_string(n)) },
+    err(e) => println("E:" + e)
+  }
+}

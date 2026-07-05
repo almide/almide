@@ -1,0 +1,90 @@
+// list_pairs — SELF-HOSTED `list.enumerate` / `list.zip` over the pair-block floor:
+// each result element is a fresh 2-slot block [rc][2][cap][slot0][slot1] MOVED into a
+// DynListStr result. SCALAR payloads are stored by value; a FLAT-heap payload (a String,
+// a List[scalar] row) is CO-OWNED per slot (prim.rc_inc — the __lc_copy_rc convention),
+// so the call-site DropListStrStr / DropListIntStr releases exactly the acquired refs.
+// v0 semantics: enumerate pairs (i, x); zip stops at the shorter list.
+
+fn __pair2(a: Int, b: Int) -> List[Int] = {
+  let pair = prim.alloc_list(2)
+  let ph = prim.handle(pair)
+  prim.store64(ph + 12, a)
+  prim.store64(ph + 20, b)
+  pair
+}
+
+fn __enum_fill(dh: Int, sh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let pair = __pair2(i, prim.load64(sh + 12 + i * 8))
+    prim.store_str(dh + 12 + i * 8, pair)
+    __enum_fill(dh, sh, n, i + 1)
+  }
+
+fn list_enumerate(xs: List[Int]) -> List[(Int, Int)] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let out: List[(Int, Int)] = prim.alloc_list_str(n)
+  let _x = __enum_fill(prim.handle(out), h, n, 0)
+  out
+}
+
+fn __enum_fill_h(dh: Int, sh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(sh + 12 + i * 8)
+    prim.rc_inc(e)
+    let pair = __pair2(i, e)
+    prim.store_str(dh + 12 + i * 8, pair)
+    __enum_fill_h(dh, sh, n, i + 1)
+  }
+
+fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let out: List[(Int, String)] = prim.alloc_list_str(n)
+  let _x = __enum_fill_h(prim.handle(out), h, n, 0)
+  out
+}
+
+fn __zip_fill(dh: Int, ha: Int, hb: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let pair = __pair2(prim.load64(ha + 12 + i * 8), prim.load64(hb + 12 + i * 8))
+    prim.store_str(dh + 12 + i * 8, pair)
+    __zip_fill(dh, ha, hb, n, i + 1)
+  }
+
+fn list_zip(a: List[Int], b: List[Int]) -> List[(Int, Int)] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let n = if la < lb then la else lb
+  let out: List[(Int, Int)] = prim.alloc_list_str(n)
+  let _x = __zip_fill(prim.handle(out), ha, hb, n, 0)
+  out
+}
+
+fn __zip_fill_rc(dh: Int, ha: Int, hb: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let ea = prim.load64(ha + 12 + i * 8)
+    let eb = prim.load64(hb + 12 + i * 8)
+    prim.rc_inc(ea)
+    prim.rc_inc(eb)
+    let pair = __pair2(ea, eb)
+    prim.store_str(dh + 12 + i * 8, pair)
+    __zip_fill_rc(dh, ha, hb, n, i + 1)
+  }
+
+fn list_zip_rc(a: List[List[Int]], b: List[List[Int]]) -> List[(List[Int], List[Int])] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let n = if la < lb then la else lb
+  let out: List[(List[Int], List[Int])] = prim.alloc_list_str(n)
+  let _x = __zip_fill_rc(prim.handle(out), ha, hb, n, 0)
+  out
+}

@@ -1,0 +1,11 @@
+// list_to_string_ll — SELF-HOSTED `${xs}` interp display for a NESTED
+// `List[List[Int]]` / `List[List[Float]]` (v0 renders `[[1, 2], [3]]` via Debug).
+// Composed from the existing per-row self-hosts: each inner list renders through
+// its own `"${r}"` interp (routing picks the flat list.to_string/_f), joined
+// with ", " inside brackets. The row map inlines via the C1 defunc.
+
+fn list_to_string_ll(xs: List[List[Int]]) -> String =
+  "[" + (xs |> list.map((r) => "${r}") |> list.join(", ")) + "]"
+
+fn list_to_string_llf(xs: List[List[Float]]) -> String =
+  "[" + (xs |> list.map((r) => "${r}") |> list.join(", ")) + "]"

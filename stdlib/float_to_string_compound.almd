@@ -1,0 +1,39 @@
+// float_to_string_compound — SELF-HOSTED `float.to_string_compound`, the SINGLE-value
+// compound-Float repr v0 uses for a Float ELEMENT/FIELD inside a record/tuple/list (the
+// `${record}` / `${tuple}` form). v0 renders a nested float with `format!("{}", f64)`,
+// the SHORTEST round-trip decimal in FIXED notation — IDENTICAL to the self-hosted
+// scalar `float.to_string` (Dragon4) EXCEPT integer-valued floats DROP the trailing ".0"
+// (`1.0` → "1", `100.0` → "100", `-3.0` → "-3"), whereas `float.to_string` keeps it.
+//   - "1.0"  → "1"      "100.0" → "100"     "0.0" → "0"     "-3.0" → "-3"
+//   - "2.5"  → "2.5"    "0.1"   → "0.1"     (no trailing ".0" → unchanged)
+//   - "inf" / "-inf" / "NaN"                (no trailing ".0" → unchanged)
+// This REUSES all of Dragon4 (`float.to_string`) and only strips a trailing ".0" — the
+// SAME re-render `list_to_string_f` (`__ltsf_fill_elem`) does per List[Float] element,
+// here as a single-value formatter so a record/tuple Float field byte-matches v0.
+// Result is a fresh owned String; the trailing ".0" case re-allocates at the exact width.
+
+// Does the `n`-byte string at `src` end in ".0"? (n >= 2 and last two bytes are '.' '0'.)
+// NB: `and` does not lower in v1's if-conditions, so this is a NESTED if (the documented idiom).
+fn __ftsc_ends_dot0(src: Int, n: Int) -> Bool =
+  if n < 2 then false
+  else if prim.load8(src + n - 2) != 46 then false      // not '.'
+  else prim.load8(src + n - 1) == 48                    // last byte is '0'
+
+// Copy `n` bytes from `src` to `dst`; return the address past the last byte.
+fn __ftsc_bcopy(src: Int, dst: Int, n: Int) -> Int =
+  if n <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __ftsc_bcopy(src + 1, dst + 1, n - 1)
+  }
+
+fn float_to_string_compound(x: Float) -> String = {
+  let s = float.to_string(x)
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let w = if __ftsc_ends_dot0(sh + 12, n) then n - 2 else n
+  let buf = prim.alloc_str(w)
+  let base = prim.handle(buf) + 12
+  let after = __ftsc_bcopy(sh + 12, base, w)
+  buf
+}

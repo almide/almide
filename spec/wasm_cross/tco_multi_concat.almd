@@ -1,0 +1,8 @@
+// @contract: C-104
+// A tail-recursive String accumulator grown by a MULTI-concat `acc + c0 + c1` (base64 encode_chunks:
+// `enc(.., acc + c0 + c1 + c2 + c3)`). The TCO's self-append detector recurses the ConcatStr left
+// spine to the leftmost leaf (`acc`), admitting the nested concat; the loop-body general-reassign
+// path materializes it (try_lower_concat_str) with the loop-carried i(id)m drop-old/alloc-new. v0==v1.
+local fn build(n: Int, pos: Int, acc: String) -> String =
+  if pos >= n then acc else { let c0 = "a" let c1 = "b" build(n, pos + 1, acc + c0 + c1) }
+fn main() -> Unit = { println(build(3, 0, "")) }

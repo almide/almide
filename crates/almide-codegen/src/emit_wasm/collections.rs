@@ -1,6 +1,5 @@
 //! Collection construction and access emission — records, lists, tuples, maps.
 
-use crate::emit_wasm::engine::{Imm32, Imm64, Local};
 use almide_ir::{IrExpr, IrExprKind};
 use almide_lang::types::Ty;
 use super::FuncCompiler;
@@ -53,18 +52,18 @@ impl FuncCompiler<'_> {
 
         // Allocate
         wasm!(self.func, {
-            i32_const(Imm32(total_size as i32));
+            i32_const(total_size as i32);
             call(self.emitter.rt.alloc);
         });
 
         let scratch = self.scratch.alloc_i32();
-        wasm!(self.func, { local_set(Local(scratch)); });
+        wasm!(self.func, { local_set(scratch); });
 
         // Write tag if variant
         if let Some(tag_val) = tag {
             wasm!(self.func, {
-                local_get(Local(scratch));
-                i32_const(Imm32(tag_val as i32));
+                local_get(scratch);
+                i32_const(tag_val as i32);
                 i32_store(0);
             });
         }
@@ -103,7 +102,7 @@ impl FuncCompiler<'_> {
             // Emit in type-definition order
             for (field_name, field_ty) in &type_fields {
                 if let Some(expr) = explicit_map.get(field_name.as_str()) {
-                    wasm!(self.func, { local_get(Local(scratch)); });
+                    wasm!(self.func, { local_get(scratch); });
                     self.emit_stored_field(expr);
                     let store_ty = if expr.ty.is_unresolved() {
                         field_ty
@@ -114,7 +113,7 @@ impl FuncCompiler<'_> {
                     offset += values::byte_size(store_ty);
                 } else if let Some(ctor_name) = name {
                     if let Some(default_expr) = self.emitter.default_fields.get(&(ctor_name.to_string(), field_name.clone())) {
-                        wasm!(self.func, { local_get(Local(scratch)); });
+                        wasm!(self.func, { local_get(scratch); });
                         let default_expr = default_expr.clone();
                         let dt = match (&default_expr.ty, &default_expr.kind) {
                             (Ty::Unknown, almide_ir::IrExprKind::LitInt { .. }) => Ty::Int,
@@ -138,7 +137,7 @@ impl FuncCompiler<'_> {
             // No type info: emit explicit fields only
             for (_, field_expr) in fields {
                 let field_size = values::byte_size(&field_expr.ty);
-                wasm!(self.func, { local_get(Local(scratch)); });
+                wasm!(self.func, { local_get(scratch); });
                 self.emit_stored_field(field_expr);
                 self.emit_store_at(&field_expr.ty, offset);
                 offset += field_size;
@@ -146,7 +145,7 @@ impl FuncCompiler<'_> {
         }
 
         self.scratch.free_i32(scratch);
-        wasm!(self.func, { local_get(Local(scratch)); });
+        wasm!(self.func, { local_get(scratch); });
     }
 
     /// Look up variant tag for a constructor name within a variant type.
@@ -172,40 +171,40 @@ impl FuncCompiler<'_> {
 
         // Allocate new record
         wasm!(self.func, {
-            i32_const(Imm32(total_size as i32));
+            i32_const(total_size as i32);
             call(self.emitter.rt.alloc);
         });
         let result_scratch = self.scratch.alloc_i32();
-        wasm!(self.func, { local_set(Local(result_scratch)); });
+        wasm!(self.func, { local_set(result_scratch); });
 
         // Evaluate base and store ptr
         self.emit_expr(base);
         let base_scratch = self.scratch.alloc_i32();
-        wasm!(self.func, { local_set(Local(base_scratch)); });
+        wasm!(self.func, { local_set(base_scratch); });
 
         // Copy all bytes from base to result (including tag if variant)
         let counter = self.scratch.alloc_i64();
         wasm!(self.func, {
-            i64_const(Imm64(0));
-            local_set(Local(counter));
+            i64_const(0);
+            local_set(counter);
             block_empty;
             loop_empty;
         });
         // break if counter >= total_size
         wasm!(self.func, {
-            local_get(Local(counter));
-            i64_const(Imm64(total_size as i64));
+            local_get(counter);
+            i64_const(total_size as i64);
             i64_ge_u;
             br_if(1);
         });
         // dst[i] = src[i]
         wasm!(self.func, {
-            local_get(Local(result_scratch));
-            local_get(Local(counter));
+            local_get(result_scratch);
+            local_get(counter);
             i32_wrap_i64;
             i32_add;
-            local_get(Local(base_scratch));
-            local_get(Local(counter));
+            local_get(base_scratch);
+            local_get(counter);
             i32_wrap_i64;
             i32_add;
             i32_load8_u(0);
@@ -213,16 +212,46 @@ impl FuncCompiler<'_> {
         });
         // counter++
         wasm!(self.func, {
-            local_get(Local(counter));
-            i64_const(Imm64(1));
+            local_get(counter);
+            i64_const(1);
             i64_add;
-            local_set(Local(counter));
+            local_set(counter);
             br(0);
             end;
             end;
         });
 
-        // Overwrite specified fields
+        // SHARE: the byte-copy duplicated the base's heap-field POINTERS — each
+        // copied field is now reachable from TWO records (the base and this one)
+        // but owns a single refcount, so both records' scope-end drops double-free
+        // it (svg `doc`: `{ ...base, children }` lost its attrs Map on wasm once
+        // the piped `base` temp was dropped). Own a shallow +1 per copied heap
+        // field. Overridden fields are excluded: their copied pointer is clobbered
+        // by the override below and stays owned by the base.
+        for (field_name, field_ty) in &all_fields {
+            if overrides.iter().any(|(n, _)| n.as_str() == field_name.as_str()) {
+                continue;
+            }
+            if !Self::is_heap_type(field_ty) {
+                continue;
+            }
+            if let Some((offset, _)) = values::field_offset(&all_fields, field_name) {
+                let total_offset = (tag_offset + offset) as i32;
+                wasm!(self.func, {
+                    local_get(result_scratch);
+                    i32_const(total_offset);
+                    i32_add;
+                    i32_load(0);
+                    call(self.emitter.rt.rc_inc);
+                    drop;
+                });
+            }
+        }
+
+        // Overwrite specified fields. `emit_stored_field` (not a bare
+        // emit_expr): a borrowed-alias override (`{ ...base, children: kids }`
+        // with `kids` a Var) is RETAINED by this record, so it must own a +1 —
+        // the same rule plain `Record` construction applies to its fields.
         for (field_name, field_expr) in overrides {
             // Use the record's declared field type for the store width — the
             // override expression's own `.ty` may be Unknown when inference
@@ -230,8 +259,8 @@ impl FuncCompiler<'_> {
             // whereas the record layout is authoritative.
             if let Some((offset, field_ty)) = values::field_offset(&all_fields, field_name) {
                 let total_offset = tag_offset + offset;
-                wasm!(self.func, { local_get(Local(result_scratch)); });
-                self.emit_expr(field_expr);
+                wasm!(self.func, { local_get(result_scratch); });
+                self.emit_stored_field(field_expr);
                 self.emit_store_at(&field_ty, total_offset);
             }
         }
@@ -240,7 +269,7 @@ impl FuncCompiler<'_> {
         self.scratch.free_i64(counter);
         self.scratch.free_i32(base_scratch);
         self.scratch.free_i32(result_scratch);
-        wasm!(self.func, { local_get(Local(result_scratch)); });
+        wasm!(self.func, { local_get(result_scratch); });
     }
 
     /// Emit a list literal: allocate [len:i32][cap:i32][elem0][elem1]...
@@ -255,37 +284,37 @@ impl FuncCompiler<'_> {
         let total = 8 + n * elem_size;
 
         wasm!(self.func, {
-            i32_const(Imm32(total as i32));
+            i32_const(total as i32);
             call(self.emitter.rt.alloc);
         });
 
         let scratch = self.scratch.alloc_i32();
-        wasm!(self.func, { local_set(Local(scratch)); });
+        wasm!(self.func, { local_set(scratch); });
 
         // Store length
         wasm!(self.func, {
-            local_get(Local(scratch));
-            i32_const(Imm32(n as i32));
+            local_get(scratch);
+            i32_const(n as i32);
             i32_store(0);
         });
 
         // Store capacity = len (exact fit)
         wasm!(self.func, {
-            local_get(Local(scratch));
-            i32_const(Imm32(n as i32));
+            local_get(scratch);
+            i32_const(n as i32);
             i32_store(4);
         });
 
         // Store each element
         for (i, elem) in elements.iter().enumerate() {
             let offset = 8 + (i as u32) * elem_size;
-            wasm!(self.func, { local_get(Local(scratch)); });
+            wasm!(self.func, { local_get(scratch); });
             self.emit_stored_field(elem);
             self.emit_store_at(&elem.ty, offset);
         }
 
         self.scratch.free_i32(scratch);
-        wasm!(self.func, { local_get(Local(scratch)); });
+        wasm!(self.func, { local_get(scratch); });
     }
 
     /// Emit index access: list_ptr + 8 + index * elem_size
@@ -299,7 +328,7 @@ impl FuncCompiler<'_> {
         // ptr → local (needed for both the bounds check's len load and the address)
         self.emit_expr(object);
         let ptr = self.scratch.alloc_i32();
-        wasm!(self.func, { local_set(Local(ptr)); });
+        wasm!(self.func, { local_set(ptr); });
 
         // index → i32 local, BOUNDS-CHECKED on the FULL i64 first (#554/C-072).
         // The prior code did `i32_wrap_i64` BEFORE the u32 compare, so an index
@@ -316,28 +345,28 @@ impl FuncCompiler<'_> {
             // Constant index: the bound is dynamic (len), so still guard, but the
             // index itself fits i32 once we know it is non-negative and < 2^31.
             let idx64 = self.scratch.alloc_i64();
-            wasm!(self.func, { i64_const(Imm64(v)); local_set(Local(idx64)); });
+            wasm!(self.func, { i64_const(v); local_set(idx64); });
             self.emit_index_bound_guard(idx64, ptr, oob_msg, div_trap);
-            wasm!(self.func, { local_get(Local(idx64)); i32_wrap_i64; local_set(Local(idx)); });
+            wasm!(self.func, { local_get(idx64); i32_wrap_i64; local_set(idx); });
             self.scratch.free_i64(idx64);
         } else {
             let idx64 = self.scratch.alloc_i64();
             self.emit_expr(index);
             if matches!(&index.ty, Ty::Int) {
-                wasm!(self.func, { local_set(Local(idx64)); });
+                wasm!(self.func, { local_set(idx64); });
             } else {
                 // narrow-int index already i32 on the stack — widen to i64
-                wasm!(self.func, { i64_extend_i32_s; local_set(Local(idx64)); });
+                wasm!(self.func, { i64_extend_i32_s; local_set(idx64); });
             }
             self.emit_index_bound_guard(idx64, ptr, oob_msg, div_trap);
-            wasm!(self.func, { local_get(Local(idx64)); i32_wrap_i64; local_set(Local(idx)); });
+            wasm!(self.func, { local_get(idx64); i32_wrap_i64; local_set(idx); });
             self.scratch.free_i64(idx64);
         }
 
         // addr = ptr + data_off + idx * elem_size
-        wasm!(self.func, { local_get(Local(ptr)); i32_const(Imm32(data_off as i32)); i32_add; local_get(Local(idx)); });
+        wasm!(self.func, { local_get(ptr); i32_const(data_off as i32); i32_add; local_get(idx); });
         if elem_size > 1 {
-            wasm!(self.func, { i32_const(Imm32(elem_size as i32)); i32_mul; });
+            wasm!(self.func, { i32_const(elem_size as i32); i32_mul; });
         }
         wasm!(self.func, { i32_add; });
 
@@ -368,12 +397,12 @@ impl FuncCompiler<'_> {
         let total_size = values::record_size(&element_types);
 
         wasm!(self.func, {
-            i32_const(Imm32(total_size as i32));
+            i32_const(total_size as i32);
             call(self.emitter.rt.alloc);
         });
 
         let scratch = self.scratch.alloc_i32();
-        wasm!(self.func, { local_set(Local(scratch)); });
+        wasm!(self.func, { local_set(scratch); });
 
         let mut offset = 0u32;
         for elem in elements {
@@ -390,14 +419,14 @@ impl FuncCompiler<'_> {
                 elem.ty.clone()
             };
             let size = values::byte_size(&elem_ty);
-            wasm!(self.func, { local_get(Local(scratch)); });
+            wasm!(self.func, { local_get(scratch); });
             self.emit_stored_field(elem);
             self.emit_store_at(&elem_ty, offset);
             offset += size;
         }
 
         self.scratch.free_i32(scratch);
-        wasm!(self.func, { local_get(Local(scratch)); });
+        wasm!(self.func, { local_get(scratch); });
     }
 
     /// Emit a tuple index access: load from tuple pointer + element offset.
@@ -490,11 +519,11 @@ impl FuncCompiler<'_> {
         }
     }
 
-    /// Total byte offset (variant tag + field) at which `object.field` is
-    /// stored inside `object`'s record block — the store-side mirror of
-    /// `emit_member`'s type resolution. `emit_mutator_writeback` uses it to
-    /// write a realloc'd list pointer back into a record field slot (#705).
-    /// None when the field/type can't be resolved.
+    /// Total byte offset (variant tag + field) at which `object.field` is stored
+    /// inside `object`'s record block — the store-side mirror of `emit_member`'s
+    /// type resolution. `emit_mutator_writeback` uses it to write a realloc'd list
+    /// pointer back into a record field slot (#705). None when the field/type
+    /// can't be resolved.
     pub(super) fn member_field_store_offset(&self, object: &IrExpr, field: &str) -> Option<u32> {
         let resolved_ty = if let almide_ir::IrExprKind::Var { id } = &object.kind {
             let vt_ty = &self.var_table.get(*id).ty;

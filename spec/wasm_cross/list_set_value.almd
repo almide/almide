@@ -1,0 +1,10 @@
+// @contract: C-101
+// list.set over a List[Value] (toml set_in_aot_last). A Value element is an i32 handle; set_value
+// rc-copies each element to co-own and frees the REPLACED one recursively via __drop_value (a flat
+// rc_dec would leak an Object/Array element's nested children). Routed via mod_p4 List[Value] dispatch.
+effect fn main() -> Unit = {
+  let items = [value.int(1), value.object([("a", value.int(2))]), value.int(3)]
+  let updated = list.set(items, 1, value.array([value.int(7), value.int(8)]))
+  println(value.stringify(value.array(updated)))
+  println(value.stringify(value.array(list.set(items, 0, value.str("x")))))
+}

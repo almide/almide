@@ -1,0 +1,376 @@
+// set_str — SELF-HOSTED Set[String] (the heap-element / nested-ownership Set). A Set[String] IS a
+// v1 DynListStr block (each i64 slot an OWNED String handle, freed recursively via DropListStr) of
+// UNIQUE, insertion-ordered Strings — v0's AlmideSet over String. Membership uses byte-level string
+// equality (__str_eq); each stored element is a fresh DEEP COPY (so the set owns it independently,
+// no double-free with the source). from_list dedups; contains queries; to_list copies out.
+
+// Byte-level string equality: same length AND same bytes. Reads only (both borrowed).
+fn __str_eq_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else {
+    let ca = prim.load8(pa + i)
+    let cb = prim.load8(pb + i)
+    if ca == cb then __str_eq_bytes(pa, pb, n, i + 1)
+    else false
+  }
+
+fn __str_eq(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  if la != lb then false
+  else __str_eq_bytes(ha + 12, hb + 12, la, 0)
+}
+
+// Is string x already among the first `count` elements of the set block sh? Each element is read
+// as a BORROW (prim.load_str — the set keeps owning it) and compared by bytes.
+fn __set_has_str(sh: Int, count: Int, x: String, i: Int) -> Bool =
+  if i >= count then false
+  else {
+    let e = prim.load_str(sh + 12 + i * 8)
+    let eq = __str_eq(e, x)
+    if eq then true
+    else __set_has_str(sh, count, x, i + 1)
+  }
+
+// Append each not-yet-present element of list xh (length xlen) into the set block sh as a fresh
+// DEEP COPY, growing the unique count w. Returns the final unique count.
+fn __set_str_fill(xh: Int, xlen: Int, sh: Int, i: Int, w: Int) -> Int =
+  if i >= xlen then w
+  else {
+    let x = prim.load_str(xh + 12 + i * 8)
+    let present = __set_has_str(sh, w, x, 0)
+    if present then __set_str_fill(xh, xlen, sh, i + 1, w)
+    else {
+      let copy = string.repeat(x, 1)
+      prim.store_str(sh + 12 + w * 8, copy)
+      __set_str_fill(xh, xlen, sh, i + 1, w + 1)
+    }
+  }
+
+fn set_from_list_str(xs: List[String]) -> Set[String] = {
+  let xh = prim.handle(xs)
+  let xlen = prim.load32(xh + 4)
+  let s = prim.alloc_set_str(xlen)
+  let sh = prim.handle(s)
+  let u = __set_str_fill(xh, xlen, sh, 0, 0)
+  prim.store32(sh + 4, u)
+  s
+}
+
+fn set_contains_str(s: Set[String], x: String) -> Bool = {
+  let sh = prim.handle(s)
+  let len = prim.load32(sh + 4)
+  __set_has_str(sh, len, x, 0)
+}
+
+// Copy each element of the set into a fresh List[String] as a DEEP COPY (so the returned list owns
+// its elements independently of the set).
+fn __set_to_list_str_fill(sh: Int, oh: Int, len: Int, i: Int) -> Int =
+  if i >= len then 0
+  else {
+    let e = prim.load_str(sh + 12 + i * 8)
+    let copy = string.repeat(e, 1)
+    prim.store_str(oh + 12 + i * 8, copy)
+    __set_to_list_str_fill(sh, oh, len, i + 1)
+  }
+
+fn set_to_list_str(s: Set[String]) -> List[String] = {
+  let sh = prim.handle(s)
+  let len = prim.load32(sh + 4)
+  let out = prim.alloc_list_str(len)
+  let oh = prim.handle(out)
+  let _x = __set_to_list_str_fill(sh, oh, len, 0)
+  out
+}
+
+// ── Set[String] algebra ── results own DEEP COPIES (no double-free with the operands). Order
+// matches v0: union = a's order then b's-not-in-a; intersection/difference = a's order.
+
+// Deep-copy a's first `len` elements into rh (the result's a-portion).
+fn __set_str_copyn(sh: Int, rh: Int, len: Int, i: Int) -> Int =
+  if i >= len then 0
+  else {
+    let e = prim.load_str(sh + 12 + i * 8)
+    let copy = string.repeat(e, 1)
+    prim.store_str(rh + 12 + i * 8, copy)
+    __set_str_copyn(sh, rh, len, i + 1)
+  }
+
+// Append b's elements NOT in the result's a-portion (first `acount` slots), as deep copies.
+fn __set_str_addb(acount: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
+  else {
+    let x = prim.load_str(bh + 12 + j * 8)
+    let present = __set_has_str(rh, acount, x, 0)
+    if present then __set_str_addb(acount, bh, blen, rh, j + 1, w)
+    else {
+      let copy = string.repeat(x, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_addb(acount, bh, blen, rh, j + 1, w + 1)
+    }
+  }
+
+fn set_union_str(a: Set[String], b: Set[String]) -> Set[String] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let cap = alen + blen
+  let r = prim.alloc_set_str(cap)
+  let rh = prim.handle(r)
+  let _c = __set_str_copyn(ah, rh, alen, 0)
+  let w = __set_str_addb(alen, bh, blen, rh, 0, alen)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append a's elements that ARE in b (intersection) as deep copies.
+fn __set_str_inter(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, i: Int, w: Int) -> Int =
+  if i >= alen then w
+  else {
+    let x = prim.load_str(ah + 12 + i * 8)
+    let inB = __set_has_str(bh, blen, x, 0)
+    if inB then {
+      let copy = string.repeat(x, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_inter(ah, alen, bh, blen, rh, i + 1, w + 1)
+    }
+    else __set_str_inter(ah, alen, bh, blen, rh, i + 1, w)
+  }
+
+fn set_intersection_str(a: Set[String], b: Set[String]) -> Set[String] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let r = prim.alloc_set_str(alen)
+  let rh = prim.handle(r)
+  let w = __set_str_inter(ah, alen, bh, blen, rh, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append a's elements NOT in b (difference) as deep copies.
+fn __set_str_diff(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, i: Int, w: Int) -> Int =
+  if i >= alen then w
+  else {
+    let x = prim.load_str(ah + 12 + i * 8)
+    let inB = __set_has_str(bh, blen, x, 0)
+    if inB then __set_str_diff(ah, alen, bh, blen, rh, i + 1, w)
+    else {
+      let copy = string.repeat(x, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_diff(ah, alen, bh, blen, rh, i + 1, w + 1)
+    }
+  }
+
+fn set_difference_str(a: Set[String], b: Set[String]) -> Set[String] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let r = prim.alloc_set_str(alen)
+  let rh = prim.handle(r)
+  let w = __set_str_diff(ah, alen, bh, blen, rh, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// All of a's first `alen` elements present in b?
+fn __set_str_all_in(ah: Int, alen: Int, bh: Int, blen: Int, i: Int) -> Bool =
+  if i >= alen then true
+  else {
+    let x = prim.load_str(ah + 12 + i * 8)
+    let inB = __set_has_str(bh, blen, x, 0)
+    if inB then __set_str_all_in(ah, alen, bh, blen, i + 1)
+    else false
+  }
+
+fn set_is_subset_str(a: Set[String], b: Set[String]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  __set_str_all_in(ah, alen, bh, blen, 0)
+}
+
+// None of a's first `alen` elements present in b?
+fn __set_str_none_in(ah: Int, alen: Int, bh: Int, blen: Int, i: Int) -> Bool =
+  if i >= alen then true
+  else {
+    let x = prim.load_str(ah + 12 + i * 8)
+    let inB = __set_has_str(bh, blen, x, 0)
+    if inB then false
+    else __set_str_none_in(ah, alen, bh, blen, i + 1)
+  }
+
+fn set_is_disjoint_str(a: Set[String], b: Set[String]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  __set_str_none_in(ah, alen, bh, blen, 0)
+}
+
+// ── Set[String] construction (closure-free) ── new/insert/remove/symmetric_difference, results own
+// deep copies.
+
+fn set_new_str() -> Set[String] = prim.alloc_set_str(0)
+
+// Append x (deep copy) to the result rh (holding `slen` elements) iff absent; return new count.
+fn __set_str_addone(rh: Int, slen: Int, x: String) -> Int = {
+  let present = __set_has_str(rh, slen, x, 0)
+  if present then slen
+  else {
+    let copy = string.repeat(x, 1)
+    prim.store_str(rh + 12 + slen * 8, copy)
+    slen + 1
+  }
+}
+
+fn set_insert_str(s: Set[String], x: String) -> Set[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let cap = slen + 1
+  let r = prim.alloc_set_str(cap)
+  let rh = prim.handle(r)
+  let _c = __set_str_copyn(sh, rh, slen, 0)
+  let w = __set_str_addone(rh, slen, x)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Copy s's elements EXCEPT x (deep), preserving survivors' order; return the new count.
+fn __set_str_remove_fill(sh: Int, slen: Int, rh: Int, x: String, i: Int, w: Int) -> Int =
+  if i >= slen then w
+  else {
+    let e = prim.load_str(sh + 12 + i * 8)
+    let eq = __str_eq(e, x)
+    if eq then __set_str_remove_fill(sh, slen, rh, x, i + 1, w)
+    else {
+      let copy = string.repeat(e, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_remove_fill(sh, slen, rh, x, i + 1, w + 1)
+    }
+  }
+
+fn set_remove_str(s: Set[String], x: String) -> Set[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let r = prim.alloc_set_str(slen)
+  let rh = prim.handle(r)
+  let w = __set_str_remove_fill(sh, slen, rh, x, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append b's elements NOT in the ORIGINAL a (deep copies), growing count w. For sym-difference,
+// after a's-not-in-b is written (disjoint, so no re-dedup needed).
+fn __set_str_addb_nota(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
+  else {
+    let x = prim.load_str(bh + 12 + j * 8)
+    let inA = __set_has_str(ah, alen, x, 0)
+    if inA then __set_str_addb_nota(ah, alen, bh, blen, rh, j + 1, w)
+    else {
+      let copy = string.repeat(x, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_addb_nota(ah, alen, bh, blen, rh, j + 1, w + 1)
+    }
+  }
+
+fn set_symmetric_difference_str(a: Set[String], b: Set[String]) -> Set[String] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let cap = alen + blen
+  let r = prim.alloc_set_str(cap)
+  let rh = prim.handle(r)
+  let w1 = __set_str_diff(ah, alen, bh, blen, rh, 0, 0)
+  let w2 = __set_str_addb_nota(ah, alen, bh, blen, rh, 0, w1)
+  prim.store32(rh + 4, w2)
+  r
+}
+
+// ── Higher-order Set[String] (closures machinery; the closure takes a String element by handle,
+// widened by the heap-arg closure ABI) ── filter keeps a deep-copied subset; all/any/fold read.
+
+fn __set_str_filter_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let keep = f(x)
+    if keep then {
+      let copy = string.repeat(x, 1)
+      prim.store_str(dh + 12 + di * 8, copy)
+      __set_str_filter_fill(dh, sh, f, n, i + 1, di + 1)
+    } else {
+      __set_str_filter_fill(dh, sh, f, n, i + 1, di)
+    }
+  }
+
+fn set_filter_str(s: Set[String], f: (String) -> Bool) -> Set[String] = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let r = prim.alloc_set_str(n)
+  let rh = prim.handle(r)
+  let count = __set_str_filter_fill(rh, sh, f, n, 0, 0)
+  prim.store32(rh + 4, count)
+  r
+}
+
+fn __set_str_count_hits(sh: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let h = f(x)
+    if h then __set_str_count_hits(sh, f, n, i + 1, acc + 1)
+    else __set_str_count_hits(sh, f, n, i + 1, acc)
+  }
+
+fn set_all_str(s: Set[String], f: (String) -> Bool) -> Bool = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let hits = __set_str_count_hits(sh, f, n, 0, 0)
+  hits >= n
+}
+
+fn set_any_str(s: Set[String], f: (String) -> Bool) -> Bool = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let hits = __set_str_count_hits(sh, f, n, 0, 0)
+  hits > 0
+}
+
+// set.fold over Set[String] — f : (Acc, String) -> Acc (Int accumulator). 2-arity closure with a
+// String second arg (heap-widened). Insertion-order walk.
+fn __set_str_fold_loop(sh: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    __set_str_fold_loop(sh, f, n, i + 1, nacc)
+  }
+
+fn set_fold_str(s: Set[String], init: Int, f: (Int, String) -> Int) -> Int = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  __set_str_fold_loop(sh, f, n, 0, init)
+}
+
+// set.map over Set[String] is DEFERRED: the closure returns a NEW owned String per element and a
+// dedup-DISCARDED duplicate must be freed in ONE branch of the recursion only — that consume-in-
+// one-arm interacts badly with the per-arm teardown (drop_arm_locals split_off underflow). Needs
+// a lowering fix (per-branch owned-heap accounting), not an .almd change.
+
+// Order-independent equality: same size and every element of a is in b
+// (size equality makes one-directional subset sufficient).
+fn set_eq_str(a: Set[String], b: Set[String]) -> Bool = {
+  let la = prim.load32(prim.handle(a) + 4)
+  let lb = prim.load32(prim.handle(b) + 4)
+  if la != lb then false
+  else set.is_subset(a, b)
+}

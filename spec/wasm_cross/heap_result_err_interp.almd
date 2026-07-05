@@ -1,0 +1,12 @@
+// @contract: C-106
+// A heap-result `if`/`match` arm that returns `err("…${x}…")` — a Result[_,String] whose Err
+// message is a STRING INTERPOLATION (base64 char_to_val). The ResultErr arm folds the interp to a
+// fresh owned String, moves it into the Err block, and frees the interp's intermediates per-arm.
+// Byte-matches v0; 10000x leak-free.
+fn classify(cp: Int, ch: String) -> Result[Int, String] =
+  if cp >= 65 and cp <= 90 then ok(cp - 65)
+  else err("invalid char '${ch}'")
+fn main() -> Unit = {
+  match classify(66, "B") { ok(n) => println("ok:" + int.to_string(n)), err(e) => println(e) }
+  match classify(33, "!") { ok(n) => println("ok:" + int.to_string(n)), err(e) => println(e) }
+}

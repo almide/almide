@@ -1,0 +1,15 @@
+// @contract: C-104
+// A function-TAIL self-recursive call with a GENERAL heap arg (not a TCO-able append/identity/reset
+// accumulator) — toml parse_doc's `parse_doc(t, .., append_aot(root,path), ..)`. v1 lowers it as a
+// REAL recursive CallFn (matches v0's native recursion exactly), no longer walling. Depth is bounded
+// by the input (the position advances), identical to v0.
+effect fn scan(t: String, p: Int, acc: List[String]) -> Result[List[String], String] = {
+  if p >= string.len(t) then ok(acc)
+  else {
+    let c = string.slice(t, p, p + 1)
+    scan(t, p + 1, acc + [c])
+  }
+}
+effect fn main() -> Unit = {
+  match scan("abc", 0, []) { ok(v) => println(list.join(v, "-")), err(e) => println("E:" + e) }
+}

@@ -1,0 +1,21 @@
+// @contract: C-105
+// MUTUAL-RECURSIVE block collector (collect_block ↔ block_line) — the yaml block-scalar shape. block_line's
+// body is a heap-result `if` whose THEN arm carries a call-arg `if` (`collect_block(.., if list.is_empty(acc)
+// then acc else acc+[""])`) and whose ELSE arm appends `acc + [string.drop(line, 0)]`. The bare-call-arg
+// ANF-lift made it lowerable, but the lift's fresh `tmp` was sized by `max_var_id(THIS arm)` — which omits
+// `line` (used only in the SIBLING else arm) — so `tmp` aliased `line` and the renderer read the then-arm's
+// concat where the else-arm wanted `line` (every element rendered ""). Fixed by threading a FUNCTION-WIDE
+// fresh-VarId counter through the desugars. byte-matches v0.
+fn line_at(lines: List[String], pos: Int) -> String = list.get(lines, pos) ?? ""
+fn collect_block(lines: List[String], pos: Int, acc: List[String]) -> (List[String], Int) =
+  if pos >= list.len(lines) then (acc, pos)
+  else block_line(lines, pos, acc, line_at(lines, pos))
+fn block_line(lines: List[String], pos: Int, acc: List[String], line: String) -> (List[String], Int) =
+  if string.is_empty(line) then collect_block(lines, pos + 1, if list.is_empty(acc) then acc else acc + [""])
+  else collect_block(lines, pos + 1, acc + [string.drop(line, 0)])
+
+fn main() -> Unit = {
+  let (out, n) = collect_block(["a", "", "bb", "c"], 0, [])
+  println(list.join(out, "|"))     // a||bb|c
+  println(int.to_string(n))        // 4
+}

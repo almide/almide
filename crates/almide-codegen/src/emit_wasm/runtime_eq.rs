@@ -3,34 +3,9 @@
 //! Split from runtime.rs for file size. These are all standalone compile_* functions
 //! called from `compile_runtime()` in runtime.rs.
 
-use crate::emit_wasm::engine::{Imm32, Imm64, Local};
 use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
-
-// ── Named immediates ──────────────────────────────────────────────────────────
-
-/// Byte size of a 32-bit (i32) value / pointer on the heap.
-const I32_BYTES: i32 = 4;
-
-/// Total bytes allocated for a Result heap cell: [tag:i32][value:i64|str_ptr:i32],
-/// sized to hold the widest payload (an i64 ok-value at offset 4).
-const RESULT_HEAP_BYTES: i32 = 12;
-
-/// ASCII code of '-' (minus / hyphen).
-const ASCII_MINUS: i32 = 45;
-
-/// ASCII code of '+' (plus).
-const ASCII_PLUS: i32 = 43;
-
-/// ASCII code of '0' (digit zero — lower bound of the decimal digit range).
-const ASCII_ZERO: i32 = 48;
-
-/// ASCII code of '9' (digit nine — upper bound of the decimal digit range).
-const ASCII_NINE: i32 = 57;
-
-/// Decimal base used in the integer parse accumulator loop.
-const DECIMAL_BASE: i64 = 10;
 
 pub(super) fn compile_option_eq_i64(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.option_eq_i64];
@@ -38,33 +13,33 @@ pub(super) fn compile_option_eq_i64(emitter: &mut WasmEmitter) {
 
     // Both none → 1
     wasm!(f, {
-        local_get(Local(0));
+        local_get(0);
         i32_eqz;
-        local_get(Local(1));
+        local_get(1);
         i32_eqz;
         i32_and;
         if_empty;
-        i32_const(Imm32(1));
+        i32_const(1);
         return_;
         end;
     });
     // One none → 0
     wasm!(f, {
-        local_get(Local(0));
+        local_get(0);
         i32_eqz;
-        local_get(Local(1));
+        local_get(1);
         i32_eqz;
         i32_or;
         if_empty;
-        i32_const(Imm32(0));
+        i32_const(0);
         return_;
         end;
     });
     // Both some: compare i64 values
     wasm!(f, {
-        local_get(Local(0));
+        local_get(0);
         i64_load(0);
-        local_get(Local(1));
+        local_get(1);
         i64_load(0);
         i64_eq;
         end;
@@ -79,30 +54,30 @@ pub(super) fn compile_option_eq_str(emitter: &mut WasmEmitter) {
     let mut f = Function::new([]);
 
     wasm!(f, {
-        local_get(Local(0));
+        local_get(0);
         i32_eqz;
-        local_get(Local(1));
+        local_get(1);
         i32_eqz;
         i32_and;
         if_empty;
-        i32_const(Imm32(1));
+        i32_const(1);
         return_;
         end;
-        local_get(Local(0));
+        local_get(0);
         i32_eqz;
-        local_get(Local(1));
+        local_get(1);
         i32_eqz;
         i32_or;
         if_empty;
-        i32_const(Imm32(0));
+        i32_const(0);
         return_;
         end;
     });
     // Both some: load string ptrs and call str_eq
     wasm!(f, {
-        local_get(Local(0));
+        local_get(0);
         i32_load(0);
-        local_get(Local(1));
+        local_get(1);
         i32_load(0);
         call(emitter.rt.string.eq);
         end;
@@ -119,25 +94,25 @@ pub(super) fn compile_result_eq_i64_str(emitter: &mut WasmEmitter) {
 
     // Compare tags
     wasm!(f, {
-        local_get(Local(0));
+        local_get(0);
         i32_load(0);
-        local_get(Local(1));
+        local_get(1);
         i32_load(0);
         i32_ne;
         if_empty;
-        i32_const(Imm32(0));
+        i32_const(0);
         return_;
         end;
     });
     // Same tag. If tag == 0 (ok): compare i64 at offset 4
     wasm!(f, {
-        local_get(Local(0));
+        local_get(0);
         i32_load(0);
         i32_eqz;
         if_empty;
-        local_get(Local(0));
+        local_get(0);
         i64_load(4);
-        local_get(Local(1));
+        local_get(1);
         i64_load(4);
         i64_eq;
         return_;
@@ -145,9 +120,9 @@ pub(super) fn compile_result_eq_i64_str(emitter: &mut WasmEmitter) {
     });
     // tag == 1 (err): compare strings at offset 4
     wasm!(f, {
-        local_get(Local(0));
+        local_get(0);
         i32_load(4);
-        local_get(Local(1));
+        local_get(1);
         i32_load(4);
         call(emitter.rt.string.eq);
         end;
@@ -165,51 +140,51 @@ pub(super) fn compile_mem_eq(emitter: &mut WasmEmitter) {
 
     // Same pointer → equal
     wasm!(f, {
-        local_get(Local(0));
-        local_get(Local(1));
+        local_get(0);
+        local_get(1);
         i32_eq;
         if_empty;
-        i32_const(Imm32(1));
+        i32_const(1);
         return_;
         end;
     });
 
     // Compare bytes
     wasm!(f, {
-        i32_const(Imm32(0));
-        local_set(Local(3));
+        i32_const(0);
+        local_set(3);
         block_empty;
         loop_empty;
-        local_get(Local(3));
-        local_get(Local(2));
+        local_get(3);
+        local_get(2);
         i32_ge_u;
         if_empty;
-        i32_const(Imm32(1));
+        i32_const(1);
         return_;
         end;
-        local_get(Local(0));
-        local_get(Local(3));
+        local_get(0);
+        local_get(3);
         i32_add;
         i32_load8_u(0);
-        local_get(Local(1));
-        local_get(Local(3));
+        local_get(1);
+        local_get(3);
         i32_add;
         i32_load8_u(0);
         i32_ne;
         if_empty;
-        i32_const(Imm32(0));
+        i32_const(0);
         return_;
         end;
-        local_get(Local(3));
-        i32_const(Imm32(1));
+        local_get(3);
+        i32_const(1);
         i32_add;
-        local_set(Local(3));
+        local_set(3);
         br(0);
         end;
         end;
     });
 
-    wasm!(f, { i32_const(Imm32(0)); end; });
+    wasm!(f, { i32_const(0); end; });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.mem_eq, type_idx, f));
 }
 
@@ -225,78 +200,78 @@ pub(super) fn compile_list_eq(emitter: &mut WasmEmitter) {
 
     // Same pointer → equal
     wasm!(f, {
-        local_get(Local(0));
-        local_get(Local(1));
+        local_get(0);
+        local_get(1);
         i32_eq;
         if_empty;
-        i32_const(Imm32(1));
+        i32_const(1);
         return_;
         end;
     });
 
     // Compare lengths
     wasm!(f, {
-        local_get(Local(0));
+        local_get(0);
         i32_load(0);
-        local_set(Local(3));
-        local_get(Local(3));
-        local_get(Local(1));
+        local_set(3);
+        local_get(3);
+        local_get(1);
         i32_load(0);
         i32_ne;
         if_empty;
-        i32_const(Imm32(0));
+        i32_const(0);
         return_;
         end;
     });
 
     // $total_bytes = $len * $elem_size
     wasm!(f, {
-        local_get(Local(3));
-        local_get(Local(2));
+        local_get(3);
+        local_get(2);
         i32_mul;
-        local_set(Local(4));
+        local_set(4);
     });
 
     // Compare data bytes
     wasm!(f, {
-        i32_const(Imm32(0));
-        local_set(Local(5));
+        i32_const(0);
+        local_set(5);
         block_empty;
         loop_empty;
-        local_get(Local(5));
-        local_get(Local(4));
+        local_get(5);
+        local_get(4);
         i32_ge_u;
         if_empty;
-        i32_const(Imm32(1));
+        i32_const(1);
         return_;
         end;
-        local_get(Local(0));
-        i32_const(Imm32(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32));
+        local_get(0);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32);
         i32_add;
-        local_get(Local(5));
+        local_get(5);
         i32_add;
         i32_load8_u(0);
-        local_get(Local(1));
-        i32_const(Imm32(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32));
+        local_get(1);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32);
         i32_add;
-        local_get(Local(5));
+        local_get(5);
         i32_add;
         i32_load8_u(0);
         i32_ne;
         if_empty;
-        i32_const(Imm32(0));
+        i32_const(0);
         return_;
         end;
-        local_get(Local(5));
-        i32_const(Imm32(1));
+        local_get(5);
+        i32_const(1);
         i32_add;
-        local_set(Local(5));
+        local_set(5);
         br(0);
         end;
         end;
     });
 
-    wasm!(f, { i32_const(Imm32(0)); end; });
+    wasm!(f, { i32_const(0); end; });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.list_eq, type_idx, f));
 }
 
@@ -314,28 +289,28 @@ pub(super) fn compile_list_list_str_cmp(emitter: &mut WasmEmitter) {
         (1, ValType::I32), // 6: c (per-element cmp)
     ]);
     wasm!(f, {
-        local_get(Local(0)); i32_load(0); local_set(Local(2));
-        local_get(Local(1)); i32_load(0); local_set(Local(3));
+        local_get(0); i32_load(0); local_set(2);
+        local_get(1); i32_load(0); local_set(3);
         // min_len = min(a_len, b_len)
-        local_get(Local(2)); local_get(Local(3)); i32_lt_u;
-        if_i32; local_get(Local(2)); else_; local_get(Local(3)); end;
-        local_set(Local(4));
+        local_get(2); local_get(3); i32_lt_u;
+        if_i32; local_get(2); else_; local_get(3); end;
+        local_set(4);
         // Compare element-by-element (elements are 4-byte string pointers).
-        i32_const(Imm32(0)); local_set(Local(5));
+        i32_const(0); local_set(5);
         block_empty; loop_empty;
-          local_get(Local(5)); local_get(Local(4)); i32_ge_u; br_if(1);
-          local_get(Local(0)); i32_const(Imm32(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-          local_get(Local(5)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_load(0);
-          local_get(Local(1)); i32_const(Imm32(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-          local_get(Local(5)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_load(0);
-          call(str_cmp); local_set(Local(6));
-          local_get(Local(6)); i32_const(Imm32(0)); i32_ne;
-          if_empty; local_get(Local(6)); return_; end;
-          local_get(Local(5)); i32_const(Imm32(1)); i32_add; local_set(Local(5));
+          local_get(5); local_get(4); i32_ge_u; br_if(1);
+          local_get(0); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
+          local_get(5); i32_const(4); i32_mul; i32_add; i32_load(0);
+          local_get(1); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
+          local_get(5); i32_const(4); i32_mul; i32_add; i32_load(0);
+          call(str_cmp); local_set(6);
+          local_get(6); i32_const(0); i32_ne;
+          if_empty; local_get(6); return_; end;
+          local_get(5); i32_const(1); i32_add; local_set(5);
           br(0);
         end; end;
         // Tie on common prefix: shorter list sorts first.
-        local_get(Local(2)); local_get(Local(3)); i32_sub;
+        local_get(2); local_get(3); i32_sub;
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.list_list_str_cmp, type_idx, f));
@@ -356,38 +331,38 @@ pub(super) fn compile_concat_list(emitter: &mut WasmEmitter) {
     ]);
 
     wasm!(f, {
-        local_get(Local(0));
+        local_get(0);
         i32_load(0);
-        local_set(Local(3));
-        local_get(Local(1));
+        local_set(3);
+        local_get(1);
         i32_load(0);
-        local_set(Local(4));
-        local_get(Local(3));
-        local_get(Local(4));
+        local_set(4);
+        local_get(3);
+        local_get(4);
         i32_add;
-        local_set(Local(5));
-        local_get(Local(3));
-        local_get(Local(2));
+        local_set(5);
+        local_get(3);
+        local_get(2);
         i32_mul;
-        local_set(Local(7));
-        local_get(Local(4));
-        local_get(Local(2));
+        local_set(7);
+        local_get(4);
+        local_get(2);
         i32_mul;
-        local_set(Local(8));
-        i32_const(Imm32(emitter.layout_reg.header_size(super::engine::layout::LIST) as i32));
-        local_get(Local(7));
+        local_set(8);
+        i32_const(emitter.layout_reg.header_size(super::engine::layout::LIST) as i32);
+        local_get(7);
         i32_add;
-        local_get(Local(8));
+        local_get(8);
         i32_add;
         call(emitter.rt.alloc);
-        local_set(Local(6));
+        local_set(6);
         // Store len
-        local_get(Local(6));
-        local_get(Local(5));
+        local_get(6);
+        local_get(5);
         i32_store(0);
         // Store cap = new_len
-        local_get(Local(6));
-        local_get(Local(5));
+        local_get(6);
+        local_get(5);
         i32_store(4);
     });
 
@@ -396,38 +371,38 @@ pub(super) fn compile_concat_list(emitter: &mut WasmEmitter) {
 
     // Copy b's data: dst=$result+DATA_OFFSET+$bytes_a, src=$b+DATA_OFFSET
     wasm!(f, {
-        i32_const(Imm32(0));
-        local_set(Local(9));
+        i32_const(0);
+        local_set(9);
         block_empty;
         loop_empty;
-        local_get(Local(9));
-        local_get(Local(8));
+        local_get(9);
+        local_get(8);
         i32_ge_u;
         br_if(1);
-        local_get(Local(6));
-        i32_const(Imm32(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32));
+        local_get(6);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32);
         i32_add;
-        local_get(Local(7));
+        local_get(7);
         i32_add;
-        local_get(Local(9));
+        local_get(9);
         i32_add;
-        local_get(Local(1));
-        i32_const(Imm32(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32));
+        local_get(1);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32);
         i32_add;
-        local_get(Local(9));
+        local_get(9);
         i32_add;
         i32_load8_u(0);
         i32_store8(0);
-        local_get(Local(9));
-        i32_const(Imm32(1));
+        local_get(9);
+        i32_const(1);
         i32_add;
-        local_set(Local(9));
+        local_set(9);
         br(0);
         end;
         end;
     });
 
-    wasm!(f, { local_get(Local(6)); end; });
+    wasm!(f, { local_get(6); end; });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.concat_list, type_idx, f));
 }
 
@@ -477,12 +452,12 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
     // Emit an `err(<interned string>)` return: alloc [tag=1][str_ptr] and return.
     let emit_err = |f: &mut Function, err_str: u32| {
         wasm!(f, {
-            i32_const(Imm32(RESULT_HEAP_BYTES));
+            i32_const(12);
             call(alloc);
-            local_set(Local(6));
-            local_get(Local(6)); i32_const(Imm32(1)); i32_store(0);              // tag = 1 (err)
-            local_get(Local(6)); i32_const(Imm32(err_str as i32)); i32_store(4); // err string ptr
-            local_get(Local(6));
+            local_set(6);
+            local_get(6); i32_const(1); i32_store(0);              // tag = 1 (err)
+            local_get(6); i32_const(err_str as i32); i32_store(4); // err string ptr
+            local_get(6);
             return_;
         });
     };
@@ -490,72 +465,72 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
     // Emit `byte = s[data_off + idx_local]`.
     let load_byte = |f: &mut Function, idx_local: u32, dst: u32| {
         wasm!(f, {
-            local_get(Local(0)); i32_const(Imm32(data_off)); i32_add;
-            local_get(Local(idx_local)); i32_add;
-            i32_load8_u(0); local_set(Local(dst));
+            local_get(0); i32_const(data_off); i32_add;
+            local_get(idx_local); i32_add;
+            i32_load8_u(0); local_set(dst);
         });
     };
 
     // len = s.len  (byte length lives at the LEN field, offset 0)
     wasm!(f, {
-        local_get(Local(0)); i32_load(0); local_set(Local(1));
+        local_get(0); i32_load(0); local_set(1);
     });
 
     // Trim leading + trailing Unicode whitespace (matches native s.trim().parse),
     // codepoint-aware via the shared __is_unicode_ws helpers. i=cursor(2), end=3,
     // string ptr=0, scratch q=5.
-    wasm!(f, { i32_const(Imm32(0)); local_set(Local(2)); });
+    wasm!(f, { i32_const(0); local_set(2); });
     super::rt_string::emit_trim_forward(&mut f, emitter, 2, 1);
-    wasm!(f, { local_get(Local(1)); local_set(Local(3)); });
+    wasm!(f, { local_get(1); local_set(3); });
     super::rt_string::emit_trim_backward(&mut f, emitter, 3, 2, 5);
 
     // ── Empty after trim → "cannot parse integer from empty string" ──
-    wasm!(f, { local_get(Local(2)); local_get(Local(3)); i32_ge_u; if_empty; });
+    wasm!(f, { local_get(2); local_get(3); i32_ge_u; if_empty; });
     emit_err(&mut f, err_empty);
     wasm!(f, { end; });
 
     // ── Optional single leading sign ──
-    wasm!(f, { i32_const(Imm32(0)); local_set(Local(4)); }); // is_neg = 0
+    wasm!(f, { i32_const(0); local_set(4); }); // is_neg = 0
     load_byte(&mut f, 2, 5);
     wasm!(f, {
-        local_get(Local(5)); i32_const(Imm32(ASCII_MINUS)); i32_eq; // '-'
+        local_get(5); i32_const(45); i32_eq; // '-'
         if_empty;
-          i32_const(Imm32(1)); local_set(Local(4));
-          local_get(Local(2)); i32_const(Imm32(1)); i32_add; local_set(Local(2));
+          i32_const(1); local_set(4);
+          local_get(2); i32_const(1); i32_add; local_set(2);
         else_;
-          local_get(Local(5)); i32_const(Imm32(ASCII_PLUS)); i32_eq; // '+'
+          local_get(5); i32_const(43); i32_eq; // '+'
           if_empty;
-            local_get(Local(2)); i32_const(Imm32(1)); i32_add; local_set(Local(2));
+            local_get(2); i32_const(1); i32_add; local_set(2);
           end;
         end;
     });
 
     // ── No digits after sign → "invalid digit found in string" ──
-    wasm!(f, { local_get(Local(2)); local_get(Local(3)); i32_ge_u; if_empty; });
+    wasm!(f, { local_get(2); local_get(3); i32_ge_u; if_empty; });
     emit_err(&mut f, err_digit);
     wasm!(f, { end; });
 
     // ── limit = is_neg ? 0x8000000000000000 (|i64::MIN|) : i64::MAX ──
     wasm!(f, {
-        local_get(Local(4));
+        local_get(4);
         if_empty;
-          i64_const(Imm64(i64::MIN)); // bit pattern 0x8000000000000000 == 2^63 unsigned
-          local_set(Local(9));
+          i64_const(i64::MIN); // bit pattern 0x8000000000000000 == 2^63 unsigned
+          local_set(9);
         else_;
-          i64_const(Imm64(i64::MAX));
-          local_set(Local(9));
+          i64_const(i64::MAX);
+          local_set(9);
         end;
     });
 
     // acc = 0, digit_count = 0
     wasm!(f, {
-        i64_const(Imm64(0)); local_set(Local(7));
-        i32_const(Imm32(0)); local_set(Local(8));
+        i64_const(0); local_set(7);
+        i32_const(0); local_set(8);
     });
 
     // ── Main parse loop: while i < end ──
     wasm!(f, { block_empty; loop_empty;
-        local_get(Local(2)); local_get(Local(3)); i32_ge_u; br_if(1);
+        local_get(2); local_get(3); i32_ge_u; br_if(1);
     });
 
     // byte = s[i]
@@ -563,8 +538,8 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
 
     // Non-digit → "invalid digit found in string"
     wasm!(f, {
-        local_get(Local(5)); i32_const(Imm32(ASCII_ZERO)); i32_lt_u; // < '0'
-        local_get(Local(5)); i32_const(Imm32(ASCII_NINE)); i32_gt_u; // > '9'
+        local_get(5); i32_const(48); i32_lt_u; // < '0'
+        local_get(5); i32_const(57); i32_gt_u; // > '9'
         i32_or;
         if_empty;
     });
@@ -573,20 +548,20 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
 
     // d = (byte - '0') as i64  →  tmp
     wasm!(f, {
-        local_get(Local(5)); i32_const(Imm32(ASCII_ZERO)); i32_sub;
-        i64_extend_i32_u; local_set(Local(10));
+        local_get(5); i32_const(48); i32_sub;
+        i64_extend_i32_u; local_set(10);
     });
 
     // ── Overflow step 1: if acc > limit/10 → overflow (acc*10 already exceeds limit) ──
     // Unsigned `a > b` ≡ !(b >= a), expressed via i64_ge_u + i32_eqz.
     wasm!(f, {
-        local_get(Local(9)); i64_const(Imm64(DECIMAL_BASE)); i64_div_u; // limit/10
-        local_get(Local(7));                            // acc
+        local_get(9); i64_const(10); i64_div_u; // limit/10
+        local_get(7);                            // acc
         i64_ge_u;                                // (limit/10) >= acc  ≡  acc <= limit/10
         i32_eqz;                                 // → acc > limit/10
         if_empty;
     });
-    wasm!(f, { local_get(Local(4)); if_empty; });
+    wasm!(f, { local_get(4); if_empty; });
     emit_err(&mut f, err_small);
     wasm!(f, { else_; });
     emit_err(&mut f, err_large);
@@ -594,18 +569,18 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
 
     // acc = acc * 10  (safe: acc <= limit/10, so acc*10 <= limit < u64::MAX)
     wasm!(f, {
-        local_get(Local(7)); i64_const(Imm64(DECIMAL_BASE)); i64_mul; local_set(Local(7));
+        local_get(7); i64_const(10); i64_mul; local_set(7);
     });
 
     // ── Overflow step 2: if acc > limit - d → overflow (adding d would exceed) ──
     wasm!(f, {
-        local_get(Local(9)); local_get(Local(10)); i64_sub; // limit - d
-        local_get(Local(7));                          // acc
+        local_get(9); local_get(10); i64_sub; // limit - d
+        local_get(7);                          // acc
         i64_ge_u;                              // (limit - d) >= acc
         i32_eqz;                               // → acc > limit - d
         if_empty;
     });
-    wasm!(f, { local_get(Local(4)); if_empty; });
+    wasm!(f, { local_get(4); if_empty; });
     emit_err(&mut f, err_small);
     wasm!(f, { else_; });
     emit_err(&mut f, err_large);
@@ -613,12 +588,12 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
 
     // acc = acc + d
     wasm!(f, {
-        local_get(Local(7)); local_get(Local(10)); i64_add; local_set(Local(7));
+        local_get(7); local_get(10); i64_add; local_set(7);
     });
 
     // i++, continue
     wasm!(f, {
-        local_get(Local(2)); i32_const(Imm32(1)); i32_add; local_set(Local(2));
+        local_get(2); i32_const(1); i32_add; local_set(2);
         br(0);
         end; end;
     });
@@ -627,18 +602,18 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
     // Negative: value = 0 - acc (two's-complement; wraps exactly to i64::MIN when
     // acc == 2^63). Positive: value = acc (acc <= i64::MAX, fits).
     wasm!(f, {
-        local_get(Local(4));
+        local_get(4);
         if_empty;
-          i64_const(Imm64(0)); local_get(Local(7)); i64_sub; local_set(Local(7));
+          i64_const(0); local_get(7); i64_sub; local_set(7);
         end;
     });
 
     // Return ok(value): alloc [tag=0][value:i64]
     wasm!(f, {
-        i32_const(Imm32(RESULT_HEAP_BYTES)); call(alloc); local_set(Local(6));
-        local_get(Local(6)); i32_const(Imm32(0)); i32_store(0); // tag = 0 (ok)
-        local_get(Local(6)); local_get(Local(7)); i64_store(4); // value
-        local_get(Local(6));
+        i32_const(12); call(alloc); local_set(6);
+        local_get(6); i32_const(0); i32_store(0); // tag = 0 (ok)
+        local_get(6); local_get(7); i64_store(4); // value
+        local_get(6);
         end;
     });
 

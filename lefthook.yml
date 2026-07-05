@@ -9,6 +9,8 @@ pre-commit:
     contracts:
       glob: "{docs/contracts/contracts.toml,docs/contracts/*.md,spec/wasm_cross/*.almd,crates/almide-codegen/rt-oracle-registry.toml,scripts/check-contracts.sh,scripts/lib/contract-classes.txt}"
       run: scripts/check-contracts.sh && bash docs/contracts/generate-readme.sh > docs/contracts/README.md && git add docs/contracts/README.md
+    ratchet-separation:
+      run: scripts/check-ratchet-separation.sh
     semantics-manifest:
       glob: "{docs/stdlib/semantics-manifest.toml,stdlib/string.almd,spec/stdlib/string_semantics_manifest_test.almd,scripts/check-semantics-manifest.sh}"
       run: scripts/check-semantics-manifest.sh

@@ -5,7 +5,6 @@
 
 use std::collections::{HashMap, HashSet};
 use wasm_encoder::ValType;
-use crate::emit_wasm::engine::Local;
 
 use almide_ir::{IrExpr, IrExprKind, IrProgram, IrStmtKind, VarId};
 use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
@@ -308,15 +307,15 @@ pub(super) fn compile_lambda_bodies(
                 // Mutable capture: env stores cell ptr (i32). Load as i32.
                 let cap_local = var_map[&vid.0];
                 let offset = ci as u32 * 8;
-                wasm!(wasm_func, { local_get(Local(0)); });
+                wasm_func.instruction(&wasm_encoder::Instruction::LocalGet(0));
                 wasm_func.instruction(&wasm_encoder::Instruction::I32Load(
                     wasm_encoder::MemArg { offset: offset as u64, align: 2, memory_index: 0 }
                 ));
-                wasm!(wasm_func, { local_set(Local(cap_local)); });
+                wasm_func.instruction(&wasm_encoder::Instruction::LocalSet(cap_local));
             } else if let Some(vt) = values::ty_to_valtype(ty) {
                 let cap_local = var_map[&vid.0];
                 let offset = ci as u32 * 8;
-                wasm!(wasm_func, { local_get(Local(0)); });
+                wasm_func.instruction(&wasm_encoder::Instruction::LocalGet(0));
                 match vt {
                     ValType::I64 => {
                         wasm_func.instruction(&wasm_encoder::Instruction::I64Load(
@@ -334,7 +333,7 @@ pub(super) fn compile_lambda_bodies(
                         ));
                     }
                 }
-                wasm!(wasm_func, { local_set(Local(cap_local)); });
+                wasm_func.instruction(&wasm_encoder::Instruction::LocalSet(cap_local));
             }
         }
 
@@ -353,6 +352,7 @@ pub(super) fn compile_lambda_bodies(
                 var_table: &program.var_table,
                 stub_ret_ty: Ty::Unit,
                 current_module_name: None,
+                live_heap: Vec::new(),
             };
             compiler.emit_expr(body);
             compiler.func.instruction(&wasm_encoder::Instruction::End);
@@ -376,7 +376,7 @@ pub(super) fn compile_lambda_bodies(
                 let mut f = super::TrackedFunction::new([]);
                 // Skip env (local 0), pass remaining params to original
                 for i in 0..orig_params.len() {
-                    wasm!(f, { local_get(Local((i + 1) as u32)); });
+                    f.instruction(&wasm_encoder::Instruction::LocalGet((i + 1) as u32));
                 }
                 f.instruction(&wasm_encoder::Instruction::Call(orig_func_idx));
                 f.instruction(&wasm_encoder::Instruction::End);

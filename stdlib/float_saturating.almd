@@ -1,0 +1,13 @@
+// float_saturating — SELF-HOSTED `float.to_{int,uint}N_saturating` for v1. v0 defines each as a
+// plain forward to `float.to_intN` (the f64→iN `as` cast is ALREADY saturating in Rust: out-of-range
+// floats clamp to the type's min/max, NaN → 0), so the saturating variant IS the conversion. Each
+// forwards to the already-self-hosted `float.to_intN` (a 1:1 CallFn — no mir>ir issue); pure scalar.
+
+fn float_to_int8_saturating(n: Float) -> Int8 = float.to_int8(n)
+fn float_to_int16_saturating(n: Float) -> Int16 = float.to_int16(n)
+fn float_to_int32_saturating(n: Float) -> Int32 = float.to_int32(n)
+fn float_to_int64_saturating(n: Float) -> Int64 = float.to_int64(n)
+fn float_to_uint8_saturating(n: Float) -> UInt8 = float.to_uint8(n)
+fn float_to_uint16_saturating(n: Float) -> UInt16 = float.to_uint16(n)
+fn float_to_uint32_saturating(n: Float) -> UInt32 = float.to_uint32(n)
+fn float_to_uint64_saturating(n: Float) -> UInt64 = float.to_uint64(n)

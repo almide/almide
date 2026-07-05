@@ -1,0 +1,146 @@
+// map_to_string — SELF-HOSTED `${Map[String, Int]}` interpolation, byte-matching v0's
+// `["a": 1, "b": 2]` (insertion order; empty map → `[:]`). Keys come from `map.keys` (List[String]),
+// values from `map.values` (List[Int]) — both callable, both insertion-ordered (now that a map
+// literal materializes a real map). Each entry renders as `"<escaped key>": <decimal value>`, joined
+// by `, `, wrapped in `[` … `]`. Two passes (measure, fill); escape + decimal helpers mirror the
+// list-element formatters. The owned `map.keys`/`map.values` lists drop at scope end (PCC-verified).
+
+fn __mts_is_escaped(b: Int) -> Bool =
+  if b == 92 then true
+  else if b == 34 then true
+  else if b == 10 then true
+  else if b == 13 then true
+  else if b == 9 then true
+  else false
+
+fn __mts_esc_len(src: Int, slen: Int, i: Int, acc: Int) -> Int =
+  if i >= slen then acc
+  else {
+    let b = prim.load8(src + i)
+    let w = if __mts_is_escaped(b) then 2 else 1
+    __mts_esc_len(src, slen, i + 1, acc + w)
+  }
+
+fn __mts_esc_char(b: Int) -> Int =
+  if b == 10 then 110
+  else if b == 13 then 114
+  else if b == 9 then 116
+  else b
+
+fn __mts_fill_esc(src: Int, slen: Int, i: Int, pos: Int) -> Int =
+  if i >= slen then pos
+  else {
+    let b = prim.load8(src + i)
+    let pos1 = if __mts_is_escaped(b) then {
+      prim.store8(pos, 92)
+      prim.store8(pos + 1, __mts_esc_char(b))
+      pos + 2
+    } else {
+      prim.store8(pos, b)
+      pos + 1
+    }
+    __mts_fill_esc(src, slen, i + 1, pos1)
+  }
+
+fn __mts_digits(n: Int, acc: Int) -> Int =
+  if n < 10 then acc + 1
+  else __mts_digits(n / 10, acc + 1)
+
+// Negative path WITHOUT negating (i64::MIN safe, #660): count digits of n <= 0 directly.
+fn __mts_count_neg(n: Int, acc: Int) -> Int =
+  if n > 0 - 10 then acc + 1
+  else __mts_count_neg(n / 10, acc + 1)
+
+fn __mts_int_width(v: Int) -> Int =
+  if v < 0 then __mts_count_neg(v, 0) + 1
+  else __mts_digits(v, 0)
+
+fn __mts_fill_digits(n: Int, pos: Int) -> Int =
+  if n < 10 then {
+    prim.store8(pos, 48 + n)
+    pos + 1
+  } else {
+    let p = __mts_fill_digits(n / 10, pos)
+    prim.store8(p, 48 + (n % 10))
+    p + 1
+  }
+
+// Fill the digits of n <= 0 WITHOUT negating: magnitude digit = -(n % 10) ∈ [0, 9].
+fn __mts_fill_neg(n: Int, pos: Int) -> Int =
+  if n > 0 - 10 then {
+    prim.store8(pos, 48 + (0 - n))
+    pos + 1
+  } else {
+    let p = __mts_fill_neg(n / 10, pos)
+    prim.store8(p, 48 + (0 - (n % 10)))
+    p + 1
+  }
+
+fn __mts_fill_int(v: Int, pos: Int) -> Int =
+  if v < 0 then {
+    prim.store8(pos, 45)
+    __mts_fill_neg(v, pos + 1)
+  } else __mts_fill_digits(v, pos)
+
+// Key width: `"` + escaped-body + `"` (elem = the String handle at slot i).
+fn __mts_key_width(elem: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  2 + __mts_esc_len(elem + 12, slen, 0, 0)
+}
+
+// Total body width = Σ per-entry (sep + key + ": " + value).
+fn __mts_body_len(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let v = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __mts_key_width(kelem) + 2 + __mts_int_width(v)
+    __mts_body_len(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
+
+// Write one key `"<escaped>"` at `pos`; return the address past it.
+fn __mts_fill_key(elem: Int, pos: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  prim.store8(pos, 34)
+  let mid = __mts_fill_esc(elem + 12, slen, 0, pos + 1)
+  prim.store8(mid, 34)
+  mid + 1
+}
+
+fn __mts_fill_body(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)               // ','
+      prim.store8(pos + 1, 32)           // ' '
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __mts_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)                // ':'
+    prim.store8(pos2 + 1, 32)            // ' '
+    let v = prim.load64(vaddr + i * 8)
+    let pos3 = __mts_fill_int(v, pos2 + 2)
+    __mts_fill_body(kaddr, vaddr, count, i + 1, pos3)
+  }
+
+fn map_to_string(m: Map[String, Int]) -> String = {
+  let ks = map.keys(m)
+  let vs = map.values(m)
+  let hk = prim.handle(ks)
+  let hv = prim.handle(vs)
+  let count = prim.load32(hk + 4)
+  if count == 0 then "[:]"
+  else {
+    let kaddr = hk + 12
+    let vaddr = hv + 12
+    let body = __mts_body_len(kaddr, vaddr, count, 0, 0)
+    let buf = prim.alloc_str(body + 2)   // '[' + body + ']'
+    let base = prim.handle(buf) + 12
+    prim.store8(base, 91)                // '['
+    let after = __mts_fill_body(kaddr, vaddr, count, 0, base + 1)
+    prim.store8(after, 93)               // ']'
+    buf
+  }
+}

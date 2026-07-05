@@ -1,0 +1,37 @@
+// list_hshare — handle-SHARING accessors over a List[heap]: the result CO-OWNS its
+// block (a borrowed `prim.load_handle` auto-acquires on move-out; take's per-slot
+// copies rc_inc explicitly — the __lc_copy_rc convention), correct for ANY element
+// layout (no deep copy, no layout assumption). The list keeps owning the originals;
+// the result's own typed drop releases exactly the acquired refs.
+
+fn __hshare_elem(h: Int, i: Int) -> List[Int] = {
+  let v: List[Int] = prim.load_handle(h + 12 + i * 8)
+  v
+}
+
+fn list_get_or_hshare(xs: List[List[Int]], i: Int, default: List[Int]) -> List[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if i < 0 then default
+  else if i >= len then default
+  else __hshare_elem(h, i)
+}
+
+fn __take_h_fill(dh: Int, sh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(sh + 12 + i * 8)
+    prim.rc_inc(e)
+    prim.store64(dh + 12 + i * 8, e)
+    __take_h_fill(dh, sh, n, i + 1)
+  }
+
+fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let k0 = if n < len then n else len
+  let k = if k0 > 0 then k0 else 0
+  let out: List[List[Int]] = prim.alloc_list_str(k)
+  let _x = __take_h_fill(prim.handle(out), h, k, 0)
+  out
+}

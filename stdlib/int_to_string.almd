@@ -1,0 +1,75 @@
+// int_to_string — the SELF-HOSTED `int.to_string` for v1, written in ALMIDE over the
+// `prim` primitive floor (raw memory + the runtime-sized owned allocation
+// `prim.alloc_str`). The v1 lowering maps the `int.to_string(n)` stdlib call to a
+// `(call $int_to_string ...)`; this is that callee's BODY — compiled through v1's own
+// lower→MIR→render pipeline, NO hand-written wasm (the §4.1 discipline). The v1
+// runtime linker auto-includes this (with its helpers) when a program calls it.
+//
+// It allocates a String of exactly the digit count via `prim.alloc_str` (an owned
+// rc=1 block, cert `i`), fills the decimal bytes via `prim.store8`, and returns it
+// (moved out, freed by the caller). A NEGATIVE n prepends '-' then formats its
+// magnitude — but WITHOUT negating n (which would overflow for i64::MIN, whose
+// magnitude `9223372036854775808` is not a representable positive i64). Instead the
+// negative path extracts digits directly from n <= 0: `digit = -(n % 10)` (i64.rem_s
+// truncates toward zero, so n % 10 ∈ [-9,0] and its negation ∈ [0,9]) and `n / 10`
+// (toward zero). This is exact for ALL negatives including i64::MIN (#660).
+
+// Count the decimal digits of `n` (n >= 0), accumulator-style so the recursion is a
+// tail call (no `acc + count(...)` arithmetic over a call).
+fn __itos_count_digits(n: Int, acc: Int) -> Int =
+  if n < 10 then acc + 1
+  else __itos_count_digits(n / 10, acc + 1)
+
+// Write the decimal bytes of `n` (n >= 0) starting at byte address `pos`, most
+// significant first (the recursion writes the high digits before the low one).
+// Returns the address just past the last byte written.
+fn __itos_fill(n: Int, pos: Int) -> Int =
+  if n < 10 then {
+    prim.store8(pos, 48 + n)   // '0' = 48
+    pos + 1
+  } else {
+    let p = __itos_fill(n / 10, pos)
+    prim.store8(p, 48 + (n % 10))
+    p + 1
+  }
+
+// Non-negative path: a String of exactly the digit count.
+fn __itos_pos(n: Int) -> String = {
+  let len = __itos_count_digits(n, 0)
+  let buf = prim.alloc_str(len)              // owned rc=1 String, `len` bytes
+  let _end = __itos_fill(n, prim.handle(buf) + 12)  // data starts at handle + LIST_HEADER(12)
+  buf
+}
+
+// Count the decimal digits of `n` (n <= 0), without negating — `n > 0 - 10` means a
+// single magnitude digit (i64::MIN included: it is far below -9, so it recurses).
+fn __itos_count_digits_neg(n: Int, acc: Int) -> Int =
+  if n > 0 - 10 then acc + 1
+  else __itos_count_digits_neg(n / 10, acc + 1)
+
+// Write the magnitude bytes of `n` (n <= 0) starting at `pos`, MSD-first — extracting
+// `digit = -(n % 10)` directly so i64::MIN never has to be negated.
+fn __itos_fill_neg(n: Int, pos: Int) -> Int =
+  if n > 0 - 10 then {
+    prim.store8(pos, 48 + (0 - n))           // '0' = 48, magnitude digit = -n ∈ [0,9]
+    pos + 1
+  } else {
+    let p = __itos_fill_neg(n / 10, pos)
+    prim.store8(p, 48 + (0 - (n % 10)))      // magnitude of the low digit = -(n % 10)
+    p + 1
+  }
+
+// Negative path: `n` < 0 (passed UNCHANGED, never negated). One '-' byte (45) then the digits.
+fn __itos_neg(n: Int) -> String = {
+  let digits = __itos_count_digits_neg(n, 0)
+  let len = digits + 1
+  let buf = prim.alloc_str(len)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 45)                      // '-' = 45
+  let _end = __itos_fill_neg(n, base + 1)
+  buf
+}
+
+fn int_to_string(n: Int) -> String =
+  if n < 0 then __itos_neg(n)
+  else __itos_pos(n)

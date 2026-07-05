@@ -1,0 +1,59 @@
+// @contract: C-122
+// Value object operations that build a NEW pair list from existing objects —
+// `value.merge`, `value.pick`, `value.omit`, `json.keys`, and the ok path of
+// `value.get`/`value.field` — must (a) allocate the FULL `[len][cap][data]`
+// list layout and (b) own a +1 on every shared pair / key / payload. The WASM
+// emitter previously allocated 4 bytes short (no cap word — the last element
+// write clobbered the next heap block), left cap uninitialized, and copied
+// pair/key/value pointers borrowed: `value.merge(a, b)` read back `{"":null}`
+// and the toml array-of-tables parse silently dropped fields.
+import json
+
+fn push_obj(root: Value, key: String) -> Value = {
+  let arr = value.as_array(value.get(root, key) ?? value.object([])) ?? []
+  value.merge(root, value.object([(key, value.array(arr + [value.object([])]))]))
+}
+
+fn set_last(root: Value, key: String, item_key: String, v: Value) -> Value = {
+  let items = value.as_array(value.get(root, key) ?? value.object([])) ?? []
+  let idx = list.len(items) - 1
+  if idx >= 0 then {
+    let updated = list.set(items, idx, value.merge(list.get(items, idx) ?? value.object([]), value.object([(item_key, v)])))
+    value.merge(root, value.object([(key, value.array(updated))]))
+  } else root
+}
+
+fn main() -> Unit = {
+  // merge: override + append keys.
+  let a = value.object([("k", value.int(1)), ("x", value.str("old"))])
+  let b = value.object([("x", value.str("new")), ("y", value.bool(true))])
+  println(json.stringify(value.merge(a, b)))
+
+  // pick / omit share the kept pairs with the source object.
+  let src = value.object([("p", value.int(1)), ("q", value.int(2)), ("r", value.int(3))])
+  println(json.stringify(value.pick(src, ["p", "r"])))
+  println(json.stringify(value.omit(src, ["q"])))
+  println(json.stringify(src))
+
+  // json.keys elements alias the object's key strings — binding one must not
+  // free the object's live key.
+  let keys = json.keys(src)
+  println(list.get(keys, 0) ?? "?")
+  println(keys |> list.join(","))
+  println(json.stringify(src))
+
+  // value.get ok payload is shared with the object.
+  let inner = value.get(src, "q") ?? value.null()
+  println(value.stringify(inner))
+  println(json.stringify(src))
+
+  // The toml array-of-tables build shape: incremental merge into nested arrays.
+  var root = value.object([])
+  root = push_obj(root, "items")
+  root = set_last(root, "items", "name", value.str("x"))
+  root = set_last(root, "items", "count", value.int(3))
+  root = push_obj(root, "items")
+  root = set_last(root, "items", "name", value.str("y"))
+  root = set_last(root, "items", "count", value.int(7))
+  println(json.stringify(root))
+}

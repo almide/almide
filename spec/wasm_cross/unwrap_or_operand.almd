@@ -1,0 +1,14 @@
+// @contract: C-108
+// A scalar `??` in a BinOp OPERAND position (`(int.parse(s) ?? 0) - 48`, `(codepoint(ch) ?? 0)` fed
+// to arithmetic). Before: a `??` operand fell through `lower_scalar_value` to a `Const 0`, so the
+// WHOLE BinOp silently read 0 (a silent miscompile, e.g. oct/bin digit parsing). Now it executes.
+fn add1(s: String) -> Int = (int.parse(s) ?? 0) + 1
+fn digit(s: String) -> Int = (int.parse(s) ?? 0) - 48
+fn cp(cs: List[String], i: Int) -> Int = (string.codepoint(cs[i]) ?? 0) - 48
+fn main() -> Unit = {
+  println(int.to_string(add1("5")))     // 6
+  println(int.to_string(add1("x")))     // 1 (?? 0 fallback, +1)
+  println(int.to_string(digit("50")))   // 2
+  println(int.to_string(cp(string.chars("12"), 0)))  // codepoint('1')-48 = 1
+  println(int.to_string(cp(string.chars("12"), 1)))  // codepoint('2')-48 = 2
+}

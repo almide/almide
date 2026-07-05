@@ -114,3 +114,25 @@ jobs:
           fi
 
           echo "::notice::Cross-target: Rust $rust_pass, WASM $wasm_pass, both $both_pass / $total"
+
+      - name: v1 trust-spine differential fuzz (render_program v0==v1)
+        run: |
+          # PER-PR generative byte-match of the V1 TRUST-SPINE path (render_program -> wasm). The
+          # cross-target step above exercises the OLD wasm codegen, NOT the trust spine, and the
+          # nightly xtarget-fuzz emits only `let`-bound expressions — so the imperative
+          # `var v = w; … v = …` shape had NO per-PR gate, which is how the scalar-aliasing miscompile
+          # shipped. This synthesizes that class (var reassignment, loops, accumulators, the sha1
+          # rotation) PLUS the COMPARISON matrix (==/!=/</<=/>/>= over Int/String/Bool/Float + lists,
+          # in if-condition AND value position — the class that shipped the handle-compare / both-arms
+          # silent miscompiles) and byte-diffs v0 native vs v1 wasm. N is high enough that every
+          # template (now 11) is exercised each run. Any divergence fails the build.
+          bash proofs/diff-fuzz.sh 150
+
+      - name: v1 trust-spine output parity (fixtures, ratcheting baseline)
+        run: |
+          # FIXTURE byte-match of the V1 trust spine over spec/*.almd, gated against a ratcheting
+          # baseline (proofs/output-parity-baseline.txt) that can only GROW. The generative fuzz above
+          # catches NEW shapes; this catches a REGRESSION in any shape a committed fixture pins. The
+          # corpus-wall proves v1's SOUNDNESS properties but never compares stdout — this is the
+          # output-correctness leg. Skips gracefully if almide/wasmtime are absent.
+          bash proofs/output-parity.sh

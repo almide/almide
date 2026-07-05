@@ -1,0 +1,19 @@
+// @contract: C-106
+// A heap-result `if` whose arms are ok((String,Int))/err for Result[(String,Int),String] (toml
+// parse_key_part's `ok((slice, end))` AS AN IF-ARM, not just a tail). The Ok-tuple's String must
+// free recursively via the brick-1 DropResultStrInt — a flat DropListStr would leak it.
+fn parse_part(c: String, p: Int) -> Result[(String, Int), String] =
+  if c == "" then err("empty")
+  else if c == "0" then ok(("zero", p + 1))
+  else ok(("bare", p + 2))
+
+effect fn main() -> Unit = {
+  match parse_part("x", 10) {
+    ok(t) => { let (s, n) = t  println(s + ":" + int.to_string(n)) },
+    err(e) => println("E:" + e)
+  }
+  match parse_part("", 10) {
+    ok(t) => { let (s, n) = t  println(s) },
+    err(e) => println("E:" + e)
+  }
+}

@@ -1,0 +1,92 @@
+// json_scalar — SELF-HOSTED scalar `json.*` over the SHARED Value repr (value_core's block:
+// [rc][len@4 = TAG][cap@8][payload@12], tag 0=Null/1=Bool/2=Int/3=Float). json's Value IS value's
+// Value (one type; json.rs includes value.rs), so the constructors are byte-identical to value.int/
+// bool/float/null. The accessors return Option (json's contract) and WIDEN across Int/Float exactly
+// like v0: json.as_int sees a Float as `f as i64` (saturating), json.as_float sees an Int as
+// `n as f64`. Scalar payload → flat DropValue. Str/Array/Object are a refinement.
+//
+// SHAPE NOTE: an Option-returning body must stay MINIMAL — a long `let` chain before a `Some/None`
+// tail trips the multi-let-heap-body bail (the value structure is silently dropped → the fn returns
+// void). So ALL tag/payload computation lives in SCALAR helpers, and each accessor is just two lets
+// (value + domain flag) plus the FLAT `if ok == 1 then Some(var) else None` (the int_checked shape).
+
+// ── Constructors (mirror value_core; scalar payload @12, tag in the len field @4) ──
+
+fn json_null() -> Value = {
+  let v = prim.alloc_value(1)
+  prim.store32(prim.handle(v) + 4, 0)        // tag = Null
+  v
+}
+
+fn json_from_int(n: Int) -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 2)                      // tag = Int
+  prim.store64(h + 12, n)
+  v
+}
+
+fn json_from_bool(b: Bool) -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 1)                      // tag = Bool
+  let bi = if b then 1 else 0
+  prim.store64(h + 12, bi)
+  v
+}
+
+fn json_from_float(f: Float) -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 3)                      // tag = Float
+  let bits = prim.fbits(f)
+  prim.store64(h + 12, bits)
+  v
+}
+
+// ── Option builders (the int_checked SHAPE: expression-bodied, SCALAR params, NO lets/calls, flat
+//    Some/None arms — this is the only body form the materialized-Option lowering admits). All
+//    payload interpretations are passed pre-computed; the matched tag selects the right one. ──
+
+fn __jai(tag: Int, n_int: Int, n_flt: Int) -> Option[Int] =
+  if tag == 2 then Some(n_int)
+  else if tag == 3 then Some(n_flt)
+  else None
+
+fn __jaf(tag: Int, f_flt: Float, f_int: Float) -> Option[Float] =
+  if tag == 3 then Some(f_flt)
+  else if tag == 2 then Some(f_int)
+  else None
+
+fn __jab(tag: Int, b: Bool) -> Option[Bool] =
+  if tag == 1 then Some(b)
+  else None
+
+// ── Accessors: read the tag + payload (scalar prim reads in lets), then a TAIL CALL to the
+//    flat-arm builder (brick #46 — a heap Option-returning named-call tail after lets lowers). ──
+
+fn json_as_int(v: Value) -> Option[Int] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  let raw = prim.load64(h + 12)
+  let fv = prim.ffrombits(raw)
+  let nf = prim.f2i(fv)                       // Float payload → i64 (saturating `as`)
+  __jai(tag, raw, nf)
+}
+
+fn json_as_float(v: Value) -> Option[Float] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  let raw = prim.load64(h + 12)
+  let ff = prim.ffrombits(raw)                // Float payload
+  let fi = prim.i2f(raw)                      // Int payload → f64
+  __jaf(tag, ff, fi)
+}
+
+fn json_as_bool(v: Value) -> Option[Bool] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  let raw = prim.load64(h + 12)
+  let b = raw != 0
+  __jab(tag, b)
+}

@@ -1,0 +1,53 @@
+// list_fold_float — SELF-HOSTED `list.max` / `list.min` over a List[Float], by IEEE-754 totalOrder
+// (f64::total_cmp; see list_sort_float for the bit-key). The plain list.max/min compare the i64 slot
+// bits with signed-int `>`/`<` = garbage for f64. Here the running extremum carries the RAW f64 bits
+// (so `Some(best)` returns the original Float), and the COMPARISON uses the monotone totalOrder key.
+// max/min return Some(extremum)/None (None for the empty list, a materialized Option[Float]).
+
+fn __ftotal_ff(b: Int) -> Int = {
+  let s = prim.bshr(b, 63)
+  let m = prim.bshr_u(s, 1)
+  prim.bxor(b, m)
+}
+
+fn __maxf_fold(h: Int, len: Int, i: Int, best: Int) -> Int =
+  if i >= len then best
+  else {
+    let e = prim.load64(h + 12 + i * 8)
+    let nb = if __ftotal_ff(e) > __ftotal_ff(best) then e else best
+    __maxf_fold(h, len, i + 1, nb)
+  }
+
+fn __minf_fold(h: Int, len: Int, i: Int, best: Int) -> Int =
+  if i >= len then best
+  else {
+    let e = prim.load64(h + 12 + i * 8)
+    let nb = if __ftotal_ff(e) < __ftotal_ff(best) then e else best
+    __minf_fold(h, len, i + 1, nb)
+  }
+
+fn __lmmf_none() -> Option[Float] = None
+fn __lmaxf_at(h: Int, len: Int) -> Option[Float] = {
+  let first = prim.load64(h + 12)
+  let m = __maxf_fold(h, len, 1, first)
+  Some(prim.ffrombits(m))
+}
+fn __lminf_at(h: Int, len: Int) -> Option[Float] = {
+  let first = prim.load64(h + 12)
+  let m = __minf_fold(h, len, 1, first)
+  Some(prim.ffrombits(m))
+}
+
+fn list_max_float(xs: List[Float]) -> Option[Float] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then __lmmf_none()
+  else __lmaxf_at(h, len)
+}
+
+fn list_min_float(xs: List[Float]) -> Option[Float] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then __lmmf_none()
+  else __lminf_at(h, len)
+}

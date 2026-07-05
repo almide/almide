@@ -1,0 +1,37 @@
+// list_takedrop_str — SELF-HOSTED list.take / list.drop over a List[String] (the repr-poly _str
+// variants). Same clamping as list_take_drop (n<0 → all-for-take / empty-for-drop, mirroring v0's
+// `n as usize`); each kept element is DEEP-COPIED (string.repeat ·1) into a fresh DynListStr so it
+// is single-owned (the source keeps the original, no double-free). Source borrowed; result owned.
+
+fn __clamp_str(n: Int, len: Int) -> Int =
+  if n < 0 then len
+  else if n > len then len
+  else n
+
+fn __copy_slice_str(srch: Int, dsth: Int, start: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    let x = prim.load_str(srch + 12 + (start + i) * 8)
+    let copy = string.repeat(x, 1)
+    prim.store_str(dsth + 12 + i * 8, copy)
+    __copy_slice_str(srch, dsth, start, count, i + 1)
+  }
+
+fn list_take_str(xs: List[String], n: Int) -> List[String] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let count = __clamp_str(n, len)
+  let buf = prim.alloc_list_str(count)
+  let _x = __copy_slice_str(h, prim.handle(buf), 0, count, 0)
+  buf
+}
+
+fn list_drop_str(xs: List[String], n: Int) -> List[String] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let start = __clamp_str(n, len)
+  let count = len - start
+  let buf = prim.alloc_list_str(count)
+  let _x = __copy_slice_str(h, prim.handle(buf), start, count, 0)
+  buf
+}

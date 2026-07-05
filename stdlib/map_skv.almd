@@ -1,0 +1,398 @@
+// map_skv — SELF-HOSTED Map[String, scalar] (a heap-KEY, scalar-VALUE map: Map[String,Int] and
+// Map[String,Float] both, since an Int and the f64-bits of a Float occupy the SAME i64 value slot).
+//
+// PHYSICAL LAYOUT (distinct from map_str's interleaved all-String form): a single block with TWO
+// regions — `entries` String-handle KEY slots followed by `entries` i64 VALUE slots:
+//   [rc][len@4 = entries][cap@8 = 2*entries][k0@12, k1@20, ..., k(e-1), v0, v1, ..., v(e-1)]
+//   key   i @  h + 12 +            i  * 8
+//   value i @  h + 12 + (entries + i) * 8
+// The `len` header (at +4) is the KEY count `entries`, so a scope-end DropListStr frees EXACTLY the
+// `entries` key handles (the keys are owned Strings) and never touches the scalar value region (the
+// values own no heap). `cap` (at +8) is the FULL slot count `2*entries`, so the $alloc free-list
+// reuse — which recomputes a freed block's size from `cap` — sees the true allocation. INSERTION-
+// ORDERED (v0's AlmideMap). Keys compared by byte equality. Source borrowed; constructed maps owned.
+
+fn __skv_eq_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else {
+    let ca = prim.load8(pa + i)
+    let cb = prim.load8(pb + i)
+    if ca == cb then __skv_eq_bytes(pa, pb, n, i + 1)
+    else false
+  }
+
+fn __skv_eq(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  if la != lb then false
+  else __skv_eq_bytes(ha + 12, hb + 12, la, 0)
+}
+
+// Index of key k among the first `entries` key slots at block-handle h, or -1.
+fn __skv_find(h: Int, entries: Int, k: String, i: Int) -> Int =
+  if i >= entries then 0 - 1
+  else {
+    let kk = prim.load_str(h + 12 + i * 8)
+    let eq = __skv_eq(kk, k)
+    if eq then i
+    else __skv_find(h, entries, k, i + 1)
+  }
+
+fn map_new_skv() -> Map[String, Int] = prim.alloc_map_skv(0)
+
+fn map_len_skv(m: Map[String, Int]) -> Int = prim.load32(prim.handle(m) + 4)
+
+fn map_is_empty_skv(m: Map[String, Int]) -> Bool = prim.load32(prim.handle(m) + 4) == 0
+
+fn map_contains_skv(m: Map[String, Int], k: String) -> Bool = {
+  let h = prim.handle(m)
+  let entries = prim.load32(h + 4)
+  let idx = __skv_find(h, entries, k, 0)
+  idx >= 0
+}
+
+fn map_get_or_skv(m: Map[String, Int], k: String, default: Int) -> Int = {
+  let h = prim.handle(m)
+  let entries = prim.load32(h + 4)
+  let idx = __skv_find(h, entries, k, 0)
+  if idx < 0 then default
+  else prim.load64(h + 12 + (entries + idx) * 8)
+}
+
+// map.get — Some(value) when the key is present, None otherwise (a materialized Option, scalar
+// payload — works for Map[String,Int] and Map[String,Float] alike: the value slot is i64-width).
+fn __skv_none() -> Option[Int] = None
+fn __skv_some(h: Int, entries: Int, idx: Int) -> Option[Int] = {
+  let v = prim.load64(h + 12 + (entries + idx) * 8)
+  Some(v)
+}
+fn map_get_skv(m: Map[String, Int], k: String) -> Option[Int] = {
+  let h = prim.handle(m)
+  let entries = prim.load32(h + 4)
+  let idx = __skv_find(h, entries, k, 0)
+  if idx < 0 then __skv_none()
+  else __skv_some(h, entries, idx)
+}
+
+// Deep-copy String `s` into the key slot at `addr` (created AND consumed here).
+fn __skv_store_key(addr: Int, s: String) -> Int = {
+  let copy = string.repeat(s, 1)
+  prim.store_str(addr, copy)
+  0
+}
+
+// Copy every entry (key deep-copy + value) from sh to rh; the entry whose key equals k gets `newv`,
+// all others keep their old value. `sentries`/`rentries` are the source/result entry counts (the
+// value regions start at different offsets when the result grows by one).
+fn __skv_set_copy(sh: Int, rh: Int, sentries: Int, rentries: Int, k: String, newv: Int, i: Int) -> Int =
+  if i >= sentries then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __skv_store_key(rh + 12 + i * 8, kk)
+    let oldv = prim.load64(sh + 12 + (sentries + i) * 8)
+    let eq = __skv_eq(kk, k)
+    let putv = if eq then newv else oldv
+    prim.store64(rh + 12 + (rentries + i) * 8, putv)
+    __skv_set_copy(sh, rh, sentries, rentries, k, newv, i + 1)
+  }
+
+// Append a fresh (k, v) entry at slot `sentries` — ONLY when the key was new (idx < 0).
+fn __skv_set_append(rh: Int, sentries: Int, rentries: Int, idx: Int, k: String, v: Int) -> Int =
+  if idx >= 0 then 0
+  else {
+    let _kc = __skv_store_key(rh + 12 + sentries * 8, k)
+    prim.store64(rh + 12 + (rentries + sentries) * 8, v)
+    0
+  }
+
+fn map_set_skv(m: Map[String, Int], k: String, v: Int) -> Map[String, Int] = {
+  let sh = prim.handle(m)
+  let sentries = prim.load32(sh + 4)
+  let idx = __skv_find(sh, sentries, k, 0)
+  let extra = if idx < 0 then 1 else 0
+  let rentries = sentries + extra
+  let rslots = rentries * 2
+  let r = prim.alloc_map_skv(rslots)
+  let rh = prim.handle(r)
+  let _c = __skv_set_copy(sh, rh, sentries, rentries, k, v, 0)
+  let _a = __skv_set_append(rh, sentries, rentries, idx, k, v)
+  prim.store32(rh + 4, rentries)
+  r
+}
+
+// map.remove — copy every entry EXCEPT the one keyed k (preserving survivors' order). The result is
+// over-allocated for `sentries` keys (cap = 2*sentries) but its `len` is the survivor count.
+fn __skv_remove_fill(sh: Int, rh: Int, sentries: Int, rentries: Int, k: String, i: Int, w: Int) -> Int =
+  if i >= sentries then w
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let eq = __skv_eq(kk, k)
+    if eq then __skv_remove_fill(sh, rh, sentries, rentries, k, i + 1, w)
+    else {
+      let _kc = __skv_store_key(rh + 12 + w * 8, kk)
+      let vv = prim.load64(sh + 12 + (sentries + i) * 8)
+      prim.store64(rh + 12 + (rentries + w) * 8, vv)
+      __skv_remove_fill(sh, rh, sentries, rentries, k, i + 1, w + 1)
+    }
+  }
+
+fn map_remove_skv(m: Map[String, Int], k: String) -> Map[String, Int] = {
+  let sh = prim.handle(m)
+  let sentries = prim.load32(sh + 4)
+  let present = __skv_find(sh, sentries, k, 0)
+  let rentries = if present < 0 then sentries else sentries - 1
+  let rslots = rentries * 2
+  let r = prim.alloc_map_skv(rslots)
+  let rh = prim.handle(r)
+  let w = __skv_remove_fill(sh, rh, sentries, rentries, k, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// map.keys / map.values — extract each entry's key / value into a fresh List, deep-copying keys so
+// the list owns them independently of the map.
+fn __skv_keys_fill(sh: Int, oh: Int, entries: Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let _c = __skv_store_key(oh + 12 + i * 8, k)
+    __skv_keys_fill(sh, oh, entries, i + 1)
+  }
+
+fn map_keys_skv(m: Map[String, Int]) -> List[String] = {
+  let h = prim.handle(m)
+  let entries = prim.load32(h + 4)
+  let out = prim.alloc_list_str(entries)
+  let oh = prim.handle(out)
+  let _x = __skv_keys_fill(h, oh, entries, 0)
+  out
+}
+
+fn __skv_values_fill(sh: Int, oh: Int, entries: Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let v = prim.load64(sh + 12 + (entries + i) * 8)
+    prim.store64(oh + 12 + i * 8, v)
+    __skv_values_fill(sh, oh, entries, i + 1)
+  }
+
+fn map_values_skv(m: Map[String, Int]) -> List[Int] = {
+  let h = prim.handle(m)
+  let entries = prim.load32(h + 4)
+  let out = prim.alloc_list(entries)
+  let oh = prim.handle(out)
+  let _x = __skv_values_fill(h, oh, entries, 0)
+  out
+}
+
+// ── Higher-order Map[String, scalar] ── the closures receive the KEY as a String (a borrow,
+// prim.load_str → widened to the i64 closure ABI) and the VALUE as the raw i64 slot.
+
+// map.filter — keep a subset of entries (still unique keys). The predicate f : (String, V) -> Bool,
+// called EXACTLY ONCE per entry (a single pass, v0's order). Because the kept count `w` is not known
+// until the pass ends, kept KEYS go to slots `0..w` but kept VALUES are parked at the SOURCE-count
+// base `sentries` (slots `sentries+0 .. sentries+w`); a final compaction relocates the value region
+// down to its live base `w` so map.get/values read it at `(w + idx)`.
+fn __skv_filter_fill(sh: Int, sentries: Int, rh: Int, f: (String, Int) -> Bool, i: Int, w: Int) -> Int =
+  if i >= sentries then w
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let v = prim.load64(sh + 12 + (sentries + i) * 8)
+    let keep = f(k, v)
+    if keep then {
+      let _kc = __skv_store_key(rh + 12 + w * 8, k)
+      prim.store64(rh + 12 + (sentries + w) * 8, v)
+      __skv_filter_fill(sh, sentries, rh, f, i + 1, w + 1)
+    } else {
+      __skv_filter_fill(sh, sentries, rh, f, i + 1, w)
+    }
+  }
+
+// Relocate `w` parked values from base `from` down to base `to` (to < from, so a forward copy is
+// non-overlapping in the safe direction: slot to+j is read at from+j before it would be overwritten).
+fn __skv_compact_values(rh: Int, from: Int, to: Int, w: Int, j: Int) -> Int =
+  if j >= w then 0
+  else {
+    let v = prim.load64(rh + 12 + (from + j) * 8)
+    prim.store64(rh + 12 + (to + j) * 8, v)
+    __skv_compact_values(rh, from, to, w, j + 1)
+  }
+
+fn map_filter_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Map[String, Int] = {
+  let sh = prim.handle(m)
+  let sentries = prim.load32(sh + 4)
+  let rslots = sentries * 2
+  let r = prim.alloc_map_skv(rslots)
+  let rh = prim.handle(r)
+  let w = __skv_filter_fill(sh, sentries, rh, f, 0, 0)
+  let _z = __skv_compact_values(rh, sentries, w, w, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Sum the predicate's 0/1 over all entries → the hit COUNT (a Bool is an i64 0/1).
+fn __skv_count_hits(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int, acc: Int) -> Int =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let v = prim.load64(sh + 12 + (entries + i) * 8)
+    let h = f(k, v)
+    if h then __skv_count_hits(sh, entries, f, i + 1, acc + 1)
+    else __skv_count_hits(sh, entries, f, i + 1, acc)
+  }
+
+fn map_all_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
+  let sh = prim.handle(m)
+  let entries = prim.load32(sh + 4)
+  let hits = __skv_count_hits(sh, entries, f, 0, 0)
+  hits >= entries
+}
+
+fn map_any_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
+  let sh = prim.handle(m)
+  let entries = prim.load32(sh + 4)
+  let hits = __skv_count_hits(sh, entries, f, 0, 0)
+  hits > 0
+}
+
+fn map_count_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Int = {
+  let sh = prim.handle(m)
+  let entries = prim.load32(sh + 4)
+  __skv_count_hits(sh, entries, f, 0, 0)
+}
+
+// map.fold — left fold with a THREE-arity closure f : (Acc, String, V) -> Acc (v0's fold(m, init,
+// f), acc first). The accumulator and the value share the raw i64 slot, so an Int or a Float
+// accumulator both thread through unchanged (the closure's own ops interpret the bits).
+fn __skv_fold_loop(sh: Int, f: (Int, String, Int) -> Int, entries: Int, i: Int, acc: Int) -> Int =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let v = prim.load64(sh + 12 + (entries + i) * 8)
+    let nacc = f(acc, k, v)
+    __skv_fold_loop(sh, f, entries, i + 1, nacc)
+  }
+
+fn map_fold_skv(m: Map[String, Int], init: Int, f: (Int, String, Int) -> Int) -> Int = {
+  let sh = prim.handle(m)
+  let entries = prim.load32(sh + 4)
+  __skv_fold_loop(sh, f, entries, 0, init)
+}
+
+// Order-independent equality: same length and every (k, v) of `a` has an equal
+// scalar value under the same key in `b`.
+fn __skv_eqm_at(ah: Int, an: Int, bh: Int, bn: Int, i: Int) -> Bool =
+  if i >= an then true
+  else {
+    let k = prim.load_str(ah + 12 + i * 8)
+    let j = __skv_find(bh, bn, k, 0)
+    if j < 0 then false
+    else if prim.load64(ah + 12 + (an + i) * 8) == prim.load64(bh + 12 + (bn + j) * 8)
+    then __skv_eqm_at(ah, an, bh, bn, i + 1)
+    else false
+  }
+
+fn map_eq_skv(a: Map[String, Int], b: Map[String, Int]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let an = prim.load32(ah + 4)
+  let bn = prim.load32(bh + 4)
+  if an != bn then false
+  else __skv_eqm_at(ah, an, bh, bn, 0)
+}
+
+// map.entries over the skv layout — List[(String, scalar)] pairs in insertion order.
+// Each pair CO-OWNS its key (rc_inc — the call-site DropListStrInt releases it) and
+// copies the scalar value.
+fn __skv_entries_fill(dh: Int, sh: Int, entries: Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let k = prim.load64(sh + 12 + i * 8)
+    prim.rc_inc(k)
+    let v = prim.load64(sh + 12 + (entries + i) * 8)
+    let pair = prim.alloc_list(2)
+    let ph = prim.handle(pair)
+    prim.store64(ph + 12, k)
+    prim.store64(ph + 20, v)
+    prim.store_str(dh + 12 + i * 8, pair)
+    __skv_entries_fill(dh, sh, entries, i + 1)
+  }
+
+fn map_entries_skv(m: Map[String, Int]) -> List[(String, Int)] = {
+  let h = prim.handle(m)
+  let entries = prim.load32(h + 4)
+  let out: List[(String, Int)] = prim.alloc_list_str(entries)
+  let _x = __skv_entries_fill(prim.handle(out), h, entries, 0)
+  out
+}
+
+// map.from_list over (String, scalar) pairs — v0's AlmideMap collect: a duplicate key
+// keeps its FIRST position with the LAST value. Two passes over the pair list (no
+// intermediate maps, no leak): count the first-occurrence keys, then store each with
+// the last-matching value. Keys deep-copied (__skv_store_key), values scalar.
+fn __skv_pair_key(lh: Int, i: Int) -> String = {
+  let pair = prim.load64(lh + 12 + i * 8)
+  let k: String = prim.load_str(pair + 12)
+  k
+}
+
+fn __skv_pair_val(lh: Int, i: Int) -> Int = {
+  let pair = prim.load64(lh + 12 + i * 8)
+  prim.load64(pair + 20)
+}
+
+// Is pairs[i]'s key ALREADY present among pairs[0..i)? (a later duplicate — skipped)
+fn __skv_seen_before(lh: Int, i: Int, k: String, j: Int) -> Bool =
+  if j >= i then false
+  else {
+    let kj = __skv_pair_key(lh, j)
+    let eq = __skv_eq(kj, k)
+    if eq then true
+    else __skv_seen_before(lh, i, k, j + 1)
+  }
+
+fn __skv_count_firsts(lh: Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let k = __skv_pair_key(lh, i)
+    let dup = __skv_seen_before(lh, i, k, 0)
+    let add = if dup then 0 else 1
+    __skv_count_firsts(lh, n, i + 1, acc + add)
+  }
+
+// The LAST value paired with key k anywhere in the list (scan from the end).
+fn __skv_last_val(lh: Int, n: Int, k: String, j: Int, best: Int) -> Int =
+  if j >= n then best
+  else {
+    let kj = __skv_pair_key(lh, j)
+    let eq = __skv_eq(kj, k)
+    let nb = if eq then __skv_pair_val(lh, j) else best
+    __skv_last_val(lh, n, k, j + 1, nb)
+  }
+
+fn __skv_from_fill(lh: Int, rh: Int, n: Int, entries: Int, i: Int, w: Int) -> Int =
+  if i >= n then w
+  else {
+    let k = __skv_pair_key(lh, i)
+    let dup = __skv_seen_before(lh, i, k, 0)
+    if dup then __skv_from_fill(lh, rh, n, entries, i + 1, w)
+    else {
+      let v = __skv_last_val(lh, n, k, 0, 0)
+      let _kc = __skv_store_key(rh + 12 + w * 8, k)
+      prim.store64(rh + 12 + (entries + w) * 8, v)
+      __skv_from_fill(lh, rh, n, entries, i + 1, w + 1)
+    }
+  }
+
+fn map_from_list_skv(pairs: List[(String, Int)]) -> Map[String, Int] = {
+  let lh = prim.handle(pairs)
+  let n = prim.load32(lh + 4)
+  let entries = __skv_count_firsts(lh, n, 0, 0)
+  let r = prim.alloc_map_skv(entries * 2)
+  let rh = prim.handle(r)
+  let _f = __skv_from_fill(lh, rh, n, entries, 0, 0)
+  prim.store32(rh + 4, entries)
+  r
+}

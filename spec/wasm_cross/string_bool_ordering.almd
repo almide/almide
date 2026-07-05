@@ -1,0 +1,17 @@
+// @contract: C-099
+// String `< <= > >=` (lexicographic via string.cmp) and Bool ordering (false < true). Were silently
+// wrong — String compared the i64 handle, Bool ordering was unhandled. Now they branch correctly.
+fn cs(a: String, b: String) -> String = if a < b then "LT" else if a > b then "GT" else "EQ"
+fn le(a: String, b: String) -> String = if a <= b then "y" else "n"
+fn ge(a: String, b: String) -> String = if a >= b then "y" else "n"
+fn cb_lt(a: Bool, b: Bool) -> String = if a < b then "T" else "F"
+fn cb_ge(a: Bool, b: Bool) -> String = if a >= b then "T" else "F"
+effect fn main() -> Unit = {
+  println(cs("apple", "banana"))
+  println(cs("banana", "apple"))
+  println(cs("x", "x"))
+  println(le("ab", "ab"))
+  println(ge("abc", "abd"))
+  println(cb_lt(false, true))
+  println(cb_ge(true, false))
+}

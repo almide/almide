@@ -1,0 +1,173 @@
+// float_checked — SELF-HOSTED float.to_{int,uint}{8,16,32}_checked for v1: Some(T) iff `n` is an
+// EXACT integer in T's range, else None (NaN / infinity / fractional / out-of-range → None),
+// byte-matching v0's round-trip-via-int.to_float check.
+//
+// SHAPE: all computation (guard bools, the truncation `i`, and the round-trip bool `rt`) is hoisted
+// into PRECEDING `let`s, leaving a FLAT if-chain whose every arm is directly `None` or `Some(i)` —
+// the proven materialized-Option shape (cf. int_checked.almd). A BLOCK arm (`else { … }`) is NOT in
+// that subset: a tail Option-`if` with a block arm falls back to an Opaque (len-0 = always-None)
+// result. v1 also does not lower `or` (so the chain is nested ifs), a scalar call as an `if` cond
+// (so each guard is bound first), or a nested call arg (so the round-trip is unrolled to one call
+// per `let`). Float compares go through the prim floor (flt/fgt/feq → f64.lt/gt/eq); the signed
+// lower bound is built with prim.fneg. `i`/`rt` are computed UNCONDITIONALLY — sound because every
+// op (float.to_T / int.from_T / int.to_float / prim.feq) is TOTAL (no trap, no effect, saturating),
+// so the discarded out-of-range values change nothing and the Some-path value is `to_T(n)` exactly.
+// Scalar Option[Int8…] over the materialized-Option machinery — cert untouched.
+//
+// The 64-bit variants build their 2^63 / 2^64 bound at RUNTIME (the literal overflows the float
+// parser) via prim.i2f(prim.bshl(1, 62)) doubled — the pattern from float_convert.almd's
+// float_to_uint64; the round-trip through int.from_{int,uint}64 (an i64-repr identity) naturally
+// rejects the u64 high half (>= 2^63 wraps to a negative i64 repr → i2f gives a negative float ≠ n),
+// matching v0 exactly. Deferred: to_float32_checked (needs f32).
+
+fn float_to_int8_checked(n: Float) -> Option[Int8] = {
+  let nan = float.is_nan(n)
+  let inf = float.is_infinite(n)
+  let neg = prim.fneg(128.0)
+  let lo = prim.flt(n, neg)
+  let hi = prim.fgt(n, 127.0)
+  let i = float.to_int8(n)
+  let f = int.from_int8(i)
+  let back = int.to_float(f)
+  let rt = prim.feq(back, n)
+  if nan then None
+  else if inf then None
+  else if lo then None
+  else if hi then None
+  else if rt then Some(i)
+  else None
+}
+
+fn float_to_int16_checked(n: Float) -> Option[Int16] = {
+  let nan = float.is_nan(n)
+  let inf = float.is_infinite(n)
+  let neg = prim.fneg(32768.0)
+  let lo = prim.flt(n, neg)
+  let hi = prim.fgt(n, 32767.0)
+  let i = float.to_int16(n)
+  let f = int.from_int16(i)
+  let back = int.to_float(f)
+  let rt = prim.feq(back, n)
+  if nan then None
+  else if inf then None
+  else if lo then None
+  else if hi then None
+  else if rt then Some(i)
+  else None
+}
+
+fn float_to_int32_checked(n: Float) -> Option[Int32] = {
+  let nan = float.is_nan(n)
+  let inf = float.is_infinite(n)
+  let neg = prim.fneg(2147483648.0)
+  let lo = prim.flt(n, neg)
+  let hi = prim.fgt(n, 2147483647.0)
+  let i = float.to_int32(n)
+  let f = int.from_int32(i)
+  let back = int.to_float(f)
+  let rt = prim.feq(back, n)
+  if nan then None
+  else if inf then None
+  else if lo then None
+  else if hi then None
+  else if rt then Some(i)
+  else None
+}
+
+fn float_to_uint8_checked(n: Float) -> Option[UInt8] = {
+  let nan = float.is_nan(n)
+  let inf = float.is_infinite(n)
+  let lo = prim.flt(n, 0.0)
+  let hi = prim.fgt(n, 255.0)
+  let i = float.to_uint8(n)
+  let f = int.from_uint8(i)
+  let back = int.to_float(f)
+  let rt = prim.feq(back, n)
+  if nan then None
+  else if inf then None
+  else if lo then None
+  else if hi then None
+  else if rt then Some(i)
+  else None
+}
+
+fn float_to_uint16_checked(n: Float) -> Option[UInt16] = {
+  let nan = float.is_nan(n)
+  let inf = float.is_infinite(n)
+  let lo = prim.flt(n, 0.0)
+  let hi = prim.fgt(n, 65535.0)
+  let i = float.to_uint16(n)
+  let f = int.from_uint16(i)
+  let back = int.to_float(f)
+  let rt = prim.feq(back, n)
+  if nan then None
+  else if inf then None
+  else if lo then None
+  else if hi then None
+  else if rt then Some(i)
+  else None
+}
+
+fn float_to_uint32_checked(n: Float) -> Option[UInt32] = {
+  let nan = float.is_nan(n)
+  let inf = float.is_infinite(n)
+  let lo = prim.flt(n, 0.0)
+  let hi = prim.fgt(n, 4294967295.0)
+  let i = float.to_uint32(n)
+  let f = int.from_uint32(i)
+  let back = int.to_float(f)
+  let rt = prim.feq(back, n)
+  if nan then None
+  else if inf then None
+  else if lo then None
+  else if hi then None
+  else if rt then Some(i)
+  else None
+}
+
+// 64-bit: bound 2^63 built at runtime (2^62 + 2^62), guards `n < -2^63` / `n >= 2^63` (>= because
+// the f64 2^63 is just above i64::MAX). float.to_int64 = saturating f2i (total, no trap).
+fn float_to_int64_checked(n: Float) -> Option[Int64] = {
+  let nan = float.is_nan(n)
+  let inf = float.is_infinite(n)
+  let p62 = prim.bshl(1, 62)
+  let f62 = prim.i2f(p62)
+  let two63 = prim.fadd(f62, f62)
+  let neg63 = prim.fneg(two63)
+  let lo = prim.flt(n, neg63)
+  let hi = prim.fge(n, two63)
+  let i = float.to_int64(n)
+  let f = int.from_int64(i)
+  let back = int.to_float(f)
+  let rt = prim.feq(back, n)
+  if nan then None
+  else if inf then None
+  else if lo then None
+  else if hi then None
+  else if rt then Some(i)
+  else None
+}
+
+// 64-bit unsigned: bound 2^64 built at runtime (2^63 + 2^63), guards `n < 0` / `n >= 2^64`. The
+// round-trip through int.from_uint64 (i64-repr identity) rejects [2^63, 2^64) — i2f of the wrapped
+// negative i64 ≠ n — so Some only for [0, 2^63) integers, exactly like v0.
+fn float_to_uint64_checked(n: Float) -> Option[UInt64] = {
+  let nan = float.is_nan(n)
+  let inf = float.is_infinite(n)
+  let p62 = prim.bshl(1, 62)
+  let f62 = prim.i2f(p62)
+  let two63 = prim.fadd(f62, f62)
+  let two64 = prim.fadd(two63, two63)
+  let lo = prim.flt(n, 0.0)
+  let hi = prim.fge(n, two64)
+  let i = float.to_uint64(n)
+  let f = int.from_uint64(i)
+  let back = int.to_float(f)
+  let rt = prim.feq(back, n)
+  if nan then None
+  else if inf then None
+  else if lo then None
+  else if hi then None
+  else if rt then Some(i)
+  else None
+}

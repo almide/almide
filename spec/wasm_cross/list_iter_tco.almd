@@ -1,0 +1,25 @@
+// @contract: C-102
+// LIST-ITERATOR TCO (heap-loop-carried escape): a tail-self-recursive fn over a SHRINKING list
+// (`list.drop(cs,1)` per call, `match list.first(cs)`) is rewritten to an INVARIANT borrowed list +
+// a synthetic scalar INDEX — the cert-clean scalar-TCO form, NO heap back-edge merge / cert change.
+// Covers a direct-arm scan (bin), a block-arm scan (cnt with a `let`), and a string-eq element use.
+fn bin_rec(cs: List[String], acc: Int) -> Result[Int, String] =
+  match list.first(cs) {
+    none => ok(acc),
+    some(ch) => if ch == "0" then bin_rec(list.drop(cs, 1), acc * 2) else if ch == "1" then bin_rec(list.drop(cs, 1), acc * 2 + 1) else err("bad"),
+  }
+fn parse_bin(s: String) -> Int = match bin_rec(string.chars(s), 0) { ok(n) => n, err(_) => 0 - 1 }
+fn cnt(cs: List[String], acc: Int) -> Result[Int, String] =
+  match list.first(cs) {
+    none => ok(acc),
+    some(ch) => { let step = 1; cnt(list.drop(cs, 1), acc + step) },
+  }
+fn len_of(s: String) -> Int = match cnt(string.chars(s), 0) { ok(n) => n, err(_) => 0 - 1 }
+fn main() -> Unit = {
+  println(int.to_string(parse_bin("101")))   // 5
+  println(int.to_string(parse_bin("1111")))  // 15
+  println(int.to_string(parse_bin("")))      // 0
+  println(int.to_string(parse_bin("2")))     // -1 (bad)
+  println(int.to_string(len_of("hello")))    // 5
+  println(int.to_string(len_of("")))         // 0
+}

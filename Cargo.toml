@@ -1,11 +1,11 @@
 [workspace]
-members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab"]
+members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab"]
 resolver = "3"
 exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare", "tools/wasmgen-harness", "tools/wasmgen-harness-uu", "tools/xtarget-fuzz"]
 
 [package]
 name = "almide"
-version = "0.27.13"
+version = "0.28.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -19,6 +19,12 @@ almide-optimize = { path = "crates/almide-optimize" }
 almide-interp = { path = "crates/almide-interp" }
 almide-frontend = { path = "crates/almide-frontend" }
 almide-dialect = { path = "crates/almide-dialect" }
+# v1 MIR trust-spine — the opt-in `--verified` wasm codegen path (pipeline::try_render_wasm_source),
+# tried before v0 codegen and byte-identical to it where it lowers; v0 fallback on wall. Acyclic:
+# almide-mir keeps `almide` only as a DEV-dependency, so this edge does not cycle.
+almide-mir = { path = "crates/almide-mir" }
+# WAT (text) → wasm bytes: the v1 renderer emits WAT; the CLI assembles it to a module.
+wat = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

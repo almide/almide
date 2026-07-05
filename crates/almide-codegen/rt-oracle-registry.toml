@@ -64,7 +64,7 @@
 #
 # The two differential test TIERS cited below:
 #   1. The cross-target equivalence GATE:
-#        tests/wasm_runtime_test.rs::wasm_cross_target_spec
+#        tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec
 #      runs every spec/wasm_cross/*.almd on BOTH native and wasm and asserts
 #      byte-identical (stdout, stderr, exit). Native is the oracle. A routine is
 #      "verified" by this gate when a fixture exercises its stdlib surface; the
@@ -108,183 +108,165 @@
 
 # ── mod.rs ───────────────────────────────────────────────────────────
 [[routine]]
-file = "mod.rs"
+file = "mod_p4.rs"
 routine = "compile_variant_eq_funcs"
 status = "verified"
 class = "fixture"
 oracle = "native derived PartialEq / almide_eq! deep variant equality"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/deep_eq_heap.almd compares `Tagged(\"x\") == Tagged(\"y\")` (variant), list, and tuple equality byte-identically native vs wasm; records_variants.almd also exercises variant construction/eq."
 
 [[routine]]
-file = "mod.rs"
+file = "mod_p5.rs"
 routine = "compile_repr_funcs"
 status = "verified"
 class = "fixture"
 oracle = "Generated per-type AlmideRepr impls on native (walker/declarations.rs render_repr_impl) — recursive named types repr via runtime dispatch on both targets"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Added in PR-3 (compound repr): per-type __repr_<Type> wasm fns for RECURSIVE named types (cycle-set DFS; bodies sorted by name for host determinism); exercised by spec/wasm_cross/compound_repr_recursive_interp.almd (self/mutual recursion, generics, anon records)."
 
 # ── runtime.rs ───────────────────────────────────────────────────────
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p2.rs"
 routine = "compile_alloc"
 status = "verified"
 class = "fixture"
 oracle = "no native counterpart — bump allocator (+free-list reuse) backing every heap value; oracle is observable correctness of programs under heavy allocation"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/rc_alloc_stress.almd: 1000-element list growth (sum=499500), deep per-iteration list allocation, map/set rehash churn — all byte-identical, so a misaligned or under-sized allocation would surface as a wrong result. memory_stress.almd adds nested/concurrent-list growth."
 
 [[routine]]
-file = "runtime.rs"
-routine = "compile_alloc_variant"
-status = "verified"
-class = "fixture"
-oracle = "no native counterpart — the parameterized body shared by compile_alloc and compile_alloc_nozero (the `zero_on_reuse` flag selects whether a recycled free-list block is zero-filled before return); same observable-correctness oracle as compile_alloc"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
-note = "Not a distinct runtime routine: compile_alloc / compile_alloc_nozero both delegate here, so spec/wasm_cross/rc_alloc_stress.almd exercises it on every allocation. Refactored out of compile_alloc to express the zero-fill choice once instead of duplicating the allocator. The BUMP path never zeros (fresh wasm pages are zero); reclaimed-then-rebumped memory IS dirty, but the one read-before-write caller that can land there — variant construction — zeros its own payload tail (calls.rs::emit_zero_variant_tail), and map/set tags can't reach a reclaimed block (their in-place-mutator builders disable reclamation)."
-
-[[routine]]
-file = "runtime.rs"
-routine = "compile_alloc_nozero"
-status = "verified"
-class = "fixture"
-oracle = "no native counterpart — bump allocator variant that SKIPS the free-list-reuse zero-fill; sound only for callers that overwrite the whole returned buffer (every read is bounded by a length/cap they also write). Oracle is the same observable correctness as compile_alloc: a caller that reads an un-written byte would diverge from native."
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
-note = "Routed from emit_list_alloc (list_layout.rs — pre-sized list data is written in full by map/filter/range/collect, reads bounded by len) and the string-append grow path (expressions.rs try_emit_string_append_loop — old prefix copied, the rest filled). spec/wasm_cross/rc_alloc_stress.almd churns exactly these list allocations byte-identically: an unsound skip would surface an un-zeroed reused block as a wrong checksum. Maps keep compile_alloc (Swiss/COD tag arrays depend on the reuse zero-fill); variants keep compile_alloc and additionally zero their own payload tail at construction."
-
-[[routine]]
-file = "runtime.rs"
+file = "runtime_p2.rs"
 routine = "compile_rc_inc"
 status = "verified"
 class = "fixture"
 oracle = "native Rc::clone refcount discipline (Perceus-inserted; AlmidePerceusBelt PerceusVerifyPass certifies Inc/Dec balance at the IR level)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/rc_alloc_stress.almd test_rc_churn builds + drops 50 rounds of nested List[List[Int]] and reads a checksum; an under-count would free-then-reuse a still-live block and corrupt the result. Byte-identical native vs wasm = balanced Inc."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p2.rs"
 routine = "compile_rc_dec"
 status = "verified"
 class = "fixture"
 oracle = "native Rc drop / free-list push discipline (Perceus-inserted; AlmidePerceusBelt-certified IR balance)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/rc_alloc_stress.almd churns the free list (build+drop nested structures, map/set rounds): a double-free or premature free would hand a reused block to a live value and diverge. Byte-identical = correct Dec + free-list reuse."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p2.rs"
 routine = "compile_cow_check"
 status = "verified"
 oracle = "native eager `.clone()` at a copy-bind before in-place mutation (RcCow / walker IndexAssign|FieldAssign) — value semantics: a mutation through one binding is invisible through another that aliased it"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/alias_cow.almd pins every supported shape × in-place op (IndexAssign, FieldAssign, list.push/pop/clear, map.insert, string.push; var/let/chain/branch-arm/record-field aliases) byte-identical native==wasm. __cow_check is now CALLED: `FuncCompiler::cow_if_needed` wires it at every in-place mutation site (statements.rs + the in-place-mutator RuntimeCall path) for vars `AliasCowPass` marks in `codegen_annotations.needs_cow` (copy-aliased AND mutated). The prior grandfathered note's coalescing claim was DISPROVEN: aliased mutable vars get DISTINCT wasm locals (collect_locals: one per VarId), so the write-back-to-its-own-local cow already separates them. The real blockers were (1) no caller, and (2) `__cow_check`'s data-section guard read `rt.heap_start_global`, which is 0 (= the moving heap_ptr global) at runtime-fn compile time — so the guard treated EVERY heap pointer as a header-less data ptr and returned it unchanged; it now uses the immutable `HEAP_START_GLOBAL_IDX` constant. cow_check clones UNCONDITIONALLY — kept after the 0.27.0 frees flip as the conservative choice (extra copy, never corruption) until a rc>1-gated COW is designed against the real-rc model and derives the copy length from the alloc header SIZE field (no per-site byte-size). Native's own holes (the E0382 move-after-use shapes) are fixed in CloneInsertionPass by counting the in-place mutation target as a use."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p2.rs"
 routine = "compile_heap_save"
 status = "verified"
 class = "fixture"
 oracle = "bytes.heap_save() -> Int (opaque checkpoint); native runtime/rs/src/bytes.rs returns 0, wasm returns the bump pointer — the checkpoint is never observed, only its round-trip with heap_restore"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/heap_arena.almd takes a checkpoint, allocates scratch, restores, and verifies post-restore results across 40 rounds + a nested checkpoint; the opaque checkpoint value is never printed (it differs per target by design), only the observable results, which are byte-identical."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p2.rs"
 routine = "compile_heap_restore"
 status = "verified"
 class = "fixture"
 oracle = "bytes.heap_restore(checkpoint) -> Unit; native is a no-op (Rust allocator), wasm resets the bump pointer — both must leave subsequent allocations coherent"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/heap_arena.almd: after each restore the wasm bump pointer is reused while native ignores it; the nested-checkpoint case proves an inner restore does not corrupt outer live data (outer list still reads 55). Byte-identical observable output."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p2.rs"
 routine = "compile_println_str"
 status = "verified"
 class = "fixture"
 oracle = "native println! to stdout"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Every spec/wasm_cross fixture prints via println; the gate compares stdout bytes, so string println is verified across all of them (e.g. string_ops.almd)."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p2.rs"
 routine = "compile_int_to_string"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/int.rs::almide_rt_int_to_string (i64::to_string)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/num_edge_to_string.almd and int_parse_overflow.almd render i64 edge values (MIN/MAX, negatives) through int.to_string; byte-identical native vs wasm."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p2.rs"
 routine = "compile_println_int"
 status = "verified"
 class = "fixture"
 oracle = "native println! of an i64"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Covered transitively wherever an Int is printed directly; num_edge_to_string.almd drives it."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p3.rs"
 routine = "compile_concat_str"
 status = "verified"
 class = "fixture"
 oracle = "native String `+` / format! concatenation"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_ops.almd and compound_repr_interp.almd build strings via interpolation/`+`; gate compares bytes."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p3.rs"
 routine = "compile_string_append"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_push (String::push_str)"
-test = "tests/wasm_runtime_test.rs::wasm_string_push_clear_in_place"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_string_push_clear_in_place"
 note = "Differential test pushes/clears a String in place and compares native vs wasm output."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p3.rs"
 routine = "compile_string_alloc"
 status = "verified"
 class = "fixture"
 oracle = "no native counterpart — wasm string header/data allocation primitive (len/cap written by construction)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/rc_alloc_stress.almd test_string_builder grows a string 200 single-char appends + an interleaved 50-iteration builder and reads back len/slice; a mis-sized header or cap would corrupt the length or data. Byte-identical native vs wasm."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p3.rs"
 routine = "compile_div_trap"
 status = "verified"
 class = "fixture"
 oracle = "native checked integer division (div-by-zero / overflow panic + exit code)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/int_div_by_zero.almd, int_mod_by_zero.almd, int_div_overflow.almd, int_mod_overflow.almd assert byte-identical stderr + exit code on the trapping path."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p3.rs"
 routine = "compile_init_preopen_dirs"
 status = "verified"
 class = "fixture"
 oracle = "native std::fs (no preopen concept); wasm scans fd_prestat_get to map WASI preopen dirs"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Flipped 2026-06-06 (fs drain). spec/wasm_cross/fs_preopen_resolve.almd writes under the gate's sole `--dir=/` preopen then reads it back through a `./`-normalized form of the same absolute path, byte-identical native vs wasm — the write would fail to open if this startup preopen scan produced an empty/wrong table, so an Ok readback proves the scan ran and populated the table. Absolute /tmp path keeps it cwd-independent (verified stable across two launch cwds + repeated runs). The fixture is LOCKED to TWO fs ops + a trailing println: the wasm fs runtime has a SEPARATE pre-existing trap (a WASI-host-written scratch buffer is later reclaimed onto the bump-allocator free list with a poisoned `next` field, so a 3rd fs op — or heavy allocation after an fs op — sends __alloc's free-list walk out of bounds, exit 134). That trap lives in the bump-allocator/fs-buffer-lifetime model (rc_dec free-list push of a host-overwritten block), NOT in these two resolve routines; a multi-op corpus is impossible until it is fixed, but the 2-op fixture is in the stable zone and fully exercises both routines. Do NOT add a 3rd fs op to the fixture."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p3.rs"
 routine = "compile_resolve_path"
 status = "verified"
 class = "fixture"
 oracle = "native std::path::Path (the path is used directly); wasm maps an absolute path to the longest-prefix preopen fd + relative remainder"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Flipped 2026-06-06 (fs drain). spec/wasm_cross/fs_preopen_resolve.almd exercises this routine TWICE in one program: once on the write path and once on a `./`-NORMALIZED form of the same absolute path on read-back. Both calls must match `/` as the longest (only `--dir=/`) preopen prefix and strip it to the relative remainder so the two calls land on the IDENTICAL host file — the readback equals the written bytes byte-identically native vs wasm, also covering the host path-normalization edge (`/tmp/./x` == `/tmp/x`). Absolute path => cwd-independent (verified across two launch cwds). The old 2-op LOCK is LIFTED (Stage D, 2026-06-11): the multi-op trap's TRUE root was a stale global-index pair in register_runtime — __init_preopen_dirs wrote the preopen TABLE POINTER into the FREE LIST head (pre-frees numbering survived the free_list insertion at index 1), so __alloc's walk treated the table as a free node from boot. Indices fixed AND every host-written fs scratch buffer is now __alloc_pinned (PINNED_RC, immortal by construction); the fixture runs 6 fs ops + allocation churn byte-identically."
 
 [[routine]]
-file = "runtime.rs"
+file = "runtime_p3.rs"
 routine = "compile_bytes_f16_to_f64"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/bytes.rs::f16_bits_to_f64 (bytes.read_f16 family)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/bytes_f16.almd: ±inf / NaN / ±0 / subnormal / normals. Drain PR-D fixed the exp-all-ones path (was finite ±f32::MAX, now ±inf / NaN)."
 
 # ── runtime_eq.rs ────────────────────────────────────────────────────
@@ -294,7 +276,7 @@ routine = "compile_option_eq_i64"
 status = "verified"
 class = "fixture"
 oracle = "native Option<i64> PartialEq"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/option_result.almd compares Option[Int] values; gate asserts equality bytes match."
 
 [[routine]]
@@ -303,7 +285,7 @@ routine = "compile_option_eq_str"
 status = "verified"
 class = "fixture"
 oracle = "native Option<String> PartialEq"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/option_result.almd compares Option[String] values."
 
 [[routine]]
@@ -312,7 +294,7 @@ routine = "compile_result_eq_i64_str"
 status = "verified"
 class = "fixture"
 oracle = "native Result<i64,String> PartialEq"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/match_result.almd / option_result.almd compare Result values."
 
 [[routine]]
@@ -321,7 +303,7 @@ routine = "compile_mem_eq"
 status = "verified"
 class = "fixture"
 oracle = "native byte-slice / String PartialEq (almide_eq!)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/deep_eq_heap.almd and compound_eq.almd compare strings/heap blocks for equality byte-identically."
 
 [[routine]]
@@ -330,7 +312,7 @@ routine = "compile_list_eq"
 status = "verified"
 class = "fixture"
 oracle = "native Vec PartialEq (element-wise almide_eq!)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/deep_eq_heap.almd compares `[\"a\",\"b\"] == [\"a\",\"c\"]`; compound_eq.almd drives list.contains/index_of/unique which lean on list element eq."
 
 [[routine]]
@@ -339,7 +321,7 @@ routine = "compile_list_list_str_cmp"
 status = "verified"
 class = "fixture"
 oracle = "native Vec<String> / nested-list Ord (lexicographic)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/list_sort_short.almd and list_comprehensive.almd sort lists of strings; ordering compared byte-identically."
 
 [[routine]]
@@ -357,7 +339,7 @@ routine = "compile_int_parse"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/int.rs::almide_rt_int_parse (str::trim().parse::<i64>)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/int_parse_overflow.almd parses overflow / malformed inputs; both targets must produce the same Result + error bytes. string_whitespace.almd exercises int.parse with surrounding whitespace."
 
 # ── rt_string.rs ─────────────────────────────────────────────────────
@@ -376,7 +358,7 @@ routine = "compile_utf8_scalar"
 status = "verified"
 class = "fixture"
 oracle = "Rust char scalar decode (str::chars)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_codepoint.almd decodes multibyte scalars via string.codepoint/chars; byte-identical native vs wasm."
 
 [[routine]]
@@ -385,7 +367,7 @@ routine = "compile_utf8_snap"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::snap_to_char_boundary (str::is_char_boundary)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_codepoint.almd slices multibyte strings at non-boundary byte offsets (string.slice/get); both targets snap identically."
 
 [[routine]]
@@ -394,7 +376,7 @@ routine = "compile_utf8_byte_of_cp"
 status = "verified"
 class = "fixture"
 oracle = "Rust char-index → byte-offset mapping"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "string_codepoint.almd's string.take/drop/get convert char positions to byte offsets identically."
 
 [[routine]]
@@ -403,7 +385,7 @@ routine = "compile_cp_of_byte"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_index_of (s[..b].chars().count() prefix conversion)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_codepoint_index.almd exercises index_of/last_index_of codepoint conversion on multibyte input (C-065)."
 
 [[routine]]
@@ -412,7 +394,7 @@ routine = "compile_char_count"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_char_count (str::chars().count())"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_codepoint.almd and string_whitespace.almd use string.len (char count) on multibyte input."
 
 [[routine]]
@@ -421,7 +403,7 @@ routine = "compile_eq"
 status = "verified"
 class = "fixture"
 oracle = "native String PartialEq"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/deep_eq_heap.almd / compound_eq.almd compare strings."
 
 [[routine]]
@@ -430,7 +412,7 @@ routine = "compile_contains"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_contains (str::contains)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_ops.almd exercises string.contains."
 
 [[routine]]
@@ -448,11 +430,11 @@ routine = "compile_trim"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_trim (str::trim)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_whitespace.almd trims Unicode-whitespace-padded strings."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_slice"
 status = "verified"
 class = "fixture"
@@ -461,43 +443,43 @@ test = "tests/wasm_runtime_test.rs::wasm_list_slice"
 note = "string_codepoint.almd / string_ops.almd slice multibyte and ASCII strings byte-identically; wasm_list_slice covers list slicing alongside."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_reverse"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_reverse (chars().rev())"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_codepoint.almd reverses multibyte strings (by scalar, not byte)."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_repeat"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_repeat (str::repeat)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_ops.almd uses string.repeat."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_index_of"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_index_of (str::find — BYTE offset)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_ops.almd uses string.index_of; both targets return byte offsets."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_replace"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_replace (str::replace)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_ops.almd uses string.replace; r5_wasm_split_replace_iterative.almd (#634) pins the de-recursed loop on large inputs (6000 occurrences) and the empty-`from` codepoint-boundary insertion."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_split"
 status = "verified"
 class = "fixture"
@@ -506,7 +488,7 @@ test = "tests/wasm_runtime_test.rs::wasm_string_split"
 note = "wasm_string_split + wasm_string_split_empty (now also asserts the empty-delimiter CODEPOINT split, leading/trailing empties) differential tests; spec/wasm_cross/string_split_rle_codepoint.almd (C-050) pins the empty-delimiter path; string_ops.almd also drives it; r5_wasm_split_replace_iterative.almd (#634) pins the de-recursed forward-scan loop on 5000+ segments."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_join"
 status = "verified"
 class = "fixture"
@@ -515,52 +497,52 @@ test = "tests/wasm_runtime_test.rs::wasm_string_join"
 note = "Differential test joins a list of strings native vs wasm."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_count"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_count (str::matches().count())"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_rle.almd / string_ops.almd cover substring counting paths."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_pad_start"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_pad_left (char-count padding)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_codepoint.almd uses string.pad_start on multibyte input."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_pad_end"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_pad_right (char-count padding)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_codepoint.almd uses string.pad_end."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_trim_start"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_trim_start (str::trim_start)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_whitespace.almd uses string.trim_start with Unicode whitespace."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_trim_end"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_trim_end (str::trim_end)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_whitespace.almd uses string.trim_end."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_to_upper"
 status = "verified"
 class = "exhaustive"
@@ -569,7 +551,7 @@ test = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs::tables_reproduce_
 note = "The case-table Σ-probe asserts the emitted upper/lower tables reproduce char::to_uppercase/to_lowercase (incl. ß→SS length change, Greek/Cyrillic). string_case_unicode.almd drives the runtime path through the gate."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_to_lower"
 status = "verified"
 class = "exhaustive"
@@ -578,25 +560,25 @@ test = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs::tables_reproduce_
 note = "See compile_to_upper; the same Σ-probe covers lowercasing and Final_Sigma (final_sigma_via_serialized_sets)."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_chars"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_chars (str::chars)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_codepoint.almd splits multibyte strings into scalars via string.chars."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_run_length_encode"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_run_length_encode"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Groups runs by CODEPOINT (utf8_scalar compare + utf8_width advance), matching native s.chars(); the run string is the whole codepoint. spec/wasm_cross/string_rle.almd (ASCII) + string_split_rle_codepoint.almd (C-050, multibyte ﬀ/İ) are byte-identical native vs wasm."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p2.rs"
 routine = "compile_lines"
 status = "verified"
 class = "fixture"
@@ -605,7 +587,7 @@ test = "tests/wasm_runtime_test.rs::wasm_string_lines"
 note = "Differential test; string_ops.almd also uses string.lines."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p3.rs"
 routine = "compile_utf8_classify"
 status = "verified"
 class = "exhaustive"
@@ -614,34 +596,34 @@ test = "crates/almide-codegen/src/emit_wasm/rt_string.rs::derived_classification
 note = "The utf8_lossy_tests Σ-probe (300k fuzzed inputs) asserts the derived classification equals std from_utf8_lossy; string_from_bytes.almd drives the runtime path."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p3.rs"
 routine = "compile_from_bytes"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_from_bytes (String::from_utf8_lossy)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_from_bytes.almd round-trips bytes↔string incl. invalid UTF-8 (U+FFFD replacement) byte-identically."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p3.rs"
 routine = "compile_to_bytes"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_to_bytes (str::bytes)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_from_bytes.almd uses string.to_bytes on multibyte input."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p3.rs"
 routine = "compile_utf8_emit_scalar"
 status = "verified"
 class = "fixture"
 oracle = "Rust char → UTF-8 encode (char::encode_utf8 / from_u32)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_codepoint.almd uses string.from_codepoint to re-encode scalars (incl. surrogate/out-of-range → empty), matching native char::from_u32."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p3.rs"
 routine = "compile_case_map_lookup"
 status = "verified"
 class = "exhaustive"
@@ -650,7 +632,7 @@ test = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs::tables_reproduce_
 note = "The case lookup binary-searches the Σ-probe-derived table the test validates against char methods."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p3.rs"
 routine = "compile_set_member"
 status = "verified"
 class = "exhaustive"
@@ -659,7 +641,7 @@ test = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs::final_sigma_via_s
 note = "final_sigma_via_serialized_sets validates the serialized Cased/CI sets this routine probes against the std-derived sets."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p3.rs"
 routine = "compile_final_sigma"
 status = "verified"
 class = "exhaustive"
@@ -668,7 +650,7 @@ test = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs::final_sigma_via_s
 note = "Directly validated against the std Final_Sigma scan; string_case_unicode.almd drives it through the gate."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p3.rs"
 routine = "compile_str_case_map"
 status = "verified"
 class = "exhaustive"
@@ -677,12 +659,12 @@ test = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs::tables_reproduce_
 note = "The whole-string driver over compile_case_map_lookup; validated by the case-table Σ-probe + string_case_unicode.almd."
 
 [[routine]]
-file = "rt_string.rs"
+file = "rt_string_p3.rs"
 routine = "compile_str_capitalize"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_capitalize (first char to_uppercase)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_case_unicode.almd capitalizes strings with a non-ASCII leading char."
 
 # ── rt_string_extra.rs ───────────────────────────────────────────────
@@ -692,7 +674,7 @@ routine = "compile_replace_first"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_replace_first (str::find + splice)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_ops_drain.almd locks the structural edges byte-identically: empty pattern (native find(\"\")=Some(0) splices `to` at index 0), empty subject (no-op), pattern==subject, multibyte (日本日)."
 
 [[routine]]
@@ -701,7 +683,7 @@ routine = "compile_last_index_of"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_last_index_of (str::rfind — BYTE offset)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Fixed 2026-06-05 (drain PR-A): empty pattern now Some(byte_len) matching str::rfind; corpus locks empty/ASCII/multibyte/astral subjects"
 
 [[routine]]
@@ -710,7 +692,7 @@ routine = "compile_strip_prefix"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_strip_prefix (str::strip_prefix)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_ops_drain.almd: empty prefix → Some(whole), prefix==whole → Some(\"\"), prefix longer than subject → None, multibyte (日本語/日) byte-boundary slice — all byte-identical."
 
 [[routine]]
@@ -719,7 +701,7 @@ routine = "compile_strip_suffix"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_strip_suffix (str::strip_suffix)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_ops_drain.almd: empty suffix → Some(whole), suffix==whole → Some(\"\"), suffix longer than subject → None, multibyte (日本語/語) — all byte-identical."
 
 [[routine]]
@@ -728,7 +710,7 @@ routine = "compile_byte_predicate_range"
 status = "verified"
 class = "fixture"
 oracle = "Rust ASCII byte-class predicate shape: !empty && every byte in [lo,hi]"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Sole live caller is compile_is_digit (range 48..57). spec/wasm_cross/string_ops_drain.almd exercises the empty→false, all-in-range→true, any-out-of-range→false, and multibyte-lead-byte→false paths byte-identically; ASCII digits 48..57 are exactly the in-range bytes and any multibyte lead byte (>=0xC2) is out of range."
 
 [[routine]]
@@ -737,7 +719,7 @@ routine = "compile_is_digit"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_is_digit (!empty && all char::is_ascii_digit)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_ops_drain.almd: ASCII-only contract locked — fullwidth ０ (U+FF10) and Arabic-Indic ٣ are false, empty is false, '-1' is false, '123'/'0' and a runtime-built '7' are true; byte-identical."
 
 [[routine]]
@@ -747,7 +729,7 @@ status = "verified"
 class = "exhaustive"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_is_alpha (char::is_alphabetic — Unicode!)"
 test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::alphabetic_table_matches_char_method"
-note = "Fixed 2026-06-05 (drain PR-A): codepoint walk + oracle-derived Alphabetic range table; Σ-probe lock over all scalars + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
+note = "Fixed 2026-06-05 (drain PR-A): codepoint walk + oracle-derived Alphabetic range table; Σ-probe lock over all scalars + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec)"
 
 [[routine]]
 file = "rt_string_extra.rs"
@@ -756,7 +738,7 @@ status = "verified"
 class = "exhaustive"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_is_alphanumeric (Unicode)"
 test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::alphanumeric_table_matches_char_method"
-note = "Fixed 2026-06-05 (drain PR-A): codepoint walk + Alphanumeric range table; Σ-probe lock + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
+note = "Fixed 2026-06-05 (drain PR-A): codepoint walk + Alphanumeric range table; Σ-probe lock + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec)"
 
 [[routine]]
 file = "rt_string_extra.rs"
@@ -764,7 +746,7 @@ routine = "compile_is_whitespace"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_is_whitespace (s.chars().all(char::is_whitespace))"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_ops_drain.almd locks the WRAPPER (the is_unicode_ws ranges were already Σ-probe-verified): empty string is VACUOUSLY TRUE (chars().all over an empty iter), and full-Unicode White_Space members built at runtime — VT (0x0B), FF (0x0C), NBSP (0xC2 0xA0) — are all true, while a non-WS char is false; byte-identical."
 
 [[routine]]
@@ -774,7 +756,7 @@ status = "verified"
 class = "exhaustive"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_is_upper (Unicode case query)"
 test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::uppercase_table_matches_char_method"
-note = "Fixed 2026-06-05 (drain PR-A): any-alpha guard + Uppercase property table (was vacuous-true on multibyte/no-letter strings); Σ-probe lock + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
+note = "Fixed 2026-06-05 (drain PR-A): any-alpha guard + Uppercase property table (was vacuous-true on multibyte/no-letter strings); Σ-probe lock + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec)"
 
 [[routine]]
 file = "rt_string_extra.rs"
@@ -783,7 +765,7 @@ status = "verified"
 class = "exhaustive"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_is_lower (Unicode case query)"
 test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::lowercase_table_matches_char_method"
-note = "Fixed 2026-06-05 (drain PR-A): any-alpha guard + Lowercase property table; Σ-probe lock + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
+note = "Fixed 2026-06-05 (drain PR-A): any-alpha guard + Lowercase property table; Σ-probe lock + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec)"
 
 [[routine]]
 file = "rt_string_extra.rs"
@@ -792,7 +774,7 @@ status = "verified"
 class = "exhaustive"
 oracle = "Rust char case predicate helper (is_uppercase/is_lowercase)"
 test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::uppercase_table_matches_char_method"
-note = "Shared is_upper/is_lower body (any_alpha + all_ok walk over Alphabetic + case property tables); verified through both predicate Σ-probes + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
+note = "Shared is_upper/is_lower body (any_alpha + all_ok walk over Alphabetic + case property tables); verified through both predicate Σ-probes + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec)"
 
 [[routine]]
 file = "rt_string_extra.rs"
@@ -818,7 +800,7 @@ routine = "compile_cmp"
 status = "verified"
 class = "fixture"
 oracle = "native str Ord (unsigned byte-wise lexicographic comparison with length tiebreak)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/string_ops_drain.almd drives __str_cmp through `<` on String and locks the BYTE (not codepoint) ordering: \"ä\"(0xC3..) > \"z\"(0x7A), \"apple\" > \"Apple\" ('a'=97 > 'A'=65), shorter common prefix sorts first (\"abc\" < \"abcd\"), empty sorts first, equal → false, multibyte (日/本); byte-identical."
 
 # ── rt_numeric.rs ────────────────────────────────────────────────────
@@ -828,7 +810,7 @@ routine = "compile_int_from_hex"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/int.rs::almide_rt_int_parse_hex (i64::from_str_radix(s.trim().trim_start_matches(\"0x\"), 16))"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/int_from_hex.almd. Drain PR-D rewrote this to mirror the native oracle EXACTLY: trim, lowercase-only + REPEATED 0x strip, no underscore skip, sign-after-strip, the four std ParseIntError strings + overflow. See contract_notes (0X/0x0x quirks)."
 
 [[routine]]
@@ -837,7 +819,7 @@ routine = "compile_float_parse"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/float.rs / string.rs to_float (str::trim().parse::<f64> — correctly rounded)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/float_parse.almd parses 0.1/0.2/0.3, 2^53 boundaries, subnormals, sci-notation, overflow — each printed via float.to_string so a 1-ULP error shows as different bytes. The Clinger AlgorithmM impl is proven byte-identical to str::parse::<f64> over 2.55M fuzzed inputs (rt_dec2flt.rs header)."
 
 [[routine]]
@@ -923,12 +905,12 @@ note = "See compile_math_log — dispatches to __libm_exp (e_exp.c); fixes exp(-
 
 # ── rt_dragon.rs (Dragon4 float.to_string + bignum helpers) ──────────
 [[routine]]
-file = "rt_dragon.rs"
+file = "rt_dragon_p2.rs"
 routine = "compile_float_to_string"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/float.rs::almide_rt_float_to_string (f64 Display, shortest round-trip + .0 suffix)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/float_shortest_roundtrip.almd and num_edge_to_string.almd render 0.1+0.2, 1/3, |x|>=2^63, 1e20, 1e-10 etc. byte-identically. The Dragon4 impl was validated against format!(\"{}\", x) over 20M random+boundary f64 (rt_dragon.rs header)."
 
 [[routine]]
@@ -937,7 +919,7 @@ routine = "compile_norm"
 status = "verified"
 class = "fixture"
 oracle = "bignum normalize subroutine of Dragon4 / dec2flt"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Internal bignum helper exercised transitively by float_shortest_roundtrip.almd (Dragon4) and float_parse.almd (dec2flt); both validated to 20M / 2.55M inputs."
 
 [[routine]]
@@ -946,7 +928,7 @@ routine = "compile_mul_small"
 status = "verified"
 class = "fixture"
 oracle = "bignum *= u32 subroutine of Dragon4 / dec2flt"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Internal bignum helper; see compile_norm. Driven by float_shortest_roundtrip.almd / float_parse.almd."
 
 [[routine]]
@@ -955,7 +937,7 @@ routine = "compile_cmp"
 status = "verified"
 class = "fixture"
 oracle = "bignum compare (-1/0/1) subroutine of Dragon4 / dec2flt"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Internal bignum helper; see compile_norm."
 
 [[routine]]
@@ -964,7 +946,7 @@ routine = "compile_add"
 status = "verified"
 class = "fixture"
 oracle = "bignum += subroutine of Dragon4 / dec2flt"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Internal bignum helper; see compile_norm."
 
 [[routine]]
@@ -973,7 +955,7 @@ routine = "compile_sub"
 status = "verified"
 class = "fixture"
 oracle = "bignum -= subroutine of Dragon4 / dec2flt"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Internal bignum helper; see compile_norm."
 
 [[routine]]
@@ -982,7 +964,7 @@ routine = "compile_shl"
 status = "verified"
 class = "fixture"
 oracle = "bignum <<= subroutine of Dragon4 / dec2flt"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Internal bignum helper; see compile_norm."
 
 [[routine]]
@@ -991,11 +973,11 @@ routine = "compile_copy"
 status = "verified"
 class = "fixture"
 oracle = "bignum copy subroutine of Dragon4 / dec2flt"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Internal bignum helper; see compile_norm."
 
 [[routine]]
-file = "rt_dragon.rs"
+file = "rt_dragon_p3.rs"
 routine = "compile_float_to_fixed"
 status = "verified"
 class = "fuzz"
@@ -1010,7 +992,7 @@ routine = "compile_dec2flt"
 status = "verified"
 class = "fixture"
 oracle = "str::parse::<f64> (IEEE-754 round-to-nearest-even)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/float_parse.almd drives it; proven byte-identical to str::parse::<f64> over 2.55M fuzzed + boundary inputs (rt_dec2flt.rs header)."
 
 [[routine]]
@@ -1019,7 +1001,7 @@ routine = "compile_bn_add_small"
 status = "verified"
 class = "fixture"
 oracle = "bignum += u32 subroutine of dec2flt"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Internal helper exercised by float_parse.almd; see compile_dec2flt."
 
 [[routine]]
@@ -1028,7 +1010,7 @@ routine = "compile_bn_bit_len"
 status = "verified"
 class = "fixture"
 oracle = "bignum bit-length subroutine of dec2flt"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Internal helper exercised by float_parse.almd; see compile_dec2flt."
 
 # ── rt_libm.rs (vendored musl-libm trig: sin/cos/tan) ────────────────
@@ -1036,7 +1018,7 @@ note = "Internal helper exercised by float_parse.almd; see compile_dec2flt."
 # (FreeBSD msun) — the SAME algorithm on both targets, so trig is bit-identical
 # native==wasm AND deterministic across platforms. Covered by the random-bit fuzz
 # + boundary cross-target tests and the always-on spec/wasm_cross/trig_libm.almd
-# fixture run through tests/wasm_runtime_test.rs::wasm_cross_target_spec.
+# fixture run through tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec.
 [[routine]]
 file = "rt_libm.rs"
 routine = "compile_floor"
@@ -1056,7 +1038,7 @@ test = "tests/libm_trig_cross_target_test.rs::trig_cross_target_random_fuzz"
 note = "Argument-reduction helper used by rem_pio2_large; see compile_floor."
 
 [[routine]]
-file = "rt_libm.rs"
+file = "rt_libm_p2.rs"
 routine = "compile_rem_pio2_large"
 status = "verified"
 class = "fuzz"
@@ -1065,7 +1047,7 @@ test = "tests/libm_trig_cross_target_test.rs::trig_cross_target_random_fuzz"
 note = "The huge-arg argument reduction (|x| >= 2^20*pi/2). Reads the embedded IPIO2 (2/pi) + PIO2 tables. The fuzz battery's random-bit points hit this path including the recompute/argument-distillation branch."
 
 [[routine]]
-file = "rt_libm.rs"
+file = "rt_libm_p2.rs"
 routine = "compile_rem_pio2"
 status = "verified"
 class = "fuzz"
@@ -1107,7 +1089,7 @@ note = "Tangent kernel; reached by math.tan after argument reduction."
 # + boundary cross-target batteries. spec/wasm_cross/{math_explog,math_pow}.almd are
 # the always-on gate fixtures.
 [[routine]]
-file = "rt_libm.rs"
+file = "rt_libm_p3.rs"
 routine = "compile_exp"
 status = "verified"
 class = "fuzz"
@@ -1116,7 +1098,7 @@ test = "tests/libm_explog_pow_cross_target_test.rs::explog_cross_target_random_f
 note = "Reached by math.exp; the overflow/underflow-to-subnormal edges are pinned by explog_cross_target_boundary + math_explog.almd."
 
 [[routine]]
-file = "rt_libm.rs"
+file = "rt_libm_p3.rs"
 routine = "compile_log"
 status = "verified"
 class = "fuzz"
@@ -1125,7 +1107,7 @@ test = "tests/libm_explog_pow_cross_target_test.rs::explog_cross_target_random_f
 note = "Natural log; the shared reduction kernel is also used by log2/log10. log(0)=-inf, log(neg)=NaN pinned by the boundary test + math_explog.almd."
 
 [[routine]]
-file = "rt_libm.rs"
+file = "rt_libm_p3.rs"
 routine = "compile_log2"
 status = "verified"
 class = "fuzz"
@@ -1134,7 +1116,7 @@ test = "tests/libm_explog_pow_cross_target_test.rs::explog_cross_target_random_f
 note = "Reached by math.log2; exact powers of two stay exact via the extra-precision split."
 
 [[routine]]
-file = "rt_libm.rs"
+file = "rt_libm_p3.rs"
 routine = "compile_log10"
 status = "verified"
 class = "fuzz"
@@ -1143,7 +1125,7 @@ test = "tests/libm_explog_pow_cross_target_test.rs::explog_cross_target_random_f
 note = "Reached by math.log10; exact powers of ten stay exact."
 
 [[routine]]
-file = "rt_libm.rs"
+file = "rt_libm_p3.rs"
 routine = "compile_pow"
 status = "verified"
 class = "fuzz"
@@ -1158,7 +1140,7 @@ routine = "compile_json_escape_string"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/json.rs / value.rs JSON string escaping (serde_json-compatible)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/json_value.almd stringifies values containing strings; escapes compared byte-identically."
 
 [[routine]]
@@ -1167,7 +1149,7 @@ routine = "compile_value_stringify"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/value.rs::stringify (value.stringify)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/json_value.almd round-trips parse→stringify; output bytes must match native."
 
 [[routine]]
@@ -1176,52 +1158,52 @@ routine = "compile_json_stringify_pretty"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/json.rs::stringify_value (json.stringify_pretty) — depth-indented recursive pretty-printer: 2-space indent per depth, one element/member per line, inline [] / {} for empties"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/json_stringify_pretty.almd pretty-prints a nested object (arrays, nested object, empty array/object, bool, float); output bytes must match native (#661)."
 
 [[routine]]
-file = "rt_value.rs"
+file = "rt_value_p2.rs"
 routine = "compile_json_parse"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/json.rs::parse (json.parse)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/json_value.almd parses a JSON document; the parsed structure (via as_int/as_string/get) must match native."
 
 [[routine]]
-file = "rt_value.rs"
+file = "rt_value_p2.rs"
 routine = "compile_json_parse_at"
 status = "verified"
 class = "fixture"
 oracle = "internal recursive-descent step of json.parse"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "The per-node recursion under compile_json_parse; driven by json_value.almd."
 
 [[routine]]
-file = "rt_value.rs"
+file = "rt_value_p3.rs"
 routine = "compile_json_get_path"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/json.rs::almide_json_get_path (negative-index normalize: len + i)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/{json_value,json_path_edges}.almd. Drain PR-D added negative-Index normalization (was None) so get_path mirrors the infallible native oracle."
 
 [[routine]]
-file = "rt_value.rs"
+file = "rt_value_p3.rs"
 routine = "compile_json_set_path"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/json.rs::almide_json_set_path / set_at_steps (fully INFALLIBLE: Field over a non-object autovivifies, Index non-array & OOB are no-ops)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/json_path_edges.almd. Drain PR-D made Index INFALLIBLE: negative normalize, non-array root → no-op (was reading object pairs as an array / trapping on a scalar root), OOB → no-op (was Err 'path error: index out of bounds'). Drain PR-D remediation made Field INFALLIBLE too: a Field step over a non-object (Int/String/Null/Bool/Array) node now AUTOVIVIFIES — it replaces the node with a fresh single-key object, seeding every absent/non-object descent with native's `Object(vec![])` (empty object, not null) so a following Index step's local no-op rebuilds as `{}` and a following Field appends; was Err 'path error: expected object'. Covered rows: av_* (Field-over-{int,str,null,bool,array} nested+final, mid-path replace, deep chain, Field-after-Index autoviv, Field-then-Index `{x:{}}`, Index-then-Field `{x:{y:{}}}`, Index-OOB-then-Field whole-subtree no-op)."
 
 [[routine]]
-file = "rt_value.rs"
+file = "rt_value_p3.rs"
 routine = "compile_json_remove_path"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/json.rs::almide_json_remove_path / remove_at_steps (infallible Index)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/json_path_edges.almd. Drain PR-D added negative-Index normalization (top + nested + intermediate rebuild) so remove_path mirrors the native oracle."
 
 # ── rt_encoding.rs (base64 / hex) ────────────────────────────────────
@@ -1231,7 +1213,7 @@ routine = "compile_base64_encode"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/base64.rs::encode_with (RFC 4648, standard + URL-safe, canonical padded)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/encoding_base64.almd. Drain PR-D created the native oracle (the almide_rt_base64_* fns did not exist → E0425) and fixed the WASM encode (stale offset literals left output empty; string_alloc now writes the len header)."
 
 [[routine]]
@@ -1240,7 +1222,7 @@ routine = "compile_base64_decode"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/base64.rs::decode_str (strip '=', length/char errors)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/encoding_base64.almd. Drain PR-D fixed the stale read offsets and the '0'..'9' char→value offset in emit_b64_decode_char (was -4, must be +4), and added the 'invalid base64 length: N' / 'invalid base64 character' strings to match native byte-for-byte."
 
 [[routine]]
@@ -1249,7 +1231,7 @@ routine = "compile_hex_encode"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/hex.rs::almide_rt_hex_encode"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/encoding_base64.almd uses hex.encode to dump decoded Bytes byte-for-byte across targets."
 
 [[routine]]
@@ -1258,7 +1240,7 @@ routine = "compile_hex_decode"
 status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/hex.rs::almide_rt_hex_decode (odd-length / non-hex error path with position)"
-test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/encoding_base64.almd exercises the error path. Drain PR-D appended the position/length detail the WASM strings dropped: 'hex string has odd length: N' / 'invalid hex char at N' (hi at 2*pair, lo at 2*pair+1)."
 
 # ── rt_regex.rs (regex engine — node-graph backtracking interpreter) ──
@@ -1329,7 +1311,7 @@ oracle = "runtime/rs/src/regex.rs rx_parse_class (negation, \\d\\w\\s expansion,
 test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
-file = "rt_regex.rs"
+file = "rt_regex_p2.rs"
 routine = "compile_node_matches"
 status = "verified"
 class = "fuzz"
@@ -1337,7 +1319,7 @@ oracle = "runtime/rs/src/regex.rs rx_node_matches (Lit==scalar, Dot=scalar!='\\n
 test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
-file = "rt_regex.rs"
+file = "rt_regex_p2.rs"
 routine = "compile_match_alts"
 status = "verified"
 class = "fuzz"
@@ -1345,7 +1327,7 @@ oracle = "runtime/rs/src/regex.rs rx_match_alts (try each alt, clone/restore cap
 test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
-file = "rt_regex.rs"
+file = "rt_regex_p2.rs"
 routine = "compile_match_seq"
 status = "verified"
 class = "fuzz"
@@ -1353,7 +1335,7 @@ oracle = "runtime/rs/src/regex.rs rx_match_seq (anchors as nodes, else delegate 
 test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
-file = "rt_regex.rs"
+file = "rt_regex_p2.rs"
 routine = "compile_match_rep"
 status = "verified"
 class = "fuzz"
@@ -1361,7 +1343,7 @@ oracle = "runtime/rs/src/regex.rs rx_match_rep (greedy, zero-width guard, caps s
 test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
-file = "rt_regex.rs"
+file = "rt_regex_p2.rs"
 routine = "compile_match_one"
 status = "verified"
 class = "fuzz"
@@ -1369,9 +1351,18 @@ oracle = "runtime/rs/src/regex.rs rx_match_one (consume one scalar; Group record
 test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
-file = "rt_regex.rs"
+file = "rt_regex_p2.rs"
 routine = "compile_find_at"
 status = "verified"
 class = "fuzz"
 oracle = "runtime/rs/src/regex.rs rx_find_at (search start..=len, fresh caps per pos, sets match_start)"
 test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
+
+[[routine]]
+file = "rt_value.rs"
+routine = "compile_value_eq"
+status = "verified"
+class = "fixture"
+oracle = "runtime/rs/src/value.rs::derive(PartialEq) on enum Value (strict tags, in-order object pairs)"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
+note = "Deep structural Value equality dispatched from the emit_eq Named(\"Value\") arm; exercised by spec/wasm_cross/value_deep_eq.almd (nulls, scalars, cross-tag, arrays, in-order objects, parsed-vs-built)."

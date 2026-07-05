@@ -1,0 +1,71 @@
+// Self-hosted bytes.read_f16_le — IEEE-754 half-precision (f16) → f64, bit-exact to v0.
+//
+// Mirrors runtime/rs/src/bytes.rs `f16_bits_to_f64` (which decodes in f32 then widens
+// `as f64`). For the ≤10-bit f16 mantissa every intermediate is exactly representable,
+// so the f64 computation here is bit-identical to the f32 path: powers of two are exact,
+// and the inf/NaN constants equal the `f32→f64` widening (f32::INF→0x7FF0…, f32::NaN→
+// 0x7FF8…). 2^k via ffrombits((1023+k)<<52); float constants via prim.ffrombits.
+
+fn __f16_pow2(k: Int) -> Float = prim.ffrombits(prim.bshl(1023 + k, 52))
+
+fn __f16_decode(bits: Int) -> Float = {
+  let sign = prim.band(prim.bshr_u(bits, 15), 1)
+  let exp = prim.band(prim.bshr_u(bits, 10), 31)
+  let mant = prim.band(bits, 1023)
+  let sign_f = if sign == 1 then 0.0 - 1.0 else 1.0
+  if exp == 0 then {
+    // subnormal / zero: sign * mant * 2^-24
+    let m = prim.i2f(mant)
+    let p = prim.ffrombits(4499096027743125504)
+    sign_f * m * p
+  } else if exp == 31 then {
+    // inf / NaN
+    if mant == 0 then sign_f * prim.ffrombits(9218868437227405312)
+    else prim.ffrombits(9221120237041090560)
+  } else {
+    // normal: sign * (1 + mant/1024) * 2^(exp-15)
+    let m = 1.0 + prim.i2f(mant) / 1024.0
+    let p = __f16_pow2(exp - 15)
+    sign_f * m * p
+  }
+}
+
+fn bytes_read_f16_le(b: Bytes, pos: Int) -> Float = {
+  let h = prim.handle(b)
+  let len = prim.load32(h + 4)
+  if pos + 2 > len then 0.0
+  else {
+    let b0 = prim.load8(h + 12 + pos)
+    let b1 = prim.load8(h + 12 + pos + 1)
+    let bits = prim.bor(b0, prim.bshl(b1, 8))
+    __f16_decode(bits)
+  }
+}
+
+// bytes.read_f16_le_array — `count` f16 values from `pos` (stride 2) into a List[Float].
+// Decodes inline via the private __f16_decode (NOT a call to the registered bytes.read_f16_le
+// — a same-file registered cross-reference loops the auto-linker). Per-element OOB → 0.0.
+fn __arr_f16le_one(h: Int, p: Int, len: Int) -> Float =
+  if p + 2 > len then 0.0
+  else {
+    let b0 = prim.load8(h + 12 + p)
+    let b1 = prim.load8(h + 12 + p + 1)
+    __f16_decode(prim.bor(b0, prim.bshl(b1, 8)))
+  }
+
+fn __arr_f16le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    let h = prim.handle(b)
+    let len = prim.load32(h + 4)
+    let x = __arr_f16le_one(h, pos + i * 2, len)
+    prim.store64(dh + 12 + i * 8, prim.fbits(x))
+    __arr_f16le(b, dh, pos, count, i + 1)
+  }
+
+fn bytes_read_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = {
+  let n = if count > 0 then count else 0
+  let buf = prim.alloc_list_f64(n)
+  let _x = __arr_f16le(b, prim.handle(buf), pos, n, 0)
+  buf
+}

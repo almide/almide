@@ -1,0 +1,59 @@
+// list_to_string_b — SELF-HOSTED `list.to_string` over a `List[Bool]`, byte-matching v0's compound
+// repr `[true, false]` (the `${list}` form). v0 renders each bool via `format!("{}", bool)` =
+// "true" / "false". Layout: 8-byte i64 slots holding 0/1. `xs` borrowed; result a fresh String.
+
+// Byte width of a bool element: "true"=4, "false"=5.
+fn __ltsb_width(v: Int) -> Int =
+  if v == 0 then 5 else 4
+
+// Write the bool element's bytes at `pos`; return the address past the last byte.
+fn __ltsb_fill_elem(v: Int, pos: Int) -> Int =
+  if v == 0 then {
+    prim.store8(pos, 102)            // 'f'
+    prim.store8(pos + 1, 97)         // 'a'
+    prim.store8(pos + 2, 108)        // 'l'
+    prim.store8(pos + 3, 115)        // 's'
+    prim.store8(pos + 4, 101)        // 'e'
+    pos + 5
+  } else {
+    prim.store8(pos, 116)            // 't'
+    prim.store8(pos + 1, 114)        // 'r'
+    prim.store8(pos + 2, 117)        // 'u'
+    prim.store8(pos + 3, 101)        // 'e'
+    pos + 4
+  }
+
+fn __ltsb_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let v = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __ltsb_body_len(addr, count, i + 1, acc + sep + __ltsb_width(v))
+  }
+
+fn __ltsb_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)           // ','
+      prim.store8(pos + 1, 32)       // ' '
+      pos + 2
+    } else pos
+    let v = prim.load64(addr + i * 8)
+    let pos2 = __ltsb_fill_elem(v, pos1)
+    __ltsb_fill_body(addr, count, i + 1, pos2)
+  }
+
+fn list_to_string_b(xs: List[Bool]) -> String = {
+  let h = prim.handle(xs)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __ltsb_body_len(addr, count, 0, 0)
+  let total = body + 2
+  let buf = prim.alloc_str(total)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 91)              // '['
+  let after = __ltsb_fill_body(addr, count, 0, base + 1)
+  prim.store8(after, 93)             // ']'
+  buf
+}

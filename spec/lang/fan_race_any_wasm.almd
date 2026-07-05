@@ -1,0 +1,35 @@
+// wasm:enabled
+// Locks in `fan.race` over a LITERAL thunk list. On wasm the fan combinators are DETERMINISTIC:
+// `fan.race` takes the FIRST thunk in list order to settle = thunk[0]'s result (NOT wall-clock
+// fastest). The trust-spine desugars `fan.race([() => t0, …])` by INLINING the first thunk's body,
+// avoiding an unrepresentable `List[funcref]`. Byte-identical to v0 --target wasm.
+
+effect fn okn(n: Int) -> Result[Int, String] = ok(n * 3)
+effect fn failing() -> Result[Int, String] = err("boom")
+
+effect fn main() -> Unit = {
+  match fan.race([() => okn(10), () => okn(20), () => okn(30)]) {
+    ok(v) => println("race=" + int.to_string(v))
+    err(e) => println("err=" + e)
+  }
+  let single = fan.race([() => okn(5)])
+  println("single=" + int.to_string(single))
+  // race takes the HEAD even when it errs (not the fastest-to-succeed).
+  match fan.race([() => failing(), () => okn(9)]) {
+    ok(v) => println("ok=" + int.to_string(v))
+    err(e) => println("err=" + e)
+  }
+
+  // fan.any: the FIRST Ok in list order wins; if every candidate errs, v0's fixed
+  // `fan.any: all candidates failed` message. Inlined into a per-thunk match chain.
+  match fan.any([() => failing(), () => okn(7), () => okn(99)]) {
+    ok(v) => println("any=" + int.to_string(v))
+    err(e) => println("any_err=" + e)
+  }
+  match fan.any([() => failing(), () => failing()]) {
+    ok(v) => println("any_ok")
+    err(e) => println("all_fail=" + e)
+  }
+  let got = fan.any([() => failing(), () => okn(88)])
+  println("unwrap=" + int.to_string(got))
+}

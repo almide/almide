@@ -1,0 +1,21 @@
+// string_cmp — SELF-HOSTED lexicographic byte comparison of two Strings for v1, returning -1/0/1
+// (matching v0's Rust String Ord, which is byte-lexicographic = codepoint order for UTF-8). The `<`,
+// `<=`, `>`, `>=` operators over String lower to `string.cmp(a,b)` then an Int compare with 0 — without
+// this they compared the i64 HANDLE pointers (arbitrary order, a silent bug). Equal-length-prefix → the
+// shorter string is less. Bytes at handle+12, byte length at handle+4. Read-only, allocates nothing.
+fn __scmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int =
+  if k >= la then (if k >= lb then 0 else 0 - 1)
+  else if k >= lb then 1
+  else {
+    let ca = prim.load8(ah + 12 + k)
+    let cb = prim.load8(bh + 12 + k)
+    if ca < cb then 0 - 1
+    else if ca > cb then 1
+    else __scmp_at(ah, bh, la, lb, k + 1)
+  }
+
+fn string_cmp(a: String, b: String) -> Int = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  __scmp_at(ah, bh, prim.load32(ah + 4), prim.load32(bh + 4), 0)
+}

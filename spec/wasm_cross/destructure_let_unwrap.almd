@@ -1,0 +1,16 @@
+// @contract: C-108
+// `let (a, b) = e!` — a DESTRUCTURE-let-unwrap of a tuple-Result (toml parse_key's
+// `let (first, np) = parse_key_part(t, p)!`). desugar_let_unwrap rewrites it to
+// `match e { ok($p2) => { let (a,b) = $p2; <rest> }, err($x) => err($x) }` — the proven direct-match
+// form. Without this the Result was destructured directly as a tuple = a silent miscompile (the
+// wrapper @12/@16 read as the tuple fields). Covers a call/ctor tail using the destructured fields + err.
+effect fn kv(p: Int) -> Result[(String, Int), String] =
+  if p < 0 then err("neg") else ok(("key", p + 1))
+effect fn wrap(p: Int) -> Result[String, String] = {
+  let (k, np) = kv(p)!
+  ok(k + ":" + int.to_string(np))
+}
+effect fn main() -> Unit = {
+  match wrap(40) { ok(s) => println(s), err(e) => println("E:" + e) }
+  match wrap(0 - 1) { ok(s) => println(s), err(e) => println("E:" + e) }
+}

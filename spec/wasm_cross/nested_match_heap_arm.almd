@@ -1,0 +1,22 @@
+// @contract: C-106
+// A heap-result `match` whose ELSE arm is itself a `match` (the try_decimal /
+// parse_number shape): the nested-match arm must lower through the same proven
+// variant-value-match machinery the tail position uses, executing only the
+// taken leaf and moving out its owned String. Uses only linkable self-host
+// calls (int.parse / int.from_hex) so the whole program renders on v1.
+fn classify(c: String) -> String =
+  match int.parse(c) {
+    ok(n) => "int:" + int.to_string(n),
+    err(_) => match int.from_hex(c) {
+      ok(m) => "hex:" + int.to_string(m),
+      err(_) => "other:" + c,
+    },
+  }
+
+fn main() -> Unit = {
+  println(classify("42"))
+  println(classify("ff"))
+  println(classify("0"))
+  println(classify("hello"))
+  println(classify("-7"))
+}

@@ -44,7 +44,6 @@
 //! stack" (`rx_save_sp_global`) carved from the same arena: a branch pushes a
 //! `ncap*2`-word copy and restores by copying back on failure.
 
-use crate::emit_wasm::engine::{Imm32, Local};
 use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::ValType;
 use super::TrackedFunction as Function;
@@ -145,8 +144,6 @@ const RX_ARENA_SLACK_WORDS: i32 = 512;
 /// Fraction of the arena handed to the node graph; the rest is the save stack.
 /// Nodes are bounded by O(pattern); the save stack by O(depth × ncap).
 const RX_ARENA_NODE_SHIFT: i32 = 1; // node region = arena/2, save region = arena/2
-/// Bytes consumed by a two-character escape sequence (`\` + escape char).
-const RX_ESCAPE_LEN: i32 = 2;
 
 /// Regex-related runtime function indices.
 #[derive(Default, Clone)]
@@ -254,7 +251,7 @@ pub(super) fn compile(emitter: &mut WasmEmitter) {
 fn emit_node_alloc(f: &mut Function, arena_sp: u32, n: i32) {
     wasm!(f, {
         global_get(arena_sp);                              // base (result)
-        global_get(arena_sp); i32_const(Imm32(n * RX_WORD)); i32_add; global_set(arena_sp);
+        global_get(arena_sp); i32_const(n * RX_WORD); i32_add; global_set(arena_sp);
     });
 }
 
@@ -272,22 +269,22 @@ fn compile_compile(emitter: &mut WasmEmitter) {
     let ncap = emitter.rt.regex.ncap_global;
 
     wasm!(f, {
-        local_get(Local(0)); i32_load(0); local_set(Local(1));
+        local_get(0); i32_load(0); local_set(1);
         // arena_words = pat_byte_len * PER_BYTE + SLACK
-        local_get(Local(1)); i32_const(Imm32(RX_ARENA_WORDS_PER_BYTE)); i32_mul;
-        i32_const(Imm32(RX_ARENA_SLACK_WORDS)); i32_add; local_set(Local(3));
+        local_get(1); i32_const(RX_ARENA_WORDS_PER_BYTE); i32_mul;
+        i32_const(RX_ARENA_SLACK_WORDS); i32_add; local_set(3);
         // arena_base = alloc(arena_words * 4)
-        local_get(Local(3)); i32_const(Imm32(RX_WORD)); i32_mul; call(alloc); local_set(Local(2));
+        local_get(3); i32_const(RX_WORD); i32_mul; call(alloc); local_set(2);
         // node region grows up from arena_base; save stack grows up from the
         // node/save split point so the two bump cursors never collide.
-        local_get(Local(2)); global_set(arena_sp);
-        local_get(Local(3)); i32_const(Imm32(RX_ARENA_NODE_SHIFT)); i32_shr_u; local_set(Local(4)); // node_words = arena_words/2
-        local_get(Local(2)); local_get(Local(4)); i32_const(Imm32(RX_WORD)); i32_mul; i32_add; global_set(save_sp);
+        local_get(2); global_set(arena_sp);
+        local_get(3); i32_const(RX_ARENA_NODE_SHIFT); i32_shr_u; local_set(4); // node_words = arena_words/2
+        local_get(2); local_get(4); i32_const(RX_WORD); i32_mul; i32_add; global_set(save_sp);
         // reset parser state
-        i32_const(Imm32(0)); global_set(parse_pos);
-        i32_const(Imm32(0)); global_set(ncap);
+        i32_const(0); global_set(parse_pos);
+        i32_const(0); global_set(ncap);
         // alts = parse_alts(pat, in_group=0)
-        local_get(Local(0)); i32_const(Imm32(0)); call(parse_alts);
+        local_get(0); i32_const(0); call(parse_alts);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.compile, type_idx, f));
@@ -307,29 +304,29 @@ fn compile_parse_alts(emitter: &mut WasmEmitter) {
     let parse_pos = emitter.rt.regex.parse_pos_global;
     let data_off = string_data_off();
 
-    wasm!(f, { local_get(Local(0)); i32_load(0); local_set(Local(2)); });
+    wasm!(f, { local_get(0); i32_load(0); local_set(2); });
     // Alts header
     emit_node_alloc(&mut f, arena_sp, RX_ALTS_WORDS);
-    wasm!(f, { local_set(Local(3)); });
+    wasm!(f, { local_set(3); });
     // First Seq (native starts with one empty alt). cur_seq head=null, next=null
     emit_node_alloc(&mut f, arena_sp, RX_SEQ_WORDS);
     wasm!(f, {
-        local_set(Local(4)); // cur_seq
-        local_get(Local(4)); i32_const(Imm32(RX_SEQ_HEAD_OFF)); i32_add; i32_const(Imm32(RX_NULL)); i32_store(0);
-        local_get(Local(4)); i32_const(Imm32(RX_SEQ_NEXT_OFF)); i32_add; i32_const(Imm32(RX_NULL)); i32_store(0);
-        local_get(Local(3)); i32_const(Imm32(RX_ALTS_HEAD_OFF)); i32_add; local_get(Local(4)); i32_store(0);
-        local_get(Local(4)); local_set(Local(5)); // last_seq = cur_seq
-        i32_const(Imm32(RX_NULL)); local_set(Local(6)); // cur_piece_tail = null
+        local_set(4); // cur_seq
+        local_get(4); i32_const(RX_SEQ_HEAD_OFF); i32_add; i32_const(RX_NULL); i32_store(0);
+        local_get(4); i32_const(RX_SEQ_NEXT_OFF); i32_add; i32_const(RX_NULL); i32_store(0);
+        local_get(3); i32_const(RX_ALTS_HEAD_OFF); i32_add; local_get(4); i32_store(0);
+        local_get(4); local_set(5); // last_seq = cur_seq
+        i32_const(RX_NULL); local_set(6); // cur_piece_tail = null
     });
     // Main loop
     wasm!(f, { block_empty; loop_empty; });
-    wasm!(f, { global_get(parse_pos); local_get(Local(2)); i32_ge_u; br_if(1); });
+    wasm!(f, { global_get(parse_pos); local_get(2); i32_ge_u; br_if(1); });
     wasm!(f, {
-        local_get(Local(0)); i32_const(Imm32(data_off)); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0); local_set(Local(7));
+        local_get(0); i32_const(data_off); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0); local_set(7);
     });
     // if in_group && ch==')' break
     wasm!(f, {
-        local_get(Local(1)); local_get(Local(7)); i32_const(Imm32(ASCII_RPAREN)); i32_eq; i32_and;
+        local_get(1); local_get(7); i32_const(ASCII_RPAREN); i32_eq; i32_and;
         if_empty; br(2); end;
     });
     // if ch=='|' : pos++, start a new (possibly empty) Seq; else parse a piece.
@@ -339,37 +336,37 @@ fn compile_parse_alts(emitter: &mut WasmEmitter) {
     // an atom to a freshly-started empty trailing arm (`a|`). Native mirrors this
     // as `if '|' { … continue } else { push piece }` in rx_parse_alts.
     wasm!(f, {
-        local_get(Local(7)); i32_const(Imm32(ASCII_PIPE)); i32_eq;
+        local_get(7); i32_const(ASCII_PIPE); i32_eq;
         if_empty;
-            global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos);
+            global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos);
     });
     emit_node_alloc(&mut f, arena_sp, RX_SEQ_WORDS);
     wasm!(f, {
-            local_set(Local(9)); // new_seq
-            local_get(Local(9)); i32_const(Imm32(RX_SEQ_HEAD_OFF)); i32_add; i32_const(Imm32(RX_NULL)); i32_store(0);
-            local_get(Local(9)); i32_const(Imm32(RX_SEQ_NEXT_OFF)); i32_add; i32_const(Imm32(RX_NULL)); i32_store(0);
+            local_set(9); // new_seq
+            local_get(9); i32_const(RX_SEQ_HEAD_OFF); i32_add; i32_const(RX_NULL); i32_store(0);
+            local_get(9); i32_const(RX_SEQ_NEXT_OFF); i32_add; i32_const(RX_NULL); i32_store(0);
             // last_seq.next = new_seq
-            local_get(Local(5)); i32_const(Imm32(RX_SEQ_NEXT_OFF)); i32_add; local_get(Local(9)); i32_store(0);
-            local_get(Local(9)); local_set(Local(5)); // last_seq = new_seq
-            local_get(Local(9)); local_set(Local(4)); // cur_seq = new_seq
-            i32_const(Imm32(RX_NULL)); local_set(Local(6)); // reset piece tail
+            local_get(5); i32_const(RX_SEQ_NEXT_OFF); i32_add; local_get(9); i32_store(0);
+            local_get(9); local_set(5); // last_seq = new_seq
+            local_get(9); local_set(4); // cur_seq = new_seq
+            i32_const(RX_NULL); local_set(6); // reset piece tail
         else_;
             // piece = parse_piece(pat); append to cur_seq's piece list
-            local_get(Local(0)); call(parse_piece); local_set(Local(8));
-            local_get(Local(8)); i32_const(Imm32(RX_PIECE_NEXT_OFF)); i32_add; i32_const(Imm32(RX_NULL)); i32_store(0);
+            local_get(0); call(parse_piece); local_set(8);
+            local_get(8); i32_const(RX_PIECE_NEXT_OFF); i32_add; i32_const(RX_NULL); i32_store(0);
             // if cur_piece_tail==null: cur_seq.head = piece; else tail.next = piece
-            local_get(Local(6)); i32_eqz;
+            local_get(6); i32_eqz;
             if_empty;
-                local_get(Local(4)); i32_const(Imm32(RX_SEQ_HEAD_OFF)); i32_add; local_get(Local(8)); i32_store(0);
+                local_get(4); i32_const(RX_SEQ_HEAD_OFF); i32_add; local_get(8); i32_store(0);
             else_;
-                local_get(Local(6)); i32_const(Imm32(RX_PIECE_NEXT_OFF)); i32_add; local_get(Local(8)); i32_store(0);
+                local_get(6); i32_const(RX_PIECE_NEXT_OFF); i32_add; local_get(8); i32_store(0);
             end;
-            local_get(Local(8)); local_set(Local(6)); // tail = piece
+            local_get(8); local_set(6); // tail = piece
         end;
         br(0); // continue loop (loop level, outside the '|' if)
     });
     wasm!(f, { end; end; }); // end loop, block
-    wasm!(f, { local_get(Local(3)); end; });
+    wasm!(f, { local_get(3); end; });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.parse_alts, type_idx, f));
 }
 
@@ -385,38 +382,38 @@ fn compile_parse_piece(emitter: &mut WasmEmitter) {
     let data_off = string_data_off();
 
     wasm!(f, {
-        local_get(Local(0)); i32_load(0); local_set(Local(2));
-        local_get(Local(0)); call(parse_atom); local_set(Local(1));
+        local_get(0); i32_load(0); local_set(2);
+        local_get(0); call(parse_atom); local_set(1);
         // default (min=1, max=1)
-        local_get(Local(1)); i32_const(Imm32(RX_PIECE_MIN_OFF)); i32_add; i32_const(Imm32(1)); i32_store(0);
-        local_get(Local(1)); i32_const(Imm32(RX_PIECE_MAX_OFF)); i32_add; i32_const(Imm32(1)); i32_store(0);
+        local_get(1); i32_const(RX_PIECE_MIN_OFF); i32_add; i32_const(1); i32_store(0);
+        local_get(1); i32_const(RX_PIECE_MAX_OFF); i32_add; i32_const(1); i32_store(0);
         // quantifier?
-        global_get(parse_pos); local_get(Local(2)); i32_lt_u;
+        global_get(parse_pos); local_get(2); i32_lt_u;
         if_empty;
-            local_get(Local(0)); i32_const(Imm32(data_off)); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0); local_set(Local(3));
+            local_get(0); i32_const(data_off); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0); local_set(3);
             // '*' => (0, None)
-            local_get(Local(3)); i32_const(Imm32(ASCII_STAR)); i32_eq;
+            local_get(3); i32_const(ASCII_STAR); i32_eq;
             if_empty;
-                local_get(Local(1)); i32_const(Imm32(RX_PIECE_MIN_OFF)); i32_add; i32_const(Imm32(0)); i32_store(0);
-                local_get(Local(1)); i32_const(Imm32(RX_PIECE_MAX_OFF)); i32_add; i32_const(Imm32(RX_MAX_UNBOUNDED)); i32_store(0);
-                global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos);
+                local_get(1); i32_const(RX_PIECE_MIN_OFF); i32_add; i32_const(0); i32_store(0);
+                local_get(1); i32_const(RX_PIECE_MAX_OFF); i32_add; i32_const(RX_MAX_UNBOUNDED); i32_store(0);
+                global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos);
             else_;
-                local_get(Local(3)); i32_const(Imm32(ASCII_PLUS)); i32_eq;
+                local_get(3); i32_const(ASCII_PLUS); i32_eq;
                 if_empty;
-                    local_get(Local(1)); i32_const(Imm32(RX_PIECE_MIN_OFF)); i32_add; i32_const(Imm32(1)); i32_store(0);
-                    local_get(Local(1)); i32_const(Imm32(RX_PIECE_MAX_OFF)); i32_add; i32_const(Imm32(RX_MAX_UNBOUNDED)); i32_store(0);
-                    global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos);
+                    local_get(1); i32_const(RX_PIECE_MIN_OFF); i32_add; i32_const(1); i32_store(0);
+                    local_get(1); i32_const(RX_PIECE_MAX_OFF); i32_add; i32_const(RX_MAX_UNBOUNDED); i32_store(0);
+                    global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos);
                 else_;
-                    local_get(Local(3)); i32_const(Imm32(ASCII_QUESTION)); i32_eq;
+                    local_get(3); i32_const(ASCII_QUESTION); i32_eq;
                     if_empty;
-                        local_get(Local(1)); i32_const(Imm32(RX_PIECE_MIN_OFF)); i32_add; i32_const(Imm32(0)); i32_store(0);
-                        local_get(Local(1)); i32_const(Imm32(RX_PIECE_MAX_OFF)); i32_add; i32_const(Imm32(1)); i32_store(0);
-                        global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos);
+                        local_get(1); i32_const(RX_PIECE_MIN_OFF); i32_add; i32_const(0); i32_store(0);
+                        local_get(1); i32_const(RX_PIECE_MAX_OFF); i32_add; i32_const(1); i32_store(0);
+                        global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos);
                     end;
                 end;
             end;
         end;
-        local_get(Local(1));
+        local_get(1);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.parse_piece, type_idx, f));
@@ -440,84 +437,84 @@ fn compile_parse_atom(emitter: &mut WasmEmitter) {
     let data_off = string_data_off();
 
     emit_node_alloc(&mut f, arena_sp, RX_PIECE_WORDS);
-    wasm!(f, { local_set(Local(1)); });
+    wasm!(f, { local_set(1); });
     wasm!(f, {
-        local_get(Local(0)); i32_load(0); local_set(Local(7));
-        local_get(Local(0)); i32_const(Imm32(data_off)); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0); local_set(Local(6));
+        local_get(0); i32_load(0); local_set(7);
+        local_get(0); i32_const(data_off); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0); local_set(6);
     });
     // '.' => Dot
     wasm!(f, {
-        local_get(Local(6)); i32_const(Imm32(ASCII_DOT)); i32_eq;
+        local_get(6); i32_const(ASCII_DOT); i32_eq;
         if_empty;
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_KIND_OFF)); i32_add; i32_const(Imm32(RX_KIND_DOT)); i32_store(0);
-            global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos);
-            local_get(Local(1)); return_;
+            local_get(1); i32_const(RX_PIECE_KIND_OFF); i32_add; i32_const(RX_KIND_DOT); i32_store(0);
+            global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos);
+            local_get(1); return_;
         end;
     });
     // '^' => AnchorStart
     wasm!(f, {
-        local_get(Local(6)); i32_const(Imm32(ASCII_CARET)); i32_eq;
+        local_get(6); i32_const(ASCII_CARET); i32_eq;
         if_empty;
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_KIND_OFF)); i32_add; i32_const(Imm32(RX_KIND_ANCHOR_START)); i32_store(0);
-            global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos);
-            local_get(Local(1)); return_;
+            local_get(1); i32_const(RX_PIECE_KIND_OFF); i32_add; i32_const(RX_KIND_ANCHOR_START); i32_store(0);
+            global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos);
+            local_get(1); return_;
         end;
     });
     // '$' => AnchorEnd
     wasm!(f, {
-        local_get(Local(6)); i32_const(Imm32(ASCII_DOLLAR)); i32_eq;
+        local_get(6); i32_const(ASCII_DOLLAR); i32_eq;
         if_empty;
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_KIND_OFF)); i32_add; i32_const(Imm32(RX_KIND_ANCHOR_END)); i32_store(0);
-            global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos);
-            local_get(Local(1)); return_;
+            local_get(1); i32_const(RX_PIECE_KIND_OFF); i32_add; i32_const(RX_KIND_ANCHOR_END); i32_store(0);
+            global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos);
+            local_get(1); return_;
         end;
     });
     // '\\' => escape
     wasm!(f, {
-        local_get(Local(6)); i32_const(Imm32(ASCII_BACKSLASH)); i32_eq;
+        local_get(6); i32_const(ASCII_BACKSLASH); i32_eq;
         if_empty;
-            global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos);
-            local_get(Local(0)); local_get(Local(1)); call(parse_escape);
-            local_get(Local(1)); return_;
+            global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos);
+            local_get(0); local_get(1); call(parse_escape);
+            local_get(1); return_;
         end;
     });
     // '[' => class
     wasm!(f, {
-        local_get(Local(6)); i32_const(Imm32(ASCII_LBRACKET)); i32_eq;
+        local_get(6); i32_const(ASCII_LBRACKET); i32_eq;
         if_empty;
-            global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos);
-            local_get(Local(0)); local_get(Local(1)); call(parse_class);
-            local_get(Local(1)); return_;
+            global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos);
+            local_get(0); local_get(1); call(parse_class);
+            local_get(1); return_;
         end;
     });
     // '(' => group: ncap++, ci, recurse alts(in_group=1), consume ')'
     wasm!(f, {
-        local_get(Local(6)); i32_const(Imm32(ASCII_LPAREN)); i32_eq;
+        local_get(6); i32_const(ASCII_LPAREN); i32_eq;
         if_empty;
-            global_get(ncap); i32_const(Imm32(1)); i32_add; local_tee(Local(4)); global_set(ncap); // ci = ++ncap
-            global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); // consume '('
-            local_get(Local(0)); i32_const(Imm32(1)); call(parse_alts); local_set(Local(5));
+            global_get(ncap); i32_const(1); i32_add; local_tee(4); global_set(ncap); // ci = ++ncap
+            global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); // consume '('
+            local_get(0); i32_const(1); call(parse_alts); local_set(5);
             // consume ')' if present
-            global_get(parse_pos); local_get(Local(7)); i32_lt_u;
+            global_get(parse_pos); local_get(7); i32_lt_u;
             if_empty;
-                local_get(Local(0)); i32_const(Imm32(data_off)); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0);
-                i32_const(Imm32(ASCII_RPAREN)); i32_eq;
-                if_empty; global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); end;
+                local_get(0); i32_const(data_off); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0);
+                i32_const(ASCII_RPAREN); i32_eq;
+                if_empty; global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); end;
             end;
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_KIND_OFF)); i32_add; i32_const(Imm32(RX_KIND_GROUP)); i32_store(0);
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_X_OFF)); i32_add; local_get(Local(5)); i32_store(0);
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_Z_OFF)); i32_add; local_get(Local(4)); i32_store(0);
-            local_get(Local(1)); return_;
+            local_get(1); i32_const(RX_PIECE_KIND_OFF); i32_add; i32_const(RX_KIND_GROUP); i32_store(0);
+            local_get(1); i32_const(RX_PIECE_X_OFF); i32_add; local_get(5); i32_store(0);
+            local_get(1); i32_const(RX_PIECE_Z_OFF); i32_add; local_get(4); i32_store(0);
+            local_get(1); return_;
         end;
     });
     // else: literal scalar (decode by UTF-8, advance by width)
     wasm!(f, {
-        local_get(Local(0)); global_get(parse_pos); call(utf8_scalar); i32_wrap_i64; local_set(Local(2));
-        local_get(Local(0)); global_get(parse_pos); call(utf8_width); local_set(Local(3));
-        local_get(Local(1)); i32_const(Imm32(RX_PIECE_KIND_OFF)); i32_add; i32_const(Imm32(RX_KIND_LIT)); i32_store(0);
-        local_get(Local(1)); i32_const(Imm32(RX_PIECE_X_OFF)); i32_add; local_get(Local(2)); i32_store(0);
-        global_get(parse_pos); local_get(Local(3)); i32_add; global_set(parse_pos);
-        local_get(Local(1));
+        local_get(0); global_get(parse_pos); call(utf8_scalar); i32_wrap_i64; local_set(2);
+        local_get(0); global_get(parse_pos); call(utf8_width); local_set(3);
+        local_get(1); i32_const(RX_PIECE_KIND_OFF); i32_add; i32_const(RX_KIND_LIT); i32_store(0);
+        local_get(1); i32_const(RX_PIECE_X_OFF); i32_add; local_get(2); i32_store(0);
+        global_get(parse_pos); local_get(3); i32_add; global_set(parse_pos);
+        local_get(1);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.parse_atom, type_idx, f));
@@ -537,66 +534,66 @@ fn compile_parse_escape(emitter: &mut WasmEmitter) {
     let data_off = string_data_off();
 
     wasm!(f, {
-        local_get(Local(0)); i32_load(0); local_set(Local(2));
+        local_get(0); i32_load(0); local_set(2);
         // if pos >= pat_len → Lit('\\')
-        global_get(parse_pos); local_get(Local(2)); i32_ge_u;
+        global_get(parse_pos); local_get(2); i32_ge_u;
         if_empty;
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_KIND_OFF)); i32_add; i32_const(Imm32(RX_KIND_LIT)); i32_store(0);
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_X_OFF)); i32_add; i32_const(Imm32(ASCII_BACKSLASH)); i32_store(0);
+            local_get(1); i32_const(RX_PIECE_KIND_OFF); i32_add; i32_const(RX_KIND_LIT); i32_store(0);
+            local_get(1); i32_const(RX_PIECE_X_OFF); i32_add; i32_const(ASCII_BACKSLASH); i32_store(0);
             return_;
         end;
-        local_get(Local(0)); i32_const(Imm32(data_off)); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0); local_set(Local(3));
+        local_get(0); i32_const(data_off); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0); local_set(3);
     });
 
     // \d / \D
-    wasm!(f, { local_get(Local(3)); i32_const(Imm32(ASCII_LOWER_D)); i32_eq; if_empty; });
+    wasm!(f, { local_get(3); i32_const(ASCII_LOWER_D); i32_eq; if_empty; });
     emit_class_digit(&mut f, arena_sp, 1, 4, 0);
-    wasm!(f, { global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); return_; end; });
-    wasm!(f, { local_get(Local(3)); i32_const(Imm32(ASCII_UPPER_D)); i32_eq; if_empty; });
+    wasm!(f, { global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); return_; end; });
+    wasm!(f, { local_get(3); i32_const(ASCII_UPPER_D); i32_eq; if_empty; });
     emit_class_digit(&mut f, arena_sp, 1, 4, 1);
-    wasm!(f, { global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); return_; end; });
+    wasm!(f, { global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); return_; end; });
     // \w / \W
-    wasm!(f, { local_get(Local(3)); i32_const(Imm32(ASCII_LOWER_W)); i32_eq; if_empty; });
+    wasm!(f, { local_get(3); i32_const(ASCII_LOWER_W); i32_eq; if_empty; });
     emit_class_word(&mut f, arena_sp, 1, 4, 0);
-    wasm!(f, { global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); return_; end; });
-    wasm!(f, { local_get(Local(3)); i32_const(Imm32(ASCII_UPPER_W)); i32_eq; if_empty; });
+    wasm!(f, { global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); return_; end; });
+    wasm!(f, { local_get(3); i32_const(ASCII_UPPER_W); i32_eq; if_empty; });
     emit_class_word(&mut f, arena_sp, 1, 4, 1);
-    wasm!(f, { global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); return_; end; });
+    wasm!(f, { global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); return_; end; });
     // \s / \S
-    wasm!(f, { local_get(Local(3)); i32_const(Imm32(ASCII_LOWER_S)); i32_eq; if_empty; });
+    wasm!(f, { local_get(3); i32_const(ASCII_LOWER_S); i32_eq; if_empty; });
     emit_class_space(&mut f, arena_sp, 1, 4, 0);
-    wasm!(f, { global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); return_; end; });
-    wasm!(f, { local_get(Local(3)); i32_const(Imm32(ASCII_UPPER_S)); i32_eq; if_empty; });
+    wasm!(f, { global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); return_; end; });
+    wasm!(f, { local_get(3); i32_const(ASCII_UPPER_S); i32_eq; if_empty; });
     emit_class_space(&mut f, arena_sp, 1, 4, 1);
-    wasm!(f, { global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); return_; end; });
+    wasm!(f, { global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); return_; end; });
     // \n \t \r → control Lit
     wasm!(f, {
-        local_get(Local(3)); i32_const(Imm32(ASCII_LOWER_N)); i32_eq;
+        local_get(3); i32_const(ASCII_LOWER_N); i32_eq;
         if_empty;
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_KIND_OFF)); i32_add; i32_const(Imm32(RX_KIND_LIT)); i32_store(0);
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_X_OFF)); i32_add; i32_const(Imm32(ASCII_NEWLINE)); i32_store(0);
-            global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); return_;
+            local_get(1); i32_const(RX_PIECE_KIND_OFF); i32_add; i32_const(RX_KIND_LIT); i32_store(0);
+            local_get(1); i32_const(RX_PIECE_X_OFF); i32_add; i32_const(ASCII_NEWLINE); i32_store(0);
+            global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); return_;
         end;
-        local_get(Local(3)); i32_const(Imm32(ASCII_LOWER_T)); i32_eq;
+        local_get(3); i32_const(ASCII_LOWER_T); i32_eq;
         if_empty;
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_KIND_OFF)); i32_add; i32_const(Imm32(RX_KIND_LIT)); i32_store(0);
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_X_OFF)); i32_add; i32_const(Imm32(ASCII_TAB)); i32_store(0);
-            global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); return_;
+            local_get(1); i32_const(RX_PIECE_KIND_OFF); i32_add; i32_const(RX_KIND_LIT); i32_store(0);
+            local_get(1); i32_const(RX_PIECE_X_OFF); i32_add; i32_const(ASCII_TAB); i32_store(0);
+            global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); return_;
         end;
-        local_get(Local(3)); i32_const(Imm32(ASCII_LOWER_R)); i32_eq;
+        local_get(3); i32_const(ASCII_LOWER_R); i32_eq;
         if_empty;
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_KIND_OFF)); i32_add; i32_const(Imm32(RX_KIND_LIT)); i32_store(0);
-            local_get(Local(1)); i32_const(Imm32(RX_PIECE_X_OFF)); i32_add; i32_const(Imm32(ASCII_CR)); i32_store(0);
-            global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); return_;
+            local_get(1); i32_const(RX_PIECE_KIND_OFF); i32_add; i32_const(RX_KIND_LIT); i32_store(0);
+            local_get(1); i32_const(RX_PIECE_X_OFF); i32_add; i32_const(ASCII_CR); i32_store(0);
+            global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); return_;
         end;
     });
     // default → Lit(escaped scalar), advance by width
     wasm!(f, {
-        local_get(Local(0)); global_get(parse_pos); call(utf8_scalar); i32_wrap_i64; local_set(Local(3));
-        local_get(Local(0)); global_get(parse_pos); call(utf8_width); local_set(Local(5));
-        local_get(Local(1)); i32_const(Imm32(RX_PIECE_KIND_OFF)); i32_add; i32_const(Imm32(RX_KIND_LIT)); i32_store(0);
-        local_get(Local(1)); i32_const(Imm32(RX_PIECE_X_OFF)); i32_add; local_get(Local(3)); i32_store(0);
-        global_get(parse_pos); local_get(Local(5)); i32_add; global_set(parse_pos);
+        local_get(0); global_get(parse_pos); call(utf8_scalar); i32_wrap_i64; local_set(3);
+        local_get(0); global_get(parse_pos); call(utf8_width); local_set(5);
+        local_get(1); i32_const(RX_PIECE_KIND_OFF); i32_add; i32_const(RX_KIND_LIT); i32_store(0);
+        local_get(1); i32_const(RX_PIECE_X_OFF); i32_add; local_get(3); i32_store(0);
+        global_get(parse_pos); local_get(5); i32_add; global_set(parse_pos);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.parse_escape, type_idx, f));
@@ -611,13 +608,13 @@ fn emit_class_const(
     fill: impl Fn(&mut Function, u32),
 ) {
     emit_node_alloc(f, arena_sp, RX_RANGE_WORDS * nranges);
-    wasm!(f, { local_set(Local(rp)); });
+    wasm!(f, { local_set(rp); });
     fill(f, rp);
     wasm!(f, {
-        local_get(Local(piece)); i32_const(Imm32(RX_PIECE_KIND_OFF)); i32_add; i32_const(Imm32(RX_KIND_CLASS)); i32_store(0);
-        local_get(Local(piece)); i32_const(Imm32(RX_PIECE_X_OFF)); i32_add; local_get(Local(rp)); i32_store(0);
-        local_get(Local(piece)); i32_const(Imm32(RX_PIECE_Y_OFF)); i32_add; i32_const(Imm32(nranges)); i32_store(0);
-        local_get(Local(piece)); i32_const(Imm32(RX_PIECE_Z_OFF)); i32_add; i32_const(Imm32(negated)); i32_store(0);
+        local_get(piece); i32_const(RX_PIECE_KIND_OFF); i32_add; i32_const(RX_KIND_CLASS); i32_store(0);
+        local_get(piece); i32_const(RX_PIECE_X_OFF); i32_add; local_get(rp); i32_store(0);
+        local_get(piece); i32_const(RX_PIECE_Y_OFF); i32_add; i32_const(nranges); i32_store(0);
+        local_get(piece); i32_const(RX_PIECE_Z_OFF); i32_add; i32_const(negated); i32_store(0);
     });
 }
 
@@ -625,8 +622,8 @@ fn emit_class_const(
 fn emit_store_range(f: &mut Function, rp: u32, index: i32, lo: i32, hi: i32) {
     let base = index * RX_RANGE_WORDS * RX_WORD;
     wasm!(f, {
-        local_get(Local(rp)); i32_const(Imm32(base + RX_RANGE_LO_OFF)); i32_add; i32_const(Imm32(lo)); i32_store(0);
-        local_get(Local(rp)); i32_const(Imm32(base + RX_RANGE_HI_OFF)); i32_add; i32_const(Imm32(hi)); i32_store(0);
+        local_get(rp); i32_const(base + RX_RANGE_LO_OFF); i32_add; i32_const(lo); i32_store(0);
+        local_get(rp); i32_const(base + RX_RANGE_HI_OFF); i32_add; i32_const(hi); i32_store(0);
     });
 }
 
@@ -671,65 +668,65 @@ fn compile_parse_class(emitter: &mut WasmEmitter) {
     let data_off = string_data_off();
 
     wasm!(f, {
-        local_get(Local(0)); i32_load(0); local_set(Local(2));
-        i32_const(Imm32(0)); local_set(Local(3)); // neg
-        i32_const(Imm32(0)); local_set(Local(5)); // nranges
+        local_get(0); i32_load(0); local_set(2);
+        i32_const(0); local_set(3); // neg
+        i32_const(0); local_set(5); // nranges
         // leading '^' => negated
-        global_get(parse_pos); local_get(Local(2)); i32_lt_u;
+        global_get(parse_pos); local_get(2); i32_lt_u;
         if_empty;
-            local_get(Local(0)); i32_const(Imm32(data_off)); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0);
-            i32_const(Imm32(ASCII_CARET)); i32_eq;
-            if_empty; i32_const(Imm32(1)); local_set(Local(3)); global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); end;
+            local_get(0); i32_const(data_off); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0);
+            i32_const(ASCII_CARET); i32_eq;
+            if_empty; i32_const(1); local_set(3); global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); end;
         end;
         // ranges grow contiguously from here
-        global_get(arena_sp); local_set(Local(4));
+        global_get(arena_sp); local_set(4);
     });
 
     // Loop: while pos < pat_len && pat[pos] != ']'
     wasm!(f, { block_empty; loop_empty; });
-    wasm!(f, { global_get(parse_pos); local_get(Local(2)); i32_ge_u; br_if(1); });
+    wasm!(f, { global_get(parse_pos); local_get(2); i32_ge_u; br_if(1); });
     wasm!(f, {
-        local_get(Local(0)); i32_const(Imm32(data_off)); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0); local_set(Local(6));
-        local_get(Local(6)); i32_const(Imm32(ASCII_RBRACKET)); i32_eq; br_if(1);
+        local_get(0); i32_const(data_off); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0); local_set(6);
+        local_get(6); i32_const(ASCII_RBRACKET); i32_eq; br_if(1);
     });
 
     // Escape inside class: '\' and pos+1 < pat_len
     wasm!(f, {
-        local_get(Local(6)); i32_const(Imm32(ASCII_BACKSLASH)); i32_eq;
-        global_get(parse_pos); i32_const(Imm32(1)); i32_add; local_get(Local(2)); i32_lt_u;
+        local_get(6); i32_const(ASCII_BACKSLASH); i32_eq;
+        global_get(parse_pos); i32_const(1); i32_add; local_get(2); i32_lt_u;
         i32_and;
         if_empty;
-            local_get(Local(0)); i32_const(Imm32(data_off)); i32_add; global_get(parse_pos); i32_const(Imm32(1)); i32_add; i32_add; i32_load8_u(0); local_set(Local(7));
-            global_get(parse_pos); i32_const(Imm32(RX_ESCAPE_LEN)); i32_add; global_set(parse_pos);
+            local_get(0); i32_const(data_off); i32_add; global_get(parse_pos); i32_const(1); i32_add; i32_add; i32_load8_u(0); local_set(7);
+            global_get(parse_pos); i32_const(2); i32_add; global_set(parse_pos);
     });
     // Each `\X` sub-branch sits inside its own `if(escape)` → `if(\X)`; the loop
     // is two structured-control levels out, so `br(2)` continues the class loop.
     // The default branch (no inner `if`) is one level inside `if(escape)`, so it
     // uses `br(1)`.
     // \d
-    wasm!(f, { local_get(Local(7)); i32_const(Imm32(ASCII_LOWER_D)); i32_eq; if_empty; });
+    wasm!(f, { local_get(7); i32_const(ASCII_LOWER_D); i32_eq; if_empty; });
     emit_push_pair_const(&mut f, arena_sp, 4, 5, RX_DIGIT_LO, RX_DIGIT_HI);
     wasm!(f, { br(2); end; });
     // \w
-    wasm!(f, { local_get(Local(7)); i32_const(Imm32(ASCII_LOWER_W)); i32_eq; if_empty; });
+    wasm!(f, { local_get(7); i32_const(ASCII_LOWER_W); i32_eq; if_empty; });
     emit_push_pair_const(&mut f, arena_sp, 4, 5, RX_LOWER_LO, RX_LOWER_HI);
     emit_push_pair_const(&mut f, arena_sp, 4, 5, RX_UPPER_LO, RX_UPPER_HI);
     emit_push_pair_const(&mut f, arena_sp, 4, 5, RX_DIGIT_LO, RX_DIGIT_HI);
     emit_push_pair_const(&mut f, arena_sp, 4, 5, RX_UNDERSCORE, RX_UNDERSCORE);
     wasm!(f, { br(2); end; });
     // \s
-    wasm!(f, { local_get(Local(7)); i32_const(Imm32(ASCII_LOWER_S)); i32_eq; if_empty; });
+    wasm!(f, { local_get(7); i32_const(ASCII_LOWER_S); i32_eq; if_empty; });
     emit_push_pair_const(&mut f, arena_sp, 4, 5, ASCII_SPACE, ASCII_SPACE);
     emit_push_pair_const(&mut f, arena_sp, 4, 5, ASCII_TAB, ASCII_TAB);
     emit_push_pair_const(&mut f, arena_sp, 4, 5, ASCII_NEWLINE, ASCII_NEWLINE);
     emit_push_pair_const(&mut f, arena_sp, 4, 5, ASCII_CR, ASCII_CR);
     wasm!(f, { br(2); end; });
     // \n
-    wasm!(f, { local_get(Local(7)); i32_const(Imm32(ASCII_LOWER_N)); i32_eq; if_empty; });
+    wasm!(f, { local_get(7); i32_const(ASCII_LOWER_N); i32_eq; if_empty; });
     emit_push_pair_const(&mut f, arena_sp, 4, 5, ASCII_NEWLINE, ASCII_NEWLINE);
     wasm!(f, { br(2); end; });
     // \t
-    wasm!(f, { local_get(Local(7)); i32_const(Imm32(ASCII_LOWER_T)); i32_eq; if_empty; });
+    wasm!(f, { local_get(7); i32_const(ASCII_LOWER_T); i32_eq; if_empty; });
     emit_push_pair_const(&mut f, arena_sp, 4, 5, ASCII_TAB, ASCII_TAB);
     wasm!(f, { br(2); end; });
     // default (incl \D \S \W \r): literal esc byte → (esc, esc)
@@ -739,27 +736,27 @@ fn compile_parse_class(emitter: &mut WasmEmitter) {
 
     // Non-escape: decode scalar (lo), advance by width
     wasm!(f, {
-        local_get(Local(0)); global_get(parse_pos); call(utf8_scalar); i32_wrap_i64; local_set(Local(10));
-        local_get(Local(0)); global_get(parse_pos); call(utf8_width); local_set(Local(9));
-        global_get(parse_pos); local_get(Local(9)); i32_add; global_set(parse_pos);
+        local_get(0); global_get(parse_pos); call(utf8_scalar); i32_wrap_i64; local_set(10);
+        local_get(0); global_get(parse_pos); call(utf8_width); local_set(9);
+        global_get(parse_pos); local_get(9); i32_add; global_set(parse_pos);
     });
     // range a-b: '-' at pos && byte after '-' exists && != ']'
     wasm!(f, {
-        global_get(parse_pos); local_get(Local(2)); i32_lt_u;
+        global_get(parse_pos); local_get(2); i32_lt_u;
         if_empty;
-            local_get(Local(0)); i32_const(Imm32(data_off)); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0);
-            i32_const(Imm32(ASCII_DASH)); i32_eq;
-            global_get(parse_pos); i32_const(Imm32(1)); i32_add; local_get(Local(2)); i32_lt_u;
+            local_get(0); i32_const(data_off); i32_add; global_get(parse_pos); i32_add; i32_load8_u(0);
+            i32_const(ASCII_DASH); i32_eq;
+            global_get(parse_pos); i32_const(1); i32_add; local_get(2); i32_lt_u;
             i32_and;
             if_empty;
-                local_get(Local(0)); i32_const(Imm32(data_off)); i32_add; global_get(parse_pos); i32_const(Imm32(1)); i32_add; i32_add; i32_load8_u(0);
-                i32_const(Imm32(ASCII_RBRACKET)); i32_ne;
+                local_get(0); i32_const(data_off); i32_add; global_get(parse_pos); i32_const(1); i32_add; i32_add; i32_load8_u(0);
+                i32_const(ASCII_RBRACKET); i32_ne;
                 if_empty;
                     // consume '-', decode end scalar (hi)
-                    global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos);
-                    local_get(Local(0)); global_get(parse_pos); call(utf8_scalar); i32_wrap_i64; local_set(Local(8));
-                    local_get(Local(0)); global_get(parse_pos); call(utf8_width); local_set(Local(9));
-                    global_get(parse_pos); local_get(Local(9)); i32_add; global_set(parse_pos);
+                    global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos);
+                    local_get(0); global_get(parse_pos); call(utf8_scalar); i32_wrap_i64; local_set(8);
+                    local_get(0); global_get(parse_pos); call(utf8_width); local_set(9);
+                    global_get(parse_pos); local_get(9); i32_add; global_set(parse_pos);
     });
     emit_push_pair_local(&mut f, arena_sp, 4, 5, 10, 8); // (lo, hi)
     wasm!(f, {
@@ -777,15 +774,15 @@ fn compile_parse_class(emitter: &mut WasmEmitter) {
 
     // skip closing ']'
     wasm!(f, {
-        global_get(parse_pos); local_get(Local(2)); i32_lt_u;
-        if_empty; global_get(parse_pos); i32_const(Imm32(1)); i32_add; global_set(parse_pos); end;
+        global_get(parse_pos); local_get(2); i32_lt_u;
+        if_empty; global_get(parse_pos); i32_const(1); i32_add; global_set(parse_pos); end;
     });
     // write CLASS node
     wasm!(f, {
-        local_get(Local(1)); i32_const(Imm32(RX_PIECE_KIND_OFF)); i32_add; i32_const(Imm32(RX_KIND_CLASS)); i32_store(0);
-        local_get(Local(1)); i32_const(Imm32(RX_PIECE_X_OFF)); i32_add; local_get(Local(4)); i32_store(0);
-        local_get(Local(1)); i32_const(Imm32(RX_PIECE_Y_OFF)); i32_add; local_get(Local(5)); i32_store(0);
-        local_get(Local(1)); i32_const(Imm32(RX_PIECE_Z_OFF)); i32_add; local_get(Local(3)); i32_store(0);
+        local_get(1); i32_const(RX_PIECE_KIND_OFF); i32_add; i32_const(RX_KIND_CLASS); i32_store(0);
+        local_get(1); i32_const(RX_PIECE_X_OFF); i32_add; local_get(4); i32_store(0);
+        local_get(1); i32_const(RX_PIECE_Y_OFF); i32_add; local_get(5); i32_store(0);
+        local_get(1); i32_const(RX_PIECE_Z_OFF); i32_add; local_get(3); i32_store(0);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.parse_class, type_idx, f));
@@ -797,11 +794,11 @@ fn emit_push_pair_const(f: &mut Function, arena_sp: u32, ranges_base: u32, nrang
     emit_node_alloc(f, arena_sp, RX_RANGE_WORDS);
     wasm!(f, { drop; }); // base already known via ranges_base + nranges
     wasm!(f, {
-        local_get(Local(ranges_base)); local_get(Local(nranges)); i32_const(Imm32(RX_RANGE_WORDS * RX_WORD)); i32_mul; i32_add;
-        i32_const(Imm32(lo)); i32_store(RX_RANGE_LO_OFF);
-        local_get(Local(ranges_base)); local_get(Local(nranges)); i32_const(Imm32(RX_RANGE_WORDS * RX_WORD)); i32_mul; i32_add;
-        i32_const(Imm32(hi)); i32_store(RX_RANGE_HI_OFF);
-        local_get(Local(nranges)); i32_const(Imm32(1)); i32_add; local_set(Local(nranges));
+        local_get(ranges_base); local_get(nranges); i32_const(RX_RANGE_WORDS * RX_WORD); i32_mul; i32_add;
+        i32_const(lo); i32_store(RX_RANGE_LO_OFF);
+        local_get(ranges_base); local_get(nranges); i32_const(RX_RANGE_WORDS * RX_WORD); i32_mul; i32_add;
+        i32_const(hi); i32_store(RX_RANGE_HI_OFF);
+        local_get(nranges); i32_const(1); i32_add; local_set(nranges);
     });
 }
 
@@ -810,368 +807,12 @@ fn emit_push_pair_local(f: &mut Function, arena_sp: u32, ranges_base: u32, nrang
     emit_node_alloc(f, arena_sp, RX_RANGE_WORDS);
     wasm!(f, { drop; });
     wasm!(f, {
-        local_get(Local(ranges_base)); local_get(Local(nranges)); i32_const(Imm32(RX_RANGE_WORDS * RX_WORD)); i32_mul; i32_add;
-        local_get(Local(lo_l)); i32_store(RX_RANGE_LO_OFF);
-        local_get(Local(ranges_base)); local_get(Local(nranges)); i32_const(Imm32(RX_RANGE_WORDS * RX_WORD)); i32_mul; i32_add;
-        local_get(Local(hi_l)); i32_store(RX_RANGE_HI_OFF);
-        local_get(Local(nranges)); i32_const(Imm32(1)); i32_add; local_set(Local(nranges));
+        local_get(ranges_base); local_get(nranges); i32_const(RX_RANGE_WORDS * RX_WORD); i32_mul; i32_add;
+        local_get(lo_l); i32_store(RX_RANGE_LO_OFF);
+        local_get(ranges_base); local_get(nranges); i32_const(RX_RANGE_WORDS * RX_WORD); i32_mul; i32_add;
+        local_get(hi_l); i32_store(RX_RANGE_HI_OFF);
+        local_get(nranges); i32_const(1); i32_add; local_set(nranges);
     });
 }
 
-// ════════════════════════════════════════════════════════════════════════
-//  Matcher
-// ════════════════════════════════════════════════════════════════════════
-
-// ─── __rx_node_matches(piece_ptr, scalar) -> 0/1 ───
-// Mirrors native rx_node_matches: Lit==scalar, Dot=scalar!='\n', Class=ranges.
-fn compile_node_matches(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.regex.node_matches];
-    // params: 0=piece, 1=scalar
-    // locals: 2=kind, 3=ranges, 4=nranges, 5=neg, 6=i, 7=hit, 8=lo, 9=hi
-    let mut f = Function::new([(8, ValType::I32)]);
-    wasm!(f, {
-        local_get(Local(0)); i32_load(0); local_set(Local(2)); // kind
-        // Lit
-        local_get(Local(2)); i32_const(Imm32(RX_KIND_LIT)); i32_eq;
-        if_empty;
-            local_get(Local(1)); local_get(Local(0)); i32_const(Imm32(RX_PIECE_X_OFF)); i32_add; i32_load(0); i32_eq;
-            return_;
-        end;
-        // Dot
-        local_get(Local(2)); i32_const(Imm32(RX_KIND_DOT)); i32_eq;
-        if_empty;
-            local_get(Local(1)); i32_const(Imm32(ASCII_NEWLINE)); i32_ne;
-            return_;
-        end;
-        // Class
-        local_get(Local(2)); i32_const(Imm32(RX_KIND_CLASS)); i32_eq;
-        if_empty;
-            local_get(Local(0)); i32_const(Imm32(RX_PIECE_X_OFF)); i32_add; i32_load(0); local_set(Local(3));
-            local_get(Local(0)); i32_const(Imm32(RX_PIECE_Y_OFF)); i32_add; i32_load(0); local_set(Local(4));
-            local_get(Local(0)); i32_const(Imm32(RX_PIECE_Z_OFF)); i32_add; i32_load(0); local_set(Local(5));
-            i32_const(Imm32(0)); local_set(Local(7)); // hit
-            i32_const(Imm32(0)); local_set(Local(6)); // i
-            block_empty; loop_empty;
-                local_get(Local(6)); local_get(Local(4)); i32_ge_u; br_if(1);
-                local_get(Local(3)); local_get(Local(6)); i32_const(Imm32(RX_RANGE_WORDS * RX_WORD)); i32_mul; i32_add; i32_load(RX_RANGE_LO_OFF); local_set(Local(8));
-                local_get(Local(3)); local_get(Local(6)); i32_const(Imm32(RX_RANGE_WORDS * RX_WORD)); i32_mul; i32_add; i32_load(RX_RANGE_HI_OFF); local_set(Local(9));
-                // lo <= scalar <= hi (signed; scalars are non-negative)
-                local_get(Local(1)); local_get(Local(8)); i32_ge_s;
-                local_get(Local(1)); local_get(Local(9)); i32_le_s;
-                i32_and;
-                if_empty; i32_const(Imm32(1)); local_set(Local(7)); br(2); end;
-                local_get(Local(6)); i32_const(Imm32(1)); i32_add; local_set(Local(6));
-                br(0);
-            end; end;
-            // hit XOR neg
-            local_get(Local(7)); local_get(Local(5)); i32_ne;
-            return_;
-        end;
-        // anchors / group never reach node_matches
-        i32_const(Imm32(0));
-        end;
-    });
-    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.node_matches, type_idx, f));
-}
-
-// ─── __rx_match_one(piece_ptr, text, p, caps, ncap) -> bytes_consumed | -1 ───
-// p is a BYTE offset. Returns BYTES consumed (caller advances p+ret) or -1.
-// Mirrors native rx_match_one (native returns char count; we return bytes).
-fn compile_match_one(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.regex.match_one];
-    // params: 0=piece, 1=text, 2=p, 3=caps, 4=ncap
-    // locals: 5=kind, 6=text_len, 7=scalar, 8=width, 9=inner, 10=end, 11=ci, 12=start
-    let mut f = Function::new([(8, ValType::I32)]);
-    let node_matches = emitter.rt.regex.node_matches;
-    let match_alts = emitter.rt.regex.match_alts;
-    let utf8_scalar = emitter.rt.string.utf8_scalar;
-    let utf8_width = emitter.rt.string.utf8_width;
-
-    wasm!(f, {
-        local_get(Local(0)); i32_load(0); local_set(Local(5)); // kind
-        local_get(Local(1)); i32_load(0); local_set(Local(6)); // text_len bytes
-    });
-    // Group
-    wasm!(f, {
-        local_get(Local(5)); i32_const(Imm32(RX_KIND_GROUP)); i32_eq;
-        if_empty;
-            local_get(Local(2)); local_set(Local(12)); // start = p
-            local_get(Local(0)); i32_const(Imm32(RX_PIECE_X_OFF)); i32_add; i32_load(0); local_set(Local(9)); // inner alts
-            local_get(Local(9)); local_get(Local(1)); local_get(Local(2)); local_get(Local(3)); local_get(Local(4));
-            call(match_alts);
-            local_set(Local(10));
-            local_get(Local(10)); i32_const(Imm32(RX_NO_MATCH)); i32_eq;
-            if_empty; i32_const(Imm32(RX_NO_MATCH)); return_; end;
-            // caps[ci-1] = (start,end) when ci>0
-            local_get(Local(0)); i32_const(Imm32(RX_PIECE_Z_OFF)); i32_add; i32_load(0); local_set(Local(11));
-            local_get(Local(11)); i32_const(Imm32(0)); i32_gt_u;
-            if_empty;
-                local_get(Local(3)); local_get(Local(11)); i32_const(Imm32(1)); i32_sub; i32_const(Imm32(RX_CAP_BYTES)); i32_mul; i32_add;
-                local_get(Local(12)); i32_store(RX_CAP_START_OFF);
-                local_get(Local(3)); local_get(Local(11)); i32_const(Imm32(1)); i32_sub; i32_const(Imm32(RX_CAP_BYTES)); i32_mul; i32_add;
-                local_get(Local(10)); i32_store(RX_CAP_END_OFF);
-            end;
-            local_get(Local(10)); local_get(Local(2)); i32_sub; return_; // bytes consumed
-        end;
-    });
-    // Lit / Dot / Class: one scalar at p
-    wasm!(f, {
-        local_get(Local(2)); local_get(Local(6)); i32_ge_u;
-        if_empty; i32_const(Imm32(RX_NO_MATCH)); return_; end;
-        local_get(Local(1)); local_get(Local(2)); call(utf8_scalar); i32_wrap_i64; local_set(Local(7));
-        local_get(Local(0)); local_get(Local(7)); call(node_matches);
-        if_empty;
-            local_get(Local(1)); local_get(Local(2)); call(utf8_width); local_set(Local(8));
-            local_get(Local(8)); return_;
-        else_;
-            i32_const(Imm32(RX_NO_MATCH)); return_;
-        end;
-    });
-    wasm!(f, { i32_const(Imm32(RX_NO_MATCH)); end; });
-    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.match_one, type_idx, f));
-}
-
-// ─── __rx_match_rep(piece, text, p, caps, ncap, count) -> end | -1 ───
-// Greedy repetition over a single Piece, then its `next`. Mirrors native
-// rx_match_rep with caps save/restore on the greedy branch.
-fn compile_match_rep(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.regex.match_rep];
-    // params: 0=piece, 1=text, 2=p, 3=caps, 4=ncap, 5=count
-    // locals: 6=max, 7=min, 8=at_max, 9=consumed, 10=res, 11=save, 12=next
-    let mut f = Function::new([(7, ValType::I32)]);
-    let match_one = emitter.rt.regex.match_one;
-    let match_seq = emitter.rt.regex.match_seq;
-    let match_rep = emitter.rt.regex.match_rep;
-    let save_sp = emitter.rt.regex.save_sp_global;
-
-    wasm!(f, {
-        local_get(Local(0)); i32_const(Imm32(RX_PIECE_MAX_OFF)); i32_add; i32_load(0); local_set(Local(6));
-        local_get(Local(0)); i32_const(Imm32(RX_PIECE_MIN_OFF)); i32_add; i32_load(0); local_set(Local(7));
-        // at_max = max != UNBOUNDED && count >= max
-        i32_const(Imm32(0)); local_set(Local(8));
-        local_get(Local(6)); i32_const(Imm32(RX_MAX_UNBOUNDED)); i32_ne;
-        if_empty; local_get(Local(5)); local_get(Local(6)); i32_ge_u; local_set(Local(8)); end;
-    });
-    // greedy: if !at_max try one more
-    wasm!(f, { local_get(Local(8)); i32_eqz; if_empty; });
-    emit_caps_push(&mut f, save_sp, 3, 4, 11);
-    wasm!(f, {
-            local_get(Local(0)); local_get(Local(1)); local_get(Local(2)); local_get(Local(3)); local_get(Local(4));
-            call(match_one);
-            local_set(Local(9));
-            local_get(Local(9)); i32_const(Imm32(RX_NO_MATCH)); i32_ne;
-            if_empty;
-                // zero-width guard: consumed>0 || count==0
-                local_get(Local(9)); i32_const(Imm32(0)); i32_gt_u;
-                local_get(Local(5)); i32_eqz;
-                i32_or;
-                if_empty;
-                    local_get(Local(0)); local_get(Local(1));
-                    local_get(Local(2)); local_get(Local(9)); i32_add; // p+consumed
-                    local_get(Local(3)); local_get(Local(4));
-                    local_get(Local(5)); i32_const(Imm32(1)); i32_add; // count+1
-                    call(match_rep);
-                    local_set(Local(10));
-                    local_get(Local(10)); i32_const(Imm32(RX_NO_MATCH)); i32_ne;
-                    if_empty;
-    });
-    emit_caps_pop_discard(&mut f, save_sp, 11);
-    wasm!(f, {
-                        local_get(Local(10)); return_;
-                    end;
-                end;
-            end;
-    });
-    emit_caps_restore(&mut f, save_sp, 3, 4, 11);
-    wasm!(f, { end; }); // end !at_max
-    // if count >= min: match rest of seq (piece.next)
-    wasm!(f, {
-        local_get(Local(5)); local_get(Local(7)); i32_ge_u;
-        if_empty;
-            local_get(Local(0)); i32_const(Imm32(RX_PIECE_NEXT_OFF)); i32_add; i32_load(0); local_set(Local(12));
-            local_get(Local(12)); local_get(Local(1)); local_get(Local(2)); local_get(Local(3)); local_get(Local(4));
-            call(match_seq);
-            return_;
-        end;
-        i32_const(Imm32(RX_NO_MATCH));
-        end;
-    });
-    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.match_rep, type_idx, f));
-}
-
-// ─── __rx_match_seq(piece, text, p, caps, ncap) -> end | -1 ───
-// Match the linked piece list starting at `piece` (null = success). Anchors are
-// handled here; everything else delegates to rep. Mirrors native rx_match_seq.
-fn compile_match_seq(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.regex.match_seq];
-    // params: 0=piece, 1=text, 2=p, 3=caps, 4=ncap
-    // locals: 5=kind, 6=text_len, 7=next
-    let mut f = Function::new([(3, ValType::I32)]);
-    let match_seq = emitter.rt.regex.match_seq;
-    let match_rep = emitter.rt.regex.match_rep;
-
-    wasm!(f, {
-        // piece == null => success (return p)
-        local_get(Local(0)); i32_eqz;
-        if_empty; local_get(Local(2)); return_; end;
-        local_get(Local(0)); i32_load(0); local_set(Local(5)); // kind
-        local_get(Local(1)); i32_load(0); local_set(Local(6)); // text_len bytes
-        local_get(Local(0)); i32_const(Imm32(RX_PIECE_NEXT_OFF)); i32_add; i32_load(0); local_set(Local(7)); // next
-        // AnchorStart: p==0
-        local_get(Local(5)); i32_const(Imm32(RX_KIND_ANCHOR_START)); i32_eq;
-        if_empty;
-            local_get(Local(2)); i32_eqz;
-            if_empty;
-                local_get(Local(7)); local_get(Local(1)); local_get(Local(2)); local_get(Local(3)); local_get(Local(4));
-                call(match_seq); return_;
-            else_;
-                i32_const(Imm32(RX_NO_MATCH)); return_;
-            end;
-        end;
-        // AnchorEnd: p==text_len(bytes)
-        local_get(Local(5)); i32_const(Imm32(RX_KIND_ANCHOR_END)); i32_eq;
-        if_empty;
-            local_get(Local(2)); local_get(Local(6)); i32_eq;
-            if_empty;
-                local_get(Local(7)); local_get(Local(1)); local_get(Local(2)); local_get(Local(3)); local_get(Local(4));
-                call(match_seq); return_;
-            else_;
-                i32_const(Imm32(RX_NO_MATCH)); return_;
-            end;
-        end;
-        // else: rep over this piece, count=0
-        local_get(Local(0)); local_get(Local(1)); local_get(Local(2)); local_get(Local(3)); local_get(Local(4)); i32_const(Imm32(0));
-        call(match_rep);
-        end;
-    });
-    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.match_seq, type_idx, f));
-}
-
-// ─── __rx_match_alts(alts, text, p, caps, ncap) -> end | -1 ───
-// Try each Seq alternative; save/restore caps. Mirrors native rx_match_alts.
-fn compile_match_alts(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.regex.match_alts];
-    // params: 0=alts, 1=text, 2=p, 3=caps, 4=ncap
-    // locals: 5=seq, 6=res, 7=save, 8=head_piece
-    let mut f = Function::new([(4, ValType::I32)]);
-    let match_seq = emitter.rt.regex.match_seq;
-    let save_sp = emitter.rt.regex.save_sp_global;
-
-    wasm!(f, {
-        local_get(Local(0)); i32_const(Imm32(RX_ALTS_HEAD_OFF)); i32_add; i32_load(0); local_set(Local(5)); // first seq
-        block_empty; loop_empty;
-            local_get(Local(5)); i32_eqz; br_if(1); // no more alts → fail
-            local_get(Local(5)); i32_const(Imm32(RX_SEQ_HEAD_OFF)); i32_add; i32_load(0); local_set(Local(8)); // head piece
-    });
-    emit_caps_push(&mut f, save_sp, 3, 4, 7);
-    wasm!(f, {
-            local_get(Local(8)); local_get(Local(1)); local_get(Local(2)); local_get(Local(3)); local_get(Local(4));
-            call(match_seq);
-            local_set(Local(6));
-            local_get(Local(6)); i32_const(Imm32(RX_NO_MATCH)); i32_ne;
-            if_empty;
-    });
-    emit_caps_pop_discard(&mut f, save_sp, 7);
-    wasm!(f, {
-                local_get(Local(6)); return_;
-            end;
-    });
-    emit_caps_restore(&mut f, save_sp, 3, 4, 7);
-    wasm!(f, {
-            local_get(Local(5)); i32_const(Imm32(RX_SEQ_NEXT_OFF)); i32_add; i32_load(0); local_set(Local(5)); // next alt
-            br(0);
-        end; end;
-        i32_const(Imm32(RX_NO_MATCH));
-        end;
-    });
-    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.match_alts, type_idx, f));
-}
-
-// ─── __rx_find_at(alts, text, start, caps, ncap) -> end | -1 ───
-// Search from byte offset `start`; mirrors native rx_find_at (resets caps to
-// unset on each position, sets match_start_global). `start` advances by scalar
-// width so byte offsets stay codepoint-aligned. The search range is
-// `start..=byte_len` (i may equal len for zero-width / anchor matches).
-fn compile_find_at(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.regex.find_at];
-    // params: 0=alts, 1=text, 2=start, 3=caps, 4=ncap
-    // locals: 5=text_len, 6=i, 7=res, 8=k, 9=width
-    let mut f = Function::new([(5, ValType::I32)]);
-    let match_alts = emitter.rt.regex.match_alts;
-    let match_start = emitter.rt.regex.match_start_global;
-    let utf8_width = emitter.rt.string.utf8_width;
-
-    wasm!(f, {
-        local_get(Local(1)); i32_load(0); local_set(Local(5)); // text_len bytes
-        local_get(Local(2)); local_set(Local(6)); // i = start
-        block_empty; loop_empty;
-            local_get(Local(6)); local_get(Local(5)); i32_gt_u; br_if(1); // i > len → stop
-    });
-    emit_caps_reset(&mut f, 3, 4, 8);
-    wasm!(f, {
-            local_get(Local(0)); local_get(Local(1)); local_get(Local(6)); local_get(Local(3)); local_get(Local(4));
-            call(match_alts);
-            local_set(Local(7));
-            local_get(Local(7)); i32_const(Imm32(RX_NO_MATCH)); i32_ne;
-            if_empty;
-                local_get(Local(6)); global_set(match_start);
-                local_get(Local(7)); return_;
-            end;
-            // advance i by one scalar width; if i==len, no more positions.
-            local_get(Local(6)); local_get(Local(5)); i32_ge_u;
-            if_empty; i32_const(Imm32(RX_NO_MATCH)); return_; end;
-            local_get(Local(1)); local_get(Local(6)); call(utf8_width); local_set(Local(9));
-            local_get(Local(6)); local_get(Local(9)); i32_add; local_set(Local(6));
-            br(0);
-        end; end;
-        i32_const(Imm32(RX_NO_MATCH));
-        end;
-    });
-    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.find_at, type_idx, f));
-}
-
-// ════════════════════════════════════════════════════════════════════════
-//  Capture save-stack helpers (bump push/pop of ncap × 2 words)
-// ════════════════════════════════════════════════════════════════════════
-
-/// Push a copy of `caps` (ncap slots) onto the save stack; record the saved
-/// base into `save_local`. Bumps `save_sp` by ncap × RX_CAP_BYTES.
-fn emit_caps_push(f: &mut Function, save_sp: u32, caps: u32, ncap: u32, save_local: u32) {
-    wasm!(f, {
-        global_get(save_sp); local_set(Local(save_local));
-        global_get(save_sp); local_get(Local(ncap)); i32_const(Imm32(RX_CAP_BYTES)); i32_mul; i32_add; global_set(save_sp);
-        // memory_copy(dst=save_base, src=caps, n=ncap*RX_CAP_BYTES)
-        local_get(Local(save_local)); local_get(Local(caps)); local_get(Local(ncap)); i32_const(Imm32(RX_CAP_BYTES)); i32_mul;
-        memory_copy;
-    });
-}
-
-/// Restore `caps` from the saved copy at `save_local`, then pop (rewind save_sp).
-fn emit_caps_restore(f: &mut Function, save_sp: u32, caps: u32, ncap: u32, save_local: u32) {
-    wasm!(f, {
-        local_get(Local(caps)); local_get(Local(save_local)); local_get(Local(ncap)); i32_const(Imm32(RX_CAP_BYTES)); i32_mul;
-        memory_copy;
-        local_get(Local(save_local)); global_set(save_sp);
-    });
-}
-
-/// Discard the saved copy at `save_local` (success path): rewind save_sp.
-fn emit_caps_pop_discard(f: &mut Function, save_sp: u32, save_local: u32) {
-    wasm!(f, { local_get(Local(save_local)); global_set(save_sp); });
-}
-
-/// Reset all caps slots to UNSET (-1). `i` is a scratch loop local.
-fn emit_caps_reset(f: &mut Function, caps: u32, ncap: u32, i: u32) {
-    wasm!(f, {
-        i32_const(Imm32(0)); local_set(Local(i));
-        block_empty; loop_empty;
-            local_get(Local(i)); local_get(Local(ncap)); i32_ge_u; br_if(1);
-            local_get(Local(caps)); local_get(Local(i)); i32_const(Imm32(RX_CAP_BYTES)); i32_mul; i32_add;
-            i32_const(Imm32(RX_CAP_UNSET)); i32_store(RX_CAP_START_OFF);
-            local_get(Local(caps)); local_get(Local(i)); i32_const(Imm32(RX_CAP_BYTES)); i32_mul; i32_add;
-            i32_const(Imm32(RX_CAP_UNSET)); i32_store(RX_CAP_END_OFF);
-            local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
-            br(0);
-        end; end;
-    });
-}
+include!("rt_regex_p2.rs");

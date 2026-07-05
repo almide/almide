@@ -1,0 +1,53 @@
+// int32_convert — SELF-HOSTED int32.to_* sized conversions for v1: `int.to_<dst>(int.from_int32(x))`
+// unrolled to two `let`s (no call-as-arg), byte-matching v0's int32.almd. Cross-file callees, pure
+// scalar. `to_string` routes through signed int.to_string.
+
+fn int32_to_string(x: Int32) -> String = {
+  let i = int.from_int32(x)
+  int.to_string(i)
+}
+
+fn int32_to_int8(x: Int32) -> Int8 = {
+  let i = int.from_int32(x)
+  int.to_int8(i)
+}
+
+fn int32_to_int16(x: Int32) -> Int16 = {
+  let i = int.from_int32(x)
+  int.to_int16(i)
+}
+
+fn int32_to_int64(x: Int32) -> Int64 = {
+  let i = int.from_int32(x)
+  int.to_int64(i)
+}
+
+fn int32_to_uint8(x: Int32) -> UInt8 = {
+  let i = int.from_int32(x)
+  int.to_uint8(i)
+}
+
+fn int32_to_uint16(x: Int32) -> UInt16 = {
+  let i = int.from_int32(x)
+  int.to_uint16(i)
+}
+
+fn int32_to_uint32(x: Int32) -> UInt32 = {
+  let i = int.from_int32(x)
+  int.to_uint32(i)
+}
+
+fn int32_to_uint64(x: Int32) -> UInt64 = {
+  let i = int.from_int32(x)
+  int.to_uint64(i)
+}
+
+fn int32_to_float32(x: Int32) -> Float32 = {
+  let i = int.from_int32(x)
+  int.to_float32(i)
+}
+
+fn int32_to_float64(x: Int32) -> Float64 = {
+  let i = int.from_int32(x)
+  int.to_float64(i)
+}

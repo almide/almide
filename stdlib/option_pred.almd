@@ -1,0 +1,45 @@
+// option_pred — SELF-HOSTED `option.is_some` / `option.is_none` for v1. A materialized
+// Option is a 0-or-1-element list (Some = len 1, None = len 0), so the predicate is just
+// the header length read — element-type-agnostic (like list.is_empty), so a monomorphic
+// Option[Int] impl serves any Option. Reads only (the Option is borrowed); scalar Bool.
+
+fn option_is_some(o: Option[Int]) -> Bool = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  len == 1
+}
+
+fn option_is_none(o: Option[Int]) -> Bool = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  len == 0
+}
+
+// option.unwrap_or: the Some payload (data[0]) when len==1, else the default. The payload
+// read is eager but only USED for Some — a None (len 0) discards it (a harmless in-memory
+// read, no trap). Scalar payload (Option[Int]); the function form of the `??` operator.
+fn option_unwrap_or(o: Option[Int], default: Int) -> Int = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let some_val = prim.load64(h + 12)
+  if len == 1 then some_val else default
+}
+
+// option.to_list: Some(x) -> [x], None -> []. A fresh List[Int] of the Option's own
+// length (0 or 1) — scalar element, so the cert is one owned Alloc (like list.range). The
+// payload copy is isolated in a scalar helper, so the function keeps a plain heap tail.
+fn __otl_fill(srch: Int, dsth: Int, len: Int) -> Int =
+  if len == 1 then {
+    let v = prim.load64(srch + 12)
+    prim.store64(dsth + 12, v)
+    0
+  }
+  else 0
+
+fn option_to_list(o: Option[Int]) -> List[Int] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let buf = prim.alloc_list(len)
+  let _f = __otl_fill(h, prim.handle(buf), len)
+  buf
+}

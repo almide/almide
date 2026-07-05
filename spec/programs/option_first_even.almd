@@ -1,0 +1,9 @@
+fn first_even(xs: List[Int]) -> Option[Int] =
+  match list.filter(xs, (x) => x % 2 == 0) {
+    [] => None,
+    ys => list.get(ys, 0)
+  }
+fn main() -> Unit = {
+  println(int.to_string(first_even([1, 3, 6, 8]) ?? -1))
+  println(int.to_string(first_even([1, 3, 5]) ?? -1))
+}

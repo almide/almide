@@ -1,0 +1,25 @@
+// list_reverse — SELF-HOSTED `list.reverse` for v1 over the prim floor: allocate a new
+// List[Int] of the same length (prim.alloc_list) and copy each i64 element to the mirror
+// position. This monomorphic List[Int] impl serves List[Int] (i64 VALUE copies — fully
+// sound: the new list owns plain values, no element aliasing). For a List with heap
+// elements the i64 slots hold handles; copying them mirrors v1's current flat-drop
+// nested-heap model (no double-free, elements not individually RC'd yet — a later
+// refinement), so it is element-leaky but never unsafe. `xs` borrowed; result owned.
+
+fn __lrev_fill(srch: Int, dsth: Int, len: Int, i: Int) -> Int =
+  if i >= len then 0
+  else {
+    let e = prim.load64(srch + 12 + i * 8)        // source element i
+    let off = (len - 1 - i) * 8                    // mirror slot
+    prim.store64(dsth + 12 + off, e)
+    __lrev_fill(srch, dsth, len, i + 1)
+  }
+
+fn list_reverse(xs: List[Int]) -> List[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let buf = prim.alloc_list(len)                   // owned rc=1 List[Int], `len` slots
+  let bh = prim.handle(buf)
+  let _x = __lrev_fill(h, bh, len, 0)
+  buf
+}

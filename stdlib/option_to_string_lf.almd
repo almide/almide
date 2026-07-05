@@ -1,0 +1,79 @@
+// option_to_string_lf — `option.to_string_lf` over `Option[List[Float]]`, byte-matching v0's
+// `some([1.5, 2])` / `none` / `some([])`. The inner List[Float] renders like `${list}` — each element
+// `float.to_string` (Dragon4) with an integer-valued trailing ".0" STRIPPED (`1.0` → "1") — wrapped in
+// `some(` … `)`. Slots hold f64 BITS (prim.load64 → prim.ffrombits). `float.to_string` is a callable
+// intrinsic; the strip + list body mirror list_to_string_f (self-hosts cannot call each other).
+
+fn __olf_ends_dot0(src: Int, n: Int) -> Bool =
+  if n < 2 then false
+  else if prim.load8(src + n - 2) != 46 then false     // not '.'
+  else prim.load8(src + n - 1) == 48                   // last byte is '0'
+
+fn __olf_bcopy(src: Int, dst: Int, n: Int) -> Int =
+  if n <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __olf_bcopy(src + 1, dst + 1, n - 1)
+  }
+
+fn __olf_elem_width(bits: Int) -> Int = {
+  let x = prim.ffrombits(bits)
+  let s = float.to_string(x)
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  if __olf_ends_dot0(sh + 12, n) then n - 2 else n
+}
+
+fn __olf_fill_elem(bits: Int, pos: Int) -> Int = {
+  let x = prim.ffrombits(bits)
+  let s = float.to_string(x)
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let w = if __olf_ends_dot0(sh + 12, n) then n - 2 else n
+  __olf_bcopy(sh + 12, pos, w)
+}
+
+fn __olf_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let bits = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __olf_body_len(addr, count, i + 1, acc + sep + __olf_elem_width(bits))
+  }
+
+fn __olf_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)             // ','
+      prim.store8(pos + 1, 32)         // ' '
+      pos + 2
+    } else pos
+    let bits = prim.load64(addr + i * 8)
+    let pos2 = __olf_fill_elem(bits, pos1)
+    __olf_fill_body(addr, count, i + 1, pos2)
+  }
+
+fn __olf_some(v: List[Float]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __olf_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(8 + body)   // "some([" (6) + body + "])" (2)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 115)               // 's'
+  prim.store8(base + 1, 111)           // 'o'
+  prim.store8(base + 2, 109)           // 'm'
+  prim.store8(base + 3, 101)           // 'e'
+  prim.store8(base + 4, 40)            // '('
+  prim.store8(base + 5, 91)            // '['
+  let after = __olf_fill_body(addr, count, 0, base + 6)
+  prim.store8(after, 93)               // ']'
+  prim.store8(after + 1, 41)           // ')'
+  buf
+}
+
+fn option_to_string_lf(o: Option[List[Float]]) -> String = match o {
+  some(v) => __olf_some(v),
+  none => "none",
+}

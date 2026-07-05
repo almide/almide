@@ -1,0 +1,43 @@
+// math_float — SELF-HOSTED `math.sqrt` over the Float prim floor. f64.sqrt is the single
+// CORRECTLY-ROUNDED wasm transcendental-ish instruction, so math.sqrt = prim.fsqrt is
+// byte-exact with v0's `x.sqrt()`. (sin/cos/log/exp need a libm-matching polynomial — they
+// have no wasm instruction and are deferred.) Pure scalar — cert untouched.
+
+fn math_sqrt(x: Float) -> Float = prim.fsqrt(x)
+
+// math.fmin/fmax are NaN-AWARE (return the non-NaN operand, unlike wasm f64.min/max which
+// propagate NaN): `if is_nan(a) then b else if is_nan(b) then a else <min/max>`. Replicated
+// exactly (is_nan via fne(x,x), the min/max via fgt/flt + the bound conds).
+fn math_fmin(a: Float, b: Float) -> Float = {
+  let anan = prim.fne(a, a)
+  if anan then b
+  else {
+    let bnan = prim.fne(b, b)
+    if bnan then a
+    else {
+      let agtb = prim.fgt(a, b)
+      if agtb then b else a
+    }
+  }
+}
+
+fn math_fmax(a: Float, b: Float) -> Float = {
+  let anan = prim.fne(a, a)
+  if anan then b
+  else {
+    let bnan = prim.fne(b, b)
+    if bnan then a
+    else {
+      let altb = prim.flt(a, b)
+      if altb then b else a
+    }
+  }
+}
+
+// math.pi / math.e — the f64 constants (declared `= _` in stdlib/math.almd; self-hosted here).
+// The decimal literals are the shortest round-tripping forms of std::f64::consts::PI / E, so
+// they parse to the identical f64 bits (a float-literal tail materializes its real bits via the
+// LitFloat tail-lowering). Zero-arg, pure. (floor/ceil/round/is_nan are float-only in the v1
+// frontend — not callable as math.*, so not self-hosted here.)
+fn math_pi() -> Float = 3.141592653589793
+fn math_e() -> Float = 2.718281828459045

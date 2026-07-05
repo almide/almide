@@ -1,0 +1,44 @@
+// guard let — Swift-style implicit unwrap with early exit (task #32).
+// `guard let name = scrutinee else { … }` binds the unwrapped inner value for the REST
+// of the block; the else branch is the early-exit value. The frontend desugars the block
+// tail into the Some/Ok arm of a match on the scrutinee.
+
+fn first_or(xs: List[Int], d: Int) -> Int = {
+  guard let head = list.first(xs) else { d }
+  head * 10
+}
+
+test "guard let binds Some and continues" {
+  assert_eq(first_or([5, 6], 0), 50)
+}
+
+test "guard let takes the else exit on None" {
+  assert_eq(first_or([], 7), 7)
+}
+
+fn sum_two(xs: List[Int]) -> Int = {
+  guard let a = list.get(xs, 0) else { 0 - 1 }
+  guard let b = list.get(xs, 1) else { 0 - 1 }
+  a + b
+}
+
+test "nested guard let: both bindings stay in scope" {
+  assert_eq(sum_two([3, 4, 5]), 7)
+}
+
+test "nested guard let: second guard exits early" {
+  assert_eq(sum_two([3]), 0 - 1)
+}
+
+fn unwrap_res(r: Result[Int, String]) -> Int = {
+  guard let v = r else { 0 - 99 }
+  v + 1
+}
+
+test "guard let unwraps Ok" {
+  assert_eq(unwrap_res(Ok(10)), 11)
+}
+
+test "guard let takes the else exit on Err" {
+  assert_eq(unwrap_res(Err("x")), 0 - 99)
+}

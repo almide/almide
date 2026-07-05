@@ -1,0 +1,12 @@
+// @contract: C-102
+// list.enumerate over a List[String] + the `enumerate |> list.find(closure)` consumer (the yaml
+// parse_lines shape): builds a List[(Int,String)], finds the first element matching a CLOSURE that
+// reads the tuple's `.1`, and destructures `some((idx, line))` from the Option[(Int,String)] in a
+// VALUE-result match. Exercises the (Int,String) tuple-list builder + find_int_str (closure over a
+// heap-tuple element) + the heap-payload Option construct/match/destructure + the recursive
+// `$__drop_list_int_str`. Byte-matches v0 (`1:b`).
+fn pick(es: List[(Int, String)]) -> String = match es |> list.find((e) => e.1 == "b") {
+  none => "none",
+  some((idx, line)) => int.to_string(idx) + ":" + line,
+}
+fn main() -> Unit = { println(pick(["a", "b", "c"] |> list.enumerate)) }

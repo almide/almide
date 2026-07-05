@@ -1,0 +1,20 @@
+// string_to_bytes — SELF-HOSTED `string.to_bytes` for v1 over the prim floor: the UTF-8
+// bytes of `s` as a List[Int] (each byte 0..256). Builds a List[Int] (prim.alloc_list +
+// store64), storing i64 VALUES — fully sound + loop-bounded (no heap elements). `s`
+// borrowed; result owned.
+
+fn __tb_fill(sh: Int, dh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let b = prim.load8(sh + i)
+    prim.store64(dh + 12 + i * 8, b)
+    __tb_fill(sh, dh, n, i + 1)
+  }
+
+fn string_to_bytes(s: String) -> List[Int] = {
+  let h = prim.handle(s)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list(n)
+  let _f = __tb_fill(h + 12, prim.handle(buf), n, 0)
+  buf
+}

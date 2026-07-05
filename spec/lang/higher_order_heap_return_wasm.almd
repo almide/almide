@@ -1,0 +1,21 @@
+// wasm:enabled
+// Locks in a HIGHER-ORDER function RETURNING a heap value through a known funcref — `fn apply(g, x) =
+// g(x)` where `g` yields a Result / String / List. The trust-spine used to wall a tail heap-result
+// method/computed call; it now executes it via `Op::CallIndirect` and moves the fresh owned result
+// out (like a Named/Module tail call). The non-capturing lambda argument is lifted to a table slot.
+// Byte-identical to v0 --target wasm.
+
+fn apply_r(f: (Int) -> Result[Int, String], x: Int) -> Result[Int, String] = f(x)
+fn apply_s(f: (Int) -> String, x: Int) -> String = f(x)
+
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok:" + int.to_string(v),
+  err(e) => "err:" + e,
+}
+
+effect fn main() -> Unit = {
+  println(show(apply_r((y) => ok(y * 2), 5)))
+  println(show(apply_r((y) => if y > 0 then ok(y) else err("neg"), -3)))
+  println(apply_s((y) => "v" + int.to_string(y), 7))
+  println(apply_s((y) => int.to_string(y + 1), 41))
+}

@@ -1,0 +1,12 @@
+// A REAL .almd program whose ownership + name witnesses the KERNEL-PROVEN
+// checker re-verifies — the G1 end-to-end PCC path (weekly indicator ①: a real
+// source program, parsed/typechecked/lowered by the actual frontend, taken to
+// the proven checker; NOT a hand-built MIR).
+//
+// `build` allocates a heap list and RETURNS it — a move-out: the returned
+// handle is consumed at the boundary (a −1), balancing the Alloc (+1). The
+// ownership witness is `id` (alloc, then moved out) → the proven checker ACCEPTs.
+fn build() -> List[Int] = {
+  var a = [1, 2, 3]
+  a
+}

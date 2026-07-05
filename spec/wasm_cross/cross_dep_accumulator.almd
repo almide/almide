@@ -1,0 +1,21 @@
+// @contract: C-105
+// CROSS-DEPENDENT append-accumulator TCO (the off-by-one regression test). The appended element READS a
+// loop index that the SAME self-call also advances, so a naive sequential carried-param update would see
+// the NEW index → off-by-one. The TCO does a SIMULTANEOUS update: stage each scalar's new value in a temp
+// (reading OLD params), run the heap append (reads the still-old indices), then commit the scalars.
+// (A pure-var alias arg `start = pos` — which a copy temp cannot stage — is walled separately; the parser
+// loops use COMPUTED indices like `pos + 1`, handled here.)
+fn chars(s: String, i: Int, acc: List[String]) -> List[String] =
+  if i >= string.len(s) then acc
+  else chars(s, i + 1, acc + [string.slice(s, i, i + 1)])
+
+// the heap accumulator reads TWO computed loop indices (`lo`, `hi`), both advanced in the same self-call
+// (the `flow_rec` window shape): the append must read the pre-update lo/hi.
+fn win(s: String, lo: Int, hi: Int, acc: List[String]) -> List[String] =
+  if hi >= string.len(s) then acc
+  else win(s, lo + 1, hi + 1, acc + [string.slice(s, lo, hi + 1)])
+
+fn main() -> Unit = {
+  println(list.join(chars("abc", 0, []), "-"))        // a-b-c
+  println(list.join(win("abcd", 0, 1, []), "|"))      // ab|bc|cd
+}

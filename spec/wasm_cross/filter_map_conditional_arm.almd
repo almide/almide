@@ -1,0 +1,33 @@
+// @contract: C-120
+// A CAPTURING `list.filter_map` whose lambda body is a `match` with a CONDITIONAL keep/skip arm — the
+// porta load_porta_config `secrets` shape: `match v { some(s) => some(rec), none => { if c then
+// some(rec2) else none } }`. The defunc `emit_filter_map_arm` now recurses into a Block arm body and an
+// `if` arm body (a unit keep/skip into the same write-cursor), so the record element is built+stored
+// inside the taken arm. (`lookup` stands in for the porta `json.get_string` subject — a call returning
+// Option — so the fixture renders through render_program's self-host registry; the real config.almd is
+// covered by corpus-wall.) Byte-matches native; cert ACCEPT.
+
+type EV = { key: String, val: String }
+
+fn lookup(k: String, p: String) -> Option[String] =
+  if string.starts_with(k, p) then some(k) else none
+
+fn build(keys: List[String], p: String) -> List[EV] =
+  keys |> list.filter_map((k) => {
+    let v = lookup(k, p)
+    match v {
+      some(s) => some({key: k, val: s}),
+      none => {
+        if string.len(k) > 2 then some({key: k, val: "long"}) else none
+      },
+    }
+  })
+
+effect fn main() -> Unit = {
+  // "ab" → some-arm (starts with "a"); "xyz" → none-arm's `if len>2 then some` (conditional keep);
+  // "x" → none-arm's `else none` (skip).
+  let r = build(["ab", "xyz", "x"], "a")
+  for e in r {
+    println(e.key + "=" + e.val)
+  }
+}

@@ -1,0 +1,218 @@
+// string_first_last — SELF-HOSTED string.first / string.last for v1, returning Option[String]
+// (the first / last CODEPOINT as a 1-char String, or None for the empty string). Option[String]
+// is materialized as a 0-or-1-element DynListStr (Machinery 2): `Some(c)` owns the slice String,
+// `None` is the empty Option. The codepoint boundary is found via UTF-8 lead/continuation bytes:
+// a lead byte's high bits give its length (1/2/3/4); a continuation byte is 0b10xxxxxx (byte/64==2).
+// Source `s` is borrowed; the returned slice is a fresh owned String.
+
+// UTF-8 codepoint byte length from its lead byte: <128 = 1 (ASCII), <224 = 2, <240 = 3, else 4.
+fn __cp_len(b: Int) -> Int =
+  if b < 128 then 1
+  else if b < 224 then 2
+  else if b < 240 then 3
+  else 4
+
+// Copy n bytes from src into dst.
+fn __copy_n(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let b = prim.load8(src + i)
+    prim.store8(dst + i, b)
+    __copy_n(dst, src, n, i + 1)
+  }
+
+// The first codepoint of s as a fresh owned String (s is non-empty when this is called).
+fn __first_char(s: String) -> String = {
+  let h = prim.handle(s)
+  let b0 = prim.load8(h + 12)
+  let cl = __cp_len(b0)
+  let out = prim.alloc_str(cl)
+  let _x = __copy_n(prim.handle(out) + 12, h + 12, cl, 0)
+  out
+}
+
+// string.first(s) -> Some(first codepoint) for a non-empty string, else None.
+fn string_first(s: String) -> Option[String] = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  if blen <= 0 then None else Some(__first_char(s))
+}
+
+// Byte offset of the last codepoint's LEAD byte: scan back from i past continuation bytes
+// (0b10xxxxxx, i.e. byte/64 == 2) until a lead byte (or the start).
+fn __last_start(h: Int, i: Int) -> Int =
+  if i <= 0 then 0
+  else {
+    let b = prim.load8(h + 12 + i)
+    let cont = b / 64
+    if cont == 2 then __last_start(h, i - 1) else i
+  }
+
+// The last codepoint of s as a fresh owned String (s is non-empty when this is called).
+fn __last_char(s: String) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let start = __last_start(h, blen - 1)
+  let n = blen - start
+  let out = prim.alloc_str(n)
+  let _x = __copy_n(prim.handle(out) + 12, h + 12 + start, n, 0)
+  out
+}
+
+// string.last(s) -> Some(last codepoint) for a non-empty string, else None.
+fn string_last(s: String) -> Option[String] = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  if blen <= 0 then None else Some(__last_char(s))
+}
+
+// Byte offset of the `target`-th codepoint (i = current index, pos = current byte offset), or -1
+// if target is out of range (walked past the end). A negative target never matches → -1.
+fn __cp_at(h: Int, blen: Int, target: Int, i: Int, pos: Int) -> Int =
+  if pos >= blen then 0 - 1
+  else if i == target then pos
+  else {
+    let b = prim.load8(h + 12 + pos)
+    let cl = __cp_len(b)
+    __cp_at(h, blen, target, i + 1, pos + cl)
+  }
+
+// The codepoint at byte offset `pos` as a fresh owned String.
+fn __slice_cp(s: String, pos: Int) -> String = {
+  let h = prim.handle(s)
+  let b = prim.load8(h + 12 + pos)
+  let cl = __cp_len(b)
+  let out = prim.alloc_str(cl)
+  let _x = __copy_n(prim.handle(out) + 12, h + 12 + pos, cl, 0)
+  out
+}
+
+// string.char_at(s, idx) -> Some(the idx-th codepoint) or None (idx out of range / negative).
+fn string_char_at(s: String, idx: Int) -> Option[String] = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let pos = __cp_at(h, blen, idx, 0, 0)
+  if pos < 0 then None else Some(__slice_cp(s, pos))
+}
+
+// Do the n bytes at `pp` equal the n bytes at `sp`? (lazy: only the matching prefix recurses.)
+fn __byteq_at(sp: Int, pp: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else {
+    let a = prim.load8(sp + i)
+    let b = prim.load8(pp + i)
+    if a == b then __byteq_at(sp, pp, n, i + 1) else false
+  }
+
+// s[start .. start+n] (byte range) as a fresh owned String.
+fn __sub_from(s: String, start: Int, n: Int) -> String = {
+  let h = prim.handle(s)
+  let out = prim.alloc_str(n)
+  let _x = __copy_n(prim.handle(out) + 12, h + 12 + start, n, 0)
+  out
+}
+
+// The remainder START byte-offset (= pn) if s starts with prefix, else -1.
+fn __pref_off(sh: Int, ph: Int, sn: Int, pn: Int) -> Int =
+  if pn > sn then 0 - 1
+  else {
+    let sd = sh + 12
+    let pd = ph + 12
+    let m = __byteq_at(sd, pd, pn, 0)
+    if m then pn else 0 - 1
+  }
+
+// string.strip_prefix(s, prefix) -> Some(s without prefix) if s starts with prefix, else None.
+fn string_strip_prefix(s: String, prefix: String) -> Option[String] = {
+  let sh = prim.handle(s)
+  let ph = prim.handle(prefix)
+  let sn = prim.load32(sh + 4)
+  let pn = prim.load32(ph + 4)
+  let off = __pref_off(sh, ph, sn, pn)
+  let rlen = sn - off
+  if off < 0 then None else Some(__sub_from(s, off, rlen))
+}
+
+// The remainder LENGTH (= sn - fl) if s ends with suffix, else -1.
+fn __suf_len(sh: Int, fh: Int, sn: Int, fl: Int) -> Int =
+  if fl > sn then 0 - 1
+  else {
+    let start = sn - fl
+    let sd = sh + 12 + start
+    let fd = fh + 12
+    let m = __byteq_at(sd, fd, fl, 0)
+    if m then start else 0 - 1
+  }
+
+// string.strip_suffix(s, suffix) -> Some(s without suffix) if s ends with suffix, else None.
+fn string_strip_suffix(s: String, suffix: String) -> Option[String] = {
+  let sh = prim.handle(s)
+  let fh = prim.handle(suffix)
+  let sn = prim.load32(sh + 4)
+  let fl = prim.load32(fh + 4)
+  let rlen = __suf_len(sh, fh, sn, fl)
+  if rlen < 0 then None else Some(__sub_from(s, 0, rlen))
+}
+
+// ── string.is_whitespace — every codepoint is in the Unicode White_Space property ──
+// White_Space = {U+0009..000D, U+0020, U+0085, U+00A0, U+1680, U+2000..200A, U+2028, U+2029,
+// U+202F, U+205F, U+3000} (all <= U+3000, so 1/2/3-byte). The empty string is whitespace (all()).
+
+// Decode the codepoint from its n UTF-8 bytes (n = 1/2/3; 4-byte are never whitespace).
+fn __ws_cp(b0: Int, b1: Int, b2: Int, n: Int) -> Int =
+  if n == 1 then b0
+  else if n == 2 then {
+    let hi = prim.band(b0, 31)
+    let lo = prim.band(b1, 63)
+    let sh = prim.bshl(hi, 6)
+    prim.bor(sh, lo)
+  }
+  else {
+    let hi = prim.band(b0, 15)
+    let mid = prim.band(b1, 63)
+    let lo = prim.band(b2, 63)
+    let shi = prim.bshl(hi, 12)
+    let smid = prim.bshl(mid, 6)
+    let p = prim.bor(shi, smid)
+    prim.bor(p, lo)
+  }
+
+// Is cp in the Unicode White_Space set? A FLAT else-if chain (every branch nests in the else —
+// no nested-if-in-THEN, which the if-marker render does not reconstruct).
+fn __is_ws(cp: Int) -> Bool =
+  if cp < 9 then false
+  else if cp <= 13 then true     // U+0009..U+000D
+  else if cp == 32 then true     // U+0020
+  else if cp == 133 then true    // U+0085
+  else if cp == 160 then true    // U+00A0
+  else if cp == 5760 then true   // U+1680
+  else if cp < 8192 then false
+  else if cp <= 8202 then true   // U+2000..U+200A
+  else if cp == 8232 then true   // U+2028
+  else if cp == 8233 then true   // U+2029
+  else if cp == 8239 then true   // U+202F
+  else if cp == 8287 then true   // U+205F
+  else if cp == 12288 then true  // U+3000
+  else false
+
+// Are all codepoints from byte offset `pos` whitespace? (lazy: stops at the first non-ws.)
+fn __ws_all(h: Int, blen: Int, pos: Int) -> Bool =
+  if pos >= blen then true
+  else {
+    let b0 = prim.load8(h + 12 + pos)
+    let n = __cp_len(b0)
+    let f1 = if n > 1 then 1 else 0
+    let f2 = if n > 2 then 1 else 0
+    let b1 = prim.load8(h + 12 + pos + f1)
+    let b2 = prim.load8(h + 12 + pos + f2 * 2)
+    let cp = __ws_cp(b0, b1, b2, n)
+    let w = __is_ws(cp)
+    if w then __ws_all(h, blen, pos + n) else false
+  }
+
+// string.is_whitespace(s) -> is every codepoint a Unicode whitespace char? ("" -> true).
+fn string_is_whitespace(s: String) -> Bool = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  __ws_all(h, blen, 0)
+}

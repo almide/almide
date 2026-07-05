@@ -1,0 +1,13 @@
+// fs_list_dir — SELF-HOSTED `fs.list_dir(path)` over the WASI directory-listing floor
+// (prim.read_dir), the v1 trust-spine realization of the effectful `fs.list_dir`. Lists the
+// entry NAMES of the directory at `path`, returning `Ok([name, …])` (sorted, with `.`/`..`
+// excluded — matching native `fs.list_dir` = std::fs::read_dir + names.sort()) or `Err(message)`
+// on a path_open error. The prim packages the `path_open(O_DIRECTORY)` + `fd_readdir` WASI
+// sequence, the dirent parse + dot-skip + lexicographic sort, and the `Result[List[String],
+// String]` construction (the cap-as-tag block — payload @12 a List[String], tag @16); the result
+// is a fresh OWNED Result whose payload List (and its element Strings) is dropped at scope end
+// (the recursive DropResultListStr — no leak). Because this body reaches prim.read_dir, its
+// cap_witness carries Capability::FsRead — so a caller is caps-verified ONLY if it declares
+// FsRead (an `effect fn`); a pure `fn` reaching it is a frontend error AND would REJECT at the
+// gate.
+effect fn fs_list_dir(path: String) -> Result[List[String], String] = prim.read_dir(path)

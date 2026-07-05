@@ -1,0 +1,52 @@
+// float32_convert — SELF-HOSTED float32.to_* conversions for v1: widen the f32 to f64 via
+// float.from_float32, then convert through the existing float.to_<dst>, byte-matching v0's
+// float32.almd. The nested call is unrolled to two `let`s (no call-as-arg). This is a SEPARATE
+// file from float_convert.almd on purpose: both callees (float.from_float32 / float.to_intN) live
+// THERE, so calling them from here is cross-file (an intra-file module call would re-trigger the
+// auto-linker forever). Pure scalar.
+//
+// `float32.to_string` is omitted — it needs `float.to_string` (decimal formatting / Ryu), not yet
+// self-hosted.
+
+fn float32_to_int8(x: Float32) -> Int8 = {
+  let f = float.from_float32(x)
+  float.to_int8(f)
+}
+
+fn float32_to_int16(x: Float32) -> Int16 = {
+  let f = float.from_float32(x)
+  float.to_int16(f)
+}
+
+fn float32_to_int32(x: Float32) -> Int32 = {
+  let f = float.from_float32(x)
+  float.to_int32(f)
+}
+
+fn float32_to_int64(x: Float32) -> Int64 = {
+  let f = float.from_float32(x)
+  float.to_int64(f)
+}
+
+fn float32_to_uint8(x: Float32) -> UInt8 = {
+  let f = float.from_float32(x)
+  float.to_uint8(f)
+}
+
+fn float32_to_uint16(x: Float32) -> UInt16 = {
+  let f = float.from_float32(x)
+  float.to_uint16(f)
+}
+
+fn float32_to_uint32(x: Float32) -> UInt32 = {
+  let f = float.from_float32(x)
+  float.to_uint32(f)
+}
+
+fn float32_to_uint64(x: Float32) -> UInt64 = {
+  let f = float.from_float32(x)
+  float.to_uint64(f)
+}
+
+// to_float64 = widen the f32 to f64 (just float.from_float32; no second hop).
+fn float32_to_float64(x: Float32) -> Float64 = float.from_float32(x)

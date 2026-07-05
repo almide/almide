@@ -1,0 +1,53 @@
+// uint32_convert — SELF-HOSTED uint32.to_* via the two-hop int composition (int.from_uint32
+// zero-widens to i64, int.to_<dst> narrows) — byte-identical to v0's uint32.almd bodies.
+// Nested call unrolled to two lets; callees are cross-file. Pure scalar.
+
+fn uint32_to_int8(x: UInt32) -> Int8 = {
+  let i = int.from_uint32(x)
+  int.to_int8(i)
+}
+
+fn uint32_to_int16(x: UInt32) -> Int16 = {
+  let i = int.from_uint32(x)
+  int.to_int16(i)
+}
+
+fn uint32_to_int32(x: UInt32) -> Int32 = {
+  let i = int.from_uint32(x)
+  int.to_int32(i)
+}
+
+fn uint32_to_int64(x: UInt32) -> Int64 = {
+  let i = int.from_uint32(x)
+  int.to_int64(i)
+}
+
+fn uint32_to_uint8(x: UInt32) -> UInt8 = {
+  let i = int.from_uint32(x)
+  int.to_uint8(i)
+}
+
+fn uint32_to_uint16(x: UInt32) -> UInt16 = {
+  let i = int.from_uint32(x)
+  int.to_uint16(i)
+}
+
+fn uint32_to_uint64(x: UInt32) -> UInt64 = {
+  let i = int.from_uint32(x)
+  int.to_uint64(i)
+}
+
+fn uint32_to_float32(x: UInt32) -> Float32 = {
+  let i = int.from_uint32(x)
+  int.to_float32(i)
+}
+
+fn uint32_to_float64(x: UInt32) -> Float64 = {
+  let i = int.from_uint32(x)
+  int.to_float64(i)
+}
+
+fn uint32_to_string(x: UInt32) -> String = {
+  let i = int.from_uint32(x)
+  int.to_string(i)
+}

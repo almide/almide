@@ -1,0 +1,70 @@
+// error_chain — SELF-HOSTED `error.chain(outer, cause)` for v1 = `"{outer}\ncaused by: {cause}"`
+// (v0's format!). A 3-way byte concat over the prim floor. The 12-byte separator "\ncaused by: " is
+// written byte-by-byte (an INTERNAL string literal used only via prim.handle is DCE'd to len 0, so
+// the bytes are materialized directly). Both inputs borrowed; result a fresh owned String.
+fn __echain_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let b = prim.load8(src + i)
+    prim.store8(dst + i, b)
+    __echain_copy(dst, src, n, i + 1)
+  }
+
+// Write "\ncaused by: " (10,99,97,117,115,101,100,32,98,121,58,32) at `d`.
+fn __echain_sep(d: Int) -> Int = {
+  prim.store8(d, 10)
+  prim.store8(d + 1, 99)
+  prim.store8(d + 2, 97)
+  prim.store8(d + 3, 117)
+  prim.store8(d + 4, 115)
+  prim.store8(d + 5, 101)
+  prim.store8(d + 6, 100)
+  prim.store8(d + 7, 32)
+  prim.store8(d + 8, 98)
+  prim.store8(d + 9, 121)
+  prim.store8(d + 10, 58)
+  prim.store8(d + 11, 32)
+  0
+}
+
+fn error_chain(outer: String, cause: String) -> String = {
+  let oh = prim.handle(outer)
+  let olen = prim.load32(oh + 4)
+  let ch = prim.handle(cause)
+  let clen = prim.load32(ch + 4)
+  let total = olen + 12 + clen
+  let out = prim.alloc_str(total)
+  let d0 = prim.handle(out) + 12
+  let _1 = __echain_copy(d0, oh + 12, olen, 0)
+  let d1 = d0 + olen
+  let _2 = __echain_sep(d1)
+  let d2 = d1 + 12
+  let _3 = __echain_copy(d2, ch + 12, clen, 0)
+  out
+}
+
+// error_context(r, ctx) = Ok kept, Err(e) → Err("{ctx}: {e}") (v0's map_err(format!)). SCALAR
+// Result[Int,String]: len 0 = Ok (rebuild the int), else Err — prepend ctx + the 2-byte ": " (58,32)
+// to the borrowed message, all freshly owned. Reuses __echain_copy.
+fn __ectx_err(ch: Int, clen: Int, msg_h: Int) -> Result[Int, String] = {
+  let mlen = prim.load32(msg_h + 4)
+  let total = clen + 2 + mlen
+  let out = prim.alloc_str(total)
+  let d0 = prim.handle(out) + 12
+  let _1 = __echain_copy(d0, ch + 12, clen, 0)
+  let d1 = d0 + clen
+  prim.store8(d1, 58)
+  prim.store8(d1 + 1, 32)
+  let d2 = d1 + 2
+  let _3 = __echain_copy(d2, msg_h + 12, mlen, 0)
+  Err(out)
+}
+
+fn error_context(r: Result[Int, String], ctx: String) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let v = prim.load64(h + 12)
+  let ch = prim.handle(ctx)
+  let clen = prim.load32(ch + 4)
+  if len == 0 then Ok(v) else __ectx_err(ch, clen, v)
+}

@@ -1,0 +1,12 @@
+// A REAL 2-function program demonstrating the PER-CALL-SITE capability rule:
+// `main` has NO direct effect, but it calls `beep` which reaches Stdout. The
+// transitive capability witness accounts for the callee's effect at the call
+// site, so `main` is REJECTED for an undeclared capability it reaches only
+// THROUGH a callee — the compositional (callee-not-opened) cap check.
+fn beep() -> Unit = {
+  var s = "beep"
+  println(s)
+}
+fn main() -> Unit = {
+  beep()
+}

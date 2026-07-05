@@ -83,6 +83,14 @@ pub struct CodegenAnnotations {
     /// emitter reads this to gate per-site COW, and a non-deterministic order could
     /// perturb emit and break the host-deterministic wasm32-vs-native byte gate.
     pub needs_cow: BTreeSet<VarId>,
+    /// Bindings whose declared IR type is REAL (the postcondition gate verifies
+    /// it) but whose Rust-side representation is a borrow the `Ty` system cannot
+    /// spell (a TCO borrow-preserved `Bytes` param temp is `&Vec<u8>`): the
+    /// walker renders their annotation as `_` and lets Rust infer. Replaces the
+    /// old smuggle of `Ty::Unknown` through the temp's type, which the
+    /// ConcretizeTypes postcondition rightly refuses. Populated by
+    /// `TailCallOptPass`.
+    pub infer_binding_tys: BTreeSet<VarId>,
 }
 
 impl CodegenAnnotations {
@@ -106,6 +114,13 @@ impl CodegenAnnotations {
     /// copy-on-write at its mutation sites to preserve value semantics. (AliasCowPass.)
     pub fn needs_cow(&self, var: &VarId) -> bool {
         self.needs_cow.contains(var)
+    }
+
+    /// True if `var`'s binding must render its type annotation as `_` on the
+    /// Rust target (the runtime representation is a borrow the `Ty` system
+    /// cannot spell). The IR type stays real. (TailCallOptPass.)
+    pub fn is_infer_binding(&self, var: &VarId) -> bool {
+        self.infer_binding_tys.contains(var)
     }
 
     /// Alias-resolved global lookup — the ONLY way stage-2 consumers are

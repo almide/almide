@@ -1,0 +1,43 @@
+// int_bits — SELF-HOSTED bitwise Int ops (band/bor/bxor/bnot/bshl/bshr) for v1. The binary
+// ops wrap the prim bitwise floor (which lowers to a scalar i64 Op::IntBinOp); bnot is pure
+// arithmetic (`!n == -n - 1` in two's complement, no bitwise op needed). Matches v0's i64
+// `& | ^ ! << >>` (>> is the arithmetic, sign-extending shift). Cert-untouching (scalar).
+
+fn int_band(a: Int, b: Int) -> Int = prim.band(a, b)
+
+fn int_bor(a: Int, b: Int) -> Int = prim.bor(a, b)
+
+fn int_bxor(a: Int, b: Int) -> Int = prim.bxor(a, b)
+
+fn int_bshl(n: Int, bits: Int) -> Int = prim.bshl(n, bits)
+
+fn int_bshr(n: Int, bits: Int) -> Int = prim.bshr(n, bits)
+
+// !n == -(n) - 1 in two's complement.
+fn int_bnot(n: Int) -> Int = (0 - n) - 1
+
+// byte_swap: reverse the 8 bytes (byte i -> position 7-i).
+fn __bswap(n: Int, i: Int, acc: Int) -> Int =
+  if i >= 8 then acc
+  else {
+    let sh = prim.bshr(n, i * 8)
+    let byte = prim.band(sh, 255)
+    let shifted = prim.bshl(byte, (7 - i) * 8)
+    let na = prim.bor(acc, shifted)
+    __bswap(n, i + 1, na)
+  }
+
+fn int_byte_swap(n: Int) -> Int = __bswap(n, 0, 0)
+
+// bit_reverse: reverse all 64 bits (bit i -> position 63-i).
+fn __brev(n: Int, i: Int, acc: Int) -> Int =
+  if i >= 64 then acc
+  else {
+    let sh = prim.bshr(n, i)
+    let bit = prim.band(sh, 1)
+    let shifted = prim.bshl(bit, 63 - i)
+    let na = prim.bor(acc, shifted)
+    __brev(n, i + 1, na)
+  }
+
+fn int_bit_reverse(n: Int) -> Int = __brev(n, 0, 0)

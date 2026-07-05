@@ -3,7 +3,6 @@
 //! Legacy constants kept for backward compatibility during migration.
 //! New code should use `engine::LayoutRegistry` via `WasmBuilder`.
 
-use crate::emit_wasm::engine::{Imm32, Local};
 use super::FuncCompiler;
 
 // ── Legacy constants (used by existing code not yet migrated) ──
@@ -31,30 +30,22 @@ impl FuncCompiler<'_> {
     pub fn emit_list_data_addr(&mut self, list_local: u32) {
         use super::engine::{WasmBuilder, layout::{LIST, list}};
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-        w.get(Local(list_local)).field_addr(LIST, list::DATA);
+        w.get(list_local).field_addr(LIST, list::DATA);
     }
 
     /// List element address. Stack: `[] → [elem_ptr]`
     pub fn emit_list_elem_addr(&mut self, list_local: u32, idx_local: u32, elem_size: u32) {
         use super::engine::{WasmBuilder, layout::{LIST, list}};
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-        w.get(Local(list_local)).field_addr(LIST, list::DATA);
-        w.get(Local(idx_local)).i32c(Imm32(elem_size as i32)).mul().add();
+        w.get(list_local).field_addr(LIST, list::DATA);
+        w.get(idx_local).i32c(elem_size as i32).mul().add();
     }
 
     /// Allocate list for `len_local` elements. Returns scratch local with ptr.
-    ///
-    /// Uses `__alloc_nozero`: a pre-sized list's data area is written in full by
-    /// its producer (map/filter/range/collect), and `len` bounds every read, so a
-    /// recycled free-list block need not be zeroed first. On a warm repeated
-    /// allocation (the common `data |> list.map` loop) this is the difference
-    /// between touching 8 MB once vs twice — list combinators were ~4× off rustc
-    /// purely from the redundant reuse-zeroing, not the (already SIMD) inner loop.
-    /// (Swiss-Table maps DO need the zero-fill — they keep using `__alloc`.)
     pub fn emit_list_alloc(&mut self, len_local: u32, elem_size: u32) -> u32 {
         use super::engine::{WasmBuilder, layout::LIST};
         let dst = self.scratch.alloc_i32();
-        let alloc_fn = self.emitter.rt.alloc_nozero;
+        let alloc_fn = self.emitter.rt.alloc;
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
         w.alloc_collection(LIST, len_local, elem_size, dst, alloc_fn);
         dst
@@ -67,8 +58,8 @@ impl FuncCompiler<'_> {
         let alloc_fn = self.emitter.rt.alloc;
         let hdr = self.emitter.layout_reg.header_size(LIST);
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-        w.i32c(Imm32(hdr as i32)).call(alloc_fn).tee(Local(dst));
-        w.i32c(Imm32(0)).field_store(LIST, list::LEN);
+        w.i32c(hdr as i32).call(alloc_fn).tee(dst);
+        w.i32c(0).field_store(LIST, list::LEN);
         dst
     }
 
@@ -76,7 +67,7 @@ impl FuncCompiler<'_> {
     pub fn emit_list_len(&mut self, list_local: u32) {
         use super::engine::{WasmBuilder, layout::{LIST, list}};
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-        w.get(Local(list_local)).field_load(LIST, list::LEN);
+        w.get(list_local).field_load(LIST, list::LEN);
     }
 
     // ── Compact-ordered-dict tag helpers (the tags array is unchanged from the old layout) ──
@@ -85,7 +76,7 @@ impl FuncCompiler<'_> {
     pub fn emit_swiss_tag_load(&mut self, map: u32, idx: u32) {
         use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m, MemType}};
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-        w.get(Local(map)).field_addr(SWISS_MAP, m::TAGS).get(Local(idx)).add();
+        w.get(map).field_addr(SWISS_MAP, m::TAGS).get(idx).add();
         w.emit_load(0, MemType::U8);
     }
 
@@ -93,10 +84,10 @@ impl FuncCompiler<'_> {
     pub fn emit_swiss_tag_store(&mut self, map: u32, idx: u32) {
         use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m, MemType}};
         let tmp = self.scratch.alloc_i32();
-        wasm!(self.func, { local_set(Local(tmp)); }); // save tag from stack
+        wasm!(self.func, { local_set(tmp); }); // save tag from stack
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-        w.get(Local(map)).field_addr(SWISS_MAP, m::TAGS).get(Local(idx)).add();
-        w.get(Local(tmp)).emit_store(0, MemType::U8);
+        w.get(map).field_addr(SWISS_MAP, m::TAGS).get(idx).add();
+        w.get(tmp).emit_store(0, MemType::U8);
         self.scratch.free_i32(tmp);
     }
 
@@ -104,14 +95,14 @@ impl FuncCompiler<'_> {
     pub fn emit_map_len(&mut self, map: u32) {
         use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m}};
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-        w.get(Local(map)).field_load(SWISS_MAP, m::LEN);
+        w.get(map).field_load(SWISS_MAP, m::LEN);
     }
 
     /// Store map length. Stack: `[] → []`. `len_local` has the value.
     pub fn emit_map_store_len(&mut self, map: u32, len_local: u32) {
         use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m}};
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-        w.get(Local(map)).get(Local(len_local)).field_store(SWISS_MAP, m::LEN);
+        w.get(map).get(len_local).field_store(SWISS_MAP, m::LEN);
     }
 
     /// Allocate empty map (len=0, cap=0). Returns scratch local.
@@ -121,9 +112,9 @@ impl FuncCompiler<'_> {
         let hdr = self.emitter.layout_reg.header_size(SWISS_MAP);
         let alloc_fn = self.emitter.rt.alloc;
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-        w.i32c(Imm32(hdr as i32)).call(alloc_fn).tee(Local(dst));
-        w.i32c(Imm32(0)).field_store(SWISS_MAP, m::LEN);
-        w.get(Local(dst)).i32c(Imm32(0)).field_store(SWISS_MAP, m::CAP);
+        w.i32c(hdr as i32).call(alloc_fn).tee(dst);
+        w.i32c(0).field_store(SWISS_MAP, m::LEN);
+        w.get(dst).i32c(0).field_store(SWISS_MAP, m::CAP);
         dst
     }
 
@@ -138,9 +129,9 @@ impl FuncCompiler<'_> {
         // total = hdr + cap + cap * entry_stride
         let total = hdr + cap_val + cap_val * entry_stride;
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-        w.i32c(Imm32(total as i32)).call(alloc_fn).tee(Local(dst));
-        w.i32c(Imm32(0)).field_store(SWISS_MAP, m::LEN);
-        w.get(Local(dst)).i32c(Imm32(cap_val as i32)).field_store(SWISS_MAP, m::CAP);
+        w.i32c(total as i32).call(alloc_fn).tee(dst);
+        w.i32c(0).field_store(SWISS_MAP, m::LEN);
+        w.get(dst).i32c(cap_val as i32).field_store(SWISS_MAP, m::CAP);
         dst
     }
 }

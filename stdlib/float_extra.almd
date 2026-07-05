@@ -1,0 +1,27 @@
+// float_extra — more SELF-HOSTED `float.*` over the Float prim floor. clamp(n,lo,hi) =
+// fmin(fmax(n,lo),hi) = n.clamp(lo,hi) (assuming lo<=hi); is_nan(n) = n != n (only NaN is
+// unequal to itself). Pure scalar — cert untouched. Matches v0's f64 semantics.
+
+fn float_clamp(n: Float, lo: Float, hi: Float) -> Float = {
+  let m = prim.fmax(n, lo)
+  prim.fmin(m, hi)
+}
+
+fn float_is_nan(n: Float) -> Bool = prim.fne(n, n)
+
+// sign(n) = f64::signum: magnitude 1.0 with n's SIGN BIT (so signum(+0.0)=1.0,
+// signum(-0.0)=-1.0), and NaN for NaN. `copysign(1.0, n)` gives the sign-bit behavior
+// exactly; the NaN case is guarded (copysign of NaN would drop the NaN payload).
+fn float_sign(n: Float) -> Float = {
+  let nan = prim.fne(n, n)
+  if nan then n else prim.fcopysign(1.0, n)
+}
+
+// is_infinite(n): true iff n is +inf or -inf. |n| == +inf catches both; a NaN |n| is
+// unequal to inf (→ false), a finite |n| < inf (→ false). inf is built as 1.0/0.0 (wasm
+// f64.div by zero is +inf, no trap).
+fn float_is_infinite(n: Float) -> Bool = {
+  let inf = prim.fdiv(1.0, 0.0)
+  let an = prim.fabs(n)
+  prim.feq(an, inf)
+}

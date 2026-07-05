@@ -1,0 +1,18 @@
+// @contract: C-107
+// Result[(Value, Int), String] producer + match-consumer (toml parse_val's `ok((value.…, pos))`).
+// The Ok tuple's slot0 is a dynamic Value (can nest an Array/Object), freed RECURSIVELY via
+// value_core's $__drop_value_tuple (Op::DropResultValueInt) — a flat DropListStr would leak it.
+fn parse_v(p: Int) -> Result[(Value, Int), String] =
+  if p < 0 then err("neg")
+  else ok((value.array([value.int(p), value.str("k")]), p + 1))
+
+effect fn main() -> Unit = {
+  match parse_v(7) {
+    ok(t) => { let (v, n) = t  println(value.stringify(v) + " @ " + int.to_string(n)) },
+    err(e) => println("E:" + e)
+  }
+  match parse_v(0 - 1) {
+    ok(t) => { let (v, n) = t  println("ok") },
+    err(e) => println("E:" + e)
+  }
+}

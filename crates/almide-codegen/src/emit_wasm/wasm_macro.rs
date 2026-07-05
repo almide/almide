@@ -1,17 +1,13 @@
 //! Macro for concise WASM instruction emission.
 //!
-//! Numeric operands are type-enforced ValueObjects: immediate constants take
-//! `Imm32`/`Imm64`, local indices take `Local` — a bare integer won't compile.
-//! Memory offsets (load/store), branch depths, and call indices stay raw.
-//!
 //! Usage (FuncCompiler — pass `self.func`):
 //! ```ignore
 //! wasm!(self.func, {
-//!     i32_const(Imm32(4));
-//!     i32_load(0);          // offset, raw
+//!     i32_const(4);
+//!     i32_load(0);
 //!     i32_add;
-//!     local_get(Local(0));
-//!     i64_store(4);         // offset, raw
+//!     local_get(0);
+//!     i64_store(4);
 //!     call(some_idx);
 //!     br_if(1);
 //!     block_empty;
@@ -24,7 +20,7 @@
 //! ```ignore
 //! wasm!(f, {
 //!     global_get(heap_ptr);
-//!     local_set(Local(1));
+//!     local_set(1);
 //! });
 //! ```
 
@@ -38,13 +34,13 @@ macro_rules! wasm {
     // Terminal
     (@emit $f:expr,) => {};
 
-    // ── Const ── ($v is an Imm32/Imm64 ValueObject — a bare int won't compile)
+    // ── Const ──
     (@emit $f:expr, i32_const($v:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::I32Const(($v).val()));
+        $f.instruction(&wasm_encoder::Instruction::I32Const($v));
         wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, i64_const($v:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::I64Const(($v).val()));
+        $f.instruction(&wasm_encoder::Instruction::I64Const($v));
         wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, f64_const($v:expr); $($rest:tt)*) => {
@@ -52,17 +48,17 @@ macro_rules! wasm {
         wasm!(@emit $f, $($rest)*)
     };
 
-    // ── Variables ── ($v is a Local ValueObject — a bare int won't compile)
+    // ── Variables ──
     (@emit $f:expr, local_get($v:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::LocalGet(($v).idx()));
+        $f.instruction(&wasm_encoder::Instruction::LocalGet($v));
         wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, local_set($v:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::LocalSet(($v).idx()));
+        $f.instruction(&wasm_encoder::Instruction::LocalSet($v));
         wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, local_tee($v:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::LocalTee(($v).idx()));
+        $f.instruction(&wasm_encoder::Instruction::LocalTee($v));
         wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, global_get($v:expr); $($rest:tt)*) => {
@@ -637,18 +633,6 @@ macro_rules! wasm {
     };
     (@emit $f:expr, i64x2_splat; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I64x2Splat); wasm!(@emit $f, $($rest)*)
-    };
-    (@emit $f:expr, i64x2_extract_lane($lane:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::I64x2ExtractLane($lane)); wasm!(@emit $f, $($rest)*)
-    };
-    (@emit $f:expr, i64x2_replace_lane($lane:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::I64x2ReplaceLane($lane)); wasm!(@emit $f, $($rest)*)
-    };
-    (@emit $f:expr, v128_xor; $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::V128Xor); wasm!(@emit $f, $($rest)*)
-    };
-    (@emit $f:expr, i8x16_shuffle($lanes:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::I8x16Shuffle($lanes)); wasm!(@emit $f, $($rest)*)
     };
 }
 

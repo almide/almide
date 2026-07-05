@@ -1,0 +1,29 @@
+// wasm:enabled
+// Locks in the OPTION-outer nested `${…}` interps — v0's `some(<inner>)` / `none`:
+//   Option[Option[Bool]]          → some(some(true)) / some(none) / none
+//   Option[Option[String]]        → some(some("a")) / some(none) / none
+//   Option[Result[Int, String]]   → some(ok(5)) / some(err("…")) / none
+//   Option[Result[String, String]]→ some(ok("a")) / some(err("…")) / none  (cap-as-tag inner)
+//   Option[List[Bool]]            → some([true, false]) / some([]) / none
+// The inner variant is matched inside the self-host; the cap-as-tag inner (Result[String,String])
+// relies on the nested-payload seed_variant_param fix. Byte-identical to v0 --target wasm.
+
+effect fn main() -> Unit = {
+  let b1: Option[Option[Bool]] = some(some(true))
+  let b2: Option[Option[Bool]] = some(none)
+  let b3: Option[Option[Bool]] = none
+  println("${b1}") println("${b2}") println("${b3}")
+  let s1: Option[Option[String]] = some(some("tab\ttab"))
+  let s2: Option[Option[String]] = some(none)
+  println("${s1}") println("${s2}")
+  let ri1: Option[Result[Int, String]] = some(ok(0 - 3))
+  let ri2: Option[Result[Int, String]] = some(err("boom"))
+  let ri3: Option[Result[Int, String]] = none
+  println("${ri1}") println("${ri2}") println("${ri3}")
+  let rs1: Option[Result[String, String]] = some(ok("back\\slash"))
+  let rs2: Option[Result[String, String]] = some(err("nope"))
+  println("${rs1}") println("${rs2}")
+  let lb1: Option[List[Bool]] = some([false, true, false])
+  let lb2: Option[List[Bool]] = some([])
+  println("${lb1}") println("${lb2}")
+}

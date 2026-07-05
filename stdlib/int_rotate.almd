@@ -1,0 +1,36 @@
+// int_rotate — SELF-HOSTED `int.rotate_left` / `int.rotate_right` over the bitwise prim
+// floor. v0 rotates within a `bits`-wide field: mask = (1<<bits)-1 (or all-ones for
+// bits>=64); v = a & mask; n = n % bits; left/right shift the masked value as a u64 (logical
+// shr via prim.bshr_u), OR them, re-mask. Byte-exact with v0 for bits>0 (the bits<=0 error
+// path is not replicated). Pure scalar — cert untouched.
+
+fn __rotate_mask(bits: Int) -> Int =
+  if bits >= 64 then 0 - 1
+  else {
+    let p = prim.bshl(1, bits)
+    p - 1
+  }
+
+fn int_rotate_left(a: Int, n: Int, bits: Int) -> Int = {
+  // §13 termination convention: a nonpositive width has no rotation — abort
+  // with the native-identical stderr line + exit 1.
+  if bits <= 0 then prim.die(prim.handle("Error: rotate width must be positive\n")) else ()
+  let mask = __rotate_mask(bits)
+  let v = prim.band(a, mask)
+  let nn = n % bits
+  let left = prim.bshl(v, nn)
+  let right = prim.bshr_u(v, bits - nn)
+  let combined = prim.bor(left, right)
+  prim.band(combined, mask)
+}
+
+fn int_rotate_right(a: Int, n: Int, bits: Int) -> Int = {
+  if bits <= 0 then prim.die(prim.handle("Error: rotate width must be positive\n")) else ()
+  let mask = __rotate_mask(bits)
+  let v = prim.band(a, mask)
+  let nn = n % bits
+  let right = prim.bshr_u(v, nn)
+  let left = prim.bshl(v, bits - nn)
+  let combined = prim.bor(left, right)
+  prim.band(combined, mask)
+}

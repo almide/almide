@@ -124,6 +124,28 @@ impl Checker {
                     && args_a.iter().zip(args_b.iter()).all(|(ta, tb)| self.unify_infer(ta, tb))
                     || (args_a.is_empty() || args_b.is_empty())
             }
+            // DIFFERENT-named nominal pair: expanding both sides and recursing
+            // into the fields loops forever on RECURSIVE types (`El = { children:
+            // List[El] }` vs its module twin `lib.El` re-reaches El×lib.El inside
+            // `children` — the svg cross-module `render(group(..))` stack
+            // overflow). Equi-recursive unification: mark the pair in progress
+            // and treat a re-encounter as success — the pair unifies iff every
+            // OTHER field path unifies, which the outer frames still check.
+            (Ty::Named(na, _), Ty::Named(nb, _)) => {
+                let key = if na.as_str() <= nb.as_str() { (*na, *nb) } else { (*nb, *na) };
+                if !self.unify_named_in_progress.insert(key) {
+                    return true;
+                }
+                let ra = self.env.resolve_named(a);
+                let rb = self.env.resolve_named(b);
+                let out = if ra != *a || rb != *b {
+                    self.unify_infer(&ra, &rb)
+                } else {
+                    a.compatible(b)
+                };
+                self.unify_named_in_progress.remove(&key);
+                out
+            }
             (Ty::Named(_, _), _) => {
                 let resolved = self.env.resolve_named(a);
                 if resolved != *a { self.unify_infer(&resolved, b) } else { a.compatible(b) }

@@ -1,0 +1,24 @@
+// @contract: C-113
+// A LET-BOUND user-function Result, then a `match` over the bound var — the num_signed_base
+// shape. `seed_variant_param` on the let-binding gives the bound var the same read-shape the
+// direct-call-arg position already has, so the match executes (reads the tag) instead of walling.
+fn mk(b: Bool) -> Result[Int, String] = if b then ok(7) else err("no")
+
+fn letbound(b: Bool) -> String = {
+  let p = mk(b)
+  match p { ok(n) => "ok:" + int.to_string(n), err(_) => "err" }
+}
+
+// The full num_signed_base shape: a LET-BOUND heap-result `if` (the tail-duplication desugar
+// distributes the `match` into each arm), each arm's `parsed` then seeded + matched.
+fn pick(which: Bool, b: Bool) -> String = {
+  let parsed = if which then mk(b) else mk(b)
+  match parsed { ok(n) => "n=" + int.to_string(n), err(_) => "e" }
+}
+
+fn main() -> Unit = {
+  println(letbound(true))
+  println(letbound(false))
+  println(pick(true, true))
+  println(pick(false, false))
+}

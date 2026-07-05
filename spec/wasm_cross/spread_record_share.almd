@@ -1,0 +1,48 @@
+// @contract: C-123
+// `{ ...base, field: override }` byte-copies the base record, so every heap
+// field pointer it duplicates is reachable from TWO records: the copy must own
+// a +1 per non-overridden heap field, and a borrowed-alias OVERRIDE (a Var) is
+// RETAINED by the new record so it takes the same +1 as a plain `Record` field
+// (`emit_stored_field`). The WASM emitter previously copied both borrowed:
+// the svg `doc` shape (`{ ...piped_base, children }`) rendered `<svg/>` with
+// its attrs Map freed, then trapped __rc_dec on the scope-end drops.
+
+type Element = {
+  tag: String,
+  attrs: Map[String, String],
+  children: List[Element],
+  content: String,
+}
+
+fn el(tag: String) -> Element =
+  Element { tag: tag, attrs: [:], children: [], content: "" }
+
+fn attr(element: Element, key: String, value: String) -> Element =
+  { ...element, attrs: map.set(element.attrs, key, value) }
+
+fn render(e: Element) -> String = {
+  let attrs = map.entries(e.attrs)
+    |> list.map((p) => {
+      let (k, v) = p
+      " ${k}=\"${v}\""
+    })
+    |> list.join("")
+  let kids = e.children |> list.map((c) => render(c)) |> list.join("")
+  if list.is_empty(e.children) then "<${e.tag}${attrs}/>"
+  else "<${e.tag}${attrs}>${kids}</${e.tag}>"
+}
+
+fn main() -> Unit = {
+  // Piped base temp + spread with a fresh-list override (svg group/doc shape).
+  let base = el("svg") |> attr("width", "800") |> attr("height", "600")
+  let d = { ...base, children: [el("rect")] }
+  println(render(d))
+  // The base must still be intact after the spread copy is dropped.
+  println(render(base))
+
+  // Borrowed-alias override: a Var moved into the spread must be +1'd.
+  let kids: List[Element] = [el("circle")]
+  let g = { ...base, children: kids }
+  println(render(g))
+  println(int.to_string(list.len(kids)))
+}

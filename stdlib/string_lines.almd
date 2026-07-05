@@ -1,0 +1,69 @@
+// string_lines — SELF-HOSTED `string.lines` for v1 over the prim floor + Machinery 2. Rust
+// `s.lines()`: split on '\n', strip a trailing '\r' from each line, and DROP a final empty
+// line if `s` ends with '\n' ("a\nb\n" and "a\nb" yield the SAME ["a","b"]; ""→[], "\n"→[""]).
+// Line count = #'\n' + (1 if s is non-empty and its last byte is NOT '\n'). Source borrowed.
+
+fn __count_nl(sh: Int, slen: Int, i: Int, acc: Int) -> Int =
+  if i >= slen then acc
+  else {
+    let b = prim.load8(sh + 12 + i)
+    if b == 10 then __count_nl(sh, slen, i + 1, acc + 1)
+    else __count_nl(sh, slen, i + 1, acc)
+  }
+
+fn __line_count(sh: Int, slen: Int) -> Int = {
+  let nl = __count_nl(sh, slen, 0, 0)
+  if slen <= 0 then 0
+  else {
+    let last = prim.load8(sh + 12 + slen - 1)
+    if last == 10 then nl else nl + 1
+  }
+}
+
+fn __find_nl(sh: Int, slen: Int, from: Int) -> Int =
+  if from >= slen then slen
+  else {
+    let b = prim.load8(sh + 12 + from)
+    if b == 10 then from else __find_nl(sh, slen, from + 1)
+  }
+
+// The line's end byte index: the '\n' position, less one if a '\r' precedes it.
+fn __strip_cr(sh: Int, from: Int, nl: Int) -> Int =
+  if nl <= from then nl
+  else {
+    let pb = prim.load8(sh + 12 + nl - 1)
+    if pb == 13 then nl - 1 else nl
+  }
+
+fn __lncopy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let b = prim.load8(src + i)
+    prim.store8(dst + i, b)
+    __lncopy(dst, src, n, i + 1)
+  }
+
+fn __lntake(sh: Int, start: Int, n: Int) -> String = {
+  let piece = prim.alloc_str(n)
+  let _x = __lncopy(prim.handle(piece) + 12, sh + 12 + start, n, 0)
+  piece
+}
+
+fn __lines_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int, total: Int) -> Int =
+  if idx >= total then idx
+  else {
+    let nl = __find_nl(sh, slen, from)
+    let endp = __strip_cr(sh, from, nl)
+    let piece = __lntake(sh, from, endp - from)
+    prim.store_str(lh + 12 + idx * 8, piece)
+    __lines_fill(lh, sh, slen, nl + 1, idx + 1, total)
+  }
+
+fn string_lines(s: String) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let total = __line_count(sh, slen)
+  let result = prim.alloc_list_str(total)
+  let _x = __lines_fill(prim.handle(result), sh, slen, 0, 0, total)
+  result
+}

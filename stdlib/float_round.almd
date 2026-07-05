@@ -1,0 +1,19 @@
+// float_round — SELF-HOSTED `float.round` over the Float prim floor. v0 = `f64::round` =
+// round to nearest, HALF AWAY FROM ZERO (round(2.5)=3, round(-2.5)=-3) — NOT wasm's
+// `f64.nearest` (half to even). Replicated as floor(x+0.5) for x>=0, ceil(x-0.5) for x<0.
+// Pure scalar — cert untouched. The cond is bound first (a Float compare is a scalar call).
+
+fn __round_pos(x: Float) -> Float = {
+  let xp = prim.fadd(x, 0.5)
+  prim.ffloor(xp)
+}
+
+fn __round_neg(x: Float) -> Float = {
+  let xm = prim.fsub(x, 0.5)
+  prim.fceil(xm)
+}
+
+fn float_round(x: Float) -> Float = {
+  let nonneg = prim.fge(x, 0.0)
+  if nonneg then __round_pos(x) else __round_neg(x)
+}

@@ -1,0 +1,722 @@
+// matrix_core — SELF-HOSTED matrix.* for the v1 trust spine (the roadmap's "Matrix value
+// model (a)"): a v1 Matrix IS a List[List[Float]] — the SAME row-major list-of-rows
+// v0's AlmideMatrix holds — so from_lists/to_lists are share-copies and the whole
+// nested-list machinery (drops, borrows, concat) applies unchanged.
+//
+// LAYOUT: the outer block is the DynListStr shape ([rc][len@4][cap][row-handle slots @12,
+// 8 bytes each]); each row is a flat f64-slot block ([rc][len@4][cap][f64 bits @12]).
+// A row is a single flat block, so the outer's per-slot rc_dec (DropListStr) is a row's
+// FULL free — a Matrix value drops exactly like a List[String]. A List[Matrix]
+// (split_cols_even's result) drops like a List[List[String]] (DropListListStr).
+//
+// OWNERSHIP: matrix arguments are BORROWED (the caller keeps its reference); results are
+// fresh OWNED blocks. A fresh row/sub-block is MOVED into its slot via prim.store_str
+// (store + consume); a SHARED row (from_lists/to_lists) is co-owned via prim.rc_inc —
+// the __list_concat_rc convention (rc-aware on both drop paths, no double free).
+//
+// SEMANTICS: each fn is a faithful transcription of runtime/rs/src/matrix.rs (the v0
+// oracle) over its sane input domain — same zip-truncation, same empty-shape edges, same
+// k-ascending f64 accumulation order (v0-wasm's matmul_naive tiling reduces to k-order
+// per element, and the handwritten norm/linear kernels sum ascending). Out-of-bounds
+// row/col indexing (a v0 PANIC) is out of the transcribed domain.
+
+// ── shared fills/copies ──
+
+fn __mx_share_fill(dh: Int, sh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(sh + 12 + i * 8)
+    prim.rc_inc(e)
+    prim.store64(dh + 12 + i * 8, e)
+    __mx_share_fill(dh, sh, n, i + 1)
+  }
+
+// One fresh outer block whose slots co-own (rc_inc) the source's row blocks — the
+// from_lists/to_lists identity VALUE (v0 deep-copies; sharing is observably identical
+// because Almide values are immutable).
+fn __mx_share(xs: List[List[Float]]) -> List[List[Float]] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mx_share_fill(prim.handle(out), h, n, 0)
+  out
+}
+
+fn __mx_fill_row(rh: Int, c: Int, bits: Int, i: Int) -> Int =
+  if i >= c then 0
+  else {
+    prim.store64(rh + 12 + i * 8, bits)
+    __mx_fill_row(rh, c, bits, i + 1)
+  }
+
+fn __mx_const_rows(ho: Int, n: Int, c: Int, bits: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let row = prim.alloc_list_f64(c)
+    let _f = __mx_fill_row(prim.handle(row), c, bits, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_const_rows(ho, n, c, bits, i + 1)
+  }
+
+fn __mx_const(rows: Int, cols: Int, x: Float) -> List[List[Float]] = {
+  let out: List[List[Float]] = prim.alloc_list_str(rows)
+  let _x = __mx_const_rows(prim.handle(out), rows, cols, prim.fbits(x), 0)
+  out
+}
+
+// Copy n f64 slots src[start..start+n] into dst[0..n].
+fn __mx_copy_off(dh: Int, sh: Int, start: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.store64(dh + 12 + i * 8, prim.load64(sh + 12 + (start + i) * 8))
+    __mx_copy_off(dh, sh, start, n, i + 1)
+  }
+
+// Copy n f64 slots src[0..n] into dst[pos..pos+n].
+fn __mx_dst_copy(dh: Int, pos: Int, sh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.store64(dh + 12 + (pos + i) * 8, prim.load64(sh + 12 + i * 8))
+    __mx_dst_copy(dh, pos, sh, n, i + 1)
+  }
+
+// ── construction + metadata ──
+
+fn matrix_from_lists(rows: List[List[Float]]) -> List[List[Float]] = __mx_share(rows)
+
+fn matrix_to_lists(m: List[List[Float]]) -> List[List[Float]] = __mx_share(m)
+
+fn matrix_zeros(rows: Int, cols: Int) -> List[List[Float]] = __mx_const(rows, cols, 0.0)
+
+fn matrix_ones(rows: Int, cols: Int) -> List[List[Float]] = __mx_const(rows, cols, 1.0)
+
+fn matrix_rows(m: List[List[Float]]) -> Int = prim.load32(prim.handle(m) + 4)
+
+fn matrix_cols(m: List[List[Float]]) -> Int = {
+  let h = prim.handle(m)
+  if prim.load32(h + 4) == 0 then 0
+  else prim.load32(prim.load64(h + 12) + 4)
+}
+
+fn matrix_get(m: List[List[Float]], row: Int, col: Int) -> Float = {
+  let h = prim.handle(m)
+  let rh = prim.load64(h + 12 + row * 8)
+  prim.ffrombits(prim.load64(rh + 12 + col * 8))
+}
+
+// ── element-wise ──
+
+fn __mx_add_row(dh: Int, ah: Int, bh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(ah + 12 + i * 8))
+    let y = prim.ffrombits(prim.load64(bh + 12 + i * 8))
+    prim.store64(dh + 12 + i * 8, prim.fbits(x + y))
+    __mx_add_row(dh, ah, bh, n, i + 1)
+  }
+
+fn __mx_add_rows(ho: Int, ha: Int, hb: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let ar = prim.load64(ha + 12 + i * 8)
+    let br = prim.load64(hb + 12 + i * 8)
+    let ca = prim.load32(ar + 4)
+    let cb = prim.load32(br + 4)
+    let c = if ca < cb then ca else cb
+    let row = prim.alloc_list_f64(c)
+    let _f = __mx_add_row(prim.handle(row), ar, br, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_add_rows(ho, ha, hb, n, i + 1)
+  }
+
+// zip semantics like v0 (`a.iter().zip(b.iter())`): rows/cols truncate to the shorter.
+fn matrix_add(a: List[List[Float]], b: List[List[Float]]) -> List[List[Float]] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let n = if la < lb then la else lb
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mx_add_rows(prim.handle(out), ha, hb, n, 0)
+  out
+}
+
+fn __mx_scale_row(dh: Int, sh: Int, s: Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(sh + 12 + i * 8))
+    prim.store64(dh + 12 + i * 8, prim.fbits(x * s))
+    __mx_scale_row(dh, sh, s, n, i + 1)
+  }
+
+fn __mx_scale_rows(ho: Int, hm: Int, s: Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let rh = prim.load64(hm + 12 + i * 8)
+    let c = prim.load32(rh + 4)
+    let row = prim.alloc_list_f64(c)
+    let _f = __mx_scale_row(prim.handle(row), rh, s, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_scale_rows(ho, hm, s, n, i + 1)
+  }
+
+fn matrix_scale(m: List[List[Float]], s: Float) -> List[List[Float]] = {
+  let hm = prim.handle(m)
+  let n = prim.load32(hm + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mx_scale_rows(prim.handle(out), hm, s, n, 0)
+  out
+}
+
+fn __mx_map_row(dh: Int, sh: Int, f: (Float) -> Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(sh + 12 + i * 8))
+    prim.store64(dh + 12 + i * 8, prim.fbits(f(x)))
+    __mx_map_row(dh, sh, f, n, i + 1)
+  }
+
+fn __mx_map_rows(ho: Int, hm: Int, f: (Float) -> Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let rh = prim.load64(hm + 12 + i * 8)
+    let c = prim.load32(rh + 4)
+    let row = prim.alloc_list_f64(c)
+    let _f = __mx_map_row(prim.handle(row), rh, f, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_map_rows(ho, hm, f, n, i + 1)
+  }
+
+fn matrix_map(m: List[List[Float]], f: (Float) -> Float) -> List[List[Float]] = {
+  let hm = prim.handle(m)
+  let n = prim.load32(hm + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mx_map_rows(prim.handle(out), hm, f, n, 0)
+  out
+}
+
+// ── shape ops ──
+
+fn __mx_tr_fill(rh: Int, hm: Int, j: Int, r: Int, i: Int) -> Int =
+  if i >= r then 0
+  else {
+    let src = prim.load64(hm + 12 + i * 8)
+    prim.store64(rh + 12 + i * 8, prim.load64(src + 12 + j * 8))
+    __mx_tr_fill(rh, hm, j, r, i + 1)
+  }
+
+fn __mx_tr_rows(ho: Int, hm: Int, c: Int, r: Int, j: Int) -> Int =
+  if j >= c then 0
+  else {
+    let row = prim.alloc_list_f64(r)
+    let _f = __mx_tr_fill(prim.handle(row), hm, j, r, 0)
+    prim.store_str(ho + 12 + j * 8, row)
+    __mx_tr_rows(ho, hm, c, r, j + 1)
+  }
+
+// v0: an empty (0-row or 0-col) matrix transposes to the 0-row matrix.
+fn matrix_transpose(m: List[List[Float]]) -> List[List[Float]] = {
+  let h = prim.handle(m)
+  let r = prim.load32(h + 4)
+  let c0 = if r == 0 then 0 else prim.load32(prim.load64(h + 12) + 4)
+  let c = if r == 0 then 0 else c0
+  let out: List[List[Float]] = prim.alloc_list_str(c)
+  let _x = __mx_tr_rows(prim.handle(out), h, c, r, 0)
+  out
+}
+
+// v0 slice_rows: rows start..min(end, len); start >= that end → the 0-row matrix.
+fn matrix_slice_rows(m: List[List[Float]], start: Int, end: Int) -> List[List[Float]] = {
+  let hm = prim.handle(m)
+  let len = prim.load32(hm + 4)
+  let e = if end < len then end else len
+  let n = if start < e then e - start else 0
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mx_slice_fill(prim.handle(out), hm, start, n, 0)
+  out
+}
+
+fn __mx_slice_fill(ho: Int, hm: Int, start: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let src = prim.load64(hm + 12 + (start + i) * 8)
+    let c = prim.load32(src + 4)
+    let row = prim.alloc_list_f64(c)
+    let _f = __mx_copy_off(prim.handle(row), src, 0, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_slice_fill(ho, hm, start, n, i + 1)
+  }
+
+// v0 gather_rows: empty m → the 0-row matrix; an out-of-range index → a zero row of
+// m's column width.
+fn matrix_gather_rows(m: List[List[Float]], indices: List[Int]) -> List[List[Float]] = {
+  let hm = prim.handle(m)
+  let mr = prim.load32(hm + 4)
+  let hi = prim.handle(indices)
+  let k = prim.load32(hi + 4)
+  let n = if mr == 0 then 0 else k
+  let cols = if mr == 0 then 0 else prim.load32(prim.load64(hm + 12) + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mx_gather_fill(prim.handle(out), hm, mr, cols, hi, n, 0)
+  out
+}
+
+fn __mx_gather_one(hm: Int, mr: Int, cols: Int, idx: Int) -> List[Float] =
+  if idx >= 0 and idx < mr then {
+    let src = prim.load64(hm + 12 + idx * 8)
+    let c = prim.load32(src + 4)
+    let row = prim.alloc_list_f64(c)
+    let _f = __mx_copy_off(prim.handle(row), src, 0, c, 0)
+    row
+  } else {
+    let row = prim.alloc_list_f64(cols)
+    let _f = __mx_fill_row(prim.handle(row), cols, prim.fbits(0.0), 0)
+    row
+  }
+
+fn __mx_gather_fill(ho: Int, hm: Int, mr: Int, cols: Int, hi: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let idx = prim.load64(hi + 12 + i * 8)
+    let row = __mx_gather_one(hm, mr, cols, idx)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_gather_fill(ho, hm, mr, cols, hi, n, i + 1)
+  }
+
+// v0 causal_mask_add: out[i][j] = x + mask_val when j > i, else x.
+fn matrix_causal_mask_add(m: List[List[Float]], mask_val: Float) -> List[List[Float]] = {
+  let hm = prim.handle(m)
+  let n = prim.load32(hm + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mx_mask_rows(prim.handle(out), hm, mask_val, n, 0)
+  out
+}
+
+fn __mx_mask_rows(ho: Int, hm: Int, mv: Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let rh = prim.load64(hm + 12 + i * 8)
+    let c = prim.load32(rh + 4)
+    let row = prim.alloc_list_f64(c)
+    let _f = __mx_mask_row(prim.handle(row), rh, mv, i, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_mask_rows(ho, hm, mv, n, i + 1)
+  }
+
+fn __mx_mask_row(dh: Int, sh: Int, mv: Float, i: Int, n: Int, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(sh + 12 + j * 8))
+    let y = if j > i then x + mv else x
+    prim.store64(dh + 12 + j * 8, prim.fbits(y))
+    __mx_mask_row(dh, sh, mv, i, n, j + 1)
+  }
+
+// ── reductions / products ──
+
+// v0 row_dot: r out of range → 0.0; else Σ row[k]·vec[k] over min(len, vec.len), k ascending.
+fn matrix_dot_row(m: List[List[Float]], r: Int, vec: List[Float]) -> Float = {
+  let hm = prim.handle(m)
+  let mr = prim.load32(hm + 4)
+  if r >= mr or r < 0 then 0.0
+  else {
+    let rh = prim.load64(hm + 12 + r * 8)
+    let hv = prim.handle(vec)
+    let c = prim.load32(rh + 4)
+    let vl = prim.load32(hv + 4)
+    let n = if c < vl then c else vl
+    __mx_dot(rh, hv, n, 0, 0.0)
+  }
+}
+
+fn __mx_dot(ah: Int, bh: Int, n: Int, i: Int, acc: Float) -> Float =
+  if i >= n then acc
+  else {
+    let x = prim.ffrombits(prim.load64(ah + 12 + i * 8))
+    let y = prim.ffrombits(prim.load64(bh + 12 + i * 8))
+    __mx_dot(ah, bh, n, i + 1, acc + x * y)
+  }
+
+// v0 mul (the v0-wasm matmul_naive order): out[i][j] = Σ_k a[i][k]·b[k][j], k ascending
+// from 0.0 — the tiling reduces to exactly this per-element order. Degenerate dims fall
+// out of the loops (m==0 → no rows; n==0 → empty rows; k==0 → all-zero rows), matching
+// v0's explicit zero-matrix early-return.
+fn matrix_mul(a: List[List[Float]], b: List[List[Float]]) -> List[List[Float]] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let m = prim.load32(ha + 4)
+  let br = prim.load32(hb + 4)
+  let n = if br == 0 then 0 else prim.load32(prim.load64(hb + 12) + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(m)
+  let _x = __mx_mul_rows(prim.handle(out), ha, hb, br, m, n, 0)
+  out
+}
+
+fn __mx_mul_rows(ho: Int, ha: Int, hb: Int, br: Int, m: Int, n: Int, i: Int) -> Int =
+  if i >= m then 0
+  else {
+    let arh = prim.load64(ha + 12 + i * 8)
+    let k = prim.load32(arh + 4)
+    let kk = if k < br then k else br
+    let row = prim.alloc_list_f64(n)
+    let _f = __mx_mul_row(prim.handle(row), arh, hb, kk, n, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_mul_rows(ho, ha, hb, br, m, n, i + 1)
+  }
+
+fn __mx_mul_row(rh: Int, arh: Int, hb: Int, k: Int, n: Int, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let s = __mx_mul_cell(arh, hb, j, k, 0, 0.0)
+    prim.store64(rh + 12 + j * 8, prim.fbits(s))
+    __mx_mul_row(rh, arh, hb, k, n, j + 1)
+  }
+
+fn __mx_mul_cell(arh: Int, hb: Int, j: Int, k: Int, kk: Int, acc: Float) -> Float =
+  if kk >= k then acc
+  else {
+    let x = prim.ffrombits(prim.load64(arh + 12 + kk * 8))
+    let brh = prim.load64(hb + 12 + kk * 8)
+    let y = prim.ffrombits(prim.load64(brh + 12 + j * 8))
+    __mx_mul_cell(arh, hb, j, k, kk + 1, acc + x * y)
+  }
+
+// v0 linear_row: y[i][j] = Σ_k x[i][k]·w[j][k] + bias[j] (k ascending, bias added last);
+// empty x or weight → the 0-row matrix.
+fn matrix_linear_row(x: List[List[Float]], weight: List[List[Float]], bias: List[Float]) -> List[List[Float]] = {
+  let hx = prim.handle(x)
+  let hw = prim.handle(weight)
+  let r = prim.load32(hx + 4)
+  let wr = prim.load32(hw + 4)
+  let n = if wr == 0 then 0 else r
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mx_lin_rows(prim.handle(out), hx, hw, prim.handle(bias), 1, wr, n, 0)
+  out
+}
+
+fn matrix_linear_row_no_bias(x: List[List[Float]], weight: List[List[Float]]) -> List[List[Float]] = {
+  let hx = prim.handle(x)
+  let hw = prim.handle(weight)
+  let r = prim.load32(hx + 4)
+  let wr = prim.load32(hw + 4)
+  let n = if wr == 0 then 0 else r
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mx_lin_rows(prim.handle(out), hx, hw, 0, 0, wr, n, 0)
+  out
+}
+
+fn __mx_lin_rows(ho: Int, hx: Int, hw: Int, hbias: Int, with_bias: Int, n_out: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let xrh = prim.load64(hx + 12 + i * 8)
+    let row = prim.alloc_list_f64(n_out)
+    let _f = __mx_lin_row(prim.handle(row), xrh, hw, hbias, with_bias, n_out, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_lin_rows(ho, hx, hw, hbias, with_bias, n_out, n, i + 1)
+  }
+
+fn __mx_lin_row(rh: Int, xrh: Int, hw: Int, hbias: Int, with_bias: Int, n_out: Int, j: Int) -> Int =
+  if j >= n_out then 0
+  else {
+    let wrh = prim.load64(hw + 12 + j * 8)
+    let n_in = prim.load32(xrh + 4)
+    let s = __mx_dot_raw(xrh, wrh, n_in, 0, 0.0)
+    let y = if with_bias == 1 then s + prim.ffrombits(prim.load64(hbias + 12 + j * 8)) else s
+    prim.store64(rh + 12 + j * 8, prim.fbits(y))
+    __mx_lin_row(rh, xrh, hw, hbias, with_bias, n_out, j + 1)
+  }
+
+// Unchecked ascending dot of two row blocks over n slots (the linear kernels index
+// w[j][k] for k in 0..x-row-len like v0 — the sane-domain contract).
+fn __mx_dot_raw(ah: Int, bh: Int, n: Int, i: Int, acc: Float) -> Float =
+  if i >= n then acc
+  else {
+    let x = prim.ffrombits(prim.load64(ah + 12 + i * 8))
+    let y = prim.ffrombits(prim.load64(bh + 12 + i * 8))
+    __mx_dot_raw(ah, bh, n, i + 1, acc + x * y)
+  }
+
+// ── row-wise norms ──
+
+fn __mx_sq_sum(rh: Int, n: Int, i: Int, acc: Float) -> Float =
+  if i >= n then acc
+  else {
+    let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
+    __mx_sq_sum(rh, n, i + 1, acc + x * x)
+  }
+
+fn __mx_sum(rh: Int, n: Int, i: Int, acc: Float) -> Float =
+  if i >= n then acc
+  else {
+    let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
+    __mx_sum(rh, n, i + 1, acc + x)
+  }
+
+fn __mx_var_sum(rh: Int, mean: Float, n: Int, i: Int, acc: Float) -> Float =
+  if i >= n then acc
+  else {
+    let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
+    let d = x - mean
+    __mx_var_sum(rh, mean, n, i + 1, acc + d * d)
+  }
+
+// v0 rms_norm_rows: inv = 1 / sqrt(Σx²/n + eps) over the FULL row; output truncates to
+// min(row, gamma) like the zip.
+fn matrix_rms_norm_rows(m: List[List[Float]], gamma: List[Float], eps: Float) -> List[List[Float]] = {
+  let hm = prim.handle(m)
+  let n = prim.load32(hm + 4)
+  let gh = prim.handle(gamma)
+  let glen = prim.load32(gh + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mx_rms_rows(prim.handle(out), hm, gh, glen, eps, n, 0)
+  out
+}
+
+fn __mx_rms_rows(ho: Int, hm: Int, gh: Int, glen: Int, eps: Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let rh = prim.load64(hm + 12 + i * 8)
+    let c = prim.load32(rh + 4)
+    let sq = __mx_sq_sum(rh, c, 0, 0.0)
+    let inv = 1.0 / prim.fsqrt(sq / prim.i2f(c) + eps)
+    let outn = if c < glen then c else glen
+    let row = prim.alloc_list_f64(outn)
+    let _f = __mx_rms_row(prim.handle(row), rh, gh, inv, outn, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_rms_rows(ho, hm, gh, glen, eps, n, i + 1)
+  }
+
+fn __mx_rms_row(dh: Int, rh: Int, gh: Int, inv: Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
+    let g = prim.ffrombits(prim.load64(gh + 12 + i * 8))
+    prim.store64(dh + 12 + i * 8, prim.fbits(x * inv * g))
+    __mx_rms_row(dh, rh, gh, inv, n, i + 1)
+  }
+
+// v0 layer_norm_rows: mean = Σx/n; var = Σ(x-mean)²/n; inv = 1/sqrt(var+eps); output
+// (x-mean)·inv·g + b over min(row, gamma, beta) like the double zip.
+fn matrix_layer_norm_rows(m: List[List[Float]], gamma: List[Float], beta: List[Float], eps: Float) -> List[List[Float]] = {
+  let hm = prim.handle(m)
+  let n = prim.load32(hm + 4)
+  let gh = prim.handle(gamma)
+  let bh = prim.handle(beta)
+  let glen = prim.load32(gh + 4)
+  let blen = prim.load32(bh + 4)
+  let gb = if glen < blen then glen else blen
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mx_ln_rows(prim.handle(out), hm, gh, bh, gb, eps, n, 0)
+  out
+}
+
+fn __mx_ln_rows(ho: Int, hm: Int, gh: Int, bh: Int, gb: Int, eps: Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let rh = prim.load64(hm + 12 + i * 8)
+    let c = prim.load32(rh + 4)
+    let nf = prim.i2f(c)
+    let mean = __mx_sum(rh, c, 0, 0.0) / nf
+    let vr = __mx_var_sum(rh, mean, c, 0, 0.0) / nf
+    let inv = 1.0 / prim.fsqrt(vr + eps)
+    let outn = if c < gb then c else gb
+    let row = prim.alloc_list_f64(outn)
+    let _f = __mx_ln_row(prim.handle(row), rh, gh, bh, mean, inv, outn, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_ln_rows(ho, hm, gh, bh, gb, eps, n, i + 1)
+  }
+
+fn __mx_ln_row(dh: Int, rh: Int, gh: Int, bh: Int, mean: Float, inv: Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
+    let g = prim.ffrombits(prim.load64(gh + 12 + i * 8))
+    let b = prim.ffrombits(prim.load64(bh + 12 + i * 8))
+    prim.store64(dh + 12 + i * 8, prim.fbits((x - mean) * inv * g + b))
+    __mx_ln_row(dh, rh, gh, bh, mean, inv, n, i + 1)
+  }
+
+// ── byte decode ──
+
+// v0 from_bytes_f32_le: off + r·c·4 past the buffer → the all-zero r×c matrix; else each
+// element f32::from_le_bytes as f64 (prim.bits_to_f32 = the same widen on the raw bits).
+fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+  let hd = prim.handle(data)
+  let len = prim.load32(hd + 4)
+  let need = rows * cols * 4
+  if offset + need > len then __mx_const(rows, cols, 0.0)
+  else {
+    let out: List[List[Float]] = prim.alloc_list_str(rows)
+    let _x = __mx_f32_rows(prim.handle(out), hd, offset, rows, cols, 0)
+    out
+  }
+}
+
+fn __mx_f32_rows(ho: Int, hd: Int, offset: Int, n: Int, c: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let row = prim.alloc_list_f64(c)
+    let _f = __mx_f32_row(prim.handle(row), hd, offset + i * c * 4, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_f32_rows(ho, hd, offset, n, c, i + 1)
+  }
+
+fn __mx_f32_row(rh: Int, hd: Int, base: Int, c: Int, j: Int) -> Int =
+  if j >= c then 0
+  else {
+    let p = hd + 12 + base + j * 4
+    let bits = prim.bor(
+      prim.bor(prim.load8(p), prim.bshl(prim.load8(p + 1), 8)),
+      prim.bor(prim.bshl(prim.load8(p + 2), 16), prim.bshl(prim.load8(p + 3), 24)))
+    prim.store64(rh + 12 + j * 8, prim.fbits(prim.bits_to_f32(bits)))
+    __mx_f32_row(rh, hd, base, c, j + 1)
+  }
+
+// v0 from_bytes_f16_le: the same OOB→zeros edge; per element IEEE-754 half → f64
+// (bit-exact — mirrors stdlib/bytes_f16.almd's __f16_decode, private copy so no
+// registered cross-reference).
+fn __mx_f16_pow2(k: Int) -> Float = prim.ffrombits(prim.bshl(1023 + k, 52))
+
+fn __mx_f16_decode(bits: Int) -> Float = {
+  let sign = prim.band(prim.bshr_u(bits, 15), 1)
+  let exp = prim.band(prim.bshr_u(bits, 10), 31)
+  let mant = prim.band(bits, 1023)
+  let sign_f = if sign == 1 then 0.0 - 1.0 else 1.0
+  if exp == 0 then {
+    let m = prim.i2f(mant)
+    let p = prim.ffrombits(4499096027743125504)
+    sign_f * m * p
+  } else if exp == 31 then {
+    if mant == 0 then sign_f * prim.ffrombits(9218868437227405312)
+    else prim.ffrombits(9221120237041090560)
+  } else {
+    let m = 1.0 + prim.i2f(mant) / 1024.0
+    let p = __mx_f16_pow2(exp - 15)
+    sign_f * m * p
+  }
+}
+
+fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+  let hd = prim.handle(data)
+  let len = prim.load32(hd + 4)
+  let need = rows * cols * 2
+  if offset + need > len then __mx_const(rows, cols, 0.0)
+  else {
+    let out: List[List[Float]] = prim.alloc_list_str(rows)
+    let _x = __mx_f16_rows(prim.handle(out), hd, offset, rows, cols, 0)
+    out
+  }
+}
+
+fn __mx_f16_rows(ho: Int, hd: Int, offset: Int, n: Int, c: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let row = prim.alloc_list_f64(c)
+    let _f = __mx_f16_row(prim.handle(row), hd, offset + i * c * 2, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_f16_rows(ho, hd, offset, n, c, i + 1)
+  }
+
+fn __mx_f16_row(rh: Int, hd: Int, base: Int, c: Int, j: Int) -> Int =
+  if j >= c then 0
+  else {
+    let p = hd + 12 + base + j * 2
+    let bits = prim.bor(prim.load8(p), prim.bshl(prim.load8(p + 1), 8))
+    prim.store64(rh + 12 + j * 8, prim.fbits(__mx_f16_decode(bits)))
+    __mx_f16_row(rh, hd, base, c, j + 1)
+  }
+
+// ── head split / concat (List[Matrix] — the 3-level shape) ──
+
+// v0 split_cols_even: empty m or n == 0 → the empty list; else n sub-matrices, each the
+// chunk = cols/n column slice of every row.
+fn matrix_split_cols_even(m: List[List[Float]], n: Int) -> List[List[List[Float]]] = {
+  let hm = prim.handle(m)
+  let r = prim.load32(hm + 4)
+  let parts = if r == 0 or n <= 0 then 0 else n
+  let cols = if r == 0 then 0 else prim.load32(prim.load64(hm + 12) + 4)
+  let chunk = if parts == 0 then 0 else cols / parts
+  let out: List[List[List[Float]]] = prim.alloc_list_str(parts)
+  let _x = __mx_split_parts(prim.handle(out), hm, r, chunk, parts, 0)
+  out
+}
+
+fn __mx_split_parts(ho: Int, hm: Int, r: Int, chunk: Int, parts: Int, hidx: Int) -> Int =
+  if hidx >= parts then 0
+  else {
+    let sub: List[List[Float]] = prim.alloc_list_str(r)
+    let _f = __mx_split_rows(prim.handle(sub), hm, r, hidx * chunk, chunk, 0)
+    prim.store_str(ho + 12 + hidx * 8, sub)
+    __mx_split_parts(ho, hm, r, chunk, parts, hidx + 1)
+  }
+
+fn __mx_split_rows(hs: Int, hm: Int, r: Int, start: Int, chunk: Int, i: Int) -> Int =
+  if i >= r then 0
+  else {
+    let src = prim.load64(hm + 12 + i * 8)
+    let row = prim.alloc_list_f64(chunk)
+    let _c = __mx_copy_off(prim.handle(row), src, start, chunk, 0)
+    prim.store_str(hs + 12 + i * 8, row)
+    __mx_split_rows(hs, hm, r, start, chunk, i + 1)
+  }
+
+// v0 concat_cols_many: the empty list → the 0-row matrix; matrices[0] empty → ONE empty
+// row (v0's `vec![vec![]]`); else per output row r the concat of every m[r] with r in
+// range (each contributing its OWN row length — the extend_from_slice semantics).
+fn matrix_concat_cols(matrices: List[List[List[Float]]]) -> List[List[Float]] = {
+  let hs = prim.handle(matrices)
+  let k = prim.load32(hs + 4)
+  let rows0 = if k == 0 then 0 else prim.load32(prim.load64(hs + 12) + 4)
+  let empty_case = k > 0 and rows0 == 0
+  let out_rows = if k == 0 then 0 else { if rows0 == 0 then 1 else rows0 }
+  let out: List[List[Float]] = prim.alloc_list_str(out_rows)
+  let ho = prim.handle(out)
+  let _e = __mx_cc_maybe_empty(ho, empty_case)
+  let _x = __mx_cc_rows(ho, hs, k, if empty_case then 0 else rows0, 0)
+  out
+}
+
+fn __mx_cc_maybe_empty(ho: Int, do_it: Bool) -> Int =
+  if do_it then {
+    let row = prim.alloc_list_f64(0)
+    prim.store_str(ho + 12, row)
+    0
+  } else 0
+
+fn __mx_cc_rowlen(hs: Int, k: Int, r: Int, mi: Int, acc: Int) -> Int =
+  if mi >= k then acc
+  else {
+    let hm = prim.load64(hs + 12 + mi * 8)
+    let mr = prim.load32(hm + 4)
+    let add = if r < mr then prim.load32(prim.load64(hm + 12 + r * 8) + 4) else 0
+    __mx_cc_rowlen(hs, k, r, mi + 1, acc + add)
+  }
+
+fn __mx_cc_copy_one(dh: Int, pos: Int, hm: Int, r: Int) -> Int = {
+  let mr = prim.load32(hm + 4)
+  if r >= mr then 0
+  else {
+    let src = prim.load64(hm + 12 + r * 8)
+    let c = prim.load32(src + 4)
+    let _c = __mx_dst_copy(dh, pos, src, c, 0)
+    c
+  }
+}
+
+fn __mx_cc_fill(dh: Int, hs: Int, k: Int, r: Int, mi: Int, pos: Int) -> Int =
+  if mi >= k then 0
+  else {
+    let hm = prim.load64(hs + 12 + mi * 8)
+    let n = __mx_cc_copy_one(dh, pos, hm, r)
+    __mx_cc_fill(dh, hs, k, r, mi + 1, pos + n)
+  }
+
+fn __mx_cc_rows(ho: Int, hs: Int, k: Int, rows: Int, r: Int) -> Int =
+  if r >= rows then 0
+  else {
+    let rl = __mx_cc_rowlen(hs, k, r, 0, 0)
+    let row = prim.alloc_list_f64(rl)
+    let _f = __mx_cc_fill(prim.handle(row), hs, k, r, 0, 0)
+    prim.store_str(ho + 12 + r * 8, row)
+    __mx_cc_rows(ho, hs, k, rows, r + 1)
+  }

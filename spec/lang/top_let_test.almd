@@ -32,7 +32,7 @@ test "top-level let bool" {
 }
 
 test "top-level let usage in expressions" {
-  let half_mass = SOLAR_MASS / 2.0;
+  let _half_mass = SOLAR_MASS / 2.0;
   let x = MAX_COUNT + 1;
   assert_eq(x, 101)
 }

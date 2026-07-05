@@ -1,0 +1,81 @@
+// result_core — SELF-HOSTED result.is_ok / result.is_err for v1 over the prim floor. A
+// Result[Int, String] is materialized as a DynListStr with len-AS-TAG (the Ok/Err constructors
+// build it): Ok = len 0 (the value sits in slot 0 but is not owned/freed), Err = len 1 (owns the
+// message String, freed by DropListStr). So the discriminant is just the header `len` field:
+// is_ok ⇔ len == 0, is_err ⇔ len != 0. Reads only — `r` is borrowed, no allocation.
+
+fn result_is_ok(r: Result[Int, String]) -> Bool = {
+  let len = prim.load32(prim.handle(r) + 4)
+  len == 0
+}
+
+fn result_is_err(r: Result[Int, String]) -> Bool = {
+  let len = prim.load32(prim.handle(r) + 4)
+  len >= 1
+}
+
+// result.unwrap_or(r, default) -> the Ok value, or `default` for Err. Ok = len 0 with the value in
+// slot 0 (load64), Err = len != 0. Reads slot 0 unconditionally (harmless for Err — its slot holds
+// the message handle, which the else arm ignores). `r` is borrowed; the value is a scalar copy.
+fn result_unwrap_or(r: Result[Int, String], default: Int) -> Int = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let v = prim.load64(h + 12)
+  if len == 0 then v else default
+}
+
+// result.to_option(r) -> Some(value) for Ok, None for Err — the Result→Option bridge. Reads the
+// len-tag, then BUILDS a fresh Option[Int] (Some materializes the scalar slot-0 value, None the
+// empty Option) over v1's own Option machinery. `r` is borrowed; the Option is freshly owned.
+fn result_to_option(r: Result[Int, String]) -> Option[Int] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let v = prim.load64(h + 12)
+  if len == 0 then Some(v) else None
+}
+
+// result.to_list(r) -> [value] for Ok, [] for Err — the Result→List bridge. A 1- or 0-element
+// List[Int] is built directly over the prim floor: `prim.alloc_list(n)` is a flat [rc][len][cap][
+// data] block (scalar Int elements → drops as a flat block, no nested ownership). `r` is borrowed;
+// the List is freshly owned (cert: Alloc `i`, freed flat by the caller `d`). Int-payload only (like
+// unwrap_or/to_option — a String Ok payload would need a List[String] variant).
+fn __rtl_one(v: Int) -> List[Int] = {
+  let xs = prim.alloc_list(1)
+  let dh = prim.handle(xs)
+  prim.store64(dh + 12, v)
+  xs
+}
+
+fn __rtl_empty() -> List[Int] = prim.alloc_list(0)
+
+fn result_to_list(r: Result[Int, String]) -> List[Int] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let v = prim.load64(h + 12)
+  if len == 0 then __rtl_one(v) else __rtl_empty()
+}
+
+// result.zip(a, b) = both Ok → Ok((va, vb)), else the FIRST Err (its message COPIED — a/b are
+// borrowed, so the error String is deep-copied not moved, keeping single ownership). The Ok payload
+// is a scalar (Int,Int) tuple (Init::DynList); the whole result is the HEAP-Ok Result[(Int,Int),
+// String] (value.as_string's 1-slot DynListStr, payload handle @12, Ok/Err tag in slot-0 high bits).
+fn __rzip_ok(av: Int, bv: Int) -> Result[(Int, Int), String] = {
+  let t = (av, bv)
+  Ok(t)
+}
+fn __rzip_err(msg_h: Int) -> Result[(Int, Int), String] = {
+  let s = prim.load_str(msg_h + 12)
+  let copy = string.repeat(s, 1)
+  Err(copy)
+}
+fn result_zip(a: Result[Int, String], b: Result[Int, String]) -> Result[(Int, Int), String] = {
+  let ah = prim.handle(a)
+  let alen = prim.load32(ah + 4)
+  let av = prim.load64(ah + 12)
+  let bh = prim.handle(b)
+  let blen = prim.load32(bh + 4)
+  let bv = prim.load64(bh + 12)
+  if alen >= 1 then __rzip_err(ah)
+  else if blen >= 1 then __rzip_err(bh)
+  else __rzip_ok(av, bv)
+}

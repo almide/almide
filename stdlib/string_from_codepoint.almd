@@ -1,0 +1,62 @@
+// string_from_codepoint — SELF-HOSTED `string.from_codepoint(cp) -> String` for v1 over
+// the prim floor. v0 = `char::from_u32(cp as u32).map(to_string).unwrap_or_default()`:
+// encode the Unicode scalar value as UTF-8, or "" for an invalid codepoint (negative,
+// a surrogate D800..DFFF, or > 10FFFF). The byte length and the byte fill live in SCALAR
+// helpers, so from_codepoint keeps a plain heap tail (alloc_str once, no heap-result if).
+// `|` is replaced by `+` (the continuation/lead bits never overlap), so no prim.bor.
+
+fn __cp_nbytes(cp: Int) -> Int =
+  if cp < 0 then 0
+  else if cp < 128 then 1
+  else if cp < 2048 then 2
+  else if cp < 55296 then 3        // < 0xD800
+  else if cp < 57344 then 0        // 0xD800..0xDFFF surrogate → invalid
+  else if cp < 65536 then 3        // 0xE000..0xFFFF
+  else if cp < 1114112 then 4      // < 0x110000
+  else 0
+
+// Write the `nb` UTF-8 bytes of cp at address d. Returns 0.
+fn __cp_fill(d: Int, cp: Int, nb: Int) -> Int =
+  if nb == 1 then {
+    prim.store8(d, cp)
+    0
+  }
+  else if nb == 2 then {
+    let b0 = 192 + cp / 64
+    let b1 = 128 + cp % 64
+    prim.store8(d, b0)
+    prim.store8(d + 1, b1)
+    0
+  }
+  else if nb == 3 then {
+    let b0 = 224 + cp / 4096
+    let mid = (cp / 64) % 64
+    let b1 = 128 + mid
+    let b2 = 128 + cp % 64
+    prim.store8(d, b0)
+    prim.store8(d + 1, b1)
+    prim.store8(d + 2, b2)
+    0
+  }
+  else if nb == 4 then {
+    let b0 = 240 + cp / 262144
+    let m1 = (cp / 4096) % 64
+    let b1 = 128 + m1
+    let m2 = (cp / 64) % 64
+    let b2 = 128 + m2
+    let b3 = 128 + cp % 64
+    prim.store8(d, b0)
+    prim.store8(d + 1, b1)
+    prim.store8(d + 2, b2)
+    prim.store8(d + 3, b3)
+    0
+  }
+  else 0
+
+fn string_from_codepoint(cp: Int) -> String = {
+  let nb = __cp_nbytes(cp)
+  let buf = prim.alloc_str(nb)
+  let d = prim.handle(buf) + 12
+  let _f = __cp_fill(d, cp, nb)
+  buf
+}

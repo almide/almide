@@ -1,0 +1,21 @@
+// list_scan — SELF-HOSTED `list.scan` for v1: a fold that EMITS every running accumulator.
+// scan(xs, init, f) = [f(init, xs[0]), f(that, xs[1]), …] — length n, the two-arity closure
+// f: (Acc, Int) -> Acc invoked via $closure_fn2. Builds a fresh List[Int] (prim.alloc_list),
+// storing the new acc at slot i each step (like map, but threading the accumulator). List[
+// Int]/Int accumulator; source borrowed; result owned rc=1.
+
+fn __scan_fill(dh: Int, sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    prim.store64(dh + 12 + i * 8, nacc)
+    __scan_fill(dh, sh, f, n, i + 1, nacc)
+  }
+
+fn list_scan(xs: List[Int], init: Int, f: (Int, Int) -> Int) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list(n)
+  let _x = __scan_fill(prim.handle(buf), prim.handle(xs), f, n, 0, init)
+  buf
+}

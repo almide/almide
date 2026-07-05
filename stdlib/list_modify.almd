@@ -1,0 +1,279 @@
+// list_modify — SELF-HOSTED `list.set` / `list.swap` for v1 over the prim floor.
+// Both return a fresh same-length List[Int] copy with one (set) or two (swap) i64 slots
+// changed — the SAME slot-copy pattern as the shipped list.reverse/sort (scalar
+// elements, so the cert is one owned Alloc, no nested ownership). v0 indexes with
+// `i as usize`, so a negative or >= len index silently no-ops (the copy is returned
+// unchanged). The mutating decision lives in a SCALAR helper (returns 0), so list_set/
+// list_swap have a plain heap tail `buf` — no heap-result `if`. (List[Int] variant; a
+// List[String] element is an i32 handle in the same i64 slot, deferred per the repr note.)
+
+// list.set over a List[String] — the String-element variant. A String slot is an i32 handle in the
+// 8-byte slot; the i64-typed `x` param of `list_set` would mismatch (i32 vs i64 wasm type). This
+// copies every slot with rc_inc (the new list CO-OWNS each String — the source keeps its refs), then
+// at slot i releases the copied old String (rc_dec) and stores a co-owned ref to the new `x`. The
+// result drops via the recursive `DropListStr` (heap_elem_lists, the call-result classification). The
+// per-element rc makes co-ownership sound (no double-free, no leak — verified by the 10⁴ leak loop).
+fn __copy_slots_rc(src: Int, dst: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(src + i * 8)
+    prim.rc_inc(e)
+    prim.store64(dst + i * 8, e)
+    __copy_slots_rc(src, dst, n, i + 1)
+  }
+
+fn __set_slot_str(bh: Int, n: Int, i: Int, x: String) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else {
+    let old = prim.load64(bh + 12 + i * 8)
+    prim.rc_dec(old)
+    let xh = prim.handle(x)
+    prim.rc_inc(xh)
+    prim.store64(bh + 12 + i * 8, xh)
+    0
+  }
+
+fn list_set_str(xs: List[String], i: Int, x: String) -> List[String] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __copy_slots_rc(h + 12, bh + 12, n, 0)
+  let _s = __set_slot_str(bh, n, i, x)
+  buf
+}
+
+// list.insert / list.remove_at / list.swap over a List[String] — the rc-aware counterparts of the
+// generic i64 versions (which copy slots WITHOUT rc_inc → result+source co-reference each String handle
+// un-incremented → DOUBLE-FREE when both drop; insert additionally i32/i64-mismatches on the String `x`).
+// Each rc_incs every COPIED element (__copy_slots_rc); the removed element is not copied (freed once by
+// the source's DropListStr); swap reorders copied handles. Mirrors the List[Value] variants in value_core.
+fn __ls_insert_fill(srcbase: Int, dstbase: Int, n: Int, idx: Int, x: String) -> Int = {
+  let _a = __copy_slots_rc(srcbase, dstbase, idx, 0)
+  let xh = prim.handle(x)
+  prim.rc_inc(xh)
+  prim.store64(dstbase + idx * 8, xh)
+  let _b = __copy_slots_rc(srcbase + idx * 8, dstbase + (idx + 1) * 8, n - idx, 0)
+  0
+}
+
+fn list_insert_str(xs: List[String], i: Int, x: String) -> List[String] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let idx = if i < 0 then n else (if i > n then n else i)
+  let buf = prim.alloc_list_str(n + 1)
+  let bh = prim.handle(buf)
+  let _r = __ls_insert_fill(h + 12, bh + 12, n, idx, x)
+  buf
+}
+
+fn __ls_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int =
+  if oob == 1 then __copy_slots_rc(srcbase, dstbase, n, 0)
+  else {
+    let _a = __copy_slots_rc(srcbase, dstbase, i, 0)
+    let i1 = i + 1
+    __copy_slots_rc(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
+  }
+
+fn list_remove_at_str(xs: List[String], i: Int) -> List[String] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let oob = if i < 0 then 1 else (if i >= n then 1 else 0)
+  let newlen = if oob == 1 then n else n - 1
+  let buf = prim.alloc_list_str(newlen)
+  let bh = prim.handle(buf)
+  let _r = __ls_remove_fill(h + 12, bh + 12, n, i, oob)
+  buf
+}
+
+fn __ls_swap_slots(bh: Int, n: Int, i: Int, j: Int) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else if j < 0 then 0
+  else if j >= n then 0
+  else {
+    let ai = bh + 12 + i * 8
+    let aj = bh + 12 + j * 8
+    let vi = prim.load64(ai)
+    let vj = prim.load64(aj)
+    prim.store64(ai, vj)
+    prim.store64(aj, vi)
+    0
+  }
+
+fn list_swap_str(xs: List[String], i: Int, j: Int) -> List[String] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __copy_slots_rc(h + 12, bh + 12, n, 0)
+  let _s = __ls_swap_slots(bh, n, i, j)
+  buf
+}
+
+fn __copy_slots(src: Int, dst: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let off = i * 8
+    let v = prim.load64(src + off)
+    prim.store64(dst + off, v)
+    __copy_slots(src, dst, n, i + 1)
+  }
+
+// Store x at slot i of the list at base `bh` iff 0 <= i < n (else no-op). Returns 0.
+fn __set_slot(bh: Int, n: Int, i: Int, x: Int) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else {
+    prim.store64(bh + 12 + i * 8, x)
+    0
+  }
+
+fn list_set(xs: List[Int], i: Int, x: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list(n)
+  let bh = prim.handle(buf)
+  let _c = __copy_slots(h + 12, bh + 12, n, 0)
+  let _s = __set_slot(bh, n, i, x)
+  buf
+}
+
+// Swap slots i and j of the list at base `bh` iff both are in [0, n) (else no-op).
+fn __swap_slots(bh: Int, n: Int, i: Int, j: Int) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else if j < 0 then 0
+  else if j >= n then 0
+  else {
+    let ai = bh + 12 + i * 8
+    let aj = bh + 12 + j * 8
+    let vi = prim.load64(ai)
+    let vj = prim.load64(aj)
+    prim.store64(ai, vj)
+    prim.store64(aj, vi)
+    0
+  }
+
+fn list_swap(xs: List[Int], i: Int, j: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list(n)
+  let bh = prim.handle(buf)
+  let _c = __copy_slots(h + 12, bh + 12, n, 0)
+  let _s = __swap_slots(bh, n, i, j)
+  buf
+}
+
+// list.insert(xs, i, x): a length-(n+1) copy with x inserted at clamped index idx =
+// min(i, n) (v0's `(i as usize).min(len)`, so negative/over-large → append). The copying
+// is a SCALAR helper so list_insert keeps a plain heap tail (no heap-result if).
+fn __insert_fill(srcbase: Int, dstbase: Int, n: Int, idx: Int, x: Int) -> Int = {
+  let _a = __copy_slots(srcbase, dstbase, idx, 0)            // src[0,idx) -> dst[0,idx)
+  prim.store64(dstbase + idx * 8, x)                         // dst[idx] = x
+  let src_suf = srcbase + idx * 8
+  let idx1 = idx + 1
+  let dst_suf = dstbase + idx1 * 8
+  let cnt = n - idx
+  __copy_slots(src_suf, dst_suf, cnt, 0)                     // src[idx,n) -> dst[idx+1,n+1)
+}
+
+fn list_insert(xs: List[Int], i: Int, x: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let idx = if i < 0 then n else (if i > n then n else i)
+  let buf = prim.alloc_list(n + 1)
+  let bh = prim.handle(buf)
+  let _r = __insert_fill(h + 12, bh + 12, n, idx, x)
+  buf
+}
+
+// list.remove_at(xs, i): drop element i (length n-1) when 0<=i<n, else an unchanged
+// length-n copy (v0's `(i as usize) < len`). newlen + the copy plan are scalar, so the
+// length-dependent branch lives in __remove_fill, keeping a plain heap tail.
+fn __remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int =
+  if oob == 1 then __copy_slots(srcbase, dstbase, n, 0)      // copy all (unchanged)
+  else {
+    let _a = __copy_slots(srcbase, dstbase, i, 0)            // src[0,i) -> dst[0,i)
+    let i1 = i + 1
+    let src_suf = srcbase + i1 * 8
+    let dst_suf = dstbase + i * 8
+    let cnt = n - i1
+    __copy_slots(src_suf, dst_suf, cnt, 0)                   // src[i+1,n) -> dst[i,n-1)
+  }
+
+fn list_remove_at(xs: List[Int], i: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let oob = if i < 0 then 1 else (if i >= n then 1 else 0)
+  let newlen = if oob == 1 then n else n - 1
+  let buf = prim.alloc_list(newlen)
+  let bh = prim.handle(buf)
+  let _r = __remove_fill(h + 12, bh + 12, n, i, oob)
+  buf
+}
+
+// list.tail = list.drop(xs, 1): a fresh List[Int] of elements [1, n) (empty when n<=1).
+// Self-contained copy (reusing __copy_slots), so it needs no cross-stdlib call.
+fn list_tail(xs: List[Int]) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let newlen = if n > 0 then n - 1 else 0
+  let buf = prim.alloc_list(newlen)
+  let bh = prim.handle(buf)
+  let src1 = h + 12 + 8
+  let _c = __copy_slots(src1, bh + 12, newlen, 0)
+  buf
+}
+
+// list.take_end(xs, n): the LAST n elements (whole list when n<0 or n>=len, per v0's
+// n as usize). start = clamped; copy [start, len) into a fresh List[Int].
+fn list_take_end(xs: List[Int], n: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let start = if n < 0 then 0 else (if n >= len then 0 else len - n)
+  let newlen = len - start
+  let buf = prim.alloc_list(newlen)
+  let srcbase = h + 12 + start * 8
+  let _c = __copy_slots(srcbase, prim.handle(buf) + 12, newlen, 0)
+  buf
+}
+
+// list.drop_end(xs, n): all but the LAST n elements (empty when n<0 or n>=len). end =
+// clamped; copy [0, end) into a fresh List[Int].
+fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let endi = if n < 0 then 0 else (if n >= len then 0 else len - n)
+  let buf = prim.alloc_list(endi)
+  let _c = __copy_slots(h + 12, prim.handle(buf) + 12, endi, 0)
+  buf
+}
+
+// Apply f to slot i of the list at base `bh` iff 0 <= i < n (else no-op). The closure `f` is
+// invoked via CallIndirect (the list.map machinery), here CONDITIONALLY — v0's update only calls
+// `f(s.clone())` when the index is in bounds. Returns 0 (a scalar helper, so list_update keeps a
+// plain heap tail `buf`, no heap-result if).
+fn __upd_slot(bh: Int, n: Int, i: Int, f: (Int) -> Int) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else {
+    let old = prim.load64(bh + 12 + i * 8)
+    let new = f(old)
+    prim.store64(bh + 12 + i * 8, new)
+    0
+  }
+
+// list.update(xs, i, f): a fresh same-length List[Int] copy with slot i replaced by f(xs[i])
+// (the in-bounds case); an out-of-range index returns the copy unchanged. Same single-owned-Alloc
+// cert as list.set — the only addition is the conditional closure call inside the scalar helper.
+fn list_update(xs: List[Int], i: Int, f: (Int) -> Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list(n)
+  let bh = prim.handle(buf)
+  let _c = __copy_slots(h + 12, bh + 12, n, 0)
+  let _s = __upd_slot(bh, n, i, f)
+  buf
+}

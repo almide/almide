@@ -1,0 +1,110 @@
+// string_split — SELF-HOSTED `string.split` for v1 over the prim floor + Machinery 2 (the
+// nested-ownership List[String]). s.split(sep) = the pieces between each occurrence of sep
+// (Rust semantics: empty pieces kept, count = #separators + 1). BYTE-level separator match
+// (sep is a full string, so pieces stay valid UTF-8). Each piece is a FRESH owned String
+// copied out and MOVED into the result via prim.store_str; the result list owns them and
+// frees them recursively on its DropListStr. List[String]; source + sep borrowed.
+
+// Does sep (seplen bytes at seph+12) occur at byte position p in s (sh+12)?
+fn __sep_at(sh: Int, slen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool =
+  if j >= seplen then true
+  else if p + j >= slen then false
+  else {
+    let sb = prim.load8(sh + 12 + p + j)
+    let tb = prim.load8(seph + 12 + j)
+    if sb == tb then __sep_at(sh, slen, seph, seplen, p, j + 1) else false
+  }
+
+// First byte index >= `from` where sep occurs, or `slen` if none.
+fn __find_sep(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int) -> Int =
+  if from + seplen > slen then slen
+  else {
+    let hit = __sep_at(sh, slen, seph, seplen, from, 0)
+    if hit then from else __find_sep(sh, slen, seph, seplen, from + 1)
+  }
+
+fn __count_seps(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int, acc: Int) -> Int =
+  if from + seplen > slen then acc
+  else {
+    let pos = __find_sep(sh, slen, seph, seplen, from)
+    if pos >= slen then acc else __count_seps(sh, slen, seph, seplen, pos + seplen, acc + 1)
+  }
+
+fn __copy_bytes(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let b = prim.load8(src + i)
+    prim.store8(dst + i, b)
+    __copy_bytes(dst, src, n, i + 1)
+  }
+
+// A FRESH owned String = s[start .. end] (byte range).
+fn __substr(sh: Int, start: Int, end: Int) -> String = {
+  let n = end - start
+  let piece = prim.alloc_str(n)
+  let _x = __copy_bytes(prim.handle(piece) + 12, sh + 12 + start, n, 0)
+  piece
+}
+
+// Fill the result list: each piece is the span up to the next separator; store + consume it.
+fn __split_fill(lh: Int, sh: Int, slen: Int, seph: Int, seplen: Int, from: Int, idx: Int) -> Int = {
+  let pos = __find_sep(sh, slen, seph, seplen, from)
+  let piece = __substr(sh, from, pos)
+  prim.store_str(lh + 12 + idx * 8, piece)
+  if pos >= slen then idx + 1
+  else __split_fill(lh, sh, slen, seph, seplen, pos + seplen, idx + 1)
+}
+
+fn __is_cstart(sh: Int, p: Int) -> Bool = {
+  let b = prim.load8(sh + 12 + p)
+  b < 128 or b >= 192
+}
+
+fn __count_chars(sh: Int, slen: Int, p: Int, acc: Int) -> Int =
+  if p >= slen then acc
+  else if __is_cstart(sh, p) then __count_chars(sh, slen, p + 1, acc + 1)
+  else __count_chars(sh, slen, p + 1, acc)
+
+fn __next_cstart(sh: Int, slen: Int, p: Int) -> Int =
+  if p >= slen then slen
+  else if __is_cstart(sh, p) then p
+  else __next_cstart(sh, slen, p + 1)
+
+fn __empty_split_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int) -> Int =
+  if from >= slen then idx
+  else {
+    let nxt = __next_cstart(sh, slen, from + 1)
+    let piece = __substr(sh, from, nxt)
+    prim.store_str(lh + 12 + idx * 8, piece)
+    __empty_split_fill(lh, sh, slen, nxt, idx + 1)
+  }
+
+fn __empty_split(s: String) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let nchars = __count_chars(sh, slen, 0, 0)
+  let result = prim.alloc_list_str(nchars + 2)
+  let rh = prim.handle(result)
+  let lead = __substr(sh, 0, 0)
+  prim.store_str(rh + 12, lead)
+  let _x = __empty_split_fill(rh, sh, slen, 0, 1)
+  let trail = __substr(sh, 0, 0)
+  prim.store_str(rh + 12 + (nchars + 1) * 8, trail)
+  result
+}
+
+fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let nseps = __count_seps(sh, slen, seph, seplen, 0, 0)
+  let count = nseps + 1
+  let result = prim.alloc_list_str(count)
+  let _x = __split_fill(prim.handle(result), sh, slen, seph, seplen, 0, 0)
+  result
+}
+
+fn string_split(s: String, sep: String) -> List[String] = {
+  let seph = prim.handle(sep)
+  let seplen = prim.load32(seph + 4)
+  if seplen == 0 then __empty_split(s) else __nonempty_split(s, seph, seplen)
+}

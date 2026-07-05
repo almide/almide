@@ -1,0 +1,105 @@
+// string_pad — SELF-HOSTED `string.pad_start` / `string.pad_end` for v1 over the prim
+// floor. Pads `s` with copies of the FIRST codepoint of `pad` (space if `pad` is empty)
+// until its CODEPOINT width reaches `width`; if already wide enough, returns a copy of `s`.
+// Built via prim.alloc_str. Cert-untouching (DynStr Alloc = i). `s`/`pad` borrowed.
+
+// UTF-8 codepoint byte length from its lead byte.
+fn __pad_cp_len(b: Int) -> Int =
+  if b < 128 then 1
+  else if b < 224 then 2
+  else if b < 240 then 3
+  else 4
+
+// Count codepoints in the first `n` bytes from `base`.
+fn __pad_cp_count(base: Int, n: Int) -> Int =
+  if n <= 0 then 0
+  else {
+    let b = prim.load8(base)
+    let step = if b / 64 == 2 then 0 else 1
+    let rest = __pad_cp_count(base + 1, n - 1)
+    step + rest
+  }
+
+fn __pad_copy(src: Int, dst: Int, n: Int) -> Int =
+  if n <= 0 then 0
+  else {
+    prim.store8(dst, prim.load8(src))
+    __pad_copy(src + 1, dst + 1, n - 1)
+  }
+
+// Byte length of the pad char (the first codepoint of `pad`, or a 1-byte space if empty).
+fn __pad_clen(pbase: Int, plen: Int) -> Int =
+  if plen <= 0 then 1
+  else __pad_cp_len(prim.load8(pbase))
+
+// Write ONE pad char at `dst`: a space when `pad` is empty, else its first codepoint.
+fn __pad_one(dst: Int, pbase: Int, plen: Int, pclen: Int) -> Int =
+  if plen <= 0 then {
+    prim.store8(dst, 32)
+    dst + 1
+  } else __pad_copy(pbase, dst, pclen)
+
+// Write `count` pad chars from `dst`.
+fn __pad_fill(dst: Int, pbase: Int, plen: Int, pclen: Int, count: Int) -> Int =
+  if count <= 0 then dst
+  else {
+    let _w = __pad_one(dst, pbase, plen, pclen)
+    __pad_fill(dst + pclen, pbase, plen, pclen, count - 1)
+  }
+
+// Copy `s` into a fresh owned String (the already-wide-enough fallback).
+fn __pad_copy_str(s: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let buf = prim.alloc_str(slen)
+  let _c = __pad_copy(h + 12, prim.handle(buf) + 12, slen)
+  buf
+}
+
+fn __pad_start_do(s: String, n: Int, pad: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let ph = prim.handle(pad)
+  let plen = prim.load32(ph + 4)
+  let pclen = __pad_clen(ph + 12, plen)
+  let padbytes = n * pclen
+  let total = padbytes + slen
+  let buf = prim.alloc_str(total)
+  let dbase = prim.handle(buf) + 12
+  let _f = __pad_fill(dbase, ph + 12, plen, pclen, n)
+  let after = dbase + padbytes
+  let _c = __pad_copy(h + 12, after, slen)
+  buf
+}
+
+fn __pad_end_do(s: String, n: Int, pad: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let ph = prim.handle(pad)
+  let plen = prim.load32(ph + 4)
+  let pclen = __pad_clen(ph + 12, plen)
+  let padbytes = n * pclen
+  let total = slen + padbytes
+  let buf = prim.alloc_str(total)
+  let dbase = prim.handle(buf) + 12
+  let _c = __pad_copy(h + 12, dbase, slen)
+  let after = dbase + slen
+  let _f = __pad_fill(after, ph + 12, plen, pclen, n)
+  buf
+}
+
+fn string_pad_start(s: String, width: Int, pad: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let scount = __pad_cp_count(h + 12, slen)
+  if scount >= width then __pad_copy_str(s)
+  else __pad_start_do(s, width - scount, pad)
+}
+
+fn string_pad_end(s: String, width: Int, pad: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let scount = __pad_cp_count(h + 12, slen)
+  if scount >= width then __pad_copy_str(s)
+  else __pad_end_do(s, width - scount, pad)
+}

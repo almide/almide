@@ -57,6 +57,7 @@
 # ── INTEGER DIV/MOD TOTALITY (PR #378) ───────────────────────────────
 [[contract]]
 id        = "C-001"
+spec      = "ALS-T6"
 title     = "Integer division/modulo by zero is total — it aborts, never traps"
 statement = "Integer `/` and `%` by a zero divisor MUST abort with stderr `Error: division by zero` and exit code 1 on BOTH targets — never a native panic (exit 101) nor a wasm `unreachable` trap (exit 134). The `%`-by-zero message is identical to `/` (both `division by zero`). This holds for a runtime-shielded divisor AND a const-foldable literal `10 / 0`, which must still COMPILE: `/` and `%` route through the non-const-evaluable `almide_div!` / `__div_trap`, so rustc never const-evaluates the divide and the abort happens at runtime."
 since     = "0.24.0"
@@ -70,6 +71,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-002"
+spec      = "ALS-T6"
 title     = "Signed MIN / -1 overflow aborts, at the TRUE per-width MIN"
 statement = "Signed integer `MIN / -1` and `MIN % -1` MUST abort with stderr `Error: integer overflow` and exit 1 on BOTH targets, using the true per-width MIN. Int8 `-128 / -1` must abort even though it lowers to i32 in wasm where `i32.div_s(-128, -1) = 128` does not trap; and wasm `i64.rem_s` DEFINES `MIN % -1 = 0` (no trap), so an explicit MIN/-1 guard before the op realigns wasm with native's `checked_div`/`checked_rem` returning None."
 since     = "0.24.0"
@@ -82,6 +84,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-003"
+spec      = "ALS-T12"
 title     = "Non-aborting integer div/mod stay byte-identical"
 statement = "Ordinary (non-aborting) integer `/` and `%` — including negative operands and the now-total guarded codepath — MUST produce byte-identical results on both targets. The checked-div rewrite must not perturb the happy path; shielded divisors exercise the same guarded path landing on the non-aborting branch."
 since     = "0.24.0"
@@ -93,6 +96,7 @@ evidence  = [
 # ── FAN DETERMINISM (PR #377, #369) ──────────────────────────────────
 [[contract]]
 id        = "C-004"
+spec      = "ALS-R3"
 title     = "fan.race / fan.any / fan.map / fan.settle are deterministic by list order"
 statement = "`fan.race` returns thunk[0]'s settled result in LIST ORDER (Ok or Err), NOT wall-clock fastest. `fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (race takes thunk[0] even on Err; any skips failures to find an Ok.) EXCEPTION: fan.settle THUNK side-effect interleaving is wall-clock on native (real threads) and sequential on wasm — settle pins its RESULT list order only."
 since     = "0.24.0"
@@ -106,6 +110,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-005"
+spec      = "ALS-R3"
 title     = "fan error propagation surfaces as the unified main-error abort"
 statement = "The first element fn returning Err in `fan.map` (named or inline lambda), a head-Err in `fan.race`, and the all-fail case of `fan.any` (defined `Err(\"fan.any: all candidates failed\")`) all propagate as `Error: <msg>` + exit 1 on BOTH targets via the effect-main termination — NOT a native panic (101) nor a wasm trap (134)."
 since     = "0.24.0"
@@ -120,6 +125,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-006"
+spec      = "ALS-R3"
 title     = "fan.timeout is the SOLE documented wall-clock divergence (wasm warns)"
 statement = "`fan.timeout` is the single documented cross-target divergence (N=1): a wall-clock effect with no portable meaning. Native uses a real thread + `recv_timeout`; wasm has no clock/scheduler/threads, so the thunk runs to completion and the timeout never elapses. The CLI MUST emit a build-time warning when emitting wasm for a program using `fan.timeout`, so the divergence is loud, not silent. It deliberately has NO spec/wasm_cross fixture — it is the exemption, not an equivalence promise."
 since     = "0.24.0"
@@ -132,6 +138,7 @@ evidence  = [
 # ── EAGER ABORTABLE TOP-LETS (Cluster-H) ─────────────────────────────
 [[contract]]
 id        = "C-007"
+spec      = "ALS-T7"
 title     = "Abortable top-level lets evaluate eagerly at startup"
 statement = "A top-level `let` whose initializer can abort MUST be evaluated EAGERLY at program startup, in declaration order, on both targets — even if the binding is never used and even if it would be used only mid-main. wasm evaluates every top-let in `_start`; native forces abortable lazies at main entry. So an abortable top-let aborts before any of main's stdout is emitted."
 since     = "0.24.0"
@@ -144,6 +151,7 @@ evidence  = [
 # ── COMPOUND / RECORD / RECURSIVE REPR INTERPOLATION (PR #379) ───────
 [[contract]]
 id        = "C-008"
+spec      = "ALS-R2"
 title     = "Compound interpolation renders the Almide-literal repr (containers)"
 statement = "`\"${compound}\"` renders a value back to its Almide-literal form, recursively, byte-identically on both targets, for List, Map (`[\"a\": 1]`), Set, Tuple, Option (some), Result (ok), and arbitrary nesting. Backed by `AlmideRepr` (native) / the recursive rt repr emitters (wasm), gated by `ty_needs_repr`."
 since     = "0.24.0"
@@ -156,6 +164,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-009"
+spec      = "ALS-R2"
 title     = "Record / variant / anonymous-record interpolation repr (field sorting)"
 statement = "`\"${value}\"` renders records (`P { x: 1 }`), variants (tuple/record/nullary payloads), and anonymous records to their Almide construction-literal form — the same format `deriving Repr` produces — byte-identically on both targets. Anonymous records have NO type name and render their fields in SORTED name order on BOTH targets (native synthesized `AlmdRec_*` stores fields sorted; the wasm walk sorts to match)."
 since     = "0.24.0"
@@ -169,6 +178,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-010"
+spec      = "ALS-R2"
 title     = "Recursive / generic ADT interpolation repr keyed by instantiation"
 statement = "Self-recursive ADTs/records, mutually-recursive records, and generic records/variants render their repr via per-type `__repr_*` wasm functions that recurse by CALL on the finite value, not by infinite compile-time type expansion. Generic types key the repr fn by INSTANTIATION (`__repr_Tree_Int` vs `__repr_Tree_String`), substituting site type-args through recursive references, so concrete payloads repr identically to native trait dispatch."
 since     = "0.24.0"
@@ -181,6 +191,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-011"
+spec      = "ALS-R2"
 title     = "Bare-float interpolation Display drops .0; float.to_string keeps it"
 statement = "An integer-valued float in interpolation `\"${f}\"` renders via the Display form, which DROPS the `.0` suffix, whereas `float.to_string` keeps the `.0` for whole values. Both forms are byte-identical across targets."
 since     = "0.24.0"
@@ -195,6 +206,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-012"
+spec      = "ALS-R4"
 title     = "Const-folded non-finite floats emit named constants"
 statement = "A float expression that const-folds to a non-finite value (inf/NaN) MUST emit the associated Rust constant (`f64::INFINITY` / `f64::NEG_INFINITY` / `f64::NAN`), not the bare identifier (`inff64`/`NaNf64` were invalid Rust = an E0425 ICE-class bug). Runtime-COMPUTED inf/NaN already printed identically and must keep doing so. Both targets byte-identical."
 since     = "0.24.0"
@@ -206,6 +218,7 @@ evidence  = [
 # ── DETERMINISM BELT: ORDERED CONTAINERS (PR #354) ───────────────────
 [[contract]]
 id        = "C-013"
+spec      = "ALS-C1"
 title     = "Map is a compact-ordered-dict: iteration is insertion order"
 statement = "Map iteration order is INSERTION order on both targets (compact-ordered-dict: dense entries + hash index). Every order-exposing op (keys/values/fold/filter/iteration) reveals insertion order byte-identically; a regression to hash-order on either target breaks the gate."
 since     = "0.24.0"
@@ -218,6 +231,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-014"
+spec      = "ALS-C2"
 title     = "Set is insertion-ordered and deterministic"
 statement = "Set iteration is INSERTION order on both targets and deterministic. Native Set was std HashSet (hash-bucket, per-process randomized) and is now an insertion-ordered Vec-backed AlmideSet, so every order-exposing op is native == wasm and deterministic. (Set[Float] equality on wasm, which used i32_eq, is fixed too.)"
 since     = "0.24.0"
@@ -229,6 +243,7 @@ evidence  = [
 # ── DEEP STRUCTURAL EQUALITY ─────────────────────────────────────────
 [[contract]]
 id        = "C-015"
+spec      = "ALS-C3"
 title     = "Structural deep equality for compound elements and heap values"
 statement = "`==` / `!=` and every containment / dedup / key-lookup op compare COMPOUND elements (tuples, nested lists, records incl. String fields) by type-directed DEEP equality on both targets — native via Rust `PartialEq`, wasm via per-type deep-eq functions (not pointer identity). Two distinct heap objects with identical contents compare equal; Map/Set equality is size + key/value containment, so containers built in a different insertion order are still equal."
 since     = "0.24.0"
@@ -242,6 +257,7 @@ evidence  = [
 # ── UNICODE STRING SURFACE ───────────────────────────────────────────
 [[contract]]
 id        = "C-016"
+spec      = "ALS-S1"
 title     = "UTF-8 codepoint-aware string ops are byte-identical"
 statement = "Codepoint-aware string ops (chars/reverse/slice/take/drop/first/last/get/codepoint/from_codepoint/pad) operate on Unicode scalars and are byte-identical native == wasm on ASCII and multibyte input (Latin-1 accent, CJK, 4-byte emoji, 3-byte currency). Native (Rust char-based) is the oracle; the wasm runtime must byte-match it for every scalar."
 since     = "0.24.0"
@@ -253,6 +269,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-017"
+spec      = "ALS-S2"
 title     = "Empty-pattern count / last_index_of follow native codepoint/byte semantics"
 statement = "`count` with the empty pattern returns the CODEPOINT count + 1 (`s.matches(\"\").count() == s.chars().count() + 1`); `last_index_of` with the empty pattern returns the CODEPOINT count (the byte offset `s.rfind(\"\") == Some(s.len())` converted to the codepoint index, per the C-065 one-unit rule). Both are byte-identical native == wasm, including multibyte subjects where codepoint-count and byte-length differ; wasm no longer short-circuits the empty pattern to 0."
 since     = "0.24.0"
@@ -263,6 +280,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-018"
+spec      = "ALS-S3"
 title     = "Unicode string predicates match Rust char methods over the full domain"
 statement = "`is_alpha` / `is_alphanumeric` / `is_upper` / `is_lower` derive from Rust's full-Unicode `char` methods on native; the wasm target walks oracle-derived range tables (rt_unicode_tables.rs) per codepoint, byte-identical to native for every interesting Unicode category. The tables are exhaustively probed against the std `char` methods over the complete scalar domain at emit time."
 since     = "0.24.0"
@@ -277,6 +295,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-019"
+spec      = "ALS-S3"
 title     = "rt_string_extra ops (replace_first, strip_*, predicates, cmp) match native"
 statement = "`replace_first`, `strip_prefix`/`strip_suffix`, `is_digit` (ASCII-only), `is_whitespace` (full-Unicode White_Space, empty-string vacuously true), and String `<` (BYTE-lexicographic with a length tiebreak, NOT codepoint order) are byte-identical native == wasm. Empty-pattern/affix edge cases follow native exactly: `replace_first` splices at position 0, `strip_prefix`/`strip_suffix` of an empty affix return the whole string."
 since     = "0.24.0"
@@ -288,6 +307,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-020"
+spec      = "ALS-T5"
 title     = "Unicode case transforms (to_upper/to_lower/capitalize) are full-Unicode"
 statement = "`to_upper` / `to_lower` / `capitalize` produce the SAME bytes as native (Rust `str::to_uppercase` / `str::to_lowercase` / first-char `char::to_uppercase`) for ALL scalars — accents, Greek, Cyrillic, the length-CHANGING maps (ß -> SS), and the context-sensitive Greek sigma (Final_Sigma: word-final ς vs medial σ). The wasm runtime embeds oracle-derived Unicode case tables and resolves Final_Sigma at runtime; the tables are exhaustively probed against the std `char` methods at emit time."
 since     = "0.24.0"
@@ -300,6 +320,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-021"
+spec      = "ALS-T1"
 title     = "Whitespace trim / is_whitespace use the full Unicode White_Space property"
 statement = "`trim` / `trim_start` / `trim_end` / `is_whitespace` and the leading/trailing trim inside `int.parse` / `float.parse` match native (Rust `str::trim*` / `char::is_whitespace`, the 25-codepoint Unicode White_Space property) byte-identically. The old wasm checked only {0x09,0x0A,0x0D,0x20}; `is_whitespace(\"\")` is now correctly true, routed through the oracle-derived `__is_unicode_ws`."
 since     = "0.24.0"
@@ -310,6 +331,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-022"
+spec      = "ALS-S4"
 title     = "string.from_bytes is UTF-8-lossy decode (inverse of to_bytes)"
 statement = "`string.from_bytes` is a UTF-8 decode (`String::from_utf8_lossy`, U+FFFD per maximal invalid subpart), the exact inverse of `to_bytes`, byte-identical native == wasm — not the old Latin-1 `b as u8 as char` mapping that corrupted every non-ASCII string. `string.len` is BYTE length, so the round-trip is asserted on byte counts and content. The wasm runtime's byte-class derivation is differentially fuzzed (300k randomized byte sequences + boundary cases) against `from_utf8_lossy` at emit time."
 since     = "0.24.0"
@@ -322,6 +344,7 @@ evidence  = [
 # ── FLOAT FORMATTING / PARSING (Dragon4 / dec2flt) ──────────────────
 [[contract]]
 id        = "C-023"
+spec      = "ALS-T13"
 title     = "float.to_string is shortest round-tripping decimal (Dragon4)"
 statement = "`float.to_string` produces the SAME bytes as native Rust f64 Display — the shortest round-tripping decimal in fixed notation, with the `.0` integer suffix — byte-identical native == wasm. The wasm runtime implements Dragon4 with exact big-integer arithmetic (rt_dragon.rs); there is no fixed-precision drift (native 0.30000000000000004 vs the old wasm 0.3) and no `i64_trunc` trap for |x| >= 2^63."
 since     = "0.24.0"
@@ -333,6 +356,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-024"
+spec      = "ALS-T2"
 title     = "float.parse is correctly-rounded round-to-nearest-even (Clinger AlgorithmM)"
 statement = "`float.parse` produces the SAME f64 as native (`s.trim().parse::<f64>()`), i.e. correctly-rounded round-to-nearest-even, with byte-identical Err strings. The wasm runtime uses Clinger AlgorithmM with exact big-integer arithmetic (rt_dec2flt.rs, reusing the Dragon4 bignum); the old f64-accumulator parser (`acc*10+digit`) was not correctly rounded (\"0.3\" -> 0.30000000000000004, subnormals collapsing to 0)."
 since     = "0.24.0"
@@ -343,6 +367,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-025"
+spec      = "ALS-T9"
 title     = "float.to_fixed is round-half-to-even on the exact binary value"
 statement = "`float.to_fixed(x, n)` reproduces native `format!(\"{:.N}\", x)` EXACTLY on both targets: the decimal is the f64's exact binary value m*2^e rounded to N places, round-HALF-to-EVEN on the exact value. The wasm implementation rides the Dragon4 big-integer machinery (rt_dragon.rs), so there is no 10^N i64 overflow (the old impl trapped for N >= 19) and no multiply-then-round error; carry propagation, signed-zero, and inf/NaN all match. A differential fuzz suite certifies the continuous input space."
 since     = "0.24.0"
@@ -355,6 +380,7 @@ evidence  = [
 # ── VENDORED-LIBM MATH ───────────────────────────────────────────────
 [[contract]]
 id        = "C-026"
+spec      = "ALS-T10"
 title     = "Vendored-libm trig / exp / log / pow are byte-identical cross-target"
 statement = "`math.sin/cos/tan`, `math.exp/log/log2/log10`, and float `**` / `math.fpow` route through the SAME vendored musl-libm reference on both targets (native runtime/rs/src/libm.rs, wasm rt_libm.rs), so every result is byte-identical — printed via the (itself byte-identical) Dragon4 `float.to_string`. Special cases match libm: `log(0) = -inf`, `log(neg) = NaN`, `exp(-745) = 5e-324`, `fpow(-2,0.5) = NaN`, `fpow(-2,3) = -8`, `fpow(2,inf)` does not trap. Differential fuzz suites certify the continuous input space."
 since     = "0.24.0"
@@ -371,6 +397,7 @@ evidence  = [
 # ── ENCODINGS / RADIX PARSING ────────────────────────────────────────
 [[contract]]
 id        = "C-027"
+spec      = "ALS-T11"
 title     = "base64 encode/decode (standard + URL-safe) is byte-identical incl. errors"
 statement = "base64 encode/decode for BOTH alphabets (standard + URL-safe) produces byte-identical output native == wasm — RFC 4648 canonical padded form — including the decode error strings `invalid base64 character` and `invalid base64 length: <orig_len>`. Native runtime/rs/src/base64.rs is the oracle; the wasm runtime rt_encoding.rs must match it exactly."
 since     = "0.24.0"
@@ -381,6 +408,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-028"
+spec      = "ALS-T8"
 title     = "int.from_hex mirrors i64::from_str_radix incl. native quirks"
 statement = "`int.from_hex` mirrors native `i64::from_str_radix(s.trim().trim_start_matches(\"0x\"), 16)` exactly, INCLUDING the quirks: `0X10` -> Err (the `0x` strip is lowercase-only), `0x0xff` -> Ok(255) (`trim_start_matches` strips `0x` repeatedly), `f_f` -> Err (no underscore skipping), `0x-ff` -> -255 (sign accepted after strip). The four std ParseIntError strings reproduce exactly, byte-identical native == wasm."
 since     = "0.24.0"
@@ -391,6 +419,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-029"
+spec      = "ALS-T8"
 title     = "int.parse error modes byte-match native ParseIntError"
 statement = "`int.parse` byte-matches native `s.trim().parse::<i64>().map_err(|e| e.to_string())` for every failure mode — empty-after-trim, lone sign, embedded non-digit, and i64 overflow in both directions (incl. the i64::MIN edge with no positive counterpart). The Err payload STRING is part of the compared output, so the four std messages must reproduce exactly."
 since     = "0.24.0"
@@ -401,6 +430,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-030"
+spec      = "ALS-T11"
 title     = "hex.encode / hex.decode are byte-identical incl. positional error detail"
 statement = "`hex.encode` / `hex.decode` produce byte-identical output native == wasm, including the positional decode error strings `hex string has odd length: N` and `invalid hex char at N` (hi nibble at `2*pair`, lo at `2*pair+1`). Native runtime/rs/src/hex.rs is the oracle; the wasm rt_encoding.rs runtime must mirror it exactly, including the error detail the old wasm strings dropped."
 since     = "0.24.0"
@@ -412,6 +442,7 @@ evidence  = [
 # ── JSON PATH OPS ────────────────────────────────────────────────────
 [[contract]]
 id        = "C-031"
+spec      = "ALS-D1"
 title     = "json get/set/remove_path edge cases match the infallible native oracle"
 statement = "`json.get_path` / `set_path` / `remove_path` reproduce native runtime/rs/src/json.rs byte-identically across all edge cases: negative-Index normalization (`len + i`), Index over an object/scalar/null root as an infallible no-op, OOB Index no-op, and Field-over-non-object autovivification (replace with a fresh single-key object, seed descents with `Object(vec![])`). The wasm rt_value.rs path walkers had 8 divergences this locks down."
 since     = "0.24.0"
@@ -424,6 +455,7 @@ evidence  = [
 # ── REGEX ENGINE ─────────────────────────────────────────────────────
 [[contract]]
 id        = "C-032"
+spec      = "ALS-D4"
 title     = "Regex engine is byte-identical to the native engine over a fuzzed grammar"
 statement = "The regex engine produces byte-identical results native == wasm for alternation, escape atoms, class escapes, captures (incl. optional-miss), multibyte `.`/class on CJK, anchors, quantifiers, replace, split edges, full_match, find_all, empty alternation arms, and end-of-string empty-match replace. Native runtime/rs/src/regex.rs is the oracle; a deterministic differential fuzz over the regex grammar certifies the input space beyond the headline corpus."
 since     = "0.24.0"
@@ -437,6 +469,7 @@ evidence  = [
 # ── KNOWN DIVERGENCE: COPY-ON-WRITE FOR ALIASED MUTABLES ────────────
 [[contract]]
 id        = "C-033"
+spec      = "ALS-C5"
 title     = "Value semantics for aliased mutables (copy-on-write)"
 statement = "`var b = a; a[i] = v` leaves `b` unchanged on both targets: heap-typed vars that are copy-aliased AND mutated in place get a copy-on-write at every mutation site (AliasCowPass may-alias analysis -> needs_cow; wasm clones via __cow_check before IndexAssign/FieldAssign/ListSwap/Reverse/Rotate/CopySlice and in-place stdlib mutators; native counts mutation targets as uses so aliased binds clone-at-bind). The full alias-shape truth table (A-M: chains, branch arms, record fields, destructures, map/string in-place) behaves identically on both targets."
 since     = "0.24.0"
@@ -450,6 +483,7 @@ evidence  = [
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
 [[contract]]
 id        = "C-034"
+spec      = "ALS-C4"
 title     = "Out-of-range list ops clamp / no-op gracefully (no OOB heap access)"
 statement = "Out-of-range `list.insert` clamps the index to the end (`min(i, len)`), `list.remove_at` / `list.swap` with an index >= len are no-ops, `list.slice` clamps past-the-end indices (end -> len, start >= effective_end -> []), and `list.with_capacity(n)` starts empty without header corruption for any n — all byte-identical native == wasm with no OOB heap read/write. `with_capacity` is TOTAL on both targets: capacity is an unobservable hint whose EAGER reservation is clamped to the SAME named byte ceiling (`MAX_WITH_CAPACITY_PREALLOC_BYTES` = 64 MiB, runtime/rs/src/list.rs == emit_wasm/calls_list.rs), so a huge request neither aborts native (`Vec::with_capacity(i32::MAX)` over a 24-byte element = ~51.5 GB, machine-dependent) nor corrupts the wasm header (the data byte count is computed in i64 so `hdr + bytes` never overflows i32); `push` grows past the clamped reservation normally. Native (runtime/rs/src/list.rs) is the oracle for each."
 since     = "0.24.0"
@@ -465,6 +499,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-035"
+spec      = "ALS-R1"
 title     = "Effect-main errors terminate uniformly: Error: <msg> + exit 1"
 statement = "An effect `fn main` that yields Err, and any uncaught abort surfaced through the main-error path, terminate with stderr `Error: <msg>` + exit 1 on BOTH targets — native via the Display `fn main` wrapper, wasm via `__main_runner` (proc_exit + stderr) — never a native panic (101) nor a wasm `unreachable` trap (134). This is the unified termination the div/mod and fan abort contracts rely on."
 since     = "0.24.0"
@@ -478,6 +513,7 @@ evidence  = [
 # ── RECORDS / VARIANTS / SIZED INTEGERS ──────────────────────────────
 [[contract]]
 id        = "C-036"
+spec      = "ALS-C7"
 title     = "Records, variants, and pattern matching are byte-identical"
 statement = "Record construction/field-access, variant construction (tuple/record/nullary payloads), and `match` over them — including matches whose arms construct a Result with `err(..)`, and a LITERAL nested inside a container constructor (`some(\"x\")`, `some(5)`, `ok(0)`, `err(404)`) — produce byte-identical results native == wasm. The inner-literal equality is emitted on BOTH targets: wasm structurally checks the tag then ANDs in a value compare (previously `some(\"x\")` matched ANY `some(_)` because only the non-null tag was checked); native hoists a payload-nested STRING literal into a `Bind` + `==` guard (`Ok(__s) if __s == \"good\"`) — previously `ok(\"good\")` emitted `Ok(\"good\")` against a `Result<String,String>` value and FAILED TO BUILD (rustc E0308 &str vs String), so these programs could not run cross-target at all. The hoist is the single mechanism for a string literal in any payload position at any depth (`ok(\"x\")`, `err(\"x\")`, `Word(\"x\")`, `KV(\"k\", n)`, `Pair(1, \"one\")`, `ok(some(\"x\")))`, `(\"a\", 1)`, and literal+guard combos); a literal arm refines, later binding arms stay reachable, byte-identical to the wasm tag→value→guard order. Int/Bool/Float payload literals remain bare Rust patterns. A match typed `Never` no longer appends a wasm `unreachable` epilogue (trap exit 134) while native runs fine."
 since     = "0.24.0"
@@ -493,6 +529,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-037"
+spec      = "ALS-D5"
 title     = "bytes.read_f16_le decodes IEEE-754 half floats identically"
 statement = "`bytes.read_f16_le` (IEEE-754 half -> f64) is byte-identical native == wasm, including the exp-all-ones path rendering ±inf / NaN (zero and nonzero mantissa) rather than the finite ±f32::MAX — over ±inf, NaN, ±0, the smallest subnormal, a few normals, and the largest finite half. Native runtime/rs/src/bytes.rs::f16_bits_to_f64 is the oracle for the wasm expander."
 since     = "0.24.0"
@@ -503,6 +540,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-038"
+spec      = "ALS-C8"
 title     = "Sized-integer literals narrow to the declared field width"
 statement = "A bare literal assigned to a sized-integer field/element (Int8/Int16/Int32) narrows to the declared width at the construction site, so native rustc accepts it (no E0308 from `5i64` in an Int8 field) and wasm writes the correct byte WIDTH (so the next field is not read as garbage). This holds for plain records, nested records, record-variant and tuple-variant payloads, and tuple/list/nested literal positions; field access reads back the exact stored value, byte-identical native == wasm."
 since     = "0.24.0"
@@ -514,6 +552,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-039"
+spec      = "ALS-C6"
 title     = "Type-changing map.map / set.map yield a collection of the new type"
 statement = "Applying a closure whose return type differs from the collection's value/element type yields a collection of the NEW type (`Map[K,V]` with `(V)->B` => `Map[K,B]`; `Set[A]` with `(A)->B` => `Set[B]`), byte-identical native == wasm. The wasm emitter no longer keeps the SOURCE width — every width transition (i64<->i32 pointer, f64, tuple) uses the correct call_indirect signature and load/store width."
 since     = "0.24.0"
@@ -526,6 +565,7 @@ evidence  = [
 # ── HOST-DETERMINISM (emit-time) ─────────────────────────────────────
 [[contract]]
 id        = "C-040"
+spec      = "ALS-I2"
 title     = "Codegen emit is host-architecture deterministic"
 statement = "The compiler emits byte-identical output whether it runs natively (x86-64/aarch64) or as wasm32 (the browser playground), on the 1st compile or the Nth in a process. Anonymous-record naming (content hash, not a walk-order counter), egg-fused lambda param names (VarId-derived), monomorphization append order, and lifted-closure iteration order are all host-independent — enforced by HashMap->BTreeMap emit ordering and the check-host-determinism gate, with cross-arch byte fixtures."
 since     = "0.24.0"
@@ -540,6 +580,7 @@ evidence  = [
 # ── HEAP / RC / PERCEUS ──────────────────────────────────────────────
 [[contract]]
 id        = "C-041"
+spec      = "ALS-I1"
 title     = "Heap / RC primitives honour the Lean-certified Perceus discipline"
 statement = "alloc/realloc-growth, refcount inc/dec, string alloc, and the arena checkpoint primitives (heap_save/heap_restore) produce byte-identical observable results native == wasm under heavy churn — no observable leak effect, double-free, or realloc clobber. Since 0.27.0 the wasm rc bodies are REAL by default (C-066): rc_dec frees to a reuse list, double-frees trap on a rc==0 sentinel, rc_inc of a freed block traps (resurrection), and heap_restore / the per-iteration loop region reset also clear the free list so allocator state never straddles a rolled-back frontier. The IR-level Inc/Dec balance is certified by the `0 sorry` Lean Perceus belt; these fixtures are the executable counterpart. The opaque checkpoint value (0 native vs a real pointer wasm) is never printed."
 since     = "0.24.0"
@@ -555,8 +596,9 @@ evidence  = [
 
 [[contract]]
 id        = "C-066"
+spec      = "ALS-I1"
 title     = "WASM heap is reclaimed by default (true Perceus)"
-statement = "Since 0.27.0 the wasm target frees by default: construct-and-drop churn reuses freed blocks (free-list) and loop iterations whose heap values do not escape reclaim wholesale (region reset incl. the free list), so steady-state churn runs in O(1) memory instead of the pre-0.27 bump-allocate-and-leak model. The escape test counts an in-place stdlib mutator (`list.push`/`string.push`/`map.insert`) on a binding declared OUTSIDE the loop as an escape — its reallocated backing lives in the iteration arena but is reachable after the loop, so the region reset must not roll the frontier back over it (#643: the scan formerly inspected assignment STATEMENTS only and missed the mutator CALL, producing a spurious double-free trap at teardown). Observable values stay byte-identical native == wasm under churn. `ALMIDE_WASM_FREES=0` is the opt-out back to the leak model (env-conditional emission is declared behavior under the host-determinism gates). Known bounded exceptions, tracked in docs/roadmap/active/wasm-frees-ownership-discipline.md: TCO self-call loops leak per iteration until the Stage C redesign lands, and a stored-field over-count leaks one reference per construct-from-temp outside reclaimed regions."
+statement = "Since 0.27.0 the wasm target frees by default: construct-and-drop churn reuses freed blocks (free-list) and loop iterations whose heap values do not escape reclaim wholesale (region reset incl. the free list), so steady-state churn runs in O(1) memory instead of the pre-0.27 bump-allocate-and-leak model. Observable values stay byte-identical native == wasm under churn. `ALMIDE_WASM_FREES=0` is the opt-out back to the leak model (env-conditional emission is declared behavior under the host-determinism gates). Known bounded exceptions, tracked in docs/roadmap/active/wasm-frees-ownership-discipline.md: TCO self-call loops leak per iteration until the Stage C redesign lands, and a stored-field over-count leaks one reference per construct-from-temp outside reclaimed regions."
 since     = "0.27.0"
 status    = "active"
 evidence  = [
@@ -571,6 +613,7 @@ evidence  = [
 # ── FILESYSTEM (WASI PREOPEN RESOLUTION) ─────────────────────────────
 [[contract]]
 id        = "C-042"
+spec      = "ALS-R6"
 title     = "fs preopen-dir scan + path resolution is observable-equivalent"
 statement = "The wasm fs runtime scans `fd_prestat_get` at `_start` to build the WASI preopen-dir table, then resolves an absolute path to the longest-prefix preopen fd + relative remainder (incl. `./` normalization), reproducing native std::fs (which has no preopen concept) byte-identically. A write + `./`-normalized read-back of the same path resolves to the same host file under the `/` preopen, CWD-independently."
 since     = "0.24.0"
@@ -582,6 +625,7 @@ evidence  = [
 # ── RECURSIVE-ENUM HEAP INDIRECTION / NAME COLLISION ────────────────
 [[contract]]
 id        = "C-043"
+spec      = "ALS-M3"
 title     = "A user type named Box coexists with recursive-enum heap indirection"
 statement = "A recursive enum needs heap indirection on the Rust target, emitted as `std::boxed::Box<Tree>`; a user `type Box = ...` no longer collides with it (the recursive-enum pass fully-qualifies the std indirection everywhere), so native compiles (no E0072/E0107/E0599) and the program is byte-identical native == wasm. wasm has no `Box` and was already unaffected."
 since     = "0.24.0"
@@ -593,6 +637,7 @@ evidence  = [
 # ── RESULT / OPTION MATCH ────────────────────────────────────────────
 [[contract]]
 id        = "C-044"
+spec      = "ALS-M1"
 title     = "Result/Option construction and matching are byte-identical"
 statement = "Construction and `match` over Result (`ok`/`err`) and Option (`some`/`none`), including `??` fallback, `?` Result->Option, and matches whose arms build a Result, produce byte-identical results native == wasm. A Result-constructing match is not mis-typed `Never` (which trapped wasm exit 134 while native ran)."
 since     = "0.24.0"
@@ -606,6 +651,7 @@ evidence  = [
 # ── LIST[STRING] PARAM CODEGEN ───────────────────────────────────────
 [[contract]]
 id        = "C-045"
+spec      = "ALS-M12"
 title     = "A List[String] param works across join / len / index / iteration"
 statement = "A `List[String]` function param renders as `&[String]` on Rust and can be consumed by ANY combination of `string.join`, `list.len`, indexing, and iteration on both targets, byte-identically. The join runtime accepts `&[String]` (matching the list-join runtime), so passing the `&[String]` param no longer trips E0308 (`&[String]` vs `&Vec<String>`); wasm was unaffected."
 since     = "0.24.0"
@@ -619,6 +665,7 @@ evidence  = [
 # ── RECORD SPREAD-UPDATE / CROSS-MODULE MONOMORPHIZATION ─────────────
 [[contract]]
 id        = "C-046"
+spec      = "ALS-M2"
 title     = "Record spread-update and cross-module monomorphization are byte-identical"
 statement = "Record spread-update (`{ ...rec, field: v }`) and the monomorphizer's lifted-function generation across module / diamond-dependency boundaries (the spread-heavy record + pipe-chain + shared-import pattern that broke ceangal-anime) produce byte-identical results native == wasm. The spread copies all unmentioned fields and overrides the named ones; shared imports through a diamond no longer generate broken lifted functions on either target."
 since     = "0.24.0"
@@ -630,6 +677,7 @@ evidence  = [
 # ── NUMERIC TOTALITY: pow / rotate (Cluster-2) ───────────────────────
 [[contract]]
 id        = "C-047"
+spec      = "ALS-T6"
 title     = "math.pow negative exponent and rotate non-positive width are total — they abort, never trap/wrap"
 statement = "`math.pow(base, exp)` with a NEGATIVE exponent aborts with stderr `Error: negative exponent` + exit 1 on BOTH targets (never the old native `exp as u32` u32-wrap garbage nor the wasm `return 1`); `int.rotate_left`/`rotate_right` with a non-positive `bits` width abort with `Error: rotate width must be positive` + exit 1 (never a native rem-by-zero panic exit 101 nor a wasm `i64.rem_s` trap exit 134). Non-negative pow stays byte-identical including overflow, which wraps under exponentiation-by-squaring (`2^64=0`, `0^0=1`, exponents `>= 2^32` define the full i64 count and never hang)."
 since     = "0.24.0"
@@ -643,6 +691,7 @@ evidence  = [
 # ── NUMERIC WRAP/ROTATE WIDTH MASK (Cluster-2) ───────────────────────
 [[contract]]
 id        = "C-048"
+spec      = "ALS-T14"
 title     = "int.wrap_* / int.rotate_* saturate the mask to u64::MAX for bits >= 64"
 statement = "`int.wrap_add`/`wrap_mul`/`rotate_left`/`rotate_right` model an N-bit register: for `bits >= 64` the low-bit mask is `u64::MAX`, matching native `if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 }`. The wasm emit computed `(1 << bits) - 1` directly, but `i64.shl` masks the shift amount mod 64 so `1 << 64` wrapped to 1 and the mask collapsed to 0 — every `bits >= 64` result silently diverged. Now byte-identical native == wasm via a `bits >= 64 ? -1 : (1<<bits)-1` select."
 since     = "0.24.0"
@@ -654,6 +703,7 @@ evidence  = [
 # ── FLOAT IEEE SIGN / NaN-IGNORING MIN-MAX (Cluster-2) ───────────────
 [[contract]]
 id        = "C-049"
+spec      = "ALS-T15"
 title     = "float.sign is f64::signum; float/math min/max ignore NaN"
 statement = "`float.sign` == Rust `f64::signum` — `copysign(1.0, x)` for every non-NaN x (so `sign(0.0)=1`, `sign(-0.0)=-1`, `sign(±inf)=±1`) and NaN for NaN — NOT the old three-way sign (0 for ±0.0/NaN). `float.max`/`float.min`/`math.fmax`/`math.fmin` IGNORE a NaN operand and return the other, and on ±0 ties ALL FOUR return the FIRST operand (`max(0,-0)=0`, `max(-0,0)=-0`). Both targets implement the same explicit NaN/tie decision tree — never the NaN-propagating raw `f64.max`/`f64.min` wasm instructions, and never the llvm.minnum/maxnum intrinsics, whose unspecified ±0-tie order let x86 `maxsd` return the SECOND operand when inlined. All byte-identical native == wasm == interp."
 since     = "0.24.0"
@@ -665,6 +715,7 @@ evidence  = [
 # ── STRING CODEPOINT GRANULARITY: split("") / rle (Cluster-2) ────────
 [[contract]]
 id        = "C-050"
+spec      = "ALS-S5"
 title     = "string.split(\"\") and string.run_length_encode are codepoint-granular"
 statement = "`string.split(s, \"\")` splits per CODEPOINT with a leading and trailing empty string — native `s.split(\"\")` yields `[\"\", c0, c1, …, \"\"]` (and `[\"\", \"\"]` for the empty string). `string.run_length_encode` groups runs by CODEPOINT (native `s.chars()`), the run string being the whole codepoint. The wasm emit used to return `[s]` for an empty delimiter (no split) and group rle by BYTE (emitting invalid single-byte strings for multibyte input). Now byte-identical native == wasm, including multibyte."
 since     = "0.24.0"
@@ -676,6 +727,7 @@ evidence  = [
 # ── TRANSCENDENTAL: log_gamma vendored-libm bit-exactness (Cluster-2) ─
 [[contract]]
 id        = "C-051"
+spec      = "ALS-T10"
 title     = "math.log_gamma is bit-identical (both targets use the vendored musl-libm log)"
 statement = "`math.log_gamma` is bit-identical native == wasm: the same Lanczos polynomial, `t = x + 7.5`, and pinned `0.5·ln(2π)` constant, with BOTH `ln` evaluations routed through the vendored musl-libm `log` rather than the platform `f64::ln`. Native previously called the platform `ln`, which drifts ~1 ULP per OS from the wasm vendored port (the StrictMath/fdlibm cross-target-determinism decision shared with sin/cos/exp/log)."
 since     = "0.24.0"
@@ -687,6 +739,7 @@ evidence  = [
 # ── EMPTY-COLLECTION FOLD: ANNOTATE THE COLLECTION (folds into C-058) ─
 [[contract]]
 id        = "C-052"
+spec      = "ALS-C10"
 title     = "A fold over an empty collection requires the collection to carry an element type (no codegen defaulting)"
 statement = "A `list`/`map`/`set` `.fold` over an EMPTY collection whose element/key/value types the closure never uses still requires the EMPTY collection to carry an element type. This is the SAME undecidable-empty-collection class as C-058: an unannotated empty `[]` / `map.new()` / `set.new()` here is a frontend compile error (E018) on BOTH targets, not a slot codegen defaults — the former `Int` defaulting (`default_unconstrained_fold_params`) was a layer violation and has been removed. Once the empty collection is ANNOTATED, its element type pins the closure params the normal way and the fold builds + prints byte-identically native == wasm even though the closure is never invoked. Non-empty folds that DO use the params still infer normally."
 since     = "0.24.0"
@@ -698,6 +751,7 @@ evidence  = [
 # ── LIST TOTAL-ORDER OPS (min / max / sort / sort_by / unique_by) ─────
 [[contract]]
 id        = "C-053"
+spec      = "ALS-C9"
 title     = "list.min/max/sort/sort_by/unique_by are type-directed and total, native == wasm"
 statement = "`list.min`/`list.max` (extremum), `list.sort`/`list.sort_by` (ascending order), and `list.unique_by` (first-of-each-key dedup) are byte-identical native == wasm for EVERY totally-ordered element type — Int, Bool (false<true), String, Tuple (lexicographic), nested List (lexicographic with shorter-first tiebreak), Option (none<some), and variants (tag order) — and for any Eq key type the `unique_by`/`sort_by` callback returns. The wasm side routes all ordering through one type-directed total-order emitter (`emit_ord_cmp3`, the ordering twin of `emit_eq_typed`) instead of a hard-coded i64 element load; an unresolved element type is an emit-time ICE, never a silent wrong comparison or unbounded display loop."
 since     = "0.24.0"
@@ -709,6 +763,7 @@ evidence  = [
 # ── LIST/STRING Int-COUNT & INDEX TRUNCATION (Cluster-B) ─────────────
 [[contract]]
 id        = "C-054"
+spec      = "ALS-T16"
 title     = "List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB"
 statement = "Every list/string op that takes an `Int` (i64) COUNT or INDEX clamps it on the FULL i64 value BEFORE the wasm `i32_wrap_i64` narrowing, so a value at/over the 2^32 boundary can never wrap to a small in-range value, and a NEGATIVE value takes native's unsigned `n as usize` path — never the wrong lo-clamp-to-0 result (the C-034 `with_capacity` rule generalized via named `emit_clamp_count_to_i32` (UNSIGNED `min_u`) / `emit_clamp_count_signed_i32` (SIGNED `max(0).min`) / `emit_clamp_index_to_len_i32` / `emit_checked_index_i32` helpers). For UNSIGNED COUNTS — `list.take`/`drop`/`take_end`/`drop_end`/`chunk`/`windows`, `list.slice` start/end, `string.take`/`drop`/`take_end`/`drop_end`, `string.repeat`, `string.pad_start`/`pad_end` widths — the count is `min(n as usize, hi)`: a NEGATIVE count is enormous as `usize` and saturates to `hi`, so `take(-1)` returns the WHOLE collection, `drop(-1)` returns empty, `chunk(-1)` groups into ONE chunk (was a div-by-0 TRAP), `windows(-1)` is empty (was a wrong non-empty length), and `string.take(s, 2^32)` returns the whole string (was empty); a count `>= 2^32` likewise saturates instead of wrapping to a small in-range count. The size-bounded `repeat`/`chunk`/`windows`/`pad` use an `i32::MAX` sentinel so a genuinely huge count BOTH-FAILS (wasm `memory.grow` / native abort) rather than wasm silently emptying/short-cutting. The ONE exception is `string.slice` start/end, whose native oracle clamps SIGNED (`(x.max(0) as usize).min(len)`): a negative `string.slice` start maps to 0, handled by the separate SIGNED helper. For INDICES — `list.get`/`get_or`/`set`/`insert`/`remove_at`/`swap`/`update` — the index is UNSIGNED (`i as usize`) so a negative or `>= 2^32` index takes native's no-op / default / append path. Previously `list.drop_end(xs, 2^32-1)` returned a corrupt length exposing uninitialized heap, `list.take_end(xs, 2^32-1)` TRAPPED (exit 134), `list.chunk(xs, -1)` TRAPPED on wasm while native made one chunk, and `string.take(s, 2^32)` returned empty on wasm while native returned the whole string — all now byte-identical native == wasm at the 2^31 / 2^32 boundary and for negative counts on small inputs. The fixtures exercise COUNT boundaries (not SIZE boundaries), so no allocation exceeds a few KiB and the result is machine-independent."
 since     = "0.24.0"
@@ -722,6 +777,7 @@ evidence  = [
 # ── FLOAT LIST ORDERING = IEEE-754 totalOrder (Cluster-B) ────────────
 [[contract]]
 id        = "C-055"
+spec      = "ALS-C9"
 title     = "list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets"
 statement = "`list.sort`/`list.min`/`list.max` over `List[Float]` and `list.sort_by` with a Float key ORDER by IEEE-754 totalOrder (the ordering twin of `f64::total_cmp`): a +NaN takes the greatest totalOrder position (after +inf), a -NaN the least (before -inf), and `-0.0 < +0.0`. This makes Float ordering legal and byte-identical native == wasm, fixing the divergence where native REJECTED it at compile (`f64: Ord` unsatisfied) while wasm either accepted it with NaN-unaware `f64.le` or emitted an INVALID module (the `sort_by` Float-key path stored an f64 into an i64 local → `local.set` validator error). Native routes `List[Float]` ordering to `total_cmp`-based `_float` runtime variants (IntrinsicLowering swaps the symbol); wasm mirrors with the sign-magnitude bit trick inside `emit_ord_cmp3`'s Float arm (`key = bits ^ ((bits >>_s 63) >>_u 1)`, a monotone i64 key) and pre-transforms `sort_by` Float keys onto the i64 storage path; interp mirrors with `f64::total_cmp`. NaN-SIGN CAVEAT: the totalOrder POSITION of a NaN depends on its sign bit, which for a COMPUTED NaN (`0.0/0.0`) is implementation-defined — native/wasm const-fold it to +NaN (top) while the interp's runtime `divsd` yields -NaN (bottom), so the 3-way fixture stays sign-deterministic (uses ±inf, not a divided NaN); the +NaN-at-top positioning is verified native == wasm directly. ASYMMETRY (named deliberately): this list-extremum/ordering totalOrder is a DIFFERENT contract from the SCALAR `float.min`/`float.max`/`math.fmin`/`math.fmax`, which keep their C-049 NaN-IGNORING semantics — a resolved-but-unsupported sort element type is still a clean emit-time ICE, never an invalid module."
 since     = "0.24.0"
@@ -734,6 +790,7 @@ evidence  = [
 # ── list.product OVERFLOW WRAPS (Cluster-B) ──────────────────────────
 [[contract]]
 id        = "C-056"
+spec      = "ALS-T16"
 title     = "list.product wraps on i64 overflow, consistent with list.sum and plain `*`"
 statement = "`list.product` follows the language's integer-overflow law — two's-complement WRAPPING at runtime, identical to `list.sum`, to plain `a * b` (C-001/C-047 family), and to the wasm `i64.mul` accumulator. Native folds with `wrapping_mul` (identity 1) so the result is the SAME on any build profile; the old `Iterator::product` PANICKED under debug `-C overflow-checks` (exit 101) while wrapping in release and on wasm — a profile-dependent split now removed. `[i64::MAX, 2]` yields `-2` byte-identically native == wasm; the empty product is `1`. The interp gained a matching `list.product` arm so the 3-way oracle covers it instead of skipping."
 since     = "0.24.0"
@@ -745,6 +802,7 @@ evidence  = [
 # ── ASSIGN-OF-UNIT REJECTION (in-place mutator misuse, Cluster-A) ─────
 [[contract]]
 id        = "C-057"
+spec      = "ALS-M9"
 title     = "Assigning a Unit-returning in-place mutator's result is a checker error on both targets"
 statement = "An in-place stdlib mutator (`list.push`, `string.push`, `map.set` on a mut receiver — anything returning Unit) MUST be used as a STATEMENT, not assigned. `b = list.push(b, x)` assigns Unit to a non-Unit binding: native used to fail only at rustc (E0308 'expected Vec, found ()') while WASM erased Unit and silently RAN the program — a build-success asymmetry (compiled on WASM, not native). The checker now rejects the Unit-to-non-Unit assignment (E001) with a type-directed hint (call it as a statement, or rebuild with `b = b + [item]` for a List / `s + \"…\"` for a String), so BOTH targets reject identically. The well-typed statement form is byte-identical native == wasm."
 since     = "0.24.0"
@@ -756,6 +814,7 @@ evidence  = [
 # ── UNDECIDABLE EMPTY COLLECTION = COMPILE ERROR (Rust/Swift rule, never defaulted) ─
 [[contract]]
 id        = "C-058"
+spec      = "ALS-C10"
 title     = "An empty collection with an uninferable element type is a compile error on both targets, never silently defaulted"
 statement = "An empty collection whose element type CANNOT be inferred from any surrounding context — an empty `[]` / `[:]` literal, `set.new()`, `map.new()`, or `list.with_capacity(n)` consumed only by element-agnostic ops, and the iterable of a `for _ in []` — is a COMPILE ERROR on BOTH targets (frontend `E018`), resolved by a type annotation. Almide follows Rust/Swift: an undecidable empty collection demands an explicit element type and is NEVER silently defaulted to an arbitrary one (observability is irrelevant, exactly as in Rust/Swift — `for _ in []` is an error even though the element is never read). This replaces the former defaulting behavior (old C-055, which set the element to `Int` in codegen so both targets built): defaulting an undecidable element in codegen was a layer violation and observably mis-typed record fields. Because the check runs in the type checker before code generation, BOTH targets reject identically (previously native rustc failed with E0282/E0283 on the emitted `Vec::<_>::new()` while WASM, carrying no element type, ran — a build-success asymmetry). The ANNOTATED forms of every producer build and print byte-identically native == wasm; a bare list literal also accepts the inline `[]: List[T]` call-arg annotation. A rigid generic parameter (`fn f[T]() -> List[T] = []`) is a concrete element type and is accepted. The fold over an empty collection (former C-052 defaulting) folds into this rule: the empty collection must be annotated."
 since     = "0.24.0"
@@ -768,6 +827,7 @@ evidence  = [
 # ── COMPILE-TIME RECURSION IS HOST/PROFILE-INDEPENDENT (no stack-overflow crash) ─
 [[contract]]
 id        = "C-059"
+spec      = "ALS-I2"
 title     = "Compilation does not overflow the native stack on wide or deep input, identically on every host and build profile"
 statement = "Whether a program COMPILES is a function of the program, not of the host OS's default thread-stack size or the compiler's build profile. Two mechanisms make this so. (1) The compiler driver runs the whole parse → check → lower → emit pipeline on a dedicated worker thread with a fixed 256 MiB stack (overridable by `ALMIDE_COMPILER_STACK`, the analogue of rustc's `RUST_MIN_STACK`), so the achievable depth is decoupled from the OS main-thread limit — which is ~8 MiB on Linux/macOS but only ~1 MiB on Windows. Before this, a program that compiled on Unix could overflow the stack mid-codegen on Windows (it was a release-blocking crash in the Windows CI matrix build, a `float.to_fixed` fuzz body that exceeded the 1 MiB Windows main stack), and deeper inputs split debug-vs-release (unoptimized frames are ~48 KiB, far larger). (2) The Perceus RC-insertion pass (`pass_perceus`) walks the function-body statement chain ITERATIVELY — `split_chain` linearizes the `FnBody` continuation chain and the per-node passes fold over it — so a function body of N sibling statements costs O(1) native stack rather than recursing once per statement (formerly ~48 KiB/frame, overflowing the 256 MiB driver near ~5460 statements and a 1 MiB stack near ~20). A WIDE machine-generated body is therefore NOT rejected and NOT crashed: it compiles and runs byte-identical native == wasm. Expression NESTING (the orthogonal dimension) stays bounded deterministically by the parser's `MAX_DEPTH = 500`, a constant identical on both targets and both profiles — so the one remaining limit is a clean diagnostic, never a SIGSEGV. The de-recursion is behavior-preserving: the codegen snapshots and the full cross-target gate are byte-for-byte unchanged."
 since     = "0.25.0"
@@ -780,6 +840,7 @@ evidence  = [
 # ── A Value REPRS AS ITS JSON TEXT, BYTE-IDENTICAL NATIVE == WASM ─────
 [[contract]]
 id        = "C-060"
+spec      = "ALS-D2"
 title     = "A Value reprs as its JSON text byte-identically on native and WASM, bare and as a Repr-record field"
 statement = "A `Value` (the dynamic JSON-like type) renders to its JSON text — `null`, `true`/`false`, the integer's decimal, the float's Display form (`format!(\"{}\", f)`, which drops an integer-valued float's trailing `.0`), the JSON-escaped string, `[…]`, `{…}`, recursively — byte-identically on native and WASM, in EVERY repr path: a bare `\"${v}\"` interpolation, AND a `Value` field inside a `Repr`-deriving record/variant reached through both the `.repr()` (AlmideRepr) path and the `{}` (Display / interpolation) path. Before this, a `Value` field in a `Repr` type failed to COMPILE natively — `Value` impl'd neither `AlmideRepr` nor `Display`, so the derived `self.<field>.almide_repr()` and the `<Type>_repr` `{}` both errored (E0599 / E0277) — while WASM emitted the placeholder `Value {  }` (it treated `Value` as an empty record). Both targets now route through the SAME serializer (native `almide_rt_value_stringify`, WASM `__value_stringify`). The WASM float branch was additionally corrected to the native Display form via `__float_display` — it previously used the round-trip `float_to_string`, so an integer-valued float diverged (`3` native vs `3.0` WASM) — which also makes `value.stringify` / `json.stringify` of a float agree native == wasm."
 since     = "0.26.7"
@@ -791,6 +852,7 @@ evidence  = [
 # ── A mut Map PARAMETER MUTATED IN PLACE BUILDS + PERSISTS, IDENTICAL ─
 [[contract]]
 id        = "C-061"
+spec      = "ALS-M13"
 title     = "A mut Map parameter mutated in place builds on both targets and the mutation persists, byte-identical"
 statement = "A `mut Map` function parameter mutated in place via `map.insert` is promoted to a mutable borrow (RefMut) — exactly like a `mut List` + `list.push` — so it BUILDS on native (previously `E0596`: `Map`/`Set` were not recognized as heap types in borrow inference, so the param was forced to an immutable owned binding and the in-place mutator's `&mut m` had no `mut` binding to borrow) and the mutation PERSISTS to the caller, byte-identically wasm. A read-then-write through the same `mut` param (`map.get_or` then `map.insert`) works because RefMut covers both reads and writes. This closes the `list.push` (compiled) vs `map.insert` (E0596) asymmetry — a build-success divergence where wasm built but native did not."
 since     = "0.26.9"
@@ -801,6 +863,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-062"
+spec      = "ALS-D7"
 title     = "The RawPtr / linear-memory bridge moves bytes byte-identically on both targets"
 statement = "`bytes.as_ptr` / `as_mut_ptr` return a RawPtr to a Bytes data region; `from_raw_ptr(ptr, len)` copies `len` bytes from a raw offset into a fresh Bytes; `copy_to_ptr(b, ptr, cap)` copies `min(len(b), cap)` bytes through the pointer and returns the count. A RawPtr is a real `*mut u8` on native and an i32 linear-memory offset on wasm — the pointer VALUE differs per target by nature and is never observed; only the bytes moved through it are, so stdout is byte-identical. These four intrinsics used to ICE in WASM emit (`[ICE] … no WASM runtime fn`); v0.26.12 turned that into a clean build error, and v0.26.15 implements the wasm bridge (offset arithmetic + `memory.copy`). `as_mut_ptr` is `@mutating` so its Bytes argument is a mutable borrow on native (the buffer must be RefMut to hand out a writable pointer)."
 since     = "0.26.15"
@@ -812,6 +875,7 @@ evidence  = [
 # ── PARSE A glTF/JSON DOCUMENT + WALK ITS ARRAYS, BYTE-IDENTICAL ─
 [[contract]]
 id        = "C-063"
+spec      = "ALS-D3"
 title     = "Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets"
 statement = "`json.parse` of a glTF-style document (heterogeneous nested objects — accessors with float `min`/`max` arrays and `type` strings, materials with nested extensions, meshes with primitives), followed by `json.get_array` + `list.get_or` element access across `meshes`, every `accessor`'s nested `min`/`max` arrays, and `bufferViews`, produces byte-identical stdout native ⇄ wasm. Regression lock for #470, reported on a real ~10 MB VRM as a wasm-only element-access trap (`memory access out of bounds`) where `list.len` of a `get_array` result was correct but its backing disagreed; the reported flow no longer reproduces on 0.26.18+ (the host-buffer / RawPtr bridge it relied on was reworked in v0.26.15, C-062), and this fixture keeps the parse + array-element walk locked."
 since     = "0.26.19"
@@ -823,6 +887,7 @@ evidence  = [
 # ── EFFECT-FN AUTO-UNWRAP IS BINDING-POSITION-UNIFORM, BYTE-IDENTICAL ─
 [[contract]]
 id        = "C-064"
+spec      = "ALS-M4"
 title     = "The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets"
 statement = "In an effect fn, a Result[T, E]-typed RHS auto-unwraps (auto-`?`) in every binding-shaped position — `let`, `var`, plain reassignment `x = effectCall()` (#485), and index assignment — unless the TARGET keeps the Result: an explicit `Result[..]` annotation (`let r: Result[Int, String] = step()`) or a Result-typed assign target stores the Result intact, while an UN-annotated bind of a `-> Result[..]`-declared effect fn still auto-unwraps. The full matrix prints byte-identical stdout and exits 0 on native ⇄ wasm."
 since     = "0.26.20"
@@ -834,6 +899,7 @@ evidence  = [
 # ── STRING POSITION API SPEAKS ONE UNIT: CODEPOINTS ──────────────────
 [[contract]]
 id        = "C-065"
+spec      = "ALS-S1"
 title     = "The string position API is codepoint-indexed end-to-end on both targets"
 statement = "Every position/count in the `string` module speaks CODEPOINTS (#419): `len` returns the codepoint count, `index_of`/`last_index_of` return codepoint indices (the byte offsets of `str::find`/`rfind` converted via prefix codepoint count), `get` takes a codepoint index (negative or past-the-end -> none), and `slice` takes codepoint start/end clamped to [0, count] with the `end = i64::MAX` default degrading to the end of the string. Composition is therefore closed: `string.take(s, string.index_of(s, sub) ?? 0)` splits at the right place on multibyte input. Byte-identical native == wasm across ASCII, CJK, and mixed subjects."
 since     = "0.26.20"
@@ -845,6 +911,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-067"
+spec      = "ALS-T6"
 title     = "The xs[i] index syntax aborts on out-of-bounds (read and write)"
 statement = "The index-operator path `xs[i]` (both read `xs[i]` and write `xs[i] = v`) is the ASSERT-in-bounds form: an out-of-bounds, negative, or >= 2^32 index ABORTS with the unified `Error: index out of bounds\n` + exit 1, byte-identical native == wasm — distinct from the stdlib `list.get`/`set` ops (C-054) which take native's no-op / default path. The check runs on the FULL i64 before the wasm i32 narrowing (so an index >= 2^32 can never truncate into range and read/write the wrong slot) and applies to the WRITE path too (previously wasm had no write-path bounds check — an OOB `xs[i] = v` was a silent heap write into adjacent allocator memory, exit 0; native panicked exit 101). Native routes through the `almide_index!`/`almide_index_set!` macros, wasm through `emit_index_bound_guard` + the unified `div_trap`, so neither a native panic (exit 101) nor a wasm `unreachable` trap (exit 134) is observable."
 status    = "active"
@@ -854,6 +921,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-068"
+spec      = "ALS-M4"
 title     = "Auto-? is target-directed in construction positions"
 statement = "An effect-fn call in a CONSTRUCTION position — a record field, list element, tuple slot, or map value — whose declared TARGET type is `Result[T, E]` KEEPS its Result (the auto-inserted `?` is stripped), exactly like the binding-statement arms (let/assign/index-assign/field-assign). The implicit Result-lift of an effect call plus an unconditional unwrap previously produced invalid native Rust (E0308: a `?` against a Result-typed slot) while wasm RAN and stored a SILENTLY WRONG value (the unwrapped i64 0 instead of the Result). Now byte-identical native == wasm: the Result is preserved at every construction position."
 status    = "active"
@@ -864,6 +932,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-069"
+spec      = "ALS-M4"
 title     = "Effect-fn tail self-recursion loop-converts to O(1) stack on both targets"
 statement = "A self-recursive `effect fn` whose recursive call is in tail position runs in O(1) native/wasm stack (loop-converted), identically to the non-effect equivalent — not O(n) frames that overflow at ~1e5 depth. The auto-? desugar moved into the frontend (cc70ebc4), so the tail self-call reaches TailCallOpt already wrapped as `Try{Call self}` (Rust arm) or `Ok(Try(Call self))` (wasm arm, where ResultPropagation precedes TCO); TCO sees through both wrappers — the `?` is subsumed by the loop (an Err can only originate at a base case) and the `Ok` propagation wrapper is tail-transparent for effect fns. The Err short-circuit at a base case still fires. Before the fix every implicitly-lifted recursive effect fn crashed at ~1e5 depth (native stack overflow exit, wasm call-stack-exhausted trap) while the identical non-effect fn was O(1)."
 status    = "active"
@@ -873,6 +942,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-070"
+spec      = "ALS-M1"
 title     = "Nested constructor patterns match and bind identically on both targets"
 statement = "A NESTED pattern as the argument of a user-defined constructor pattern — `Wrap(A(n))`, `Box(Some(n))`, `Held(Circle { r })`, `Node(Leaf(a), Leaf(b))` — emits the inner discriminant test(s) into the arm guard and binds the inner payload(s) recursively, byte-identical native == wasm. The wasm match backend's constructor arm-binding loop previously handled only top-level `Bind`/`Literal` args: a nested ctor / Some / None / variant-record arg got NO inner discriminant test and bound garbage (0), so wasm SILENTLY took the wrong arm (exit 0) while native was correct (and a nested ctor on a recursive boxed variant additionally emitted invalid Rust). Now `emit_arg_tests` recurses the discriminant tests into the guard and `bind_arg` recurses the binding through nested ctor / Some / variant-record payloads."
 status    = "active"
@@ -882,6 +952,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-071"
+spec      = "ALS-I1"
 title     = "Single-part interpolation RC balance"
 statement = "A degenerate one-part interpolation `\"${e}\"` that the WASM emitter short-circuits to return `e`'s pointer directly does not double-free `e`'s heap buffer at teardown: when `e` is a heap-String alias the binding acquires its own reference, so native and WASM both produce the value and exit 0 (no 'unreachable' trap). Literal, non-String, surrounded, and multi-fragment interpolations stay genuinely fresh."
 status    = "active"
@@ -891,6 +962,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-072"
+spec      = "ALS-M2"
 title     = "Inferred named-record repr parity"
 statement = "A record literal inferred without a type annotation reprs identically on native and WASM: when its field set matches a declared record type, both print `TypeName { ... }` in the type's DECLARATION field order with correct values even when the literal is written out of declaration order; a truly anonymous record prints prefix-less in sorted field-name order on both targets."
 status    = "active"
@@ -900,6 +972,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-073"
+spec      = "ALS-M1"
 title     = "Tuple pattern testing a variant constructor"
 statement = "A tuple match arm that tests a variant constructor in any element position (nullary in pos 1/2 or both, or a payload-carrying constructor whose binder is captured) compiles and runs byte-identically on native and WASM; the WASM module passes structural validation (no 'expected i32 but nothing on stack')."
 status    = "active"
@@ -909,6 +982,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-074"
+spec      = "ALS-S6"
 title     = "Iterative split/replace on large inputs"
 statement = "string.split and string.replace produce byte-identical results on native and WASM for large inputs (5000+ segments, 6000+ occurrences) and exit 0 with no 'call stack exhausted' trap; an empty `from` pattern inserts the replacement at every codepoint boundary (Rust `str::replace` parity)."
 status    = "active"
@@ -918,6 +992,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-075"
+spec      = "ALS-I3"
 title     = "lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough"
 statement = "Binding a borrow-rendered param (List &[T] / Map &AlmideMap) to a local converts to the owned type; an effect-fn Option[T] bound to a let and consumed by ?? strips the effect Result first leaving Option[T]; and `!` propagation whose source error type equals the enclosing fn's declared error type carries the custom variant error through `?` unchanged (no Debug stringify). All three compile and run byte-identically on native Rust and wasm32: stdout 'list=[7, 8]' / 'map_len=2' / 'miss=999' / 'hit=42' / 'fetch=item', exit 0."
 status    = "active"
@@ -927,6 +1002,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-076"
+spec      = "ALS-M3"
 title     = "Producer-side in-module variant construction is target-stable"
 statement = "A producer function declared inside the submodule that owns a variant type, constructing the variant via the bare constructor (tuple `Circle(r)` or record-variant `Circle { radius: r }`) and returning it, compiles and runs byte-identically on native Rust and wasm32 (stdout, stderr, exit). The construction expression's type is pinned to the owner-qualified `mod.Type`, so the #433 name-pinning verifier never fires on a valid in-module construction."
 status    = "active"
@@ -936,6 +1012,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-077"
+spec      = "ALS-T7"
 title     = "Cross-module heap-global init order is dependency-respecting"
 statement = "An importing module's top-level let that reads an imported module's heap global (string/list/etc.), directly or through a function call, observes the imported global already initialized on both native Rust and wasm32 (byte-identical stdout, stderr, exit). WASM eager top-let init runs in a dependency-respecting order computed interprocedurally; native's lazy/forced init agrees (C-007)."
 status    = "active"
@@ -945,6 +1022,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-078"
+spec      = "ALS-M2"
 title     = "Phantom record generic param is stripped on the Rust target"
 statement = "A record type with a generic param used by no field (a phantom param) compiles and runs byte-identical native == wasm. Rust forbids an unused type param (error[E0392]), so the Rust struct and every reference to it are emitted without generics; the param carries no runtime data (codegen erases types), so distinct instantiations share one representation — matching wasm, which already erases type params."
 status    = "active"
@@ -954,6 +1032,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-079"
+spec      = "ALS-M3"
 title     = "Variant cases with distinct anonymous-record payloads are target-stable"
 statement = "A variant whose cases carry anonymous-record payloads with different field-name sets compiles and runs byte-identical native == wasm, including for a payload type that appears only in the declaration (never constructed). The anonymous-record collector scans declaration field/payload types, so every payload lowers to its generated struct (`AlmdRec_<fields>`) instead of native falling back to the bare field name as a type (rustc E0425)."
 status    = "active"
@@ -963,6 +1042,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-080"
+spec      = "ALS-M5"
 title     = "Empty map.from_list / set.from_list resolves its element from the result type"
 statement = "`map.from_list([])` / `set.from_list([])` with an annotated result type compiles and runs byte-identical native == wasm. The empty-list argument's element type flows only through the generic call's return (Map[K,V] from List[(K,V)], Set[E] from List[E]); the checker can leave it an unresolved List slot, which native tolerates but the WASM concretization gate refuses. ConcretizeTypes derives the argument element from the call's resolved Map/Set type — matching both the Module-call and the lowered RuntimeCall (`almide_rt_map_from_entries`) forms — pinning the empty list (and its ANF temp) before the gate."
 status    = "active"
@@ -972,6 +1052,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-081"
+spec      = "ALS-M5"
 title     = "Generic fn in an inferred-param lambda resolves its type parameter"
 statement = "A generic function called inside a `list.map` (or similar HOF) lambda whose parameter type is inferred from the collection element compiles and runs byte-identical native == wasm. The generic's type parameter, which flows in only via the HOF's `(A)->B` slot after the lambda body is inferred, is fresh-instantiated before back-propagation instead of leaking its literal name into the union-find, so it resolves to the concrete element type. Verified at two instantiations (Int and String element types)."
 status    = "active"
@@ -981,6 +1062,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-082"
+spec      = "ALS-M5"
 title     = "Calling a closure-typed lambda parameter yields the call result, not the closure"
 statement = "A lambda whose body CALLS one of its parameters — `(f) => f(10)` over a `List[(Int)->Int]` via `list.map` — compiles and runs byte-identical native == wasm. When the called parameter's type is an unresolved inference var at the call site, the call constrains it to `(args)->?ret` and yields `?ret` (resolved from context), not the parameter's own closure type — so the HOF result is `List[?ret]`, not a list of closures. Verified for Int and String closure element types."
 status    = "active"
@@ -990,6 +1072,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-083"
+spec      = "ALS-M8"
 title     = "A negated i64::MIN literal is representable, not folded to zero"
 statement = "The literal `-9223372036854775808` (and its underscored/hex forms) compiles to a real `i64::MIN` and runs byte-identical native == wasm. The magnitude 9223372036854775808 overflows a signed `i64` parse, which previously clamped to 0 so the unary minus produced 0; lowering now folds the leading minus INTO the integer-literal parse (`-<digits>`) for decimal, hex, octal, and binary, so the whole negative value is parsed in range."
 status    = "active"
@@ -999,6 +1082,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-084"
+spec      = "ALS-D6"
 title     = "Codec/value decode error messages are byte-identical across targets"
 statement = "value.as_* type mismatches and Codec decode failures produce the SAME error string on both backends. The WASM emitter mirrors the native oracle (runtime/rs/src/value.rs): type errors name the Value variant (`expected Float`, `expected Int`, `expected Str`, `expected Bool`, `expected Object`, `expected Array`) and a missing required field interpolates its name (`missing field '<key>'`, built at runtime via __concat_str), replacing the prior lowercase / `key not found` placeholders."
 status    = "active"
@@ -1008,6 +1092,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-085"
+spec      = "ALS-D6"
 title     = "Float decode widens an integral JSON number to f64"
 statement = "Because a JSON number has no int/float distinction, value.as_float, json.as_float, and Codec Float-field decode (required, Option, and defaulted) all accept an integer JSON value and widen it to f64 — matching the native oracle (which already coerces in json.as_float/get_float and now in value.as_float) and serde. This keeps Codec roundtrips total when a Float value serializes without a decimal point. Verified byte-identical native == wasm for required, Option, and defaulted Float fields plus direct value.as_float / json.as_float."
 status    = "active"
@@ -1017,6 +1102,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-086"
+spec      = "ALS-I1"
 title     = "Pass-through stdlib combinators give their result its own reference"
 statement = "Combinators that return an INPUT cell unchanged — option.filter (some), option.or_else (some), option.flatten, result.map_err (ok), result.map (err), result.flat_map (err) — SHARE a +1 onto the returned cell on the pass-through path (like list.get's some-box), so the let-bound result owns its own reference. Without it the result and the input aliased one cell and both scope-end Decs double-freed it: a __rc_dec trap, or a SILENT wrong value read from the freed cell through a longer combinator chain. Verified byte-identical native == wasm across all six combinators, a four-stage find|>map|>filter|>flat_map chain, and an OOB-defaulted loop lookahead (list.get(xs, i+1) ?? default)."
 status    = "active"
@@ -1026,6 +1112,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-087"
+spec      = "ALS-D6"
 title     = "JSON number and \\u string decoding are byte-identical across targets"
 statement = "json.parse decodes \\uXXXX escapes (BMP 1/2/3-byte UTF-8 plus high+low surrogate pairs to astral code points) and numbers identically on both backends. The WASM parser hands every float token to the same correctly-rounded parser float.parse uses (__dec2flt) instead of an ad-hoc digits/divisor * 10^exp, fixing the dropped -0.0 sign (#663) and the one-ULP exponent error (#667); its \\u decoder UTF-8-encodes the code point (#651). The native oracle's BMP-only \\u decoder gained the same surrogate-pair joining so emoji and other astral escapes round-trip. Integers keep their exact i64 path."
 status    = "active"
@@ -1035,6 +1122,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-088"
+spec      = "ALS-M7"
 title     = "A Rust-keyword function name compiles on both targets"
 statement = "A user function whose name is a Rust keyword (box, move, dyn, unsafe, …) compiles and runs byte-identical native == wasm. The Rust emitter raw-escapes the name (box → r#box) at BOTH its definition and every call site, driven by one shared keyword predicate (is_rust_keyword) — an incomplete per-site list previously left the definition or the call unescaped, producing invalid Rust. WASM identifiers have no keyword conflict."
 status    = "active"
@@ -1044,6 +1132,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-089"
+spec      = "ALS-M5"
 title     = "A default parameter referencing an earlier parameter is filled with its argument"
 statement = "A default parameter value that references an earlier parameter (fn rect(w, h: Int = w)) compiles and runs byte-identical native == wasm. Defaults are inlined at the call site, so emitting the callee-local parameter name referenced a binding absent there (rustc E0425); lowering now substitutes each earlier parameter with its actual argument (chaining through earlier-filled defaults) before lowering the default expression."
 status    = "active"
@@ -1053,6 +1142,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-090"
+spec      = "ALS-D7"
 title     = "bytes.from_list on a List[Int] parameter compiles on both targets"
 statement = "bytes.from_list applied to a List[Int] function parameter compiles and runs byte-identical native == wasm. A List[Int] parameter renders as &[i64], which the native runtime rejected when it took &Vec<i64> (rustc E0308). The runtime now takes a slice &[i64] — the parameter passes directly and a local Vec<i64> still deref-coerces."
 status    = "active"
@@ -1062,6 +1152,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-091"
+spec      = "ALS-M1"
 title     = "A nested sub-pattern in let-destructuring binds every leaf"
 statement = "A let-destructuring pattern containing a nested tuple (or record) sub-pattern binds every leaf, byte-identical native == wasm. The WASM emit handled only a flat Bind element and skipped nested sub-patterns — their leaves stayed zeroed; it now recurses, loading each sub-aggregate pointer and binding through it, mirroring the local pre-scan that already allocated those leaf locals."
 status    = "active"
@@ -1071,6 +1162,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-092"
+spec      = "ALS-M2"
 title     = "A generic record field is sized by its instantiated type at construction"
 statement = "A generic record field is allocated and laid out by its instantiated type, byte-identical native == wasm. The WASM record emit sized the block from the DECLARED field list, so a generic field (value: T) used the unresolved param's default size (4 bytes); a trailing concrete heap field then wrote past the under-allocated block and read back empty, corrupting both the record and any spread of it. Construction now derives size and field order from the concrete (generic-substituted) layout of the result type."
 status    = "active"
@@ -1080,6 +1172,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-093"
+spec      = "ALS-M3"
 title     = "Mutually-recursive variant types compile on both targets"
 statement = "Variant types forming a recursion cycle across two or more types (type A = A(B); type B = B(A)) compile and run byte-identical native == wasm. The native enum emit boxed a variant field only when it named the ENCLOSING type, so a mutual cycle emitted both enums without indirection and rustc rejected them as infinitely sized (E0072). Recursion detection is now cycle-based (a type that can reach itself through variant-field references), and the Box-rendering, pattern-deref, and boxed-fields-annotation sites all box a field that references ANY cycle member."
 status    = "active"
@@ -1089,6 +1182,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-094"
+spec      = "ALS-M5"
 title     = "A protocol-method UFCS call on an inferred lambda param resolves the element type"
 statement = "A higher-order call whose lambda argument has an UNANNOTATED parameter used as a protocol-method receiver (`list.map(xs, (e) => e.name())` where `xs: List[T]`, `T: Labelled`) compiles and runs byte-identical native == wasm. The checker resolves the callee signature up front and pins the lambda's inferred param to the expected element type (carrying its protocol bound) before inferring the body, so `e.name()` resolves via the protocol path instead of collapsing `e` into a closure type (which native rendered as `Rc<dyn Fn() -> String>`, rustc E0308). Verified for a stdlib HOF and a user-defined HOF."
 status    = "active"
@@ -1098,6 +1192,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-095"
+spec      = "ALS-D6"
 title     = "json.stringify_pretty is byte-identical indented output across targets"
 statement = "json.stringify_pretty produces the same indented JSON on both backends. The WASM arm was a stub (compact output plus a stray newline); it now has a real recursive pretty-printer (__json_stringify_pretty) mirroring the native oracle (json.rs stringify_value): two-space indent per depth, one array element / object member per line, comma-then-newline separators, and inline [] / {} for empty containers. Scalars match the compact form. Verified byte-identical native == wasm over a nested object/array document, a top-level array, and a top-level scalar."
 status    = "active"
@@ -1107,6 +1202,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-096"
+spec      = "ALS-R5"
 title     = "process.args works on WASM and matches native"
 statement = "process.args() runs on the WASM target (previously an emit ICE) and agrees with native. It maps to std::env::args() — argv[0] (the program path) followed by program args — built on WASM from the WASI args_sizes_get / args_get imports into the same List[String] layout native produces. The result List and each inner String are framed with the canonical 8-byte [len][cap][data] header (a 4-byte header made every element/byte read at the wrong offset — #645). Verified byte-identical native == wasm on the argument COUNT and on an argv[0]-independent content invariant (string.len of element 0 is non-zero), which reads the list at index 0 and walks element 0's UTF-8 data, exercising both the list and string header."
 status    = "active"
@@ -1116,6 +1212,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-097"
+spec      = "ALS-M5"
 title     = "generic + on a type parameter concatenates strings/lists identically across targets"
 statement = "A `+` whose operand is a type parameter T lowers to the default AddInt; when T instantiates to String or List, monomorphization re-dispatches it to ConcatStr / ConcatList (mirroring lowering's own type dispatch). A `fn dup[T](x: T) -> T = x + x` therefore concatenates for String and List and adds for Int, byte-identical native == wasm. A genuinely non-concatenable instantiation (e.g. a record) stays AddInt and is still rejected by the IR-verify gate."
 status    = "active"
@@ -1125,9 +1222,385 @@ evidence  = [
 
 [[contract]]
 id        = "C-098"
+spec      = "ALS-D6"
 title     = "cross-module derived Codec methods dispatch on WASM and match native"
 statement = "A derived Codec method whose subject or element type is defined in another module (mod.Type.encode/decode, direct field, List[mod.Type], Option[mod.Type]) now dispatches on the WASM target instead of an emit ICE, and roundtrips byte-identically to native. The call site carries only Type.method (the subject type has no module) while the fn is registered under its module_origin-qualified name mod.Type.method; the WASM dispatcher resolves it by a unique func_map suffix match, and a __decode_list_mod.Type codec helper is routed before the dotted-name split that used to mis-parse the embedded dot. Native is unaffected (the #411-B BuiltinLoweringPass already flattens the name, but it is Rust-only)."
 status    = "active"
 evidence  = [
   { path = "tests/crossmod_matrix_test.rs", name = "crossmod_shape_matrix", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-099"
+spec      = "ALS-M8"
+title     = "comparison/equality operators byte-match native across all operand types on the v1 wasm path"
+statement = "On the v1 wasm path the comparison operators (==, !=, <, <=, >, >=) produce stdout byte-identical to native for every operand type. Heap `==`/`!=` (Value, List[Int|String|Value|Float|Bool]) lowers to a scalar deep-equality call returning a 0/1 cond, so `if heap == heap …` branches on a single arm instead of the both-arms linearization that silently ran BOTH arms; equality is deep/structural element-wise (Value PartialEq, f64 == for floats, i64 0/1 for bools). String ordering (< <= > >=) compares lexicographic content via string.cmp rather than the i64 string handle, and Bool ordering follows value semantics (false < true) instead of being unhandled. Native is the oracle and native == wasm output is the certified invariant."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/value_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_eq_float_bool.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_bool_ordering.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tuple_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/option_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/option_heap_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_if_eq_cond.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-100"
+spec      = "ALS-M12"
+title     = "Self-hosted String classification/transform ops byte-match native on wasm"
+statement = "The self-hosted String classification predicate `string.is_alphanumeric` and the ASCII-fold transform `string.to_upper` MUST produce stdout byte-identical to native on the v1 wasm path. `is_alphanumeric` returns true only when every codepoint is ASCII alphanumeric and false for the empty string, matching native (`abc123`/`Z9` -> true; `ab-c`/`` -> false). `to_upper` maps `a-z` to `A-Z`, leaves all other bytes (digits, symbols, spaces) and the empty string unchanged, matching native `to_uppercase` over ASCII. Both ops were previously unlinked on v1 and are now certified equivalent across native Rust and wasm32."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_is_alphanumeric.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_to_upper.almd", class = "fixture" },
+  { path = "spec/wasm_cross/split_empty_sep.almd", class = "fixture" },
+  { path = "spec/wasm_cross/replace_empty_pat.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-101"
+spec      = "ALS-M12"
+title     = "List ops over heap elements (String/Value) byte-match native and are leak/double-free free"
+statement = "List operations whose elements are heap-backed handles (List[String], List[Value]) — list.min/list.max, list.sort, list.insert/remove_at/swap, and list.set — produce stdout byte-identical to native on the v1 wasm path. Comparison-based ops order and select by element CONTENT (lexicographic byte order, matching v0's Rust String Ord), not by the raw i64/i32 handle the generic impls compared, which silently picked the wrong element. The typed _str/_value variants rc-copy each retained element to co-own it (so result and source can both drop without double-free), free each removed/replaced element exactly once, and recurse via __drop_value so a replaced Object/Array element's nested children are not leaked. The promise holds at scale: no leaks and no double-frees across repeated/large lists."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_minmax_str.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_modify_heap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_set_value.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_sort_str.almd", class = "fixture" },
+  { path = "spec/wasm_cross/whilep_str.almd", class = "fixture" },
+  { path = "spec/wasm_cross/chunk_str.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fold_heap_acc.almd", class = "fixture" },
+  { path = "spec/wasm_cross/reduce_str.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_accumulator.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_object_leak_loop.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-102"
+spec      = "ALS-M6"
+title     = "List iteration, call-result element materialization, and tail-recursive list traversal byte-match native"
+statement = "On the v1 wasm path, list element/iteration constructs produce stdout byte-identical to native Rust. A `List[String]` literal whose element is a string-returning module or named call (e.g. `[string.slice(s, 0, 1)]`) materializes a fresh owned String moved into the slot and freed by `DropListStr` at scope end. `list.enumerate` over a `List[String]` builds a `List[(Int,String)]`, and `enumerate |> list.find(closure)` evaluating a closure over the heap tuple's `.1` yields an `Option[(Int,String)]` that constructs, matches, destructures `some((idx, line))`, and drops (`$__drop_list_int_str`) identically across targets. A tail-self-recursive fn over a shrinking list (`list.drop(cs, 1)` per call with `match list.first(cs)`) is rewritten to an invariant borrowed list plus a synthetic scalar index — the cert-clean scalar-TCO form with no heap back-edge merge — covering direct-arm, block-arm-with-let, and string-eq element-use scans."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_call_element.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_enumerate_find.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_iter_tco.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-103"
+spec      = "ALS-D6"
+title     = "Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop"
+statement = "On the v1 wasm path the self-hosted dynamic Value model produces stdout byte-identical to native Rust. value.merge does a shallow Object merge that keeps a's keys in a's positions with b's values overriding, then appends b's new keys, and falls back to b when a is non-object (empty-merge is identity). value.array stores and value.as_array reads back the List[Value] payload with correct Ok/Err tag dispatch, and append-accumulator tail recursion building a List[Value] with a (Value, Int) heap-result tuple return lowers identically. The recursive Value drop is leak-free across 20000 create+drop iterations for the 3-level Array -> element-Value -> String and Result -> List[Value] -> element-Value -> String free chains, so the loop completes within page 1 instead of OOB-trapping."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/value_merge.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_array_leak_loop.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_as_array_leak_loop.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_as_array_roundtrip.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_array_tuple_tco.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-104"
+spec      = "ALS-M6"
+title     = "Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native"
+statement = "A self-tail-recursive function whose recursive call carries a growing heap accumulator MUST produce byte-identical stdout, stderr, and exit code on BOTH targets, executing in bounded stack on the v1 wasm path. This holds across the accumulator-construction shapes the TCO desugars must compose: let-bound and nested heap-result `if` arms (tail-duplicated into branched recursion), multi-leaf concat spines (`acc + c0 + c1`), List append, recursion inside a `match` returning `Result[List, String]` (from `!`-unwrap desugaring) on both ok and err paths, and effect-fn `(Value, Int)` tuple-result accumulators that destructure an effectful `!` result each step. A general (non-append) heap recursive arg that is NOT TCO-able instead lowers to a real bounded recursive call that still matches native exactly. Loop-carried accumulators are rc-balanced (drop-old/alloc-new, payload Dup) so there is no leak or double-free, and v1 output equals v0 in every case."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/general_recursion_tail.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tco_let_bound_if.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tco_multi_concat.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tco_nested_list_accumulator.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tco_over_match_result.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_tuple_result_tco.almd", class = "fixture" },
+]
+
+# ── APPEND-ACCUMULATOR TCO CROSS-TARGET BYTE-MATCH (option C) ─────────
+[[contract]]
+id        = "C-105"
+spec      = "ALS-M6"
+title     = "var/append accumulator loops (scalar, owned-handle, cross-dep, mutual-recursion) byte-match native on wasm"
+statement = "A tail-self-recursive function that grows a heap accumulator by `acc + [x]` on every self-call is rewritten by the option-C TCO into a loop carrying one OWNED slot (seed `acc + []`, drop-old/acquire-new per iteration, cert `i(id)m`), and a mutually-recursive parser-loop pair is first reduced to a direct self-call (single-call sibling inlined, or the function-wide fresh-VarId desugar applied) so the same TCO fires. On the v1 wasm path these accumulator loops produce stdout, stderr, and exit code byte-identical to the native Rust oracle for any iteration count: scalar `List[Int]` elements, owned-handle `List[String]` elements (rc-incrementing concat, no leak/double-free), cross-dependent appends that must read the pre-update loop indices (no off-by-one), and mutual-recursion shapes whose semantics are preserved by the inlining. The list BLOCK ownership is machine-proved leak/double-free-free; per-element leak-safety and the final byte-equality are certified by the fixtures themselves."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/append_accumulator.almd", class = "fixture" },
+  { path = "spec/wasm_cross/append_accumulator_heap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/cross_dep_accumulator.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mutual_append.almd", class = "fixture" },
+  { path = "spec/wasm_cross/block_line_collect.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-106"
+spec      = "ALS-M10"
+title     = "Heap value bound from an if/match arm byte-matches native on the v1 wasm path"
+statement = "On the v1 wasm path, a heap-allocated value (a List, String, tuple, record, or user Result/Option payload) that is produced inside an if-arm or match-arm — including appended/concatenated list arms, record and tuple arms, str-int Ok-tuple arms, string-interpolated Err arms, arms that re-wrap a payload through a stdlib module call, and arms nested inside another match — is lowered with a per-arm ownership frame so only the taken arm's transient heap is materialized and freed exactly once. Each arm's owned value is moved out of the if/match cleanly, bound payloads borrow versus dup correctly, and the subject drops after the arms rather than via an unconditional rc_dec of an untaken arm. The resulting stdout, stderr, and exit code are byte-identical to the native Rust target across both taken-arm cases, with no leaks or rc_dec(0) traps."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/heap_result_if_append.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_if_match_arm_frame.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_if_record_arm.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_if_str_int.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_tuple_return.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_err_interp.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_match_heap_arm.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_heap_err_match.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_heap_ok_match.almd", class = "fixture" },
+  { path = "spec/wasm_cross/str_result_heap_bind.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_match_rewrap_modcall.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-107"
+spec      = "ALS-I3"
+title     = "heap Result-of-tuple / Result-of-list Ok payloads round-trip and byte-match native"
+statement = "Producing a Result whose Ok payload is a heap-bearing tuple — (String, Int), (Value, Int), (List[String], Int), or (List[Value], Int) — and then match-consuming it (binding the Ok tuple, destructuring it, printing its parts) emits stdout, stderr, and an exit code on the wasm32 path that are byte-identical to native Rust. Each shape uses its own recursive drop (Op::DropResultStrInt / DropResultValueInt / DropResultListStrInt / DropResultListValueInt, the latter two via value_core's tuple drops) so the Result wrapper, the tuple block, and every heap element inside slot0 are freed exactly once; a flat DropListStr would leak the inner String/Value/list elements. This holds leak-free at scale (loops and recursive accumulation) and on both the Ok and Err arms."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_str_int_tuple.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_value_int_tuple.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_list_str_int_tuple.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_list_value_int_tuple.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-108"
+spec      = "ALS-M11"
+title     = "Unwrap `!` and let-unwrap desugaring byte-match native in every position"
+statement = "The Result-unwrap operator `!` and its `let`-bound forms desugar to an Err-early-return match whose observable native↔wasm behavior is byte-identical for every syntactic position: nested in a call/ctor argument or BinOp operand (ANF-lifted before lowering), inside an `if` arm (lifted out of the arm), bound by `let s = e!`, destructured by `let (a, b) = e!`, and used before a self-recursive tail call (real recursion, not TCO). The Ok payload continues into the pushed-into-ok-arm continuation and the Err propagates as the function's return; a scalar `?? d` fallback in an operand position evaluates correctly instead of silently reading the default. Across all fixtures the wasm32 path emits the same stdout, stderr, and exit code as native Rust (v0==v1)."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unwrap_in_callarg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_in_if_arm.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_in_recursion.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_or_operand.almd", class = "fixture" },
+  { path = "spec/wasm_cross/let_unwrap_propagation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/destructure_let_unwrap.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-109"
+spec      = "ALS-I3"
+title     = "Self-hosted base64 encode byte-matches canonical / native on the v1 wasm path"
+statement = "The self-hosted almide/base64 encode path, compiled to v1 wasm32, prints stdout byte-identical to native and to canonical base64 vectors. This composes a const module-global alphabet string (Init::Str), a tail-recursive String-accumulator encode loop with chained multi-concat (acc + c0 + c1 + c2 + c3), let-bound heap-result `if` expressions for the pad characters, and `string.get ?? \"\"` Option fallbacks. Encoding \"a\", \"ab\", \"hello\", and \"Many hands make light work.\" yields the standard padded base64 output on both backends."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/base64_encode.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-110"
+spec      = "ALS-M13"
+title     = "In-place bytes.push mutation accumulator byte-matches native on v1 wasm"
+statement = "An in-place `bytes.push(mut buf, val) -> Unit` mutation accumulator inside a `var buf; while { bytes.push(buf, x) }` loop (the bigint.from_int shape) produces stdout byte-identical to native on the v1 wasm path. Because v1 has value semantics, the MIR lowering rewrites each `bytes.push(buf, x)` to the functional rebind `buf = bytes.append(buf, x)` using bytes_core's self-hosted append, preserving observable results. For input 0x010203 it reports length 3 and first byte 3 on both backends."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_push_inplace.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-111"
+spec      = "ALS-T7"
+title     = "Module-level const heap globals initialize and read identically on v1 wasm and native"
+statement = "Const module-level heap globals materialize as static DATA with no runtime initializer call, so functions referencing them lower and read byte-identical to native on the v1 wasm path. This covers a string literal global (Init::Str), an int-list literal, and a `bytes.from_list([int literals])` global (Init::Bytes), as in the AES S-box / base64 alphabet shape. Slicing the const string and reading `bytes.read_u8` from the const byte table print the same stdout on both backends."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/module_global_const.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-112"
+spec      = "ALS-R5"
+title     = "random.int draws stay in-range identically under the WASI entropy floor on v1 wasm"
+statement = "The self-hosted `random.int(lo, hi)` reaches the WASI entropy capability (Capability::Entropy) via prim.random_get on the v1 wasm path, the first effectful capability beyond Stdout, and is callable only from an effect fn that declares Entropy. Because the drawn value is nondeterministic, the certified observable is the deterministic RANGE invariant: every draw satisfies lo <= r <= hi. Drawing random.int(10, 20) fifty times, all 50 draws fall in range and both backends print \"50\"."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/random_int_entropy.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-113"
+spec      = "ALS-M1"
+title     = "Let-bound ADT/Result variant matched by tag byte-matches native on v1 wasm"
+statement = "A let-bound user-function Result/ADT value that is subsequently matched by tag (the num_signed_base shape) executes the match by reading the variant tag instead of walling, producing stdout byte-identical to native on the v1 wasm path. Seeding the let-binding's variant param gives the bound var the same read-shape a direct call-argument position already has, including the harder case of a let-bound heap-result `if` whose tail-duplication desugar distributes the match into each arm. Matching ok/err over both directly-bound and if-distributed Results prints the same output on both backends."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/letbound_variant_match.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-114"
+spec      = "ALS-M1"
+title     = "Matching an Option with a heap payload byte-matches native on v1 wasm"
+statement = "Matching an Option whose Some-payload is a heap value (String/Value), as in `match list.first(xs) { none => A, some(key) => B }` from toml set_nested/append_aot, returns the correct branch byte-identical to native on the v1 wasm path. The Some-payload binds the heap handle as a borrow via heap_or_scalar_bind, gated on the Option[heap] subject tracked as a nested-owner, extending the prior lowering that only handled a Tuple Some-payload. picking from [\"hello\", \"world\"] yields \"hello\" and from [] yields the fallback \"empty\" on both backends."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/option_match_heap_payload.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-115"
+spec      = "ALS-M10"
+title     = "Pipe into a block-bodied lambda producing a value byte-matches native on v1 wasm"
+statement = "A pipe into an inline lambda (`x |> (n) => body`) is inlined by the frontend to a block bind `{ let n = x; body }` and lowered to the correct value on the v1 wasm path, byte-identical to native, fixing a prior silent miscompile that produced 0. This also exercises block-valued scalar binds (`let a = { let n = ...; ... }`), which v1 MIR previously mis-lowered to 0 and now lowers by running the block's statements then binding to the block tail. Single, chained, explicit-block, and block-bodied-lambda forms print 25, 26, 48, and 36 on both backends; a pipe-lambda in a call-argument position safely walls rather than mis-lowering."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/pipe_lambda_block_value.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-116"
+spec      = "ALS-I3"
+title     = "v1 scalar-value lowering edges byte-match native (tail Bool literal, float.parse inf/nan)"
+statement = "Two previously-diverging v1 scalar-value cases now produce stdout byte-identical to native. (1) A function whose body IS a bare Bool literal (`fn t() = true`, or a constant/param-ignoring predicate `(x) => true` for list.all/any/count) RETURNS its 0/1 — not the deferred-Const ZERO it used to fall into in tail position, which silently made every constant-true predicate FALSE (list.all((x)=>true) wrongly false). (2) float.parse accepts the IEEE 754 special values inf / infinity / nan (case-insensitive, optional sign) like Rust's strtod, building them by runtime division (1/0, 0/0) so the bit patterns match on both targets; junk still errs and normal floats are unaffected. Native is the oracle."
+since     = "0.27.7"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bool_literal_tail.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_parse_special.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-117"
+spec      = "ALS-M6"
+title     = "In-loop let-bound heap if/match is lifted to a tail helper and renders on v1"
+statement = "A heap-result `if`/`match` bound to a `let`/`var` INSIDE a for-in/while body produces stdout byte-identical to native on the v1 trust-spine wasm path. The branch_lift pass (almide-optimize, the shared frontend pipeline) hoists the inline branch into a synthesized tail helper fn `__branch_lift_N(free_vars) -> T = <branch>` and rebinds the local to its call result — a proven shape (tail heap-result branch + let-bound call result), so v1 renders it where the inline branch walled (the flat cert could not attribute one scope-end drop to one-of-two exclusive arm-allocs). The existing MIR tail-duplication desugar handles the non-loop cases; this closes the loop-body residual (the #1 real-app v1 coverage lever — binary-search and kin). Native is the oracle; the lift is semantics-preserving (0 backend-split across the 3-way oracle)."
+since     = "0.27.7"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/branch_lift_in_loop.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-118"
+spec      = "ALS-R5"
+title     = "env.args works on WASM and matches native (argv[0] skipped)"
+statement = "env.args() runs on the WASM target (previously a stub that always returned the empty list) and agrees with native. It maps to almide_rt_env_args = std::env::args() with argv[0] (the binary name) SKIPPED — only the real program args. On WASM it is built from the WASI args_sizes_get / args_get imports by the SAME builder process.args uses (emit_wasm/calls_process.rs::emit_wasi_argv_list), parameterized by a leading-argv skip count: env.args passes skip=1 (drop argv[0]); process.args passes skip=0 (full argv). The result List and each inner String are framed with the canonical 8-byte [len][cap][data] header. Verified byte-identical native == wasm on the argument COUNT: with no extra program args the underlying argv is [program] on both legs, so after the skip env.args() is the empty list (length 0) on both — an argv[0]-content-independent invariant, since argv[0] itself differs between a temp binary path and the wasm module path."
+since     = "0.27.8"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/env_args.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-119"
+spec      = "ALS-M4"
+title     = "effect-`!` inside a `for` loop body propagates Err and byte-matches native"
+statement = "An effect-`!` (error propagation) inside a `for` loop body, in a function returning `Result[T, String]`, runs on the WASM target and agrees with native. Previously such a `!` WALLed at lowering (a mid-loop early-return makes the loop's owned iterable + iteration transients conditionally dropped — a double-free the flat ownership certificate cannot model). It is now a PURE IR→IR desugar (desugar_loop_unwrap) to a loop-carried error-flag + post-loop dispatch: `for x in xs { … e! … }; <post>` becomes `var __ef=false; var __ev=\"\"; for x in xs { if not __ef then { match e { ok(v)=>…, err($x)=>{__ef=true; __ev=$x ++ \"\"} } } else () }; if __ef then err(__ev) else <post>`. BYTE-IDENTICAL to early-return: once __ef is set the per-iteration guard skips all remaining effects, the loop terminates by exhausting xs (bounded — `for` only, never `while`), and the post-loop dispatch yields the propagated Err. The accumulator stores an OWNED copy (`$x ++ \"\"`, a fresh String) so the loop-carried slot certifies as the PROVEN i(id)m shape — the whole desugar reuses the existing loop-slot + heap-result-`if` machinery with NO new MIR op and NO certificate/Coq change (corpus-wall: ownership ACCEPT over all 4517 functions). Verified byte-identical native == wasm on both the all-ok path (the loop completes) and the err path (a mid-loop `!` short-circuits)."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/effect_unwrap_in_loop.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-120"
+spec      = "ALS-I3"
+title     = "capturing filter_map with a conditional keep/skip arm body byte-matches native"
+statement = "A CAPTURING `list.filter_map` whose inline lambda body is a variant `match` with a CONDITIONAL arm — an arm whose body is a Block and/or an `if c then some(rec) else none` (the porta load_porta_config `secrets` shape: `match val { some(s) => some(rec), none => { let b = …; if b then some(rec2) else none } }`) — runs on the WASM target and agrees with native. Previously the defunc `emit_filter_map_arm` handled only a bare `some(elem)` / `none` / empty-list arm body and WALLed any other shape (`list.filter_map with an unliftable/closure-list higher-order argument`). It now recurses into a Block arm body (lowering the leading `let`s as per-arm effects, captures resolving via value_of, heap temps freed at the arm frame end) and an `if` arm body (a UNIT keep/skip control structure — only the taken arm runs, its record built+stored into the SAME write-cursor result list, the cursor's increment in-place under unit_arm_depth), mirroring the proven `append_body_to_str_acc` Block/If handling for the str-accumulator path. NO merged heap value is bound (the record is materialized inside the taken arm), so no unsound flat-cert shape arises; NO new MIR op and NO certificate/Coq change (corpus-wall: ownership ACCEPT over all 4520 functions). Verified byte-identical native == wasm: the some-arm (key present), the none-arm's `if … then some` (conditional keep), and the none-arm's `else none` (skip) all produce identical output."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/filter_map_conditional_arm.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-121"
+spec      = "ALS-I1"
+title     = "String pass-through fast paths hand back an owned (+1) reference"
+statement = "String runtime fns whose fast path returns the INPUT string unchanged — `string.replace` with no occurrence, `string.replace_first` on a miss, `string.pad_start`/`string.pad_end` when the width is already satisfied, and `string.capitalize` of the empty string — hand the caller its OWN reference (SHARE +1), so a pipe chain of no-match links byte-matches native. The WASM emitter previously returned the input borrowed: every no-match link added an extra Dec of the same buffer, and a 3-link no-match `string.replace` chain (the svg `escape_attr` shape) under-flowed the refcount and trapped `__rc_dec` while native printed the correct output."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_passthrough_share.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-122"
+spec      = "ALS-I1"
+title     = "Value object ops allocate full list layout and share pairs with +1"
+statement = "`value.merge`, `value.pick`, `value.omit`, `json.keys`, and the ok path of `value.get`/`value.field` build their result from an existing object's pairs: the result list uses the FULL `[len][cap][data]` layout and owns a +1 on every shared pair pointer, key string, and ok payload. The WASM emitter previously allocated the pair list 4 bytes short (no cap word — the last element write clobbered the adjacent heap block), left cap uninitialized, and copied the pointers borrowed: `value.merge(a, b)` read back `{\"\":null}`, `list.get(json.keys(v), 0) ?? d` freed the object's live key, and the toml array-of-tables parse silently dropped fields on wasm while native was correct."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/value_object_ops_share.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-123"
+spec      = "ALS-M2"
+title     = "Record spread shares copied heap fields and alias overrides with +1"
+statement = "`{ ...base, field: v }` byte-copies the base record, so every duplicated heap-field pointer is reachable from two records: the copy owns a +1 per non-overridden heap field, and a borrowed-alias override (a Var) is retained under the same `emit_stored_field` +1 rule as a plain `Record` field. The WASM emitter previously copied both borrowed: the svg `doc` shape (`{ ...piped_base, children }`) rendered `<svg/>` with its attrs Map freed once the piped base temp was dropped, then trapped `__rc_dec` at the scope-end drops, while native printed the full element."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/spread_record_share.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-124"
+spec      = "ALS-C3"
+title     = "Value equality is deep structural, mirroring the native PartialEq"
+statement = "`Value == Value` (and `!=`) compares deep structure exactly like the native derived `PartialEq` on `enum Value`: strict tag match (no Int/Float widening), string payloads by content, arrays elementwise, and objects as IN-ORDER pair lists. The WASM emitter previously fell through to the childless-record equality arm and compared POINTERS — two separately-built `json.null()`s were unequal, so `(json.get(f, \"import\") ?? json.null()) != json.null()` classified every function as a JS import on wasm (almide-wasm-bindgen generate_esm) while native said none."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/value_deep_eq.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-125"
+spec      = "ALS-C5"
+title     = "bytes.set has value semantics — never observable through the input"
+statement = "`bytes.set(b, i, v)` mirrors the native oracle `almide_rt_bytes_set` exactly: it CLONES and returns a new Bytes, so the mutation is never observable through `b` or any binding sharing its buffer — including a fn param (the caller's value stays intact) and a local alias. The wasm emitter previously stored in place unconditionally, so `encrypt_block(iv, …)` inside the aes cfb8 loop clobbered the caller's iv and produced wrong NIST vectors while native was correct. The in-place fast path survives only for the provably-unaliased `x = bytes.set(x, …)` self-update (AliasCowPass marks copy-aliased and param-reachable targets, vetoing the peephole), which is unobservable — byte-identical to native."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_set_value_semantics.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-126"
+spec      = "ALS-M5"
+title     = "Nested-lambda HOF params keep their inference link (no literal sig-generic pin)"
+statement = "An unannotated lambda param inside another lambda resolves through the union-find like any inference var: the #653 expected-type pin never writes the CALLEE's own unbound generic (`A` when the collection arg is itself an unresolved var) into the param, while a pin that denotes an IN-SCOPE rigid generic (`names[T: Labelled]` calling `list.map(xs, (e) => e.name())`) still applies. Previously the literal `A` disconnected the param from the solver and the inner `let sq = list.map(row, (x) => x*x)` defaulted its element type to Int — native rendered `Vec<i64>`/`Fn(f64) -> i64` (E0308/E0271) and wasm emitted an invalid module (i64 vs f64), the nn variance_rows shape."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/nested_hof_lambda_inference.almd", class = "fixture" },
+  { path = "spec/wasm_cross/protocol_ufcs_inferred_lambda.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-127"
+spec      = "ALS-M5"
+title     = "unwrap_or sizes its payload from the default when the chain type is unresolved"
+statement = "`option.unwrap_or` and `result.unwrap_or` derive their payload width from the DEFAULT argument whenever the Option/Result inner type arrives unresolved from a generic chain (`list.find |> option.map |> option.unwrap_or`, the nn gguf get_alignment shape). The wasm emit previously picked the pointer-width arm from the unresolved inner while the default arm emitted its real width — an `if (result i32)` block with an `i64.const` arm that failed structural validation; native was correct. `unwrap_or(o: Option[T], d: T)` makes the default's type authoritative."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/generic_chain_unwrap_or.almd", class = "fixture" },
 ]

@@ -1,0 +1,122 @@
+// option_map — SELF-HOSTED option.map(o, f) = o.map(f) for v1 over the prim floor + the closures
+// machinery. Reads the materialized Option's len-tag (Some = len 1, None = len 0). The closure is
+// invoked ONLY on the Some arm (v0 never calls f for None) — the Some arm is a CALL to a helper
+// that applies f and builds Some(f(x)); the None arm builds None. SCALAR payload (Option[Int]) so
+// there is no nested-heap transfer; `o` is borrowed, the result is a fresh owned Option.
+
+// Apply f to x and wrap as Some(f(x)) — a heap-returning helper, so option_map's Some arm is a
+// direct user call (the proven heap-result call-arm) and f is invoked via CallIndirect here, not in
+// an OptionSome scalar position (which does not lower a closure call).
+fn __opt_map_some(x: Int, f: (Int) -> Int) -> Option[Int] = {
+  let y = f(x)
+  Some(y)
+}
+
+fn option_map(o: Option[Int], f: (Int) -> Int) -> Option[Int] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len >= 1 then __opt_map_some(x, f) else None
+}
+
+// option.filter(o, pred) = o.filter(pred): keep Some(x) iff pred(x), else None. Same helper shape —
+// pred is invoked via CallIndirect ONLY when the Option is Some (v0 calls f only on the value). The
+// kept value is the SAME x (no closure transform), so Some(x) reuses the borrowed scalar.
+fn __opt_filter_some(x: Int, pred: (Int) -> Bool) -> Option[Int] = {
+  let p = pred(x)
+  if p then Some(x) else None
+}
+
+fn option_filter(o: Option[Int], pred: (Int) -> Bool) -> Option[Int] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len >= 1 then __opt_filter_some(x, pred) else None
+}
+
+// option.flat_map(o, f) = o.and_then(f): Some(x) → f(x) (itself an Option), None → None. The
+// closure RETURNS a heap Option, invoked via a heap-result CallIndirect ONLY on the Some arm; its
+// fresh owned result is moved straight out. The helper isolates the closure call so option_flat_map's
+// Some arm is a plain named call (the proven heap-result call-arm).
+fn __opt_flatmap_some(x: Int, f: (Int) -> Option[Int]) -> Option[Int] = {
+  let r = f(x)
+  r
+}
+
+fn option_flat_map(o: Option[Int], f: (Int) -> Option[Int]) -> Option[Int] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len >= 1 then __opt_flatmap_some(x, f) else None
+}
+
+// option.unwrap_or_else(o, f) = o.unwrap_or_else(f): Some(x) → x, None → f() (a 0-arg thunk). The
+// thunk is invoked via CallIndirect ONLY on the None arm (a named helper isolates the call so the
+// scalar `if` arm is a plain call). Result is a SCALAR Int. `o` is borrowed.
+fn __opt_unwrap_else(f: () -> Int) -> Int = f()
+
+fn option_unwrap_or_else(o: Option[Int], f: () -> Int) -> Int = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len >= 1 then x else __opt_unwrap_else(f)
+}
+
+// option.or_else(o, f) = o.or_else(f): Some(x) → Some(x) (kept), None → f() (a 0-arg thunk itself
+// returning an Option, invoked via a heap-result CallIndirect ONLY on the None arm). The kept Some
+// is rebuilt from its scalar slot (Option[Int]); the helper isolates the heap-result thunk call.
+fn __opt_orelse_none(f: () -> Option[Int]) -> Option[Int] = {
+  let r = f()
+  r
+}
+
+fn option_or_else(o: Option[Int], f: () -> Option[Int]) -> Option[Int] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len >= 1 then Some(x) else __opt_orelse_none(f)
+}
+
+// option.to_result(o, msg) = o.ok_or(msg.to_string()): Some(x) → Ok(x), None → Err(a fresh COPY of
+// msg). v0 copies the message (to_string), so the borrowed `msg` is NOT moved into the Result — a
+// deep copy (string.repeat ·1) is, keeping single ownership (no double-free with the caller's msg).
+fn __copy_str(s: String) -> String = string.repeat(s, 1)
+
+fn option_to_result(o: Option[Int], msg: String) -> Result[Int, String] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len >= 1 then Ok(x) else Err(__copy_str(msg))
+}
+
+// option.flatten(o) = o.flatten(): Some(inner) → inner, None → None. Re-reads the inner Option's
+// len-tag + scalar slot and REBUILDS it (no ownership transfer — the outer keeps its inner, freed
+// by the caller's DropListStr; the rebuilt Option is fresh). Some(Some(x))→Some(x), Some(None)→None.
+fn __opt_flatten_inner(inner_h: Int) -> Option[Int] = {
+  let ilen = prim.load32(inner_h + 4)
+  let ival = prim.load64(inner_h + 12)
+  if ilen >= 1 then Some(ival) else None
+}
+
+fn option_flatten(o: Option[Option[Int]]) -> Option[Int] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let inner_h = prim.load64(h + 12)
+  if len == 0 then None else __opt_flatten_inner(inner_h)
+}
+
+fn __opt_zip_some(av: Int, bv: Int) -> Option[(Int, Int)] = {
+  let t = (av, bv)
+  Some(t)
+}
+fn option_zip(a: Option[Int], b: Option[Int]) -> Option[(Int, Int)] = {
+  let ah = prim.handle(a)
+  let alen = prim.load32(ah + 4)
+  let av = prim.load64(ah + 12)
+  let bh = prim.handle(b)
+  let blen = prim.load32(bh + 4)
+  let bv = prim.load64(bh + 12)
+  if alen == 0 then None
+  else if blen == 0 then None
+  else __opt_zip_some(av, bv)
+}

@@ -1,0 +1,206 @@
+// bytes_mutate — SELF-HOSTED in-place FIXED-SIZE byte mutations for v1. v0 takes `&mut Vec<u8>` and
+// writes bytes WITHOUT changing the length, so each is a BORROW + prim.store: the target is borrowed
+// (no ownership change — no alloc/drop), the store mutates the shared memory block, and the caller
+// sees it (same handle). SOUND on all three properties (no leak/double-free, no host capability) and
+// byte-matching runtime/rs/src/bytes.rs. (GROWING mutations — append/push/write — realloc and change
+// the handle, so they need heap-var-reassign machinery and stay deferred.)
+//
+// Bounds match v0's `pos as usize` cast: a negative pos becomes a huge usize → the `p + N <= len`
+// check fails → no write. We replicate with `if pos >= 0 then (if pos + N <= n then …)`.
+
+fn __msb(p: Int, v: Int) -> Int = { prim.store8(p, v); 0 }
+
+// ── 1-byte ──
+fn bytes_set_u8(b: Bytes, pos: Int, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos < n then __msb(base + pos, val) else 0) else 0
+}
+
+fn bytes_set_at(b: Bytes, i: Int, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if i >= 0 then (if i < n then __msb(base + i, val) else 0) else 0
+}
+
+// ── 2-byte (i16/u16 store the same low-16 bits) ──
+fn __s16be(p: Int, val: Int) -> Int = { prim.store8(p, prim.bshr(val, 8)); prim.store8(p + 1, val); 0 }
+fn __s16le(p: Int, val: Int) -> Int = { prim.store8(p, val); prim.store8(p + 1, prim.bshr(val, 8)); 0 }
+
+fn bytes_set_u16_be(b: Bytes, pos: Int, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 2 <= n then __s16be(base + pos, val) else 0) else 0
+}
+fn bytes_set_u16_le(b: Bytes, pos: Int, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 2 <= n then __s16le(base + pos, val) else 0) else 0
+}
+fn bytes_set_i16_be(b: Bytes, pos: Int, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 2 <= n then __s16be(base + pos, val) else 0) else 0
+}
+fn bytes_set_i16_le(b: Bytes, pos: Int, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 2 <= n then __s16le(base + pos, val) else 0) else 0
+}
+
+// ── 4-byte ──
+fn __s32be(p: Int, val: Int) -> Int = {
+  prim.store8(p, prim.bshr(val, 24)); prim.store8(p + 1, prim.bshr(val, 16))
+  prim.store8(p + 2, prim.bshr(val, 8)); prim.store8(p + 3, val); 0
+}
+fn __s32le(p: Int, val: Int) -> Int = {
+  prim.store8(p, val); prim.store8(p + 1, prim.bshr(val, 8))
+  prim.store8(p + 2, prim.bshr(val, 16)); prim.store8(p + 3, prim.bshr(val, 24)); 0
+}
+
+fn bytes_set_u32_be(b: Bytes, pos: Int, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 4 <= n then __s32be(base + pos, val) else 0) else 0
+}
+fn bytes_set_u32_le(b: Bytes, pos: Int, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 4 <= n then __s32le(base + pos, val) else 0) else 0
+}
+fn bytes_set_i32_be(b: Bytes, pos: Int, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 4 <= n then __s32be(base + pos, val) else 0) else 0
+}
+fn bytes_set_i32_le(b: Bytes, pos: Int, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 4 <= n then __s32le(base + pos, val) else 0) else 0
+}
+
+// ── 8-byte ──
+fn __s64be(p: Int, val: Int) -> Int = {
+  prim.store8(p, prim.bshr(val, 56)); prim.store8(p + 1, prim.bshr(val, 48))
+  prim.store8(p + 2, prim.bshr(val, 40)); prim.store8(p + 3, prim.bshr(val, 32))
+  prim.store8(p + 4, prim.bshr(val, 24)); prim.store8(p + 5, prim.bshr(val, 16))
+  prim.store8(p + 6, prim.bshr(val, 8)); prim.store8(p + 7, val); 0
+}
+fn __s64le(p: Int, val: Int) -> Int = {
+  prim.store8(p, val); prim.store8(p + 1, prim.bshr(val, 8))
+  prim.store8(p + 2, prim.bshr(val, 16)); prim.store8(p + 3, prim.bshr(val, 24))
+  prim.store8(p + 4, prim.bshr(val, 32)); prim.store8(p + 5, prim.bshr(val, 40))
+  prim.store8(p + 6, prim.bshr(val, 48)); prim.store8(p + 7, prim.bshr(val, 56)); 0
+}
+
+fn bytes_set_i64_be(b: Bytes, pos: Int, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 8 <= n then __s64be(base + pos, val) else 0) else 0
+}
+fn bytes_set_i64_le(b: Bytes, pos: Int, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 8 <= n then __s64le(base + pos, val) else 0) else 0
+}
+
+// ── whole-buffer ──
+fn __fillrec(p: Int, n: Int, val: Int, i: Int) -> Int =
+  if i >= n then 0
+  else { prim.store8(p + i, val); __fillrec(p, n, val, i + 1) }
+
+fn bytes_fill(b: Bytes, val: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = __fillrec(base, n, val, 0)
+}
+
+// clear: truncate to length 0 (the cap/data are untouched, like Vec::clear).
+fn bytes_clear(b: Bytes) -> Unit = prim.store32(prim.handle(b) + 4, 0)
+
+// ── f64 (store the 8 IEEE bits; prim.fbits gives the i64 bit pattern) ──
+fn bytes_set_f64_be(b: Bytes, pos: Int, val: Float) -> Unit = {
+  let bits = prim.fbits(val)
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 8 <= n then __s64be(base + pos, bits) else 0) else 0
+}
+fn bytes_set_f64_le(b: Bytes, pos: Int, val: Float) -> Unit = {
+  let bits = prim.fbits(val)
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 8 <= n then __s64le(base + pos, bits) else 0) else 0
+}
+
+// ── f32 (demote f64 → f32, store the 4 f32 bits; prim.f32bits = the f32 bit pattern as Int) ──
+fn bytes_set_f32_be(b: Bytes, pos: Int, val: Float) -> Unit = {
+  let f = prim.f2f32(val)
+  let bits = prim.f32bits(f)
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 4 <= n then __s32be(base + pos, bits) else 0) else 0
+}
+fn bytes_set_f32_le(b: Bytes, pos: Int, val: Float) -> Unit = {
+  let f = prim.f2f32(val)
+  let bits = prim.f32bits(f)
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 4 <= n then __s32le(base + pos, bits) else 0) else 0
+}
+
+// bytes.copy_within — in-place overlap-safe byte move (memmove), borrow + store, no size change.
+// v0 `b.copy_within(s..e, d)` with usize-cast gating: s/d negative → huge → gate fails (no-op);
+// src_end clamped to len. Forward copy when dst<=s, backward when dst>s (so overlap is safe).
+fn __cw_fwd(base: Int, s: Int, d: Int, i: Int, n: Int) -> Int =
+  if i >= n then 0
+  else { prim.store8(base + d + i, prim.load8(base + s + i)); __cw_fwd(base, s, d, i + 1, n) }
+
+fn __cw_bwd(base: Int, s: Int, d: Int, i: Int) -> Int =
+  if i < 0 then 0
+  else { prim.store8(base + d + i, prim.load8(base + s + i)); __cw_bwd(base, s, d, i - 1) }
+
+fn __cw_move(base: Int, s: Int, d: Int, n: Int) -> Int =
+  if d <= s then __cw_fwd(base, s, d, 0, n) else __cw_bwd(base, s, d, n - 1)
+
+fn bytes_copy_within(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let e = if src_end >= 0 then (if src_end < n then src_end else n) else n
+  let cnt = e - src_start
+  let _ =
+    if src_start >= 0 then
+      (if src_start < e then
+        (if dst >= 0 then
+          (if dst + cnt <= n then __cw_move(base, src_start, dst, cnt) else 0)
+        else 0)
+      else 0)
+    else 0
+}
+
+// bytes.copy_from — copy src[src_off..][..len] into dst[dst_off..], borrow both + store (fixed size).
+// v0 gates dst_off/src_off >= len → no-op (usize cast: negatives become huge → out of range), and
+// clamps len to the available space in BOTH buffers (a negative len → huge → clamps to that space).
+fn __cf_copy(dh: Int, sh: Int, doff: Int, soff: Int, i: Int, n: Int) -> Int =
+  if i >= n then 0
+  else { prim.store8(dh + 12 + doff + i, prim.load8(sh + 12 + soff + i)); __cf_copy(dh, sh, doff, soff, i + 1, n) }
+
+fn bytes_copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = {
+  let dn = prim.load32(prim.handle(dst) + 4)
+  let sn = prim.load32(prim.handle(src) + 4)
+  let dh = prim.handle(dst)
+  let sh = prim.handle(src)
+  let _ =
+    if dst_off >= 0 then
+      (if dst_off < dn then
+        (if src_off >= 0 then
+          (if src_off < sn then {
+            let avail_d = dn - dst_off
+            let avail_s = sn - src_off
+            let avail = if avail_d < avail_s then avail_d else avail_s
+            let n = if len >= 0 then (if len < avail then len else avail) else avail
+            __cf_copy(dh, sh, dst_off, src_off, 0, n)
+          } else 0)
+        else 0)
+      else 0)
+    else 0
+}
