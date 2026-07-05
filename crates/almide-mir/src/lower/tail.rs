@@ -569,6 +569,13 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_result_option_ctor(tail, &tail.ty) {
                         return Ok(Some(dst));
                     }
+                    // `ok(some(x))` / `ok(none)` / `err(msg)` RETURNED for `Result[Option[T], String]` with a
+                    // STRING / SCALAR leaf (the derived-Codec `__decode_option_T`): flat `DropListStr` for a
+                    // scalar Option, recursive `$__drop_opt_str` for a String Option. Checked AFTER the
+                    // record ctor (which claims the record-Option shape) — the leaf gate keeps them disjoint.
+                    if let Some(dst) = self.try_lower_result_option_scalar_str_ctor(tail, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
                     // `ok(value.array(...))` / `err(msg)` RETURNED for a `Result[Value, String]` (csv
                     // `parse`): materialize the Value-Ok / String-Err Result block, MOVED OUT as the
                     // return (the recursive `Op::DropResultValue` frees it at the caller's scope end).

@@ -1,0 +1,29 @@
+// wasm:enabled
+// A standalone (non-test) fixture locking in derived-Codec decode of Option[T] fields:
+// the self-hosted __decode_option_T builds Result[Option[T], String] (ok(some(x)) /
+// ok(none) / err(e)) — a String leaf via the recursive $__drop_opt_str, a scalar leaf
+// flat — byte-identical to v0 --target wasm. Covers present (Some), absent (None), and
+// explicit-null (None) through an encode → decode → re-encode roundtrip.
+import json
+
+type Rec: Codec = { name: String, nick: Option[String], age: Option[Int] }
+
+effect fn main() -> Unit = {
+  let r1 = Rec { name: "A", nick: some("nn"), age: some(30) }
+  let v1 = r1.encode()
+  println(json.stringify(v1))
+  // roundtrip: decode the Some-valued object, re-encode — the Option values survive
+  match Rec.decode(v1) {
+    ok(r) => println(json.stringify(r.encode()))
+    err(e) => println("err:" + e)
+  }
+  // absent field (nick) and explicit null (age) both decode to None
+  let pv = json.parse("{\"name\":\"B\",\"age\":null}")
+  match pv {
+    ok(pj) => match Rec.decode(pj) {
+      ok(r) => println(json.stringify(r.encode()))
+      err(e) => println("err:" + e)
+    }
+    err(pe) => println("parse:" + pe)
+  }
+}

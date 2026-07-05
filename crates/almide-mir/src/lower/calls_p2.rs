@@ -638,6 +638,22 @@ impl LowerCtx {
                                         .into(),
                                 ));
                             }
+                            // A `??` over an OPTION operand whose Some-payload could NOT be read
+                            // (`r.opt ?? -1.0` over an `Option[scalar]` FIELD access — no tracked
+                            // handle) must NOT silently take the fallback: a `Const 0` reads the
+                            // WRONG arm when the Option is `Some` (a silent miscompile, exposed once
+                            // derived-Codec `Option` decode links — codec_float_int). WALL it. A
+                            // Result `??` (`int.parse(s) ?? -1`) keeps the Const-0 class below.
+                            if matches!(&expr.ty,
+                                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _))
+                            {
+                                return Err(LowerError::Unsupported(
+                                    "non-lowerable `??` over an Option operand in a call-argument \
+                                     position cannot be faithfully computed (a Const-0 would take \
+                                     the fallback when the Option is Some) not in this brick"
+                                        .into(),
+                                ));
+                            }
                             let dst = self.fresh_value();
                             self.record_elided_calls(a);
                             if crate::lower::strict_values() {

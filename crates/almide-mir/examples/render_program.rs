@@ -305,10 +305,11 @@ fn main() {
     for m in &ir.modules {
         all_type_decls.extend(m.type_decls.iter().cloned());
     }
+    let uses_result_opt_str = almide_mir::lower::program_uses_result_option_str(&ir);
     let drops = format!(
         "{}{}",
         almide_mir::lower::generate_variant_drop_sources(&all_type_decls),
-        almide_mir::lower::generate_record_drop_sources(&all_type_decls, &anon_recs),
+        almide_mir::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
     );
     // The generated drops free a `Value` field via the value_core INTERNAL `__drop_value` (and a
     // `List[Value]` via `__drop_list_value`) — NOT a public `value.*` the type checker knows. So when

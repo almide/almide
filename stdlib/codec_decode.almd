@@ -42,6 +42,29 @@ fn __dl_string(items: List[Value], n: Int, i: Int, acc: List[String]) -> Result[
 fn __decode_list_string(v: Value) -> Result[List[String], String] =
   match value.as_array(v) { ok(items) => __dl_string(items, list.len(items), 0, []), err(e) => err(e) }
 
+// ── Option (field: Null/absent → None, present → Some(as_T)) ──
+// Mirrors runtime/rs value_decode_option: Ok(Null)/missing → None, Ok(val) → as_T(val).map(some).
+fn __decode_option_int(v: Value, key: String) -> Result[Option[Int], String] =
+  match value.field(v, key) {
+    ok(fv) => if __is_null(fv) then ok(none) else match value.as_int(fv) { ok(x) => ok(some(x)), err(e) => err(e) }
+    err(_e) => ok(none)
+  }
+fn __decode_option_float(v: Value, key: String) -> Result[Option[Float], String] =
+  match value.field(v, key) {
+    ok(fv) => if __is_null(fv) then ok(none) else match value.as_float(fv) { ok(x) => ok(some(x)), err(e) => err(e) }
+    err(_e) => ok(none)
+  }
+fn __decode_option_bool(v: Value, key: String) -> Result[Option[Bool], String] =
+  match value.field(v, key) {
+    ok(fv) => if __is_null(fv) then ok(none) else match value.as_bool(fv) { ok(x) => ok(some(x)), err(e) => err(e) }
+    err(_e) => ok(none)
+  }
+fn __decode_option_string(v: Value, key: String) -> Result[Option[String], String] =
+  match value.field(v, key) {
+    ok(fv) => if __is_null(fv) then ok(none) else match value.as_string(fv) { ok(x) => ok(some(x)), err(e) => err(e) }
+    err(_e) => ok(none)
+  }
+
 // ── Default (field: Null/absent → default) ──
 fn __decode_default_int(v: Value, key: String, default: Int) -> Result[Int, String] =
   match value.field(v, key) {

@@ -1114,6 +1114,50 @@ pub fn collect_recursive_anon_records(
     collector.out
 }
 
+/// Does the program reference the `Result[Option[String], String]` shape anywhere (a function
+/// signature or an expression type)? Gates `$__drop_opt_str` emission in
+/// [`generate_record_drop_sources`] — the recursive-drop leaf `try_lower_result_option_scalar_str_ctor`
+/// routes an `ok(some(<string>))` / `ok(none)` `Result[Option[String], String]` through
+/// (`resrec:opt_str`). Only that shape needs the generated fn; a scalar Option leaf frees flat. Scans
+/// the SAME positions as [`collect_recursive_anon_records`] (ret/param/body-expr types).
+pub fn program_uses_result_option_str(program: &almide_ir::IrProgram) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    fn is_result_opt_str(ty: &Ty) -> bool {
+        let Ty::Applied(TypeConstructorId::Result, a) = ty else { return false };
+        if a.len() != 2 || !matches!(a[1], Ty::String) {
+            return false;
+        }
+        matches!(&a[0], Ty::Applied(TypeConstructorId::Option, oa)
+            if oa.len() == 1 && matches!(oa[0], Ty::String))
+    }
+    struct Finder {
+        found: bool,
+    }
+    impl almide_ir::visit::IrVisitor for Finder {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if is_result_opt_str(&expr.ty) {
+                self.found = true;
+            }
+            almide_ir::visit::walk_expr(self, expr);
+        }
+    }
+    let mut finder = Finder { found: false };
+    let funcs = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in funcs {
+        if is_result_opt_str(&f.ret_ty) || f.params.iter().any(|p| is_result_opt_str(&p.ty)) {
+            return true;
+        }
+        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
+        if finder.found {
+            return true;
+        }
+    }
+    false
+}
+
 /// Generate the ALMIDE SOURCE for each RECORD type's recursive drop `$__drop_<R>` (the records
 /// counterpart of [`generate_variant_drop_sources`]). Records have NO tag — fields sit at
 /// `slot_offset(i)`, freed per CONCRETE field type: `String → rc_dec`, `Map[String,String] →
@@ -1127,6 +1171,7 @@ pub fn collect_recursive_anon_records(
 pub fn generate_record_drop_sources(
     type_decls: &[almide_ir::IrTypeDecl],
     anon_records: &[Vec<(almide_lang::intern::Sym, Ty)>],
+    uses_result_opt_str: bool,
 ) -> String {
     use almide_ir::IrTypeDeclKind;
     let rec_names = recursive_record_drop_names(type_decls);
@@ -1185,6 +1230,17 @@ pub fn generate_record_drop_sources(
         out.push_str(&format!(
             "fn __drop_opt_{tname}(e: Option[{tname}]) -> Unit = {{\n  match e {{\n    some(r) => (),\n    none => (),\n  }}\n}}\n"
         ));
+    }
+    // `$__drop_opt_str` — frees an `Option[String]` (the recursive-drop leaf of a `Result[Option[String],
+    // String]`, the derived-Codec `__decode_option_string`). The `some(r)` arm binds the inner String
+    // whose scope-end `rc_dec` frees it; consuming `e` frees the 0-or-1 Option block. Emitted ONLY when
+    // the program constructs that shape (via `try_lower_result_option_scalar_str_ctor`'s `resrec:opt_str`),
+    // so a program without it is not perturbed. (The scalar Option leaves — Int/Float/Bool — need no drop
+    // fn: their `Result[Option[<scalar>], String]` frees flat via `DropListStr`.)
+    if uses_result_opt_str {
+        out.push_str(
+            "fn __drop_opt_str(e: Option[String]) -> Unit = {\n  match e {\n    some(r) => (),\n    none => (),\n  }\n}\n",
+        );
     }
     // `$__drop_tup_int_<R>` for each recursive-drop record R — frees a `(R, Int)` TUPLE
     // block (record handle @12 recursed via `$__drop_<R>`, the Int @20 is scalar), used

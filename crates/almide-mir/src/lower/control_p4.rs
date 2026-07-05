@@ -453,6 +453,19 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // HEAP-Ok `Result[Option[T], String]` with a STRING / SCALAR leaf (the derived-Codec
+            // `__decode_option_T` if/match arms — `ok(some(x))` / `ok(none)` / `err(e)`): a scalar Option
+            // frees flat (`DropListStr`), a String Option recursively (`$__drop_opt_str`). Checked AFTER
+            // the record-Option arm (disjoint by leaf), BEFORE the generic heap-Ok String arm.
+            IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+                if self.is_option_scalar_str_result_ty(result_ty) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_result_option_scalar_str_ctor(arm, result_ty)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // HEAP-Ok `Result[String, String]`: BOTH `Ok(string)` and `Err(string)` own a String, so
             // len-as-tag can't distinguish — materialize a len-1 DynListStr + the Ok/Err tag in cap@8.
             IrExprKind::ResultOk { expr }
@@ -807,6 +820,20 @@ impl LowerCtx {
         }
         let Ty::Applied(TypeConstructorId::Option, oa) = &a[0] else { return false };
         oa.len() == 1 && self.record_or_anon_drop_type_name(&oa[0]).is_some()
+    }
+
+    /// A `Result[Option[T], String]` whose Option leaf is a STRING or a SCALAR (Int/Float/Bool) — the
+    /// derived-Codec `__decode_option_T` shape. Gates the `try_lower_result_option_scalar_str_ctor` arm
+    /// (if/match) and is DISJOINT from `is_option_record_result_ty` (a record leaf) — the two together
+    /// cover every `Result[Option[<leaf>], String]` the executable subset admits.
+    pub(crate) fn is_option_scalar_str_result_ty(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::Result, a) = ty else { return false };
+        if a.len() != 2 || !matches!(&a[1], Ty::String) {
+            return false;
+        }
+        let Ty::Applied(TypeConstructorId::Option, oa) = &a[0] else { return false };
+        oa.len() == 1 && matches!(&oa[0], Ty::String | Ty::Int | Ty::Float | Ty::Bool)
     }
 
     /// For a `Result[<record needing recursive drop>, String]` (`Result[Manifest, String]` —
@@ -1170,6 +1197,84 @@ impl LowerCtx {
             IrExprKind::ResultErr { expr: inner } => {
                 let piece = self.lower_result_str_piece(inner)?;
                 Some(self.materialize_result_aggregate(piece, repr, true, drop_fn))
+            }
+            _ => None,
+        }
+    }
+
+    /// `ok(some(x))` / `ok(none)` / `err(msg)` RETURNED for a `Result[Option[T], String]` whose Option
+    /// payload is a STRING or a SCALAR leaf (Int/Float/Bool) — the derived-Codec `__decode_option_T`
+    /// shape (`Result[Option[Int], String]` … `Result[Option[String], String]`). The record/tuple/value
+    /// Option payloads are handled by [`Self::try_lower_result_option_ctor`] (recursive `$__drop_opt_<R>`)
+    /// and MUST be left to it — this helper declines them.
+    ///
+    /// The Ok payload is the 0-or-1 Option block (`try_lower_option_ctor` — a scalar `Init::OptSome` or a
+    /// String-holding `DynListStr`), MOVED into the Result @12. The DROP differs by leaf:
+    ///   • SCALAR leaf — the Option[scalar] block owns no inner heap, so the FLAT `materialize_result_str`
+    ///     (`heap_elem_lists` → `DropListStr` `rc_dec`s @12) frees it fully, exactly like a `Result[String,
+    ///     String]`. No generated drop fn.
+    ///   • STRING leaf — the Option[String] block owns the inner String, so a flat `rc_dec` of @12 would
+    ///     LEAK it. Route through `materialize_result_aggregate` with `resrec:opt_str` → the generated
+    ///     `$__drop_opt_str(e: Option[String])` (emitted by `generate_record_drop_sources`), whose
+    ///     `match e { some(r) => (), none => () }` drops the inner String at the some-arm end.
+    pub(crate) fn try_lower_result_option_scalar_str_ctor(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let ok_ty = match result_ty {
+            Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && matches!(a[1], Ty::String) =>
+            {
+                &a[0]
+            }
+            _ => return None,
+        };
+        let leaf = match ok_ty {
+            Ty::Applied(TypeConstructorId::Option, oa) if oa.len() == 1 => &oa[0],
+            _ => return None,
+        };
+        let is_str = matches!(leaf, Ty::String);
+        let is_scalar = matches!(leaf, Ty::Int | Ty::Float | Ty::Bool);
+        if !is_str && !is_scalar {
+            return None;
+        }
+        let repr = repr_of(result_ty).ok()?;
+        match &expr.kind {
+            IrExprKind::ResultOk { expr: inner } => {
+                if is_str {
+                    let opt_repr = repr_of(ok_ty).ok()?;
+                    // Build the `Option[String]` block DIRECTLY: `some(<string>)` co-owns its payload by
+                    // `lower_owned_heap_field` (a Dup for a borrowed param / match-ok String, an Alloc for
+                    // a literal, a move for a call) — `try_lower_option_ctor` declines a borrowed-Var
+                    // payload. `none` is a 0-element block.
+                    let piece = match &inner.kind {
+                        IrExprKind::OptionSome { expr: payload } => {
+                            let s = self.lower_owned_heap_field(payload)?;
+                            self.materialize_opt_str_some(s, opt_repr)
+                        }
+                        IrExprKind::OptionNone => self.materialize_opt_str_none(opt_repr),
+                        _ => return None,
+                    };
+                    // `materialize_opt_str_some`/`_none` mark the block for a flat scope-end `DropListStr`
+                    // (`heap_elem_lists`). It is MOVED into the Result @12 (Consumed) and freed by the
+                    // Result's `resrec:opt_str` → `$__drop_opt_str` instead — detach it so it is freed
+                    // EXACTLY once (no double-free).
+                    self.heap_elem_lists.remove(&piece);
+                    Some(self.materialize_result_aggregate(piece, repr, false, "opt_str".to_string()))
+                } else {
+                    let piece = self.try_lower_option_ctor(inner, ok_ty)?;
+                    Some(self.materialize_result_str(piece, repr, false, false))
+                }
+            }
+            IrExprKind::ResultErr { expr: inner } => {
+                let piece = self.lower_result_str_piece(inner)?;
+                if is_str {
+                    Some(self.materialize_result_aggregate(piece, repr, true, "opt_str".to_string()))
+                } else {
+                    Some(self.materialize_result_str(piece, repr, true, false))
+                }
             }
             _ => None,
         }

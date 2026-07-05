@@ -86,6 +86,28 @@ impl LowerCtx {
                 }
                 _ => return None,
             }
+        } else if let IrExprKind::Member { object, field } = &expr.kind {
+            // `r.opt ?? d` — an `Option[scalar/String]` FIELD of a materialized record: BORROW the
+            // field's Option block handle (`LoadHandle` at the field offset; the record keeps
+            // ownership, the `??` only READS the tag + scalar/String payload — no transfer, no drop).
+            // Gated to a scalar/String Option leaf so the scalar-payload / `option.unwrap_or_str` read
+            // below is over a real 0-or-1 block. Exposed by derived-Codec Option decode (the
+            // codec_float_int `r.opt ?? -1.0` consumer): without it the `??` fell to a silent Const-0.
+            let leaf_ok = matches!(&expr.ty,
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
+                    if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Float | Ty::Bool | Ty::String));
+            if !leaf_ok {
+                return None;
+            }
+            let offset = match self.aggregate_field_offset_any(&object.ty, field.as_str()) {
+                Some(o) => o,
+                None => return None,
+            };
+            let ch = match self.resolve_aggregate_container_handle(object) {
+                Some(c) => c,
+                None => return None,
+            };
+            self.load_at_offset(ch, offset as i64, PrimKind::LoadHandle)
         } else if is_self_host_option_call(expr)
             || is_self_host_result_call(expr)
             || (is_self_host_result_str_call(expr)
