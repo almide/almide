@@ -313,8 +313,27 @@ impl LowerCtx {
                 // (the generator emits no free for those — admitting one would leak).
                 let obj = self.lower_owned_heap_field(arg)?;
                 field_vals.push((obj, true));
+            } else if matches!(&arg.ty, Ty::Named(..) | Ty::Record { .. })
+                && self.aggregate_field_tys(&arg.ty).is_some()
+                && self.record_or_anon_drop_type_name(&arg.ty).is_none()
+            {
+                // A SCALAR-ONLY RECORD-type ctor field (`Wrap(Color)` — Color = {r,g,b: Int}): a variant
+                // ctor whose field is a nested record with no nested heap. Materialize the record (a
+                // `Record` literal via `try_lower_record_construct` / the scalar builder; a decoded Var /
+                // call via `lower_owned_heap_field`) and store its handle. The variant's masked
+                // `DropListStr` frees it with ONE `rc_dec` — exact for a scalar-only record block. A
+                // record NEEDING a recursive drop (a String / nested-heap field) has `record_or_anon_drop
+                // _type_name = Some`, so it is EXCLUDED here and stays walled (its mask `rc_dec` would leak
+                // the nested heap — a later brick).
+                let obj = match &arg.kind {
+                    IrExprKind::Record { .. } => self
+                        .try_lower_record_construct(arg)
+                        .or_else(|| self.try_lower_scalar_record_construct(arg))?,
+                    _ => self.lower_owned_heap_field(arg)?,
+                };
+                field_vals.push((obj, true));
             } else if is_heap_ty(&arg.ty) {
-                return None; // List[String] / Map / other heap ctor field — a later brick
+                return None; // List[String] / Map / recursive-record / Map / other heap ctor field — a later brick
             } else {
                 let v = self.lower_scalar_value(arg)?;
                 field_vals.push((v, false));

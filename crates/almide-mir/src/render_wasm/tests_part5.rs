@@ -1434,20 +1434,25 @@ fn derived_codec_list_and_default_fields_decode() {
 }
 
 #[test]
-fn derived_variant_codec_decode_tuple_and_unit() {
-    // Derived-Codec DECODE of tagged variants (tuple cases with scalar/String fields + unit cases).
-    // The decode reads the tag as a plain String (value.keys |> list.get ?? "") and the payload via
+fn derived_variant_codec_decode_all_payload_shapes() {
+    // Derived-Codec DECODE of tagged variants across every payload shape the trust-spine handles:
+    // a nested scalar-record field (Wrap(Color)), a record-shaped case with a String + nested record
+    // (Tag), a List field (Multi), a tuple with scalar/String fields (Pair), and unit (Plain). The
+    // decode reads the tag as a plain String (value.keys |> list.get ?? "") + the payload via
     // value.field — NOT a (String, Value) tuple the trust-spine walls — then `ok(Ctor(..))`
-    // materializes the variant. Encode → decode roundtrip, byte-identical to v0.
-    let src = "type Shape: Codec = | Pair(Int, String) | Solo(Int) | Plain\n\
+    // materializes the variant (a nested scalar-record field stored + freed by the masked rc_dec).
+    let src = "type Color: Codec = { r: Int, g: Int, b: Int }\n\
+        type Shape: Codec = | Wrap(Color) | Tag { name: String, c: Color } | Multi(List[Int]) | Pair(Int, String) | Plain\n\
         effect fn main() -> Unit = {\n\
-        match Shape.decode(Shape.encode(Pair(7, \"x\"))) { ok(s) => match s { Pair(n, t) => println(int.to_string(n) + t), Solo(n) => println(\"solo\"), Plain => println(\"plain\") }, err(e) => println(e) }\n\
-        match Shape.decode(Shape.encode(Solo(42))) { ok(s) => match s { Pair(n, t) => println(\"p\"), Solo(n) => println(\"solo \" + int.to_string(n)), Plain => println(\"plain\") }, err(e) => println(e) }\n\
-        match Shape.decode(Shape.encode(Plain)) { ok(s) => match s { Pair(n, t) => println(\"p\"), Solo(n) => println(\"solo\"), Plain => println(\"plain\") }, err(e) => println(e) } }\n";
+        match Shape.decode(Shape.encode(Wrap({ r: 1, g: 2, b: 3 }))) { ok(s) => match s { Wrap(c) => println(int.to_string(c.g)), _ => println(\"?\") }, err(e) => println(e) }\n\
+        match Shape.decode(Shape.encode(Tag { name: \"hi\", c: { r: 4, g: 5, b: 6 } })) { ok(s) => match s { Tag { name, c } => println(name + \" \" + int.to_string(c.b)), _ => println(\"?\") }, err(e) => println(e) }\n\
+        match Shape.decode(Shape.encode(Multi([1, 2, 3]))) { ok(s) => match s { Multi(xs) => println(int.to_string(list.len(xs))), _ => println(\"?\") }, err(e) => println(e) }\n\
+        match Shape.decode(Shape.encode(Pair(7, \"x\"))) { ok(s) => match s { Pair(n, t) => println(int.to_string(n) + t), _ => println(\"?\") }, err(e) => println(e) }\n\
+        match Shape.decode(Shape.encode(Plain)) { ok(s) => match s { Plain => println(\"plain\"), _ => println(\"?\") }, err(e) => println(e) } }\n";
     let prog = lower_source(&format!("import json\n{src}"));
     assert!(prog.functions.iter().any(|f| f.name == "Shape.decode"), "Shape.decode must link");
     if let Some(out) = build_and_run("variant_codec_decode", &render_wasm_program(&prog)) {
-        assert_eq!(out, "7x\nsolo 42\nplain");
+        assert_eq!(out, "2\nhi 6\n3\n7x\nplain");
     }
 }
 
