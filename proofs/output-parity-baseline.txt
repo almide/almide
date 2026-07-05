@@ -7,6 +7,7 @@ spec/churn/tco_loop_churn.almd
 spec/lang/block_comment_raw_string_test.almd
 spec/lang/codec_method_roundtrip_wasm.almd
 spec/lang/codec_option_field_wasm.almd
+spec/lang/guarded_variant_match_wasm.almd
 spec/lang/top_let_test.almd
 spec/lang/var_in_if_test.almd
 spec/lang/variant_codec_decode_wasm.almd

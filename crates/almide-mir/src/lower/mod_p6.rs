@@ -1637,6 +1637,12 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             cur = Some(r);
             continue;
         }
+        // Regroup a guarded/literal Option/Result match into ctor-dispatch + a payload sub-match, so
+        // the guarded-variant case reduces to the two already-proven pieces.
+        if let Some(r) = desugar_grouped_variant_match(src, next_var) {
+            cur = Some(r);
+            continue;
+        }
         if let Some(r) = desugar_if_arm_unwrap(src) {
             cur = Some(r);
             continue;
@@ -2769,6 +2775,175 @@ pub fn desugar_flatten_empty_block(body: &IrExpr) -> Option<IrExpr> {
     } else {
         None
     }
+}
+
+/// Group the per-constructor arms of an `Option`/`Result` `match` whose `some`/`ok`/`err` arms carry
+/// GUARDS or LITERAL payloads into a payload SUB-MATCH — `match x { some(n) if g => A, some(0) => B,
+/// some(_) => C, none => D }` becomes `match x { some($p) => match $p { n if g => A, 0 => B, _ => C },
+/// none => D }`. The trust-spine lowers the OUTER (variant-tag dispatch, scalar payload bind) and the
+/// INNER (scalar guard/literal chain via `build_match_chain`) separately — each proven — but NOT the
+/// guarded-VARIANT combination directly (`try_lower_variant_value_match` gates out guards; the
+/// heap-result path walls). Regrouping is sound because a variant's constructors are DISJOINT: a
+/// `none` arm can never intercept a `some` value, so collecting all `some` arms in order preserves
+/// arm order + fall-through byte-for-byte. Runs in BOTH the lowering and the `count_ir_calls` gate.
+pub fn desugar_grouped_variant_match(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    struct V<'a> {
+        next: &'a mut u32,
+        changed: bool,
+    }
+    impl IrMutVisitor for V<'_> {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            if let IrExprKind::Match { subject, arms } = &e.kind {
+                if let Some(new_arms) = group_option_result_arms(subject, arms, self.next) {
+                    e.kind = IrExprKind::Match {
+                        subject: subject.clone(),
+                        arms: new_arms,
+                    };
+                    self.changed = true;
+                }
+            }
+        }
+    }
+    let mut v = V {
+        next: next_var,
+        changed: false,
+    };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    if v.changed {
+        Some(out)
+    } else {
+        None
+    }
+}
+
+/// The grouping transform for [`desugar_grouped_variant_match`]. `None` when the subject is not an
+/// `Option`/`Result`, an arm is a top-level catch-all (`_`/binder — not a pure constructor dispatch),
+/// a payload pattern is nested (a later brick), or NO arm carries a guard/literal (the plain variant
+/// match already lowers — leave it untouched so nothing regresses).
+fn group_option_result_arms(
+    subject: &IrExpr,
+    arms: &[almide_ir::IrMatchArm],
+    next_var: &mut u32,
+) -> Option<Vec<almide_ir::IrMatchArm>> {
+    use almide_ir::{IrMatchArm, IrPattern};
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    // The two constructor "slots" (Option: Some/None; Result: Ok/Err) and each payload's type.
+    let (is_option, some_ty, none_ty) = match &subject.ty {
+        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => (true, a[0].clone(), Ty::Unit),
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
+            (false, a[0].clone(), a[1].clone())
+        }
+        _ => return None,
+    };
+    // The payload sub-pattern must be a scalar shape the inner scalar match handles (Bind / Literal /
+    // Wildcard); a nested ctor payload (`some(some(x))`) is a later brick.
+    let scalar_inner = |p: &IrPattern| matches!(p, IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::Wildcard);
+    // Split each arm into the "some/ok" bucket or the "none/err" bucket, carrying the payload
+    // sub-pattern. A top-level catch-all or a nested payload aborts the whole transform.
+    let mut a_arms: Vec<(IrPattern, Option<IrExpr>, IrExpr)> = Vec::new(); // Some / Ok
+    let mut b_arms: Vec<(IrPattern, Option<IrExpr>, IrExpr)> = Vec::new(); // None / Err
+    let mut any_guard_or_lit = false;
+    for arm in arms {
+        let (bucket, inner): (&mut Vec<_>, IrPattern) = match &arm.pattern {
+            IrPattern::Some { inner } if is_option => (&mut a_arms, (**inner).clone()),
+            IrPattern::None if is_option => (&mut b_arms, IrPattern::Wildcard),
+            IrPattern::Ok { inner } if !is_option => (&mut a_arms, (**inner).clone()),
+            IrPattern::Err { inner } if !is_option => (&mut b_arms, (**inner).clone()),
+            _ => return None, // catch-all binder / wildcard / wrong ctor — not a pure dispatch
+        };
+        if !scalar_inner(&inner) {
+            return None;
+        }
+        if arm.guard.is_some() || matches!(&inner, IrPattern::Literal { .. }) {
+            any_guard_or_lit = true;
+        }
+        bucket.push((inner, arm.guard.clone(), arm.body.clone()));
+    }
+    // Nothing to gain (a plain `some(x)/none` shape already lowers) — leave untouched.
+    if !any_guard_or_lit {
+        return None;
+    }
+    // Build one grouped arm per non-empty bucket: `ctor($p) => match $p { <inner arms> }` when the
+    // bucket has a guard/literal, else the single body directly (a lone `some(x) => body`).
+    let mk_group = |bucket: Vec<(IrPattern, Option<IrExpr>, IrExpr)>,
+                    payload_ty: &Ty,
+                    next_var: &mut u32,
+                    wrap: &dyn Fn(IrPattern) -> IrPattern|
+     -> Option<IrMatchArm> {
+        if bucket.is_empty() {
+            return Option::None;
+        }
+        let needs_inner = bucket.len() > 1
+            || bucket
+                .iter()
+                .any(|(p, g, _)| g.is_some() || matches!(p, IrPattern::Literal { .. }));
+        if !needs_inner {
+            // A single `ctor(pat) => body` with a plain payload — keep it as one arm.
+            let (pat, guard, body) = bucket.into_iter().next().unwrap();
+            return Option::Some(IrMatchArm {
+                pattern: wrap(pat),
+                guard,
+                body,
+            });
+        }
+        let pv = VarId(*next_var);
+        *next_var += 1;
+        let inner_arms: Vec<IrMatchArm> = bucket
+            .into_iter()
+            .map(|(pat, guard, body)| IrMatchArm {
+                pattern: pat,
+                guard,
+                body,
+            })
+            .collect();
+        let body_ty = inner_arms[0].body.ty.clone();
+        let sub = IrExpr {
+            kind: IrExprKind::Match {
+                subject: Box::new(IrExpr {
+                    kind: IrExprKind::Var { id: pv },
+                    ty: payload_ty.clone(),
+                    span: subject.span.clone(),
+                    def_id: None,
+                }),
+                arms: inner_arms,
+            },
+            ty: body_ty,
+            span: subject.span.clone(),
+            def_id: None,
+        };
+        Option::Some(IrMatchArm {
+            pattern: wrap(IrPattern::Bind {
+                var: pv,
+                ty: payload_ty.clone(),
+            }),
+            guard: Option::None,
+            body: sub,
+        })
+    };
+    let (wrap_a, wrap_b): (&dyn Fn(IrPattern) -> IrPattern, &dyn Fn(IrPattern) -> IrPattern) =
+        if is_option {
+            (&|p| IrPattern::Some { inner: Box::new(p) }, &|_| IrPattern::None)
+        } else {
+            (
+                &|p| IrPattern::Ok { inner: Box::new(p) },
+                &|p| IrPattern::Err { inner: Box::new(p) },
+            )
+        };
+    let mut new_arms = Vec::with_capacity(2);
+    if let Option::Some(arm) = mk_group(a_arms, &some_ty, next_var, wrap_a) {
+        new_arms.push(arm);
+    }
+    if let Option::Some(arm) = mk_group(b_arms, &none_ty, next_var, wrap_b) {
+        new_arms.push(arm);
+    }
+    if new_arms.is_empty() {
+        return Option::None;
+    }
+    Some(new_arms)
 }
 
 /// Count the occurrences of `var` (as an `IrExprKind::Var`) inside `e` — a local use-count for the
