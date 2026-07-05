@@ -1,0 +1,74 @@
+// option_to_string_s — `option.to_string_s` over `Option[String]`, byte-matching v0's `some("hi")` /
+// `none`. The inner String is QUOTED + escaped exactly as a `List[String]` element (v0's
+// `almide_repr_str`: `\ " \n \r \t` backslash-escaped, all other bytes verbatim), wrapped in
+// `some(` … `)`. The escape helpers mirror `list_to_string_s` (a separate self-host module cannot
+// share internal fns, so they are duplicated here with an `__ots_` prefix). Two passes: measure the
+// exact escaped width, then fill — so the `alloc_str` is exact. The `some(v)` arm borrows the payload
+// String (read-only byte reads, no move); `none` is the bare word.
+
+// Does byte b need a backslash escape? (\ " \n \r \t) → 2 output bytes.
+fn __ots_is_escaped(b: Int) -> Bool =
+  if b == 92 then true                 // '\'
+  else if b == 34 then true            // '"'
+  else if b == 10 then true            // '\n'
+  else if b == 13 then true            // '\r'
+  else if b == 9 then true             // '\t'
+  else false
+
+// Escaped byte width of the slen bytes at `src`: each escaped byte counts 2, others 1.
+fn __ots_esc_len(src: Int, slen: Int, i: Int, acc: Int) -> Int =
+  if i >= slen then acc
+  else {
+    let b = prim.load8(src + i)
+    let w = if __ots_is_escaped(b) then 2 else 1
+    __ots_esc_len(src, slen, i + 1, acc + w)
+  }
+
+// The escape letter for a control byte (n/r/t); a literal \ or " escapes to ITSELF.
+fn __ots_esc_char(b: Int) -> Int =
+  if b == 10 then 110                  // 'n'
+  else if b == 13 then 114             // 'r'
+  else if b == 9 then 116              // 't'
+  else b
+
+// Copy+escape the slen bytes at `src` to `pos`; return the address past the last written byte.
+fn __ots_fill_esc(src: Int, slen: Int, i: Int, pos: Int) -> Int =
+  if i >= slen then pos
+  else {
+    let b = prim.load8(src + i)
+    let pos1 = if __ots_is_escaped(b) then {
+      prim.store8(pos, 92)             // '\'
+      prim.store8(pos + 1, __ots_esc_char(b))
+      pos + 2
+    } else {
+      prim.store8(pos, b)
+      pos + 1
+    }
+    __ots_fill_esc(src, slen, i + 1, pos1)
+  }
+
+// Build `some("<escaped v>")` for a present payload String v.
+fn __ots_some(v: String) -> String = {
+  let h = prim.handle(v)
+  let slen = prim.load32(h + 4)
+  let src = h + 12
+  let body = __ots_esc_len(src, slen, 0, 0)
+  let total = 8 + body                 // "some(" (5) + '"' (1) + body + '"' (1) + ')' (1)
+  let buf = prim.alloc_str(total)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 115)               // 's'
+  prim.store8(base + 1, 111)           // 'o'
+  prim.store8(base + 2, 109)           // 'm'
+  prim.store8(base + 3, 101)           // 'e'
+  prim.store8(base + 4, 40)            // '('
+  prim.store8(base + 5, 34)            // '"'
+  let mid = __ots_fill_esc(src, slen, 0, base + 6)
+  prim.store8(mid, 34)                 // '"'
+  prim.store8(mid + 1, 41)             // ')'
+  buf
+}
+
+fn option_to_string_s(o: Option[String]) -> String = match o {
+  some(v) => __ots_some(v),
+  none => "none",
+}

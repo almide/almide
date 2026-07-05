@@ -1466,12 +1466,15 @@ fn option_interp_self_hosts_per_element_type() {
     let src = "effect fn main() -> Unit = {\n\
         let a: Option[Int] = some(42) let b: Option[Int] = some(-7) let c: Option[Int] = none\n\
         println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"v=${a}!\")\n\
+        let s: Option[String] = some(\"hi\") let q: Option[String] = some(\"a \\\"b\\\"\") let sn: Option[String] = none\n\
+        println(\"${s}\") println(\"${q}\") println(\"${sn}\")\n\
         let t: Option[Bool] = some(true) let f: Option[Bool] = none\n\
         println(\"${t}\") println(\"${f}\") }\n";
     let prog = lower_source(src);
     assert!(prog.functions.iter().any(|f| f.name == "option.to_string"), "Option[Int] interp must auto-link option.to_string");
+    assert!(prog.functions.iter().any(|f| f.name == "option.to_string_s"), "Option[String] interp must auto-link option.to_string_s");
     if let Some(out) = build_and_run("option_interp", &render_wasm_program(&prog)) {
-        assert_eq!(out, "some(42)\nsome(-7)\nnone\nv=some(42)!\nsome(true)\nnone");
+        assert_eq!(out, "some(42)\nsome(-7)\nnone\nv=some(42)!\nsome(\"hi\")\nsome(\"a \\\"b\\\"\")\nnone\nsome(true)\nnone");
     }
 }
 

@@ -1,8 +1,8 @@
 // wasm:enabled
 // Locks in `${Option[T]}` interpolation — v0's `some(<T>)` / `none` compound repr — for the element
-// types the trust-spine self-hosts (Int, Bool). `option.to_string` / `option.to_string_b` are
-// self-host .almd (a 2-arm Option match + string concat, both in v1's subset), routed per element
-// type exactly like the List family. Byte-identical to v0 --target wasm.
+// types the trust-spine self-hosts (Int, String, Bool). Each `option.to_string*` is self-host .almd
+// (a 2-arm Option match + repr build), routed per element type exactly like the List family; a String
+// element is quoted+escaped like a List[String] element. Byte-identical to v0 --target wasm.
 
 effect fn main() -> Unit = {
   let a: Option[Int] = some(42)
@@ -12,6 +12,12 @@ effect fn main() -> Unit = {
   println("${b}")
   println("${c}")
   println("val=${a} end")
+  let s: Option[String] = some("hi")
+  let sq: Option[String] = some("a \"b\" c")
+  let sn: Option[String] = none
+  println("${s}")
+  println("${sq}")
+  println("${sn}")
   let t: Option[Bool] = some(true)
   let f: Option[Bool] = some(false)
   let n: Option[Bool] = none
