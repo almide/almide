@@ -545,6 +545,13 @@ impl LowerCtx {
                     // Option (len-correct) it can `match` — the self-host Option fns
                     // (list.get/first/last) return through such helpers. Moved out (NOT
                     // pushed to live_heap_handles), cert = Alloc i + move-out m.
+                    // `ok(Pair(_e0, _e1))` / `ok(Plain)` / `err(msg)` for `Result[<user variant>, String]`
+                    // (derived variant decode) — materialize the variant Ok, recursive `$__drop_<V>` drop.
+                    // BEFORE the generic `try_lower_option_ctor` heap-Ok path, which would emit a dangling
+                    // `CallFn "Pair"` for the variant ctor.
+                    if let Some(dst) = self.try_lower_result_variant_ctor(tail, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
                     if let Some(dst) = self.try_lower_option_ctor(tail, &tail.ty) {
                         return Ok(Some(dst));
                     }

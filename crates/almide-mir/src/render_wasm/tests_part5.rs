@@ -1434,6 +1434,26 @@ fn derived_codec_list_and_default_fields_decode() {
 }
 
 #[test]
+fn variant_ctor_in_result_ok_materializes() {
+    // `ok(<user-variant ctor>)` in Result-Ok position (the derived variant-decode `ok(Pair(..))`
+    // shape) MATERIALIZES the tagged variant block (the SAME block `let p = Pair(..)` builds, with its
+    // recursive `$__drop_<V>` drop) and wraps it — NOT a dangling `CallFn "Pair"`. Covers a tuple
+    // variant (heap + scalar fields), a scalar variant, a unit variant, and the Err arm; the consumer
+    // reads the Ok payload as a real variant. Byte-identical to v0 `--target wasm`.
+    let src = "type Shape = | Pair(Int, String) | Solo(Int) | Plain\n\
+        fn build(t: Int, n: Int, s: String) -> Result[Shape, String] =\n\
+        if t == 0 then ok(Pair(n, s)) else if t == 1 then ok(Solo(n)) else if t == 2 then ok(Plain) else err(\"bad\")\n\
+        effect fn main() -> Unit = {\n\
+        match build(0, 7, \"x\") { ok(v) => match v { Pair(n, s) => println(int.to_string(n) + s), Solo(n) => println(\"solo\"), Plain => println(\"plain\") }, err(e) => println(e) }\n\
+        match build(2, 0, \"\") { ok(v) => match v { Pair(n, s) => println(\"p\"), Solo(n) => println(\"solo\"), Plain => println(\"plain\") }, err(e) => println(e) }\n\
+        match build(9, 0, \"\") { ok(v) => match v { Pair(n, s) => println(\"p\"), Solo(n) => println(\"solo\"), Plain => println(\"plain\") }, err(e) => println(e) } }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("variant_result_ctor", &render_wasm_program(&prog)) {
+        assert_eq!(out, "7x\nplain\nbad");
+    }
+}
+
+#[test]
 fn derived_codec_option_fields_decode() {
     // B-2 completion: Codec `Option[T]` fields. The self-hosted `__decode_option_T` builds a
     // `Result[Option[T], String]` (ok(some(x)) / ok(none) / err(e)) — a STRING leaf freed by the

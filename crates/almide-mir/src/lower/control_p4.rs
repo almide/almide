@@ -439,6 +439,26 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // HEAP-Ok `Result[<user variant>, String]` (derived variant decode's `ok(Pair(..))` /
+            // `ok(Plain)` if/match arms): materialize the variant Ok / String Err, recursive `$__drop_<V>`.
+            IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+                if self
+                    .custom_variant_type_name(match result_ty {
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                            if a.len() == 2 && matches!(a[1], Ty::String) =>
+                        {
+                            &a[0]
+                        }
+                        _ => result_ty,
+                    })
+                    .is_some() =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_result_variant_ctor(arm, result_ty)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // HEAP-Ok `Result[Option[record], String]` (read_message's `ok(none)` / `ok(r)` arms): the
             // Ok payload is an `Option[record]`, freed recursively via the generated `$__drop_opt_<R>`
             // (`resrec:opt_<R>`) — NOT the flat `DropListStr` that would leak the Some record. Guard =
@@ -1155,6 +1175,55 @@ impl LowerCtx {
             IrExprKind::ResultErr { expr: inner } => {
                 let piece = self.lower_result_str_piece(inner)?;
                 Some(self.materialize_result_aggregate(piece, repr, true, drop_fn))
+            }
+            _ => None,
+        }
+    }
+
+    /// `ok(<user-variant ctor>)` / `err(<String>)` for `Result[<user variant>, String]` — the derived
+    /// variant decode's `ok(Pair(_e0, _e1))` / `ok(Plain)`. Materialize the variant (`try_lower_variant_ctor`
+    /// — the SAME tagged block a `let p = Pair(..)` builds, with its recursive-drop set) and wrap it, so
+    /// the Ok payload is a REAL variant block the consumer's `match` reads. A RICH variant (a heap field,
+    /// e.g. `Pair(Int, String)`) routes the wrapper's drop to the generated `$__drop_<V>` via `resrec:<V>`
+    /// ([`Op::DropWrapperRec`]); a FLAT variant frees flat (`DropListStr`). Without this the ctor emitted a
+    /// dangling `CallFn "Pair"` (an unlinked call the render wall rejects). `None` outside a variant Ok.
+    pub(crate) fn try_lower_result_variant_ctor(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let ok_ty = match result_ty {
+            Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && matches!(a[1], Ty::String) =>
+            {
+                &a[0]
+            }
+            _ => return None,
+        };
+        let type_name = self.custom_variant_type_name(ok_ty)?;
+        let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name);
+        let repr = repr_of(result_ty).ok()?;
+        match &expr.kind {
+            IrExprKind::ResultOk { expr: inner } => {
+                let piece = self.try_lower_variant_ctor(inner)?;
+                // The variant piece is MOVED into the Result @12 (Consumed by the materialize below) and
+                // freed by the Result's drop — detach its OWN scope-end drop so it is freed EXACTLY once.
+                self.variant_drop_handles.remove(&piece);
+                self.heap_elem_lists.remove(&piece);
+                if needs_rec {
+                    Some(self.materialize_result_aggregate(piece, repr, false, type_name))
+                } else {
+                    Some(self.materialize_result_str(piece, repr, false, false))
+                }
+            }
+            IrExprKind::ResultErr { expr: inner } => {
+                let piece = self.lower_result_str_piece(inner)?;
+                if needs_rec {
+                    Some(self.materialize_result_aggregate(piece, repr, true, type_name))
+                } else {
+                    Some(self.materialize_result_str(piece, repr, true, false))
+                }
             }
             _ => None,
         }
