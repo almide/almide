@@ -1574,6 +1574,20 @@ fn option_option_int_interp() {
 }
 
 #[test]
+fn option_map_string_int_interp() {
+    // `${Option[Map[String,Int]]}` — the non-empty map is a map.from_list computed payload materialized
+    // into the Some slot; rendered via map.keys/map.values wrapped in some(…).
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Option[Map[String, Int]] = some([\"a\": 1, \"b\": 2]) let b: Option[Map[String, Int]] = none\n\
+        println(\"${a}\") println(\"${b}\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "option.to_string_msi"), "must auto-link option.to_string_msi");
+    if let Some(out) = build_and_run("option_map", &render_wasm_program(&prog)) {
+        assert_eq!(out, "some([\"a\": 1, \"b\": 2])\nnone");
+    }
+}
+
+#[test]
 fn float_list_option_and_result_interp() {
     // Option[List[Float]] / Result[List[Float],String] — each element float.to_string with drop-.0.
     let src = "effect fn main() -> Unit = {\n\

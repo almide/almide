@@ -401,10 +401,13 @@ impl LowerCtx {
                 // wrong byte never is.
                 if let IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } = &value.kind {
                     use almide_lang::types::constructor::TypeConstructorId;
-                    if matches!(&expr.ty, Ty::Applied(TypeConstructorId::List, _)) {
+                    if matches!(&expr.ty,
+                        Ty::Applied(TypeConstructorId::List, _) | Ty::Applied(TypeConstructorId::Map, _))
+                    {
                         return Err(LowerError::Unsupported(
-                            "some/ok of a list payload outside the executable subset cannot be \
-                             faithfully materialized in this brick (would defer to an empty list)"
+                            "some/ok of a list or map payload outside the executable subset cannot be \
+                             faithfully materialized in this brick (e.g. an empty `[:]` — would defer \
+                             to an empty container)"
                                 .into(),
                         ));
                     }

@@ -725,6 +725,19 @@ impl LowerCtx {
                         self.live_heap_handles.retain(|h| *h != p);
                         p
                     }
+                    // A `Map[String, Int]` (map_skv) Some payload (`some(["a": 1])` → `some(map.from_list
+                    // (…))`) — lower the map (a Module call) and MOVE it into the Some slot. The map's own
+                    // block is freed by the flat heap_elem_lists drop, exactly as a bare `let m = […]`
+                    // (a map_skv block frees like a DynListStr). Gated to the map_skv (String key, scalar
+                    // value) layout.
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                        if matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                            if a.len() == 2 && is_heap_ty(&a[0]) && !is_heap_ty(&a[1])) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     _ => return None,
                 };
                 // materialize_opt_str_some tracks materialized_options + heap_elem_lists.
