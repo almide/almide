@@ -243,6 +243,18 @@ impl LowerCtx {
                 self.value_of.insert(var, dst);
                 return Ok(());
             }
+            // A HEAP-result `??` over an Option/Result operand that `try_lower_option_unwrap_or`
+            // declined (e.g. `Option[record]` — no faithful record-payload unwrap-or yet) must
+            // NOT fall to the `Alloc{Opaque}` below: that binds an EMPTY heap value the caller
+            // OBSERVES as a wrong record (both arms of `list.get(tools,i) ?? {…}` printed empty /
+            // garbage vs v0). WALL it — an honest refusal, never a silently-wrong value.
+            if is_variant_ty(&expr.ty) {
+                return Err(LowerError::Unsupported(
+                    "heap-result ?? over an Option/Result operand outside the executable subset \
+                     (e.g. an Option[record] default) cannot be faithfully computed in this brick"
+                        .into(),
+                ));
+            }
         }
         match &value.kind {
             // Alias: `var b = a` — b is a NEW handle denoting the SAME heap

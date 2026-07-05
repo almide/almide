@@ -24,6 +24,17 @@ impl LowerCtx {
         use crate::PrimKind;
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
+        // An `Option[record]` operand (`list.get(tools, i) ?? { name: "", … }`) has NO faithful
+        // `??` lowering yet: the Value-shaped `option.value_unwrap_or` corrupts a record field
+        // block (both arms printed garbage / empty fields vs v0), and no other path here handles
+        // it. DECLINE outright so the whole `??` walls cleanly (never a wrong byte) — a correct
+        // record-payload unwrap-or is a follow-up. Gated to a record/anon-record Option payload.
+        if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) = &expr.ty
+        {
+            if a.len() == 1 && self.record_or_anon_drop_type_name(&a[0]).is_some() {
+                return None;
+            }
+        }
         // The Option operand's handle: either a VAR already bound to a materialized Option
         // (`let o = list.get(xs, i); o ?? d` — the most common form, BORROWED, dropped by its
         // own let-bind at scope end), a function PARAM of Option type (`fn f(o: Option[String]) =
@@ -134,15 +145,13 @@ impl LowerCtx {
             Some("option.liststr_unwrap_or")
         } else if crate::lower::is_option_listvalue_ty(&expr.ty) {
             Some("option.listvalue_unwrap_or")
-        } else if matches!(&expr.ty,
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
-                if a.len() == 1 && self.record_or_anon_drop_type_name(&a[0]).is_some())
-        {
-            // An `Option[record]` payload (`list.get(vars, idx) ?? {key: "", val: ""}` —
-            // porta dedup_env): the Value helper is a pure HANDLE select (load @12 +
-            // auto-acquire), layout-identical for any single-handle payload — reuse it.
-            Some("option.value_unwrap_or")
         } else {
+            // An `Option[record]` payload (`list.get(tools, i) ?? { name: "", … }`) is NOT
+            // routed to `option.value_unwrap_or`: that helper does a VALUE-shaped handle select
+            // (it reads a tagged Value block), which CORRUPTS a plain record field block — BOTH
+            // the Some and the None arm printed garbage (0x18 0x20…) vs v0's real field (a
+            // pre-existing miscompile the mir>ir gate flagged on porta parse_manifest). Decline
+            // here so the `??` walls cleanly; a correct record-payload unwrap-or is a follow-up.
             None
         };
         if let Some(helper) = value_unwrap_helper {

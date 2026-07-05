@@ -997,3 +997,45 @@
         h.visit_expr(&desugared);
         assert!(!h.0, "no Guard statement must remain after the desugar");
     }
+
+    #[test]
+    fn heap_option_record_unwrap_or_walls_not_miscompiles() {
+        // `let t = list.get(xs, i) ?? { … }` over a `List[record]` (Option[record] `??`) has NO
+        // faithful lowering — the Value-shaped option.value_unwrap_or corrupted the record field
+        // block (both arms printed garbage/empty vs v0; the mir>ir gate flagged it on porta
+        // parse_manifest). It must WALL, not fall to the empty-record Opaque. Modeled minimally:
+        // an UnwrapOr whose operand is an Option[record]-typed var and fallback a record literal.
+        let rec_ty = Ty::Record {
+            fields: vec![(almide_lang::intern::sym("name"), Ty::String)],
+        };
+        let opt_rec = Ty::Applied(TypeConstructorId::Option, vec![rec_ty.clone()]);
+        let b = body(vec![
+            bind(0, opt_rec.clone(), ir_expr(IrExprKind::OptionNone, opt_rec.clone())),
+            bind(
+                1,
+                rec_ty.clone(),
+                ir_expr(
+                    IrExprKind::UnwrapOr {
+                        expr: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, opt_rec)),
+                        fallback: Box::new(ir_expr(
+                            IrExprKind::Record {
+                                name: None,
+                                fields: vec![(
+                                    almide_lang::intern::sym("name"),
+                                    ir_expr(IrExprKind::LitStr { value: "d".into() }, Ty::String),
+                                )],
+                            },
+                            rec_ty,
+                        )),
+                    },
+                    Ty::Record {
+                        fields: vec![(almide_lang::intern::sym("name"), Ty::String)],
+                    },
+                ),
+            ),
+        ]);
+        match lower_body(&b, "f") {
+            Err(LowerError::Unsupported(_)) => {}
+            other => panic!("expected an Option[record] ?? wall, got {other:?}"),
+        }
+    }

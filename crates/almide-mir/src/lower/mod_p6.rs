@@ -752,6 +752,21 @@ pub fn dump_ir(e: &IrExpr) -> String {
                 }
             }
             K::Var { id } => out.push_str(&format!("{pad}v{}\n", id.0)),
+            K::UnwrapOr { expr, fallback } => {
+                out.push_str(&format!("{pad}UnwrapOr\n{pad}  val\n"));
+                go(expr, ind + 2, out);
+                out.push_str(&format!("{pad}  else\n"));
+                go(fallback, ind + 2, out);
+            }
+            K::IndexAccess { object, index } => {
+                out.push_str(&format!("{pad}Index\n"));
+                go(object, ind + 1, out);
+                go(index, ind + 1, out);
+            }
+            K::Member { object, field } => {
+                out.push_str(&format!("{pad}Member(.{})\n", field.as_str()));
+                go(object, ind + 1, out);
+            }
             other => out.push_str(&format!("{pad}{}\n", crate::lower::kind_name(other))),
         }
     }
