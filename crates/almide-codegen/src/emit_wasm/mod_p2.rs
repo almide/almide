@@ -364,6 +364,22 @@ impl FuncCompiler<'_> {
     /// `new_ptr` is a local already holding the new object pointer. No-op when the
     /// target is not a bare `Var` (e.g. `foo().push(x)` has nowhere to write back).
     pub fn emit_mutator_writeback(&mut self, target: &almide_ir::IrExpr, new_ptr: u32) {
+        // A field of a record (`list.push(b.xs, v)` on a `mut b`): store the
+        // realloc'd pointer back into the field slot `[base + offset]`. The record
+        // block is shared (passed by pointer), so the write persists to the caller
+        // — the wasm counterpart of native's `&mut b.xs` (#703/#705). Without this
+        // the new buffer is dropped and the field keeps the pre-realloc pointer.
+        if let almide_ir::IrExprKind::Member { object, field } = &target.kind {
+            if let Some(total_offset) = self.member_field_store_offset(object, field) {
+                self.emit_expr(object);
+                wasm!(self.func, {
+                    i32_const(total_offset as i32); i32_add;
+                    local_get(new_ptr);
+                    i32_store(0);
+                });
+            }
+            return;
+        }
         let id = match &target.kind {
             almide_ir::IrExprKind::Var { id } => id.0,
             _ => return,

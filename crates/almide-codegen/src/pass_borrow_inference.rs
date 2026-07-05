@@ -355,6 +355,19 @@ fn infer_function_borrows(func: &IrFunction) -> Vec<ParamBorrow> {
             return ParamBorrow::Own;
         }
 
+        // Explicit `mut` heap param → passed by mutable reference, and it is
+        // authoritative: the checker (`validate_mut_args`) guarantees the caller
+        // hands over a `var` binding, so the param IS a `&mut T` by construction
+        // regardless of how the body uses it — it may mutate a *field* of it
+        // (`list.push(b.xs, v)` on `mut b`, #703) or forward it to another `mut`
+        // callee. Body-inference below tracks the param var alone, not member
+        // chains, and would otherwise force a forwarded `mut` record back to Own.
+        // Honor the keyword here, before those heuristics (mirrors the @intrinsic
+        // mut path; a primitive `mut x: Int` is filtered by the heap guard above).
+        if param.is_mut {
+            return ParamBorrow::RefMut;
+        }
+
         // If the function body directly returns this param, it needs ownership
         if is_var(&func.body, param.var) {
             return ParamBorrow::Own;

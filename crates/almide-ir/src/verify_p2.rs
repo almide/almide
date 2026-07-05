@@ -343,8 +343,8 @@ mod tests {
         let f = IrFunction {
             name: "bad".into(),
             params: vec![
-                IrParam { var: x, ty: Ty::Int, name: "a".into(), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] },
-                IrParam { var: x, ty: Ty::Int, name: "b".into(), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] },
+                IrParam { var: x, ty: Ty::Int, name: "a".into(), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] },
+                IrParam { var: x, ty: Ty::Int, name: "b".into(), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] },
             ],
             ret_ty: Ty::Int,
             body: lit_int(0),

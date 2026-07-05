@@ -208,6 +208,13 @@ pub struct IrParam {
     pub ty: Ty,
     pub name: Sym,
     pub borrow: ParamBorrow,
+    /// The `mut` parameter modifier. A `mut` heap param is passed by mutable
+    /// reference (`&mut T`): the caller hands over a `var` binding and the callee
+    /// mutates it in place. Borrow inference reads this to honor the keyword
+    /// directly, mirroring the `@intrinsic` path. Defaults to `false` for derived
+    /// params.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_mut: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub open_record: Option<OpenRecordInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]

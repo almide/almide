@@ -519,6 +519,35 @@ impl FuncCompiler<'_> {
         }
     }
 
+    /// Total byte offset (variant tag + field) at which `object.field` is stored
+    /// inside `object`'s record block — the store-side mirror of `emit_member`'s
+    /// type resolution. `emit_mutator_writeback` uses it to write a realloc'd list
+    /// pointer back into a record field slot (#705). None when the field/type
+    /// can't be resolved.
+    pub(super) fn member_field_store_offset(&self, object: &IrExpr, field: &str) -> Option<u32> {
+        let resolved_ty = if let almide_ir::IrExprKind::Var { id } = &object.kind {
+            let vt_ty = &self.var_table.get(*id).ty;
+            if object.ty.is_unresolved_structural() && !vt_ty.is_unresolved_structural() {
+                vt_ty.clone()
+            } else {
+                object.ty.clone()
+            }
+        } else if let almide_ir::IrExprKind::Member { object: inner_obj, field: inner_field } = &object.kind {
+            let inner_ty = self.resolve_member_result_type(inner_obj, inner_field);
+            if !matches!(inner_ty, Ty::Unknown) { inner_ty } else { object.ty.clone() }
+        } else {
+            object.ty.clone()
+        };
+        let mut fields = self.extract_record_fields(&resolved_ty);
+        if fields.is_empty() && resolved_ty.is_unresolved() {
+            for (_name, rf) in &self.emitter.record_fields {
+                if rf.iter().any(|(n, _)| n == field) { fields = rf.clone(); break; }
+            }
+        }
+        let tag_offset = self.variant_tag_offset(&resolved_ty);
+        values::field_offset(&fields, field).map(|(field_offset, _)| tag_offset + field_offset)
+    }
+
     /// Resolve the result type of a member access (obj.field) for chained access.
     fn resolve_member_result_type(&self, object: &IrExpr, field: &str) -> Ty {
         let obj_ty = if let almide_ir::IrExprKind::Var { id } = &object.kind {

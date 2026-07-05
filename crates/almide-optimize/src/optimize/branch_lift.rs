@@ -239,6 +239,7 @@ impl<'a> BranchLifter<'a> {
                     ty: info.ty.clone(),
                     name: info.name,
                     borrow: ParamBorrow::Own,
+                    is_mut: false,
                     open_record: None,
                     default: None,
                     attrs: vec![],

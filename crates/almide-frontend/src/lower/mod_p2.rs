@@ -293,7 +293,7 @@ fn lower_fn(
                     ctx.const_param_vars.insert(sym(&g.name), var);
                     ir_params.push(IrParam {
                         var, ty: param_ty, name: g.name,
-                        borrow: ParamBorrow::Own, open_record: None, default: None,
+                        borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None,
                         attrs: Vec::new(),
                     });
                 }
@@ -307,7 +307,7 @@ fn lower_fn(
         let default = p.default.as_ref().map(|d| Box::new(lower_expr(ctx, d)));
         ir_params.push(IrParam {
             var, ty: ty.clone(), name: p.name,
-            borrow: ParamBorrow::Own, open_record: None, default,
+            borrow: ParamBorrow::Own, is_mut: p.is_mut, open_record: None, default,
             attrs: p.attrs.clone(),
         });
     }

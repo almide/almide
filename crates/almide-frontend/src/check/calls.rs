@@ -850,7 +850,6 @@ impl Checker {
         for &idx in &mut_params {
             if idx >= arg_exprs.len() { continue; }
             let arg = arg_exprs[idx];
-            let param_name = fn_name.split('.').last().unwrap_or(fn_name);
             match &arg.kind {
                 ExprKind::Ident { name, .. } => {
                     if !self.env.mutable_vars.contains(&sym(name)) {
@@ -861,6 +860,29 @@ impl Checker {
                         ).with_code("E007"));
                     }
                 }
+                // A field/element of a mutable place is itself a mutable place:
+                // `list.push(box.items, x)` with `var box` (or a `mut box` param)
+                // lowers to `&mut box.items`, valid Rust. Walk the member/index
+                // chain down to its root identifier.
+                ExprKind::Member { .. } | ExprKind::TupleIndex { .. } => {
+                    match Self::place_root(arg) {
+                        Some(root) if self.env.mutable_vars.contains(&sym(root)) => {}
+                        Some(root) => {
+                            self.emit(super::err(
+                                format!("cannot mutate a field of immutable binding '{}' via `mut` parameter of {}()", root, fn_name),
+                                format!("Declare '{}' with `var` instead of `let`", root),
+                                format!("call to {}()", fn_name),
+                            ).with_code("E007"));
+                        }
+                        None => {
+                            self.emit(super::err(
+                                format!("cannot pass a temporary expression to `mut` parameter of {}()", fn_name),
+                                "Pass a mutable `var` binding (or a field/element of one)",
+                                format!("call to {}()", fn_name),
+                            ).with_code("E007"));
+                        }
+                    }
+                }
                 _ => {
                     self.emit(super::err(
                         format!("cannot pass a temporary expression to `mut` parameter of {}()", fn_name),
@@ -869,6 +891,18 @@ impl Checker {
                     ).with_code("E007"));
                 }
             }
+        }
+    }
+
+    /// Root identifier of a place expression (member/tuple-index chain), or None
+    /// if it doesn't bottom out at a plain identifier (i.e. a temporary).
+    fn place_root(expr: &ast::Expr) -> Option<&str> {
+        match &expr.kind {
+            ExprKind::Ident { name, .. } => Some(name.as_str()),
+            ExprKind::Member { object, .. } | ExprKind::TupleIndex { object, .. } => {
+                Self::place_root(object)
+            }
+            _ => None,
         }
     }
 
