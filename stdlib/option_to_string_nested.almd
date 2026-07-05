@@ -173,3 +173,16 @@ fn option_to_string_lb(o: Option[List[Bool]]) -> String = match o {
   some(v) => __onest_some_lb(v),
   none => "none",
 }
+
+// `some(some(some(5)))` / `some(some(none))` / `some(none)` / `none` over `Option[Option[Option[Int]]]`
+// — one level deeper than option.to_string_oi (a pure nested match + int.to_string, no byte work).
+fn option_to_string_ooi(o: Option[Option[Option[Int]]]) -> String = match o {
+  some(v) => match v {
+    some(w) => match w {
+      some(x) => "some(some(some(" + int.to_string(x) + ")))",
+      none => "some(some(none))",
+    },
+    none => "some(none)",
+  },
+  none => "none",
+}

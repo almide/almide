@@ -1,0 +1,23 @@
+// wasm:enabled
+// More nested-compound interps (the adversarial-audit's tractable set), byte-identical to v0:
+//   Result[Float, String]              → ok(3.5) / ok(4) / err("<q>")   (float drop-.0, callable float.to_string)
+//   Option[Option[Option[Int]]]        → some(some(some(5))) …          (one level deeper than option.to_string_oi)
+//   Result[Option[List[Int]], String]  → ok(some([1, 2])) / ok(none) / err("<q>")  (int-list under ok(some …))
+
+effect fn main() -> Unit = {
+  let f1: Result[Float, String] = ok(3.5)
+  let f2: Result[Float, String] = ok(4.0)
+  let f3: Result[Float, String] = ok(-2.25)
+  let f4: Result[Float, String] = err("bad \"float\"")
+  println("${f1}") println("${f2}") println("${f3}") println("${f4}")
+  let o1: Option[Option[Option[Int]]] = some(some(some(-9)))
+  let o2: Option[Option[Option[Int]]] = some(some(none))
+  let o3: Option[Option[Option[Int]]] = some(none)
+  let o4: Option[Option[Option[Int]]] = none
+  println("${o1}") println("${o2}") println("${o3}") println("${o4}")
+  let r1: Result[Option[List[Int]], String] = ok(some([-1, -2, 3]))
+  let r2: Result[Option[List[Int]], String] = ok(some([]))
+  let r3: Result[Option[List[Int]], String] = ok(none)
+  let r4: Result[Option[List[Int]], String] = err("oops")
+  println("${r1}") println("${r2}") println("${r3}") println("${r4}")
+}

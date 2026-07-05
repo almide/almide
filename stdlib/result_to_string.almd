@@ -341,6 +341,64 @@ fn result_to_string_lb(r: Result[List[Bool], String]) -> String = match r {
   err(e) => __rts_err(e),
 }
 
+// `ok(3.5)` / `ok(4)` / `err("<quoted>")` over `Result[Float, String]`. The Ok Float renders like a
+// `${float}` element: `float.to_string` (Dragon4) with an integer-valued trailing ".0" STRIPPED
+// (mirrors option.to_string_f / list_to_string_f). `float.to_string` is a callable intrinsic.
+fn __rts_ends_dot0(src: Int, n: Int) -> Bool =
+  if n < 2 then false
+  else if prim.load8(src + n - 2) != 46 then false
+  else prim.load8(src + n - 1) == 48
+
+fn __rts_bcopy(src: Int, dst: Int, n: Int) -> Int =
+  if n <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __rts_bcopy(src + 1, dst + 1, n - 1)
+  }
+
+fn __rts_ok_float(v: Float) -> String = {
+  let s = float.to_string(v)
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let w = if __rts_ends_dot0(sh + 12, n) then n - 2 else n
+  let buf = prim.alloc_str(4 + w)      // "ok(" (3) + w + ")" (1)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 111)               // 'o'
+  prim.store8(base + 1, 107)           // 'k'
+  prim.store8(base + 2, 40)            // '('
+  let after = __rts_bcopy(sh + 12, base + 3, w)
+  prim.store8(after, 41)               // ')'
+  buf
+}
+
+fn result_to_string_f(r: Result[Float, String]) -> String = match r {
+  ok(v) => __rts_ok_float(v),
+  err(e) => __rts_err(e),
+}
+
+// `ok(some([1, 2]))` / `ok(none)` / `err("<quoted>")` over `Result[Option[List[Int]], String]` — the
+// inner Option[List[Int]] matched, its list rendered as a BARE `[…]` via the shared int helpers.
+fn __rts_intlist_bare(v: List[Int]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __rts_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(2 + body)   // "[" + body + "]"
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 91)                // '['
+  let after = __rts_fill_body(addr, count, 0, base + 1)
+  prim.store8(after, 93)               // ']'
+  buf
+}
+
+fn result_to_string_oli(r: Result[Option[List[Int]], String]) -> String = match r {
+  ok(o) => match o {
+    some(v) => "ok(some(" + __rts_intlist_bare(v) + "))",
+    none => "ok(none)",
+  },
+  err(e) => __rts_err(e),
+}
+
 fn result_to_string_ss(r: Result[String, String]) -> String = match r {
   ok(v) => __rts_ok_s(v),
   err(e) => __rts_err(e),

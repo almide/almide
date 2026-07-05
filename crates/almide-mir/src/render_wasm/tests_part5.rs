@@ -1574,6 +1574,22 @@ fn option_option_int_interp() {
 }
 
 #[test]
+fn nested_interp_float_deep_option_and_result_option_list() {
+    // Result[Float,String] (float drop-.0), Option[Option[Option[Int]]] (3-deep), and
+    // Result[Option[List[Int]],String] (int-list under ok(some …)).
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Result[Float, String] = ok(3.5) let b: Result[Float, String] = ok(4.0)\n\
+        let c: Option[Option[Option[Int]]] = some(some(some(5))) let d: Option[Option[Option[Int]]] = some(none)\n\
+        let e: Result[Option[List[Int]], String] = ok(some([1, 2])) let f: Result[Option[List[Int]], String] = ok(none)\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"${d}\") println(\"${e}\") println(\"${f}\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "result.to_string_f"), "must auto-link result.to_string_f");
+    if let Some(out) = build_and_run("nested_more", &render_wasm_program(&prog)) {
+        assert_eq!(out, "ok(3.5)\nok(4)\nsome(some(some(5)))\nsome(none)\nok(some([1, 2]))\nok(none)");
+    }
+}
+
+#[test]
 fn nested_interp_min_int_and_computed_list_payloads() {
     // Two adversarial-fuzz regressions: (A) i64::MIN in a list interp rendered "-0" (negate overflow),
     // (B) some/ok of a COMPUTED list read none/ok([]). Both fixed.

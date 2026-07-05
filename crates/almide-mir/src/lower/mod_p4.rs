@@ -526,6 +526,13 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
             {
                 ("option", "to_string_rs")
             }
+            Ty::Applied(TypeConstructorId::Option, e)
+                if e.len() == 1
+                    && matches!(&e[0], Ty::Applied(TypeConstructorId::Option, e2)
+                        if e2.len() == 1 && matches!(e2[0], Ty::Int)) =>
+            {
+                ("option", "to_string_ooi")
+            }
             _ => ("option", "to_string_x"),
         },
         // `${Result[T, E]}` renders v0's `ok(<T>)` / `err(<E>)`, routed per (T, E) pair (err is almost
@@ -566,6 +573,14 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
                     if e.len() == 1 && matches!(e[0], Ty::Bool) =>
                 {
                     ("result", "to_string_lb")
+                }
+                (Ty::Float, Ty::String) => ("result", "to_string_f"),
+                (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
+                    if e.len() == 1
+                        && matches!(&e[0], Ty::Applied(TypeConstructorId::List, e2)
+                            if e2.len() == 1 && matches!(e2[0], Ty::Int)) =>
+                {
+                    ("result", "to_string_oli")
                 }
                 _ => ("result", "to_string_x"),
             }
