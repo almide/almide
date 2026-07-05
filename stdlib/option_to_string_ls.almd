@@ -1,0 +1,103 @@
+// option_to_string_ls — `option.to_string_ls` over `Option[List[String]]`, byte-matching v0's
+// `some(["a", "b"])` / `none`. The inner `List[String]` renders exactly like `${list}` — each element
+// `"<escaped>"` (v0's almide_repr_str: \ " \n \r \t escaped, other bytes verbatim), `, ` joined, in
+// `[` … `]` — wrapped in `some(` … `)`. Self-hosts cannot call each other, so the string-escape
+// helpers mirror `list_to_string_s` (prefixed `__otsls_`). The `some(v)` arm borrows the payload list.
+
+fn __otsls_is_escaped(b: Int) -> Bool =
+  if b == 92 then true                 // '\'
+  else if b == 34 then true            // '"'
+  else if b == 10 then true            // '\n'
+  else if b == 13 then true            // '\r'
+  else if b == 9 then true             // '\t'
+  else false
+
+fn __otsls_esc_len(src: Int, slen: Int, i: Int, acc: Int) -> Int =
+  if i >= slen then acc
+  else {
+    let b = prim.load8(src + i)
+    let w = if __otsls_is_escaped(b) then 2 else 1
+    __otsls_esc_len(src, slen, i + 1, acc + w)
+  }
+
+fn __otsls_esc_char(b: Int) -> Int =
+  if b == 10 then 110                  // 'n'
+  else if b == 13 then 114             // 'r'
+  else if b == 9 then 116              // 't'
+  else b                               // '\' and '"' escape to themselves
+
+fn __otsls_fill_esc(src: Int, slen: Int, i: Int, pos: Int) -> Int =
+  if i >= slen then pos
+  else {
+    let b = prim.load8(src + i)
+    let pos1 = if __otsls_is_escaped(b) then {
+      prim.store8(pos, 92)             // '\'
+      prim.store8(pos + 1, __otsls_esc_char(b))
+      pos + 2
+    } else {
+      prim.store8(pos, b)
+      pos + 1
+    }
+    __otsls_fill_esc(src, slen, i + 1, pos1)
+  }
+
+// Width of one element repr: 2 quotes + escaped body length.
+fn __otsls_elem_width(elem: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  2 + __otsls_esc_len(elem + 12, slen, 0, 0)
+}
+
+// Write one element's `"..."` repr at `pos`; return the address past it.
+fn __otsls_fill_elem(elem: Int, pos: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  prim.store8(pos, 34)                 // opening '"'
+  let mid = __otsls_fill_esc(elem + 12, slen, 0, pos + 1)
+  prim.store8(mid, 34)                 // closing '"'
+  mid + 1
+}
+
+fn __otsls_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let elem = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __otsls_body_len(addr, count, i + 1, acc + sep + __otsls_elem_width(elem))
+  }
+
+fn __otsls_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)             // ','
+      prim.store8(pos + 1, 32)         // ' '
+      pos + 2
+    } else pos
+    let elem = prim.load64(addr + i * 8)
+    let pos2 = __otsls_fill_elem(elem, pos1)
+    __otsls_fill_body(addr, count, i + 1, pos2)
+  }
+
+// Build `some([<list body>])` for a present payload List[String].
+fn __otsls_some(v: List[String]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __otsls_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(8 + body)   // "some([" (6) + body + "])" (2)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 115)               // 's'
+  prim.store8(base + 1, 111)           // 'o'
+  prim.store8(base + 2, 109)           // 'm'
+  prim.store8(base + 3, 101)           // 'e'
+  prim.store8(base + 4, 40)            // '('
+  prim.store8(base + 5, 91)            // '['
+  let after = __otsls_fill_body(addr, count, 0, base + 6)
+  prim.store8(after, 93)               // ']'
+  prim.store8(after + 1, 41)           // ')'
+  buf
+}
+
+fn option_to_string_ls(o: Option[List[String]]) -> String = match o {
+  some(v) => __otsls_some(v),
+  none => "none",
+}

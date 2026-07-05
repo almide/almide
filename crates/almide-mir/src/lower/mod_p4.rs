@@ -501,6 +501,9 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
             Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::Int) => {
                 ("option", "to_string_li")
             }
+            Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::String) => {
+                ("option", "to_string_ls")
+            }
             Ty::Applied(TypeConstructorId::Option, e) if e.len() == 1 && matches!(e[0], Ty::Int) => {
                 ("option", "to_string_oi")
             }

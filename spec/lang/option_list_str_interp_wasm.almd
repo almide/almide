@@ -1,0 +1,19 @@
+// wasm:enabled
+// Locks in `${Option[List[String]]}` — a NESTED compound interp with a HEAP-element inner list, v0's
+// `some(["a", "b"])` / `none`. The inner List[String] renders like `${list}` — each element quoted +
+// escaped (\ " \n \r \t) exactly as v0's almide_repr_str — wrapped in `some(…)`. Self-hosts cannot
+// call each other, so `option.to_string_ls` inlines the string-escape helpers (mirrors list.to_string_s).
+
+fn count(o: Option[List[String]]) -> Int = match o { some(v) => list.len(v), none => 0 - 1 }
+
+effect fn main() -> Unit = {
+  let a: Option[List[String]] = some(["a", "b", "c"])
+  let b: Option[List[String]] = none
+  let c: Option[List[String]] = some([])
+  let d: Option[List[String]] = some(["he said \"hi\"", "back\\slash"])
+  println("${a}")
+  println("${b}")
+  println("${c}")
+  println("${d}")
+  println(int.to_string(count(a)) + "," + int.to_string(count(c)))
+}

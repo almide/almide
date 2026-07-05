@@ -1560,6 +1560,22 @@ fn option_option_int_interp() {
 }
 
 #[test]
+fn option_list_str_interp() {
+    // `${Option[List[String]]}` → `some(["a", "b"])` / `none` — a HEAP-element inner list. The self-host
+    // `option.to_string_ls` inlines the string quote+escape (\ " \n \r \t) since self-hosts can't call
+    // each other. Escaping is exercised by the embedded quote/backslash.
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Option[List[String]] = some([\"a\", \"b\"]) let b: Option[List[String]] = none let c: Option[List[String]] = some([])\n\
+        let d: Option[List[String]] = some([\"q\\\"x\"])\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"${d}\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "option.to_string_ls"), "must auto-link option.to_string_ls");
+    if let Some(out) = build_and_run("option_list_str_interp", &render_wasm_program(&prog)) {
+        assert_eq!(out, "some([\"a\", \"b\"])\nnone\nsome([])\nsome([\"q\\\"x\"])");
+    }
+}
+
+#[test]
 fn option_list_int_interp_and_construction() {
     // `${Option[List[Int]]}` → `some([1, 2, 3])` / `none` (nested compound). Two gaps close: the
     // OptionSome heap materializer now admits a scalar-list literal (incl the empty `some([])`), and
