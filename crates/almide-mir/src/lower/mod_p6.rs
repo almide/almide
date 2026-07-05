@@ -2831,71 +2831,129 @@ fn group_option_result_arms(
     use almide_ir::{IrMatchArm, IrPattern};
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
-    // The two constructor "slots" (Option: Some/None; Result: Ok/Err) and each payload's type.
-    let (is_option, some_ty, none_ty) = match &subject.ty {
-        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => (true, a[0].clone(), Ty::Unit),
-        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
-            (false, a[0].clone(), a[1].clone())
+    // A constructor "slot" key + its ONE payload's type (None for a nullary ctor). Handles Option
+    // (Some/None), Result (Ok/Err), and a SINGLE-FIELD user variant (`Word(String)`); a multi-field
+    // ctor, a record-variant, or a nested payload aborts (a later brick).
+    #[derive(Clone, PartialEq, Eq)]
+    enum CKey {
+        Some_,
+        None_,
+        Ok_,
+        Err_,
+        User(String),
+    }
+    let scalar_inner =
+        |p: &IrPattern| matches!(p, IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::Wildcard);
+    // `(key, payload_pattern_or_none)` for one arm — `None` (bail) for a top-level catch-all/binder,
+    // a multi-field / record ctor, or a nested payload.
+    let parse = |p: &IrPattern| -> Option<(CKey, Option<IrPattern>)> {
+        match p {
+            IrPattern::Some { inner } if scalar_inner(inner) => {
+                Some((CKey::Some_, Some((**inner).clone())))
+            }
+            IrPattern::None => Some((CKey::None_, Option::None)),
+            IrPattern::Ok { inner } if scalar_inner(inner) => {
+                Some((CKey::Ok_, Some((**inner).clone())))
+            }
+            IrPattern::Err { inner } if scalar_inner(inner) => {
+                Some((CKey::Err_, Some((**inner).clone())))
+            }
+            IrPattern::Constructor { name, args } if args.is_empty() => {
+                Some((CKey::User(name.clone()), Option::None))
+            }
+            IrPattern::Constructor { name, args } if args.len() == 1 && scalar_inner(&args[0]) => {
+                Some((CKey::User(name.clone()), Some(args[0].clone())))
+            }
+            _ => Option::None,
         }
-        _ => return None,
     };
-    // The payload sub-pattern must be a scalar shape the inner scalar match handles (Bind / Literal /
-    // Wildcard); a nested ctor payload (`some(some(x))`) is a later brick.
-    let scalar_inner = |p: &IrPattern| matches!(p, IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::Wildcard);
-    // Split each arm into the "some/ok" bucket or the "none/err" bucket, carrying the payload
-    // sub-pattern. A top-level catch-all or a nested payload aborts the whole transform.
-    let mut a_arms: Vec<(IrPattern, Option<IrExpr>, IrExpr)> = Vec::new(); // Some / Ok
-    let mut b_arms: Vec<(IrPattern, Option<IrExpr>, IrExpr)> = Vec::new(); // None / Err
+    // Ordered per-ctor buckets (first-occurrence order — the constructors are DISJOINT so outer arm
+    // order is immaterial). Each entry: (key, Vec<(payload_pattern_or_none, guard, body)>).
+    let mut groups: Vec<(CKey, Vec<(Option<IrPattern>, Option<IrExpr>, IrExpr)>)> = Vec::new();
     let mut any_guard_or_lit = false;
     for arm in arms {
-        let (bucket, inner): (&mut Vec<_>, IrPattern) = match &arm.pattern {
-            IrPattern::Some { inner } if is_option => (&mut a_arms, (**inner).clone()),
-            IrPattern::None if is_option => (&mut b_arms, IrPattern::Wildcard),
-            IrPattern::Ok { inner } if !is_option => (&mut a_arms, (**inner).clone()),
-            IrPattern::Err { inner } if !is_option => (&mut b_arms, (**inner).clone()),
-            _ => return None, // catch-all binder / wildcard / wrong ctor — not a pure dispatch
-        };
-        if !scalar_inner(&inner) {
-            return None;
-        }
-        if arm.guard.is_some() || matches!(&inner, IrPattern::Literal { .. }) {
+        let (key, payload) = parse(&arm.pattern)?;
+        if arm.guard.is_some() || matches!(&payload, Some(IrPattern::Literal { .. })) {
             any_guard_or_lit = true;
         }
-        bucket.push((inner, arm.guard.clone(), arm.body.clone()));
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, v)) => v.push((payload, arm.guard.clone(), arm.body.clone())),
+            Option::None => groups.push((key, vec![(payload, arm.guard.clone(), arm.body.clone())])),
+        }
     }
-    // Nothing to gain (a plain `some(x)/none` shape already lowers) — leave untouched.
+    // Nothing to gain (a plain `some(x)/none` / `Ctor(x)` shape already lowers) — leave untouched.
     if !any_guard_or_lit {
-        return None;
+        return Option::None;
     }
-    // Build one grouped arm per non-empty bucket: `ctor($p) => match $p { <inner arms> }` when the
-    // bucket has a guard/literal, else the single body directly (a lone `some(x) => body`).
-    let mk_group = |bucket: Vec<(IrPattern, Option<IrExpr>, IrExpr)>,
-                    payload_ty: &Ty,
-                    next_var: &mut u32,
-                    wrap: &dyn Fn(IrPattern) -> IrPattern|
-     -> Option<IrMatchArm> {
-        if bucket.is_empty() {
-            return Option::None;
+    // The payload type for a ctor's sub-match var: Option/Result from the subject; a user ctor from a
+    // Literal (its `expr.ty`) / Bind (its `ty`) among the group's arms. `None` when undeterminable.
+    let subject_ty = subject.ty.clone();
+    let payload_ty_for = |key: &CKey, bucket: &[(Option<IrPattern>, Option<IrExpr>, IrExpr)]| -> Option<Ty> {
+        match key {
+            CKey::Some_ => match &subject_ty {
+                Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => Some(a[0].clone()),
+                _ => Option::None,
+            },
+            CKey::Ok_ => match &subject_ty {
+                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => Some(a[0].clone()),
+                _ => Option::None,
+            },
+            CKey::Err_ => match &subject_ty {
+                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => Some(a[1].clone()),
+                _ => Option::None,
+            },
+            CKey::None_ => Some(Ty::Unit),
+            CKey::User(_) => bucket.iter().find_map(|(p, _, _)| match p {
+                Some(IrPattern::Bind { ty, .. }) => Some(ty.clone()),
+                Some(IrPattern::Literal { expr }) => Some(expr.ty.clone()),
+                _ => Option::None,
+            }),
         }
-        let needs_inner = bucket.len() > 1
-            || bucket
-                .iter()
-                .any(|(p, g, _)| g.is_some() || matches!(p, IrPattern::Literal { .. }));
+    };
+    let rebuild = |key: &CKey, payload: IrPattern| -> IrPattern {
+        match key {
+            CKey::Some_ => IrPattern::Some { inner: Box::new(payload) },
+            CKey::None_ => IrPattern::None,
+            CKey::Ok_ => IrPattern::Ok { inner: Box::new(payload) },
+            CKey::Err_ => IrPattern::Err { inner: Box::new(payload) },
+            CKey::User(name) => IrPattern::Constructor { name: name.clone(), args: vec![payload] },
+        }
+    };
+    let mut new_arms = Vec::with_capacity(groups.len());
+    for (key, bucket) in groups {
+        let has_payload = !matches!(key, CKey::None_);
+        let needs_inner = has_payload
+            && (bucket.len() > 1
+                || bucket
+                    .iter()
+                    .any(|(p, g, _)| g.is_some() || matches!(p, Some(IrPattern::Literal { .. }))));
         if !needs_inner {
-            // A single `ctor(pat) => body` with a plain payload — keep it as one arm.
-            let (pat, guard, body) = bucket.into_iter().next().unwrap();
-            return Option::Some(IrMatchArm {
-                pattern: wrap(pat),
-                guard,
-                body,
-            });
+            // A single arm for this ctor (a lone `some(x) => body` / a nullary `none => body`) — keep
+            // it verbatim. A nullary ctor with a guard/duplicate cannot sub-match (no payload) → bail.
+            if bucket.len() != 1 {
+                return Option::None;
+            }
+            let (payload, guard, body) = bucket.into_iter().next().unwrap();
+            let pat = match payload {
+                Some(p) => rebuild(&key, p),
+                Option::None => rebuild(&key, IrPattern::Wildcard),
+            };
+            // `rebuild` for a nullary key ignores the payload arg, so the Wildcard above is inert.
+            let pat = if matches!(key, CKey::None_) {
+                IrPattern::None
+            } else {
+                pat
+            };
+            new_arms.push(IrMatchArm { pattern: pat, guard, body });
+            continue;
         }
+        let payload_ty = payload_ty_for(&key, &bucket)?;
         let pv = VarId(*next_var);
         *next_var += 1;
         let inner_arms: Vec<IrMatchArm> = bucket
             .into_iter()
-            .map(|(pat, guard, body)| IrMatchArm {
-                pattern: pat,
+            .map(|(payload, guard, body)| IrMatchArm {
+                pattern: payload.unwrap_or(IrPattern::Wildcard),
                 guard,
                 body,
             })
@@ -2915,30 +2973,11 @@ fn group_option_result_arms(
             span: subject.span.clone(),
             def_id: None,
         };
-        Option::Some(IrMatchArm {
-            pattern: wrap(IrPattern::Bind {
-                var: pv,
-                ty: payload_ty.clone(),
-            }),
+        new_arms.push(IrMatchArm {
+            pattern: rebuild(&key, IrPattern::Bind { var: pv, ty: payload_ty }),
             guard: Option::None,
             body: sub,
-        })
-    };
-    let (wrap_a, wrap_b): (&dyn Fn(IrPattern) -> IrPattern, &dyn Fn(IrPattern) -> IrPattern) =
-        if is_option {
-            (&|p| IrPattern::Some { inner: Box::new(p) }, &|_| IrPattern::None)
-        } else {
-            (
-                &|p| IrPattern::Ok { inner: Box::new(p) },
-                &|p| IrPattern::Err { inner: Box::new(p) },
-            )
-        };
-    let mut new_arms = Vec::with_capacity(2);
-    if let Option::Some(arm) = mk_group(a_arms, &some_ty, next_var, wrap_a) {
-        new_arms.push(arm);
-    }
-    if let Option::Some(arm) = mk_group(b_arms, &none_ty, next_var, wrap_b) {
-        new_arms.push(arm);
+        });
     }
     if new_arms.is_empty() {
         return Option::None;

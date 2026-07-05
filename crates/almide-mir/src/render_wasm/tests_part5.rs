@@ -1464,15 +1464,19 @@ fn guarded_option_result_match_regroups_and_lowers() {
     // payloads regroups into constructor dispatch + a scalar payload sub-match (`some(n) if g` →
     // `some($p) => match $p { n if g => .. }`), so the guarded-variant case reduces to the proven
     // variant-tag dispatch + scalar guard/literal chain. A guard/literal MUST select the exact arm.
-    let src = "fn olabel(x: Option[Int]) -> String = match x { some(n) if n > 100 => \"big\", some(n) if n > 0 => \"pos\", some(0) => \"zero\", some(_) => \"neg\", none => \"none\" }\n\
+    let src = "type Tok = Word(String) | Num(Int)\n\
+        fn olabel(x: Option[Int]) -> String = match x { some(n) if n > 100 => \"big\", some(n) if n > 0 => \"pos\", some(0) => \"zero\", some(_) => \"neg\", none => \"none\" }\n\
         fn rlabel(r: Result[Int, String]) -> String = match r { ok(v) if v > 0 => \"ok+\", ok(0) => \"ok0\", ok(_) => \"ok-\", err(e) if string.len(e) > 5 => \"eL\", err(_) => \"eS\" }\n\
+        fn tclass(t: Tok) -> String = match t { Word(\"hi\") => \"HI\", Word(_) => \"W\", Num(7) => \"SEVEN\", Num(_) => \"N\" }\n\
         effect fn main() -> Unit = {\n\
         println(olabel(some(200))) println(olabel(some(5))) println(olabel(some(0))) println(olabel(none))\n\
-        println(rlabel(ok(7))) println(rlabel(ok(0))) println(rlabel(err(\"longmsg\"))) println(rlabel(err(\"no\"))) }\n";
+        println(rlabel(ok(7))) println(rlabel(ok(0))) println(rlabel(err(\"longmsg\"))) println(rlabel(err(\"no\")))\n\
+        println(tclass(Word(\"hi\"))) println(tclass(Word(\"z\"))) println(tclass(Num(7))) println(tclass(Num(3))) }\n";
     let prog = lower_source(src);
     assert!(prog.functions.iter().any(|f| f.name == "olabel"), "olabel must lower");
+    assert!(prog.functions.iter().any(|f| f.name == "tclass"), "tclass must lower");
     if let Some(out) = build_and_run("guarded_variant_match", &render_wasm_program(&prog)) {
-        assert_eq!(out, "big\npos\nzero\nnone\nok+\nok0\neL\neS");
+        assert_eq!(out, "big\npos\nzero\nnone\nok+\nok0\neL\neS\nHI\nW\nSEVEN\nN");
     }
 }
 

@@ -29,6 +29,14 @@ fn sclass(r: Result[String, String]) -> String = match r {
   err(_) => "ERR",
 }
 
+type Tok = Word(String) | Num(Int)
+fn tclass(t: Tok) -> String = match t {
+  Word("hi") => "HI",
+  Word(_)    => "W",
+  Num(7)     => "SEVEN",
+  Num(_)     => "N",
+}
+
 effect fn main() -> Unit = {
   println(olabel(some(200)))
   println(olabel(some(5)))
@@ -44,4 +52,8 @@ effect fn main() -> Unit = {
   println(sclass(ok("x")))
   println(sclass(err("bad")))
   println(sclass(err("y")))
+  println(tclass(Word("hi")))
+  println(tclass(Word("z")))
+  println(tclass(Num(7)))
+  println(tclass(Num(3)))
 }
