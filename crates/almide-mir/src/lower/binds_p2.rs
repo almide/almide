@@ -794,6 +794,11 @@ impl LowerCtx {
                 });
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
+                // The funcref returns its Result/Option in the SAME materialized layout an `ok()`/
+                // `err()` ctor builds (a lifted lambda's body goes through `materialize_result_*`), so
+                // SEED its read-shape — a later `match o { ok/err }` over the bound var then reads its
+                // real tag instead of walling (the higher-order-Result-callback path `fan.map` needs).
+                self.seed_variant_param(dst, ty);
                 Ok(())
             }
             // `var x = obj.method(args)` / `var x = (g)(args)` — an UNRESOLVABLE

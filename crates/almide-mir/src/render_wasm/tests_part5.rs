@@ -1532,6 +1532,27 @@ fn set_interp_self_hosts_via_to_list() {
 }
 
 #[test]
+fn higher_order_result_traverse_matches_call_indirect() {
+    // A fallible list traverse over a funcref callback — `match f(x) { ok => .., err => .. }` where
+    // `f` is invoked via CallIndirect. The trust-spine seeds the CallIndirect result's read-shape and
+    // hoists a computed-call match subject, so the traverse (short-circuit on first err) lowers. The
+    // sequential `fan.map` semantics on wasm.
+    let src = "fn go(xs: List[Int], f: (Int) -> Result[Int, String], i: Int, acc: List[Int]) -> Result[List[Int], String] =\n\
+        if i >= list.len(xs) then ok(acc)\n\
+        else match f(list.get(xs, i) ?? 0) { ok(y) => go(xs, f, i + 1, acc + [y]), err(e) => err(e) }\n\
+        fn traverse(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[List[Int], String] = go(xs, f, 0, [])\n\
+        fn show(r: Result[List[Int], String]) -> String = match r { ok(ys) => \"ok:\" + int.to_string(list.sum(ys)), err(e) => \"err:\" + e }\n\
+        effect fn main() -> Unit = {\n\
+        println(show(traverse([1, 2, 3, 4], (x) => ok(x * 2))))\n\
+        println(show(traverse([1, -2, 3], (x) => if x > 0 then ok(x) else err(\"neg\")))) }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "traverse"), "traverse must lower");
+    if let Some(out) = build_and_run("ho_traverse", &render_wasm_program(&prog)) {
+        assert_eq!(out, "ok:20\nerr:neg");
+    }
+}
+
+#[test]
 fn higher_order_heap_return_via_call_indirect() {
     // `fn apply(g, x) = g(x)` returning a heap value (Result / String) through a known funcref used to
     // wall a tail heap-result computed call; it now executes via `Op::CallIndirect` and moves the

@@ -1459,9 +1459,19 @@ fn desugar_match_subject_hoist(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
         let has_literal_arm = arms
             .iter()
             .any(|a| matches!(a.pattern, almide_ir::IrPattern::Literal { .. }));
-        if has_literal_arm
+        // A COMPUTED-call (funcref / `Op::CallIndirect`) subject cannot lower INLINE through the
+        // variant path (which materializes only a Var / Named / Module subject), so hoist it to a
+        // `let $t = f(x); match $t` even for an Option/Result subject — the bind's heap-result
+        // CallIndirect + seeded read-shape then makes the match lower (the `fan.map` traverse `match
+        // f(x) { ok/err }` shape).
+        let is_computed_call = matches!(
+            &subject.kind,
+            IrExprKind::Call { target: almide_ir::CallTarget::Computed { .. }, .. }
+        );
+        if (has_literal_arm
             && !is_pure_match_subject(subject)
-            && !is_variant_subject(&subject.ty)
+            && !is_variant_subject(&subject.ty))
+            || is_computed_call
         {
             let tmp = VarId(*next_var);
             *next_var += 1;
