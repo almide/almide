@@ -56,34 +56,12 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         return;
     }
 
-    // cdylib target: build shared library (.dylib/.so)
-    if cdylib {
-        let use_release = release || fast;
-        let project_dir = std::env::temp_dir().join("almide-build-cdylib");
-        // Strip fn main() from the code — cdylib has no entry point
-        let lib_code = rs_code.replace("fn main()", "fn __almide_unused_main()");
-        // Serialize across processes: the shared scratch dir's src + target
-        // would otherwise be corrupted by a concurrent `almide build`.
-        let _ = std::fs::create_dir_all(&project_dir);
-        let _flock = super::run::BuildDirLock::acquire(&project_dir)
-            .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-        match super::cargo_build_cdylib(&lib_code, &project_dir, &output, use_release) {
-            Ok(lib_path) => {
-                eprintln!("Built {}", lib_path.display());
-            }
-            Err(e) => {
-                eprintln!("Compile error:\n{}", e);
-                std::process::exit(1);
-            }
-        }
-        return;
-    }
-
-    // Native target: use cargo to resolve rustls/webpki-roots for HTTPS support
+    // Load native deps from almide.toml (search in input file's directory, then
+    // CWD). BOTH the cdylib and bin paths need them: a cdylib with a `native/*.rs`
+    // shim or a `[native-deps]` crate must wire them in exactly like a bin, or it
+    // fails with E0433 / a missing dep (#719). source_root is the directory
+    // containing almide.toml (where native/ lives).
     let use_release = release || fast;
-    let project_dir = std::env::temp_dir().join("almide-build");
-    // Load native deps from almide.toml (search in input file's directory, then CWD).
-    // source_root is the directory containing almide.toml (where native/ lives).
     let file_dir = std::path::Path::new(file).parent()
         .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
         .unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -106,6 +84,31 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         .unwrap_or_else(|| std::path::PathBuf::from("."));
     let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
     let source_root = if !native_deps.is_empty() || has_deps { Some(toml_dir.as_path()) } else { None };
+
+    // cdylib target: build shared library (.dylib/.so)
+    if cdylib {
+        let project_dir = std::env::temp_dir().join("almide-build-cdylib");
+        // Strip fn main() from the code — cdylib has no entry point
+        let lib_code = rs_code.replace("fn main()", "fn __almide_unused_main()");
+        // Serialize across processes: the shared scratch dir's src + target would
+        // otherwise be corrupted by a concurrent `almide build`.
+        let _ = std::fs::create_dir_all(&project_dir);
+        let _flock = super::run::BuildDirLock::acquire(&project_dir)
+            .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+        match super::cargo_build_cdylib(&lib_code, &project_dir, &output, use_release, native_deps, source_root) {
+            Ok(lib_path) => {
+                eprintln!("Built {}", lib_path.display());
+            }
+            Err(e) => {
+                eprintln!("Compile error:\n{}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    // Native target: use cargo to resolve rustls/webpki-roots for HTTPS support
+    let project_dir = std::env::temp_dir().join("almide-build");
     // Serialize across processes: the shared scratch dir's src + target would
     // otherwise be corrupted by a concurrent `almide build`. Held through the
     // copy-out below so the generated binary can't be overwritten between

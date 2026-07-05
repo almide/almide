@@ -205,6 +205,22 @@ fn build_cargo_toml(base_toml: &str, native_deps: &[crate::project::NativeDep]) 
 }
 
 /// Copy native/*.rs files from source_root into src_dir and inject mod declarations into code.
+fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(to).map_err(|e| format!("failed to create {}: {}", to.display(), e))?;
+    let entries = std::fs::read_dir(from).map_err(|e| format!("failed to read {}: {}", from.display(), e))?;
+    for entry in entries.flatten() {
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if src.is_dir() {
+            copy_dir_recursive(&src, &dst)?;
+        } else {
+            std::fs::copy(&src, &dst)
+                .map_err(|e| format!("failed to copy {}: {}", src.display(), e))?;
+        }
+    }
+    Ok(())
+}
+
 fn inject_native_modules(code: &mut String, source_root: Option<&std::path::Path>, src_dir: &std::path::Path) -> Result<(), String> {
     let root = match source_root {
         Some(r) => r,
@@ -223,6 +239,10 @@ fn inject_native_modules(code: &mut String, source_root: Option<&std::path::Path
                 std::fs::write(src_dir.join(entry.file_name()), &content)
                     .map_err(|e| format!("failed to write native module {}: {}", stem, e))?;
                 mod_decls.push_str(&format!("mod {};\n", stem));
+            } else if path.is_dir() {
+                // asset subdirectories (e.g. native/wgsl/*.wgsl) travel with the
+                // modules so include_str!("wgsl/...") resolves in the generated crate
+                copy_dir_recursive(&path, &src_dir.join(entry.file_name()))?;
             }
         }
     }
@@ -294,10 +314,15 @@ fn append_cargo_dep(cargo: &mut String, name: &str, spec: &str) {
 }
 
 /// Build generated Rust code as a cdylib shared library (.dylib/.so).
-fn cargo_build_cdylib(rs_code: &str, project_dir: &std::path::Path, lib_name: &str, release: bool) -> Result<std::path::PathBuf, String> {
+fn cargo_build_cdylib(rs_code: &str, project_dir: &std::path::Path, lib_name: &str, release: bool, native_deps: &[crate::project::NativeDep], source_root: Option<&std::path::Path>) -> Result<std::path::PathBuf, String> {
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
-    let cargo_toml = format!(r#"[package]
+    // Base manifest for a cdylib; `build_cargo_toml` folds in `[native-deps]` and
+    // `inject_dep_natives` appends any dependency-package native deps below — so a
+    // cdylib wires native crates exactly like the bin path (#719). Previously this
+    // wrote a dep-free manifest and `rs_code` verbatim, so `@extern(rust, …)`
+    // modules were undeclared (E0433) and `[native-deps]` never reached cargo.
+    let cdylib_base = format!(r#"[package]
 name = "almide-cdylib"
 version = "0.1.0"
 edition = "2021"
@@ -316,9 +341,17 @@ opt-level = 3
 lto = true
 codegen-units = 1
 "#, lib_name.replace('-', "_"));
+    let cargo_toml = build_cargo_toml(&cdylib_base, native_deps);
     std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
-    std::fs::write(src_dir.join("lib.rs"), rs_code)
+
+    // Copy `native/*.rs` shims into src/ + inject `mod <stem>;`, then pull native
+    // modules + `[native-deps]` from dependency packages — same wiring as
+    // `cargo_build_generated_with_native`.
+    let mut lib_code = rs_code.to_string();
+    inject_native_modules(&mut lib_code, source_root, &src_dir)?;
+    inject_dep_natives(&mut lib_code, source_root, &src_dir, project_dir)?;
+    std::fs::write(src_dir.join("lib.rs"), &lib_code)
         .map_err(|e| format!("failed to write lib.rs: {}", e))?;
 
     let mut cmd = std::process::Command::new("cargo");
