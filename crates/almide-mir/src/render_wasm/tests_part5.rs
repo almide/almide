@@ -1574,6 +1574,20 @@ fn option_option_int_interp() {
 }
 
 #[test]
+fn float_list_option_and_result_interp() {
+    // Option[List[Float]] / Result[List[Float],String] — each element float.to_string with drop-.0.
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Option[List[Float]] = some([1.5, 2.0]) let b: Option[List[Float]] = some([])\n\
+        let c: Result[List[Float], String] = ok([100.0, 0.5]) let d: Result[List[Float], String] = err(\"x\")\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"${d}\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "option.to_string_lf"), "must auto-link option.to_string_lf");
+    if let Some(out) = build_and_run("float_list", &render_wasm_program(&prog)) {
+        assert_eq!(out, "some([1.5, 2])\nsome([])\nok([100, 0.5])\nerr(\"x\")");
+    }
+}
+
+#[test]
 fn nested_interp_float_deep_option_and_result_option_list() {
     // Result[Float,String] (float drop-.0), Option[Option[Option[Int]]] (3-deep), and
     // Result[Option[List[Int]],String] (int-list under ok(some …)).
