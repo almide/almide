@@ -1442,9 +1442,11 @@ fn derived_variant_codec_decode_all_payload_shapes() {
     // value.field — NOT a (String, Value) tuple the trust-spine walls — then `ok(Ctor(..))`
     // materializes the variant (a nested scalar-record field stored + freed by the masked rc_dec).
     let src = "type Color: Codec = { r: Int, g: Int, b: Int }\n\
-        type Shape: Codec = | Wrap(Color) | Tag { name: String, c: Color } | Multi(List[Int]) | Pair(Int, String) | Plain\n\
+        type Labeled: Codec = { label: String, n: Int }\n\
+        type Shape: Codec = | Wrap(Color) | Boxed(Labeled) | Tag { name: String, c: Color } | Multi(List[Int]) | Pair(Int, String) | Plain\n\
         effect fn main() -> Unit = {\n\
         match Shape.decode(Shape.encode(Wrap({ r: 1, g: 2, b: 3 }))) { ok(s) => match s { Wrap(c) => println(int.to_string(c.g)), _ => println(\"?\") }, err(e) => println(e) }\n\
+        match Shape.decode(Shape.encode(Boxed({ label: \"z\", n: 8 }))) { ok(s) => match s { Boxed(i) => println(i.label + \" \" + int.to_string(i.n)), _ => println(\"?\") }, err(e) => println(e) }\n\
         match Shape.decode(Shape.encode(Tag { name: \"hi\", c: { r: 4, g: 5, b: 6 } })) { ok(s) => match s { Tag { name, c } => println(name + \" \" + int.to_string(c.b)), _ => println(\"?\") }, err(e) => println(e) }\n\
         match Shape.decode(Shape.encode(Multi([1, 2, 3]))) { ok(s) => match s { Multi(xs) => println(int.to_string(list.len(xs))), _ => println(\"?\") }, err(e) => println(e) }\n\
         match Shape.decode(Shape.encode(Pair(7, \"x\"))) { ok(s) => match s { Pair(n, t) => println(int.to_string(n) + t), _ => println(\"?\") }, err(e) => println(e) }\n\
@@ -1452,7 +1454,7 @@ fn derived_variant_codec_decode_all_payload_shapes() {
     let prog = lower_source(&format!("import json\n{src}"));
     assert!(prog.functions.iter().any(|f| f.name == "Shape.decode"), "Shape.decode must link");
     if let Some(out) = build_and_run("variant_codec_decode", &render_wasm_program(&prog)) {
-        assert_eq!(out, "2\nhi 6\n3\n7x\nplain");
+        assert_eq!(out, "2\nz 8\nhi 6\n3\n7x\nplain");
     }
 }
 

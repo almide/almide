@@ -232,7 +232,7 @@ impl LowerCtx {
         }
         self.variant_layouts
             .field_variant_name(&a[0])
-            .is_some_and(|n| self.variant_layouts.needs_recursive_drop(&n))
+            .is_some_and(|n| self.variant_layouts.needs_recursive_drop(&n, &|_| false))
     }
 
     pub(crate) fn try_lower_variant_ctor(&mut self, value: &IrExpr) -> Option<ValueId> {
@@ -271,9 +271,14 @@ impl LowerCtx {
         if args.len() != arity {
             return None;
         }
-        // Does this TYPE need the recursive DropVariant (a nested-variant field)? If so, its heap
-        // fields are freed by the generated `$__drop_<T>`, NOT the masked DropListStr.
-        let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name);
+        // Does this TYPE need the recursive DropVariant (a nested-variant OR nested-record field)? If
+        // so, its heap fields are freed by the generated `$__drop_<T>`, NOT the masked DropListStr.
+        // The record predicate mirrors the drop generator's `variant_needs_recursive_drop` widening.
+        let needs_rec = self
+            .variant_layouts
+            .needs_recursive_drop(&type_name, &|rn| {
+                crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+            });
         // Lower every field value FIRST (before the alloc) so a field expr that itself allocates
         // does not interleave with our store sequence. A SCALAR field is a value copy; a leaf
         // `String` field is a fresh OWNED handle (lower_owned_heap_field) moved in; a NESTED
@@ -315,16 +320,13 @@ impl LowerCtx {
                 field_vals.push((obj, true));
             } else if matches!(&arg.ty, Ty::Named(..) | Ty::Record { .. })
                 && self.aggregate_field_tys(&arg.ty).is_some()
-                && self.record_or_anon_drop_type_name(&arg.ty).is_none()
             {
-                // A SCALAR-ONLY RECORD-type ctor field (`Wrap(Color)` — Color = {r,g,b: Int}): a variant
-                // ctor whose field is a nested record with no nested heap. Materialize the record (a
+                // A RECORD-type ctor field (`Wrap(Color)`, `Box(Inner)`): materialize the record (a
                 // `Record` literal via `try_lower_record_construct` / the scalar builder; a decoded Var /
-                // call via `lower_owned_heap_field`) and store its handle. The variant's masked
-                // `DropListStr` frees it with ONE `rc_dec` — exact for a scalar-only record block. A
-                // record NEEDING a recursive drop (a String / nested-heap field) has `record_or_anon_drop
-                // _type_name = Some`, so it is EXCLUDED here and stays walled (its mask `rc_dec` would leak
-                // the nested heap — a later brick).
+                // call via `lower_owned_heap_field`) and store its handle. Because the variant now counts
+                // a record field in `needs_recursive_drop`, its scope-end drop is the generated
+                // `$__drop_<V>` — which frees the field via `$__drop_<R>` (a nested-heap record) or a flat
+                // `rc_dec` (a scalar-only record), so the record's nested heap is never leaked.
                 let obj = match &arg.kind {
                     IrExprKind::Record { .. } => self
                         .try_lower_record_construct(arg)
@@ -333,7 +335,7 @@ impl LowerCtx {
                 };
                 field_vals.push((obj, true));
             } else if is_heap_ty(&arg.ty) {
-                return None; // List[String] / Map / recursive-record / Map / other heap ctor field — a later brick
+                return None; // List[String] / Map / other heap ctor field — a later brick
             } else {
                 let v = self.lower_scalar_value(arg)?;
                 field_vals.push((v, false));

@@ -1202,7 +1202,11 @@ impl LowerCtx {
             _ => return None,
         };
         let type_name = self.custom_variant_type_name(ok_ty)?;
-        let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name);
+        let needs_rec = self
+            .variant_layouts
+            .needs_recursive_drop(&type_name, &|rn| {
+                crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+            });
         let repr = repr_of(result_ty).ok()?;
         match &expr.kind {
             IrExprKind::ResultOk { expr: inner } => {

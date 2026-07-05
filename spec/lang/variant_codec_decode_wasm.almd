@@ -9,9 +9,11 @@
 import json
 
 type Color: Codec = { r: Int, g: Int, b: Int }
+type Labeled: Codec = { label: String, n: Int }
 
 type Shape: Codec =
   | Wrap(Color)
+  | Boxed(Labeled)
   | Tag { name: String, c: Color }
   | Multi(List[Int])
   | Pair(Int, String)
@@ -20,6 +22,10 @@ type Shape: Codec =
 effect fn main() -> Unit = {
   match Shape.decode(Shape.encode(Wrap({ r: 1, g: 2, b: 3 }))) {
     ok(s) => match s { Wrap(c) => println("wrap " + int.to_string(c.g)), _ => println("?") }
+    err(e) => println("err:" + e)
+  }
+  match Shape.decode(Shape.encode(Boxed({ label: "z", n: 8 }))) {
+    ok(s) => match s { Boxed(i) => println("boxed " + i.label + " " + int.to_string(i.n)), _ => println("?") }
     err(e) => println("err:" + e)
   }
   match Shape.decode(Shape.encode(Tag { name: "hi", c: { r: 4, g: 5, b: 6 } })) {

@@ -989,14 +989,16 @@ impl VariantLayouts {
     /// leak its children? A String-only-field variant uses the masked `DropListStr` instead (ADT
     /// brick 5a/5c). This is the lowering-side mirror of
     /// [`crate::lower::variant_needs_recursive_drop`], computed from the registry's field Tys.
-    pub fn needs_recursive_drop(&self, type_name: &str) -> bool {
+    pub fn needs_recursive_drop(&self, type_name: &str, is_record: &dyn Fn(&str) -> bool) -> bool {
         use almide_lang::types::constructor::TypeConstructorId;
         let Some(layout) = self.by_type.get(type_name) else { return false };
-        // Mirrors the generator's `variant_needs_recursive_drop`: a nested-variant field
-        // (the original rule) OR heap fields the generated drop can ALL free (String /
-        // List[scalar] / List[variant]) — the GGUFValue shape.
+        // Mirrors the generator's `variant_needs_recursive_drop`: a nested-variant field (the
+        // original rule) OR heap fields the generated drop can ALL free (String / List[scalar] /
+        // List[variant] / a RECORD — via `$__drop_<R>` or a scalar-only record's flat rc_dec). The
+        // `is_record` predicate is supplied by the caller (LowerCtx checks its record registry).
         let supported_heap = |t: &Ty| -> bool {
             self.field_is_variant(t)
+                || matches!(t, Ty::Named(n, _) if is_record(n.as_str()))
                 || matches!(t, Ty::String)
                 || matches!(t, Ty::Applied(TypeConstructorId::List, a)
                     if a.len() == 1 && (!is_heap_ty(&a[0]) || self.field_is_variant(&a[0])))
@@ -1051,7 +1053,11 @@ impl VariantLayouts {
     /// gate) so the two never disagree: a variant admitted here ALWAYS has a generated `$__drop_list_<V>`.
     pub fn is_rich_variant_ty(&self, ty: &Ty) -> Option<String> {
         let name = self.field_variant_name(ty)?;
-        self.needs_recursive_drop(&name).then_some(name)
+        // A `List[<variant>]` ELEMENT check keys on nested-variant fields only (a variant with a
+        // record field is neither flat nor list-rich here → the list materializer walls it cleanly,
+        // never a leak). The record-widening applies to the direct-ctor `needs_rec` (LowerCtx), not
+        // to the list-element admission.
+        self.needs_recursive_drop(&name, &|_| false).then_some(name)
     }
 
     /// Is `ty` one of the variant types in this registry (a nested-variant ctor field)?
