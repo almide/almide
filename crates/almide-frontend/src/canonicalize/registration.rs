@@ -708,15 +708,25 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     // equal and not flagged.
     if matches!(resolved, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. }) {
         let canonical_key = prefixed_key(prefix, name);
-        if let Some(existing) = env.types.get(&sym(&canonical_key)) {
-            if existing != &resolved
-                && matches!(existing, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. })
-            {
-                diagnostics.push(err(
-                    format!("type '{}' is declared more than once with different structures", name),
-                    format!("Two distinct types share the name '{}' within the same module. Rename one so the name is unique.", name),
-                    format!("type {}", name),
-                ).with_code("E020"));
+        // A LOCAL type (main program, no prefix) is allowed to SHADOW a
+        // dependency's bare-name dual-registration rather than collide with it
+        // (#433): the existing bare `Persona` mirrors some `dep.Persona`, and a
+        // local `type Persona` should win for unqualified use (the dep stays
+        // reachable via `dep.Persona`). Only flag E020 for a genuine duplicate —
+        // another type registered under the SAME canonical key that is NOT just a
+        // dependency's bare alias being shadowed by a local.
+        let shadows_dep_alias = prefix.is_none() && env.prefixed_bare_aliases.contains(&sym(&canonical_key));
+        if !shadows_dep_alias {
+            if let Some(existing) = env.types.get(&sym(&canonical_key)) {
+                if existing != &resolved
+                    && matches!(existing, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. })
+                {
+                    diagnostics.push(err(
+                        format!("type '{}' is declared more than once with different structures", name),
+                        format!("Two distinct types share the name '{}' within the same module. Rename one so the name is unique.", name),
+                        format!("type {}", name),
+                    ).with_code("E020"));
+                }
             }
         }
     }
@@ -746,7 +756,14 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     }
     env.types.insert(sym(&key), resolved.clone());
     if prefix.is_some() {
+        // Bare-name dual-registration of a prefixed type, for unqualified access.
+        // Record it so a local same-name type may shadow it (#433).
         env.types.insert(sym(name), resolved);
+        env.prefixed_bare_aliases.insert(sym(name));
+    } else {
+        // A local type owns the bare name now — it is no longer a dependency
+        // alias, so a later genuine local duplicate is still caught by E020.
+        env.prefixed_bare_aliases.remove(&sym(name));
     }
     if let Some(derives) = deriving {
         register_derive_sigs(env, derives, name, prefix);
