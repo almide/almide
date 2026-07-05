@@ -2,14 +2,20 @@ use std::process::Command;
 use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
 
 pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool, repr_c: bool, cdylib: bool, emit_unverified: bool, verified: bool) {
-    let is_npm = matches!(target, Some("npm"));
+    // The npm/JavaScript target was removed with the TS backend; reject it with a
+    // clear pointer instead of emitting a non-functional stub package.
+    if matches!(target, Some("npm" | "js" | "ts" | "javascript" | "typescript")) {
+        let t = target.unwrap_or("npm");
+        eprintln!(
+            "error: the npm/JavaScript build target has been removed\n  \
+             in `almide build --target {t}`\n  \
+             supported targets: rust (default, native binary), wasm\n  \
+             hint: use `--target wasm` for a portable build"
+        );
+        std::process::exit(2);
+    }
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
     let is_wasm_direct = matches!(target, Some("wasm"));
-    if is_npm {
-        let out_dir = output.unwrap_or("dist");
-        cmd_build_npm(file, out_dir, no_check);
-        return;
-    }
 
     // Direct WASM emit: .almd → IR → WASM binary (no rustc)
     if is_wasm_direct {
@@ -423,113 +429,5 @@ fn run_wasm_opt(path: &str) -> Result<usize, String> {
     }
     let meta = std::fs::metadata(path).map_err(|e| format!("stat {}: {}", path, e))?;
     Ok(meta.len() as usize)
-}
-
-fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
-    let (mut program, source_text, _parse_errors) = parse_file(file);
-
-    // Resolve dependencies
-    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
-                .into_iter()
-                .map(|fd| (fd.pkg_id, fd.source_dir))
-                .collect()
-        } else {
-            vec![]
-        }
-    } else {
-        vec![]
-    };
-
-    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
-        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-
-    // Type check (always needed for IR lowering)
-    let canon = canonicalize::canonicalize_program(
-        &program,
-        resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
-    );
-    let mut checker = check::Checker::from_env(canon.env);
-    checker.set_source(file, &source_text);
-    checker.diagnostics = canon.diagnostics;
-    let diagnostics = checker.infer_program(&mut program);
-    if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
-        for d in &diagnostics {
-            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
-        }
-        std::process::exit(1);
-    }
-
-    // Pre-register versioned names before root lowering
-    for (name, _, pkg_id, _) in &resolved.modules {
-        if let Some(pid) = pkg_id.as_ref() {
-            let base = pid.mod_name();
-            let v = if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base };
-            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&v));
-        }
-    }
-    let mut ir_program = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-    for (name, mod_prog, pkg_id, _) in &resolved.modules {
-        if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
-        let saved_self = checker.env.self_module_name;
-        if let Some(pid) = pkg_id.as_ref() {
-            checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
-        }
-        checker.infer_module(&mut mod_prog.clone(), name);
-        let versioned = pkg_id.as_ref().map(|pid| pid.mod_name());
-        if let Some(ref v) = versioned {
-            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
-        }
-        let self_name = checker.env.self_module_name.map(|s| s.to_string());
-        let import_table_name = self_name.as_deref().unwrap_or(name);
-        let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
-        let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-        let mod_ir_module = almide::lower::lower_module(name, &mod_prog, &checker.env, &checker.type_map, versioned);
-        checker.env.import_table = saved_table;
-        checker.env.self_module_name = saved_self;
-        ir_program.modules.push(mod_ir_module);
-    }
-
-    // Read package metadata from almide.toml (or use defaults)
-    let (pkg_name, pkg_version) = if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            (proj.package.name, proj.package.version)
-        } else {
-            (file.strip_suffix(".almd").unwrap_or("my-package").to_string(), "0.1.0".to_string())
-        }
-    } else {
-        (file.strip_suffix(".almd").unwrap_or("my-package").to_string(), "0.1.0".to_string())
-    };
-
-    // Generate JS via v3 codegen (TS target removed — emit stub)
-    almide::mono::monomorphize(&mut ir_program);
-    let js_code = "// TypeScript target has been removed. Use --target wasm instead.\n".to_string();
-
-    let package_json = format!(
-        r#"{{"name":"{}","version":"{}","main":"index.js","type":"module"}}"#,
-        pkg_name, pkg_version
-    );
-
-    // Write files
-    let out_path = std::path::Path::new(out_dir);
-    std::fs::create_dir_all(out_path).unwrap_or_else(|e| {
-        eprintln!("Failed to create {}: {}", out_dir, e);
-        std::process::exit(1);
-    });
-
-    std::fs::write(out_path.join("package.json"), &package_json).unwrap_or_else(|e| {
-        eprintln!("Failed to write package.json: {}", e);
-        std::process::exit(1);
-    });
-    std::fs::write(out_path.join("index.js"), &js_code).unwrap_or_else(|e| {
-        eprintln!("Failed to write index.js: {}", e);
-        std::process::exit(1);
-    });
-
-    eprintln!("Built npm package in {}/", out_dir);
-    eprintln!("  package.json");
-    eprintln!("  index.js");
 }
 
