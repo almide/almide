@@ -802,6 +802,15 @@ impl LowerCtx {
                         self.drop_arm_locals(mark);
                         obj
                     }
+                    // `ok(some(5))` / `ok(none)` / `ok(ok(7))` / `ok(err("x"))` — a NESTED Option/Result
+                    // ctor Ok payload. Build the inner Option/Result block recursively (a fresh OWNED
+                    // handle), moved into the outer Ok's slot — exactly like the OptionSome nested arm.
+                    // Without this the nested ctor fell to `_ => None` and the inner degraded to an EMPTY
+                    // Opaque (the Result-outer nested-interp `ok(none)` miscompile).
+                    IrExprKind::OptionSome { .. }
+                    | IrExprKind::OptionNone
+                    | IrExprKind::ResultOk { .. }
+                    | IrExprKind::ResultErr { .. } => self.try_lower_option_ctor(expr, &expr.ty)?,
                     _ => return None,
                 };
                 let dst = self.materialize_result_str(piece, repr, false, false);

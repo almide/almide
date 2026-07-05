@@ -551,25 +551,16 @@ impl LowerCtx {
                 s.value_of.insert(bind_var, payload);
                 if is_heap {
                     s.param_values.insert(payload);
-                    // NESTED VARIANT PAYLOAD: `ok(m)` where m is itself an
-                    // Option/Result (`Result[Option[record], String]` — the
-                    // `read_message()!` monadic-desugar Ok arm holding porta's
-                    // `match m { some(req)/none }`). Track the BORROWED payload
-                    // exactly like the statement-match Some-bind does
-                    // (control.rs), so the INNER match BRANCHES on its tag
-                    // instead of falling to the (now-walled) linearization.
-                    use almide_lang::types::constructor::TypeConstructorId;
-                    if matches!(&bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
-                        s.materialized_options.insert(payload);
-                        if crate::lower::is_heap_elem_list_ty(&bind_ty) {
-                            s.heap_elem_lists.insert(payload);
-                        }
-                    } else if crate::lower::is_result_ty(&bind_ty) {
-                        s.materialized_results.insert(payload);
-                        if crate::lower::is_heap_elem_list_ty(&bind_ty) {
-                            s.heap_elem_lists.insert(payload);
-                        }
-                    }
+                    // NESTED VARIANT PAYLOAD: `ok(m)` / `some(m)` where m is itself an Option/Result
+                    // (`Result[Option[record], String]` — the `read_message()!` monadic-desugar Ok arm
+                    // holding porta's `match m { some(req)/none }`; `Option[Result[String,String]]` — the
+                    // nested-compound interp). SEED the BORROWED payload's READ-shape via the canonical
+                    // seeder so the INNER match BRANCHES on its tag. Using `seed_variant_param` (not a
+                    // hand-rolled Option/Result split) is what distinguishes a cap-as-tag both-heap
+                    // Result (`Result[String,String]`, tag@16) from a len-as-tag scalar-Ok Result (tag@4)
+                    // — the old split mis-seeded the former as len-as-tag, so an inner `match r` read
+                    // tag@4 (the `Option[Result[String,String]]` interp `some(ok)` → `some(err)` bug).
+                    s.seed_variant_param(payload, &bind_ty);
                 }
             }
         };

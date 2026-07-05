@@ -507,6 +507,25 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
             Ty::Applied(TypeConstructorId::Option, e) if e.len() == 1 && matches!(e[0], Ty::Int) => {
                 ("option", "to_string_oi")
             }
+            Ty::Applied(TypeConstructorId::Option, e) if e.len() == 1 && matches!(e[0], Ty::Bool) => {
+                ("option", "to_string_ob")
+            }
+            Ty::Applied(TypeConstructorId::Option, e) if e.len() == 1 && matches!(e[0], Ty::String) => {
+                ("option", "to_string_os")
+            }
+            Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::Bool) => {
+                ("option", "to_string_lb")
+            }
+            Ty::Applied(TypeConstructorId::Result, e)
+                if e.len() == 2 && matches!(e[0], Ty::Int) && matches!(e[1], Ty::String) =>
+            {
+                ("option", "to_string_ri")
+            }
+            Ty::Applied(TypeConstructorId::Result, e)
+                if e.len() == 2 && matches!(e[0], Ty::String) && matches!(e[1], Ty::String) =>
+            {
+                ("option", "to_string_rs")
+            }
             _ => ("option", "to_string_x"),
         },
         // `${Result[T, E]}` renders v0's `ok(<T>)` / `err(<E>)`, routed per (T, E) pair (err is almost
@@ -526,6 +545,27 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
                     if e.len() == 1 && matches!(e[0], Ty::String) =>
                 {
                     ("result", "to_string_ls")
+                }
+                (Ty::Bool, Ty::String) => ("result", "to_string_b"),
+                (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
+                    if e.len() == 1 && matches!(e[0], Ty::Int) =>
+                {
+                    ("result", "to_string_oi")
+                }
+                (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
+                    if e.len() == 1 && matches!(e[0], Ty::String) =>
+                {
+                    ("result", "to_string_os")
+                }
+                (Ty::Applied(TypeConstructorId::Result, e), Ty::String)
+                    if e.len() == 2 && matches!(e[0], Ty::Int) && matches!(e[1], Ty::String) =>
+                {
+                    ("result", "to_string_ri")
+                }
+                (Ty::Applied(TypeConstructorId::List, e), Ty::String)
+                    if e.len() == 1 && matches!(e[0], Ty::Bool) =>
+                {
+                    ("result", "to_string_lb")
                 }
                 _ => ("result", "to_string_x"),
             }

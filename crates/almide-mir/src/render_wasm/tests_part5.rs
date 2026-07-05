@@ -1574,6 +1574,38 @@ fn option_option_int_interp() {
 }
 
 #[test]
+fn result_outer_nested_interp() {
+    // Result-outer nested `${…}`: the ResultOk heap materializer admits a nested Option/Result ctor
+    // Ok payload (construction) and the nested-payload bind seeds its read-shape (inner match).
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Result[Bool, String] = ok(true) let b: Result[List[Bool], String] = ok([true, false])\n\
+        let c: Result[Option[Int], String] = ok(some(5)) let d: Result[Option[Int], String] = ok(none)\n\
+        let e: Result[Result[Int, String], String] = ok(err(\"x\"))\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"${d}\") println(\"${e}\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "result.to_string_b"), "must auto-link result.to_string_b");
+    if let Some(out) = build_and_run("result_nested", &render_wasm_program(&prog)) {
+        assert_eq!(out, "ok(true)\nok([true, false])\nok(some(5))\nok(none)\nok(err(\"x\"))");
+    }
+}
+
+#[test]
+fn option_outer_nested_interp() {
+    // Option-outer nested `${…}`, incl a cap-as-tag inner Result[String,String] (the seed_variant_param
+    // nested-payload fix) and a bool-list inner.
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Option[Option[Bool]] = some(some(true)) let b: Option[Option[String]] = some(some(\"a\"))\n\
+        let c: Option[Result[Int, String]] = some(ok(5)) let d: Option[Result[String, String]] = some(ok(\"q\"))\n\
+        let e: Option[List[Bool]] = some([false, true])\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"${d}\") println(\"${e}\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "option.to_string_rs"), "must auto-link option.to_string_rs");
+    if let Some(out) = build_and_run("option_nested", &render_wasm_program(&prog)) {
+        assert_eq!(out, "some(some(true))\nsome(some(\"a\"))\nsome(ok(5))\nsome(ok(\"q\"))\nsome([false, true])");
+    }
+}
+
+#[test]
 fn option_list_str_interp() {
     // `${Option[List[String]]}` → `some(["a", "b"])` / `none` — a HEAP-element inner list. The self-host
     // `option.to_string_ls` inlines the string quote+escape (\ " \n \r \t) since self-hosts can't call
