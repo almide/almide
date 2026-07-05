@@ -369,7 +369,7 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [env](stdlib/env.md) | Environment and system | `import env` | 9 |
 | [process](stdlib/process.md) | Process execution, env vars, signals | `import process` | 12 |
 | [io](stdlib/io.md) | Standard I/O | `import io` | 7 |
-| [http](stdlib/http.md) | HTTP client and server | `import http` | 20 |
+| [http](stdlib/http.md) | HTTP client and server | `import http` | 23 |
 | [random](stdlib/random.md) | Random number generation | `import random` | 4 |
 ## Key rules
 - Newline = statement separator (no semicolons needed)

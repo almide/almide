@@ -86,6 +86,11 @@ fn req_header(req: HttpRequest, key: String) -> Option[String] = _
 @borrow_ref(req)
 fn query_params(req: HttpRequest) -> Map[String, String] = _
 
+// Percent-decode a URL component (`+` → space, `%XX` → byte). `query_params`
+// already decodes its values; use this for manually-extracted query/form text.
+@intrinsic("almide_http_url_decode")
+fn url_decode(s: String) -> String = _
+
 // ── HTTP client (effect) ──
 
 @intrinsic("almide_http_get")
@@ -106,6 +111,16 @@ effect fn delete(url: String) -> Result[String, String] = _
 @intrinsic("almide_http_request")
 @borrow_ref(headers)
 effect fn request(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = _
+
+// Binary client: returns the raw response body as `Bytes` with no UTF-8
+// conversion, so binary payloads (images, audio — e.g. TTS mp3/wav) survive
+// byte-identical. The String client above corrupts non-UTF-8 bodies.
+@intrinsic("almide_http_get_bytes")
+effect fn get_bytes(url: String) -> Result[Bytes, String] = _
+
+@intrinsic("almide_http_request_bytes")
+@borrow_ref(headers)
+effect fn request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String] = _
 
 // Streaming HTTP request. The on_chunk callback is invoked with each
 // raw body chunk as it arrives on the wire. Supports `Transfer-Encoding:
