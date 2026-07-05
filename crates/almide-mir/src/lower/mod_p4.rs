@@ -788,6 +788,31 @@ pub fn interp_str_desugarable(parts: &[IrStringPart], registry: &RecordLayouts) 
 /// the plain name. `module.func` is unchanged for everything else.
 pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], result_ty: &Ty) -> String {
     use almide_lang::types::constructor::TypeConstructorId;
+    // `fan.map` selects a monomorphic self-host by (input element A, output element B) — `fan.map<sfx>`
+    // where A/B in {Int (""), String ("s")}. The input A is `arg_tys[0] = List[A]`; the output B is
+    // `result_ty = Result[List[B], String]`. An unsupported pairing routes to the UNLINKED
+    // `fan.map_x` → a clean render wall (never a wrong-typed link = never invalid wasm).
+    if module == "fan" && func == "map" {
+        fn elem_of(t: Option<&Ty>) -> Option<&Ty> {
+            match t {
+                Some(Ty::Applied(TypeConstructorId::List, e)) if e.len() == 1 => Some(&e[0]),
+                _ => None,
+            }
+        }
+        let a = elem_of(arg_tys.first());
+        let b = match result_ty {
+            Ty::Applied(TypeConstructorId::Result, r) if r.len() == 2 => elem_of(Some(&r[0])),
+            _ => None,
+        };
+        let sfx = match (a, b) {
+            (Some(Ty::Int), Some(Ty::Int)) => "",
+            (Some(Ty::Int), Some(Ty::String)) => "_is",
+            (Some(Ty::String), Some(Ty::String)) => "_ss",
+            (Some(Ty::String), Some(Ty::Int)) => "_si",
+            _ => "_x",
+        };
+        return format!("fan.map{sfx}");
+    }
     // `fold` threads an ACCUMULATOR (= the result type). A HEAP accumulator (e.g. a String built up
     // across the fold) needs the closure-result + accumulator to be an i32 handle, not the i64 the
     // scalar-accumulator fold variants hardcode — emitting an i32 there is invalid wasm. No heap-

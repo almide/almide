@@ -28,4 +28,16 @@ effect fn main() -> Unit = {
     ok(ys) => println("ok")
     err(e) => println("short:" + e)
   }
+
+  // Other (input, output) element pairings, each routed to its own self-host variant.
+  let is = fan.map([10, 20], (x) => label_i(x))          // Int -> String
+  println(is[0] + "," + is[1])
+  let ss = fan.map(["a", "b"], (s) => bang(s))            // String -> String
+  println(ss[0] + "," + ss[1])
+  let si = fan.map(["ab", "cde"], (s) => slen(s))         // String -> Int
+  println(int.to_string(si[0]) + "," + int.to_string(si[1]))
 }
+
+effect fn label_i(x: Int) -> Result[String, String] = ok("n" + int.to_string(x))
+effect fn bang(s: String) -> Result[String, String] = ok(s + "!")
+effect fn slen(s: String) -> Result[Int, String] = ok(string.len(s))

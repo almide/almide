@@ -78,6 +78,9 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // `materialize_result_str` layout, like `fs.list_dir`'s `Result[List[String], String]`).
             // So a `match`/`!` over it reads tag @16 + binds the @12 payload list handle.
             | ("fan", "map")
+            | ("fan", "map_is")
+            | ("fan", "map_ss")
+            | ("fan", "map_si")
     )
 }
 
