@@ -1520,11 +1520,14 @@ fn set_interp_self_hosts_via_to_list() {
     // `list.to_string`; the owned `set.to_list` result is dropped at scope end (no leak).
     let src = "effect fn main() -> Unit = {\n\
         let a: Set[Int] = set.from_list([3, 1, 2, 1]) let b: Set[Int] = set.from_list([]) let c: Set[Int] = set.from_list([-5, 10])\n\
-        println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"s=${a}!\") }\n";
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"s=${a}!\")\n\
+        let sa: Set[String] = set.from_list([\"b\", \"a\", \"b\"]) let sc: Set[String] = set.from_list([\"q\"])\n\
+        println(\"${sa}\") println(\"${sc}\") }\n";
     let prog = lower_source(src);
     assert!(prog.functions.iter().any(|f| f.name == "set.to_string"), "Set[Int] interp must auto-link set.to_string");
+    assert!(prog.functions.iter().any(|f| f.name == "set.to_string_s"), "Set[String] interp must auto-link set.to_string_s");
     if let Some(out) = build_and_run("set_interp", &render_wasm_program(&prog)) {
-        assert_eq!(out, "set.from_list([3, 1, 2])\nset.from_list([])\nset.from_list([-5, 10])\ns=set.from_list([3, 1, 2])!");
+        assert_eq!(out, "set.from_list([3, 1, 2])\nset.from_list([])\nset.from_list([-5, 10])\ns=set.from_list([3, 1, 2])!\nset.from_list([\"b\", \"a\"])\nset.from_list([\"q\"])");
     }
 }
 

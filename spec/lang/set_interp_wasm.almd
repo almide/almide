@@ -15,4 +15,10 @@ effect fn main() -> Unit = {
   println("${c}")
   println("${d}")
   println("set=${a} done")
+  let sa: Set[String] = set.from_list(["b", "a", "b", "c"])
+  let sb: Set[String] = set.from_list([])
+  let sc: Set[String] = set.from_list(["q \"x\""])
+  println("${sa}")
+  println("${sb}")
+  println("${sc}")
 }

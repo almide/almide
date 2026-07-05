@@ -512,6 +512,7 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
         // any other element routes to the UNLINKED `set.to_string_x` (walls cleanly).
         Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 => match &args[0] {
             Ty::Int => ("set", "to_string"),
+            Ty::String => ("set", "to_string_s"),
             _ => ("set", "to_string_x"),
         },
         // Map top-level `to_string` is not self-hosted → the synthesized call is UNLINKED, so the
