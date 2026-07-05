@@ -51,7 +51,7 @@ jobs:
     name: Coq proofs + axiom audit + PCC gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # ── Rust toolchain + cargo cache (almide-mir pulls in the frontend) ──
       - uses: dtolnay/rust-toolchain@master
