@@ -2234,17 +2234,23 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
     }
     let (i, target, inner) = stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
         IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
-            IrExprKind::Unwrap { expr } => {
+            // `!` (Unwrap) and `?` (Try) both propagate the `Err(E)` in an effect fn — the SAME
+            // early-return this desugar builds. The derive-generated field binds arrive as `Try`
+            // (`let _e0 = value.as_int(..)?`) — handle both so they lower to the match, not a
+            // heap-result Try left for `lower_call_args` to wall.
+            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
                 Some((i, Target::Single { var: *var, ty: ty.clone() }, (**expr).clone()))
             }
             _ => None,
         },
         IrStmtKind::BindDestructure { pattern, value } => {
-            // `let (a,b) = e!`. The `!` is EITHER kept as an `Unwrap` node (inner = its Result expr)
-            // OR already stripped to a bare Result-typed value (inner = the value) — handle both so a
-            // destructure-let-unwrap never reaches lowering as a Result-destructured-as-a-tuple.
+            // `let (a,b) = e!` / `let (a,b) = e?`. The `!`/`?` is EITHER kept as an `Unwrap`/`Try`
+            // node (inner = its Result expr) OR already stripped to a bare Result-typed value (inner
+            // = the value) — handle all three so a destructure-let-unwrap never reaches lowering as a
+            // Result-destructured-as-a-tuple. The derived variant decode's `let (_tag, _payload) =
+            // value.tagged_variant(v)?` is exactly the kept-`Try` case.
             let inner = match &value.kind {
-                IrExprKind::Unwrap { expr } => Some((**expr).clone()),
+                IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => Some((**expr).clone()),
                 _ if value.ty.is_result() => Some(value.clone()),
                 _ => None,
             }?;
