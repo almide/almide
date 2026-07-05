@@ -309,8 +309,8 @@ fn ir_function_construction() {
     let f = IrFunction {
         name: "add".into(),
         params: vec![
-            IrParam { var: VarId(0), ty: Ty::Int, name: "a".into(), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![], },
-            IrParam { var: VarId(1), ty: Ty::Int, name: "b".into(), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![], },
+            IrParam { var: VarId(0), ty: Ty::Int, name: "a".into(), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![], },
+            IrParam { var: VarId(1), ty: Ty::Int, name: "b".into(), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![], },
         ],
         ret_ty: Ty::Int,
         body: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None },
@@ -510,6 +510,7 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
             ty: Ty::Int,
             name: info.name.clone(),
             borrow: ParamBorrow::Own,
+            is_mut: false,
             open_record: None,
             default: None,
             attrs: vec![],
