@@ -12,18 +12,20 @@ description = "Almide v1 Middle IR — the single source of truth for ownership 
 [dependencies]
 almide-ir = { path = "../almide-ir" }
 almide-lang = { path = "../almide-lang" }
-
-# Dev-only: the `emit_cert_from_source` example drives a REAL .almd through the
-# existing frontend pipeline (parse → check → lower → optimize → mono → ir_link)
-# to obtain linked IR, then lowers THAT to MIR and emits a witness — the G1
-# end-to-end PCC path (a real program, not a hand-built MIR). Kept dev-only so
-# the library's dependency surface stays almide-ir + almide-lang.
-[dev-dependencies]
+# The v1 execution pipeline (`pipeline::try_render_wasm_source`, the lib form of the
+# render_program example) drives a REAL .almd through the existing frontend pipeline
+# (parse → check → lower → optimize → mono → ir_link) to obtain linked IR, then lowers
+# THAT to MIR and emits a wasm module — so the `almide` CLI can drive the v1 `--verified`
+# codegen path. These deps go away once the frontend is greenfielded. Acyclic: neither
+# almide-frontend nor almide-optimize depends on almide-mir.
 almide-frontend = { path = "../almide-frontend" }
 almide-optimize = { path = "../almide-optimize" }
+
+[dev-dependencies]
 # The workspace-root `almide` binary crate's lib — reused ONLY by the org-sweep
 # examples (`render_program`, `classify_corpus`) for the CANONICAL cross-module
 # discovery (`resolve::resolve_imports_with_deps`), so `import self.<submodule>`
-# resolves its sibling `src/*.almd` exactly like `almide run`/`almide check`.
-# Acyclic: `almide` does NOT depend on `almide-mir` (`cargo tree -p almide` = 0).
+# resolves its sibling `src/*.almd` exactly like `almide run`/`almide check`. Kept
+# DEV-ONLY so the workspace-root `almide` crate can depend on almide-mir's LIB
+# WITHOUT a cycle (the lib's dependency graph never reaches `almide`).
 almide = { path = "../.." }

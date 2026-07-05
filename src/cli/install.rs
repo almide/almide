@@ -113,6 +113,7 @@ pub fn cmd_install(
         false, // repr_c
         false, // cdylib
         false, // emit_unverified
+        false, // verified (v0 codegen for install)
     );
 
     let _ = std::env::set_current_dir(&prev_cwd);

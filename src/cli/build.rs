@@ -1,7 +1,7 @@
 use std::process::Command;
-use crate::{compile_with_ir, parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
+use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
 
-pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool, repr_c: bool, cdylib: bool, emit_unverified: bool) {
+pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool, repr_c: bool, cdylib: bool, emit_unverified: bool, verified: bool) {
     let is_npm = matches!(target, Some("npm"));
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
     let is_wasm_direct = matches!(target, Some("wasm"));
@@ -13,7 +13,7 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
 
     // Direct WASM emit: .almd → IR → WASM binary (no rustc)
     if is_wasm_direct {
-        cmd_build_wasm_direct(file, output, no_check, emit_unverified);
+        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified);
         return;
     }
 
@@ -166,7 +166,7 @@ fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
 }
 
 /// Direct WASM emit: parse → check → lower → optimize → monomorphize → emit WASM binary.
-fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool) {
+fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool, verified: bool) {
     let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
     let output = output.unwrap_or(&default_output);
 
@@ -175,7 +175,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let bytes = match compile_to_wasm_bytes(file, allow_unverified) {
+    let (bytes, produced_by_v1) = match compile_to_wasm_bytes(file, allow_unverified, verified) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
@@ -184,6 +184,14 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     if let Err(e) = std::fs::write(output, &bytes) {
         eprintln!("Failed to write {}: {}", output, e);
         std::process::exit(1);
+    }
+
+    // A PCC-VERIFIED v1 module is shipped AS-IS: wasm-opt is an UNVERIFIED transform, so running it
+    // would replace the exact bytes the trust-spine verified. `--verified` therefore emits the
+    // verified module verbatim (a v0 fallback build still gets wasm-opt, exactly as without the flag).
+    if produced_by_v1 {
+        eprintln!("Built {} ({} bytes, v1-verified — wasm-opt skipped)", output, pre_size);
+        return;
     }
 
     // Post-process: wasm-opt -O3 (binaryen) shrinks size + sometimes helps
@@ -210,7 +218,10 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
 /// the byte-identical module the cross-target equivalence guarantee promises.
 /// Compile diagnostics are rendered to stderr here; on any error it returns
 /// `Err(())` and the caller decides how to terminate.
-pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool) -> Result<Vec<u8>, ()> {
+/// Returns `(wasm_bytes, produced_by_v1)`. When the second field is `true`, the module IS the
+/// PCC-verified v1 trust-spine output — the caller MUST NOT post-process it (wasm-opt would replace
+/// the verified bytes with an unverified transform), so `--verified` ships exactly what was verified.
+pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool) -> Result<(Vec<u8>, bool), ()> {
     let (mut program, source_text, parse_errors) = parse_file(file);
 
     if !parse_errors.is_empty() {
@@ -237,6 +248,15 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool) -> Resul
     let mut resolved = match resolve::resolve_imports_with_deps(file, &program, &dep_paths) {
         Ok(r) => r,
         Err(e) => { eprintln!("{}", e); return Err(()); }
+    };
+
+    // v1 `--verified`: capture the FRESH (un-inferred) cross-module siblings now, before the loop
+    // below mutates them in place — the v1 pipeline re-runs its own canonicalize/infer/lower from
+    // raw programs (exactly the render_program example's `discover_self_modules` input).
+    let v1_self_modules: Vec<(String, almide_lang::ast::Program, bool)> = if verified {
+        resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect()
+    } else {
+        Vec::new()
     };
 
     // Type check
@@ -341,6 +361,29 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool) -> Resul
         return Err(());
     }
 
+    // v1 OPT-IN verified codegen: after every v0 gate above (type-check, IR-verify, fan.timeout /
+    // native-matrix guards) has passed, TRY the PCC-verified trust-spine renderer. It is byte-
+    // identical to v0 where it lowers and WALLS (`Err`) otherwise — on a wall we fall through to
+    // v0 codegen below. Honest-wall: a v1 module is never wrong; a walled program builds via v0
+    // exactly as without `--verified`.
+    if verified {
+        if let Ok(wat) =
+            almide_mir::pipeline::try_render_wasm_source(&source_text, &v1_self_modules, false)
+        {
+            if let Ok(bytes) = wat::parse_str(&wat) {
+                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+                    eprintln!(
+                        "[almide] --verified: v1 trust-spine emitted the module ({} bytes)",
+                        bytes.len()
+                    );
+                }
+                return Ok((bytes, true));
+            }
+        } else if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+            eprintln!("[almide] --verified: v1 walled — falling back to v0 codegen");
+        }
+    }
+
     // Codegen (nanopass pipeline + WASM binary emit). The Perceus RC gate
     // (`Verified::verify`) runs inside this path; `allow_unverified` selects
     // hard-error (default) vs the `--emit-unverified` waiver. It does not change
@@ -350,7 +393,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool) -> Resul
         almide::codegen::CodegenOutput::Binary(b) => b,
         almide::codegen::CodegenOutput::Source(_) => unreachable!(),
     };
-    Ok(bytes)
+    Ok((bytes, false))
 }
 
 /// Run `wasm-opt -O3 --enable-simd` on the output file, in-place.

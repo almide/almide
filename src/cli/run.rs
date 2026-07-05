@@ -185,14 +185,14 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_m
     }
 }
 
-pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: bool, target: Option<&str>) {
+pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: bool, target: Option<&str>, verified: bool) {
     let code = match target {
         // Default and explicit native target: the cargo/rustc path.
         None | Some("rust") | Some("native") => cmd_run_inner(file, program_args, no_check, false, release),
         // WASM target: build the same module `almide build --target wasm`
         // emits, then execute it on the `wasmtime` CLI. Both targets must
         // produce byte-identical stdout/stderr/exit — the cross-target gate.
-        Some("wasm") | Some("wasm32") | Some("wasi") => cmd_run_wasm(file, program_args),
+        Some("wasm") | Some("wasm32") | Some("wasi") => cmd_run_wasm(file, program_args, verified),
         Some(other) => {
             eprintln!(
                 "error: unknown run target '{}'\n  \
@@ -214,12 +214,12 @@ pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: boo
 /// `spec/wasm_cross` gate. Program args after `--` are forwarded to the guest.
 /// `wasmtime`'s own exit code is propagated unchanged, so a guest
 /// `proc_exit(n)` surfaces as `n` exactly as a native binary's exit would.
-fn cmd_run_wasm(file: &str, program_args: &[String]) -> i32 {
+fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool) -> i32 {
     // `run` does not expose the `--emit-unverified` waiver: running a module that
     // failed the Perceus RC gate would silently execute leaky/double-freeing code,
     // so a verification failure is always a hard error here. The waiver is
     // build-only (you opt into shipping a known-bad artifact, not into running it).
-    let bytes = match super::build::compile_to_wasm_bytes(file, false) {
+    let (bytes, _produced_by_v1) = match super::build::compile_to_wasm_bytes(file, false, verified) {
         Ok(b) => b,
         Err(()) => return 1,
     };

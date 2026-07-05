@@ -28,6 +28,7 @@
 pub mod certificate;
 pub mod coown_names;
 pub mod lower;
+pub mod pipeline;
 pub mod purity;
 pub mod render_rust;
 pub mod render_wasm;
