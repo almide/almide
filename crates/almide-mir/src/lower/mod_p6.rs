@@ -3047,106 +3047,114 @@ fn group_option_result_arms(
 /// Each `t_i` is a no-param lambda whose body is a `Result[T, String]` (an effect fn call). The inlined
 /// form is a plain match-over-a-call chain, all in v1's subset. A NON-literal thunk list (`let ts =
 /// […]; fan.race(ts)`) has no inlinable bodies → left for the call-site purity wall.
-pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     use almide_ir::{CallTarget, IrMatchArm, IrPattern};
-    use almide_lang::types::constructor::TypeConstructorId;
-    use almide_lang::types::Ty;
-    struct V<'a> {
-        next: &'a mut u32,
+    struct V {
         changed: bool,
     }
-    // The `Result[T, String]` Ok-payload type T (for the `ok(v) => ok(v)` re-wrap).
-    fn ok_ty(result_ty: &Ty) -> Option<Ty> {
-        match result_ty {
-            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => Some(a[0].clone()),
-            _ => None,
+    // Extract the no-param thunk bodies of a `fan.race`/`fan.any` LITERAL-list call, or `None` if the
+    // expr is not such a call (a non-literal thunk list has no inlinable bodies → declines).
+    fn fan_bodies(e: &IrExpr, want: &str) -> Option<Vec<IrExpr>> {
+        let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
+        else {
+            return None;
+        };
+        if module.as_str() != "fan" || func.as_str() != want {
+            return None;
         }
+        let [arg] = &args[..] else { return None };
+        let IrExprKind::List { elements } = &arg.kind else {
+            return None;
+        };
+        if elements.is_empty() {
+            return None;
+        }
+        let mut bodies = Vec::with_capacity(elements.len());
+        for el in elements {
+            let IrExprKind::Lambda { params, body, .. } = &el.kind else {
+                return None;
+            };
+            if !params.is_empty() {
+                return None;
+            }
+            bodies.push((**body).clone());
+        }
+        Some(bodies)
     }
-    impl IrMutVisitor for V<'_> {
+    impl IrMutVisitor for V {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-            walk_expr_mut(self, e);
-            let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
-            else {
-                return;
-            };
-            if module.as_str() != "fan" || (func.as_str() != "race" && func.as_str() != "any") {
-                return;
-            }
-            let is_any = func.as_str() == "any";
-            // The one arg must be a LITERAL list of no-param lambdas; extract each body.
-            let [arg] = &args[..] else { return };
-            let IrExprKind::List { elements } = &arg.kind else {
-                return;
-            };
-            if elements.is_empty() {
-                return;
-            }
-            let mut bodies: Vec<IrExpr> = Vec::with_capacity(elements.len());
-            for el in elements {
-                let IrExprKind::Lambda { params, body, .. } = &el.kind else {
-                    return;
-                };
-                if !params.is_empty() {
-                    return;
+            // PRE-order: `match fan.any([() => t0, …]) { ok(pat) => okbody, err(epat) => errbody }` —
+            // INLINE the outer arms into each thunk level (avoiding the intermediate Result + a
+            // match-over-match). Each thunk `t_i` runs, an Ok takes `okbody`, an Err falls to the NEXT
+            // thunk; the LAST thunk's Err takes the original `errbody` (the all-errored fallback). Only
+            // one arm ever executes, so duplicating `okbody` per level is dead-code-safe.
+            if let IrExprKind::Match { subject, arms } = &e.kind {
+                if arms.len() == 2 {
+                    if let Some(bodies) = fan_bodies(subject, "any") {
+                        let ty = e.ty.clone();
+                        let ok_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Ok { .. }));
+                        let err_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Err { .. }));
+                        if let (Some(ok_arm), Some(err_arm)) = (ok_arm, err_arm) {
+                            // The ALL-FAILED fallback is v0's fixed `fan.any: all candidates failed`
+                            // Err (NOT the last thunk's own error): run the outer `err` arm's body with
+                            // its bound var substituted by that literal (a `Wildcard` err pattern just
+                            // runs the body). Then wrap each thunk: `match t_i { ok(pat) => okbody,
+                            // err(_) => rest }` — an Ok short-circuits, an Err falls through in order.
+                            let msg = IrExpr {
+                                kind: IrExprKind::LitStr {
+                                    value: "fan.any: all candidates failed".to_string(),
+                                },
+                                ty: almide_lang::types::Ty::String,
+                                span: None,
+                                def_id: None,
+                            };
+                            let mut acc = match &err_arm.pattern {
+                                IrPattern::Err { inner } => match &**inner {
+                                    IrPattern::Bind { var, .. } => {
+                                        almide_ir::substitute_var_in_expr(&err_arm.body, *var, &msg)
+                                    }
+                                    _ => err_arm.body.clone(),
+                                },
+                                _ => err_arm.body.clone(),
+                            };
+                            for tb in bodies.into_iter().rev() {
+                                acc = IrExpr {
+                                    kind: IrExprKind::Match {
+                                        subject: Box::new(tb),
+                                        arms: vec![
+                                            ok_arm.clone(),
+                                            IrMatchArm {
+                                                pattern: IrPattern::Err {
+                                                    inner: Box::new(IrPattern::Wildcard),
+                                                },
+                                                guard: None,
+                                                body: acc,
+                                            },
+                                        ],
+                                    },
+                                    ty: ty.clone(),
+                                    span: None,
+                                    def_id: None,
+                                };
+                            }
+                            *e = acc;
+                            self.changed = true;
+                            walk_expr_mut(self, e);
+                            return;
+                        }
+                    }
                 }
-                bodies.push((**body).clone());
             }
-            let result_ty = e.ty.clone();
-            if !is_any {
-                // `fan.race` — the first thunk's body.
+            walk_expr_mut(self, e);
+            // POST-order: `fan.race([() => t0, …])` — the FIRST thunk's body (deterministic head).
+            if let Some(bodies) = fan_bodies(e, "race") {
                 *e = bodies.into_iter().next().unwrap();
                 self.changed = true;
-                return;
             }
-            // `fan.any` — a right-nested `match t_i { ok(v) => ok(v), err(_) => <rest> }` chain; the
-            // last body is returned directly (its ok/err is the all-errored fallback).
-            let Some(t) = ok_ty(&result_ty) else { return };
-            let mut acc = bodies.pop().unwrap(); // the last thunk's result (fallback)
-            while let Some(first) = bodies.pop() {
-                let v = VarId(*self.next);
-                *self.next += 1;
-                let ok_arm = IrExpr {
-                    kind: IrExprKind::ResultOk {
-                        expr: Box::new(IrExpr {
-                            kind: IrExprKind::Var { id: v },
-                            ty: t.clone(),
-                            span: first.span.clone(),
-                            def_id: None,
-                        }),
-                    },
-                    ty: result_ty.clone(),
-                    span: first.span.clone(),
-                    def_id: None,
-                };
-                acc = IrExpr {
-                    kind: IrExprKind::Match {
-                        subject: Box::new(first),
-                        arms: vec![
-                            IrMatchArm {
-                                pattern: IrPattern::Ok {
-                                    inner: Box::new(IrPattern::Bind { var: v, ty: t.clone() }),
-                                },
-                                guard: None,
-                                body: ok_arm,
-                            },
-                            IrMatchArm {
-                                pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
-                                guard: None,
-                                body: acc,
-                            },
-                        ],
-                    },
-                    ty: result_ty.clone(),
-                    span: None,
-                    def_id: None,
-                };
-            }
-            *e = acc;
-            self.changed = true;
         }
     }
-    let mut v = V { next: next_var, changed: false };
+    let mut v = V { changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     if v.changed {
