@@ -773,6 +773,29 @@ impl LowerCtx {
                             .into(),
                     ))
                 }
+                // `fn apply(g, x) = g(x)` — a heap-result call through a KNOWN funcref (a lifted
+                // lambda / a function-typed param bound to a table slot). EXECUTE it via
+                // `Op::CallIndirect` and move the fresh owned result out, exactly like the Named /
+                // Module arms above (its var-bind sibling is `binds_p2`'s heap-result CallIndirect).
+                // This opens higher-order functions RETURNING a heap value (Result/List/String) — the
+                // foundation for a self-hosted `fan.map` / traverse. An UNKNOWN callee stays walled.
+                IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+                    if self.funcref_value_of(callee).is_some() =>
+                {
+                    let mark = self.live_heap_handles.len();
+                    let table_idx = self.funcref_value_of(callee).unwrap();
+                    let lowered = self.lower_call_args(args)?;
+                    let dst = self.fresh_value();
+                    let repr = repr_of(&tail.ty)?;
+                    self.ops.push(Op::CallIndirect {
+                        dst: Some(dst),
+                        table_idx,
+                        args: lowered,
+                        result: Some(repr),
+                    });
+                    self.drop_arm_locals(mark);
+                    Ok(Some(dst))
+                }
                 // `fn f(o) = o.method()` / `(g)()` returned — an UNRESOLVABLE
                 // `Method`/`Computed` callee (the `Named`/`Module` arms are above).
                 // Moving out a deferred Opaque EMPTY value the caller observes is a SILENT

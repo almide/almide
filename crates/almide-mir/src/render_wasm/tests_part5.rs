@@ -1532,6 +1532,25 @@ fn set_interp_self_hosts_via_to_list() {
 }
 
 #[test]
+fn higher_order_heap_return_via_call_indirect() {
+    // `fn apply(g, x) = g(x)` returning a heap value (Result / String) through a known funcref used to
+    // wall a tail heap-result computed call; it now executes via `Op::CallIndirect` and moves the
+    // owned result out. Opens higher-order functions returning heap values (the fan.map foundation).
+    let src = "fn apply_r(f: (Int) -> Result[Int, String], x: Int) -> Result[Int, String] = f(x)\n\
+        fn apply_s(f: (Int) -> String, x: Int) -> String = f(x)\n\
+        fn show(r: Result[Int, String]) -> String = match r { ok(v) => \"ok:\" + int.to_string(v), err(e) => \"err:\" + e }\n\
+        effect fn main() -> Unit = {\n\
+        println(show(apply_r((y) => ok(y * 2), 5)))\n\
+        println(show(apply_r((y) => if y > 0 then ok(y) else err(\"neg\"), -3)))\n\
+        println(apply_s((y) => \"v\" + int.to_string(y), 7)) }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "apply_r"), "apply_r must lower");
+    if let Some(out) = build_and_run("higher_order_heap", &render_wasm_program(&prog)) {
+        assert_eq!(out, "ok:10\nerr:neg\nv7");
+    }
+}
+
+#[test]
 fn result_ok_err_concat_payload_materializes() {
     // `ok("n" + int.to_string(x))` / `err("bad " + …)` — a computed (ConcatStr) String payload the
     // trust-spine used to wall (only literal/Var/call payloads were handled). It now materializes the

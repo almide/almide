@@ -8,6 +8,7 @@ spec/lang/block_comment_raw_string_test.almd
 spec/lang/codec_method_roundtrip_wasm.almd
 spec/lang/codec_option_field_wasm.almd
 spec/lang/guarded_variant_match_wasm.almd
+spec/lang/higher_order_heap_return_wasm.almd
 spec/lang/map_literal_wasm.almd
 spec/lang/map_interp_wasm.almd
 spec/lang/option_interp_wasm.almd
