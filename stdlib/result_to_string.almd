@@ -79,8 +79,77 @@ fn __rts_ok_s(v: String) -> String = {
   buf
 }
 
+// `ok([1, 2, 3])` over a List[Int] Ok payload — the inner list renders like `${list}` (signed
+// decimals, `, ` joined), wrapped in `ok(` … `)`. The int/list helpers mirror `list_to_string`.
+fn __rts_digits(n: Int, acc: Int) -> Int =
+  if n < 10 then acc + 1
+  else __rts_digits(n / 10, acc + 1)
+
+fn __rts_int_width(v: Int) -> Int =
+  if v < 0 then __rts_digits(0 - v, 0) + 1
+  else __rts_digits(v, 0)
+
+fn __rts_fill_digits(n: Int, pos: Int) -> Int =
+  if n < 10 then {
+    prim.store8(pos, 48 + n)
+    pos + 1
+  } else {
+    let p = __rts_fill_digits(n / 10, pos)
+    prim.store8(p, 48 + (n % 10))
+    p + 1
+  }
+
+fn __rts_fill_int(v: Int, pos: Int) -> Int =
+  if v < 0 then {
+    prim.store8(pos, 45)
+    __rts_fill_digits(0 - v, pos + 1)
+  } else __rts_fill_digits(v, pos)
+
+fn __rts_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let v = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __rts_body_len(addr, count, i + 1, acc + sep + __rts_int_width(v))
+  }
+
+fn __rts_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let v = prim.load64(addr + i * 8)
+    let pos2 = __rts_fill_int(v, pos1)
+    __rts_fill_body(addr, count, i + 1, pos2)
+  }
+
+fn __rts_ok_li(v: List[Int]) -> String = {
+  let h = prim.handle(v)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __rts_body_len(addr, count, 0, 0)
+  let buf = prim.alloc_str(6 + body)     // "ok([" (4) + body + "])" (2)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 111)                 // 'o'
+  prim.store8(base + 1, 107)             // 'k'
+  prim.store8(base + 2, 40)              // '('
+  prim.store8(base + 3, 91)              // '['
+  let after = __rts_fill_body(addr, count, 0, base + 4)
+  prim.store8(after, 93)                 // ']'
+  prim.store8(after + 1, 41)             // ')'
+  buf
+}
+
 fn result_to_string(r: Result[Int, String]) -> String = match r {
   ok(v) => "ok(" + int.to_string(v) + ")",
+  err(e) => __rts_err(e),
+}
+
+fn result_to_string_li(r: Result[List[Int], String]) -> String = match r {
+  ok(v) => __rts_ok_li(v),
   err(e) => __rts_err(e),
 }
 

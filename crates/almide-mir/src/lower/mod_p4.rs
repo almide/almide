@@ -513,6 +513,12 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
             match (&args[0], &args[1]) {
                 (Ty::Int, Ty::String) => ("result", "to_string"),
                 (Ty::String, Ty::String) => ("result", "to_string_ss"),
+                // `${Result[List[Int], String]}` → `ok([1, 2, 3])` / `err("<quoted>")`.
+                (Ty::Applied(TypeConstructorId::List, e), Ty::String)
+                    if e.len() == 1 && matches!(e[0], Ty::Int) =>
+                {
+                    ("result", "to_string_li")
+                }
                 _ => ("result", "to_string_x"),
             }
         }

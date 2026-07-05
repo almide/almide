@@ -1532,6 +1532,20 @@ fn set_interp_self_hosts_via_to_list() {
 }
 
 #[test]
+fn result_list_int_interp_and_construction() {
+    // `${Result[List[Int], String]}` → `ok([1, 2, 3])` / `err("<quoted>")`. The ResultOk heap
+    // materializer admits a scalar-list literal (incl empty `ok([])`); `result.to_string_li` renders.
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Result[List[Int], String] = ok([4, 5]) let b: Result[List[Int], String] = err(\"boom\") let c: Result[List[Int], String] = ok([])\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "result.to_string_li"), "must auto-link result.to_string_li");
+    if let Some(out) = build_and_run("result_list_interp", &render_wasm_program(&prog)) {
+        assert_eq!(out, "ok([4, 5])\nerr(\"boom\")\nok([])");
+    }
+}
+
+#[test]
 fn option_option_int_interp() {
     // `${Option[Option[Int]]}` → `some(some(5))` / `some(none)` / `none` (nested Option interp), the
     // self-host `option.to_string_oi` over the already-materializing nested-Option construction.

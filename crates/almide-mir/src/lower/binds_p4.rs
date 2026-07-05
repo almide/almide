@@ -781,9 +781,15 @@ impl LowerCtx {
                     // porta resolve_env). The string-list literal builder yields a
                     // fresh owned block movable into the Result exactly like a call
                     // piece; an out-of-subset element list returns None (wall kept).
-                    IrExprKind::List { .. } => {
+                    IrExprKind::List { elements } => {
                         let e = (**expr).clone();
-                        self.try_lower_str_list_literal(&e)?
+                        // A str-element list via the str builder; a SCALAR-element list (`ok([4, 5])`,
+                        // List[Int]) via the scalar-slots builder (incl the empty `ok([])`), which the
+                        // str builder declines. Both yield a fresh owned block moved into the Ok slot.
+                        match self.try_lower_str_list_literal(&e) {
+                            Some(obj) => obj,
+                            None => self.try_lower_scalar_list_slots(elements)?,
+                        }
                     }
                     // `ok("n" + int.to_string(x))` — a COMPUTED String Ok payload (a `ConcatStr`
                     // chain, the `fan.map`/effect-fn `ok(label)` shape). `try_lower_concat_str` yields a

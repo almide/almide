@@ -1,0 +1,19 @@
+// wasm:enabled
+// Locks in `${Result[List[Int], String]}` — a NESTED compound interp, v0's `ok([1, 2, 3])` /
+// `err("<quoted>")`. Two gaps close: constructing `ok([…])` (the ResultOk heap materializer admits a
+// scalar-list literal, incl empty `ok([])`), and rendering it (self-host `result.to_string_li`, the
+// inner list like `${list}` wrapped in `ok(…)`, the Err string quoted like a List[String] element).
+
+fn tag(r: Result[List[Int], String]) -> Int = match r { ok(v) => list.len(v), err(e) => 0 - 1 }
+
+effect fn main() -> Unit = {
+  let a: Result[List[Int], String] = ok([4, 5])
+  let b: Result[List[Int], String] = err("boom")
+  let c: Result[List[Int], String] = ok([])
+  let d: Result[List[Int], String] = ok([-7, 0, 42])
+  println("${a}")
+  println("${b}")
+  println("${c}")
+  println("${d}")
+  println(int.to_string(tag(a)) + "," + int.to_string(tag(b)) + "," + int.to_string(tag(c)))
+}
