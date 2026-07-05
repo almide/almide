@@ -451,6 +451,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/option_to_string.almd"), &[("option_to_string", "option.to_string")]),
         (include_str!("../../../../stdlib/option_to_string_s.almd"), &[("option_to_string_s", "option.to_string_s")]),
         (include_str!("../../../../stdlib/option_to_string_b.almd"), &[("option_to_string_b", "option.to_string_b")]),
+        (include_str!("../../../../stdlib/result_to_string.almd"), &[("result_to_string", "result.to_string"), ("result_to_string_ss", "result.to_string_ss")]),
         // Single-value compound formatters for record/tuple Display (the `${record}`/`${tuple}`
         // form): a Float field drops the trailing ".0" like a List[Float] element, a String field
         // is quoted+escaped like a List[String] element. Both reuse the proven list-element logic.

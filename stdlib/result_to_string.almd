@@ -1,0 +1,90 @@
+// result_to_string — SELF-HOSTED `${Result[T, E]}` interpolation, byte-matching v0's `ok(<T>)` /
+// `err(<E>)`. Two element pairings the trust-spine self-hosts (routed per (T,E) like the List family):
+//   result.to_string     : Result[Int, String]    — ok(<decimal>)   / err("<quoted>")
+//   result.to_string_ss  : Result[String, String]  — ok("<quoted>")  / err("<quoted>")
+// A String payload is quoted+escaped exactly as a `List[String]` element (v0's almide_repr_str). The
+// escape helpers mirror `list_to_string_s`; both variants live in ONE file so they share them.
+
+fn __rts_is_escaped(b: Int) -> Bool =
+  if b == 92 then true
+  else if b == 34 then true
+  else if b == 10 then true
+  else if b == 13 then true
+  else if b == 9 then true
+  else false
+
+fn __rts_esc_len(src: Int, slen: Int, i: Int, acc: Int) -> Int =
+  if i >= slen then acc
+  else {
+    let b = prim.load8(src + i)
+    let w = if __rts_is_escaped(b) then 2 else 1
+    __rts_esc_len(src, slen, i + 1, acc + w)
+  }
+
+fn __rts_esc_char(b: Int) -> Int =
+  if b == 10 then 110
+  else if b == 13 then 114
+  else if b == 9 then 116
+  else b
+
+fn __rts_fill_esc(src: Int, slen: Int, i: Int, pos: Int) -> Int =
+  if i >= slen then pos
+  else {
+    let b = prim.load8(src + i)
+    let pos1 = if __rts_is_escaped(b) then {
+      prim.store8(pos, 92)
+      prim.store8(pos + 1, __rts_esc_char(b))
+      pos + 2
+    } else {
+      prim.store8(pos, b)
+      pos + 1
+    }
+    __rts_fill_esc(src, slen, i + 1, pos1)
+  }
+
+// Build `err("<escaped e>")`.
+fn __rts_err(e: String) -> String = {
+  let h = prim.handle(e)
+  let slen = prim.load32(h + 4)
+  let src = h + 12
+  let body = __rts_esc_len(src, slen, 0, 0)
+  let buf = prim.alloc_str(7 + body)   // "err(" (4) + '"' + body + '"' + ')'
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 101)               // 'e'
+  prim.store8(base + 1, 114)           // 'r'
+  prim.store8(base + 2, 114)           // 'r'
+  prim.store8(base + 3, 40)            // '('
+  prim.store8(base + 4, 34)            // '"'
+  let mid = __rts_fill_esc(src, slen, 0, base + 5)
+  prim.store8(mid, 34)                 // '"'
+  prim.store8(mid + 1, 41)             // ')'
+  buf
+}
+
+// Build `ok("<escaped v>")`.
+fn __rts_ok_s(v: String) -> String = {
+  let h = prim.handle(v)
+  let slen = prim.load32(h + 4)
+  let src = h + 12
+  let body = __rts_esc_len(src, slen, 0, 0)
+  let buf = prim.alloc_str(6 + body)   // "ok(" (3) + '"' + body + '"' + ')'
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 111)               // 'o'
+  prim.store8(base + 1, 107)           // 'k'
+  prim.store8(base + 2, 40)            // '('
+  prim.store8(base + 3, 34)            // '"'
+  let mid = __rts_fill_esc(src, slen, 0, base + 4)
+  prim.store8(mid, 34)                 // '"'
+  prim.store8(mid + 1, 41)             // ')'
+  buf
+}
+
+fn result_to_string(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok(" + int.to_string(v) + ")",
+  err(e) => __rts_err(e),
+}
+
+fn result_to_string_ss(r: Result[String, String]) -> String = match r {
+  ok(v) => __rts_ok_s(v),
+  err(e) => __rts_err(e),
+}

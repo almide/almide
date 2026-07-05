@@ -1479,6 +1479,24 @@ fn option_interp_self_hosts_per_element_type() {
 }
 
 #[test]
+fn result_interp_self_hosts_per_element_pair() {
+    // `${Result[Int, String]}` / `${Result[String, String]}` render v0's `ok(<T>)` / `err(<E>)` via a
+    // per-(T,E) self-host (`result.to_string` / `result.to_string_ss`); a String payload is quoted +
+    // escaped. Any other pairing stays an unlinked clean wall.
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Result[Int, String] = ok(42) let b: Result[Int, String] = err(\"bad\")\n\
+        println(\"${a}\") println(\"${b}\") println(\"r=${a}!\")\n\
+        let c: Result[String, String] = ok(\"hi\") let d: Result[String, String] = err(\"x\")\n\
+        println(\"${c}\") println(\"${d}\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "result.to_string"), "Result[Int,String] interp must auto-link result.to_string");
+    assert!(prog.functions.iter().any(|f| f.name == "result.to_string_ss"), "Result[String,String] interp must auto-link result.to_string_ss");
+    if let Some(out) = build_and_run("result_interp", &render_wasm_program(&prog)) {
+        assert_eq!(out, "ok(42)\nerr(\"bad\")\nr=ok(42)!\nok(\"hi\")\nerr(\"x\")");
+    }
+}
+
+#[test]
 fn tuple_multifield_and_single_ctor_matches_lower() {
     // A TUPLE-subject match (`desugar_tuple_match`), a MULTI-FIELD variant match (regrouped into a
     // tuple payload sub-match), and a SINGLE-CTOR newtype match (routed through an IfThen merge with

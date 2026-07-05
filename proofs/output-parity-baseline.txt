@@ -9,6 +9,7 @@ spec/lang/codec_method_roundtrip_wasm.almd
 spec/lang/codec_option_field_wasm.almd
 spec/lang/guarded_variant_match_wasm.almd
 spec/lang/option_interp_wasm.almd
+spec/lang/result_interp_wasm.almd
 spec/lang/top_let_test.almd
 spec/lang/tuple_and_multifield_match_wasm.almd
 spec/lang/var_in_if_test.almd

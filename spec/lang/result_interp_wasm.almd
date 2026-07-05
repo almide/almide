@@ -1,0 +1,19 @@
+// wasm:enabled
+// Locks in `${Result[T, E]}` interpolation — v0's `ok(<T>)` / `err(<E>)` compound repr — for the
+// (T, E) pairings the trust-spine self-hosts: (Int, String) and (String, String). Each
+// `result.to_string*` is self-host .almd (a 2-arm Result match + repr build); a String payload is
+// quoted+escaped like a List[String] element. Byte-identical to v0 --target wasm.
+
+effect fn main() -> Unit = {
+  let a: Result[Int, String] = ok(42)
+  let b: Result[Int, String] = ok(-7)
+  let c: Result[Int, String] = err("bad")
+  println("${a}")
+  println("${b}")
+  println("${c}")
+  println("r=${a}!")
+  let d: Result[String, String] = ok("hi")
+  let e: Result[String, String] = err("no \"way\"")
+  println("${d}")
+  println("${e}")
+}
