@@ -374,20 +374,60 @@ fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &M
         // caller-side Var as defined so LICM doesn't wrongly hoist
         // something that depends on it.
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+            // A mutated arg's heap backing is written in place; if that arg (or a
+            // place rooted at it) is hoisted out of the loop as a CLONE, the
+            // mutation is lost. Two mutator sources: user fns (per-param `mut`
+            // flags in `mm`) and stdlib in-place mutators (`list.push`, …) whose
+            // args[0] is keyed by the mangled runtime symbol (mm only covers user
+            // fns). Without the latter `list.push(b.xs, …)` had `b.xs` hoisted to
+            // a clone and never grew `b.xs` (#712, after #703).
+            let stdlib_sym = format!("almide_rt_{}_{}", module.as_str(), func.as_str());
+            let stdlib_mutates_arg0 =
+                crate::pass_closure_conversion::is_inplace_mutator(&stdlib_sym);
             for (i, arg) in args.iter().enumerate() {
-                if let IrExprKind::Var { id } = &arg.kind {
-                    if mm.get(&(*module, *func)).map_or(false, |mp| mp.contains(&i)) {
+                let mutated = (i == 0 && stdlib_mutates_arg0)
+                    || mm.get(&(*module, *func)).map_or(false, |mp| mp.contains(&i));
+                if mutated {
+                    // Mark the ROOT var (bare `out`, or `b` in `b.xs` / `b[i]`)
+                    // loop-variant so LICM never hoists an expression on it.
+                    let mut root = &arg.kind;
+                    while let IrExprKind::Member { object, .. }
+                        | IrExprKind::TupleIndex { object, .. }
+                        | IrExprKind::IndexAccess { object, .. } = root
+                    {
+                        root = &object.kind;
+                    }
+                    if let IrExprKind::Var { id } = root {
                         defined.insert(*id);
                     }
                 }
             }
         }
-        // Explicit-preserve: only the scopes/loops/mutating-Module-calls above
-        // define variables relevant to LICM. Every other node (including Call
-        // with a non-Module target) defines nothing. Listing each variant
-        // turns a new IrExprKind into a compile error instead of a silent miss.
+        // The wasm pipeline lowers `list.push` etc. to RuntimeCall BEFORE LICM, so
+        // the Module arm above never sees them — handle the same stdlib in-place-
+        // mutator escape here (#712 wasm: without it `b.xs` was hoisted to a clone
+        // and the push never grew it, so the loop read len 0).
+        IrExprKind::RuntimeCall { symbol, args } => {
+            if crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str()) {
+                if let Some(arg0) = args.first() {
+                    let mut root = &arg0.kind;
+                    while let IrExprKind::Member { object, .. }
+                        | IrExprKind::TupleIndex { object, .. }
+                        | IrExprKind::IndexAccess { object, .. } = root
+                    {
+                        root = &object.kind;
+                    }
+                    if let IrExprKind::Var { id } = root {
+                        defined.insert(*id);
+                    }
+                }
+            }
+        }
+        // Explicit-preserve: only the scopes/loops/mutating calls above define
+        // variables relevant to LICM. Every other node (including Call with a
+        // non-Module target) defines nothing. Listing each variant turns a new
+        // IrExprKind into a compile error instead of a silent miss.
         IrExprKind::Call { .. } | IrExprKind::TailCall { .. }
-        | IrExprKind::RuntimeCall { .. }
         | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
         | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
         | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
