@@ -1660,6 +1660,12 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             cur = Some(r);
             continue;
         }
+        // Inline a `fan.race`/`fan.any` over a literal thunk list (avoids an unrepresentable
+        // List[funcref]) into a plain match-over-a-call chain.
+        if let Some(r) = desugar_fan_race_any(src, next_var) {
+            cur = Some(r);
+            continue;
+        }
         // Regroup a guarded/literal Option/Result match into ctor-dispatch + a payload sub-match, so
         // the guarded-variant case reduces to the two already-proven pieces.
         if let Some(r) = desugar_grouped_variant_match(src, next_var) {
@@ -3030,6 +3036,124 @@ fn group_option_result_arms(
         return Option::None;
     }
     Some(new_arms)
+}
+
+/// Desugar `fan.race` / `fan.any` over a LITERAL thunk list by INLINING each thunk's body — avoiding a
+/// `List[funcref]` (unrepresentable in v1) entirely. On wasm the fan combinators are deterministic:
+///   `fan.race([() => t0, () => t1, …])`  ≡  `t0`           (the FIRST thunk settles first)
+///   `fan.any([() => t0, () => t1, …])`   ≡  `match t0 { ok(v) => ok(v), err(_) => <any of the rest> }`
+///                                             (the FIRST Ok in list order; the last thunk's result is
+///                                              the fallback if every earlier one errs)
+/// Each `t_i` is a no-param lambda whose body is a `Result[T, String]` (an effect fn call). The inlined
+/// form is a plain match-over-a-call chain, all in v1's subset. A NON-literal thunk list (`let ts =
+/// […]; fan.race(ts)`) has no inlinable bodies → left for the call-site purity wall.
+pub fn desugar_fan_race_any(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use almide_ir::{CallTarget, IrMatchArm, IrPattern};
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    struct V<'a> {
+        next: &'a mut u32,
+        changed: bool,
+    }
+    // The `Result[T, String]` Ok-payload type T (for the `ok(v) => ok(v)` re-wrap).
+    fn ok_ty(result_ty: &Ty) -> Option<Ty> {
+        match result_ty {
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => Some(a[0].clone()),
+            _ => None,
+        }
+    }
+    impl IrMutVisitor for V<'_> {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
+            else {
+                return;
+            };
+            if module.as_str() != "fan" || (func.as_str() != "race" && func.as_str() != "any") {
+                return;
+            }
+            let is_any = func.as_str() == "any";
+            // The one arg must be a LITERAL list of no-param lambdas; extract each body.
+            let [arg] = &args[..] else { return };
+            let IrExprKind::List { elements } = &arg.kind else {
+                return;
+            };
+            if elements.is_empty() {
+                return;
+            }
+            let mut bodies: Vec<IrExpr> = Vec::with_capacity(elements.len());
+            for el in elements {
+                let IrExprKind::Lambda { params, body, .. } = &el.kind else {
+                    return;
+                };
+                if !params.is_empty() {
+                    return;
+                }
+                bodies.push((**body).clone());
+            }
+            let result_ty = e.ty.clone();
+            if !is_any {
+                // `fan.race` — the first thunk's body.
+                *e = bodies.into_iter().next().unwrap();
+                self.changed = true;
+                return;
+            }
+            // `fan.any` — a right-nested `match t_i { ok(v) => ok(v), err(_) => <rest> }` chain; the
+            // last body is returned directly (its ok/err is the all-errored fallback).
+            let Some(t) = ok_ty(&result_ty) else { return };
+            let mut acc = bodies.pop().unwrap(); // the last thunk's result (fallback)
+            while let Some(first) = bodies.pop() {
+                let v = VarId(*self.next);
+                *self.next += 1;
+                let ok_arm = IrExpr {
+                    kind: IrExprKind::ResultOk {
+                        expr: Box::new(IrExpr {
+                            kind: IrExprKind::Var { id: v },
+                            ty: t.clone(),
+                            span: first.span.clone(),
+                            def_id: None,
+                        }),
+                    },
+                    ty: result_ty.clone(),
+                    span: first.span.clone(),
+                    def_id: None,
+                };
+                acc = IrExpr {
+                    kind: IrExprKind::Match {
+                        subject: Box::new(first),
+                        arms: vec![
+                            IrMatchArm {
+                                pattern: IrPattern::Ok {
+                                    inner: Box::new(IrPattern::Bind { var: v, ty: t.clone() }),
+                                },
+                                guard: None,
+                                body: ok_arm,
+                            },
+                            IrMatchArm {
+                                pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+                                guard: None,
+                                body: acc,
+                            },
+                        ],
+                    },
+                    ty: result_ty.clone(),
+                    span: None,
+                    def_id: None,
+                };
+            }
+            *e = acc;
+            self.changed = true;
+        }
+    }
+    let mut v = V { next: next_var, changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    if v.changed {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 /// Desugar a NON-EMPTY map literal `["k": v, …]` into `map.from_list([(k, v), …])` — the trust-spine
