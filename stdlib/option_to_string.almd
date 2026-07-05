@@ -1,0 +1,8 @@
+// option_to_string — SELF-HOSTED `option.to_string` over an `Option[Int]`, byte-matching v0's
+// compound repr: `some(42)` / `some(-7)` / `none` (the `${option}` interpolation form). The inner
+// Int renders as its plain signed decimal (`int.to_string`), wrapped in `some(` … `)`; `none` is the
+// bare word. A 2-arm Option match over a SCALAR payload + string concat — both in v1's subset.
+fn option_to_string(o: Option[Int]) -> String = match o {
+  some(v) => "some(" + int.to_string(v) + ")",
+  none => "none",
+}

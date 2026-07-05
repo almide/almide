@@ -1,0 +1,6 @@
+// option_to_string_b — `option.to_string_b` over `Option[Bool]`, byte-matching v0's `some(true)` /
+// `some(false)` / `none`. The inner Bool renders inline (no `bool.to_string` self-host dependency).
+fn option_to_string_b(o: Option[Bool]) -> String = match o {
+  some(v) => "some(" + (if v then "true" else "false") + ")",
+  none => "none",
+}

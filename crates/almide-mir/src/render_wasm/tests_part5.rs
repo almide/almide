@@ -1459,6 +1459,23 @@ fn derived_variant_codec_decode_all_payload_shapes() {
 }
 
 #[test]
+fn option_interp_self_hosts_per_element_type() {
+    // `${Option[Int]}` / `${Option[Bool]}` render v0's `some(<v>)` / `none` via a per-element self-host
+    // (`option.to_string` / `option.to_string_b` — a 2-arm Option match + string concat), routed by
+    // element type exactly like the List family. A String/Float element stays an unlinked clean wall.
+    let src = "effect fn main() -> Unit = {\n\
+        let a: Option[Int] = some(42) let b: Option[Int] = some(-7) let c: Option[Int] = none\n\
+        println(\"${a}\") println(\"${b}\") println(\"${c}\") println(\"v=${a}!\")\n\
+        let t: Option[Bool] = some(true) let f: Option[Bool] = none\n\
+        println(\"${t}\") println(\"${f}\") }\n";
+    let prog = lower_source(src);
+    assert!(prog.functions.iter().any(|f| f.name == "option.to_string"), "Option[Int] interp must auto-link option.to_string");
+    if let Some(out) = build_and_run("option_interp", &render_wasm_program(&prog)) {
+        assert_eq!(out, "some(42)\nsome(-7)\nnone\nv=some(42)!\nsome(true)\nnone");
+    }
+}
+
+#[test]
 fn tuple_multifield_and_single_ctor_matches_lower() {
     // A TUPLE-subject match (`desugar_tuple_match`), a MULTI-FIELD variant match (regrouped into a
     // tuple payload sub-match), and a SINGLE-CTOR newtype match (routed through an IfThen merge with
