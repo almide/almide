@@ -6,7 +6,7 @@
 
 ## Active
 
-60 items
+61 items
 
 | Item | Description |
 |------|-------------|
@@ -57,6 +57,7 @@
 | [v1 Proof Architecture — 構想(着地形)](active/v1-proof-architecture.md) | v1 vision — the landed proof architecture: untrusted compiler + two tiny qualified checkers, ALS as normative semantics, single Coq trust base, per-build receipts. Self-contained, terminal-state. |
 | [v1 Proof Spine — #31 progress (全V / leak-freedom / 推移的caps / 抽出穴)](active/v1-proof-spine-progress.md) | v1 proof-spine progress — what of task #31 (全V / leak-freedom / 推移的caps / 抽出穴) is PROVEN vs the honest remaining. Records the CapabilityReach.v transitive-caps theorem (2026-06-21). |
 | [v1 — records feature: svg FULL CONQUEST (goal prompt)](active/v1-records-svg.md) |  |
+| [v1 リリース路線 — 段階リリース計画](active/v1-release-path.md) | v1 リリース路線 — opt-in 検証 codegen(v0 fallback) を beachhead に、カバレッジ→証明書 emit→flight-grade へ段階リリースする計画。4案のメリデメと選定理由、各段の受入基準。 |
 | [v1 stdlib self-host — the machinery phase (Option / List-building / closures)](active/v1-selfhost-machinery.md) |  |
 | [v1 self-host print floor — the ③ observability keystone](active/v1-selfhost-print-floor.md) |  |
 | [v1 trust-spine correctness holes (adversarial sweep 2026-06-27)](active/v1-spine-correctness-holes.md) |  |
