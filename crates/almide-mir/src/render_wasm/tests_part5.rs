@@ -1482,6 +1482,23 @@ fn option_interp_self_hosts_per_element_type() {
 }
 
 #[test]
+fn nonempty_map_literal_materializes_via_from_list() {
+    // A non-empty map literal used to lower to a DEFERRED-Opaque empty block, so `map.len`/`map.get`
+    // silently read 0 (a miscompile). Routing it through `map.from_list` materializes a real map, so
+    // the ops byte-match v0. (Regression guard for the silent-miscompile fix.)
+    let src = "fn probe(m: Map[String, Int]) -> String = {\n\
+        \"len=\" + int.to_string(map.len(m)) + \" x=\" + int.to_string(map.get(m, \"x\") ?? -1)\n\
+        }\n\
+        effect fn main() -> Unit = {\n\
+        let a: Map[String, Int] = [\"x\": 1, \"y\": 2, \"z\": 3]\n\
+        println(probe(a)) println(int.to_string(map.len(a))) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("map_literal", &render_wasm_program(&prog)) {
+        assert_eq!(out, "len=3 x=1\n3");
+    }
+}
+
+#[test]
 fn set_interp_self_hosts_via_to_list() {
     // `${Set[Int]}` renders v0's `set.from_list([<elems>])` (insertion order, dedup). `set.to_string`
     // reads the elements via the callable `set.to_list` and renders the body inline like

@@ -1637,6 +1637,12 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             cur = Some(r);
             continue;
         }
+        // Route a non-empty map literal through `map.from_list` so it materializes a real map (else a
+        // deferred-Opaque empty block silently miscompiles every subsequent map op).
+        if let Some(r) = desugar_map_literal(src) {
+            cur = Some(r);
+            continue;
+        }
         // Regroup a guarded/literal Option/Result match into ctor-dispatch + a payload sub-match, so
         // the guarded-variant case reduces to the two already-proven pieces.
         if let Some(r) = desugar_grouped_variant_match(src, next_var) {
@@ -3007,6 +3013,70 @@ fn group_option_result_arms(
         return Option::None;
     }
     Some(new_arms)
+}
+
+/// Desugar a NON-EMPTY map literal `["k": v, …]` into `map.from_list([(k, v), …])` — the trust-spine
+/// materializes a map literal as a DEFERRED-Opaque (empty) block, so a subsequent `map.len` / `map.get`
+/// / `map.keys` would SILENTLY read the empty block (v0=2, v1=0 — a miscompile). `map.from_list`
+/// builds the REAL map from a `List[(K, V)]` (byte-verified), so routing the literal through it both
+/// fixes the miscompile AND opens map-literal usage. v0 is untouched (this is a v1-lowering rewrite).
+/// The EMPTY literal `[:]` is already materialized correctly, so it is left alone.
+pub fn desugar_map_literal(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    struct V {
+        changed: bool,
+    }
+    impl IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::MapLiteral { entries } = &e.kind else { return };
+            if entries.is_empty() {
+                return;
+            }
+            let (k_ty, v_ty) = match &e.ty {
+                Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 => (a[0].clone(), a[1].clone()),
+                _ => return,
+            };
+            let tuple_ty = Ty::Tuple(vec![k_ty, v_ty]);
+            let elements: Vec<IrExpr> = entries
+                .iter()
+                .map(|(k, v)| IrExpr {
+                    kind: IrExprKind::Tuple {
+                        elements: vec![k.clone(), v.clone()],
+                    },
+                    ty: tuple_ty.clone(),
+                    span: e.span.clone(),
+                    def_id: None,
+                })
+                .collect();
+            let list_expr = IrExpr {
+                kind: IrExprKind::List { elements },
+                ty: Ty::Applied(TypeConstructorId::List, vec![tuple_ty]),
+                span: e.span.clone(),
+                def_id: None,
+            };
+            e.kind = IrExprKind::Call {
+                target: almide_ir::CallTarget::Module {
+                    module: almide_lang::intern::sym("map"),
+                    func: almide_lang::intern::sym("from_list"),
+                    def_id: None,
+                },
+                args: vec![list_expr],
+                type_args: vec![],
+            };
+            self.changed = true;
+        }
+    }
+    let mut v = V { changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    if v.changed {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 /// Desugar a `match` over a TUPLE subject into element accesses + a linear guard/`if` chain — `match t

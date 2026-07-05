@@ -1,0 +1,23 @@
+// wasm:enabled
+// Locks in NON-EMPTY map-literal materialization. The trust-spine used to lower `["k": v, …]` to a
+// DEFERRED-Opaque (empty) block, so every subsequent `map.len` / `map.get` / `map.contains` silently
+// read the empty block (v0=2, v1=0 — a MISCOMPILE). The literal is now routed through `map.from_list`
+// (a real map, byte-verified), so these operations byte-match v0 --target wasm. The empty literal
+// `[:]` was already correct.
+
+fn probe(m: Map[String, Int]) -> String = {
+  let n = map.len(m)
+  let x = map.get(m, "x") ?? -1
+  let z = map.get(m, "z") ?? -1
+  "len=" + int.to_string(n) + " x=" + int.to_string(x) + " z=" + int.to_string(z)
+}
+
+effect fn main() -> Unit = {
+  let a: Map[String, Int] = ["x": 1, "y": 2, "z": 3]
+  let e: Map[String, Int] = [:]
+  println(probe(a))
+  println(probe(e))
+  println(int.to_string(map.len(a)))
+  println("has_x " + (if map.contains(a, "x") then "yes" else "no"))
+  println("has_w " + (if map.contains(a, "w") then "yes" else "no"))
+}
