@@ -99,9 +99,9 @@ pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Res
     Ok(dep_dir)
 }
 
-/// Update almide.lock after fetching all dependencies.
-pub fn update_lock_file(deps: &[Dependency], fetched: &[FetchedDep]) -> Result<(), String> {
-    let lock_path = Path::new("almide.lock");
+/// Update almide.lock (next to the project's almide.toml) after fetching all dependencies.
+pub fn update_lock_file(root: &Path, deps: &[Dependency], fetched: &[FetchedDep]) -> Result<(), String> {
+    let lock_path = root.join("almide.lock");
     let mut locked = Vec::new();
     for (dep, fd) in deps.iter().zip(fetched.iter()) {
         let ref_name = dep.tag.as_deref()
@@ -120,7 +120,7 @@ pub fn update_lock_file(deps: &[Dependency], fetched: &[FetchedDep]) -> Result<(
         }
     }
     if !locked.is_empty() {
-        write_lock_file(lock_path, &locked)?;
+        write_lock_file(&lock_path, &locked)?;
     }
     Ok(())
 }
@@ -151,9 +151,9 @@ fn resolve_dep_version(dep: &Dependency) -> String {
 /// Same-name deps with same major version are unified; different majors coexist.
 /// If almide.lock exists, uses locked commit hashes for reproducibility.
 pub fn fetch_all_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
-    let lock_path = Path::new("almide.lock");
+    let lock_path = project.root.join("almide.lock");
     let locked = if lock_path.exists() {
-        parse_lock_file(lock_path).unwrap_or_default()
+        parse_lock_file(&lock_path).unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -164,7 +164,7 @@ pub fn fetch_all_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
 
     // Update lock file if it doesn't exist or deps changed
     if !project.dependencies.is_empty() {
-        let _ = update_lock_file(&project.dependencies, &fetched);
+        let _ = update_lock_file(&project.root, &project.dependencies, &fetched);
     }
 
     Ok(fetched)

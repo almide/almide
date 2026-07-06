@@ -76,6 +76,9 @@ pub struct Project {
     /// Native Rust crate dependencies added to generated Cargo.toml.
     /// e.g., [("wasmtime", "42.0.0")]
     pub native_deps: Vec<NativeDep>,
+    /// Directory containing almide.toml. Project-level files (almide.lock)
+    /// anchor here, not in the process CWD.
+    pub root: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -170,6 +173,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
         dependencies: deps,
         permissions,
         native_deps,
+        root: path.parent().map(Path::to_path_buf).unwrap_or_default(),
     })
 }
 
