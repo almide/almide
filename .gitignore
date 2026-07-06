@@ -14,3 +14,4 @@ __pycache__/
 research/benchmark/framework/config.yaml
 research/benchmark/framework/results/
 docs-site/
+*.profraw
