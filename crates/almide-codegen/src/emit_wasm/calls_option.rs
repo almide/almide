@@ -338,7 +338,26 @@ impl FuncCompiler<'_> {
                             local_get(closure); i32_load(0);
                         });
                         let ti = self.emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
-                        wasm!(self.func, { call_indirect(ti, 0); else_; local_get(opt); i32_load(0); end; });
+                        if Self::is_heap_type(&inner_ty) {
+                            // The unwrapped HEAP payload must be co-owned (+1): the
+                            // Option temp's drop recursively releases its payload
+                            // when the box rc hits 0, so a bare `*opt` handed back
+                            // a soon-freed handle (fuzz #727 cluster 5 — a
+                            // some(Map) payload printed as a garbage-length list).
+                            // Same share-+1 discipline as `or_else` above (#668);
+                            // unwrap_or_else was the family member that missed it.
+                            // (rc_inc is (ptr) -> ptr, so the +1'd handle stays on
+                            // the stack as the branch result.)
+                            wasm!(self.func, {
+                                call_indirect(ti, 0);
+                                else_;
+                                  local_get(opt); i32_load(0);
+                                  call(self.emitter.rt.rc_inc);
+                                end;
+                            });
+                        } else {
+                            wasm!(self.func, { call_indirect(ti, 0); else_; local_get(opt); i32_load(0); end; });
+                        }
                     }
                 }
                 self.scratch.free_i32(closure);

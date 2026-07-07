@@ -1634,3 +1634,15 @@ evidence  = [
   { path = "spec/wasm_cross/list_chunk_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_windows_zero.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-130"
+spec      = "ALS-I1"
+title     = "option/map combinators hand back OWNED heap results (no bare pass-through handles)"
+statement = "A combinator whose result can be one of its inputs' heap values returns that value CO-OWNED (+1), never as a bare aliased handle: `option.unwrap_or_else`'s Some path acquires the payload before the Option temp's recursive drop releases it, and `map.fold` acquires a heap init when storing the accumulator and releases the previous accumulator after every closure call — so the zero-iteration fold hands back an owned handle exactly like the N-iteration one. Previously a some(Map) payload was returned bare and read after free (garbage lengths — a 2-entry map printed as hundreds of `false`), and an empty-subject fold's caller double-freed the init against its own binding (rc sentinel trap; with a `map.get_or` subject the allocator reuse printed the init as `[:]`). These were fuzz #727's dominant clusters; all 13 campaign representatives replay CLEAN with these two acquisitions in place. Same share-+1 discipline as the #668 pass-through family."
+since     = "0.28.5"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/option_unwrap_or_else_heap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_fold_heap_acc.almd", class = "fixture" },
+]

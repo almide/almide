@@ -19,10 +19,23 @@ impl FuncCompiler<'_> {
                 // a Float is f64. Hardcoding i64 broke the wasm module (validation
                 // "expected i64, found i32") for any non-Int accumulator.
                 let acc_vt = values::ty_to_valtype(&args[1].ty).unwrap_or(ValType::I32);
+                // A HEAP accumulator needs explicit ownership through the loop:
+                // the closure returns an OWNED value (fn returns are +1), so after
+                // every call the PREVIOUS acc we owned must be released, and the
+                // init must be acquired (+1) when stored so the zero-iteration
+                // path hands back an owned handle too. Previously the empty-map
+                // fold returned the init var's handle BARE — the caller's temp
+                // dec then double-freed it against the var's own release (fuzz
+                // #727: `map.fold(map.get_or(...), init, f)` printed [:] /
+                // garbage and tripped the rc sentinel).
+                let acc_heap = Self::is_heap_type(&args[1].ty);
                 let acc = self.scratch.alloc(acc_vt);
                 let closure = self.scratch.alloc_i32();
                 let it = self.map_iter_begin(&args[0], ks + vs);
                 self.emit_expr(&args[1]); // init
+                if acc_heap {
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 wasm!(self.func, { local_set(acc); });
                 self.emit_expr(&args[2]); // closure
                 wasm!(self.func, { local_set(closure); });
@@ -40,7 +53,20 @@ impl FuncCompiler<'_> {
                     if let Some(vt) = values::ty_to_valtype(&val_ty) { ct.push(vt); }
                     self.emit_call_indirect(ct, vec![acc_vt]);
                 }
-                wasm!(self.func, { local_set(acc); });
+                if acc_heap {
+                    // Release the pre-call acc we owned; the call's result is the
+                    // new owned acc (identity closures return the SAME handle
+                    // +1'd, so the dec still balances).
+                    let newacc = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        local_set(newacc);
+                        local_get(acc); call(self.emitter.rt.rc_dec);
+                        local_get(newacc); local_set(acc);
+                    });
+                    self.scratch.free_i32(newacc);
+                } else {
+                    wasm!(self.func, { local_set(acc); });
+                }
                 self.map_iter_loop_tail(&it);
                 wasm!(self.func, { local_get(acc); });
                 self.scratch.free(acc, acc_vt);

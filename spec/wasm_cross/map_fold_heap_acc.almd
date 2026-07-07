@@ -1,0 +1,22 @@
+// @contract: C-130
+// map.fold with a HEAP accumulator owns it through the loop (#727 clusters 3/4).
+// The zero-iteration path previously returned the init var's handle BARE — the
+// caller's temp release then double-freed it against the var's own (rc sentinel
+// trap), and with the subject coming from map.get_or the reuse corrupted the
+// allocator (the init map printed as [:]). Probes: empty subject (init passes
+// through owned), identity closure over a non-empty subject (same handle +1'd
+// per iteration), a fresh-map closure (previous acc released each iteration),
+// and the original fuzz shape (fold over a get_or default).
+fn main() -> Unit = {
+  let e: Map[String, String] = [:]
+  let init = ["k0": 1, "k1": 2]
+  println("${map.fold(e, init, ((a, k, v) => a))}")
+  let subj = ["a": 9, "b": 8]
+  println("${map.fold(subj, init, ((a, k, v) => a))}")
+  println("${map.fold(subj, init, ((a, k, v) => ["fresh": v]))}")
+  let y3: Map[String, String] = [:]
+  let r7 = map.fold(map.get_or(["k0": ["k0": "x"]], "missing", y3), ["k0": 1], ((a, k, v) => ["k": 10]))
+  println("r7 = ${r7}")
+  // init must still be alive and intact after every fold above.
+  println("init = ${init}")
+}
