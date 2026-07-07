@@ -530,6 +530,24 @@ fn hint_int_to_string_return() {
     assert!(hints[0].contains("int.to_string"), "hint should suggest int.to_string, got: {}", hints[0]);
 }
 
+// #740: an Int-only math builtin given a Float must point at the Float-preserving
+// sibling (float.abs / math.fpow), NOT at the truncating float.to_int.
+#[test]
+fn hint_math_abs_on_float_suggests_float_abs() {
+    let hints = error_hints("import math\nfn f(x: Float) -> Int = math.abs(x)");
+    assert!(!hints.is_empty(), "should have an error");
+    assert!(hints[0].contains("float.abs"), "hint should suggest float.abs, got: {}", hints[0]);
+    assert!(!hints[0].starts_with("Fix the argument type. Or use `float.to_int"),
+        "hint must not lead with the truncating cast, got: {}", hints[0]);
+}
+
+#[test]
+fn hint_math_pow_on_float_suggests_fpow() {
+    let hints = error_hints("import math\nfn f() -> Int = math.pow(2.0, 3.0)");
+    assert!(!hints.is_empty(), "should have an error");
+    assert!(hints[0].contains("math.fpow"), "hint should suggest math.fpow, got: {}", hints[0]);
+}
+
 #[test]
 fn hint_int_to_string_let() {
     let hints = error_hints("fn f() -> Unit = {\n  let x: String = 42\n  ()\n}");
