@@ -1,0 +1,46 @@
+// @contract: C-131
+// Loop-carried buffer churn at scale (#696). A loop that rebuilds a list via
+// `list.push` each iteration — dropped, or swap-carried into an outer var —
+// must be O(n) bytes like native. Two compounding causes made it O(n²) + OOM:
+// (1) LICM hoisted the loop-local `[]` allocation into a shared `__licm` temp,
+// aliasing every iteration's buffer (correct only because COW then cloned);
+// (2) the `cur = merged` swap edge marked the buffer for COW although `merged`
+// is DEAD after the swap (re-declared next iteration before any use), so every
+// push cloned the whole container. Fixed statically: LICM never hoists a
+// heap-typed result, and AliasCowPass elides a direct whole-var edge whose
+// source has no occurrence after it (the MOVE refinement). Real aliased
+// mutation still clones (alias_cow.almd, bytes_set_value_semantics.almd).
+fn main() -> Unit = {
+  // Swap-carried doubling: 3 → 98304 elements over 15 rounds.
+  var cur: List[Int] = [1, 2, 3]
+  var w = 0
+  while w < 15 {
+    var merged: List[Int] = []
+    let n = list.len(cur)
+    var j = 0
+    while j < n * 2 { list.push(merged, j); j = j + 1 }
+    cur = merged
+    w = w + 1
+  }
+  println(int.to_string(list.len(cur)))
+  // Constant-size rebuild rounds, buffer dropped each time (the no-swap shape
+  // that trapped identically via the LICM-hoisted alias).
+  var w2 = 0
+  while w2 < 3 {
+    var scratch: List[Int] = []
+    var j2 = 0
+    while j2 < 20000 { list.push(scratch, j2); j2 = j2 + 1 }
+    println(int.to_string(list.get(scratch, 19999) ?? 0))
+    w2 = w2 + 1
+  }
+  // The carried buffer's content survived the swaps.
+  println(int.to_string(list.get(cur, 98303) ?? 0))
+  // A LIVE alias across the swap still gets value semantics: keep is read
+  // AFTER the swap edge, so the move elision must NOT fire for it.
+  var keep: List[Int] = [5, 6]
+  var out: List[Int] = []
+  out = keep
+  list.push(out, 7)
+  println(int.to_string(list.len(keep)))
+  println(int.to_string(list.len(out)))
+}

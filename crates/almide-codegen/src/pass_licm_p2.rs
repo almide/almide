@@ -218,6 +218,17 @@ fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>, pure_fns: &HashSet
     if has_assignment(expr) {
         return false;
     }
+    // Never hoist a HEAP-typed result out of a loop (#696). Hoisting an
+    // allocation (`var merged: List[Int] = []` → `__licm = []` before the
+    // loop, `merged = __licm` inside) makes every iteration ALIAS one shared
+    // buffer, so per-iteration value semantics survive only because the
+    // AliasCow guard then clones on every in-place mutation — the quadratic
+    // blow-up that OOM'd the merge sort (each `list.push` re-copied the whole
+    // container). The hoist saves one allocation per iteration; the
+    // correctness structure it demands costs O(n²). Scalars keep hoisting.
+    if super::pass_alias_cow::is_heap_aliasable(&expr.ty) {
+        return false;
+    }
     refs_are_outside_loop(expr, loop_defined)
 }
 
