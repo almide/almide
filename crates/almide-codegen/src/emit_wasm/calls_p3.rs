@@ -83,8 +83,12 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_tail_call(&mut self, target: &CallTarget, args: &[IrExpr], ret_ty: &Ty) {
         match target {
             CallTarget::Named { name } => {
-                // Only user-defined functions get return_call; builtins fall back to normal call
-                if let Some(&func_idx) = self.emitter.func_map.get(name.as_str()) {
+                // Only user-defined functions get return_call; builtins fall back to
+                // normal call. Resolution MUST be the shared resolve_named_func —
+                // a bare-only lookup here bound an intra-module tail call to the
+                // MAIN program's same-name fn (wrong arity/result → invalid
+                // return_call, #692) while the non-tail path resolved correctly.
+                if let Some(func_idx) = self.resolve_named_func(name.as_str()) {
                     for arg in args {
                         self.emit_expr(arg);
                     }

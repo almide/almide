@@ -73,6 +73,31 @@ impl FuncCompiler<'_> {
         false
     }
 
+    /// Resolve a `CallTarget::Named` user function. The current module's
+    /// qualified name (`{module}.{name}`) is tried FIRST so an intra-module
+    /// call binds the module-local function — a bare-name-first lookup binds
+    /// the MAIN program's same-name fn instead (func_map's bare slot is
+    /// first-registered-wins across program+modules), which emitted an invalid
+    /// call/return_call when the arities or result types differ (#692). Then
+    /// the bare name, then any module's qualified name. Shared by emit_call
+    /// and emit_tail_call so the two can never resolve the same name to
+    /// different functions.
+    fn resolve_named_func(&self, name: &str) -> Option<u32> {
+        self.current_module_name
+            .as_ref()
+            .and_then(|m| {
+                let qn = format!("{}.{}", m, name);
+                self.emitter.func_map.get(qn.as_str()).copied()
+            })
+            .or_else(|| self.emitter.func_map.get(name).copied())
+            .or_else(|| {
+                self.emitter.module_names.iter().find_map(|m| {
+                    let qn = format!("{}.{}", m, name);
+                    self.emitter.func_map.get(qn.as_str()).copied()
+                })
+            })
+    }
+
     /// Resolve a `Type.method` call whose function was registered under its
     /// module_origin-qualified name `mod.Type.method` (#433 namespacing). The
     /// call site lost the owning-module prefix because the subject type carries

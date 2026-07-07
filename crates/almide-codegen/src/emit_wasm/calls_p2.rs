@@ -284,21 +284,8 @@ impl FuncCompiler<'_> {
                             self.emit_expr(arg);
                         }
                         // Resolve: prefer current module's qualified name, then bare,
-                        // then try all qualified variants
-                        let func_idx = self.current_module_name.as_ref()
-                            .and_then(|m| {
-                                let qn = format!("{}.{}", m, name.as_str());
-                                self.emitter.func_map.get(qn.as_str()).copied()
-                            })
-                            .or_else(|| self.emitter.func_map.get(name.as_str()).copied())
-                            .or_else(|| {
-                                // Try qualified: "{module}.{name}" for each known module
-                                self.emitter.module_names.iter()
-                                    .find_map(|m| {
-                                        let qn = format!("{}.{}", m, name.as_str());
-                                        self.emitter.func_map.get(qn.as_str()).copied()
-                                    })
-                            });
+                        // then try all qualified variants (shared with emit_tail_call).
+                        let func_idx = self.resolve_named_func(name.as_str());
                         if let Some(idx) = func_idx {
                             wasm!(self.func, { call(idx); });
                         } else {
