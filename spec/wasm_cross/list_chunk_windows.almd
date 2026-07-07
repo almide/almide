@@ -1,0 +1,19 @@
+// @contract: C-129
+// list.chunk / list.windows negative-size adjudication (ALS-T4): a NEGATIVE n
+// gives chunk = the whole list as ONE chunk (empty list stays empty) and
+// windows = the empty list — the historical `as usize` reinterpretation promoted
+// to the norm. Plus the ordinary positive-size shapes. `neg`/`two` shield the
+// size from constant folding so the runtime path is what's exercised.
+fn neg(x: Int) -> Int = 0 - x
+fn two(x: Int) -> Int = x - x + 2
+
+fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  let empty: List[Int] = []
+  println(int.to_string(list.len(list.chunk(xs, neg(2)))))      // 1 — whole as one chunk
+  println(int.to_string(list.len(list.chunk(empty, neg(2)))))   // 0 — empty stays empty
+  println(int.to_string(list.len(list.windows(xs, neg(2)))))    // 0 — empty
+  println(int.to_string(list.len(list.chunk(xs, two(0)))))      // 2 — [1,2],[3]
+  println(int.to_string(list.len(list.windows(xs, two(0)))))    // 2 — [1,2],[2,3]
+  println(int.to_string(list.get(list.get(list.chunk(xs, two(0)), 1) ?? [], 0) ?? neg(1))) // 3 — chunk[1][0]
+}

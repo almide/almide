@@ -24,6 +24,11 @@
 # ------
 #   [[contract]]
 #   id        (string, REQUIRED)  ^C-[0-9]{3}$, unique. THE PRIMARY KEY.
+#   spec      (string, REQUIRED)  the ALS normative section this contract
+#                                 certifies ("ALS-xx"); must resolve to a real
+#                                 `## ALS-xx` heading, and every heading must be
+#                                 cited by >=1 contract (#565, both directions
+#                                 gated by check-contracts.sh).
 #   title     (string, REQUIRED)  one line.
 #   statement (string, REQUIRED)  the normative behaviour, <= 3 sentences. When a
 #                                 table / longer prose is needed, the statement is
@@ -1112,7 +1117,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-087"
-spec      = "ALS-D6"
+spec      = "ALS-T3"
 title     = "JSON number and \\u string decoding are byte-identical across targets"
 statement = "json.parse decodes \\uXXXX escapes (BMP 1/2/3-byte UTF-8 plus high+low surrogate pairs to astral code points) and numbers identically on both backends. The WASM parser hands every float token to the same correctly-rounded parser float.parse uses (__dec2flt) instead of an ad-hoc digits/divisor * 10^exp, fixing the dropped -0.0 sign (#663) and the one-ULP exponent error (#667); its \\u decoder UTF-8-encodes the code point (#651). The native oracle's BMP-only \\u decoder gained the same surrogate-pair joining so emoji and other astral escapes round-trip. Integers keep their exact i64 path."
 status    = "active"
@@ -1615,4 +1620,17 @@ since     = "0.28.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/datetime_format.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-129"
+spec      = "ALS-T4"
+title     = "list.chunk / list.windows non-positive sizes: negative keeps the promoted norm, zero aborts in the T6 form"
+statement = "A NEGATIVE size keeps the historical-`as usize`-wrap behavior promoted to the ALS-T4 norm — `list.chunk(xs, n<0)` returns the whole list as ONE chunk (an empty list stays empty) and `list.windows(xs, n<0)` returns the empty list — byte-identical on both targets. A ZERO size is a domain error: `chunk` aborts with `Error: chunk size must be positive`, `windows` with `Error: window size must be positive`, one stderr line + exit 1 on BOTH targets per the ALS-T6 termination convention. Previously `n == 0` leaked Rust's raw `chunks(0)`/`windows(0)` panic natively (exit 101) while wasm trapped on chunk and SILENTLY returned len+1 empty windows for `windows(xs, 0)` — a value-vs-abort divergence."
+since     = "0.28.4"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_chunk_windows.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_chunk_zero.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_windows_zero.almd", class = "fixture" },
 ]

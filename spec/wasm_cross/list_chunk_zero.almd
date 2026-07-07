@@ -1,0 +1,13 @@
+// @contract: C-129
+// `list.chunk(xs, 0)` is a domain error (ALS-T4): it aborts with
+// "Error: chunk size must be positive" + exit 1 on BOTH targets — never a raw
+// native `chunks(0)` panic (exit 101) nor a wasm div-by-zero trap (exit 134).
+// `zero(7)` shields the size; the leading print locks stdout/stderr order and
+// the trailing print must never appear.
+fn zero(x: Int) -> Int = x - x
+
+fn main() -> Unit = {
+  println("before")
+  let cs = list.chunk([1, 2, 3], zero(7))
+  println(int.to_string(list.len(cs)))
+}
