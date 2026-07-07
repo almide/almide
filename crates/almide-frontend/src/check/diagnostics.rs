@@ -19,6 +19,19 @@ impl Checker {
         }
     }
 
+    /// Int-only `math.*` builtins whose generic Float→Int hint (`float.to_int`)
+    /// would silently truncate. When one of these gets a Float argument, the
+    /// caller points at the Float-preserving sibling instead (#740).
+    pub(crate) fn math_float_sibling(fn_name: &str) -> Option<&'static str> {
+        match fn_name {
+            "math.abs" => Some("float.abs"),
+            "math.pow" => Some("math.fpow"),
+            "math.max" => Some("math.fmax"),
+            "math.min" => Some("math.fmin"),
+            _ => None,
+        }
+    }
+
     pub(crate) fn suggest_conversion(expected: &Ty, actual: &Ty) -> Option<String> {
         match (actual, expected) {
             (Ty::Int, Ty::String) => Some("use `int.to_string(x)` to convert Int to String".to_string()),

@@ -76,6 +76,7 @@ list_set_value  out-of-interp-scope capability: value.int
 list_slice_oob  out-of-interp-scope capability: list.slice
 list_swap_oob  out-of-interp-scope capability: list.swap
 list_total_order  out-of-interp-scope capability: list.min/max on non-comparable elements
+list_update_heap  out-of-interp-scope capability: value.int
 list_with_capacity  out-of-interp-scope capability: list.with_capacity
 loop_outer_inplace_mutate_rc  out-of-interp-scope capability: list.slice
 map_filter  out-of-interp-scope capability: map.new

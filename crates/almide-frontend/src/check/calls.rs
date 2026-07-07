@@ -979,7 +979,22 @@ impl Checker {
             let expected_resolved = self.env.resolve_named(&expected);
             let arg_resolved = self.env.resolve_named(arg_ty);
             if types_mismatch(&expected_resolved, &arg_resolved) {
-                let hint = if let Ty::Named(name, args) = &expected {
+                // #740: an Int-only math builtin given a Float — point at the
+                // Float-preserving sibling, not the truncating `float.to_int`.
+                let float_sibling = if matches!(arg_resolved, Ty::Float)
+                    && matches!(expected_resolved, Ty::Int)
+                {
+                    Self::math_float_sibling(fn_name)
+                } else {
+                    None
+                };
+                let hint = if let Some(sib) = float_sibling {
+                    format!(
+                        "`{}` is Int-only. For Floats use `{}(x)`, which preserves the Float — \
+                         not `float.to_int`, which truncates",
+                        fn_name, sib
+                    )
+                } else if let Ty::Named(name, args) = &expected {
                     let n = name.as_str();
                     let is_likely_typevar = args.is_empty()
                         && !n.is_empty()
@@ -1001,12 +1016,16 @@ impl Checker {
                 if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(fn_name)) {
                     diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
                 }
-                // Show fix code: replace argument with conversion expression
-                if let Some(span) = self.current_span {
-                    if let Some((_, template)) = Self::conversion_template(&expected, arg_ty) {
-                        if let Some(src) = self.source_slice(span) {
-                            let fixed = template.replace("{}", &src);
-                            diag = diag.with_try(format!("// Try:\n{}", fixed));
+                // Show fix code: replace argument with conversion expression.
+                // Suppressed for the math-Float-sibling case (#740): the fix is to
+                // change the function, not to wrap the arg in a truncating cast.
+                if float_sibling.is_none() {
+                    if let Some(span) = self.current_span {
+                        if let Some((_, template)) = Self::conversion_template(&expected, arg_ty) {
+                            if let Some(src) = self.source_slice(span) {
+                                let fixed = template.replace("{}", &src);
+                                diag = diag.with_try(format!("// Try:\n{}", fixed));
+                            }
                         }
                     }
                 }

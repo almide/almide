@@ -1,0 +1,22 @@
+// @contract: C-101
+// list.update over heap-element lists (List[Value], List[String]) — #736's last leg. The generic
+// list_update declares f: (Int) -> Int, an (i64)->i64 CallIndirect type, but a (Value/String)->same
+// user lambda renders with an i32 handle RESULT (closure params are i64-widened; results are NOT), so
+// on the v1 spine the indirect call trapped with a type mismatch. The typed _value/_str variants
+// declare the closure's real element type so both sides agree, share every non-target slot with an
+// rc_inc co-own, and store the closure's owned return directly. Covers: in-bounds update, both OOB
+// sides (f never called — unchanged copy), the identity closure, replacing a nested Object element,
+// and a closure that reads the old element.
+effect fn main() -> Unit = {
+  let xs = [value.int(1), value.object([("a", value.int(2))]), value.int(3)]
+  println(value.stringify(value.array(list.update(xs, 0, (v) => value.int(9)))))
+  println(value.stringify(value.array(list.update(xs, 0 - 1, (v) => value.str("BAD")))))
+  println(value.stringify(value.array(list.update(xs, 9, (v) => value.str("BAD")))))
+  println(value.stringify(value.array(list.update(xs, 1, (v) => v))))
+  println(value.stringify(value.array(list.update(xs, 1, (v) => value.array([value.int(7)])))))
+  println(value.stringify(value.array(list.update(xs, 0, (v) => value.int((value.as_int(v) ?? 0) + 100)))))
+  let ss = ["a", "b"]
+  println(list.join(list.update(ss, 0, (s) => s + "!"), ","))
+  println(list.join(list.update(ss, 0, (s) => s), ","))
+  println(list.join(list.update(ss, 5, (s) => "BAD"), ","))
+}
