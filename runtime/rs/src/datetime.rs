@@ -58,13 +58,17 @@ pub fn almide_rt_datetime_format(ts: i64, pattern: &str) -> String {
     let h = almide_rt_datetime_hour(ts);
     let mi = almide_rt_datetime_minute(ts);
     let s = almide_rt_datetime_second(ts);
+    // strftime-style specifiers, substituted sequentially. The wasm + self-hosted
+    // backends run the identical sequence, so datetime.format is byte-identical
+    // across targets. `%` is special only before one of these specifiers; there is
+    // no `%%` escape (see docs/stdlib/datetime.md).
     pattern
-        .replace("YYYY", &format!("{:04}", y))
-        .replace("MM", &format!("{:02}", m))
-        .replace("DD", &format!("{:02}", d))
-        .replace("HH", &format!("{:02}", h))
-        .replace("mm", &format!("{:02}", mi))
-        .replace("ss", &format!("{:02}", s))
+        .replace("%Y", &format!("{:04}", y))
+        .replace("%m", &format!("{:02}", m))
+        .replace("%d", &format!("{:02}", d))
+        .replace("%H", &format!("{:02}", h))
+        .replace("%M", &format!("{:02}", mi))
+        .replace("%S", &format!("{:02}", s))
 }
 
 pub fn almide_rt_datetime_add_days(ts: i64, n: i64) -> i64 { ts + n * 86400 }

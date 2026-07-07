@@ -1,0 +1,26 @@
+// @contract: C-128
+// Cross-target probe for datetime.format strftime-specifier substitution.
+//
+// datetime.format(ts, pattern) replaces %Y %m %d %H %M %S with the zero-padded
+// civil fields via the same sequential string.replace on all three backends, so
+// native and wasm must print byte-identical output. Fixed timestamps only (no
+// wall clock) so the result is deterministic. This locks the fix for #747, where
+// the default v0 wasm arm was a stub that ignored the pattern entirely.
+
+import datetime
+
+fn main() -> Unit = {
+  // 2024-03-05T13:07:09Z built from parts (see ALS-T17 SCOPE: year 0..9999).
+  let ts = datetime.from_parts(2024, 3, 5, 13, 7, 9)
+  println(datetime.format(ts, "%Y-%m-%d"))
+  println(datetime.format(ts, "%H:%M:%S"))
+  println(datetime.format(ts, "%Y-%m-%dT%H:%M:%SZ"))
+  println(datetime.format(ts, "date=%Y/%m/%d time=%H.%M.%S"))
+
+  // The unix epoch and one day later — leading-zero months/days.
+  let epoch = datetime.from_parts(1970, 1, 2, 0, 0, 0)
+  println(datetime.format(epoch, "%d/%m/%Y %H:%M:%S"))
+
+  // An unrecognized specifier and a stray '%' pass through unchanged.
+  println(datetime.format(ts, "%Y%% %q end"))
+}

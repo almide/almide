@@ -232,6 +232,14 @@ m["key"] = value           // index write (var only)
 "hello ${name}, result=${1 + 1}"
 ```
 
+### String escapes
+```
+"\n \t \r \\ \" \$"   // newline, tab, return, backslash, quote, dollar
+"\x1b"                // \xNN  — two hex digits, codepoint 0x00..0xFF (ESC here)
+"\u{1F600}"           // \u{…} — 1..6 hex digits, any Unicode scalar (😀)
+```
+A malformed numeric escape (e.g. `\xzz`, `\u{}`) is left literal.
+
 ### Heredoc (multi-line strings)
 ```
 let sql = """

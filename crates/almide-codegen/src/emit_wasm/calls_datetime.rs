@@ -6,6 +6,13 @@ use almide_lang::types::Ty;
 use super::values;
 use wasm_encoder::Instruction;
 
+// Seconds per calendar unit.
+const SECS_PER_DAY: i64 = 86400;
+const SECS_PER_HOUR: i64 = 3600;
+const SECS_PER_MIN: i64 = 60;
+// Julian Day Number of the Unix epoch (1970-01-01).
+const UNIX_EPOCH_JDN: i64 = 2440588;
+
 impl FuncCompiler<'_> {
     pub(super) fn emit_datetime_call(&mut self, func: &str, args: &[IrExpr]) {
         match func {
@@ -222,11 +229,48 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { i64_sub; i64_const(86400); i64_div_s; });
             }
             "format" => {
-                // Stub: return int.to_string(ts), ignore fmt
-                self.emit_expr(&args[0]);
-                wasm!(self.func, { call(self.emitter.rt.int_to_string); });
+                // datetime.format(ts, pattern): strftime-style specifier substitution.
+                // Each specifier is spliced in sequentially via the string.replace
+                // runtime — byte-identical to the native + self-hosted backends by
+                // construction. Supported: %Y %m %d %H %M %S. `%` is only special
+                // before one of these (there is no `%%` escape); see
+                // docs/stdlib/datetime.md.
+                let ts = self.scratch.alloc_i64();
+                let cur = self.scratch.alloc_i32();
+
+                // pattern (args[1]) is the running haystack; ts (args[0]) drives fields.
                 self.emit_expr(&args[1]);
-                wasm!(self.func, { drop; });
+                wasm!(self.func, { local_set(cur); });
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(ts); });
+
+                // Civil date/time decomposition — shared with `to_iso`.
+                let yr = self.scratch.alloc_i64();
+                let mo = self.scratch.alloc_i64();
+                let dy = self.scratch.alloc_i64();
+                let hr = self.scratch.alloc_i64();
+                let mi = self.scratch.alloc_i64();
+                let se = self.scratch.alloc_i64();
+                self.emit_civil_decompose(ts, yr, mo, dy, hr, mi, se);
+
+                let d_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA);
+                self.emit_format_specifier(cur, d_off, "%Y", yr, 4);
+                self.emit_format_specifier(cur, d_off, "%m", mo, 2);
+                self.emit_format_specifier(cur, d_off, "%d", dy, 2);
+                self.emit_format_specifier(cur, d_off, "%H", hr, 2);
+                self.emit_format_specifier(cur, d_off, "%M", mi, 2);
+                self.emit_format_specifier(cur, d_off, "%S", se, 2);
+
+                wasm!(self.func, { local_get(cur); });
+
+                self.scratch.free_i64(se);
+                self.scratch.free_i64(mi);
+                self.scratch.free_i64(hr);
+                self.scratch.free_i64(dy);
+                self.scratch.free_i64(mo);
+                self.scratch.free_i64(yr);
+                self.scratch.free_i32(cur);
+                self.scratch.free_i64(ts);
             }
             "to_iso" => {
                 // datetime.to_iso(ts) → String "YYYY-MM-DDTHH:MM:SSZ"
@@ -239,46 +283,13 @@ impl FuncCompiler<'_> {
                     i32_const(20); call(self.emitter.rt.string_alloc); local_set(ptr);
                 });
 
-                let d = self.scratch.alloc_i64();
-                let f = self.scratch.alloc_i64();
-                let e = self.scratch.alloc_i64();
-                let g = self.scratch.alloc_i64();
-                let h = self.scratch.alloc_i64();
                 let yr = self.scratch.alloc_i64();
                 let mo = self.scratch.alloc_i64();
                 let dy = self.scratch.alloc_i64();
                 let hr = self.scratch.alloc_i64();
                 let mi = self.scratch.alloc_i64();
                 let se = self.scratch.alloc_i64();
-
-                wasm!(self.func, {
-                    local_get(ts); i64_const(0); i64_ge_s;
-                    if_i64;
-                      local_get(ts); i64_const(86400); i64_div_s;
-                    else_;
-                      local_get(ts); i64_const(86399); i64_sub; i64_const(86400); i64_div_s;
-                    end;
-                    local_set(d);
-                    local_get(d); i64_const(2440588); i64_add; local_set(d);
-                    local_get(d); i64_const(1401); i64_add;
-                    i64_const(4); local_get(d); i64_mul; i64_const(274277); i64_add;
-                    i64_const(146097); i64_div_s; i64_const(3); i64_mul; i64_const(4); i64_div_s;
-                    i64_add; i64_const(38); i64_sub; local_set(f);
-                    i64_const(4); local_get(f); i64_mul; i64_const(3); i64_add; local_set(e);
-                    local_get(e); i64_const(1461); i64_rem_s; i64_const(4); i64_div_s; local_set(g);
-                    i64_const(5); local_get(g); i64_mul; i64_const(2); i64_add; local_set(h);
-                    local_get(h); i64_const(153); i64_rem_s; i64_const(5); i64_div_s; i64_const(1); i64_add; local_set(dy);
-                    local_get(h); i64_const(153); i64_div_s; i64_const(2); i64_add;
-                    i64_const(12); i64_rem_s; i64_const(1); i64_add; local_set(mo);
-                    local_get(e); i64_const(1461); i64_div_s; i64_const(4716); i64_sub;
-                    i64_const(14); local_get(mo); i64_sub; i64_const(12); i64_div_s;
-                    i64_add; local_set(yr);
-                    local_get(ts); i64_const(86400); i64_rem_s; i64_const(86400); i64_add; i64_const(86400); i64_rem_s;
-                    local_set(d);
-                    local_get(d); i64_const(3600); i64_div_s; local_set(hr);
-                    local_get(d); i64_const(3600); i64_rem_s; i64_const(60); i64_div_s; local_set(mi);
-                    local_get(d); i64_const(60); i64_rem_s; local_set(se);
-                });
+                self.emit_civil_decompose(ts, yr, mo, dy, hr, mi, se);
 
                 let d_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA);
                 self.emit_write_decimal_digits(ptr, d_off, yr, 4);        // YYYY
@@ -302,11 +313,6 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i64(dy);
                 self.scratch.free_i64(mo);
                 self.scratch.free_i64(yr);
-                self.scratch.free_i64(h);
-                self.scratch.free_i64(g);
-                self.scratch.free_i64(e);
-                self.scratch.free_i64(f);
-                self.scratch.free_i64(d);
                 self.scratch.free_i32(ptr);
                 self.scratch.free_i64(ts);
             }
@@ -466,6 +472,87 @@ impl FuncCompiler<'_> {
                 func
             ),
         }
+    }
+
+    /// Decompose a Unix-epoch timestamp (i64 local `ts`) into civil fields, writing
+    /// year / month / day / hour / minute / second into the caller's i64 locals.
+    /// This is the Richards Julian-day → Gregorian-date algorithm; `to_iso` and
+    /// `format` share this single copy. The working locals d/f/e/g/h are owned here.
+    pub(super) fn emit_civil_decompose(
+        &mut self,
+        ts: u32,
+        yr: u32,
+        mo: u32,
+        dy: u32,
+        hr: u32,
+        mi: u32,
+        se: u32,
+    ) {
+        let d = self.scratch.alloc_i64();
+        let f = self.scratch.alloc_i64();
+        let e = self.scratch.alloc_i64();
+        let g = self.scratch.alloc_i64();
+        let h = self.scratch.alloc_i64();
+        wasm!(self.func, {
+            // days since epoch = floor(ts / SECS_PER_DAY) (toward -inf for pre-epoch ts)
+            local_get(ts); i64_const(0); i64_ge_s;
+            if_i64;
+              local_get(ts); i64_const(SECS_PER_DAY); i64_div_s;
+            else_;
+              local_get(ts); i64_const(SECS_PER_DAY - 1); i64_sub; i64_const(SECS_PER_DAY); i64_div_s;
+            end;
+            local_set(d);
+            local_get(d); i64_const(UNIX_EPOCH_JDN); i64_add; local_set(d);
+            // Richards Julian day number → Gregorian y/m/d (published fixed constants):
+            local_get(d); i64_const(1401); i64_add;                                              // magic-ok: Richards algorithm
+            i64_const(4); local_get(d); i64_mul; i64_const(274277); i64_add;                     // magic-ok: Richards algorithm
+            i64_const(146097); i64_div_s; i64_const(3); i64_mul; i64_const(4); i64_div_s;        // magic-ok: Richards algorithm
+            i64_add; i64_const(38); i64_sub; local_set(f);                                       // magic-ok: Richards algorithm
+            i64_const(4); local_get(f); i64_mul; i64_const(3); i64_add; local_set(e);            // magic-ok: Richards algorithm
+            local_get(e); i64_const(1461); i64_rem_s; i64_const(4); i64_div_s; local_set(g);     // magic-ok: Richards algorithm
+            i64_const(5); local_get(g); i64_mul; i64_const(2); i64_add; local_set(h);            // magic-ok: Richards algorithm
+            local_get(h); i64_const(153); i64_rem_s; i64_const(5); i64_div_s; i64_const(1); i64_add; local_set(dy); // magic-ok: Richards algorithm
+            local_get(h); i64_const(153); i64_div_s; i64_const(2); i64_add;                      // magic-ok: Richards algorithm
+            i64_const(12); i64_rem_s; i64_const(1); i64_add; local_set(mo);                      // magic-ok: Richards algorithm
+            local_get(e); i64_const(1461); i64_div_s; i64_const(4716); i64_sub;                  // magic-ok: Richards algorithm
+            i64_const(14); local_get(mo); i64_sub; i64_const(12); i64_div_s;                     // magic-ok: Richards algorithm
+            i64_add; local_set(yr);
+            // time-of-day = ts mod SECS_PER_DAY (forced non-negative), split into h/m/s
+            local_get(ts); i64_const(SECS_PER_DAY); i64_rem_s; i64_const(SECS_PER_DAY); i64_add; i64_const(SECS_PER_DAY); i64_rem_s;
+            local_set(d);
+            local_get(d); i64_const(SECS_PER_HOUR); i64_div_s; local_set(hr);
+            local_get(d); i64_const(SECS_PER_HOUR); i64_rem_s; i64_const(SECS_PER_MIN); i64_div_s; local_set(mi);
+            local_get(d); i64_const(SECS_PER_MIN); i64_rem_s; local_set(se);
+        });
+        self.scratch.free_i64(h);
+        self.scratch.free_i64(g);
+        self.scratch.free_i64(e);
+        self.scratch.free_i64(f);
+        self.scratch.free_i64(d);
+    }
+
+    /// Emit `cur = string.replace(cur, token, field)` for one strftime specifier.
+    /// Builds the zero-padded `width`-digit field as a fresh heap string, then
+    /// splices it in via the verified `__str_replace` runtime, reusing the interned
+    /// static token. Doing every backend's substitution through the SAME sequential
+    /// string.replace keeps datetime.format byte-identical across native / wasm /
+    /// self-host by construction. (Intermediate strings are not reclaimed here — a
+    /// call leaks a bounded handful, matching this arm's allocation-light style.)
+    pub(super) fn emit_format_specifier(&mut self, cur: u32, d_off: u32, token: &str, field: u32, width: u32) {
+        let fptr = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            i32_const(width as i32); call(self.emitter.rt.string_alloc); local_set(fptr);
+        });
+        self.emit_write_decimal_digits(fptr, d_off, field, width);
+        let tok = self.emitter.intern_string(token);
+        wasm!(self.func, {
+            local_get(cur);
+            i32_const(tok as i32);
+            local_get(fptr);
+            call(self.emitter.rt.string.replace);
+            local_set(cur);
+        });
+        self.scratch.free_i32(fptr);
     }
 
     /// Write N decimal digits of an i64 value to a string buffer at a given byte offset.

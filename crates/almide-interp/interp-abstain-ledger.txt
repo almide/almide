@@ -28,6 +28,7 @@ compound_repr_interp  out-of-interp-scope capability: set.from_list
 compound_repr_records_interp  out-of-interp-scope capability: set.from_list
 container_alias_return  out-of-interp-scope capability: list.get_or
 cross_dep_accumulator  out-of-interp-scope capability: string.slice
+datetime_format  out-of-interp-scope capability: datetime.from_parts
 effect_tco  interp fuel/recursion budget exhausted
 effect_tuple_result_tco  out-of-interp-scope capability: value.str
 empty_collection_annotated  out-of-interp-scope capability: set.new
@@ -76,6 +77,7 @@ list_slice_oob  out-of-interp-scope capability: list.slice
 list_swap_oob  out-of-interp-scope capability: list.swap
 list_total_order  out-of-interp-scope capability: list.min/max on non-comparable elements
 list_with_capacity  out-of-interp-scope capability: list.with_capacity
+loop_outer_inplace_mutate_rc  out-of-interp-scope capability: list.slice
 map_filter  out-of-interp-scope capability: map.new
 map_fold  out-of-interp-scope capability: map.new
 map_insertion_order  out-of-interp-scope capability: map.entries
