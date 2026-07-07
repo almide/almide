@@ -1646,3 +1646,14 @@ evidence  = [
   { path = "spec/wasm_cross/option_unwrap_or_else_heap.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_fold_heap_acc.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-131"
+spec      = "ALS-I1"
+title     = "In-place mutation of a uniquely-owned buffer is O(n) — COW clones only on real sharing"
+statement = "A loop that rebuilds a heap container via in-place mutation (`list.push` per element, the buffer dropped or swap-carried each round) costs O(n) bytes like native. The static may-alias COW guard is rc-GATED for LOCAL copy-alias targets: alias bindings carry a real alias-Inc under the frees model, so `rc <= 1` proves unique ownership and the pre-mutation clone is skipped; a genuinely shared block (rc > 1) still clones (value semantics, alias_cow.almd), and param-reachable targets keep the UNCONDITIONAL clone because call arguments are borrowed and their count under-reports sharing (bytes_set_value_semantics.almd is the witness). Previously the unconditional clone made every looped push O(n²) bytes and past ~128 KiB per round the exploded frontier drove the 32-bit heap arithmetic out of bounds — a raw wasm OOB at n≳8000 while native merge-sorted 152k fine (#696); the same shape now byte-matches native at 152k."
+since     = "0.28.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/loop_buffer_churn.almd", class = "fixture" },
+]
