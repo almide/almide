@@ -1,0 +1,21 @@
+// @contract: C-130
+// option.unwrap_or_else must hand back an OWNED heap payload (#727 clusters 2/4/5/7).
+// The Some-path previously returned the payload handle BARE while the Option temp's
+// drop recursively released it — the caller then read a freed Map/List (garbage
+// lengths: a some(Map) printed as hundreds of `false`) and the teardown tripped the
+// rc sentinel. String literals masked the bug (data-section statics are never
+// freed), so this probes Map, List, AND a computed (heap) String payload, plus the
+// None path calling the fallback closure.
+fn main() -> Unit = {
+  let m = option.unwrap_or_else(some(["k0": true, "k1": false]), (() => ["k": false]))
+  println("${map.values(m)}")
+  let xs = option.unwrap_or_else(some([1, 2, 3]), (() => [9]))
+  println("${xs}")
+  let s = option.unwrap_or_else(some(string.repeat("ab", 2)), (() => "x"))
+  println(s)
+  let nm: Option[Map[String, Bool]] = none
+  println("${option.unwrap_or_else(nm, (() => ["fb": true]))}")
+  // Use the unwrapped values AGAIN after other allocations so a freed-then-reused
+  // block would show as corruption.
+  println("${map.values(m)} ${xs} ${s}")
+}

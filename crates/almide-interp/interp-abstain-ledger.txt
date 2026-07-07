@@ -84,6 +84,7 @@ list_with_capacity  out-of-interp-scope capability: list.with_capacity
 loop_outer_inplace_mutate_rc  out-of-interp-scope capability: list.slice
 map_filter  out-of-interp-scope capability: map.new
 map_fold  out-of-interp-scope capability: map.new
+map_fold_heap_acc  out-of-interp-scope capability: map.fold
 map_insertion_order  out-of-interp-scope capability: map.entries
 map_set_eq  out-of-interp-scope capability: map.new
 map_set_ops  out-of-interp-scope capability: map.from_list
