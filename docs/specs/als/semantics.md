@@ -96,5 +96,7 @@ Contracts: C-045, C-100, C-101。
 
 `mut` パラメータ（Map / Bytes 等）への in-place 変異は呼び出し元の値に
 反映される（`mut` が明示された場合のみ — ALS-C5 の例外）。`bytes.push`
-蓄積も同様。
-Contracts: C-061, C-110。
+蓄積も同様。**再割り当てする**コンテナ（List / String / Bytes の容量成長）
+でも成立し、値返しの callee・入れ子式位置・レコードフィールド実引数
+（`f(b.items, …)`）を含む全呼び出し位置で呼び出し元スロットに書き戻される。
+Contracts: C-061, C-110, C-132。
