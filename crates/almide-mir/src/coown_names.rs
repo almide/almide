@@ -35,6 +35,8 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__lsv_copy",         // list.set_value — rc-copy each Value element
     "__lsv_insert_fill",  // list.insert_value — rc_inc the inserted Value
     "__ls_insert_fill",   // list.insert_str — rc_inc the inserted String
+    "__lsuv_val",         // list.update_value — rc_inc each shared (non-updated) Value element
+    "__lsu_val_str",      // list.update_str — rc_inc each shared (non-updated) String element
     "__sort_copy_rc",     // list.sort_str — rc-copy each String element
     "__filterrc_fill",
     "__sbfr_init",

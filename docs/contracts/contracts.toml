@@ -1267,13 +1267,14 @@ evidence  = [
 id        = "C-101"
 spec      = "ALS-M12"
 title     = "List ops over heap elements (String/Value) byte-match native and are leak/double-free free"
-statement = "List operations whose elements are heap-backed handles (List[String], List[Value]) — list.min/list.max, list.sort, list.insert/remove_at/swap, and list.set — produce stdout byte-identical to native on the v1 wasm path. Comparison-based ops order and select by element CONTENT (lexicographic byte order, matching v0's Rust String Ord), not by the raw i64/i32 handle the generic impls compared, which silently picked the wrong element. The typed _str/_value variants rc-copy each retained element to co-own it (so result and source can both drop without double-free), free each removed/replaced element exactly once, and recurse via __drop_value so a replaced Object/Array element's nested children are not leaked. The promise holds at scale: no leaks and no double-frees across repeated/large lists."
+statement = "List operations whose elements are heap-backed handles (List[String], List[Value]) — list.min/list.max, list.sort, list.insert/remove_at/swap, list.set, and list.update — produce stdout byte-identical to native on the v1 wasm path. Comparison-based ops order and select by element CONTENT (lexicographic byte order, matching v0's Rust String Ord), not by the raw i64/i32 handle the generic impls compared, which silently picked the wrong element. The typed _str/_value variants rc-copy each retained element to co-own it (so result and source can both drop without double-free), free each removed/replaced element exactly once, and recurse via __drop_value so a replaced Object/Array element's nested children are not leaked. For update, the closure is declared at its real element type — the generic f: (Int) -> Int CallIndirect expected an i64 result while a (Value/String)->same lambda returns an i32 handle (params are i64-widened; results are not), so the v1 indirect call trapped (#736) — and the closure's owned return is stored with an explicit slot acquisition so the scope's auto-release cannot free the stored element. The promise holds at scale: no leaks and no double-frees across repeated/large lists."
 since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_minmax_str.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_modify_heap.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_set_value.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_update_heap.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_sort_str.almd", class = "fixture" },
   { path = "spec/wasm_cross/whilep_str.almd", class = "fixture" },
   { path = "spec/wasm_cross/chunk_str.almd", class = "fixture" },

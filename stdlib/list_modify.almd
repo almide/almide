@@ -112,6 +112,89 @@ fn list_swap_str(xs: List[String], i: Int, j: Int) -> List[String] = {
   buf
 }
 
+// list.update over a List[String] — the same CallIndirect type-mismatch class as list_update_value
+// (#736): the generic list_update's f: (Int) -> Int expects an i64 result, but a (String) -> String
+// user lambda returns an i32 String handle (closure params are i64-widened; results are NOT) → the
+// indirect call traps. Single fill pass mirroring the map_update_str shape: non-target slots are
+// rc_inc-shared (co-own), the target slot stores f(old) directly (the closure's return is already
+// owned — no inc, and the copy never acquires the replaced old element). v0 calls f only in bounds;
+// OOB shares every slot (the unchanged copy). Result drops via the recursive DropListStr.
+fn __lsu_val_str(hit: Bool, addr: Int, old: String, f: (String) -> String) -> Int =
+  if hit then {
+    let nv = f(old)
+    // nv is an OWNED return the lowering auto-releases at scope end (a raw store64 is
+    // invisible to the ownership cert) — acquire the slot's own ref explicitly and let
+    // that auto-release consume the return's +1 (the __set_slot_str discipline).
+    let nh = prim.handle(nv)
+    prim.rc_inc(nh)
+    prim.store64(addr, nh)
+    0
+  }
+  else {
+    let h = prim.handle(old)
+    prim.rc_inc(h)
+    prim.store64(addr, h)
+    0
+  }
+
+fn __lsu_fill_str(sh: Int, bh: Int, n: Int, i: Int, f: (String) -> String, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let old = prim.load_str(sh + 12 + j * 8)
+    let hit = j == i
+    let _s = __lsu_val_str(hit, bh + 12 + j * 8, old, f)
+    __lsu_fill_str(sh, bh, n, i, f, j + 1)
+  }
+
+fn list_update_str(xs: List[String], i: Int, f: (String) -> String) -> List[String] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __lsu_fill_str(h, bh, n, i, f, 0)
+  buf
+}
+
+// list.update over a List[Value] — the same shape with the Value element type. It lives here
+// (not in value_core with the other _value modifiers) because the single-pass fill never
+// acquires the replaced element, so it has no same-file __drop_value dependency. Result drops
+// via the recursive DropListValue.
+fn __lsuv_val(hit: Bool, addr: Int, old: Value, f: (Value) -> Value) -> Int =
+  if hit then {
+    let nv = f(old)
+    // nv is an OWNED return the lowering auto-releases at scope end (a raw store64 is
+    // invisible to the ownership cert) — acquire the slot's own ref explicitly and let
+    // that auto-release consume the return's +1 (the __set_slot_str discipline).
+    let nh = prim.handle(nv)
+    prim.rc_inc(nh)
+    prim.store64(addr, nh)
+    0
+  }
+  else {
+    let h = prim.handle(old)
+    prim.rc_inc(h)
+    prim.store64(addr, h)
+    0
+  }
+
+fn __lsuv_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let old: Value = prim.load_handle(sh + 12 + j * 8)
+    let hit = j == i
+    let _s = __lsuv_val(hit, bh + 12 + j * 8, old, f)
+    __lsuv_fill(sh, bh, n, i, f, j + 1)
+  }
+
+fn list_update_value(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __lsuv_fill(h, bh, n, i, f, 0)
+  buf
+}
+
 fn __copy_slots(src: Int, dst: Int, n: Int, i: Int) -> Int =
   if i >= n then 0
   else {
