@@ -151,3 +151,12 @@ List / String の長さ・添字を受け取る API は、i64 値を内部幅へ
 してから使う（負→0、上限超→len）。ラップや符号化けによる誤アクセスは不適合。
 `list.product` は `list.sum` と同じく i64 wrap（オーバーフローは 2^64 mod）。
 Contracts: C-054, C-056。
+
+## ALS-T17 datetime.format の指定子置換
+
+`datetime.format(ts, pattern)` は strftime 系指定子 `%Y %m %d %H %M %S` を、
+ゼロ埋めした暦フィールド（年 4 桁・他 2 桁）へ**逐次置換**する。native /
+v0-wasm / 自己ホストの 3 バックエンドが同一の逐次 `string.replace` 列を走らせる
+ため、出力はバイト一致。`%` は上記指定子の直前でのみ特別扱いされ、`%%` エス
+ケープは存在しない（認識されない `%X` はそのまま素通り）。SCOPE: 年 0..9999
+（5 桁年は 4 桁欄を超える — `to_iso` と同じ文書化済みの端）。Contracts: C-128。

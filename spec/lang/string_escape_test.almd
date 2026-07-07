@@ -1,0 +1,26 @@
+// String literal numeric / Unicode escapes (#746).
+//
+// `\xNN` (two hex digits, codepoint 0..=0xFF) and `\u{...}` (one to six hex
+// digits, any Unicode scalar) decode to the codepoint. A malformed escape passes
+// through literally, exactly as before. Escapes are resolved at lex time, so the
+// resulting bytes are identical on the native and wasm targets.
+
+test "hex escape \\xNN decodes to a codepoint" {
+  assert_eq("\x41", "A");
+  assert_eq("\x1b", string.from_codepoint(27))
+}
+
+test "unicode escape \\u{...} decodes to a codepoint" {
+  assert_eq("\u{41}", "A");
+  assert_eq("\u{1b}", string.from_codepoint(27));
+  assert_eq("\u{3042}", string.from_codepoint(12354));
+  // An astral codepoint is a single codepoint (string.len counts codepoints).
+  assert_eq(string.len("\u{1f600}"), 1)
+}
+
+test "basic escapes still work and malformed escapes pass through" {
+  assert_eq(string.len("\n\t"), 2);
+  // `\u` not followed by `{`, and `\x` not followed by two hex digits, stay literal.
+  assert_eq("\users", "\\users");
+  assert_eq("\xyz", "\\xyz")
+}

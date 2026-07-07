@@ -272,13 +272,18 @@ fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
 }
 
 /// Single-quote string: `'...'` — no interpolation.
-/// Supports escape sequences (`\\`, `\'`, `\n`, `\t`, `\r`).
+/// Supports escape sequences (`\\`, `\'`, `\n`, `\t`, `\r`, `\xNN`, `\u{...}`).
 fn lex_single_quote_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
     let mut pos = start + 1; // skip opening '
     let mut value = String::new();
 
     while pos < chars.len() && chars[pos] != '\'' {
         if chars[pos] == '\\' && pos + 1 < chars.len() {
+            if let Some((c, new_pos)) = lex_numeric_escape(chars, pos) {
+                value.push(c);
+                pos = new_pos;
+                continue;
+            }
             let next = chars[pos + 1];
             match next {
                 '\'' => { value.push('\''); pos += 2; }
@@ -343,6 +348,10 @@ fn lex_string_char(chars: &[char], pos: usize, buf: &mut String, has_interpolati
 
 /// Process a backslash escape sequence. Returns the new position.
 fn lex_escape(chars: &[char], pos: usize, buf: &mut String) -> usize {
+    if let Some((c, new_pos)) = lex_numeric_escape(chars, pos) {
+        buf.push(c);
+        return new_pos;
+    }
     match chars[pos + 1] {
         'n' => { buf.push('\n'); pos + 2 }
         't' => { buf.push('\t'); pos + 2 }
@@ -351,6 +360,47 @@ fn lex_escape(chars: &[char], pos: usize, buf: &mut String) -> usize {
         '"' => { buf.push('"'); pos + 2 }
         '$' => { buf.push('$'); pos + 2 }
         other => { buf.push('\\'); buf.push(other); pos + 2 }
+    }
+}
+
+/// Decode a numeric / Unicode escape starting at `pos` (which points at the `\`):
+///   `\xNN`    — exactly two hex digits, a codepoint in 0..=0xFF (e.g. `\x1b` → ESC).
+///   `\u{...}` — one to six hex digits, any Unicode scalar value (e.g. `\u{1f600}`).
+/// Returns `(decoded_char, new_pos)` on a well-formed escape, or `None` otherwise
+/// (a malformed escape falls through to the caller's literal-passthrough path, so
+/// existing text like `\users` / `\xyz` is preserved unchanged). Codepoints that
+/// are not valid Unicode scalars (surrogates, > U+10FFFF) also yield `None`.
+fn lex_numeric_escape(chars: &[char], pos: usize) -> Option<(char, usize)> {
+    match chars.get(pos + 1)? {
+        'x' => {
+            let hi = chars.get(pos + 2)?.to_digit(16)?;
+            let lo = chars.get(pos + 3)?.to_digit(16)?;
+            char::from_u32(hi * 16 + lo).map(|c| (c, pos + 4))
+        }
+        'u' => {
+            if *chars.get(pos + 2)? != '{' {
+                return None;
+            }
+            let mut i = pos + 3;
+            let mut code: u32 = 0;
+            let mut digits = 0;
+            while let Some(&c) = chars.get(i) {
+                if c == '}' {
+                    break;
+                }
+                code = code.checked_mul(16)?.checked_add(c.to_digit(16)?)?;
+                digits += 1;
+                if digits > 6 {
+                    return None;
+                }
+                i += 1;
+            }
+            if digits == 0 || chars.get(i) != Some(&'}') {
+                return None;
+            }
+            char::from_u32(code).map(|c| (c, i + 1))
+        }
+        _ => None,
     }
 }
 
@@ -605,5 +655,40 @@ mod tests {
             .find(|t| t.token_type == TokenType::String)
             .expect("heredoc should lex to a String token");
         assert_eq!(s.value, "one\ntwo");
+    }
+
+    fn lex_string_value(src: &str) -> String {
+        Lexer::tokenize(src)
+            .into_iter()
+            .find(|t| t.token_type == TokenType::String)
+            .expect("expected a String token")
+            .value
+    }
+
+    // #746: numeric / Unicode escapes must decode, not pass through literally.
+    #[test]
+    fn numeric_and_unicode_escapes_decode() {
+        // \xNN — two hex digits, codepoint 0..=0xFF (ESC control char).
+        assert_eq!(lex_string_value("let x = \"\\x1b\"\n"), "\u{1b}");
+        // \u{...} — ASCII 'A', a BMP codepoint, and an astral codepoint.
+        assert_eq!(lex_string_value("let x = \"\\u{41}\"\n"), "A");
+        assert_eq!(lex_string_value("let x = \"\\u{3042}\"\n"), "\u{3042}");
+        assert_eq!(lex_string_value("let x = \"\\u{1f600}\"\n"), "\u{1f600}");
+        // Interoperates with the basic escapes and literal text.
+        assert_eq!(lex_string_value("let x = \"a\\x1bb\\n\"\n"), "a\u{1b}b\n");
+        // Single-quote strings decode the same way.
+        assert_eq!(lex_string_value("let x = '\\x1b'\n"), "\u{1b}");
+        assert_eq!(lex_string_value("let x = '\\u{41}'\n"), "A");
+    }
+
+    // Malformed numeric escapes fall through to literal passthrough so existing
+    // text (e.g. `\users`, `\xyz`, a surrogate) is preserved unchanged.
+    #[test]
+    fn malformed_numeric_escapes_pass_through() {
+        assert_eq!(lex_string_value("let x = \"\\users\"\n"), "\\users");
+        assert_eq!(lex_string_value("let x = \"\\xyz\"\n"), "\\xyz");
+        assert_eq!(lex_string_value("let x = \"\\u{}\"\n"), "\\u{}");
+        // U+D800 is a surrogate — not a valid scalar, so it stays literal.
+        assert_eq!(lex_string_value("let x = \"\\u{d800}\"\n"), "\\u{d800}");
     }
 }

@@ -36,11 +36,27 @@ datetime.from_unix(1705320000)
 
 ### `datetime.format(ts: Int, pattern: String) -> String`
 
-Format a timestamp using a pattern string.
+Format a timestamp using a strftime-style pattern. The following specifiers are
+substituted with the zero-padded civil fields; every other character (including a
+`%` that is not immediately followed by a recognized specifier) is copied through
+verbatim. There is **no** `%%` escape.
+
+| Specifier | Field           | Width |
+| --------- | --------------- | ----- |
+| `%Y`      | year            | 4     |
+| `%m`      | month (01–12)   | 2     |
+| `%d`      | day (01–31)     | 2     |
+| `%H`      | hour (00–23)    | 2     |
+| `%M`      | minute (00–59)  | 2     |
+| `%S`      | second (00–59)  | 2     |
 
 ```almd
-datetime.format(ts, "%Y-%m-%d") // => "2024-01-15"
+datetime.format(ts, "%Y-%m-%d")            // => "2024-01-15"
+datetime.format(ts, "%Y-%m-%dT%H:%M:%SZ")  // => "2024-01-15T12:00:00Z"
 ```
+
+The output is byte-identical on the native and wasm targets (contract C-128), for
+years `0..9999`.
 
 ### `datetime.to_iso(ts: Int) -> String`
 

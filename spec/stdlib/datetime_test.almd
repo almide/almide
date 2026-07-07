@@ -59,10 +59,13 @@ test "datetime.to_iso roundtrip" {
   assert_eq(string.contains(iso, "15"), true)
 }
 
-test "datetime.format returns a string" {
-  let ts = datetime.from_parts(2024, 3, 5, 0, 0, 0);
-  let formatted = datetime.format(ts, "%Y-%m-%d");
-  assert(string.len(formatted) > 0)
+test "datetime.format substitutes strftime specifiers" {
+  let ts = datetime.from_parts(2024, 3, 5, 13, 7, 9);
+  assert_eq(datetime.format(ts, "%Y-%m-%d"), "2024-03-05");
+  assert_eq(datetime.format(ts, "%H:%M:%S"), "13:07:09");
+  assert_eq(datetime.format(ts, "%Y-%m-%dT%H:%M:%SZ"), "2024-03-05T13:07:09Z");
+  // '%' is only special before a recognized specifier; '%%' / '%q' pass through.
+  assert_eq(datetime.format(ts, "%Y%% %q"), "2024%% %q")
 }
 
 test "datetime.weekday returns string" {

@@ -1604,3 +1604,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/generic_chain_unwrap_or.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-128"
+spec      = "ALS-T17"
+title     = "datetime.format substitutes strftime specifiers identically on every backend"
+statement = "`datetime.format(ts, pattern)` substitutes the strftime specifiers %Y %m %d %H %M %S with the zero-padded civil fields (year 4-wide, others 2-wide) via the SAME sequential `string.replace` order on all three backends — native Rust, v0 wasm emit, and the v1 self-hosted module — so the output is byte-identical. Previously the default v0 wasm arm was a stub returning `int.to_string(ts)` (pattern ignored) while native/self-host substituted a different `YYYY/MM/DD` token set that the documented `%Y-%m-%d` never matched (#747). `%` is special only immediately before a recognized specifier; there is no `%%` escape. SCOPE: year 0..9999, the same documented edge as to_iso."
+since     = "0.28.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/datetime_format.almd", class = "fixture" },
+]

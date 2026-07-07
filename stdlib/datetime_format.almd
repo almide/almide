@@ -49,12 +49,13 @@ fn __dt_pad(width: Int, n: Int) -> String = {
   out
 }
 
-// datetime.format(ts, pattern): substitute the 6 fixed ASCII tokens in `pattern` with the
-// zero-padded date fields, in v0's SEQUENTIAL .replace() order (YYYY then MM/DD/HH/mm/ss). Each
-// field is built by __dt_pad and substituted by the already-self-hosted string.replace (cross-file
-// — no intra-file link cycle), exactly mirroring v0's `pattern.replace("YYYY", &format!("{:04}", y))
-// .replace("MM", ...)...`. SCOPE: byte-matches v0 for year 0..9999 (a 5-digit year exceeds the
-// 4-wide field, the same documented edge as to_iso) and the <100 field ranges.
+// datetime.format(ts, pattern): substitute the strftime specifiers %Y %m %d %H %M %S in `pattern`
+// with the zero-padded date fields, in the SAME SEQUENTIAL string.replace order used by the native
+// and v0-wasm backends — so all three are byte-identical by construction. Each field is built by
+// __dt_pad and substituted by the already-self-hosted string.replace (cross-file — no intra-file
+// link cycle). `%` is special ONLY before one of these specifiers; there is no `%%` escape (see
+// docs/stdlib/datetime.md). SCOPE: byte-matches for year 0..9999 (a 5-digit year exceeds the 4-wide
+// field, the same documented edge as to_iso) and the <100 field ranges.
 fn datetime_format(ts: Int, pattern: String) -> String = {
   let y = datetime.year(ts)
   let mo = datetime.month(ts)
@@ -63,15 +64,15 @@ fn datetime_format(ts: Int, pattern: String) -> String = {
   let mi = datetime.minute(ts)
   let s = datetime.second(ts)
   let ys = __dt_pad(4, y)
-  let p1 = string.replace(pattern, "YYYY", ys)
+  let p1 = string.replace(pattern, "%Y", ys)
   let ms = __dt_pad(2, mo)
-  let p2 = string.replace(p1, "MM", ms)
+  let p2 = string.replace(p1, "%m", ms)
   let ds = __dt_pad(2, d)
-  let p3 = string.replace(p2, "DD", ds)
+  let p3 = string.replace(p2, "%d", ds)
   let hs = __dt_pad(2, h)
-  let p4 = string.replace(p3, "HH", hs)
+  let p4 = string.replace(p3, "%H", hs)
   let mis = __dt_pad(2, mi)
-  let p5 = string.replace(p4, "mm", mis)
+  let p5 = string.replace(p4, "%M", mis)
   let ss = __dt_pad(2, s)
-  string.replace(p5, "ss", ss)
+  string.replace(p5, "%S", ss)
 }
