@@ -261,6 +261,24 @@ done
 # not exist — the third layer of the spec ↔ contract ↔ fixture traceability.
 ALS_DIR="docs/specs/als"
 if [ -d "$ALS_DIR" ]; then
+  # The spec key is REQUIRED on every contract (#565): a claim without its
+  # normative section is untraceable. (Triple-quoted statement bodies are
+  # skipped so a literal "spec =" inside prose cannot satisfy the check.)
+  missing_spec="$(awk '
+    /'"'"''"'"''"'"'/ { in_stmt = !in_stmt; next }
+    in_stmt { next }
+    /^\[\[contract\]\]/ { if (id != "" && !has) print id; id=""; has=0; next }
+    /^id[ \t]*=/   { v=$0; sub(/^id[ \t]*=[ \t]*"/,"",v); sub(/".*$/,"",v); id=v; next }
+    /^spec[ \t]*=/ { has=1; next }
+    END { if (id != "" && !has) print id }
+  ' "$LEDGER")"
+  if [ -n "$missing_spec" ]; then
+    for cid in $missing_spec; do
+      echo "::error::contract $cid has NO spec key — every contract must cite its ALS section (#565)"
+    done
+    fail=1
+  fi
+
   specd="$(grep -E '^spec      = ' "$LEDGER" | sed -E 's/^spec      = "([^"]+)"/\1/' | sort -u)"
   n_specd=0
   for sec in $specd; do
@@ -271,6 +289,22 @@ if [ -d "$ALS_DIR" ]; then
     fi
   done
   echo "spec-keying: $n_specd distinct ALS section(s) referenced; all resolve."
+
+  # ── REVERSE DIRECTION (#565): every normative section must be cited by at
+  # least one contract, so a section cannot make a claim no executable evidence
+  # certifies. This is not paperwork: the first run of this check found ALS-T4
+  # adjudicating `chunk/windows(n <= 0)` while BOTH targets diverged from it
+  # (raw native panic / wasm silently returning len+1 empty windows) — an
+  # uncited section is exactly where a spec↔implementation divergence hides.
+  n_orphan=0
+  for sec in $(grep -hoE '^## ALS-[A-Z0-9]+' "$ALS_DIR"/*.md | sed 's/^## //' | sort -u); do
+    if ! printf '%s\n' "$specd" | grep -qxF "$sec"; then
+      echo "::error::ALS section '$sec' is cited by NO contract — every normative section needs >=1 [[contract]] with spec = \"$sec\" (see #565)"
+      n_orphan=$((n_orphan + 1))
+      fail=1
+    fi
+  done
+  [ "$n_orphan" -eq 0 ] && echo "spec-coverage: every normative ALS section is cited by >=1 contract."
 fi
 
 if [ "$fail" -ne 0 ]; then

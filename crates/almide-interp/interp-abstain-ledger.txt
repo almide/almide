@@ -66,6 +66,8 @@ json_stringify_pretty  out-of-interp-scope capability: json.from_string
 json_value  out-of-interp-scope capability: json.parse
 let_unwrap_propagation  out-of-interp-scope capability: value.str
 list_call_element  out-of-interp-scope capability: string.slice
+list_chunk_windows  out-of-interp-scope capability: list.chunk
+list_chunk_zero  out-of-interp-scope capability: list.chunk
 list_comprehensive  out-of-interp-scope capability: list.repeat
 list_count_index_truncation  out-of-interp-scope capability: list.take
 list_insert_clamp  out-of-interp-scope capability: list.insert
@@ -77,6 +79,7 @@ list_slice_oob  out-of-interp-scope capability: list.slice
 list_swap_oob  out-of-interp-scope capability: list.swap
 list_total_order  out-of-interp-scope capability: list.min/max on non-comparable elements
 list_update_heap  out-of-interp-scope capability: value.int
+list_windows_zero  out-of-interp-scope capability: list.windows
 list_with_capacity  out-of-interp-scope capability: list.with_capacity
 loop_outer_inplace_mutate_rc  out-of-interp-scope capability: list.slice
 map_filter  out-of-interp-scope capability: map.new

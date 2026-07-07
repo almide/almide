@@ -51,14 +51,25 @@ Fixture: `spec/wasm_cross/json_*.almd` 群、read_message roundtrip。
 
 ## ALS-T4 `list.chunk` / `list.windows`
 
-**裁定**: サイズ引数 `n <= 0` の挙動は次のとおり規範化する —
-`chunk(xs, n<=0)` は**全体を 1 チャンク**として返し、`windows(xs, n<=0)` は
-**空リスト**を返す。
+**裁定**: サイズ引数の非正値の挙動は次のとおり規範化する —
 
-> 注記: この裁定は歴史的に v0 の Rust 実装詳細（`chunks(n as usize)` の usize
-> 再解釈）から生まれた挙動を**明示的に規範へ昇格**したものである。以後この挙動の
-> 根拠は本節であり、Rust の型変換ではない。
-> Fixture: `spec/wasm_cross/list_chunk_windows.almd`。
+- `n < 0`: `chunk(xs, n)` は**全体を 1 チャンク**として返す（空リストは空のまま）。
+  `windows(xs, n)` は**空リスト**を返す。
+- `n == 0`: **定義域エラー** — ALS-T6 の終了規約に従い、`chunk` は
+  `Error: chunk size must be positive`、`windows` は
+  `Error: window size must be positive` を stderr に 1 行出力し exit code 1 で
+  停止する。生の Rust panic（exit 101）や wasm trap（exit 134）、無言の
+  空/全ウィンドウ返しは不適合。
+
+> 注記: `n < 0` の裁定は歴史的に v0 の Rust 実装詳細（`chunks(n as usize)` の
+> usize 再解釈）から生まれた挙動を**明示的に規範へ昇格**したものである。以後この
+> 挙動の根拠は本節であり、Rust の型変換ではない。`n == 0` はその再解釈でも定義
+> されず（Rust は panic）、v0.28.4 で T6 形式の abort に規範化した — それ以前は
+> native が生 panic、wasm は `windows(xs, 0)` が **len+1 個の空ウィンドウを
+> 無言で返していた**（silent-wrong）。
+> Fixtures: `spec/wasm_cross/list_chunk_windows.almd`（値ケース）、
+> `list_chunk_zero.almd` / `list_windows_zero.almd`（abort ケース）。
+> Contracts: C-129。
 
 ## ALS-T5 `string.to_upper` / `string.to_lower`
 

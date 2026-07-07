@@ -308,25 +308,31 @@ impl FuncCompiler<'_> {
                 // Unsigned-saturate n to [0, i32::MAX] on the i64 count (C-054)
                 // so a huge chunk size cannot wrap to a small in-range value.
                 // Native `chunks(n as usize)`: a NEGATIVE n (huge as usize) or
-                // any n >= len groups into ONE chunk; only a genuine `chunk(0)`
-                // panics. The unsigned clamp sends -1/2^32/… to the i32::MAX
-                // sentinel (>= len → one chunk), and ONLY a literal 0 stays 0 and
-                // falls through to the `i32_div_u` by 0 below → trap, matching
-                // native `chunks(0)` panic (incl. `[].chunks(0)`).
+                // any n >= len groups into ONE chunk — the ALS-T4 norm. The
+                // unsigned clamp sends -1/2^32/… to the i32::MAX sentinel
+                // (>= len → one chunk); ONLY a genuine 0 stays 0 and aborts
+                // below with the ALS-T6 form, byte-matching native.
                 const CHUNK_MAX_N: i64 = i32::MAX as i64;
                 self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(CHUNK_MAX_N));
+                // chunk(xs, 0) is a domain error (ALS-T4): `Error: chunk size
+                // must be positive` + exit 1 on BOTH targets — previously a raw
+                // native `chunks(0)` panic (exit 101) vs a wasm div-by-zero trap.
+                let chunk_zero_msg =
+                    self.emitter.intern_string("Error: chunk size must be positive\n") as i32;
+                let div_trap = self.emitter.rt.div_trap;
                 wasm!(self.func, {
                     local_set(n);
-                    // num_chunks: (n != 0 && n >= len) → one chunk of all (0
-                    // when len == 0, matching native `[].chunks(k>0)` = empty);
-                    // else ceil(len / n) = (len + n - 1) / n. The fast path
-                    // avoids the `len + n - 1` i32 overflow for huge n AND
-                    // excludes n == 0, which falls through to the `i32_div_u`
-                    // by 0 so it still traps (matches native `chunks(0)` panic,
-                    // including `[].chunks(0)`).
-                    local_get(n); i32_eqz; i32_eqz;          // n != 0
+                    local_get(n); i32_eqz;
+                    if_empty;
+                      i32_const(chunk_zero_msg);
+                      call(div_trap);
+                    end;
+                    // num_chunks: n >= len → one chunk of all (0 when len == 0,
+                    // matching native `[].chunks(k>0)` = empty); else
+                    // ceil(len / n) = (len + n - 1) / n. The fast path avoids
+                    // the `len + n - 1` i32 overflow for huge n; n == 0 already
+                    // aborted above.
                     local_get(n); local_get(len); i32_ge_u;  // n >= len
-                    i32_and;
                     if_i32;
                       local_get(len); i32_const(0); i32_gt_u;
                       if_i32; i32_const(1); else_; i32_const(0); end;
@@ -404,14 +410,23 @@ impl FuncCompiler<'_> {
                 // Unsigned-saturate n to [0, i32::MAX] on the i64 count (C-054)
                 // so a huge window size cannot wrap to a small in-range value.
                 // Native `windows`: `(n as usize) > len → []`, so a NEGATIVE n
-                // (huge as usize) or any n > len → empty. The unsigned clamp
-                // sends -1/2^32/… to the i32::MAX sentinel (> len → num_win = 0,
-                // empty). (n == 0 keeps its existing behavior; orthogonal to the
-                // truncation class.)
+                // (huge as usize) or any n > len → empty — the ALS-T4 norm.
                 const WINDOWS_MAX_N: i64 = i32::MAX as i64;
                 self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(WINDOWS_MAX_N));
+                // windows(xs, 0) is a domain error (ALS-T4): `Error: window size
+                // must be positive` + exit 1 on BOTH targets. Previously wasm
+                // SILENTLY returned len+1 empty windows (num_win = len - 0 + 1)
+                // while native panicked raw — a silent-wrong divergence.
+                let window_zero_msg =
+                    self.emitter.intern_string("Error: window size must be positive\n") as i32;
+                let div_trap = self.emitter.rt.div_trap;
                 wasm!(self.func, {
                     local_set(n);
+                    local_get(n); i32_eqz;
+                    if_empty;
+                      i32_const(window_zero_msg);
+                      call(div_trap);
+                    end;
                     // num_win = if len >= n then len - n + 1 else 0
                     local_get(len); local_get(n); i32_ge_u;
                     if_i32;
