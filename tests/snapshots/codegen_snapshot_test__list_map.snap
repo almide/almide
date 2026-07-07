@@ -44,8 +44,13 @@ pub fn almide_rt_list_product(xs: &[i64]) -> i64 { xs.iter().fold(1i64, |a, &b| 
 pub fn almide_rt_list_product_float(xs: &[f64]) -> f64 { xs.iter().product() }
 pub fn almide_rt_list_min<T: Ord + Clone>(xs: &[T]) -> Option<T> { xs.iter().min().cloned() }
 pub fn almide_rt_list_max<T: Ord + Clone>(xs: &[T]) -> Option<T> { xs.iter().max().cloned() }
-pub fn almide_rt_list_chunk<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { xs.chunks(n as usize).map(|c| c.to_vec()).collect() }
-pub fn almide_rt_list_windows<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if (n as usize) > xs.len() { return vec![]; } xs.windows(n as usize).map(|w| w.to_vec()).collect() }
+// chunk/windows are TOTAL (ALS-T4): a NEGATIVE n keeps the historical `as usize`
+// wrap (huge → chunk: whole-as-one-chunk / windows: empty), now normative; n == 0
+// aborts with the ALS-T6 form (`Error: …` + exit 1) instead of leaking Rust's raw
+// `chunks(0)`/`windows(0)` panic (exit 101) — wasm previously even returned len+1
+// EMPTY windows silently for `windows(xs, 0)`.
+pub fn almide_rt_list_chunk<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n == 0 { eprintln!("Error: chunk size must be positive"); std::process::exit(1); } xs.chunks(n as usize).map(|c| c.to_vec()).collect() }
+pub fn almide_rt_list_windows<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n == 0 { eprintln!("Error: window size must be positive"); std::process::exit(1); } if (n as usize) > xs.len() { return vec![]; } xs.windows(n as usize).map(|w| w.to_vec()).collect() }
 pub fn almide_rt_list_dedup<T: Clone + PartialEq>(xs: &[T]) -> Vec<T> { let mut r = Vec::new(); for x in xs { if r.last() != Some(x) { r.push(x.clone()); } } r }
 pub fn almide_rt_list_unique<T: Clone + PartialEq>(xs: &[T]) -> Vec<T> { let mut r = Vec::new(); for x in xs { if !r.contains(x) { r.push(x.clone()); } } r }
 pub fn almide_rt_list_set<T: Clone>(xs: &[T], i: i64, x: T) -> Vec<T> { let mut r = xs.to_vec(); if let Some(s) = r.get_mut(i as usize) { *s = x; } r }
