@@ -302,7 +302,6 @@ pub struct RuntimeFuncs {
     pub rc_inc: u32,
     pub rc_dec: u32,
     pub cow_check: u32,
-    pub cow_check_rc: u32,
     pub heap_save: u32,
     pub heap_restore: u32,
     /// `__alloc_pinned(size)` — alloc whose block is stamped `PINNED_RC` so
@@ -527,8 +526,6 @@ pub struct WasmEmitter {
     // alias is preserved (value semantics). Empty for non-aliasing programs → the
     // direct mutation path is byte-identical to before.
     pub needs_cow: HashSet<u32>,
-    /// LOCAL copy-alias COW targets — rc-gated __cow_check_rc (see AliasCowPass split, #696).
-    pub needs_cow_rc: HashSet<u32>,
     /// §4 Stage 2: synthetic cross-module use-site VarId → declaration VarId
     /// (from `codegen_annotations.global_alias`). The PRIMARY resolution for
     /// module globals — the name-key reconstruction below it is the soak-era

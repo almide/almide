@@ -167,10 +167,6 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // mutation through one binding never reaches another binding aliasing the value.
     let cow_check_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.cow_check = emitter.register_func("__cow_check", cow_check_ty);
-    // __cow_check_rc(ptr) -> ptr — the RC-GATED sibling for LOCAL copy-alias
-    // targets only (alias-Inc makes the count a true sharing witness there);
-    // param-reachable targets keep the unconditional __cow_check (#696).
-    emitter.rt.cow_check_rc = emitter.register_func("__cow_check_rc", cow_check_ty);
 
     // __heap_save() -> i32   — return current heap pointer
     let heap_save_ty = emitter.register_type(vec![], vec![ValType::I32]);
@@ -392,7 +388,6 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_rc_inc(emitter);
     compile_rc_dec(emitter);
     compile_cow_check(emitter);
-    compile_cow_check_rc(emitter);
     compile_heap_save(emitter);
     compile_heap_restore(emitter);
     compile_alloc_pinned(emitter);

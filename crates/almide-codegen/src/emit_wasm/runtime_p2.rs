@@ -306,56 +306,6 @@ fn compile_cow_check(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.cow_check, type_idx, f));
 }
 
-// __cow_check_rc(ptr: i32) -> i32
-// The RC-GATED sibling of __cow_check, used ONLY for LOCAL copy-alias COW
-// targets (#696). For those, alias bindings carry a real rc_inc (the frees
-// model's alias-Inc), so the header refcount is a TRUE sharing witness: a block
-// with rc <= 1 is uniquely owned and mutating it in place IS value semantics —
-// no clone. The previous unconditional clone turned every `list.push` on such a
-// var into a full-container copy: O(n²) bytes per loop, and past ~128 KiB per
-// round the exploded frontier drove the i32 heap arithmetic out of bounds — the
-// merge-sort trap (#696). A genuinely shared block (rc > 1) still clones, and
-// the original keeps its count (the same conservative leak __cow_check has).
-//
-// NOT SOUND for param-reachable targets: call arguments are borrowed (no inc),
-// so the caller's live reference is invisible in the count — those keep the
-// unconditional __cow_check (see AliasCowPass's split and C-125's bytes.set).
-// Under ALMIDE_WASM_FREES=0 rc_inc is a no-op (rc stays 1 forever), so the
-// gate would skip every clone; the emission falls back to the unconditional
-// body there (env-conditional emission is declared behavior).
-fn compile_cow_check_rc(emitter: &mut WasmEmitter) {
-    use super::engine::{WasmBuilder, layout::*};
-    let type_idx = emitter.func_type_indices[&emitter.rt.cow_check_rc];
-    let size_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::SIZE) as i32;
-    let size_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::SIZE).ty;
-    let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
-    let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
-    let alloc_fn = emitter.rt.alloc;
-
-    // locals: 1 = $size (data byte count), 2 = $new_ptr
-    let mut f = Function::new([(2, ValType::I32)]);
-    {
-        let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
-        // Data-section ptr → no header → nothing to clone.
-        w.get(0).gget(HEAP_START_GLOBAL_IDX).lt_u();
-        w.if_void(|w| { w.get(0).ret(); }, |_| {});
-        if wasm_frees_enabled() {
-            // The smallest SHARED refcount is 2 — one owner plus one alias —
-            // so `rc < SHARED_RC_MIN` ⇔ uniquely owned ⇔ in-place is sound.
-            const SHARED_RC_MIN: i32 = 2;
-            w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty);
-            w.i32c(SHARED_RC_MIN).lt_u();
-            w.if_void(|w| { w.get(0).ret(); }, |_| {});
-        }
-        w.get(0).i32c(size_neg).sub().emit_load(0, size_ty).set(1);
-        w.get(1).call(alloc_fn).set(2);
-        w.get(2).get(0).get(1).memory_copy();
-        w.get(2);
-    }
-    f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.cow_check_rc, type_idx, f));
-}
-
 // __heap_save() -> i32
 // Returns the current heap_ptr. Pair with __heap_restore for arena-style
 // scoped allocation: save before a sequence of __alloc calls, restore after

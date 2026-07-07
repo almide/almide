@@ -83,11 +83,6 @@ pub struct CodegenAnnotations {
     /// emitter reads this to gate per-site COW, and a non-deterministic order could
     /// perturb emit and break the host-deterministic wasm32-vs-native byte gate.
     pub needs_cow: BTreeSet<VarId>,
-    /// The rc-gated subset of COW targets: LOCAL copy-aliases only (their alias
-    /// bindings carry a real alias-Inc, so the header refcount is a true sharing
-    /// witness). Param-reachable targets stay in `needs_cow` — call args are
-    /// borrowed, so their count under-reports sharing (#696).
-    pub needs_cow_rc: BTreeSet<VarId>,
     /// Bindings whose declared IR type is REAL (the postcondition gate verifies
     /// it) but whose Rust-side representation is a borrow the `Ty` system cannot
     /// spell (a TCO borrow-preserved `Bytes` param temp is `&Vec<u8>`): the

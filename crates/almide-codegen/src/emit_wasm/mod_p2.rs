@@ -19,7 +19,7 @@ impl WasmEmitter {
             libm_tables: None,
             case_table_bytes: 0,
             rt: RuntimeFuncs {
-                fd_write: 0, alloc: 0, rc_inc: 0, rc_dec: 0, cow_check: 0, cow_check_rc: 0,
+                fd_write: 0, alloc: 0, rc_inc: 0, rc_dec: 0, cow_check: 0,
                 heap_save: 0, heap_restore: 0, alloc_pinned: 0, heap_start_global: 0,
                 println_str: 0, println_int: 0,
                 int_to_string: 0, float_to_string: 0,
@@ -126,7 +126,6 @@ impl WasmEmitter {
             effect_fns: HashSet::new(),
             mutable_captures: HashSet::new(),
             needs_cow: HashSet::new(),
-            needs_cow_rc: HashSet::new(),
             global_alias: HashMap::new(),
             eq_funcs: HashMap::new(),
             repr_funcs: BTreeMap::new(),
@@ -416,21 +415,11 @@ impl FuncCompiler<'_> {
     /// captures (deliberately reference-shared) and for vars without a plain local
     /// (globals don't alias at the source level; AliasCowPass excludes them).
     pub fn cow_if_needed(&mut self, id: u32) {
-        // Param-reachable targets take the UNCONDITIONAL __cow_check (call args
-        // are borrowed, so the rc is not a sharing witness for them); local
-        // copy-alias targets take the rc-gated __cow_check_rc (#696 — the
-        // unconditional clone made looped pushes O(n^2) bytes and blew the
-        // 32-bit heap arithmetic).
-        let checker = if self.emitter.needs_cow.contains(&id) {
-            self.emitter.rt.cow_check
-        } else if self.emitter.needs_cow_rc.contains(&id) {
-            self.emitter.rt.cow_check_rc
-        } else {
-            return;
-        };
+        if !self.emitter.needs_cow.contains(&id) { return; }
         if self.emitter.mutable_captures.contains(&id) { return; }
         let Some(&local_idx) = self.var_map.get(&id) else { return };
-        wasm!(self.func, { local_get(local_idx); call(checker); local_set(local_idx); });
+        let cow_check = self.emitter.rt.cow_check;
+        wasm!(self.func, { local_get(local_idx); call(cow_check); local_set(local_idx); });
     }
 }
 

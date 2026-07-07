@@ -7,7 +7,6 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     // Copy the COW-target var set (AliasCowPass) onto the emitter as bare u32s,
     // mirroring `mutable_captures`. Read at every in-place mutation emit site.
     emitter.needs_cow = program.codegen_annotations.needs_cow.iter().map(|v| v.0).collect();
-    emitter.needs_cow_rc = program.codegen_annotations.needs_cow_rc.iter().map(|v| v.0).collect();
     emitter.global_alias = program.codegen_annotations.global_alias.iter()
         .map(|(k, v)| (k.0, v.0)).collect();
 

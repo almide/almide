@@ -62,15 +62,8 @@ impl NanoPass for AliasCowPass {
         // Pure analysis — no IR rewrite — so it is trivially order-safe. Collect
         // the alias classes and the in-place-mutated targets per function, then
         // intersect: a var needs COW iff it is mutated in place AND shares a heap
-        // value with another binding. The marks are SPLIT by why (#696):
-        //   - param-reachable → `needs_cow` (unconditional __cow_check: call
-        //     args are borrowed, so the runtime rc under-reports sharing);
-        //   - local copy-alias only → `needs_cow_rc` (rc-gated __cow_check_rc:
-        //     alias bindings carry a real alias-Inc, so rc <= 1 proves unique
-        //     ownership and the clone — previously O(n²) in looped pushes —
-        //     is skipped).
+        // value with another binding.
         let mut needs_cow = std::collections::BTreeSet::new();
-        let mut needs_cow_rc = std::collections::BTreeSet::new();
 
         let shared_mut = program.codegen_annotations.shared_mut_vars.clone();
         let module_vars = collect_module_vars(&program);
@@ -86,19 +79,14 @@ impl NanoPass for AliasCowPass {
         for (body, params) in bodies {
             let mut a = AliasAnalysis::new(&program.var_table, &params);
             a.visit_expr(body);
-            for (v, param_reachable) in a.finish() {
+            for v in a.finish() {
                 // Exclude deliberately-shared closure cells and module globals.
                 if shared_mut.contains(&v) || module_vars.contains(&v) { continue; }
-                if param_reachable {
-                    needs_cow.insert(v);
-                } else {
-                    needs_cow_rc.insert(v);
-                }
+                needs_cow.insert(v);
             }
         }
 
         program.codegen_annotations.needs_cow = needs_cow;
-        program.codegen_annotations.needs_cow_rc = needs_cow_rc;
         PassResult { program, changed: false }
     }
 }
@@ -214,14 +202,11 @@ impl<'a> AliasAnalysis<'a> {
         }
     }
 
-    /// Intersect: a var is a COW target iff it is mutated in place AND either
+    /// Intersect: a var is in `needs_cow` iff it is mutated in place AND either
     /// its may-alias class has size > 1 (some other heap binding shares its
     /// value) or the class reaches a fn param (the CALLER may still hold the
     /// value — cross-function aliasing the per-function analysis cannot see).
-    /// The bool is `param_reachable`: those must clone UNCONDITIONALLY (call
-    /// args are borrowed, so the runtime rc under-reports sharing), while pure
-    /// local copy-aliases may use the rc-gated check (#696).
-    fn finish(mut self) -> Vec<(VarId, bool)> {
+    fn finish(mut self) -> Vec<VarId> {
         // class size per root.
         let mutated: Vec<VarId> = self.mutated.iter().copied().collect();
         let members: Vec<VarId> = self.parent.keys().copied().collect();
@@ -233,9 +218,8 @@ impl<'a> AliasAnalysis<'a> {
         let mut out = Vec::new();
         for v in mutated {
             let r = self.find(v);
-            let param_reachable = param_roots.contains(&r);
-            if class_size.get(&r).copied().unwrap_or(0) > 1 || param_reachable {
-                out.push((v, param_reachable));
+            if class_size.get(&r).copied().unwrap_or(0) > 1 || param_roots.contains(&r) {
+                out.push(v);
             }
         }
         out

@@ -163,15 +163,6 @@ note = "spec/wasm_cross/alias_cow.almd pins every supported shape × in-place op
 
 [[routine]]
 file = "runtime_p2.rs"
-routine = "compile_cow_check_rc"
-status = "verified"
-class = "fixture"
-oracle = "native eager `.clone()` at a copy-bind before in-place mutation — the same value-semantics oracle as compile_cow_check, PLUS scale-invariance: native's looped `list.push` on a swap-carried buffer is O(n) bytes and correct at 152k elements"
-test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
-note = "The rc>1-gated COW the compile_cow_check note called for (#696). Used ONLY for LOCAL copy-alias targets (AliasCowPass's needs_cow_rc split): their alias bindings carry a real alias-Inc under the frees model, so rc <= 1 is a TRUE unique-ownership witness and the clone is skipped — the unconditional clone had made every looped push O(n²) bytes and blew the i32 heap arithmetic past ~128KiB/round (the merge-sort OOB). Param-reachable targets stay on the unconditional __cow_check (call args are borrowed; rc under-reports sharing — bytes_set_value_semantics is the witness). Under ALMIDE_WASM_FREES=0 the body falls back to the unconditional clone (rc never moves there). spec/wasm_cross/loop_buffer_churn.almd pins the class (swap-carried doubling to 98304, constant-size rebuild rounds, per-round drop) byte-identical; alias_cow/bytes_set_value_semantics/mut_map_param stay green."
-
-[[routine]]
-file = "runtime_p2.rs"
 routine = "compile_heap_save"
 status = "verified"
 class = "fixture"
