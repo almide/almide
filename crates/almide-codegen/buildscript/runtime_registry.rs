@@ -132,6 +132,16 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) {
         let mut inline = String::new();
         inline.push_str("#[allow(dead_code, unused_imports, unused_variables, unused_parens, unused_mut, non_snake_case, clippy::all)]\nmod almide_kernel {\n");
         for m in &mods {
+            // `bridge` is the kernel's STANDALONE bench/ABI-glue module, written against
+            // the pre-0.28 nested `Vec<Vec<f64>>` matrix; nothing in the runtime calls
+            // `bridge::` (matrix.rs calls the kernels directly on the flat struct).
+            // Embedding it shipped a second, stale `AlmideMatrix` into every generated
+            // matrix crate — and its alias line was the exact marker the old burn
+            // splicer keyed on, so the splicer fired INSIDE the bridge and produced
+            // invalid Rust (#739). Kernel compute modules only.
+            if m == "bridge" {
+                continue;
+            }
             if let Ok(src) = fs::read_to_string(kernel_dir.join(format!("{m}.rs"))) {
                 let body = strip_test_blocks(&src).replace("crate::", "super::");
                 inline.push_str(&format!("pub mod {m} {{\n{body}\n}}\n"));

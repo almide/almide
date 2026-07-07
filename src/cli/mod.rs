@@ -117,56 +117,6 @@ lto = true
 codegen-units = 1
 "#;
 
-const GENERATED_CARGO_TOML_ML: &str = r#"[package]
-name = "almide-out"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
-webpki-roots = "0.26"
-burn = { version = "0.16", features = ["ndarray"] }
-ndarray = { version = "0.16", features = ["blas"] }
-rayon = "1.10"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-blas-src = { version = "0.10", features = ["accelerate"] }
-
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-blas-src = { version = "0.10", features = ["openblas"] }
-openblas-src = { version = "0.10", features = ["static"] }
-
-[profile.dev]
-opt-level = 1
-overflow-checks = false
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-"#;
-
-/// The burn-backed matrix runtime source, with its on-disk `include!` split parts
-/// (`matrix_burn_pN.rs`, kept under the 1000-line limit) INLINED. The generated crate
-/// writes this as one `src/` file, and the part siblings live in `runtime/rs/burn/`
-/// (not the generated `src/`), so the `include!` directives must be resolved here at
-/// embed time — otherwise they dangle (`couldn't read src/matrix_burn_p2.rs`).
-fn burn_matrix_runtime() -> String {
-    include_str!("../../runtime/rs/burn/matrix_burn.rs")
-        .replace(
-            "include!(\"matrix_burn_p2.rs\");",
-            include_str!("../../runtime/rs/burn/matrix_burn_p2.rs"),
-        )
-        .replace(
-            "include!(\"matrix_burn_p3.rs\");",
-            include_str!("../../runtime/rs/burn/matrix_burn_p3.rs"),
-        )
-        .replace(
-            "include!(\"matrix_burn_p4.rs\");",
-            include_str!("../../runtime/rs/burn/matrix_burn_p4.rs"),
-        )
-}
-
 /// Build a Cargo.toml string by inserting native deps into the [dependencies] section.
 fn build_cargo_toml(base_toml: &str, native_deps: &[crate::project::NativeDep]) -> String {
     if native_deps.is_empty() {
@@ -448,8 +398,12 @@ fn cargo_build_generated_with_native(
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
 
-    // Build Cargo.toml: start with base template, append native deps + auto-detected deps
-    let base_toml = if uses_matrix { GENERATED_CARGO_TOML_ML } else if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
+    // Build Cargo.toml: start with base template, append native deps + auto-detected deps.
+    // Matrix programs need NO extra deps: the flat AlmideMatrix runtime + the embedded
+    // almide-kernel SIMD modules are pure Rust (the burn/BLAS splice retired with the
+    // 0.28 flat-matrix runtime — its Vec<Vec<f64>> marker no longer existed anywhere
+    // except inside the embedded kernel bridge, where the splicer misfired, #739).
+    let base_toml = if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
     let mut all_deps = native_deps.to_vec();
     if uses_zlib {
         all_deps.push(crate::project::NativeDep { name: "flate2".into(), spec: "1".into() });
@@ -458,11 +412,7 @@ fn cargo_build_generated_with_native(
     std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
 
-    let mut final_code = if uses_matrix {
-        replace_matrix_runtime(rs_code)
-    } else {
-        rs_code.to_string()
-    };
+    let mut final_code = rs_code.to_string();
 
     inject_native_modules(&mut final_code, source_root, &src_dir)?;
     // Inject native modules + native-deps from dependency packages
@@ -762,50 +712,6 @@ fn cargo_build_test_with_native(
     }
 
     Err("could not determine test binary path from cargo output".to_string())
-}
-
-/// Replace the Vec<Vec<f64>> matrix runtime with burn-backed implementation.
-///
-/// Strategy: once we enter the matrix block (marked by `pub type AlmideMatrix
-/// = Vec<Vec<f64>>`), skip every line until we find a `pub fn` whose name is
-/// NOT prefixed with `almide_rt_matrix_`. That marks the end of the matrix
-/// block. This is robust against doc comments (`///`), section dividers,
-/// helper functions, etc. — it only cares about whether we're between matrix
-/// `pub fn`s.
-fn replace_matrix_runtime(rs_code: &str) -> String {
-    let burn_runtime = burn_matrix_runtime();
-    let mut result = String::with_capacity(rs_code.len() + burn_runtime.len());
-    let mut in_matrix_block = false;
-    let mut inserted = false;
-
-    for line in rs_code.lines() {
-        if !in_matrix_block && line.contains("pub type AlmideMatrix = Vec<Vec<f64>>") {
-            in_matrix_block = true;
-            if !inserted {
-                result.push_str("// ── burn-backed Matrix runtime (auto-inserted by almide build) ──\n");
-                result.push_str(&burn_runtime);
-                result.push('\n');
-                inserted = true;
-            }
-            continue;
-        }
-        if in_matrix_block {
-            // End of matrix block = first `pub fn` whose name is NOT
-            // `almide_rt_matrix_`. Anything else (doc comment, blank line,
-            // indented body, `// section` divider, inline helper fn) stays
-            // skipped.
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("pub fn ") && !trimmed.starts_with("pub fn almide_rt_matrix_") {
-                in_matrix_block = false;
-                // Fall through to emit this non-matrix line.
-            } else {
-                continue;
-            }
-        }
-        result.push_str(line);
-        result.push('\n');
-    }
-    result
 }
 
 /// Recursively collect .almd files that contain `test` blocks.
