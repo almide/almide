@@ -12,8 +12,24 @@
 //!
 //!   fn add_item(xs: List[Int], x: Int) -> List[Int] = { list.push(xs, x); xs }
 //!   data = add_item(data, 1)
+//!
+//! A fn that already RETURNS a value gets the tuple form (#705):
+//!
+//!   fn push9(mut v: List[Int], x: Int) -> Int = { list.push(v, x); list.len(v) - 1 }
+//!   let i = push9(data, 7)
+//!
+//! becomes
+//!
+//!   fn push9(v, x) -> (Int, List[Int]) = { let __mp_ret = <body>; (__mp_ret, v) }
+//!   let __mp_tmp = push9(data, 7); data = __mp_tmp.1; let i = __mp_tmp.0
+//!
+//! Effect fns with a non-Unit return are SKIPPED (their return is later
+//! Result-wrapped; tuple-inside-Result plumbing is a separate brick) — they
+//! keep the semantics they had.
 
+use almide_base::intern::sym;
 use almide_ir::*;
+use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
 use almide_lang::types::Ty;
 use crate::pass::{NanoPass, PassResult, Target};
 
@@ -26,205 +42,252 @@ impl NanoPass for MutParamLoweringPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Collect functions with mutated params: name → (param_indices, param_types)
-        let mut mut_fns: std::collections::HashMap<String, Vec<(usize, Ty)>> = std::collections::HashMap::new();
-        for func in &program.functions {
-            if !func.mutated_params.is_empty() {
-                let entries: Vec<(usize, Ty)> = func.mutated_params.iter()
-                    .map(|&idx| (idx, func.params.get(idx).map(|p| p.ty.clone()).unwrap_or(Ty::Unknown)))
-                    .collect();
-                mut_fns.insert(func.name.to_string(), entries);
-            }
+        // name → (mut param index, its type, callee returned Unit before the
+        // rewrite). Non-Unit EFFECT fns are excluded (Result-wrap interplay).
+        // Call sites are keyed by BARE name, so a name that resolves to more
+        // than one function (same-name fns across modules, the #692 class)
+        // must be excluded wholesale: rewriting the callee but not a caller —
+        // or a caller of the OTHER same-name fn — leaves an invalid module
+        // (the pass previously indexed mutated_params[0] on the same-name
+        // NON-mut sibling and panicked).
+        let mut name_count: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for func in program.functions.iter()
+            .chain(program.modules.iter().flat_map(|m| m.functions.iter()))
+        {
+            *name_count.entry(func.name.as_str()).or_insert(0) += 1;
+        }
+        let mut mut_fns: std::collections::HashMap<String, (usize, Ty, bool)> = std::collections::HashMap::new();
+        let collect = |func: &IrFunction, mut_fns: &mut std::collections::HashMap<String, (usize, Ty, bool)>| {
+            if func.mutated_params.len() != 1 { return; }
+            if name_count.get(func.name.as_str()).copied().unwrap_or(0) != 1 { return; }
+            let idx = func.mutated_params[0];
+            let Some(p) = func.params.get(idx) else { return };
+            let was_unit = matches!(func.ret_ty, Ty::Unit);
+            if !was_unit && func.is_effect { return; }
+            mut_fns.insert(func.name.to_string(), (idx, p.ty.clone(), was_unit));
+        };
+        for func in &program.functions { collect(func, &mut mut_fns); }
+        if std::env::var("ALMIDE_MP_PROBE").is_ok() {
+            for (k, v) in &mut_fns { eprintln!("[mp] fn {} → {:?}", k, v); }
         }
         for module in &program.modules {
-            for func in &module.functions {
-                if !func.mutated_params.is_empty() {
-                    let entries: Vec<(usize, Ty)> = func.mutated_params.iter()
-                        .map(|&idx| (idx, func.params.get(idx).map(|p| p.ty.clone()).unwrap_or(Ty::Unknown)))
-                        .collect();
-                    mut_fns.insert(func.name.to_string(), entries);
-                }
-            }
+            for func in &module.functions { collect(func, &mut mut_fns); }
         }
 
         if mut_fns.is_empty() {
             return PassResult { program, changed: false };
         }
 
-        // Phase 1: Rewrite function bodies — append mutated param as return value
-        for func in &mut program.functions {
-            if func.mutated_params.is_empty() { continue; }
-            if func.mutated_params.len() != 1 { continue; } // only single mut param for now
-            let mut_idx = func.mutated_params[0];
+        // Phase 1: Rewrite function bodies. Unit-returning fns return the
+        // mutated param; value-returning fns return (orig, mutated) as a tuple
+        // (#705 — previously the non-Unit case was silently skipped, so the
+        // caller's List never saw a reallocating push: `len=1` on wasm vs
+        // `len=3` native, and mlp's loss printed 0.0).
+        let vt = &mut program.var_table;
+        for func in program.functions.iter_mut()
+            .chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
+        {
+            let Some(&(entry_idx, _, was_unit)) = mut_fns.get(func.name.as_str()) else { continue };
+            // Name-keyed entry — confirm THIS func is the one that was
+            // collected (unique-name invariant above makes this a plain
+            // assertion, but stay defensive).
+            let Some(&mut_idx) = func.mutated_params.first() else { continue };
+            if mut_idx != entry_idx { continue; }
             let mut_var = func.params[mut_idx].var;
             let mut_ty = func.params[mut_idx].ty.clone();
-
-            // Change return type to the mutated param's type
-            if matches!(func.ret_ty, Ty::Unit) {
+            let var_expr = |ty: Ty| IrExpr {
+                kind: IrExprKind::Var { id: mut_var }, ty, span: None, def_id: None,
+            };
+            if was_unit {
                 func.ret_ty = mut_ty.clone();
-                // Append `var` as tail expression
-                let var_expr = IrExpr {
-                    kind: IrExprKind::Var { id: mut_var },
-                    ty: mut_ty,
-                    span: None,
-                    def_id: None,
-                };
-                // Wrap existing body in a block with the var as tail
+                // Wrap existing body in a block with the param as tail.
                 let old_body = std::mem::replace(&mut func.body, IrExpr {
-                    kind: IrExprKind::Unit,
-                    ty: Ty::Unit,
-                    span: None,
-                    def_id: None,
+                    kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
                 });
                 func.body = IrExpr {
                     kind: IrExprKind::Block {
+                        stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: old_body }, span: None }],
+                        expr: Some(Box::new(var_expr(mut_ty))),
+                    },
+                    ty: func.ret_ty.clone(), span: None, def_id: None,
+                };
+            } else {
+                // { let __mp_ret: T = <old body>; (__mp_ret, mut_param) } — the
+                // body runs first (its mutations land in the param local), then
+                // the tuple pairs the original result with the final buffer.
+                let orig_ty = func.ret_ty.clone();
+                let tuple_ty = Ty::Tuple(vec![orig_ty.clone(), mut_ty.clone()]);
+                func.ret_ty = tuple_ty.clone();
+                let ret_var = vt.alloc(sym("__mp_ret"), orig_ty.clone(), Mutability::Let, None);
+                let old_body = std::mem::replace(&mut func.body, IrExpr {
+                    kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
+                });
+                let ret_read = IrExpr {
+                    kind: IrExprKind::Var { id: ret_var }, ty: orig_ty.clone(),
+                    span: None, def_id: None,
+                };
+                func.body = IrExpr {
+                    kind: IrExprKind::Block {
                         stmts: vec![IrStmt {
-                            kind: IrStmtKind::Expr { expr: old_body },
+                            kind: IrStmtKind::Bind {
+                                var: ret_var, mutability: Mutability::Let,
+                                ty: orig_ty, value: old_body,
+                            },
                             span: None,
                         }],
-                        expr: Some(Box::new(var_expr)),
+                        expr: Some(Box::new(IrExpr {
+                            kind: IrExprKind::Tuple {
+                                elements: vec![ret_read, var_expr(mut_ty)],
+                            },
+                            ty: tuple_ty.clone(), span: None, def_id: None,
+                        })),
                     },
-                    ty: func.ret_ty.clone(),
-                    span: None,
-                    def_id: None,
+                    ty: tuple_ty, span: None, def_id: None,
                 };
             }
         }
 
-        // Phase 2: Rewrite call sites — assign return value back
-        for func in &mut program.functions {
-            rewrite_calls(&mut func.body, &mut_fns);
+        // Phase 2: Rewrite call sites — write the mutated buffer back. A
+        // bottom-up IrMutVisitor rewrites EVERY position uniformly (statement,
+        // Bind/Assign RHS, nested expression, loop bodies): the callee's
+        // signature changed globally, so an unrewritten site is not merely
+        // un-written-back — it is an invalid module (i32 tuple vs the old
+        // scalar). The call becomes a Block expression:
+        //
+        //   { let (__mp_res, __mp_buf) = <call>; <writeback>; __mp_res }
+        //
+        // and the writeback targets the argument PLACE: a bare var assigns it,
+        // a `b.items` field FieldAssigns it, and a temp (no named place) skips
+        // the writeback — native mutates an invisible temp there too.
+        let vt = &mut program.var_table;
+        let mut rw = CallSiteRewriter { mut_fns: &mut_fns, vt };
+        for func in program.functions.iter_mut()
+            .chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
+        {
+            rw.visit_expr_mut(&mut func.body);
         }
-        for tl in &mut program.top_lets {
-            rewrite_calls(&mut tl.value, &mut_fns);
+        for tl in &mut program.top_lets { rw.visit_expr_mut(&mut tl.value); }
+        for m in &mut program.modules {
+            for tl in &mut m.top_lets { rw.visit_expr_mut(&mut tl.value); }
         }
 
         PassResult { program, changed: true }
     }
 }
 
-fn rewrite_calls(expr: &mut IrExpr, mut_fns: &std::collections::HashMap<String, Vec<(usize, Ty)>>) {
-    match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            // Look for Expr { Call(mut_fn, args) } statements and rewrite to Assign
-            let mut i = 0;
-            while i < stmts.len() {
-                if let IrStmtKind::Expr { expr: call_expr } = &stmts[i].kind {
-                    if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &call_expr.kind {
-                        if let Some(params) = mut_fns.get(name.as_str()) {
-                            if params.len() == 1 {
-                                let (mut_idx, ref mut_ty) = params[0];
-                                if let Some(arg) = args.get(mut_idx) {
-                                    if let IrExprKind::Var { id } = &arg.kind {
-                                        let var_id = *id;
-                                        // Rewrite: Expr { call } → Assign { var, call }
-                                        let mut call = stmts[i].kind.clone();
-                                        if let IrStmtKind::Expr { expr: ref mut ce } = call {
-                                            ce.ty = mut_ty.clone();
-                                        }
-                                        if let IrStmtKind::Expr { expr: ce } = call {
-                                            stmts[i] = IrStmt {
-                                                kind: IrStmtKind::Assign { var: var_id, value: ce },
-                                                span: stmts[i].span,
-                                            };
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                // Recurse into statement expressions
-                match &mut stmts[i].kind {
-                    IrStmtKind::Bind { value, .. } => rewrite_calls(value, mut_fns),
-                    IrStmtKind::Assign { value, .. } => rewrite_calls(value, mut_fns),
-                    IrStmtKind::Expr { expr } => rewrite_calls(expr, mut_fns),
-                    // Explicit-preserve: mutation lowering only rewrites call sites
-                    // reachable through the statement kinds above. The remaining
-                    // kinds are listed so a new IrStmtKind is a compile error here,
-                    // not a silently-dropped subtree.
-                    IrStmtKind::BindDestructure { .. } | IrStmtKind::IndexAssign { .. }
-                    | IrStmtKind::MapInsert { .. } | IrStmtKind::FieldAssign { .. }
-                    | IrStmtKind::Guard { .. } | IrStmtKind::Comment { .. }
-                    | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. }
-                    | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
-                    | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => {}
-                }
-                i += 1;
-            }
-            if let Some(t) = tail { rewrite_calls(t, mut_fns); }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            rewrite_calls(cond, mut_fns);
-            rewrite_calls(then, mut_fns);
-            rewrite_calls(else_, mut_fns);
-        }
-        IrExprKind::Match { subject, arms } => {
-            rewrite_calls(subject, mut_fns);
-            for arm in arms { rewrite_calls(&mut arm.body, mut_fns); }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            rewrite_calls(iterable, mut_fns);
-            for s in body {
-                match &mut s.kind {
-                    IrStmtKind::Bind { value, .. } => rewrite_calls(value, mut_fns),
-                    IrStmtKind::Assign { value, .. } => rewrite_calls(value, mut_fns),
-                    IrStmtKind::Expr { expr } => rewrite_calls(expr, mut_fns),
-                    // Explicit-preserve (see Block above).
-                    IrStmtKind::BindDestructure { .. } | IrStmtKind::IndexAssign { .. }
-                    | IrStmtKind::MapInsert { .. } | IrStmtKind::FieldAssign { .. }
-                    | IrStmtKind::Guard { .. } | IrStmtKind::Comment { .. }
-                    | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. }
-                    | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
-                    | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => {}
-                }
-            }
-        }
-        IrExprKind::While { cond, body } => {
-            rewrite_calls(cond, mut_fns);
-            for s in body {
-                match &mut s.kind {
-                    IrStmtKind::Bind { value, .. } => rewrite_calls(value, mut_fns),
-                    IrStmtKind::Assign { value, .. } => rewrite_calls(value, mut_fns),
-                    IrStmtKind::Expr { expr } => rewrite_calls(expr, mut_fns),
-                    // Explicit-preserve (see Block above).
-                    IrStmtKind::BindDestructure { .. } | IrStmtKind::IndexAssign { .. }
-                    | IrStmtKind::MapInsert { .. } | IrStmtKind::FieldAssign { .. }
-                    | IrStmtKind::Guard { .. } | IrStmtKind::Comment { .. }
-                    | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. }
-                    | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
-                    | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => {}
-                }
-            }
-        }
-        // Explicit-preserve: this pass walks the structural-control nodes above
-        // to reach mutating call sites; the remaining expression kinds either
-        // contain no statement-level call sites to rewrite or are leaves. Listing
-        // every kind makes a new IrExprKind a compile error rather than a silently
-        // un-rewritten (native↔WASM divergent) subtree.
-        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
-        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
-        | IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. }
-        | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
-        | IrExprKind::Call { .. } | IrExprKind::TailCall { .. }
-        | IrExprKind::RuntimeCall { .. } | IrExprKind::List { .. }
-        | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
-        | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
-        | IrExprKind::Tuple { .. } | IrExprKind::Range { .. }
-        | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
-        | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
-        | IrExprKind::Lambda { .. } | IrExprKind::StringInterp { .. }
-        | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
-        | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
-        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
-        | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
-        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
-        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
-        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
-        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
-        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
-        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
-        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
-        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+type MutFns = std::collections::HashMap<String, (usize, Ty, bool)>;
+
+/// The caller-side slot the mutated buffer writes back into.
+enum ArgPlace {
+    Var(VarId),
+    Field(VarId, almide_base::intern::Sym),
+    /// No named place (a temp expression) — native mutates an unobservable
+    /// temporary there as well, so skipping the writeback is equivalent.
+    None,
+}
+
+fn mut_arg_place(arg: &IrExpr) -> ArgPlace {
+    match &arg.kind {
+        IrExprKind::Var { id } => ArgPlace::Var(*id),
+        IrExprKind::Member { object, field } => match &object.kind {
+            IrExprKind::Var { id } => ArgPlace::Field(*id, *field),
+            _ => ArgPlace::None,
+        },
+        _ => ArgPlace::None,
+    }
+}
+
+struct CallSiteRewriter<'a> {
+    mut_fns: &'a MutFns,
+    vt: &'a mut VarTable,
+}
+
+impl IrMutVisitor for CallSiteRewriter<'_> {
+    fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        // Bottom-up: children first, so a mut-call argument nested inside
+        // another mut-call is already rewritten when the outer one wraps.
+        walk_expr_mut(self, expr);
+
+        let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind else {
+            return;
+        };
+        let Some((idx, mut_ty, was_unit)) = self.mut_fns.get(name.as_str()).cloned() else {
+            return;
+        };
+        let Some(arg) = args.get(idx) else { return };
+        let place = mut_arg_place(arg);
+        let span = expr.span;
+
+        let orig_ty = expr.ty.clone();
+        let mut call = std::mem::replace(expr, IrExpr {
+            kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
+        });
+
+        let buf = self.vt.alloc(sym("__mp_buf"), mut_ty.clone(), Mutability::Let, None);
+        let buf_read = |ty: Ty| IrExpr {
+            kind: IrExprKind::Var { id: buf }, ty, span: None, def_id: None,
+        };
+        let writeback = match place {
+            ArgPlace::Var(v) => Some(IrStmt {
+                kind: IrStmtKind::Assign { var: v, value: buf_read(mut_ty.clone()) },
+                span,
+            }),
+            ArgPlace::Field(obj, field) => Some(IrStmt {
+                kind: IrStmtKind::FieldAssign {
+                    target: obj, field, value: buf_read(mut_ty.clone()),
+                },
+                span,
+            }),
+            ArgPlace::None => None,
+        };
+
+        let (bind_stmt, tail) = if was_unit {
+            // Callee now returns the buffer directly.
+            call.ty = mut_ty.clone();
+            let bind = IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: buf, mutability: Mutability::Let,
+                    ty: mut_ty.clone(), value: call,
+                },
+                span,
+            };
+            let unit_tail = IrExpr {
+                kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
+            };
+            (bind, unit_tail)
+        } else {
+            // Callee returns (orig, buffer): destructure both — the proven
+            // `let (a, b) = f(..)` ownership path (a hand-built TupleIndex
+            // read left the extracted buffer aliased to a slot the tuple
+            // temp's drop then freed).
+            let tuple_ty = Ty::Tuple(vec![orig_ty.clone(), mut_ty.clone()]);
+            call.ty = tuple_ty;
+            let res = self.vt.alloc(sym("__mp_res"), orig_ty.clone(), Mutability::Let, None);
+            let bind = IrStmt {
+                kind: IrStmtKind::BindDestructure {
+                    pattern: IrPattern::Tuple {
+                        elements: vec![
+                            IrPattern::Bind { var: res, ty: orig_ty.clone() },
+                            IrPattern::Bind { var: buf, ty: mut_ty.clone() },
+                        ],
+                    },
+                    value: call,
+                },
+                span,
+            };
+            let res_tail = IrExpr {
+                kind: IrExprKind::Var { id: res }, ty: orig_ty.clone(),
+                span: None, def_id: None,
+            };
+            (bind, res_tail)
+        };
+
+        let mut stmts = vec![bind_stmt];
+        if let Some(wb) = writeback { stmts.push(wb); }
+        *expr = IrExpr {
+            kind: IrExprKind::Block { stmts, expr: Some(Box::new(tail)) },
+            ty: if was_unit { Ty::Unit } else { orig_ty },
+            span, def_id: None,
+        };
     }
 }
