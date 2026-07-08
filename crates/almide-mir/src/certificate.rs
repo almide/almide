@@ -706,6 +706,15 @@ fn loop_carried_slots(
             {
                 heap_objs.insert(*d);
             }
+            // A Dup of a heap object is a heap handle: the SWAP-CARRY rebind
+            // (`cur = merged` lowered as `Dup tmp = merged; Drop cur; SetLocal
+            // cur = tmp` since the whole-var alias-edge elision) feeds its slot
+            // through the Dup's dst. Without this the slot goes unrecognized and
+            // the in-loop drop-old + scope-end drop read flat (`idd`) — the
+            // loop_buffer_churn false double-free the Trust Spine gate caught.
+            Op::Dup { dst, src } if heap_objs.contains(src) => {
+                heap_objs.insert(*dst);
+            }
             _ => {}
         }
     }
@@ -842,9 +851,24 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             Op::Dup { dst, src } => {
                 // ALIAS acquire (+1): a new handle on an existing shared object.
                 // `a` (not `i`) records the share-vs-move ground fact (format v1).
-                let o = s.object_of(*src);
-                s.of.insert(*dst, o);
-                s.event(o, 'a');
+                // A Dup that FEEDS a loop-carried slot (`cur = merged` swap-carry:
+                // `Dup tmp = merged; Drop cur; SetLocal cur = tmp`) routes its `a`
+                // into the SLOT stream, exactly as the Alloc/heap-call feeders route
+                // their `i`: the slot's per-iteration acquire-new + drop-old then
+                // reads `(ad)` (rc-preserving), instead of the drop-old landing flat
+                // next to the scope-end drop (`idd` — a false double-free).
+                if let Some(&slot) = feeder_to_slot.get(dst) {
+                    let so = s.object_of(slot);
+                    s.of.insert(*dst, so);
+                    if line_slots.contains(&slot) {
+                        s.event(so, '(');
+                    }
+                    s.event(so, 'a');
+                } else {
+                    let o = s.object_of(*src);
+                    s.of.insert(*dst, o);
+                    s.event(o, 'a');
+                }
             }
             // Plain release (−1). A `DropListStr`/`DropListValue` is the SAME single `d` on the LIST
             // object — its elements were already accounted as `m` (consumed) when stored into it, so
@@ -1204,6 +1228,51 @@ mod tests {
         assert_eq!(ownership_certificate(&f), "i(i)m\n");
         // verify_ownership flags the leaked old `acc` object (the dropped Alloc never
         // released before rebind) — the cert faithfully carries the rejection.
+        assert!(verify_ownership(&f).is_err());
+    }
+
+    #[test]
+    fn swap_carried_buffer_folds_dup_feeder_into_the_slot_stream() {
+        // The SWAP-CARRY shape (`cur = merged`, loop_buffer_churn / C-131): since the
+        // whole-var alias-edge elision the rebind lowers as `Dup tmp = merged;
+        // Drop cur; SetLocal cur = tmp` — the slot's feeder is a DUP dst, not an
+        // Alloc/call result. The Dup's `a` must route into the slot stream so the
+        // per-iteration acquire-new + drop-old reads `(ad)` (rc-preserving); flat, the
+        // in-loop drop-old + scope-end drop read `idd` — a FALSE double-free (the
+        // corpus-wall REJECT the first develop Trust Spine run caught).
+        let (cur, merged, tmp) = (ValueId(0), ValueId(1), ValueId(2));
+        let f = func(vec![
+            Op::Alloc { dst: cur, repr: heap(), init: Init::Opaque },
+            Op::LoopStart,
+            Op::Alloc { dst: merged, repr: heap(), init: Init::Opaque },
+            Op::Dup { dst: tmp, src: merged },
+            Op::Drop { v: cur },
+            Op::SetLocal { local: cur, src: tmp },
+            Op::Drop { v: merged },
+            Op::LoopEnd,
+            Op::Drop { v: cur },
+        ]);
+        assert_eq!(ownership_certificate(&f), "i(ad)d\nid\n");
+        assert_eq!(verify_ownership(&f), Ok(()));
+    }
+
+    #[test]
+    fn swap_carry_without_drop_old_is_rejected() {
+        // The same swap-carry but the OLD buffer is never dropped in the body — a
+        // real leak: the slot stream reads `i(a)d` (body nets +1, not rc-preserving)
+        // → REJECT, and verify_ownership flags the leaked original object.
+        let (cur, merged, tmp) = (ValueId(0), ValueId(1), ValueId(2));
+        let f = func(vec![
+            Op::Alloc { dst: cur, repr: heap(), init: Init::Opaque },
+            Op::LoopStart,
+            Op::Alloc { dst: merged, repr: heap(), init: Init::Opaque },
+            Op::Dup { dst: tmp, src: merged },
+            Op::SetLocal { local: cur, src: tmp },
+            Op::Drop { v: merged },
+            Op::LoopEnd,
+            Op::Drop { v: cur },
+        ]);
+        assert_eq!(ownership_certificate(&f), "i(a)d\nid\n");
         assert!(verify_ownership(&f).is_err());
     }
 
