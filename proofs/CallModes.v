@@ -108,6 +108,12 @@ Proof.
       rewrite Eg.
       replace (r + k - 1) with (r - 1 + k) by lia. apply IH; auto.
     + (* Reuse *) discriminate Hnr.
+    + (* Borrow — shift-safe: the liveness guard rc > 0 only gets EASIER with
+         k more references, and the count is unchanged. *)
+      destruct (r <=? 0) eqn:E; [discriminate|].
+      apply Z.leb_gt in E.
+      assert (Eg : (r + k <=? 0) = false) by (apply Z.leb_gt; lia).
+      rewrite Eg. apply IH; auto.
 Qed.
 
 (* An abstract caller line: plain ops, plus call sites carrying their mode. *)
@@ -154,6 +160,8 @@ Proof.
     + destruct (r <=? 0) eqn:E; [discriminate|]. apply Z.leb_gt in E.
       apply IHHF; [lia | exact Hex].
     + destruct (Z.eqb r 1) eqn:E; [|discriminate]. apply Z.eqb_eq in E.
+      apply IHHF; [lia | exact Hex].
+    + destruct (r <=? 0) eqn:E; [discriminate|]. apply Z.leb_gt in E.
       apply IHHF; [lia | exact Hex].
   - (* call site: split the mode *)
     unfold param_stream_ok in H. apply andb_prop in H. destruct H as [Hnr Hend].
@@ -235,6 +243,17 @@ Proof. reflexivity. Qed.
    `[Inc; Reuse]` balances from 0, but at a caller holding an extra alias
    (entry 1) it FAULTS — reuse pins rc = 1 exactly, so it is not shift-safe. *)
 Example reuse_body_not_shift_safe : exec [Inc; Reuse] 1 = None.
+Proof. reflexivity. Qed.
+
+(* `b` (Borrow, brick 5b) is shift-safe and composes: a callee that first
+   acquires its own reference may witness borrows on it (`a b d` nets 0 from a
+   borrowed param's entry 0). A BARE `b` on the zero-seeded param stream faults
+   — which is exactly why plain param borrows stay event-free in the emitter:
+   their liveness is the caller's obligation, discharged by the mode agreement,
+   not by the callee's own count. *)
+Example borrow_use_body_ok : param_stream_ok MBorrow [Alias; Borrow; Dec] = true.
+Proof. reflexivity. Qed.
+Example bare_borrow_body_needs_own_ref : param_stream_ok MBorrow [Borrow] = false.
 Proof. reflexivity. Qed.
 
 (* ─── the extracted per-build checker: signature/call-site agreement ───

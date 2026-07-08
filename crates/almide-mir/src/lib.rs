@@ -976,6 +976,11 @@ pub enum ViolationKind {
     UseAfterMove,
     /// A heap value still owned (count > 0) at function end.
     Leak,
+    /// The two arms of an `IfThen`/`Else`/`EndIf` branch leave an object at
+    /// DIFFERENT owner counts — whichever way the branch goes at runtime, the
+    /// later accounting is wrong for the other path (a path-dependent leak or
+    /// double-free). Mirrors the proven checker's `CBranch` agreement rule.
+    BranchDisagreement,
 }
 
 /// A located ownership violation.
@@ -1020,6 +1025,20 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             borrowed.insert(p.value);
         }
     }
+
+    // BRANCH JOIN (mirrors the proven checker's `CBranch` rule): each arm of an
+    // `IfThen`/`Else`/`EndIf` runs from the SAME entry state, and the arms must
+    // AGREE on every object's leaving count (the net may be nonzero — a
+    // heap-result branch nets +1 through either arm). Folding the arms FLAT
+    // (the old model) counted BOTH arms' events, silently accepting cross-arm
+    // compensation — a `Consume` in one arm "balancing" the other arm's missing
+    // release, i.e. a path-dependent leak/double-free.
+    struct BranchFrame {
+        entry_rc: BTreeMap<ValueId, i64>,
+        entry_dead: BTreeMap<ValueId, bool>,
+        then_exit: Option<(BTreeMap<ValueId, i64>, BTreeMap<ValueId, bool>)>,
+    }
+    let mut branches: Vec<BranchFrame> = Vec::new();
 
     for (i, op) in func.ops.iter().enumerate() {
         match op {
@@ -1122,15 +1141,65 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                     }
                 }
             }
+            // The if-markers carry no ownership of their own, but they scope the
+            // BRANCH JOIN: both arms run from the entry state and must agree.
+            Op::IfThen { .. } => {
+                branches.push(BranchFrame {
+                    entry_rc: rc.clone(),
+                    entry_dead: dead.clone(),
+                    then_exit: None,
+                });
+            }
+            Op::Else { .. } => {
+                if let Some(fr) = branches.last_mut() {
+                    fr.then_exit = Some((rc.clone(), dead.clone()));
+                    rc = fr.entry_rc.clone();
+                    dead = fr.entry_dead.clone();
+                }
+            }
+            Op::EndIf { .. } => {
+                if let Some(fr) = branches.pop() {
+                    let (then_rc, then_dead) = match fr.then_exit {
+                        Some(t) => t,
+                        // No Else marker: everything since IfThen was the then arm;
+                        // the else arm is empty (= the entry state).
+                        None => {
+                            let cur = (rc.clone(), dead.clone());
+                            rc = fr.entry_rc.clone();
+                            dead = fr.entry_dead.clone();
+                            cur
+                        }
+                    };
+                    // Agreement per object (absent = 0 owned refs).
+                    let keys: BTreeSet<ValueId> =
+                        then_rc.keys().chain(rc.keys()).copied().collect();
+                    for k in keys {
+                        let a = then_rc.get(&k).copied().unwrap_or(0);
+                        let b = rc.get(&k).copied().unwrap_or(0);
+                        if a != b {
+                            violations.push(violation(i, k, ViolationKind::BranchDisagreement));
+                        }
+                    }
+                    // Continue with the JOIN: pointwise max keeps the run stable
+                    // after a reported disagreement (no cascading underflows); on
+                    // agreement it is the common value. A handle dead on EITHER
+                    // path is unusable after the merge.
+                    for (k, v) in then_rc {
+                        let e = rc.entry(k).or_insert(0);
+                        if v > *e {
+                            *e = v;
+                        }
+                    }
+                    for (k, d) in then_dead {
+                        let e = dead.entry(k).or_insert(d);
+                        *e = *e || d;
+                    }
+                }
+            }
             // Scalar arithmetic — no ownership.
             // A scalar arithmetic op and a primitive-floor op carry no ownership: a
             // scalar result is Copy and a `Prim` handle arg is BORROWED (read only).
-            // The if-markers carry no ownership either — the arm OPS (flat between the
-            // markers) are processed normally, per-arm-balanced by the lowering.
             Op::IntBinOp { .. }
-            | Op::IfThen { .. }
-            | Op::Else { .. }
-            | Op::EndIf { .. }
             // Loop markers carry no ownership; the body ops between them are
             // per-iteration-balanced (verified flat, one iteration).
             | Op::LoopStart

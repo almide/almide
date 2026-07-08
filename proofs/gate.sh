@@ -92,6 +92,28 @@ echo "-- property: call-modes (call sites use the callee's declared param modes)
 run_mode modes-agree    modes call-modes 0
 run_mode modes-mismatch modes call-modes 1
 
+echo "-- property: ownership, format v4 (brick 5a/5b: branch agreement + borrow) --"
+# BRANCH agreement: both arms acquire one alias (net +1, a heap-result-branch
+# shape) → `i{a|a}dd` ACCEPT; a mis-lowered branch whose arms disagree
+# (+1 vs 0 — a path-dependent leak) → `i{a|}d` REJECT. The lowering's per-arm
+# balance is no longer a trusted convention: the proven CBranch rule re-derives
+# arm agreement from the witness itself.
+run branch-agree    ownership 0
+run branch-mismatch ownership 1
+# BORROW liveness: an in-place unique use (MakeUnique) of a live owned object
+# is `ibd` (+0 guarded) → ACCEPT; the same use AFTER the release is `idb` — a
+# use-after-free the cert previously could not witness → REJECT.
+run borrow-live ownership 0
+run borrow-uaf  ownership 1
+
+echo "-- property: call-modes over CLOSURE dispatch (brick 5c: possible-callee set) --"
+# main calls through a funcref. AGREE: the dispatch shape matches the one table
+# target, the site's modes equal its signature → ACCEPT. UNKNOWABLE: the site's
+# shape matches NO table target (heap handle vs scalar param) → the sentinel
+# row conservatively REJECTS.
+run_mode closure-agree      modes call-modes 0
+run_mode closure-unknowable modes call-modes 1
+
 echo "-- REAL .almd → frontend → MIR → proven checker (weekly indicator ①: 0→1) --"
 run_src return_list.almd build ownership 0
 run_src return_list.almd build names     0
@@ -136,6 +158,14 @@ run_src_mode two_functions.almd  main modes call-modes 0
 # (one borrow param) — the site's actual [borrow] equals the declared signature.
 run_src      heap_arg_call.almd  main ownership 0
 run_src_mode heap_arg_call.almd  main modes call-modes 0
+# A REAL heap-result branch (brick 5a): both of pick's arms allocate + move out,
+# the merge receives + returns — witnessed through the branch-aware emitter and
+# re-verified by the format-v4 proven checker.
+run_src      heap_result_if.almd pick ownership 0
+# A REAL first-class-function dispatch (brick 5c): `inc()` returns a lifted
+# funcref, `f(5)` is an Op::CallIndirect — the witness expands the site to one
+# agreement row per possible callee (the lifted lambda), proven per-site.
+run_src_mode funcref_call.almd   main modes call-modes 0
 
 echo
 echo "GATE OK: the kernel-proven checker re-verified per-build witnesses on THREE"

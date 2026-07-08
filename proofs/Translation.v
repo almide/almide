@@ -32,6 +32,7 @@ Definition wasm_pattern (o : Op) : string :=
   | Dec     => ""                 (* eager: release emits no instruction *)
   | MoveOut => ""                 (* eager: move is a pointer pass, no instruction *)
   | Reuse   => ""                 (* eager: no reuse; the perceus renderer emits rc_dec/reuse *)
+  | Borrow  => ""                 (* a borrow reads through the handle — no RC instruction *)
   end.
 
 Definition is_release (o : Op) : bool :=

@@ -1,0 +1,12 @@
+// A REAL heap-result branch through the actual frontend: both arms allocate
+// and move out (`im` each), the merge dst receives + returns (`im`) — the
+// branch-aware certificate (format v4) re-verifies it on the proven CBranch
+// spine. The gate row pins the shape end-to-end (source → IR → MIR → witness →
+// kernel-proven checker).
+fn pick(c: Bool) -> List[Int] =
+  if c then [1] else [2]
+
+fn main() -> Int = {
+  let xs = pick(true)
+  list.len(xs)
+}

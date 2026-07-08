@@ -214,12 +214,22 @@ fn main() {
         // Call-mode signature witness (brick 2c): whole-program — every function's
         // declared heap-param modes + every CallFn site's actual modes; the proven
         // checker re-verifies per-site agreement (caller and callee assumed the
-        // same calling convention).
+        // same calling convention). Lambdas are LIFTED during MIR lowering (not at
+        // the IR level), so the all-variant lowering is used: its lifted
+        // `__lambda_*` auxiliaries are the FuncRef table targets the indirect
+        // (closure) sites' possible-callee sets are computed from (brick 5c) —
+        // without them every CallIndirect would be unknowable (sentinel REJECT).
         "modes" => {
+            let record_layouts = almide_mir::lower::build_record_layouts(&ir.type_decls);
+            let variant_layouts = almide_mir::lower::build_variant_layouts(&ir.type_decls);
             let mut program: BTreeMap<String, almide_mir::MirFunction> = BTreeMap::new();
             for f in &ir.functions {
-                if let Ok(m) = almide_mir::lower::lower_function(f, &globals) {
-                    program.insert(f.name.as_str().to_string(), m);
+                if let Ok(mirs) = almide_mir::lower::lower_function_all_with_globals(
+                    f, &globals, &global_inits, &record_layouts, &variant_layouts,
+                ) {
+                    for m in mirs {
+                        program.insert(m.name.clone(), m);
+                    }
                 }
             }
             // Dotted callees are self-hosted stdlib calls — purity-gated at

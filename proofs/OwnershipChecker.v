@@ -44,13 +44,20 @@ Open Scope Z_scope.
                inference the checker cannot re-derive; the fold already knows rc,
                so the guard is both simpler and strictly sound. A Reuse at rc > 1
                = SHARED = unsound, and FAULTS — see `check_reuse_sound`.)
-   (Borrow b≡+0, the closure-env mode, is the remaining letter.) *)
+     Borrow  = +0 USE of a live reference (a read-only borrow / in-place unique
+               use — `Op::Borrow`/`MakeUnique`). No refcount change, but a
+               LIVENESS guard: a borrow of a DEAD object (rc = 0 — every owned
+               reference already released) is a use-after-free and FAULTS. This
+               makes owned-object use-after-free WITNESSABLE (brick 5b): `idb`
+               rejects. Borrowed PARAMS stay event-free (their liveness is the
+               caller's obligation — the call-mode system, CallModes.v). *)
 Inductive Op : Type :=
   | Inc : Op
   | Alias : Op
   | Dec : Op
   | MoveOut : Op
-  | Reuse : Op.
+  | Reuse : Op
+  | Borrow : Op.
 
 (* OPERATIONAL SEMANTICS (the ALS side — "what actually happens").
    A refcount, or a FAULT (`None`) when a −1 op hits rc = 0: that is a
@@ -73,6 +80,11 @@ Fixpoint exec (ops : list Op) (rc : Z) : option Z :=
      rc = 1 at this point (then it goes to 0). A Reuse at rc > 1 (a SHARED object)
      would corrupt the aliasing owner — it FAULTS; rc <= 0 is the usual underflow. *)
   | Reuse :: rest => if Z.eqb rc 1 then exec rest 0 else None
+  (* Borrow is a +0 USE: it needs a live reference (rc > 0) but releases nothing.
+     A borrow at rc = 0 is a use-after-free — the object's owned references are
+     all gone — and FAULTS, exactly like verify_ownership's live-check on
+     `Op::Borrow`/`MakeUnique`. *)
+  | Borrow :: rest => if rc <=? 0 then None else exec rest rc
   end.
 
 Definition run (ops : list Op) : option Z := exec ops 0.
@@ -165,6 +177,7 @@ Definition parse_byte (a : ascii) : option Op :=
   else if orb (Ascii.eqb a "d"%char) (Ascii.eqb a "D"%char) then Some Dec
   else if orb (Ascii.eqb a "m"%char) (Ascii.eqb a "M"%char) then Some MoveOut
   else if orb (Ascii.eqb a "r"%char) (Ascii.eqb a "R"%char) then Some Reuse
+  else if orb (Ascii.eqb a "b"%char) (Ascii.eqb a "B"%char) then Some Borrow
   else None.
 
 (* Fold the byte string into per-line op streams; flush the final line at end. *)
@@ -237,6 +250,9 @@ Fixpoint reuses_unique (ops : list Op) (rc : Z) : bool :=
   | Dec :: rest => if rc <=? 0 then true else reuses_unique rest (rc - 1)
   | MoveOut :: rest => if rc <=? 0 then true else reuses_unique rest (rc - 1)
   | Reuse :: rest => if Z.eqb rc 1 then reuses_unique rest 0 else false
+  (* Borrow mirrors exec: a fault (rc = 0) ends the run (vacuously true), a live
+     borrow changes nothing. *)
+  | Borrow :: rest => if rc <=? 0 then true else reuses_unique rest rc
   end.
 
 (* The bridge: a run that does NOT fault has every Reuse at rc = 1. This holds
@@ -253,6 +269,7 @@ Proof.
     + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
     + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
     + destruct (Z.eqb rc 1) eqn:E. { apply IH. exact H. } exfalso. apply H. reflexivity.
+    + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
 Qed.
 
 (* REUSE SOUNDNESS: an accepted certificate has every Reuse acting on a UNIQUELY
@@ -297,6 +314,23 @@ Proof. reflexivity. Qed.
 Example reuses_shared_iard_not_unique : reuses_unique [Inc; Alias; Reuse; Dec] 0 = false.
 Proof. reflexivity. Qed.
 
+(* ─── the `b` (borrow, +0) letter — brick 5b non-vacuity ───
+   A borrow needs a LIVE owned reference and changes nothing: `ibd` accepts.
+   A borrow AFTER the last release (`idb`) is a use-after-free — before this
+   letter the cert could not witness it (the Borrow op was invisible); now it
+   FAULTS. A borrow with nothing ever owned (`b`) faults the same way. *)
+Example cert_borrow_live_accepts : check_cert "ibd"%string = true.
+Proof. reflexivity. Qed.
+
+Example cert_borrow_after_free_rejects : check_cert "idb"%string = false.
+Proof. reflexivity. Qed.
+
+Example cert_borrow_nothing_rejects : check_cert "b"%string = false.
+Proof. reflexivity. Qed.
+
+Example borrow_of_alias_accepts : check [Inc; Alias; Borrow; Dec; Dec] = true.
+Proof. reflexivity. Qed.
+
 (* ─── HEAP-LOOP-CARRIED extension (option C, the COMPLETENESS fix) ───
    The flat per-object cert above cannot express a loop-carried heap accumulator
    (`acc = acc + [x]` each iteration: drop the old object, alloc a new one, rebind
@@ -314,7 +348,7 @@ Proof. reflexivity. Qed.
 Inductive CertItem : Type :=
   | COp : Op -> CertItem            (* a plain op *)
   | CLoop : list Op -> CertItem     (* a loop body run any number of times *)
-  | CCondLoop : list Op -> list Op -> CertItem.
+  | CCondLoop : list Op -> list Op -> CertItem
     (* a CONDITIONAL loop (filter / filter_map): each iteration runs EITHER the
        `then` body (predicate true) OR the `else` body (predicate false). The
        number of `then` iterations is RUNTIME-VARIABLE. Accepted iff BOTH branch
@@ -324,6 +358,17 @@ Inductive CertItem : Type :=
        is the degenerate case `then = else = body`; this strictly generalizes it.
        Ported from OwnershipFilter.v (`cexec`/`ccheck_unroll_sound`, kernel-checked,
        axiom-clean) onto the production Inc/Alias/Dec/MoveOut/Reuse `exec`. *)
+  | CBranch : list Op -> list Op -> CertItem.
+    (* a ONE-SHOT branch (brick 5a): the run takes EXACTLY ONE of the two flat
+       arm bodies. Accepted iff BOTH arms execute from the entry count WITHOUT
+       faulting to the SAME result — the arms AGREE on the leaving resource
+       state (which may differ from the entry state: net +1 arms are the whole
+       point — a heap-result branch). CCondLoop is the ITERATED cousin (its
+       preservation requirement `r = rc` makes any iteration count sound); a
+       one-shot branch only needs AGREEMENT. This retires the lowering's
+       per-arm-balance TRUSTED convention: cross-arm compensation (an `i` in one
+       arm balanced by a `d` in the other — runtime-unsafe either way the branch
+       goes, yet flat-balanced) becomes structurally REJECTED. *)
 
 (* exec_line folds a cert LINE. A CLoop body is checked via the existing flat `exec`
    (its body is plain ops); accepted iff the body preserves rc (sufficient for any
@@ -351,6 +396,14 @@ Fixpoint exec_line (cs : list CertItem) (rc : Z) : option Z :=
           if andb (Z.eqb rt rc) (Z.eqb re rc) then exec_line rest rc else None
       | _, _ => None
       end
+  | CBranch thenb elseb :: rest =>
+      (* one-shot branch: both arms run fault-free from the entry count to the
+         SAME result (AGREEMENT, not preservation — the net may be nonzero);
+         continue at that agreed count. *)
+      match exec thenb rc, exec elseb rc with
+      | Some rt, Some re => if Z.eqb rt re then exec_line rest rt else None
+      | _, _ => None
+      end
   end.
 
 Definition check_line (cs : list CertItem) : bool :=
@@ -370,6 +423,7 @@ Proof.
     + destruct (rc <=? 0). reflexivity. apply IH.
     + destruct (rc <=? 0). reflexivity. apply IH.
     + destruct (Z.eqb rc 1). apply IH. reflexivity.
+    + destruct (rc <=? 0). reflexivity. apply IH.
 Qed.
 
 (* exec over a cons = single-op step then the rest. *)
@@ -425,7 +479,11 @@ Inductive UnrollsL : list CertItem -> list Op -> Prop :=
       UnrollsL a b -> UnrollsL (CLoop body :: a) (List.concat (List.repeat body n) ++ b)
   | UL_cond : forall thenb elseb a b bs,
       UnrollsL a b ->
-      UnrollsL (CCondLoop thenb elseb :: a) (cond_concat thenb elseb bs ++ b).
+      UnrollsL (CCondLoop thenb elseb :: a) (cond_concat thenb elseb bs ++ b)
+  (* a one-shot branch unrolls to EXACTLY ONE arm — the runtime choice. *)
+  | UL_branch : forall thenb elseb a b (choice : bool),
+      UnrollsL a b ->
+      UnrollsL (CBranch thenb elseb :: a) ((if choice then thenb else elseb) ++ b).
 
 (* SOUNDNESS CORE: an accepting line, at any rc, executes EVERY unrolling to the
    same result — so no unrolling faults and the final rc matches. *)
@@ -442,6 +500,7 @@ Proof.
     + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
     + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
     + destruct (Z.eqb rc 1); [apply IHHU; exact Hexec | discriminate].
+    + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
   - (* CLoop body *) simpl in *.
     destruct (exec body rc) as [rc' |] eqn:Eb; [| discriminate].
     destruct (Z.eqb rc' rc) eqn:Eq; [| discriminate].
@@ -457,6 +516,16 @@ Proof.
     apply Z.eqb_eq in Hrt. apply Z.eqb_eq in Hre. subst rt re.
     rewrite exec_app, (cond_concat_preserve thenb elseb rc Et Ee bs).
     apply IHHU. exact Hexec.
+  - (* CBranch thenb elseb — the run takes ONE arm; both agree on the result,
+       so either way the line continues at the same count. *)
+    simpl in *.
+    destruct (exec thenb rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (exec elseb rc) as [re |] eqn:Ee; [| discriminate].
+    destruct (Z.eqb rt re) eqn:Eq; [| discriminate].
+    apply Z.eqb_eq in Eq. subst re.
+    rewrite exec_app. destruct choice.
+    + rewrite Et. apply IHHU. exact Hexec.
+    + rewrite Ee. apply IHHU. exact Hexec.
 Qed.
 
 (* The headline: an ACCEPTED loop cert line guarantees EVERY concrete unrolling is
@@ -494,6 +563,29 @@ Proof. reflexivity. Qed.
 (* ELSE branch drains (net −1) — REJECT. *)
 Example filter_draining_else_line_rejects :
   check_line [COp Inc; CCondLoop [Dec; Inc] [Dec]; COp MoveOut] = false.
+Proof. reflexivity. Qed.
+
+(* ONE-SHOT branch (brick 5a) non-vacuity. AGREEMENT at net +1: both arms
+   acquire (a heap-result branch — the merge value), released twice after.
+   entry 0 → `i` → 1; arms 1→2 AGREE; `dd` → 0. ACCEPTS. *)
+Example branch_agree_net_plus_one_accepts :
+  check_line [COp Inc; CBranch [Inc] [Inc]; COp Dec; COp Dec] = true.
+Proof. reflexivity. Qed.
+(* Arms DISAGREE (+1 vs 0): whichever way the branch goes, the line's later
+   accounting is wrong for the other — REJECT. *)
+Example branch_disagree_rejects :
+  check_line [COp Inc; CBranch [Inc] []; COp Dec] = false.
+Proof. reflexivity. Qed.
+(* CROSS-ARM COMPENSATION (the closed hole): `i` in one arm, `d` in the other.
+   FLAT the two would balance (the accept-but-unsafe class the per-arm-balance
+   convention had to promise away); grouped, the `d` arm faults from entry 0 —
+   REJECT, structurally. *)
+Example branch_cross_arm_compensation_rejects :
+  check_line [CBranch [Inc] [Dec]] = false.
+Proof. reflexivity. Qed.
+(* Both arms fault — REJECT. *)
+Example branch_both_arms_fault_rejects :
+  check_line [CBranch [Dec] [Dec]] = false.
 Proof. reflexivity. Qed.
 
 (* ─── LOOP-AWARE certificate parsing (format v2, backward-compatible) ───
@@ -663,6 +755,119 @@ Proof. reflexivity. Qed.
 Example cert_clc_draining_else_rejects : check_clc "i[di|d]m"%string = false. (* else branch drains *)
 Proof. reflexivity. Qed.
 
+(* ─── BRANCH-aware certificate parsing (format v4, backward-compatible) ───
+   Extends format v3 with ONE-SHOT branch delimiters `{` then `|` else `}` around
+   two flat arm bodies: e.g. `i{i|i}dd` = COp Inc, CBranch [Inc] [Inc], COp Dec,
+   COp Dec (a heap-result branch — both arms acquire, arms AGREE at net +1).
+   `parse_bc` is a SUPERSET of `parse_clc`: it also handles `(`…`)` loops and
+   `[`…`|`…`]` conditional loops, and a cert with NO `{` parses byte-for-byte as
+   `parse_clc` (`{`/`}` are outside the op alphabet — previously skipped bytes) —
+   full backward compat for every flat, CLoop and CCondLoop certificate. Arm
+   bodies are FLAT (no nesting), like loop bodies. *)
+Definition lbrace : ascii := "{"%char.
+Definition rbrace : ascii := "}"%char.
+
+(* Flush the in-progress line, defensively closing a dangling `{`-branch first
+   (well-formed certs close every `{` before newline/EOF), else deferring to the
+   format-v3 flush. *)
+Definition finish_line_b (cur : list CertItem) (lp : option (list Op))
+                         (cp bp : option condst) : list CertItem :=
+  match bp with
+  | Some (_, th, el) => rev (CBranch (rev th) (rev el) :: cur)
+  | None => finish_line_c cur lp cp
+  end.
+
+Fixpoint parse_bc (s : string) (cur : list CertItem)
+                  (lp : option (list Op)) (cp bp : option condst)
+                  {struct s} : list (list CertItem) :=
+  match s with
+  | EmptyString => [finish_line_b cur lp cp bp]
+  | String b rest =>
+      if Ascii.eqb b newline then finish_line_b cur lp cp bp :: parse_bc rest [] None None None
+      else match bp with
+      | Some (in_else, th, el) =>
+          (* inside `{ … | … }` — collect ops into the then/else arm *)
+          if Ascii.eqb b bar then parse_bc rest cur lp cp (Some (true, th, el))
+          else if Ascii.eqb b rbrace then
+            parse_bc rest (CBranch (rev th) (rev el) :: cur) lp cp None
+          else match parse_byte b with
+               | Some op =>
+                   if in_else then parse_bc rest cur lp cp (Some (true, th, op :: el))
+                   else parse_bc rest cur lp cp (Some (false, op :: th, el))
+               | None => parse_bc rest cur lp cp bp
+               end
+      | None =>
+          match cp with
+          | Some (in_else, th, el) =>
+              (* inside `[ … | … ]` — exactly parse_clc's conditional-loop state *)
+              if Ascii.eqb b bar then parse_bc rest cur lp (Some (true, th, el)) None
+              else if Ascii.eqb b rbracket then
+                parse_bc rest (CCondLoop (rev th) (rev el) :: cur) lp None None
+              else match parse_byte b with
+                   | Some op =>
+                       if in_else then parse_bc rest cur lp (Some (true, th, op :: el)) None
+                       else parse_bc rest cur lp (Some (false, op :: th, el)) None
+                   | None => parse_bc rest cur lp cp None
+                   end
+          | None =>
+              if Ascii.eqb b lbrace then parse_bc rest cur lp None (Some (false, [], []))
+              else if Ascii.eqb b lbracket then parse_bc rest cur lp (Some (false, [], [])) None
+              else if Ascii.eqb b lparen then parse_bc rest cur (Some []) None None
+              else if Ascii.eqb b rparen then
+                match lp with
+                | Some body => parse_bc rest (CLoop (rev body) :: cur) None None None
+                | None => parse_bc rest cur None None None
+                end
+              else match parse_byte b with
+                   | Some op =>
+                       match lp with
+                       | Some body => parse_bc rest cur (Some (op :: body)) None None
+                       | None => parse_bc rest (COp op :: cur) None None None
+                       end
+                   | None => parse_bc rest cur lp None None
+                   end
+          end
+      end
+  end.
+
+(* The full branch-aware checker over raw certificate bytes (format v4). *)
+Definition check_bc (s : string) : bool :=
+  forallb check_line (parse_bc s [] None None None).
+
+(* SOUNDNESS over bytes (1-line corollary of check_line_unroll_sound, covering
+   CBranch via UL_branch + the exec_line_unroll CBranch case): an accepted
+   branch certificate has, for EVERY parsed line and EVERY concrete unrolling —
+   each branch resolved to the ONE arm the runtime takes — no double-free /
+   use-after-free and no leak. *)
+Theorem check_bc_unroll_sound :
+  forall s, check_bc s = true ->
+    forall cs, In cs (parse_bc s [] None None None) ->
+      forall fops, UnrollsL cs fops -> run fops <> None /\ run fops = Some 0.
+Proof.
+  intros s H cs Hin fops HU.
+  unfold check_bc in H. rewrite forallb_forall in H.
+  apply (check_line_unroll_sound cs (H cs Hin) fops HU).
+Qed.
+
+(* backward-compat (flat + loop + cond-loop certs verify exactly as before) +
+   the new one-shot branch certs, on real bytes *)
+Example cert_bc_flat_accepts : check_bc "iidd"%string = true.
+Proof. reflexivity. Qed.
+Example cert_bc_flat_rejects : check_bc "idd"%string = false.
+Proof. reflexivity. Qed.
+Example cert_bc_loop_accepts : check_bc "i(di)m"%string = true.          (* v2 CLoop still accepts *)
+Proof. reflexivity. Qed.
+Example cert_bc_filter_accepts : check_bc "i[di|]m"%string = true.       (* v3 CCondLoop still accepts *)
+Proof. reflexivity. Qed.
+Example cert_bc_borrow_accepts : check_bc "ibd"%string = true.           (* 5b `b` rides format v4 *)
+Proof. reflexivity. Qed.
+Example cert_bc_branch_accepts : check_bc "i{i|i}dd"%string = true.      (* heap-result branch: arms agree at +1 *)
+Proof. reflexivity. Qed.
+Example cert_bc_branch_disagree_rejects : check_bc "i{i|}d"%string = false. (* arms disagree (+1 vs 0) *)
+Proof. reflexivity. Qed.
+Example cert_bc_cross_arm_rejects : check_bc "{i|d}"%string = false.     (* cross-arm compensation faults *)
+Proof. reflexivity. Qed.
+
 (* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on
    nothing but the Coq kernel — no admits, no extra axioms. Expected output:
    "Closed under the global context". *)
@@ -670,6 +875,7 @@ Print Assumptions check_sound.
 Print Assumptions check_line_unroll_sound.
 Print Assumptions check_cert_lc_sound.
 Print Assumptions check_clc_unroll_sound.
+Print Assumptions check_bc_unroll_sound.
 Print Assumptions check_all_sound.
 Print Assumptions check_cert_sound.
 Print Assumptions check_reuse_sound.

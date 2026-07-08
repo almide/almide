@@ -469,17 +469,28 @@ const MODE_BORROW: u32 = 0;
 /// assumed borrow (both per-function-balanced, inlined = double-free) can no
 /// longer slip through.
 ///
-/// Honest scope: [`Op::CallFn`] sites only. A runtime [`Op::Call`] follows the
-/// fixed borrow-args/owned-result convention (a renderer contract, not a
-/// per-function signature); an [`Op::CallIndirect`] goes through a closure whose
-/// signature (captured-env ownership included) is format v1 brick 5 — until
-/// then indirect sites are not mode-checked here. An out-of-program callee with
-/// a KNOWN calling convention (`is_known_convention` — the caller's policy,
-/// e.g. dotted self-hosted stdlib names, purity-gated at lowering and borrowing
-/// their heap args by the same renderer contract as [`Op::Call`]) is omitted;
-/// any OTHER unknown / cross-file callee gets an out-of-range index, which the
-/// checker REJECTS (conservative, same discipline as the caps graph's universe
-/// node).
+/// Honest scope: [`Op::CallFn`] sites, plus [`Op::CallIndirect`] sites via the
+/// POSSIBLE-CALLEE set (brick 5c). A runtime [`Op::Call`] follows the fixed
+/// borrow-args/owned-result convention (a renderer contract, not a per-function
+/// signature). An out-of-program callee with a KNOWN calling convention
+/// (`is_known_convention` — the caller's policy, e.g. dotted self-hosted stdlib
+/// names, purity-gated at lowering and borrowing their heap args by the same
+/// renderer contract as [`Op::Call`]) is omitted; any OTHER unknown /
+/// cross-file callee gets an out-of-range index, which the checker REJECTS
+/// (conservative, same discipline as the caps graph's universe node).
+///
+/// CLOSURE SIGNATURES (brick 5c): a [`Op::CallIndirect`] dispatches through a
+/// funcref whose runtime target the caller cannot name — but every funcref
+/// VALUE originates from some [`Op::FuncRef`] in the program (the closure-table
+/// ground truth, the same fact the caps fold uses at FuncRef creation). The
+/// site's possible-callee set = the FuncRef targets whose param SHAPE matches
+/// the site (arity + per-position heapness — the `call_indirect` type gate
+/// traps on any other target, fail-stop). The witness emits ONE agreement row
+/// PER POSSIBLE CALLEE — `forallb site_ok` in the proven checker then IS the
+/// "agreement against every member of the set" Forall lift, with no new Coq
+/// surface. A site whose set is EMPTY, or reaching a FuncRef target that never
+/// lowered (its signature unseeable), emits the out-of-range sentinel —
+/// conservative REJECT, never a silent skip.
 pub fn call_modes_witness(
     program: &BTreeMap<String, MirFunction>,
     is_known_convention: &dyn Fn(&str) -> bool,
@@ -500,21 +511,81 @@ pub fn call_modes_witness(
                 .join(" ")
         })
         .collect();
+    // The function TABLE: every FuncRef target anywhere in the program — the
+    // over-approximation of what any CallIndirect can reach. A target that never
+    // lowered (absent from `program`) poisons the table: its signature is
+    // unseeable, so every indirect site becomes unknowable (sentinel).
+    let mut table_targets: Vec<&str> = Vec::new();
+    let mut table_unseeable = false;
+    for name in &names {
+        for op in &program[*name].ops {
+            if let Op::FuncRef { name: target, .. } = op {
+                if program.contains_key(target.as_str()) {
+                    if !table_targets.contains(&target.as_str()) {
+                        table_targets.push(target.as_str());
+                    }
+                } else {
+                    table_unseeable = true;
+                }
+            }
+        }
+    }
     let mut sites: Vec<String> = Vec::new();
     for name in &names {
         for op in &program[*name].ops {
-            if let Op::CallFn { name: callee, args, .. } = op {
-                let idx = match index_of.get(callee.as_str()) {
-                    Some(&i) => i,
-                    None if is_known_convention(callee) => continue, // renderer-contract callee
-                    None => unknown, // unknown callee — the checker rejects the site
-                };
-                let mut site = vec![idx.to_string()];
-                site.extend(args.iter().filter_map(|a| match a {
-                    CallArg::Handle(_) => Some(MODE_BORROW.to_string()),
-                    CallArg::Scalar(_) | CallArg::Imm(_) | CallArg::Label(_) => None,
-                }));
-                sites.push(site.join(" "));
+            match op {
+                Op::CallFn { name: callee, args, .. } => {
+                    let idx = match index_of.get(callee.as_str()) {
+                        Some(&i) => i,
+                        None if is_known_convention(callee) => continue, // renderer-contract callee
+                        None => unknown, // unknown callee — the checker rejects the site
+                    };
+                    let mut site = vec![idx.to_string()];
+                    site.extend(args.iter().filter_map(|a| match a {
+                        CallArg::Handle(_) => Some(MODE_BORROW.to_string()),
+                        CallArg::Scalar(_) | CallArg::Imm(_) | CallArg::Label(_) => None,
+                    }));
+                    sites.push(site.join(" "));
+                }
+                Op::CallIndirect { args, .. } => {
+                    let actual: Vec<String> = args
+                        .iter()
+                        .filter_map(|a| match a {
+                            CallArg::Handle(_) => Some(MODE_BORROW.to_string()),
+                            CallArg::Scalar(_) | CallArg::Imm(_) | CallArg::Label(_) => None,
+                        })
+                        .collect();
+                    // Possible callees: table targets whose param shape matches the
+                    // site (any other target traps at dispatch — excluded soundly).
+                    let possible: Vec<usize> = if table_unseeable {
+                        Vec::new()
+                    } else {
+                        table_targets
+                            .iter()
+                            .filter(|t| {
+                                let f = &program[**t];
+                                f.params.len() == args.len()
+                                    && f.params.iter().zip(args).all(|(p, a)| {
+                                        p.repr.is_heap() == matches!(a, CallArg::Handle(_))
+                                    })
+                            })
+                            .filter_map(|t| index_of.get(*t).copied())
+                            .collect()
+                    };
+                    if possible.is_empty() {
+                        // Unknowable dispatch — the sentinel row rejects the build.
+                        let mut site = vec![unknown.to_string()];
+                        site.extend(actual.iter().cloned());
+                        sites.push(site.join(" "));
+                    } else {
+                        for idx in possible {
+                            let mut site = vec![idx.to_string()];
+                            site.extend(actual.iter().cloned());
+                            sites.push(site.join(" "));
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -629,41 +700,123 @@ pub fn reachable_caps_or_tainted(
     Some(caps)
 }
 
+/// One open `IfThen…Else…EndIf` region (format v4, brick 5a): per-object events
+/// collected PER ARM, so the flush at `EndIf` can decide — arms that each
+/// self-balance (net 0) for the object flush FLAT (byte-identical to the
+/// ungrouped emission: zero churn on every existing cert), arms that do NOT are
+/// grouped as `{then|else}` and the proven checker re-derives their AGREEMENT
+/// from the arm bodies themselves (`CBranch`). Cross-arm compensation — an `i`
+/// in one arm balanced by a `d` in the other, runtime-unsafe whichever way the
+/// branch goes yet flat-balanced — thereby becomes structurally rejected: the
+/// lowering's per-arm-balance promise is no longer a TRUSTED convention.
+#[derive(Default)]
+struct BranchFrame {
+    then_ev: BTreeMap<ValueId, String>,
+    else_ev: BTreeMap<ValueId, String>,
+    order: Vec<ValueId>, // objects in first-touch order (across both arms)
+    in_else: bool,
+}
+
 /// Per-object refcount-event accumulator, preserving object creation order.
 struct Streams {
     of: BTreeMap<ValueId, ValueId>, // handle → object representative
     order: Vec<ValueId>,            // objects in first-seen order
     stream: BTreeMap<ValueId, String>,
+    frames: Vec<BranchFrame>, // open IfThen regions, innermost last
+}
+
+fn seg_net(seg: &str) -> i64 {
+    seg.chars()
+        .map(|c| match c {
+            'i' | 'a' => 1,
+            'd' | 'm' => -1,
+            _ => 0, // b (+0), loop/branch delimiters
+        })
+        .sum()
 }
 
 impl Streams {
     fn new() -> Self {
-        Streams { of: BTreeMap::new(), order: Vec::new(), stream: BTreeMap::new() }
+        Streams {
+            of: BTreeMap::new(),
+            order: Vec::new(),
+            stream: BTreeMap::new(),
+            frames: Vec::new(),
+        }
     }
-    /// Record a +1/−1 event (`'i'`/`'d'`) on object `o`.
-    fn event(&mut self, o: ValueId, c: char) {
+    /// Append an event segment to `o` — into the innermost open branch arm when
+    /// one exists (buffered until the region's flush), else onto the stream.
+    fn append_seg(&mut self, o: ValueId, seg: &str) {
+        if let Some(fr) = self.frames.last_mut() {
+            if !fr.then_ev.contains_key(&o) && !fr.else_ev.contains_key(&o) {
+                fr.order.push(o);
+            }
+            let map = if fr.in_else { &mut fr.else_ev } else { &mut fr.then_ev };
+            map.entry(o).or_default().push_str(seg);
+            return;
+        }
         if !self.stream.contains_key(&o) {
             self.stream.insert(o, String::new());
             self.order.push(o);
         }
-        self.stream.get_mut(&o).unwrap().push(c);
+        self.stream.get_mut(&o).unwrap().push_str(seg);
     }
-    /// The current rc balance of `o`'s line (i/a = +1, d/m = −1) — used to decide
-    /// whether a branch-merge val still HOLDS its reference (an un-consumed arm
-    /// value flowing through `EndIf {{ val }}` is a real move the stream must see).
+    /// Record a +1/−1/+0 event (`'i'`/`'d'`/`'b'`…) on object `o`.
+    fn event(&mut self, o: ValueId, c: char) {
+        let mut buf = [0u8; 4];
+        self.append_seg(o, c.encode_utf8(&mut buf));
+    }
+    /// Open an `IfThen` region: subsequent events buffer into its then arm.
+    fn open_branch(&mut self) {
+        self.frames.push(BranchFrame::default());
+    }
+    /// `Else` marker: subsequent events buffer into the else arm.
+    fn else_branch(&mut self) {
+        if let Some(fr) = self.frames.last_mut() {
+            fr.in_else = true;
+        }
+    }
+    /// Close the innermost region (`EndIf`): per object, flush FLAT when both
+    /// arms self-balance (net 0 — byte-identical to the ungrouped emission),
+    /// else grouped `{then|else}` (the proven CBranch agreement rule). An arm
+    /// that itself contains a region delimiter (a nested grouped branch or a
+    /// loop) cannot be represented in a FLAT v4 arm body — emit the always-
+    /// rejecting poison `{i|}` instead (conservative: never a silent accept).
+    fn flush_branch(&mut self) {
+        let fr = match self.frames.pop() {
+            Some(fr) => fr,
+            None => return, // EndIf without IfThen — malformed MIR, nothing buffered
+        };
+        for o in fr.order {
+            let t = fr.then_ev.get(&o).cloned().unwrap_or_default();
+            let e = fr.else_ev.get(&o).cloned().unwrap_or_default();
+            let seg = if seg_net(&t) == 0 && seg_net(&e) == 0 {
+                format!("{t}{e}")
+            } else if t.contains(['(', ')', '{', '}', '[', ']'])
+                || e.contains(['(', ')', '{', '}', '[', ']'])
+            {
+                "{i|}".to_string()
+            } else {
+                format!("{{{t}|{e}}}")
+            };
+            self.append_seg(o, &seg);
+        }
+    }
+    /// The current rc balance of `o`'s line (i/a = +1, d/m = −1), INCLUDING the
+    /// events buffered in open branch arms — used to decide whether a
+    /// branch-merge val still HOLDS its reference (an un-consumed arm value
+    /// flowing through `EndIf {{ val }}` is a real move the stream must see).
     fn balance(&self, o: ValueId) -> i64 {
-        self.stream
-            .get(&o)
-            .map(|line| {
-                line.chars()
-                    .map(|c| match c {
-                        'i' | 'a' => 1,
-                        'd' | 'm' => -1,
-                        _ => 0,
-                    })
-                    .sum()
-            })
-            .unwrap_or(0)
+        let mut b = self.stream.get(&o).map(|line| seg_net(line)).unwrap_or(0);
+        for fr in &self.frames {
+            if let Some(t) = fr.then_ev.get(&o) {
+                b += seg_net(t);
+            }
+            if let Some(e) = fr.else_ev.get(&o) {
+                b += seg_net(e);
+            }
+        }
+        b
     }
     fn object_of(&self, handle: ValueId) -> ValueId {
         // Well-formed MIR always has the handle mapped; fall back to identity so a
@@ -943,33 +1096,72 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                 let so = s.object_of(*local);
                 s.event(so, ')');
             }
-            // The released branch-merge dst receives the arm's moved-in reference (+1).
-            Op::IfThen { dst: Some(d), .. } if released_merge_dsts.contains(d) => {
-                s.of.insert(*d, *d);
-                s.event(*d, 'i');
+            // Open the branch region (format v4, brick 5a): arm events buffer per
+            // arm so the flush can group non-self-balancing arms as `{then|else}`.
+            // The released merge dst's `i` (the arm's moved-in reference, +1) is a
+            // PRE-REGION event — the merge object is acquired at the merge point,
+            // outside either arm — so it is emitted before the region opens.
+            Op::IfThen { dst, .. } => {
+                if let Some(d) = dst {
+                    if released_merge_dsts.contains(d) {
+                        s.of.insert(*d, *d);
+                        s.event(*d, 'i');
+                    }
+                }
+                s.open_branch();
             }
             // An arm value that still HOLDS its reference when it flows into the merge
             // (`Else/EndIf {{ val }}` with no prior `Consume` — the declared-Result tail-if
             // style, effect_tco::checked) MOVES it there: emit the `m` the explicit-Consume
             // style already has. A val already consumed (balance 0) or never tracked
-            // (a scalar) is untouched.
-            Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) }
-                if s.of.contains_key(v)
-                    && s.balance(s.object_of(*v)) > 0
-                    // An EXPLICITLY-Consumed arm value already emitted its move `m` — the
-                    // val-move here would double-count it (the `else base` Var-arm `iammd`
-                    // REJECT: the Dup'd value's Consume + this rule both fired on the shared
-                    // base object). Only the never-Consumed style (effect-TCO tail-if) reaches here.
-                    && !consumed_values.contains(v)
-                    // Loop-carried machinery keeps its own `(id)` accounting — a slot or
-                    // feeder flowing through a branch inside the loop is NOT a move-out
-                    // (heap_result_if_append's accumulator would double-`m`).
-                    && !slots.contains(&s.object_of(*v))
-                    && !feeder_to_slot.contains_key(v)
-                    && !line_slots.contains(&s.object_of(*v)) =>
-            {
-                let o = s.object_of(*v);
-                s.event(o, 'm');
+            // (a scalar) is untouched. The `m` lands in the CLOSING arm's buffer (then
+            // at `Else`, else at `EndIf`); then the region switches arm / flushes.
+            Op::Else { val } | Op::EndIf { val } => {
+                if let Some(v) = val {
+                    let val_moves = s.of.contains_key(v)
+                        && s.balance(s.object_of(*v)) > 0
+                        // An EXPLICITLY-Consumed arm value already emitted its move `m` — the
+                        // val-move here would double-count it (the `else base` Var-arm `iammd`
+                        // REJECT: the Dup'd value's Consume + this rule both fired on the shared
+                        // base object). Only the never-Consumed style (effect-TCO tail-if) reaches here.
+                        && !consumed_values.contains(v)
+                        // Loop-carried machinery keeps its own `(id)` accounting — a slot or
+                        // feeder flowing through a branch inside the loop is NOT a move-out
+                        // (heap_result_if_append's accumulator would double-`m`).
+                        && !slots.contains(&s.object_of(*v))
+                        && !feeder_to_slot.contains_key(v)
+                        && !line_slots.contains(&s.object_of(*v));
+                    if val_moves {
+                        let o = s.object_of(*v);
+                        s.event(o, 'm');
+                    }
+                }
+                if matches!(op, Op::Else { .. }) {
+                    s.else_branch();
+                } else {
+                    s.flush_branch();
+                }
+            }
+            // A LIVE USE — a read-only borrow or an in-place unique use (`xs[i] = v`
+            // via MakeUnique) — on an object whose stream HOLDS ownership (it has a
+            // +1 event) is witnessed as `b` (+0, liveness-guarded, brick 5b): a use
+            // after the last release makes the proven checker FAULT — owned-object
+            // use-after-free is now witnessable, not invisible. An object with no
+            // +1 on its stream (a borrowed param used directly) stays event-free:
+            // its liveness is the CALLER's obligation, discharged by the call-mode
+            // agreement (CallModes.v), not by this stream's count.
+            Op::Borrow { v } | Op::MakeUnique { v } => {
+                if s.of.contains_key(v) {
+                    let o = s.object_of(*v);
+                    let owned = s.stream.get(&o).map_or(false, |l| l.contains(['i', 'a']))
+                        || s.frames.iter().any(|fr| {
+                            fr.then_ev.get(&o).map_or(false, |l| l.contains(['i', 'a']))
+                                || fr.else_ev.get(&o).map_or(false, |l| l.contains(['i', 'a']))
+                        });
+                    if owned {
+                        s.event(o, 'b');
+                    }
+                }
             }
             // Loop delimiters for a heap loop-carried slot: open `(` on each slot
             // stream when entering a top-level loop, close `)` on leaving — so the
@@ -1082,10 +1274,17 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                 s.of.insert(*d, *d);
                 s.event(*d, 'i');
             }
-            // No refcount change: Borrow/MakeUnique/Const/Pure/IntBinOp/SetLocal, and
-            // a call with a void/scalar result (its heap-handle args are borrowed).
+            // No refcount change: Const/Pure/IntBinOp/scalar SetLocal, and a call
+            // with a void/scalar result (its heap-handle args are borrowed).
             _ => {}
         }
+    }
+
+    // Defensive: a dangling IfThen (no EndIf — malformed MIR) still flushes, so
+    // its buffered arm events land on the stream (and unbalance ⟹ reject) rather
+    // than vanish.
+    while !s.frames.is_empty() {
+        s.flush_branch();
     }
 
     // A heap return is MOVED OUT to the caller (a −1) — a move, hence `m`.
@@ -1306,6 +1505,13 @@ mod tests {
                             return false; // double-free / use-after-move
                         }
                         rc -= 1;
+                    }
+                    // format v4 (brick 5b): b = +0 live use — faults on a dead object
+                    // (use-after-free), exactly the Coq `Borrow` guard.
+                    'b' => {
+                        if rc == 0 {
+                            return false;
+                        }
                     }
                     _ => {}
                 }

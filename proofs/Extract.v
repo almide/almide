@@ -31,5 +31,13 @@ Set Extraction Output Directory ".".
    it parses the `<sigs>|<sites>` witness and decides per-call-site agreement, so
    `accept ⟹ every call site used exactly its callee's declared param modes` —
    the ground fact that makes per-function ownership certs compose
-   (CallModes.check_fill_sound). *)
-Extraction "checker.ml" check_cert check_cert_lc check_clc check_names_cert check_caps_cert check_prog_cert check_modes_cert.
+   (CallModes.check_fill_sound). Brick 5c rides the SAME checker: an indirect
+   (closure) site expands to one agreement row per POSSIBLE callee, so
+   `forallb site_ok` is the Forall lift over the possible-callee set. *)
+(* `check_bc` is the BRANCH-aware ownership checker (format v4, brick 5a — a
+   SUPERSET of `check_clc`: it also parses `{ then | else }` one-shot branches
+   whose arms must AGREE on the leaving resource state; flat, CLoop and CCondLoop
+   certs parse identically, so it is fully backward-compatible). It also carries
+   the `b` (borrow, +0 live-use) letter (brick 5b). The driver dispatches
+   ownership to it. *)
+Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_names_cert check_caps_cert check_prog_cert check_modes_cert.

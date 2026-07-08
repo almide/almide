@@ -1,11 +1,33 @@
 <!-- description: GOAL PROMPT — cert format brick 5: full mode (branch resource-state agreement + closure-env borrow + closure signatures) -->
+<!-- done: 2026-07-08 -->
 # GOAL PROMPT — cert format brick 5: full mode (branch agreement + `b` + closure signatures)
 
-> **Read first**: [certificate-format-v1](certificate-format-v1.md) (the ladder;
+> **OUTCOME (2026-07-08): SHIPPED — all exit criteria met.** The full record is
+> [certificate-format-v1](../active/certificate-format-v1.md) build-order item
+> 5. Grounding results that reshaped the plan, recorded here:
+> - Heap-result `if`/`match`/nested-chain/block-arm shapes were ALREADY
+>   in-profile and per-arm balanced (the 126921e6 line) — 5a's win was not
+>   unlocking walls but RETIRING the per-arm-balance trusted convention
+>   (cross-arm compensation now structurally rejects). Corpus coverage
+>   unchanged (4,693 in-profile / 317 walled) — no wall moved, none grew.
+> - **The grouping found a REAL leak on first contact**: the effect-fn tail
+>   `err(msg)` moved the error accumulator only on the error path (`{m|}`) —
+>   one block leaked per happy-path call. Fixed by RELEASE PARITY in
+>   `lower_heap_result_if_inner` (+ `verify_ownership` branch JOIN with
+>   `BranchDisagreement`).
+> - CAPTURING lambdas also defunc-inline for direct `list.map`; only
+>   returned/stored funcrefs survive as `CallIndirect`. Capturing closures
+>   still WALL at lowering, so 5c shipped possible-callee-set agreement (row
+>   expansion — zero new Coq) and `b`'s closure-ENV emission awaits the
+>   closure-env lowering brick.
+> - MODE byte: RETIRED with rationale (the alphabet is self-guarding; policy
+>   belongs in the manifest layer).
+
+> **Read first**: [certificate-format-v1](../active/certificate-format-v1.md) (the ladder;
 > bricks 1–2 shipped, 3a/3b + 4a/4b shipped), `proofs/OwnershipChecker.v`
 > (exec / CertItem / UnrollsL — the architecture you will extend),
 > `proofs/CallModes.v` (brick 2c — the composition-law house style to follow).
-> Sibling context: [v1-heap-result-control-flow](v1-heap-result-control-flow.md).
+> Sibling context: [v1-heap-result-control-flow](../active/v1-heap-result-control-flow.md).
 
 ## Context — where the ladder stands (2026-07-08, commit `c485bef9`)
 

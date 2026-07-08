@@ -1,0 +1,11 @@
+// A REAL first-class-function dispatch through the actual frontend: `inc()`
+// returns a lifted funcref and `f(5)` dispatches through Op::CallIndirect.
+// The call-mode witness (brick 5c) expands the indirect site to one agreement
+// row per POSSIBLE callee (the FuncRef table targets whose shape matches), so
+// the proven per-site checker verifies agreement against every member.
+fn inc() -> (Int) -> Int = (x) => x + 1
+
+fn main() -> Int = {
+  let f = inc()
+  f(5)
+}

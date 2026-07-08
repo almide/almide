@@ -35,6 +35,12 @@ printf 'I(D)M\n'   > /tmp/loop_drain.cert      # loop body DRAINS (release each 
 printf 'I[ID|]M\n' > /tmp/filter_slot.cert     # conditional-loop (filter) slot: then[drop-old acquire-new] / else[] both net 0 → ACCEPT
 printf 'I[I|]M\n'  > /tmp/filter_then_leak.cert # filter THEN branch leaks (net +1) → REJECT
 printf 'I[ID|D]M\n'> /tmp/filter_else_drain.cert # filter ELSE branch drains (net −1) → REJECT
+printf 'IBD\n'     > /tmp/borrow_live.cert      # 5b: borrow of a LIVE owned object (+0) → ACCEPT
+printf 'IDB\n'     > /tmp/borrow_uaf.cert       # 5b: borrow AFTER the last release = use-after-free → REJECT
+printf 'B\n'       > /tmp/borrow_nothing.cert   # 5b: borrow with nothing ever owned → REJECT
+printf 'I{I|I}DD\n'> /tmp/branch_agree.cert     # 5a: one-shot branch, arms AGREE at net +1 (heap-result if) → ACCEPT
+printf 'I{I|}D\n'  > /tmp/branch_disagree.cert  # 5a: arms DISAGREE (+1 vs 0) → REJECT
+printf '{I|D}\n'   > /tmp/branch_cross.cert     # 5a: cross-arm compensation (flat-balanced, runtime-unsafe) → REJECT
 
 run() { # path expected_exit
   set +e; ./checker ownership "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e
@@ -55,6 +61,12 @@ run /tmp/loop_drain.cert 1
 run /tmp/filter_slot.cert 0
 run /tmp/filter_then_leak.cert 1
 run /tmp/filter_else_drain.cert 1
+run /tmp/borrow_live.cert 0
+run /tmp/borrow_uaf.cert 1
+run /tmp/borrow_nothing.cert 1
+run /tmp/branch_agree.cert 0
+run /tmp/branch_disagree.cert 1
+run /tmp/branch_cross.cert 1
 
 # TRANSITIVE capability witness (call graph): functions ';'-separated, each
 # `allowed|direct|callee-indices`. accept ⟹ every function's transitive reach ⊆ declared.

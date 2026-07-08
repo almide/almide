@@ -974,9 +974,42 @@ impl LowerCtx {
         let cond_v = self.lower_heap_result_cond(cond)?;
         let dst = self.fresh_value();
         self.ops.push(Op::IfThen { cond: cond_v, dst: Some(dst) });
+        // RELEASE PARITY across the arms. An arm may MOVE an OUTER scope-level
+        // handle into its result — the effect tail's `err(msg)` moves the error
+        // accumulator into the Err block — which removes it from
+        // `live_heap_handles` GLOBALLY, though the move runs only on that arm's
+        // PATH. The sibling arm must then release it ITSELF: without the
+        // compensating Drop the non-moving path LEAKS the handle (one error
+        // accumulator per call on the happy path). The flat certificate hid this
+        // by counting the moving arm's `m` unconditionally; the branch-grouped
+        // cert (`{m|}` — arms disagree) REJECTS it, which is how it was found.
+        // With the Drop the arms agree (`{m|d}`) and the leak is gone. Nested
+        // heap-result ifs recurse through here, so parity holds level by level.
+        let outer: Vec<ValueId> = self.live_heap_handles.clone();
         let then_obj = self.lower_heap_result_arm(then, result_ty)?;
+        let consumed_by_then: Vec<ValueId> =
+            outer.iter().copied().filter(|h| !self.live_heap_handles.contains(h)).collect();
+        let else_marker_at = self.ops.len();
         self.ops.push(Op::Else { val: Some(then_obj) });
+        let live_after_then: Vec<ValueId> = self.live_heap_handles.clone();
         let else_obj = self.lower_heap_result_arm(else_, result_ty)?;
+        let consumed_by_else: Vec<ValueId> = live_after_then
+            .iter()
+            .copied()
+            .filter(|h| !self.live_heap_handles.contains(h))
+            .collect();
+        for h in &consumed_by_then {
+            if !consumed_by_else.contains(h) {
+                let op = self.drop_op_for(*h);
+                self.ops.push(op); // the ELSE arm releases what THEN moved out
+            }
+        }
+        for h in &consumed_by_else {
+            if !consumed_by_then.contains(h) {
+                let op = self.drop_op_for(*h);
+                self.ops.insert(else_marker_at, op); // the THEN arm releases what ELSE moved out
+            }
+        }
         self.ops.push(Op::EndIf { val: Some(else_obj) });
         Some(dst)
     }
