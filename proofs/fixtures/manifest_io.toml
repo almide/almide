@@ -1,0 +1,4 @@
+# The operator's capability manifest for manifest_print.almd (the ACCEPT case):
+# IO covers Stdout, so the printing program stays within its declared bound.
+[permissions]
+allow = ["IO"]

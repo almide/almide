@@ -11,6 +11,8 @@ RuntimeModel.v
 NameTotality.v
 TypeConcretization.v
 CapabilityBound.v
+CapabilityReach.v
+CallModes.v
 StackBalance.v
 Termination.v
 FreeList.v

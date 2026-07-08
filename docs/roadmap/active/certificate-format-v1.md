@@ -1,6 +1,8 @@
 # Certificate Format v1 — design
 
-> Status: **design accepted; brick 1 shipped** (ownership alphabet i/a/d/m).
+> Status: **design accepted; bricks 1–2 shipped** (ownership alphabet i/a/d/m;
+> calls 2a/2b/2c — effect calls, per-call-site caps, param-mode signatures +
+> manifest-declared caps), 3a/3b + 4a/4b shipped inside their bricks.
 > Supersedes the implicit "i/d-per-object" format. Grounded in a prior-art +
 > adversarial design pass (Perceus/Koka reuse, linear/foundational PCC,
 > WasmCert-Coq byte semantics, the v0 ownership taxonomy).
@@ -153,8 +155,39 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      callee; it does only the subset (Subset.v lever, zero new Coq). Closes the
      direct-only caps gap. Honest scope: the compiler's reachability fold is
      trusted per-build (verifying it per-edge, and an unknown callee = conservative
-     reject, are the hardenings); ownership param-modes (move/borrow signatures
-     for heap args) + manifest-declared caps (the ACCEPT case) remain (2c).
+     reject, are the hardenings).
+   - **2c: ownership param-modes + manifest-declared caps.** ✅ **SHIPPED.**
+     (i) `proofs/CallModes.v` — the SIGNATURE section (§3): per-function declared
+     heap-param modes (borrow | move as nats) + per-call-site actual modes;
+     `check_modes_cert` verifies positional agreement per site (unknown callee =
+     conservative reject; one nat-list equality per site — checker-size
+     invariant intact). The COMPOSITION LAW `check_fill_sound` is what makes it
+     sound: an accepted caller stream (call sites reduced to declared-mode
+     markers: borrow = no event, move = `m`) stays double-free/leak-free under
+     EVERY inlining of callee streams satisfying their declared modes
+     (`param_stream_ok`, Reuse-free + shift-invariant) — so per-function certs
+     COMPOSE without the checker ever opening a callee. Non-vacuous: the
+     caller-thinks-borrow/callee-thinks-move pairing (both balanced alone,
+     inlined = double-free) is exactly what agreement forbids
+     (`disagreement_double_frees`). Emitter: `call_modes_witness`
+     (certificate.rs; dotted self-host callees follow the renderer contract and
+     are omitted — the same known-class policy as the caps graph); gate rows:
+     hand-built agree/mismatch + real-source `two_functions` / `heap_arg_call`
+     (a heap arg actually passed). Both theorems axiom-clean, coqchk'd,
+     ledgered. Today's lowering is borrow-only, so every emitted mode is `0`;
+     when a consuming (move) convention lands, signature and site must flip
+     TOGETHER or the build is rejected — that agreement is now machine-checked.
+     (ii) Manifest-declared caps — the ACCEPT case: `apply_manifest_caps`
+     refines an `effect fn`'s declared bound to the operator's
+     `almide.toml [permissions].allow` (projected onto the Capability registry
+     by `manifest_caps`; pure fns keep ∅ — a manifest can never grant what the
+     effect system denies). Gate: the SAME real printing program ACCEPTs under
+     `allow=["IO"]` and REJECTs under `allow=["Rand"]` — the first non-vacuous
+     caps bound (the all-caps effect default could never reject an effect fn).
+     Remaining beyond 2c (later refinements): return-mode letters in the
+     signature line (today the owned-heap-result convention is uniform),
+     closure signatures (brick 5), and the fine-grained `FS.read`-style
+     manifest vocabulary (effect-system-capability Phase 1).
 3. **Byte-binding: op→wasm pattern table.**
    - **3a: the table + per-build matcher.** ✅ **SHIPPED.** `proofs/Translation.v`
      formalizes the op→wasm-instruction table as a Coq object (the formal

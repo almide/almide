@@ -63,6 +63,8 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `rc_dec_bytes_trap_on_zero` | WasmExec.v | Closed under the global context |
 | `rc_dec_bytes_frees_when_one` | WasmExec.v | Closed under the global context |
 | `make_unique_yields_unique` | CowSafety.v | Closed under the global context |
+| `check_fill_sound` | CallModes.v | Closed under the global context |
+| `check_modes_cert_sound` | CallModes.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 

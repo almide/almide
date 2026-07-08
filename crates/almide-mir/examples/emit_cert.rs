@@ -7,9 +7,10 @@
 //!   emit_cert <scenario> [ownership|names]   (property defaults to ownership)
 
 use almide_mir::{
-    certificate::{cap_witness_string, name_witness_string, ownership_certificate},
-    CallArg, Capability, Init, MirFunction, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT,
+    certificate::{call_modes_witness, cap_witness_string, name_witness_string, ownership_certificate},
+    CallArg, Capability, Init, MirFunction, MirParam, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT,
 };
+use std::collections::BTreeMap;
 
 fn heap() -> Repr {
     Repr::Ptr { layout: PLACEHOLDER_LAYOUT }
@@ -80,16 +81,45 @@ fn scenario(which: &str) -> MirFunction {
     }
 }
 
+/// Two-function programs for the CALL-MODE witness (brick 2c). `main` passes a
+/// heap Handle to `beep`; in the AGREE program `beep` declares one heap param
+/// (borrow — the v1 convention), in the MISMATCH program `beep` declares NO heap
+/// param, so the site's actual modes cannot equal the signature — the shape a
+/// mis-lowered call boundary produces, which the proven checker must REJECT.
+fn modes_scenario(which: &str) -> BTreeMap<String, MirFunction> {
+    let (a, p) = (ValueId(0), ValueId(1));
+    let beep_params =
+        if which == "modes-agree" { vec![MirParam { value: p, repr: heap() }] } else { vec![] };
+    let beep = MirFunction { name: "beep".into(), params: beep_params, ..Default::default() };
+    let main = MirFunction {
+        name: "main".into(),
+        ops: vec![
+            Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+            Op::CallFn { dst: None, name: "beep".into(), args: vec![CallArg::Handle(a)], result: None },
+            Op::Drop { v: a },
+        ],
+        ..Default::default()
+    };
+    let mut program = BTreeMap::new();
+    program.insert(beep.name.clone(), beep);
+    program.insert(main.name.clone(), main);
+    program
+}
+
 fn main() {
     let which = std::env::args().nth(1).unwrap_or_else(|| "balanced".to_string());
     let property = std::env::args().nth(2).unwrap_or_else(|| "ownership".to_string());
+    if property == "modes" {
+        print!("{}", call_modes_witness(&modes_scenario(&which), &|_: &str| false));
+        return;
+    }
     let f = scenario(&which);
     match property.as_str() {
         "ownership" => print!("{}", ownership_certificate(&f)),
         "names" => print!("{}", name_witness_string(&f)),
         "caps" => print!("{}", cap_witness_string(&f)),
         other => {
-            eprintln!("unknown property: {other} (try: ownership | names | caps)");
+            eprintln!("unknown property: {other} (try: ownership | names | caps | modes)");
             std::process::exit(2);
         }
     }

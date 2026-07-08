@@ -7,6 +7,7 @@ From AlmideTrust Require Import OwnershipChecker.
 From AlmideTrust Require Import NameTotality.
 From AlmideTrust Require Import CapabilityBound.
 From AlmideTrust Require Import CapabilityReach.
+From AlmideTrust Require Import CallModes.
 From Stdlib Require Import Extraction.
 From Stdlib Require Import ExtrOcamlBasic ExtrOcamlNativeString.
 
@@ -26,4 +27,9 @@ Set Extraction Output Directory ".".
    of `check_cert_lc`: it also parses `[ then | else ]` filter slots; flat + CLoop
    certs parse identically, so it is fully backward-compatible). The driver dispatches
    ownership to it. *)
-Extraction "checker.ml" check_cert check_cert_lc check_clc check_names_cert check_caps_cert check_prog_cert.
+(* `check_modes_cert` (CallModes) is the CALL-MODE SIGNATURE checker (brick 2c):
+   it parses the `<sigs>|<sites>` witness and decides per-call-site agreement, so
+   `accept ⟹ every call site used exactly its callee's declared param modes` —
+   the ground fact that makes per-function ownership certs compose
+   (CallModes.check_fill_sound). *)
+Extraction "checker.ml" check_cert check_cert_lc check_clc check_names_cert check_caps_cert check_prog_cert check_modes_cert.

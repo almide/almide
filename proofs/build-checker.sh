@@ -14,6 +14,7 @@ echo "== compile + extract the proven checker =="
 "$COQC" -Q . AlmideTrust NameTotality.v >/dev/null
 "$COQC" -Q . AlmideTrust CapabilityBound.v >/dev/null
 "$COQC" -Q . AlmideTrust CapabilityReach.v >/dev/null
+"$COQC" -Q . AlmideTrust CallModes.v >/dev/null
 "$COQC" -Q . AlmideTrust Extract.v >/dev/null
 
 echo "== link the runnable checker (extracted check_cert, parser internalized) =="
@@ -66,6 +67,22 @@ runt() { # path expected_exit  (caps-transitive mode)
 }
 runt /tmp/caps_tr_ok.cert 0
 runt /tmp/caps_tr_bad.cert 1
+
+# CALL-MODE signature witness (brick 2c): `<sigs>|<sites>`, functions/sites
+# ';'-separated, modes as nats (0 = borrow, 1 = move), each site
+# `<callee-index> <actual modes…>`. accept ⟹ every call site used exactly its
+# callee's declared param modes (the compositionality ground fact).
+printf '0 1;1|1 1' > /tmp/modes_ok.cert    # fn1 declares [move]; a site calls fn1 with [move] → ACCEPT
+printf '0|0 1'     > /tmp/modes_bad.cert    # fn0 declares [borrow]; a site calls fn0 with [move] → REJECT (the double-free pairing)
+printf '0|5 0'     > /tmp/modes_unknown.cert # a site names an out-of-range callee → conservative REJECT
+runm() { # path expected_exit  (call-modes mode)
+  set +e; ./checker call-modes "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -eq "$2" ]; then echo "ok   $(basename "$1"): $(cat /tmp/checker.out) (exit $rc)";
+  else echo "FAIL $(basename "$1"): got exit $rc want $2 ($(cat /tmp/checker.out))"; exit 1; fi
+}
+runm /tmp/modes_ok.cert 0
+runm /tmp/modes_bad.cert 1
+runm /tmp/modes_unknown.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"

@@ -1,0 +1,13 @@
+// A REAL 2-function program exercising the PARAM-MODE signature (brick 2c):
+// `main` passes a heap list to `use_it` — a BORROWED heap param (the v1
+// calling convention: the caller keeps its reference and releases it; the
+// callee gets a live handle, no owned ref). The call-modes witness records the
+// site's actual mode ([borrow]) and `use_it`'s declared signature ([borrow]);
+// the KERNEL-PROVEN check_modes_cert re-verifies the agreement — the ground
+// fact that makes the two per-function ownership certs COMPOSE
+// (CallModes.check_fill_sound).
+fn use_it(xs: List[Int]) -> Int = list.len(xs)
+fn main() -> Int = {
+  var a = [1, 2, 3]
+  use_it(a)
+}

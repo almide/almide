@@ -410,6 +410,117 @@ pub fn program_cap_graph_witness(
     fns.join(";")
 }
 
+/// Project the `almide.toml [permissions].allow` MANIFEST vocabulary (the
+/// production permission strings `cli::check_permissions` consumes: `IO` /
+/// `Rand` / `Env` / `Time` / …) onto the MIR [`Capability`] registry. This is
+/// the DECLARED side of the capability witness when a manifest exists — the
+/// operator's written bound, not the vacuous effect-fn-declares-everything
+/// default. Effects with no modeled MIR capability yet (`Net`, `Fan`) project
+/// to nothing: they cannot silently widen the bound.
+pub fn manifest_caps(allow: &[String]) -> Vec<Capability> {
+    let mut caps: Vec<Capability> = Vec::new();
+    for p in allow {
+        match p.as_str() {
+            "IO" => caps.extend([
+                Capability::Stdout,
+                Capability::Stdin,
+                Capability::FsRead,
+                Capability::FsWrite,
+            ]),
+            "Rand" => caps.push(Capability::Entropy),
+            "Env" => caps.push(Capability::CliArgs),
+            "Time" => caps.push(Capability::Clock),
+            _ => {}
+        }
+    }
+    caps
+}
+
+/// Refine an EFFECT function's declared capability bound to the manifest
+/// (`[permissions].allow` → `effect fn` declares ONLY those capabilities — the
+/// roadmap's Phase-1 semantics on the witness path). A pure `fn` keeps ∅: a
+/// manifest can never GRANT host access the effect system denies (the
+/// pure-stays-pure soundness floor is untouched). Before this refinement an
+/// `effect fn` declared every modeled capability, so `used ⊆ declared` could
+/// never REJECT it — the manifest makes the sandbox promise non-vacuous.
+pub fn apply_manifest_caps(func: &mut MirFunction, allow: &[String]) {
+    if !func.declared_caps.is_empty() {
+        func.declared_caps = manifest_caps(allow);
+    }
+}
+
+/// The mode nat of a heap param / heap call arg in the CALL-MODE witness
+/// (proofs/CallModes.v: 0 = borrow, 1 = move). The v1 calling convention is
+/// borrow-only today ([`MirParam`]: the caller keeps its reference, the callee's
+/// cert seeds the param at 0; [`CallArg::Handle`]: live-checked, refcount
+/// unchanged) — so every emitted mode is `0`. When the lowering gains consuming
+/// (move) params, it flips the mode HERE and in the signature TOGETHER or the
+/// proven checker rejects the build: that agreement is the point of the witness.
+const MODE_BORROW: u32 = 0;
+
+/// Emit the CALL-MODE SIGNATURE witness for the kernel-proven `check_modes_cert`
+/// (proofs/CallModes.v, certificate format v1 brick 2c): `<sigs>|<sites>` —
+/// signatures `;`-separated in the emitted (sorted-by-name) function order, each
+/// the space-separated heap-param modes of that function; call sites
+/// `;`-separated, each `<callee index> <actual modes…>`. The proven checker
+/// accepts iff every site's actual modes EQUAL its callee's declared signature —
+/// the ground fact that makes per-function ownership certs COMPOSE
+/// (`CallModes.check_fill_sound`): a callee that assumed move while its caller
+/// assumed borrow (both per-function-balanced, inlined = double-free) can no
+/// longer slip through.
+///
+/// Honest scope: [`Op::CallFn`] sites only. A runtime [`Op::Call`] follows the
+/// fixed borrow-args/owned-result convention (a renderer contract, not a
+/// per-function signature); an [`Op::CallIndirect`] goes through a closure whose
+/// signature (captured-env ownership included) is format v1 brick 5 — until
+/// then indirect sites are not mode-checked here. An out-of-program callee with
+/// a KNOWN calling convention (`is_known_convention` — the caller's policy,
+/// e.g. dotted self-hosted stdlib names, purity-gated at lowering and borrowing
+/// their heap args by the same renderer contract as [`Op::Call`]) is omitted;
+/// any OTHER unknown / cross-file callee gets an out-of-range index, which the
+/// checker REJECTS (conservative, same discipline as the caps graph's universe
+/// node).
+pub fn call_modes_witness(
+    program: &BTreeMap<String, MirFunction>,
+    is_known_convention: &dyn Fn(&str) -> bool,
+) -> String {
+    let names: Vec<&str> = program.keys().map(|s| s.as_str()).collect();
+    let index_of: BTreeMap<&str, usize> =
+        names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+    let unknown = names.len(); // out of range — the checker rejects any site naming it
+    let sigs: Vec<String> = names
+        .iter()
+        .map(|name| {
+            program[*name]
+                .params
+                .iter()
+                .filter(|p| p.repr.is_heap())
+                .map(|_| MODE_BORROW.to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect();
+    let mut sites: Vec<String> = Vec::new();
+    for name in &names {
+        for op in &program[*name].ops {
+            if let Op::CallFn { name: callee, args, .. } = op {
+                let idx = match index_of.get(callee.as_str()) {
+                    Some(&i) => i,
+                    None if is_known_convention(callee) => continue, // renderer-contract callee
+                    None => unknown, // unknown callee — the checker rejects the site
+                };
+                let mut site = vec![idx.to_string()];
+                site.extend(args.iter().filter_map(|a| match a {
+                    CallArg::Handle(_) => Some(MODE_BORROW.to_string()),
+                    CallArg::Scalar(_) | CallArg::Imm(_) | CallArg::Label(_) => None,
+                }));
+                sites.push(site.join(" "));
+            }
+        }
+    }
+    format!("{}|{}", sigs.join(";"), sites.join(";"))
+}
+
 /// Conservative transitive capability-reachability — the SOUND basis for a
 /// corpus capability gate across `Op::CallFn` edges. A function's empty (direct)
 /// capability witness is a sound claim of effect-freedom ONLY if this returns

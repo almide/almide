@@ -32,14 +32,19 @@ echo "== build the kernel-proven checker from the Coq proof =="
 emit() { (cd "$ROOT" && cargo run -q -p almide-mir --example emit_cert -- "$1" "$2"); }
 
 run() { # scenario property expected_exit
+  run_mode "$1" "$2" "$2" "$3"
+}
+# The call-modes witness (`modes`) is checked by the `call-modes` checker mode —
+# emit property and checker mode differ, hence this variant.
+run_mode() { # scenario emit-property checker-mode expected_exit
   emit "$1" "$2" > /tmp/compiler.witness
   set +e
-  "$ROOT/proofs/checker" "$2" /tmp/compiler.witness >/tmp/gate.out 2>&1; local rc=$?
+  "$ROOT/proofs/checker" "$3" /tmp/compiler.witness >/tmp/gate.out 2>&1; local rc=$?
   set -e
-  if [ "$rc" -eq "$3" ]; then
+  if [ "$rc" -eq "$4" ]; then
     echo "ok   [$2] $1: witness '$(cat /tmp/compiler.witness | tr '\n' '|')' -> $(cat /tmp/gate.out)"
   else
-    echo "FAIL [$2] $1: got exit $rc want $3 ($(cat /tmp/gate.out))"; exit 1
+    echo "FAIL [$2] $1: got exit $rc want $4 ($(cat /tmp/gate.out))"; exit 1
   fi
 }
 
@@ -79,6 +84,14 @@ echo "-- property: caps (no undeclared host capability) --"
 run sandboxed  caps 0
 run undeclared caps 1
 
+echo "-- property: call-modes (call sites use the callee's declared param modes) --"
+# main passes a heap Handle to beep. AGREE: beep declares one borrow param →
+# ACCEPT. MISMATCH: beep declares NO heap param (a mis-lowered call boundary —
+# the caller-thinks-borrow/callee-thinks-otherwise shape whose inlining
+# double-frees, CallModes.disagreement_double_frees) → REJECT.
+run_mode modes-agree    modes call-modes 0
+run_mode modes-mismatch modes call-modes 1
+
 echo "-- REAL .almd → frontend → MIR → proven checker (weekly indicator ①: 0→1) --"
 run_src return_list.almd build ownership 0
 run_src return_list.almd build names     0
@@ -96,6 +109,33 @@ run_src      transitive_caps.almd main caps  0
 run_src_mode transitive_caps.almd main tcaps caps 1
 run_src      two_functions.almd  main ownership 0
 run_src      two_functions.almd  main names     0
+# MANIFEST-DECLARED caps (2c ACCEPT case): the declared bound is the OPERATOR's
+# `[permissions].allow` manifest, no longer the vacuous effect-fn-declares-
+# everything default. The SAME printing program ACCEPTs under allow=["IO"]
+# (used {Stdout} ⊆ declared) and REJECTs under allow=["Rand"].
+run_src_manifest() { # fixture function property manifest expected_exit
+  (cd "$ROOT" && cargo run -q -p almide-mir --example emit_cert_from_source \
+    -- "proofs/fixtures/$1" "$2" "$3" "proofs/fixtures/$4") > /tmp/real.witness
+  set +e
+  "$ROOT/proofs/checker" "$3" /tmp/real.witness >/tmp/gate.out 2>&1; local rc=$?
+  set -e
+  if [ "$rc" -eq "$5" ]; then
+    echo "ok   [$3 ⊳ $4] $1::$2 (real source): witness '$(cat /tmp/real.witness | tr '\n' '|')' -> $(cat /tmp/gate.out)"
+  else
+    echo "FAIL [$3 ⊳ $4] $1::$2 (real source): got exit $rc want $5 ($(cat /tmp/gate.out))"; exit 1
+  fi
+}
+run_src_manifest manifest_print.almd main caps manifest_io.toml   0
+run_src_manifest manifest_print.almd main caps manifest_rand.toml 1
+# Call-mode agreement on a REAL two-function program: every CallFn site's actual
+# modes equal the callee's declared heap-param modes (the borrow-only v1
+# convention), re-verified by the proven checker — per-function ownership certs
+# now COMPOSE by CallModes.check_fill_sound.
+run_src_mode two_functions.almd  main modes call-modes 0
+# ... and with a heap argument ACTUALLY PASSED: main hands its list to use_it
+# (one borrow param) — the site's actual [borrow] equals the declared signature.
+run_src      heap_arg_call.almd  main ownership 0
+run_src_mode heap_arg_call.almd  main modes call-modes 0
 
 echo
 echo "GATE OK: the kernel-proven checker re-verified per-build witnesses on THREE"
