@@ -1,7 +1,7 @@
 //! `LowerCtx` methods: binds (extracted from lower/mod.rs).
 
 use super::*;
-use crate::{CallArg, Init, Op, ValueId};
+use crate::{CallArg, Init, IntOp, Op, PrimKind, ValueId};
 use almide_ir::{
     CallTarget, IrExpr, IrExprKind, IrPattern, VarId,
 };
@@ -9,34 +9,72 @@ use almide_lang::types::Ty;
 
 impl LowerCtx {
 
-    /// Lift a NON-CAPTURING lambda `(params) => body` into a fresh top-level MIR function
-    /// (the closures machinery) and emit an `Op::FuncRef` binding its table slot, returning
-    /// that scalar value (recorded in `funcref_values` so a later call through it lowers to
-    /// `Op::CallIndirect`). Returns `None` for a CAPTURING lambda (its body references an
-    /// enclosing local — a real closure environment the proven model cannot represent) or a
-    /// body outside the lowering subset; the caller then keeps the deferred `Opaque` model.
+    /// Lift a lambda `(params) => body` into a fresh top-level MIR function (the closures
+    /// machinery) and materialize its CLOSURE BLOCK — a heap `[rc][len][cap][fnidx]
+    /// [captured…]` value (a plain DynList: slot 0 holds the `Op::FuncRef` table index,
+    /// slots 1… hold the captured locals by VALUE). The block is the UNIFORM first-class
+    /// function representation: a call through it loads the fnidx from slot 0 and passes
+    /// the block as the leading (borrowed) ENV argument (`emit_closure_call`); the lifted
+    /// body reads its captures back out of that env param in a prologue. A NON-capturing
+    /// lambda is the k = 0 degenerate block. Returns `None` for a capture outside the
+    /// slice (a heap or non-i64-scalar capture — a later ratchet) or a body outside the
+    /// lowering subset; the caller then keeps the deferred `Opaque` model.
+    ///
+    /// OWNERSHIP: the block is a fresh owned heap object (cert `i`, scope-end `d` — pushed
+    /// to `live_heap_handles` here; a tail return moves it out instead). Captured scalars
+    /// are COPIED into the block at creation (value semantics — matching v0's move-closure
+    /// copy), so the env owns no nested handles and the flat drop frees it exactly.
     ///
     /// SOUNDNESS: the lifted body is lowered by the SAME `lower_body_into` as any function,
     /// so it carries its own ownership / name-totality / capability certificate that the
-    /// proven checker re-verifies. Its capabilities reach THIS function through the
-    /// `Op::FuncRef` edge — folded at closure CREATION (coverage-free; see
-    /// `certificate::reachable_caps` / `reachable_caps_or_tainted`), so a printing lambda
-    /// can never be silently caps-verified regardless of how/whether it is later invoked.
-    /// The lambda is named `__lambda_<fn_name>_<n>` — file-unique (the harness keys the
-    /// in-profile map by name), with nested lifts flattened into this function's set.
+    /// proven checker re-verifies; its env param is BORROWED (the caller's block outlives
+    /// the call — the call-mode agreement the CallModes witness pins). Its capabilities
+    /// reach THIS function through the `Op::FuncRef` edge — folded at closure CREATION
+    /// (coverage-free; see `certificate::reachable_caps` / `reachable_caps_or_tainted`), so
+    /// a printing lambda can never be silently caps-verified regardless of how/whether it
+    /// is later invoked. The lambda is named `__lambda_<fn_name>_<n>` — file-unique (the
+    /// harness keys the in-profile map by name), with nested lifts flattened into this
+    /// function's set.
     pub(crate) fn lift_lambda(
         &mut self,
         params: &[(VarId, Ty)],
         body: &IrExpr,
     ) -> Option<ValueId> {
         // free_vars over the lambda's own params reports exactly its captures (a `Var` node
-        // denotes only locals). A non-empty set ⇒ a real environment ⇒ not liftable here.
+        // denotes only locals). Collect them WITH their types (from the body's Var nodes) in
+        // first-occurrence order — the deterministic env slot layout both sides share.
         let mut bound: std::collections::HashSet<VarId> = std::collections::HashSet::new();
         for (v, _) in params {
             bound.insert(*v);
         }
-        if !almide_ir::free_vars::free_vars(body, &bound).is_empty() {
-            return None;
+        let free = almide_ir::free_vars::free_vars(body, &bound);
+        struct CapCollect<'a> {
+            free: &'a [VarId],
+            out: Vec<(VarId, Ty)>,
+        }
+        impl almide_ir::visit::IrVisitor for CapCollect<'_> {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if let IrExprKind::Var { id } = &e.kind {
+                    if self.free.contains(id) && !self.out.iter().any(|(v, _)| v == id) {
+                        self.out.push((*id, e.ty.clone()));
+                    }
+                }
+                almide_ir::visit::walk_expr(self, e);
+            }
+        }
+        let mut cc = CapCollect { free: &free, out: Vec::new() };
+        almide_ir::visit::IrVisitor::visit_expr(&mut cc, body);
+        let captures = cc.out;
+        // Slice gate: i64-scalar captures only (Int/Bool — stored/loaded as raw 64-bit
+        // slots). A heap capture needs env-owned nested drops, a Float capture an f64
+        // reinterpret — both later ratchets. Every capture must also resolve to a lowered
+        // local value HERE (a capture of a deferred/opaque binding has no readable value).
+        let mut cap_vals: Vec<ValueId> = Vec::new();
+        for (v, ty) in &captures {
+            if !matches!(ty, Ty::Int | Ty::Bool) {
+                return None;
+            }
+            cap_vals.push(*self.value_of.get(v)?);
         }
         // Lower the body in a FRESH sub-context sharing only the globals (its own value
         // space + params). A failure (a body outside the subset) aborts the lift cleanly —
@@ -59,7 +97,12 @@ impl LowerCtx {
             global_inits: self.global_inits.clone(),
             ..Default::default()
         };
-        let mut mir_params = Vec::new();
+        // The leading ENV param: the closure block itself, BORROWED (the caller owns it
+        // and keeps it live across the call — the v1 heap-param convention).
+        let env_pv = sub.fresh_value();
+        sub.param_values.insert(env_pv);
+        let mut mir_params =
+            vec![crate::MirParam { value: env_pv, repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT } }];
         for (v, ty) in params {
             let pv = sub.fresh_value();
             sub.value_of.insert(*v, pv);
@@ -75,6 +118,22 @@ impl LowerCtx {
                 sub.seed_variant_param(pv, ty);
             }
             mir_params.push(crate::MirParam { value: pv, repr });
+        }
+        // PROLOGUE: read each capture back out of the env block (slot 1 + i — slot 0 is
+        // the fnidx). A raw 64-bit load through the borrowed env handle — a Prim read, no
+        // ownership event (the block is the caller's).
+        for (i, (v, _)) in captures.iter().enumerate() {
+            let h = sub.fresh_value();
+            sub.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![env_pv] });
+            let off = sub.fresh_value();
+            sub.ops
+                .push(Op::ConstInt { dst: off, value: layout::slot_offset(1 + i) as i64 });
+            let addr = sub.fresh_value();
+            sub.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            let val = sub.fresh_value();
+            sub.ops
+                .push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(val), args: vec![addr] });
+            sub.value_of.insert(*v, val);
         }
         let ret = sub.lower_body_into(body).ok()?;
         let name = format!("__lambda_{}_{}", self.fn_name, self.lifted.len());
@@ -93,10 +152,33 @@ impl LowerCtx {
         };
         self.lifted.push(lifted_fn);
         self.lifted.append(&mut nested);
-        let dst = self.fresh_value();
-        self.ops.push(Op::FuncRef { dst, name });
-        self.funcref_values.insert(dst);
-        Some(dst)
+        // Materialize the CLOSURE BLOCK: a DynList of 1 + k slots — slot 0 the funcref
+        // table index, slots 1… the captured scalars, copied in by VALUE at creation.
+        let len_c = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: len_c, value: (1 + cap_vals.len()) as i64 });
+        let blk = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst: blk,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: Init::DynList { len: len_c },
+        });
+        let fr = self.fresh_value();
+        self.ops.push(Op::FuncRef { dst: fr, name });
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![blk] });
+        for (i, v) in std::iter::once(fr).chain(cap_vals.iter().copied()).enumerate() {
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(i) as i64 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            self.ops
+                .push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, v] });
+        }
+        // A fresh owned heap value: dropped at scope end unless a consumer moves it out
+        // (a tail return removes it from the live set).
+        self.live_heap_handles.push(blk);
+        self.closure_values.insert(blk);
+        Some(blk)
     }
 
     /// Lower a `List[String]` LITERAL to an alloc_list_str + per-element move-in. Each element is

@@ -14,19 +14,53 @@ impl LowerCtx {
     /// caps fold are preserved: a real `CallFn` replaces the elided marker 1:1 (same
     /// callee NAME, so `reachable_caps` is unchanged; same op count, so the
     /// `mir_calls <= ir_calls` gate cannot falsely de-taint).
-    /// If `callee` names a local bound to a LIFTED lambda (an `Op::FuncRef` value recorded
-    /// in `funcref_values`), return that value — the table slot a `CallIndirect` dispatches
-    /// through. Returns `None` for any other computed callee (a dynamic closure param, an
-    /// unanalyzable value), so the caller keeps the sound deferred model for those.
-    pub(crate) fn funcref_value_of(&self, callee: &IrExpr) -> Option<ValueId> {
+    /// If `callee` names a local bound to a CLOSURE BLOCK (a lifted lambda, a
+    /// function-typed param, or a function-valued call result — recorded in
+    /// `closure_values`), return that block value — what a `CallIndirect` dispatches
+    /// through. Returns `None` for any other computed callee (an unanalyzable value),
+    /// so the caller keeps the sound deferred model for those.
+    pub(crate) fn closure_value_of(&self, callee: &IrExpr) -> Option<ValueId> {
         if let IrExprKind::Var { id } = &callee.kind {
             if let Some(v) = self.value_of.get(id) {
-                if self.funcref_values.contains(v) {
+                if self.closure_values.contains(v) {
                     return Some(*v);
                 }
             }
         }
         None
+    }
+
+    /// Load a closure block's table index (slot 0) — the scalar a `call_indirect`
+    /// wraps to its i32 table offset. A Prim read through the block handle: no
+    /// ownership event (the block is live — the caller holds it).
+    pub(crate) fn emit_closure_fnidx(&mut self, blk: ValueId) -> ValueId {
+        use crate::{IntOp, PrimKind};
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![blk] });
+        let off = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(0) as i64 });
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+        let idx = self.fresh_value();
+        self.ops
+            .push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(idx), args: vec![addr] });
+        idx
+    }
+
+    /// Emit a `CallIndirect` THROUGH a closure block: fnidx from slot 0, the block
+    /// itself as the leading BORROWED env argument (the lifted lambda's prologue
+    /// reads its captures back out of it), then the user args.
+    pub(crate) fn emit_closure_call(
+        &mut self,
+        blk: ValueId,
+        dst: Option<ValueId>,
+        user_args: Vec<CallArg>,
+        result: Option<crate::Repr>,
+    ) {
+        let table_idx = self.emit_closure_fnidx(blk);
+        let mut args = vec![CallArg::Handle(blk)];
+        args.extend(user_args);
+        self.ops.push(Op::CallIndirect { dst, table_idx, args, result });
     }
 
     pub(crate) fn try_lower_scalar_call(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
@@ -56,17 +90,12 @@ impl LowerCtx {
                     self.ops.truncate(ops_mark);
                     self.live_heap_handles.truncate(lhh_mark);
                 }
-                let table_idx = self.funcref_value_of(callee)?;
+                let blk = self.closure_value_of(callee)?;
                 let repr = repr_of(ty).ok()?;
                 match self.lower_call_args(args) {
                     Ok(lowered) => {
                         let dst = self.fresh_value();
-                        self.ops.push(Op::CallIndirect {
-                            dst: Some(dst),
-                            table_idx,
-                            args: lowered,
-                            result: Some(repr),
-                        });
+                        self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
                         Some(dst)
                     }
                     Err(_) => {

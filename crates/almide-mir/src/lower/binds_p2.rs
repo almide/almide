@@ -595,15 +595,11 @@ impl LowerCtx {
                 }
                 let lowered = self.lower_call_args(args)?;
                 let dst = self.fresh_value();
-                // A function-VALUED result (`let f = mk()` where `mk` returns a lifted lambda) is a
-                // scalar FUNCREF (an i64 table slot), NOT the i32 heap Ptr `repr_of(Ty::Fn)` gives — so
-                // the bound local is typed i64 to match the callee's i64 return (the `CallIndirect`
-                // wraps it to the i32 table index).
-                let repr = if matches!(ty, Ty::Fn { .. }) {
-                    crate::Repr::Scalar { width: crate::ScalarWidth::Double }
-                } else {
-                    repr_of(ty)?
-                };
+                // A function-VALUED result (`let f = mk()`) is a CLOSURE BLOCK — the uniform
+                // heap representation (`repr_of(Ty::Fn)` = Ptr), owned + dropped at scope end
+                // like any heap result; `closure_values` (below) makes a later `f(args)`
+                // dispatch through it.
+                let repr = repr_of(ty)?;
                 self.value_of.insert(var, dst);
                 self.ops.push(Op::CallFn {
                     dst: Some(dst),
@@ -637,13 +633,12 @@ impl LowerCtx {
                 if crate::lower::is_value_ty(ty) {
                     self.value_handles.insert(dst);
                 }
-                // A user fn RETURNING a function value (`let f = mk()` where `mk() -> (Int) -> Int`
-                // returns a lifted non-capturing lambda) yields a FUNCREF (a scalar table slot, NOT a
-                // heap block): track it so a later `f(args)` dispatches through `Op::CallIndirect`, and
-                // drop it from the scope-end set (a funcref is not an allocation to free).
+                // A user fn RETURNING a function value (`let f = mk()` / `let f = adder(3)`)
+                // yields a CLOSURE BLOCK — a fresh owned heap value (already in the scope-end
+                // set like any heap result): track it so a later `f(args)` dispatches through
+                // `Op::CallIndirect` via `emit_closure_call`.
                 if matches!(ty, Ty::Fn { .. }) {
-                    self.live_heap_handles.retain(|h| *h != dst);
-                    self.funcref_values.insert(dst);
+                    self.closure_values.insert(dst);
                 }
                 // A user function returning Option/Result yields a REAL same-layout variant block
                 // (the v1 calling convention — `seed_variant_param`'s contract). SEED its READ-shape
@@ -815,18 +810,13 @@ impl LowerCtx {
             // flat_map). A Computed callee that is NOT a known funcref falls through to the
             // deferred Opaque below.
             IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
-                if self.funcref_value_of(callee).is_some() =>
+                if self.closure_value_of(callee).is_some() =>
             {
-                let table_idx = self.funcref_value_of(callee).unwrap();
+                let blk = self.closure_value_of(callee).unwrap();
                 let repr = repr_of(ty)?;
                 let lowered = self.lower_call_args(args)?;
                 let dst = self.fresh_value();
-                self.ops.push(Op::CallIndirect {
-                    dst: Some(dst),
-                    table_idx,
-                    args: lowered,
-                    result: Some(repr),
-                });
+                self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
                 // The funcref returns its Result/Option in the SAME materialized layout an `ok()`/

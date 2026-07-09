@@ -743,10 +743,13 @@ pub(crate) struct LowerCtx {
     /// without this prefix (one lambda's certificate silently lost). Set by
     /// `lower_function_all`; empty for the param-free testable `lower_body` entry.
     fn_name: String,
-    /// MIR values that denote a lifted lambda's table slot (an `Op::FuncRef` dst). A later
-    /// call whose callee is one of these (`f(args)` where `f` bound a lifted lambda) lowers
-    /// to `Op::CallIndirect` through it instead of deferring — the closure EXECUTES.
-    funcref_values: HashSet<ValueId>,
+    /// MIR values that denote a CLOSURE BLOCK — the uniform first-class function
+    /// representation: a heap `[rc][len][cap][fnidx][captured…]` block (`lift_lambda`).
+    /// A later call whose callee is one of these (`f(args)` where `f` bound a lambda /
+    /// a function-typed param or call result) lowers to `Op::CallIndirect` through the
+    /// block (fnidx loaded from slot 0, the block passed as the borrowed env arg —
+    /// `emit_closure_call`) instead of deferring — the closure EXECUTES.
+    closure_values: HashSet<ValueId>,
     /// C1 DIRECT-CALL INLINE: source-`VarId` → the INLINE lambda (`params`, `body`) a `let f =
     /// (x) => body` statically bound. A later DIRECT call `f(args)` whose callee is this `f`
     /// is DEFUNCTIONALIZED — the body is lowered INLINE with each param bound to its arg, and

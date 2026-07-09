@@ -429,17 +429,20 @@ impl LowerCtx {
                 // tail (return its Result directly). This unblocks the `parse_mapping =
                 // collect_map(..)!` shape (a tail call result propagated).
                 IrExprKind::Unwrap { expr } => return self.lower_tail(Some(expr)),
-                // A NON-CAPTURING lambda RETURNED (`fn mk() -> (Int) -> Int = (x) => x + 1`) — LIFT it
-                // to a table slot (`Op::FuncRef`, a scalar i64) and move THAT out as the return. The
-                // caller tracks the bound result as a funcref (binds_p2) so a later `f(args)` dispatches
-                // through it via `Op::CallIndirect`. A CAPTURING lambda has no liftable slot (a real
-                // closure environment is a later brick) → wall cleanly, never an empty deferred value.
+                // A lambda RETURNED (`fn mk() -> (Int) -> Int = (x) => x + 1`, `fn adder(n)
+                // = (x) => x + n`) — LIFT it to a CLOSURE BLOCK (fnidx + captured scalars)
+                // and MOVE the block out as the return (a fresh owned heap value — removed
+                // from the scope-end set; cert `im`). The caller tracks the bound result in
+                // `closure_values` (binds_p2) so a later `f(args)` dispatches through it.
                 IrExprKind::Lambda { params, body, .. } => {
                     return match self.lift_lambda(params, body) {
-                        Some(slot) => Ok(Some(slot)),
+                        Some(blk) => {
+                            self.live_heap_handles.retain(|h| *h != blk);
+                            Ok(Some(blk))
+                        }
                         None => Err(LowerError::Unsupported(
-                            "capturing closure returned cannot be faithfully materialized in this \
-                             brick (a real closure environment is a later brick)"
+                            "lambda outside the liftable subset returned (heap/Float captures \
+                             are a later ratchet) — cannot be faithfully materialized"
                                 .into(),
                         )),
                     };
@@ -794,19 +797,14 @@ impl LowerCtx {
                 // This opens higher-order functions RETURNING a heap value (Result/List/String) — the
                 // foundation for a self-hosted `fan.map` / traverse. An UNKNOWN callee stays walled.
                 IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
-                    if self.funcref_value_of(callee).is_some() =>
+                    if self.closure_value_of(callee).is_some() =>
                 {
                     let mark = self.live_heap_handles.len();
-                    let table_idx = self.funcref_value_of(callee).unwrap();
+                    let blk = self.closure_value_of(callee).unwrap();
                     let lowered = self.lower_call_args(args)?;
                     let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;
-                    self.ops.push(Op::CallIndirect {
-                        dst: Some(dst),
-                        table_idx,
-                        args: lowered,
-                        result: Some(repr),
-                    });
+                    self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
                     self.drop_arm_locals(mark);
                     Ok(Some(dst))
                 }

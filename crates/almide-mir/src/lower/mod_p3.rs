@@ -28,20 +28,18 @@ impl LowerCtx {
         for p in params {
             let v = self.fresh_value();
             self.value_of.insert(p.var, v);
-            // A FUNCTION-typed param (`f: (Int) -> Int`, the closures machinery) is a SCALAR
-            // table slot (an i64 index into the module function table), NOT a heap value:
-            // the caller passes the lifted lambda's `FuncRef` value. So it gets a scalar
-            // Repr and joins `funcref_values` — a `f(x)` call in the body then lowers to
-            // `Op::CallIndirect` through it (the dynamic-closure path; cap_witness taints
-            // it conservatively, so a higher-order function stays honestly caps-unverified).
-            // This is what lets `list.map`/`filter`/`fold` be self-hosted in Almide.
-            let repr = if matches!(p.ty, Ty::Fn { .. }) {
-                let r = Repr::Scalar { width: crate::ScalarWidth::Double };
-                self.funcref_values.insert(v);
-                r
-            } else {
-                repr_of(&p.ty)? // Ptr (heap) / Scalar; Unsupported if Unknown or non-value
-            };
+            // A FUNCTION-typed param (`f: (Int) -> Int`, the closures machinery) is a
+            // CLOSURE BLOCK — the uniform heap representation: the caller passes the
+            // block (borrowed, like every heap param) and it joins `closure_values` —
+            // a `f(x)` call in the body then lowers to `Op::CallIndirect` through it
+            // (fnidx from slot 0, the block forwarded as the callee's env; cap_witness
+            // taints it conservatively, so a higher-order function stays honestly
+            // caps-unverified). This is what lets `list.map`/`filter`/`fold` be
+            // self-hosted in Almide.
+            if matches!(p.ty, Ty::Fn { .. }) {
+                self.closure_values.insert(v);
+            }
+            let repr = repr_of(&p.ty)?; // Ptr (heap) / Scalar; Unsupported if Unknown or non-value
             if repr.is_heap() {
                 self.param_values.insert(v);
                 // A heap variant param (`Option[T]` / `Result[T, String]`) is passed by the caller
@@ -359,18 +357,13 @@ impl LowerCtx {
                                 // (OwnershipChecker.v `check_line_unroll_sound` — any fresh-owned
                                 // producer). NOT pushed to live_heap_handles (the slot owns it).
                                 IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
-                                    if self.funcref_value_of(callee).is_some() =>
+                                    if self.closure_value_of(callee).is_some() =>
                                 {
-                                    let table_idx = self.funcref_value_of(callee).unwrap();
+                                    let blk = self.closure_value_of(callee).unwrap();
                                     match (repr_of(&value.ty), self.lower_call_args(args)) {
                                         (Ok(repr), Ok(lowered)) => {
                                             let new = self.fresh_value();
-                                            self.ops.push(Op::CallIndirect {
-                                                dst: Some(new),
-                                                table_idx,
-                                                args: lowered,
-                                                result: Some(repr),
-                                            });
+                                            self.emit_closure_call(blk, Some(new), lowered, Some(repr));
                                             Some(new)
                                         }
                                         _ => None,

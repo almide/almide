@@ -166,6 +166,12 @@ run_src      heap_result_if.almd pick ownership 0
 # funcref, `f(5)` is an Op::CallIndirect — the witness expands the site to one
 # agreement row per possible callee (the lifted lambda), proven per-site.
 run_src_mode funcref_call.almd   main modes call-modes 0
+# A REAL CAPTURING closure: `adder(3)` returns a closure BLOCK (fnidx + captured
+# scalar — a fresh owned heap value, "im"/"id" balanced) and `f(5)` dispatches
+# with the block as the borrowed env arg — ownership AND the env's call-mode
+# agreement both re-verified by the proven checkers.
+run_src      closure_capture.almd main ownership 0
+run_src_mode closure_capture.almd main modes call-modes 0
 
 echo
 echo "GATE OK: the kernel-proven checker re-verified per-build witnesses on THREE"

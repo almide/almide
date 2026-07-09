@@ -321,22 +321,23 @@ impl LowerCtx {
                 IrExprKind::Var { id } if is_heap_ty(&a.ty) => CallArg::Handle(self.value_or_global(*id)?),
                 IrExprKind::Var { id } => CallArg::Scalar(self.value_or_global(*id)?),
                 IrExprKind::LitInt { value } => CallArg::Imm(*value),
-                // A NON-CAPTURING lambda ARGUMENT (`list.map(xs, (x) => x + 1)`): LIFT it to
-                // a fresh `__lambda_*` function and pass its `FuncRef` table slot BY VALUE
-                // (a scalar i64) — the callee invokes it via `Op::CallIndirect` through its
-                // function-typed param. This is the call-site half of higher-order self-host
-                // (`list.map`/`filter`/`fold`). A CAPTURING lambda has no liftable form, so
-                // it falls through to the deferred Opaque arm below (unchanged).
+                // A lambda ARGUMENT (`list.map(xs, (x) => x + n)`): LIFT it to a fresh
+                // `__lambda_*` function and pass its CLOSURE BLOCK (a borrowed heap
+                // handle — fnidx in slot 0, captures in slots 1…) — the callee invokes
+                // it via `Op::CallIndirect` through its function-typed param. This is
+                // the call-site half of higher-order self-host (`list.map`/`filter`/
+                // `fold`), capturing lambdas included (scalar captures).
                 IrExprKind::Lambda { params, body, .. } => {
                     match self.lift_lambda(params, body) {
-                        Some(slot) => CallArg::Scalar(slot),
-                        // A CAPTURING lambda has no liftable form, so it would materialize a
-                        // deferred `Init::Opaque` (an EMPTY closure env) and pass it to the
-                        // callee, which would invoke garbage = a SILENT MISCOMPILE. Reject.
+                        Some(blk) => CallArg::Handle(blk),
+                        // A lambda OUTSIDE the liftable subset would materialize a
+                        // deferred `Init::Opaque` (an EMPTY closure env) and pass it to
+                        // the callee, which would invoke garbage = a SILENT MISCOMPILE.
+                        // Reject.
                         None => {
                             return Err(LowerError::Unsupported(
-                                "capturing lambda in a call-argument position cannot be lifted \
-                                 (would pass an empty deferred closure env)"
+                                "lambda outside the liftable subset in a call-argument \
+                                 position (would pass an empty deferred closure env)"
                                     .into(),
                             ))
                         }

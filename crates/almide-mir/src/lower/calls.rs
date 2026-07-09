@@ -286,10 +286,13 @@ impl LowerCtx {
                 // function through the FuncRef edge (folded at creation), so a printing
                 // closure can never be silently caps-verified.
                 IrExprKind::Lambda { params, body, .. } => match self.lift_lambda(params, body) {
-                    Some(slot) => out.push(CallArg::Scalar(slot)),
+                    // The closure BLOCK is passed like any heap arg (borrowed; it stays in
+                    // the live set here and is dropped at scope end after the combinator).
+                    Some(blk) => out.push(CallArg::Handle(blk)),
                     None => {
-                        // A capturing / param-invoking lambda — no liftable form. The self-host
-                        // combinator runs with a missing closure slot → an empty/garbage result.
+                        // A lambda outside the liftable subset — no closure form. The
+                        // self-host combinator runs with a missing closure slot → an
+                        // empty/garbage result.
                         self.last_call_had_unlifted_closure = true;
                         self.record_elided_calls(body);
                     }
@@ -545,16 +548,11 @@ impl LowerCtx {
                 // (e.g. `let f = (x) => print_it(x); f(3)`). Otherwise — a dynamic closure
                 // value we cannot name — DEFER as before (calls captured, the Computed call
                 // elided ⇒ honest caps taint).
-                if let Some(table_idx) = self.funcref_value_of(callee) {
+                if let Some(blk) = self.closure_value_of(callee) {
                     let mark = self.ops.len();
                     let lhh = self.live_heap_handles.len();
                     if let Ok(lowered) = self.lower_call_args(args) {
-                        self.ops.push(Op::CallIndirect {
-                            dst: None,
-                            table_idx,
-                            args: lowered,
-                            result: None,
-                        });
+                        self.emit_closure_call(blk, None, lowered, None);
                         return Ok(());
                     }
                     self.ops.truncate(mark);
