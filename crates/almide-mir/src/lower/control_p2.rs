@@ -605,15 +605,45 @@ impl LowerCtx {
             Some(v) => v,
             None => return rollback(self),
         };
+        // RELEASE PARITY (mirrors lower_heap_result_if_inner): which OUTER
+        // handles did the then arm MOVE out (e.g. `err(msg)` over an outer
+        // let-bound String)? The snapshot restore below makes them live again
+        // for the else arm's lowering — but the move happens only on the THEN
+        // path, so without a compensating sibling-arm release the else path
+        // leaks it AND the post-join scope-end drop double-frees the then path.
+        let consumed_by_then: Vec<ValueId> = lhh_snapshot
+            .iter()
+            .copied()
+            .filter(|h| !self.live_heap_handles.contains(h))
+            .collect();
+        let else_marker_at = self.ops.len();
         self.ops.push(Op::Else { val: Some(then_val) });
         self.param_values = pv_snapshot;
-        self.live_heap_handles = lhh_snapshot;
+        self.live_heap_handles = lhh_snapshot.clone();
         self.materialized_aggregates = ma_snapshot;
         // ELSE (tag == 0): the None branch / the scalar Ok payload.
         let else_val = match lower_arm(self, else_body) {
             Some(v) => v,
             None => return rollback(self),
         };
+        let consumed_by_else: Vec<ValueId> = lhh_snapshot
+            .iter()
+            .copied()
+            .filter(|h| !self.live_heap_handles.contains(h))
+            .collect();
+        for h in &consumed_by_then {
+            if !consumed_by_else.contains(h) {
+                let op = self.drop_op_for(*h);
+                self.ops.push(op); // the ELSE arm releases what THEN moved out …
+                self.live_heap_handles.retain(|x| x != h); // … and scope-end must not re-release
+            }
+        }
+        for h in &consumed_by_else {
+            if !consumed_by_then.contains(h) {
+                let op = self.drop_op_for(*h);
+                self.ops.insert(else_marker_at, op); // the THEN arm releases what ELSE moved out
+            }
+        }
         self.ops.push(Op::EndIf { val: Some(else_val) });
         // SUBJECT-DROP-AFTER-ARMS (the str-result heap-bind path): the payload borrowed slot-0, so
         // the subject stayed live through both arms — drop the OWNED subject ONCE here, after the
@@ -1107,9 +1137,35 @@ impl LowerCtx {
         let cond = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
         self.ops.push(Op::IfThen { cond, dst: Some(dst) });
+        // RELEASE PARITY (mirrors lower_heap_result_if_inner): an OUTER handle
+        // this arm moves out must be released by the rest of the chain, and vice
+        // versa — otherwise the accounting is path-dependent (the branch-grouped
+        // cert `{m|}` rejects it; this keeps the lowering ahead of the checker).
+        let outer: Vec<ValueId> = self.live_heap_handles.clone();
         let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, heap)?;
+        let consumed_by_then: Vec<ValueId> =
+            outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
+        let else_marker_at = self.ops.len();
         self.ops.push(Op::Else { val: Some(then_v) });
+        let live_after_then: Vec<ValueId> = self.live_heap_handles.clone();
         let else_v = self.emit_variant_arm_chain(h, tag, rest, result_ty)?;
+        let consumed_by_else: Vec<ValueId> = live_after_then
+            .iter()
+            .copied()
+            .filter(|x| !self.live_heap_handles.contains(x))
+            .collect();
+        for x in &consumed_by_then {
+            if !consumed_by_else.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.push(op); // the rest of the chain releases what this arm moved out
+            }
+        }
+        for x in &consumed_by_else {
+            if !consumed_by_then.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.insert(else_marker_at, op); // this arm releases what the chain moved out
+            }
+        }
         self.ops.push(Op::EndIf { val: Some(else_v) });
         Some(dst)
     }
