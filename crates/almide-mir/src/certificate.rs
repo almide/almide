@@ -1491,32 +1491,61 @@ mod tests {
     // Otherwise the PCC chain certifies the wrong thing. We pin it over many
     // random WELL-FORMED ownership sequences.
 
-    /// Re-run the proven checker's decision in Rust (mirrors the Coq `check_all`):
-    /// every line's i/d stream must never dec-below-zero and must end at 0.
+    /// Re-run the proven checker's decision in Rust (mirrors the Coq `check_bc`):
+    /// every line's stream must never dec-below-zero and must end at 0, with the
+    /// format-v4 branch rule — `{then|else}` arms both execute from the current
+    /// count, must not fault, and must AGREE on the leaving count.
     fn cert_all_balanced(cert: &str) -> bool {
-        cert.lines().all(|line| {
-            let mut rc: i64 = 0;
-            for c in line.chars() {
+        // The flat fold (format v1 alphabet + the 5b `b` guard); None = fault.
+        fn fold(seg: &str, mut rc: i64) -> Option<i64> {
+            for c in seg.chars() {
                 match c {
-                    // format v1: i/a = +1 (fresh/alias), d/m = −1 (release/move-out).
+                    // i/a = +1 (fresh/alias), d/m = −1 (release/move-out).
                     'i' | 'a' => rc += 1,
                     'd' | 'm' => {
                         if rc == 0 {
-                            return false; // double-free / use-after-move
+                            return None; // double-free / use-after-move
                         }
                         rc -= 1;
                     }
-                    // format v4 (brick 5b): b = +0 live use — faults on a dead object
-                    // (use-after-free), exactly the Coq `Borrow` guard.
+                    // b = +0 live use — faults on a dead object (use-after-free),
+                    // exactly the Coq `Borrow` guard.
                     'b' => {
                         if rc == 0 {
-                            return false;
+                            return None;
                         }
                     }
                     _ => {}
                 }
             }
-            rc == 0 // leak iff != 0
+            Some(rc)
+        }
+        cert.lines().all(|line| {
+            let mut rc: i64 = 0;
+            let mut rest = line;
+            while let Some(open) = rest.find('{') {
+                rc = match fold(&rest[..open], rc) {
+                    Some(r) => r,
+                    None => return false,
+                };
+                let close = match rest[open..].find('}') {
+                    Some(c) => open + c,
+                    None => return false, // unterminated branch — malformed
+                };
+                let (t, e) = match rest[open + 1..close].split_once('|') {
+                    Some(p) => p,
+                    None => return false,
+                };
+                match (fold(t, rc), fold(e, rc)) {
+                    (Some(rt), Some(re)) if rt == re => rc = rt, // arms AGREE
+                    _ => return false, // an arm faults or the arms disagree
+                }
+                rest = &rest[close + 1..];
+            }
+            match fold(rest, rc) {
+                Some(r) => r == 0, // leak iff != 0
+                None => false,
+            }
         })
     }
 
@@ -1526,9 +1555,14 @@ mod tests {
         *state
     }
 
-    /// Build a random WELL-FORMED ownership op sequence (only dup/drop LIVE
-    /// handles). Leftover-undropped handles make it a leak; dropping all makes it
-    /// balanced — so the corpus spans accept and reject.
+    /// Build a random ownership op sequence over LIVE handles, now including
+    /// BRANCH regions (format v4): agreeing arms (both alias the same object —
+    /// grouped `{a|a}`, net +1), per-arm self-balancing arms (flat flush), and
+    /// occasionally DISAGREEING arms (`{a|}` — both the grouped cert and
+    /// verify_ownership's branch join must reject). Leftover-undropped handles
+    /// make it a leak — so the corpus spans accept and reject across the flat,
+    /// borrow and branch machinery, and the test pins that the cert verdict
+    /// EQUALS verify_ownership's on every seed.
     fn gen_wellformed(seed: u64) -> MirFunction {
         let mut st = seed.wrapping_add(1);
         let mut live: Vec<ValueId> = Vec::new();
@@ -1536,7 +1570,7 @@ mod tests {
         let mut ops: Vec<Op> = Vec::new();
         let steps = 3 + (next_rand(&mut st) % 9) as usize;
         for _ in 0..steps {
-            let choice = next_rand(&mut st) % 4;
+            let choice = next_rand(&mut st) % 6;
             match choice {
                 0 => {
                     // Alloc a fresh object.
@@ -1559,10 +1593,41 @@ mod tests {
                     let v = live.remove(i);
                     ops.push(Op::Drop { v });
                 }
-                _ if !live.is_empty() => {
-                    // Borrow (no refcount change — must be skipped by the cert).
+                3 if !live.is_empty() => {
+                    // Borrow (a `b` event on the owned stream — liveness-guarded).
                     let v = live[(next_rand(&mut st) as usize) % live.len()];
                     ops.push(Op::Borrow { v });
+                }
+                4 if !live.is_empty() => {
+                    // An AGREEING branch: each arm acquires one alias of the same
+                    // live object (net +1 both ways — the heap-result-branch
+                    // class, grouped `{a|a}`). The runtime holds ONE new alias
+                    // whichever arm ran; hand `y` to the pool (`z` is the other
+                    // path's handle — same object, never used again).
+                    let x = live[(next_rand(&mut st) as usize) % live.len()];
+                    let (c, y, z) = (ValueId(next), ValueId(next + 1), ValueId(next + 2));
+                    next += 3;
+                    ops.push(Op::Const { dst: c });
+                    ops.push(Op::IfThen { cond: c, dst: None });
+                    ops.push(Op::Dup { dst: y, src: x });
+                    ops.push(Op::Else { val: None });
+                    ops.push(Op::Dup { dst: z, src: x });
+                    ops.push(Op::EndIf { val: None });
+                    live.push(y);
+                }
+                5 if !live.is_empty() && next_rand(&mut st) % 3 == 0 => {
+                    // A DISAGREEING branch (one arm aliases, the other does not —
+                    // a path-dependent count): the grouped cert `{a|}` and the
+                    // branch join must BOTH reject, and both are sticky, so the
+                    // verdicts stay equal however generation continues.
+                    let x = live[(next_rand(&mut st) as usize) % live.len()];
+                    let (c, y) = (ValueId(next), ValueId(next + 1));
+                    next += 2;
+                    ops.push(Op::Const { dst: c });
+                    ops.push(Op::IfThen { cond: c, dst: None });
+                    ops.push(Op::Dup { dst: y, src: x });
+                    ops.push(Op::Else { val: None });
+                    ops.push(Op::EndIf { val: None });
                 }
                 _ => {}
             }
