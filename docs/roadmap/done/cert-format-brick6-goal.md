@@ -1,7 +1,30 @@
 <!-- description: GOAL PROMPT — cert format brick 6: retire extraction trust (kernel-as-oracle gate + verified extraction) -->
+<!-- done: 2026-07-09 -->
 # GOAL PROMPT — cert format brick 6: retire the extraction trust (kernel oracle + verified extraction)
 
-> **Read first**: [certificate-format-v1](certificate-format-v1.md) (the ladder —
+> **OUTCOME (2026-07-09): SHIPPED — the v1 brick ladder is COMPLETE.** Full
+> record: [certificate-format-v1](../active/certificate-format-v1.md) build-
+> order item 6. Key facts:
+> - **6a scout**: BOTH routes now exist upstream for Rocq 9.1 —
+>   `rocq-verified-extraction` (MetaRocq `1.4+9.1` opam packages) and
+>   **CertiRocq** (the CertiCoq rename + Rocq 9.1 port, 2026) — a genuinely
+>   better ecosystem than the WasmCert-era. Adoption deferred per invariant 4:
+>   the local toolchain is a NO-OPAM source build (9.1.1), CI is opam 9.2, and
+>   both routes keep a compiler in the fast path's base (Malfunction→ocamlopt /
+>   C→CompCert). Recorded as the fast-path ratchet; not needed for the verdict.
+> - **6b shipped in full scope**: `kernel_verify` twins on ALL 31 gate rows +
+>   manifest rows; tamper drill (corrupted witness + simulated divergence, both
+>   caught every build); corpus batch oracle over the ENTIRE witness set —
+>   measured 4m10s `vm_compute` for 27,391 ownership objects + 4,745 names +
+>   3,897 caps + 281 tcaps — wired UNCONDITIONALLY (no sampling needed).
+>   During measurement the oracle immediately REJECTED a stale witness set
+>   containing the pre-release-parity `{m|}` certs — the divergence detector
+>   demonstrating itself on real data before it even shipped.
+> - TRUSTED_BASE item 2 rewritten: extraction is a cross-checked FAST PATH;
+>   the kernel carries the verdict. Residual: vm_compute is part of the
+>   kernel's own TCB (as always).
+
+> **Read first**: [certificate-format-v1](../active/certificate-format-v1.md) (the ladder —
 > bricks 1–5 and 3c ALL shipped; this is the LAST brick),
 > `proofs/TRUSTED_BASE.md` §"trusted base" item 2 (the exact claim this brick
 > retires), `proofs/Extract.v` + `proofs/driver.ml` + `proofs/build-checker.sh`

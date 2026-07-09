@@ -136,10 +136,50 @@ check_per_function caps  "$OUTDIR/caps.cert"  "no undeclared Stdout effect, tran
 # even via a callee, is REJECTED. This is the stronger sibling of the per-function caps gate.
 check_per_function caps-transitive "$OUTDIR/caps_graph.cert" "transitive reach ⊆ declared, fold in-proof (per program)"
 
+echo
+echo "== KERNEL ORACLE (brick 6b): the Rocq KERNEL re-verifies the ENTIRE corpus witness set =="
+# One generated assertion file over ALL witnesses (ownership = one multi-line
+# cert fold; names/caps/tcaps = forallb over the per-function witnesses), coqc'd
+# with vm_compute: the KERNEL itself certifies every verdict the extracted binary
+# just produced. Divergence fails the build — so the extraction pipeline (OCaml
+# codegen + ocamlopt) is a FAST PATH, no longer a trust root for the corpus gate
+# (TRUSTED_BASE §2, brick 6). Measured ~4 min on the full 27k-object corpus.
+KGEN="$(mktemp /tmp/KernelCorpus_XXXXXX).v"
+python3 - "$OUTDIR" > "$KGEN" <<'PYEOF'
+import sys, os
+out = sys.argv[1]
+def lit(s):
+    return '"' + s.replace('"', '""') + '"'
+def lines(name):
+    return [l for l in open(os.path.join(out, name)).read().splitlines() if l.strip()]
+own = open(os.path.join(out, 'ownership.cert')).read()
+print("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach.")
+print("From Stdlib Require Import String List.")
+print("Import ListNotations.")
+print("Open Scope string_scope.")
+print("Goal check_bc %s = true." % lit(own))
+print("Proof. vm_compute. reflexivity. Qed.")
+print("Goal forallb check_names_cert [%s] = true." % ";".join(lit(w) for w in lines('names.cert')))
+print("Proof. vm_compute. reflexivity. Qed.")
+print("Goal forallb check_caps_cert [%s] = true." % ";".join(lit(w) for w in lines('caps.cert')))
+print("Proof. vm_compute. reflexivity. Qed.")
+print("Goal forallb check_prog_cert [%s] = true." % ";".join(lit(w) for w in lines('caps_graph.cert')))
+print("Proof. vm_compute. reflexivity. Qed.")
+PYEOF
+KSTART=$(date +%s)
+if (cd "$ROOT/proofs" && "${COQC:-$(command -v coqc)}" -Q . AlmideTrust "$KGEN" >/dev/null 2>&1); then
+  echo "  KERNEL OK: all four corpus witness sets certified by the Rocq kernel in $(( $(date +%s) - KSTART ))s (vm_compute)"
+  rm -f "$KGEN" "${KGEN%.v}.vo" "${KGEN%.v}.vos" "${KGEN%.v}.vok" "${KGEN%.v}.glob"
+else
+  echo "WALL GATE FAIL: the KERNEL rejected a corpus witness the binary accepted (extraction divergence)." >&2
+  rm -f "$KGEN"; exit 1
+fi
+
 cleanup
 echo
 echo "CORPUS WALL OK: over the whole v0 corpus, lower_function is total (wall holds,"
 echo "zero panics, zero undetected refusals) AND the kernel-proven checker accepts every in-profile"
 echo "witness on ALL THREE proven properties (accept ⟹ ownership ∧ name-totality ∧"
-echo "capability-bound, on real corpus programs). Coverage is reported above; the"
-echo "Unsupported histogram is the per-feature roadmap."
+echo "capability-bound, on real corpus programs) — every verdict ALSO certified by the"
+echo "Rocq KERNEL itself (the kernel oracle; extraction is a fast path, not a trust"
+echo "root). Coverage is reported above; the Unsupported histogram is the roadmap."

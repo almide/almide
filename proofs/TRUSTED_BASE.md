@@ -29,10 +29,24 @@ These four are trusted by necessity; everything else is proven against them:
 1. **The Coq/Rocq kernel.** Decades of adversarial scrutiny; `coqchk` re-checks
    every `.vo` independently (the De Bruijn criterion). New logics have zero
    accumulated scrutiny — hence we borrow, not invent.
-2. **OCaml extraction + the OCaml compiler.** The proven `check_cert` is
-   extracted to OCaml and compiled by `ocamlopt`. This is the Thompson hole;
-   **CertiCoq + CompCert close it** (extract to CompCert Clight → machine code,
-   all in-logic) — brick 6, not yet done.
+2. **OCaml extraction + the OCaml compiler — RETIRED as a trust root for the
+   gate verdict (brick 6b, 2026-07-09).** The proven checkers still extract to
+   OCaml (`ocamlopt`) as the FAST PATH, but every `gate.sh` row's verdict AND
+   the entire corpus witness set are independently re-certified by the Rocq
+   KERNEL itself: a generated assertion file inlines the witness bytes verbatim
+   and `vm_compute` evaluates the proven checker inside the kernel-checked
+   logic (`kernel_verify` in gate.sh; the batch oracle in corpus-wall.sh,
+   measured ~4 min on the full 27k-object corpus). Binary/kernel divergence
+   fails the build, and a TAMPER DRILL (a corrupted witness + a simulated
+   divergent verdict, both caught) runs every build — so the Thompson hole no
+   longer reaches a verdict: the kernel (item 1) carries it. Residual, honest:
+   the extraction pipeline is trusted only for the convenience binary's
+   correctness-as-fast-path (cross-checked), and `vm_compute`'s bytecode
+   evaluator is part of the kernel's own trusted computing base as always.
+   Upstream, verified extraction (MetaRocq, Rocq 9.1) and CertiRocq (the
+   CertiCoq → Rocq 9.1 port, 2026) now EXIST — recorded as a future fast-path
+   ratchet once the local (source-built 9.1.1, no opam) and CI (opam 9.2)
+   toolchains align; neither is needed for the verdict.
 3. **Hardware.** The CPU executes the machine code faithfully.
 4. **ALS validity** — that the formal semantics captures the INTENDED meaning.
    This is the one item checked empirically (interp + dojo + use), never proved.
@@ -408,7 +422,10 @@ The receipt's claims are scoped to exactly this:
   literals, alias, index-assign copy-on-write, scalar/heap-move-out return — NO
   calls or control flow yet, #29), so the broader reject cases and the
   capability witness are still REPRESENTATIVE MIR shapes (emit_cert.rs).
-- **Extraction is trusted** (item 2 above) until CertiCoq/CompCert.
+- **Extraction is a cross-checked fast path, not a verdict root** (item 2
+  above, brick 6b): the kernel oracle re-certifies every gate and corpus
+  verdict; verified extraction / CertiRocq adoption is the recorded future
+  ratchet for the fast path itself.
 - **Single independent checker.** Diversity (≥2 independent checkers) is brick 6.
 
 ## Proven-vs-trusted boundary map (flight-evidence-gaps F3-1)

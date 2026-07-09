@@ -5,9 +5,12 @@
 > signatures + manifest-declared caps; full mode 5a/5b/5c — branch agreement
 > `{…|…}`, the `b` letter, closure-dispatch signatures + capturing closures),
 > 3a/3b/3c + 4a/4b shipped inside their bricks (3c = the in-tree raw-byte ⟶ ISA
-> decoder, WasmDecode.v). Remaining: brick 6 (CertiCoq extraction of the
-> checker); A2's residual is the rc-fragment scope (whole-function bodies stay
-> the renderer contract).
+> decoder, WasmDecode.v), **brick 6 shipped** (the kernel-as-oracle gate —
+> extraction retired as a verdict trust root). **The v1 brick ladder is
+> COMPLETE.** Remaining ratchets (recorded, not bricks): heap-capture closure
+> envs (`b`'s env consumer), A2 beyond the rc fragment (whole-function bodies
+> stay the renderer contract), verified-extraction/CertiRocq adoption for the
+> fast path when the toolchains align.
 > Supersedes the implicit "i/d-per-object" format. Grounded in a prior-art +
 > adversarial design pass (Perceus/Koka reuse, linear/foundational PCC,
 > WasmCert-Coq byte semantics, the v0 ownership taxonomy).
@@ -364,6 +367,30 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      `check_bc_unroll_sound` axiom-clean + coqchk'd + ledgered, corpus-wall
      coverage UNCHANGED (4,693 in-profile / 317 walled — nothing silently
      dropped), almide-mir 579, workspace + spec suites green.
+6. **retire the extraction trust: the KERNEL-AS-ORACLE gate.** ✅ **SHIPPED
+   (2026-07-09).** The per-build gate's VERDICT no longer rests on the
+   unverified OCaml extraction + `ocamlopt` (TRUSTED_BASE item 2, the Thompson
+   hole): `gate.sh`'s `kernel_verify` inlines each witness's bytes verbatim
+   into a generated assertion file and `coqc`s it — the Rocq KERNEL itself
+   evaluates the proven checker (`vm_compute`) on the exact bytes, per row
+   (all 31 rows + both manifest rows), with binary/kernel DIVERGENCE failing
+   the build. `corpus-wall.sh` runs the batch oracle over the ENTIRE corpus
+   witness set (one `check_bc` fold over the 27k-object ownership cert +
+   `forallb` over 4.7k names / 3.9k caps / 281 tcaps witnesses) — measured
+   ~4 min `vm_compute`, wired UNCONDITIONALLY (no sampling). A TAMPER DRILL
+   runs every build: (i) a corrupted witness is rejected by binary AND kernel;
+   (ii) a simulated divergent verdict is CAUGHT (proving the oracle has teeth).
+   The extracted binary remains the fast path — cross-checked, never the
+   verdict root. SCOUT record (6a): `rocq-verified-extraction` (MetaRocq,
+   Rocq 9.1 packages exist) and CertiRocq (the CertiCoq → Rocq 9.1 port, 2026)
+   both now exist upstream — adoption deferred (local is a no-opam source
+   build 9.1.1, CI is opam 9.2; and both keep a compiler in the fast path's
+   base: Malfunction→ocamlopt / C→CompCert) and recorded as the fast-path
+   ratchet; NEITHER is needed for the verdict, which the kernel now carries.
+   Residual, honest: `vm_compute`'s bytecode evaluator is part of the kernel's
+   own TCB (as always), and the oracle certifies the WITNESS-level properties
+   (the wasm-byte link beyond the rc primitives stays the §3 renderer
+   contract).
 
 ## Open risks (honest)
 
