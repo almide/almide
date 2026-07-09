@@ -64,6 +64,18 @@ Fixpoint split_bar (s : string) (left : string) : string * string :=
   | String a r => if is_bar a then (left, r) else split_bar r (left ++ String a EmptyString)
   end.
 
+(* `;`-separated segments (shared by the multi-function witness parsers:
+   CapabilityReach's call-graph nodes, CallModes' signatures/call-sites). *)
+Definition is_semi (a : ascii) : bool := Nat.eqb (nat_of_ascii a) 59. (* ';' *)
+
+Fixpoint split_semi (s : string) (cur : string) (acc : list string) : list string :=
+  match s with
+  | EmptyString => acc ++ [cur]
+  | String a r =>
+      if is_semi a then split_semi r EmptyString (acc ++ [cur])
+      else split_semi r (cur ++ String a EmptyString) acc
+  end.
+
 (* (superset ids, subset ids) *)
 Definition parse_pair (s : string) : list nat * list nat :=
   let (l, r) := split_bar s EmptyString in (pnats l None [], pnats r None []).

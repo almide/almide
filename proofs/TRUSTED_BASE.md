@@ -63,6 +63,9 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `rc_dec_bytes_trap_on_zero` | WasmExec.v | Closed under the global context |
 | `rc_dec_bytes_frees_when_one` | WasmExec.v | Closed under the global context |
 | `make_unique_yields_unique` | CowSafety.v | Closed under the global context |
+| `check_fill_sound` | CallModes.v | Closed under the global context |
+| `check_modes_cert_sound` | CallModes.v | Closed under the global context |
+| `check_bc_unroll_sound` | OwnershipChecker.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -170,7 +173,10 @@ The receipt's claims are scoped to exactly this:
   reassignment `i = i+1` is admitted), plus **`if`/`match`
   control flow** (statement / scalar- / Unit- / HEAP-tail and
   heap-bind position — arms LINEARIZED into the flat op stream with a per-arm scope
-  frame, NO branch op: each arm internally balanced + vacuous on the other path; the
+  frame, NO branch op: since brick 5a the per-arm discipline is CHECKED, not trusted —
+  arms must AGREE on each object's leaving count (the branch-grouped cert `{…|…}` +
+  `verify_ownership`'s branch join; release parity inserts the compensating
+  sibling-arm Drop when one arm moves an outer handle out); the
   result is one merged slot the caller emits — discarded (Unit/statement), a `Const`
   (scalar), or a fresh `Alloc{Opaque}` (heap, memory-safe by construction, its value
   CONTENT deferred like every Opaque); a heap `match` subject is MATERIALIZED (a

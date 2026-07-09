@@ -1,6 +1,11 @@
 # Certificate Format v1 — design
 
-> Status: **design accepted; brick 1 shipped** (ownership alphabet i/a/d/m).
+> Status: **design accepted; bricks 1–2 and 5 shipped** (ownership alphabet
+> i/a/d/m; calls 2a/2b/2c — effect calls, per-call-site caps, param-mode
+> signatures + manifest-declared caps; full mode 5a/5b/5c — branch agreement
+> `{…|…}`, the `b` letter, closure-dispatch signatures), 3a/3b + 4a/4b shipped
+> inside their bricks. Remaining: 3c (WasmCert ISA byte binding), A2 raw-byte
+> encoding, brick 6 (CertiCoq).
 > Supersedes the implicit "i/d-per-object" format. Grounded in a prior-art +
 > adversarial design pass (Perceus/Koka reuse, linear/foundational PCC,
 > WasmCert-Coq byte semantics, the v0 ownership taxonomy).
@@ -70,10 +75,17 @@ soundness proof reasons about the DELTAS, not the letters**, so adding
 ground-fact letters costs ZERO new proof obligations. **v0's `i`/`d` is the
 degenerate case** (Alias≡Inc, MoveOut≡Dec at the fold).
 
-A `MODE` byte (`eager` | `perceus` | `full`) prefixes the bundle and selects
-which letters are legal (eager: only `i a d m`; perceus: `+r`; full: `+b`),
-keeping the staged rollout honest — a witness can't silently claim reuse before
-the uniqueness obligation exists.
+~~A `MODE` byte (`eager` | `perceus` | `full`) prefixes the bundle and selects
+which letters are legal~~ — **RETIRED (brick 5b decision, 2026-07-08)**. The
+alphabet turned out to be SELF-GUARDING: `r`'s obligation is discharged by the
+fold itself (valid iff rc = 1 — `check_reuse_sound`), and `b` carries its own
+liveness guard (faults at rc = 0) — so a witness structurally CANNOT "claim
+reuse before the obligation exists"; the obligation is enforced per event, not
+per bundle. A MODE prefix would have been a compiler-ASSERTED claim the checker
+cannot re-derive (contra the ground-fact principle), and deployment-level
+letter policy ("this operator forbids perceus mode") is an OPERATOR concern
+that belongs in the manifest layer (`[permissions]`-style), not in the witness
+bytes.
 
 ### 2. Side-table sections — all the ONE subset law (Subset.v)
 
@@ -153,8 +165,39 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      callee; it does only the subset (Subset.v lever, zero new Coq). Closes the
      direct-only caps gap. Honest scope: the compiler's reachability fold is
      trusted per-build (verifying it per-edge, and an unknown callee = conservative
-     reject, are the hardenings); ownership param-modes (move/borrow signatures
-     for heap args) + manifest-declared caps (the ACCEPT case) remain (2c).
+     reject, are the hardenings).
+   - **2c: ownership param-modes + manifest-declared caps.** ✅ **SHIPPED.**
+     (i) `proofs/CallModes.v` — the SIGNATURE section (§3): per-function declared
+     heap-param modes (borrow | move as nats) + per-call-site actual modes;
+     `check_modes_cert` verifies positional agreement per site (unknown callee =
+     conservative reject; one nat-list equality per site — checker-size
+     invariant intact). The COMPOSITION LAW `check_fill_sound` is what makes it
+     sound: an accepted caller stream (call sites reduced to declared-mode
+     markers: borrow = no event, move = `m`) stays double-free/leak-free under
+     EVERY inlining of callee streams satisfying their declared modes
+     (`param_stream_ok`, Reuse-free + shift-invariant) — so per-function certs
+     COMPOSE without the checker ever opening a callee. Non-vacuous: the
+     caller-thinks-borrow/callee-thinks-move pairing (both balanced alone,
+     inlined = double-free) is exactly what agreement forbids
+     (`disagreement_double_frees`). Emitter: `call_modes_witness`
+     (certificate.rs; dotted self-host callees follow the renderer contract and
+     are omitted — the same known-class policy as the caps graph); gate rows:
+     hand-built agree/mismatch + real-source `two_functions` / `heap_arg_call`
+     (a heap arg actually passed). Both theorems axiom-clean, coqchk'd,
+     ledgered. Today's lowering is borrow-only, so every emitted mode is `0`;
+     when a consuming (move) convention lands, signature and site must flip
+     TOGETHER or the build is rejected — that agreement is now machine-checked.
+     (ii) Manifest-declared caps — the ACCEPT case: `apply_manifest_caps`
+     refines an `effect fn`'s declared bound to the operator's
+     `almide.toml [permissions].allow` (projected onto the Capability registry
+     by `manifest_caps`; pure fns keep ∅ — a manifest can never grant what the
+     effect system denies). Gate: the SAME real printing program ACCEPTs under
+     `allow=["IO"]` and REJECTs under `allow=["Rand"]` — the first non-vacuous
+     caps bound (the all-caps effect default could never reject an effect fn).
+     Remaining beyond 2c (later refinements): return-mode letters in the
+     signature line (today the owned-heap-result convention is uniform),
+     closure signatures (brick 5), and the fine-grained `FS.read`-style
+     manifest vocabulary (effect-system-capability Phase 1).
 3. **Byte-binding: op→wasm pattern table.**
    - **3a: the table + per-build matcher.** ✅ **SHIPPED.** `proofs/Translation.v`
      formalizes the op→wasm-instruction table as a Coq object (the formal
@@ -229,8 +272,70 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      piece refining a proof, zero trusted runtime.** REMAINING (perf/encoding, not
      safety): A1.2 size-classes/walking (exact-size head-match today); A2 raw-byte
      encoding. `rc_dec`/`rc_inc` DONE (A1.1b / A1.3-render).
-5. **full mode: `b` (closure-env borrow) + branch resource-state agreement** →
-   control-flow + closures.
+5. **full mode: branch agreement + `b` + closure signatures.** ✅ **SHIPPED
+   (2026-07-08).**
+   - **5a: branch resource-state agreement (`CBranch`, format v4).**
+     `OwnershipChecker.v`: `CertItem` gains `CBranch thenb elseb` — accept iff
+     BOTH flat arm bodies execute fault-free from the entry count to the SAME
+     result (AGREEMENT, not preservation: net +1 arms are the heap-result
+     branch); `UL_branch` unrolls to the ONE arm the runtime takes and the
+     headline `check_line_unroll_sound` statement is UNCHANGED. Parser
+     `parse_bc` (format v4, `{ then | else }`) is a superset of `parse_clc` —
+     every flat/CLoop/CCondLoop cert parses byte-identically. Emitter: arm
+     events buffer per `IfThen`/`Else`/`EndIf` region; arms that each
+     self-balance flush FLAT (byte-identical, zero churn on every existing
+     cert), arms that do not are grouped `{then|else}` — so CROSS-ARM
+     COMPENSATION (an `i` in one arm "balanced" by a `d` in the other:
+     path-dependent leak/double-free, flat-ACCEPTED before) is now structurally
+     rejected: the lowering's per-arm-balance promise is no longer a trusted
+     convention. `verify_ownership` gained the same branch JOIN (entry-state
+     snapshot per arm + per-object agreement + `BranchDisagreement`), retiring
+     its flat both-arms fold. **The grouping found a REAL leak on first
+     contact**: the effect-fn tail `if err then err(msg) else ok(total)` moved
+     the error accumulator into the Err block on the error path but NEVER
+     released it on the ok path (`{m|}` — one empty-string block leaked per
+     happy-path call; the flat cert had counted the `m` unconditionally). Fixed
+     at the root: `lower_heap_result_if_inner` now enforces RELEASE PARITY — an
+     outer handle one arm moves out gets a compensating `Drop` in the sibling
+     arm (`{m|d}`, arms agree). spec 280/280, corpus 26,976 objects ACCEPT.
+   - **5b: the `b` (borrow, +0) letter.** `exec` gains `Borrow` — no delta, a
+     LIVENESS guard (faults at rc ≤ 0): owned-object use-after-free is now
+     witnessable (`idb` REJECTS; before, `Op::Borrow`/`MakeUnique` were
+     invisible to the cert). Every op-casing lemma extended (`exec_app`,
+     `reuses_unique`, Termination's fuel interpreter, ALS increments-only,
+     RuntimeModel's memory machine `rt_borrow` — live-read faults with the
+     abstract semantics — and CallModes' `exec_shift`/`exec_fill`: `b` is
+     shift-safe, so it composes across call boundaries). Emitter: `b` fires for
+     `Op::Borrow`/`Op::MakeUnique` on objects whose stream HOLDS ownership (has
+     a +1); a borrowed param used directly stays event-free — its liveness is
+     the CALLER's obligation, discharged by mode agreement
+     (`bare_borrow_body_needs_own_ref` records why: a `b` on the zero-seeded
+     param stream faults). The 500-seed differential floor now exercises `b`
+     for real. MODE-byte question RESOLVED: retired (see §1 — the alphabet is
+     self-guarding; policy belongs in the manifest layer).
+   - **5c: closure signatures (G3.1/G3.3, the checkable slice).**
+     `call_modes_witness` no longer skips `Op::CallIndirect`: a funcref value
+     can only originate from an `Op::FuncRef`, so the site's POSSIBLE-CALLEE
+     set = the program's FuncRef table targets whose param shape matches the
+     dispatch (arity + per-position heapness — any other target traps at the
+     `call_indirect` type gate, fail-stop). The witness emits ONE agreement row
+     PER possible callee, so the ALREADY-PROVEN `forallb site_ok`
+     (`check_modes_cert_sound`) IS the Forall lift over the set — zero new Coq
+     surface. Empty/unseeable set (a FuncRef target that never lowered) → the
+     out-of-range sentinel → conservative REJECT. Real-source gate row:
+     `funcref_call.almd` (a returned lifted funcref dispatched via
+     CallIndirect; lifted `__lambda_*` auxiliaries included in the witness
+     program). HONEST SCOPE: capturing closures still WALL at lowering (no
+     closure ENV exists in-profile yet), so `b`'s closure-env emission — the
+     env is a heap value the closure body borrows — awaits that lowering brick;
+     when it lands, the env rides the existing `b` semantics and the captured
+     sig section, no new checker rule.
+   - Gates: build-checker byte demos ×6 (borrow live/uaf/nothing, branch
+     agree/disagree/cross-arm), gate.sh 29 rows (8 new: branch A/R, borrow A/R,
+     closure A/R, real `heap_result_if.almd` + `funcref_call.almd`),
+     `check_bc_unroll_sound` axiom-clean + coqchk'd + ledgered, corpus-wall
+     coverage UNCHANGED (4,693 in-profile / 317 walled — nothing silently
+     dropped), almide-mir 579, workspace + spec suites green.
 
 ## Open risks (honest)
 
@@ -240,6 +345,8 @@ because they are about the run's `Z` result). v0 certificates remain valid.
   is genuinely heavy and unbuilt — it is the single hardest remaining piece
   (G1.2). The table-match decomposition makes per-build cheap but does not remove
   the one-time proof.
-- Branch resource-state agreement (brick 5) is the place a CFG-walk is most
-  tempting — the tripwire must be guarded hardest there (encode per-edge state as
-  ground facts, check join consistency locally).
+- ~~Branch resource-state agreement (brick 5) is the place a CFG-walk is most
+  tempting~~ — shipped WITHIN the tripwire: the `CBranch` rule is two flat arm
+  folds + one equality; no CFG walk, no path enumeration (the emitter groups
+  per-object arm events as ground facts; nested-region arms fall back to an
+  always-rejecting poison `{i|}` rather than a cleverer rule).

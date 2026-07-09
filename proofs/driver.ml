@@ -18,12 +18,13 @@ let () =
   let bytes = read_file Sys.argv.(2) in
   let accepted =
     match mode with
-    | "ownership" -> Checker.check_clc bytes  (* conditional-loop-aware (v3); flat + CLoop certs unchanged *)
+    | "ownership" -> Checker.check_bc bytes  (* branch-aware (v4); flat + CLoop + CCondLoop certs unchanged *)
     | "names" -> Checker.check_names_cert bytes
     | "caps" -> Checker.check_caps_cert bytes
     | "caps-transitive" -> Checker.check_prog_cert bytes  (* call-graph: transitive reach ⊆ declared *)
+    | "call-modes" -> Checker.check_modes_cert bytes  (* per-call-site param modes = callee's declared signature *)
     | m ->
-      prerr_endline ("unknown property: " ^ m ^ " (try: ownership | names | caps | caps-transitive)");
+      prerr_endline ("unknown property: " ^ m ^ " (try: ownership | names | caps | caps-transitive | call-modes)");
       exit 2
   in
   if accepted then (print_endline "ACCEPT"; exit 0)

@@ -18,14 +18,16 @@ name: Trust Spine (v1)
 
 on:
   push:
-    branches: [develop-v1]
+    # develop is the working branch since the 0.28.0 reconciliation folded the
+    # v1 line in; develop-v1 stays covered while it still receives pushes.
+    branches: [develop, develop-v1]
     paths:
       - 'proofs/**'
       - 'crates/almide-mir/**'
       - 'Makefile'
       - '.github/workflows/trust-spine.yml'
   pull_request:
-    branches: [develop-v1]
+    branches: [develop, develop-v1]
     paths:
       - 'proofs/**'
       - 'crates/almide-mir/**'

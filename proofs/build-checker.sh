@@ -14,6 +14,7 @@ echo "== compile + extract the proven checker =="
 "$COQC" -Q . AlmideTrust NameTotality.v >/dev/null
 "$COQC" -Q . AlmideTrust CapabilityBound.v >/dev/null
 "$COQC" -Q . AlmideTrust CapabilityReach.v >/dev/null
+"$COQC" -Q . AlmideTrust CallModes.v >/dev/null
 "$COQC" -Q . AlmideTrust Extract.v >/dev/null
 
 echo "== link the runnable checker (extracted check_cert, parser internalized) =="
@@ -34,6 +35,12 @@ printf 'I(D)M\n'   > /tmp/loop_drain.cert      # loop body DRAINS (release each 
 printf 'I[ID|]M\n' > /tmp/filter_slot.cert     # conditional-loop (filter) slot: then[drop-old acquire-new] / else[] both net 0 → ACCEPT
 printf 'I[I|]M\n'  > /tmp/filter_then_leak.cert # filter THEN branch leaks (net +1) → REJECT
 printf 'I[ID|D]M\n'> /tmp/filter_else_drain.cert # filter ELSE branch drains (net −1) → REJECT
+printf 'IBD\n'     > /tmp/borrow_live.cert      # 5b: borrow of a LIVE owned object (+0) → ACCEPT
+printf 'IDB\n'     > /tmp/borrow_uaf.cert       # 5b: borrow AFTER the last release = use-after-free → REJECT
+printf 'B\n'       > /tmp/borrow_nothing.cert   # 5b: borrow with nothing ever owned → REJECT
+printf 'I{I|I}DD\n'> /tmp/branch_agree.cert     # 5a: one-shot branch, arms AGREE at net +1 (heap-result if) → ACCEPT
+printf 'I{I|}D\n'  > /tmp/branch_disagree.cert  # 5a: arms DISAGREE (+1 vs 0) → REJECT
+printf '{I|D}\n'   > /tmp/branch_cross.cert     # 5a: cross-arm compensation (flat-balanced, runtime-unsafe) → REJECT
 
 run() { # path expected_exit
   set +e; ./checker ownership "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e
@@ -54,6 +61,12 @@ run /tmp/loop_drain.cert 1
 run /tmp/filter_slot.cert 0
 run /tmp/filter_then_leak.cert 1
 run /tmp/filter_else_drain.cert 1
+run /tmp/borrow_live.cert 0
+run /tmp/borrow_uaf.cert 1
+run /tmp/borrow_nothing.cert 1
+run /tmp/branch_agree.cert 0
+run /tmp/branch_disagree.cert 1
+run /tmp/branch_cross.cert 1
 
 # TRANSITIVE capability witness (call graph): functions ';'-separated, each
 # `allowed|direct|callee-indices`. accept ⟹ every function's transitive reach ⊆ declared.
@@ -66,6 +79,22 @@ runt() { # path expected_exit  (caps-transitive mode)
 }
 runt /tmp/caps_tr_ok.cert 0
 runt /tmp/caps_tr_bad.cert 1
+
+# CALL-MODE signature witness (brick 2c): `<sigs>|<sites>`, functions/sites
+# ';'-separated, modes as nats (0 = borrow, 1 = move), each site
+# `<callee-index> <actual modes…>`. accept ⟹ every call site used exactly its
+# callee's declared param modes (the compositionality ground fact).
+printf '0 1;1|1 1' > /tmp/modes_ok.cert    # fn1 declares [move]; a site calls fn1 with [move] → ACCEPT
+printf '0|0 1'     > /tmp/modes_bad.cert    # fn0 declares [borrow]; a site calls fn0 with [move] → REJECT (the double-free pairing)
+printf '0|5 0'     > /tmp/modes_unknown.cert # a site names an out-of-range callee → conservative REJECT
+runm() { # path expected_exit  (call-modes mode)
+  set +e; ./checker call-modes "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -eq "$2" ]; then echo "ok   $(basename "$1"): $(cat /tmp/checker.out) (exit $rc)";
+  else echo "FAIL $(basename "$1"): got exit $rc want $2 ($(cat /tmp/checker.out))"; exit 1; fi
+}
+runm /tmp/modes_ok.cert 0
+runm /tmp/modes_bad.cert 1
+runm /tmp/modes_unknown.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"

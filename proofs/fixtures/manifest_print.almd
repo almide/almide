@@ -1,0 +1,13 @@
+// A REAL effectful program for the MANIFEST-DECLARED capability bound (brick
+// 2c, the ACCEPT case): `effect fn main` prints — it USES exactly {Stdout}.
+// Its DECLARED bound comes from an `almide.toml [permissions].allow` manifest
+// (see manifest_io.toml / manifest_rand.toml beside this file), no longer the
+// vacuous effect-fn-declares-everything default:
+//   allow = ["IO"]    → declared ⊇ {Stdout} → the proven checker ACCEPTs.
+//   allow = ["Rand"]  → Stdout is undeclared → the SAME program is REJECTED.
+// One program, two manifests — the sandbox promise is the operator's written
+// bound, re-verified by the kernel-proven `used ⊆ declared` subset check.
+effect fn main() -> Unit = {
+  var s = "hello"
+  println(s)
+}

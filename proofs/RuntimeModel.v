@@ -45,11 +45,18 @@ Definition rt_dec (m : Mem) (base : Z) : option Mem :=
 Definition rt_reuse (m : Mem) (base : Z) : option Mem :=
   if Z.eqb (read_rc m base) 1 then Some (upd m (base + RC_OFFSET) 0) else None.
 
+(* BORROW: a read through a handle — memory is untouched, but the cell must be
+   LIVE (rc > 0): reading a freed cell is the concrete use-after-free. Mirrors
+   exec's Borrow guard so the machine and the abstract semantics fault together. *)
+Definition rt_borrow (m : Mem) (base : Z) : option Mem :=
+  if read_rc m base <=? 0 then None else Some m.
+
 Definition step_mem (o : Op) (m : Mem) (base : Z) : option Mem :=
   match o with
   | Inc | Alias => Some (rt_inc m base)
   | Dec | MoveOut => rt_dec m base
   | Reuse => rt_reuse m base
+  | Borrow => rt_borrow m base
   end.
 
 Fixpoint mrun (ops : list Op) (m : Mem) (base : Z) : option Mem :=
@@ -102,6 +109,11 @@ Proof.
         rewrite (read_upd_same m base 0) in IH2. exact IH2.
       * (* rc <> 1: both fault (shared reuse / underflow) *)
         reflexivity.
+    + (* Borrow *) unfold rt_borrow. destruct (read_rc m base <=? 0) eqn:E.
+      * (* dead cell: both fault (use-after-free) *)
+        reflexivity.
+      * (* live: memory untouched, count unchanged *)
+        apply IH.
 Qed.
 
 (* COROLLARY: an accepted certificate (the abstract run ends balanced from rc 0)

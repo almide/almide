@@ -121,17 +121,8 @@ Proof. reflexivity. Qed.
    what `prog_within` validates, so the whole "witness bytes ⟶ accept/reject" pipeline is the
    single extracted proven function `check_prog_cert` (no untrusted transitive fold). *)
 
-Definition is_semi (a : ascii) : bool := Nat.eqb (nat_of_ascii a) 59. (* ';' *)
-
-Fixpoint split_semi (s : string) (cur : string) (acc : list string) : list string :=
-  match s with
-  | EmptyString => acc ++ [cur]
-  | String a r =>
-      if is_semi a then split_semi r EmptyString (acc ++ [cur])
-      else split_semi r (cur ++ String a EmptyString) acc
-  end.
-
-(* one function: split off `allowed`, then `direct`, then the rest is `callees`. *)
+(* `split_semi` is the shared `;`-segment parser (Subset.v).
+   one function: split off `allowed`, then `direct`, then the rest is `callees`. *)
 Definition parse_fn (s : string) : Fn :=
   let (a, rest) := split_bar s EmptyString in
   let (d, c) := split_bar rest EmptyString in

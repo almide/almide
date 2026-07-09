@@ -1,0 +1,61 @@
+// @contract: C-132
+// A `mut` parameter of a REALLOCATING container (List/String/Bytes) mutated in
+// place persists to the caller on wasm exactly as native (#705). A List's repr
+// is inline [len][data…] at one pointer, so a capacity-growing `list.push`
+// reallocates the whole header — the callee's fresh pointer must travel back to
+// the CALLER's slot. MutParamLoweringPass returns the buffer (Unit callees) or
+// an (orig, buffer) tuple (value callees) and writes it back at every call
+// position: statement, Bind/Assign RHS, nested expression, loop bodies, and a
+// record-FIELD argument (`push9(b.items, 7)` FieldAssigns the buffer back).
+// Previously only Unit-returning callees in statement position were lowered —
+// `let i = push9(v, 7)` silently pushed into a discarded copy (len=1 native=3;
+// mlp's loss printed 0.0), and after the signature change an unrewritten site
+// would be an invalid module.
+type Box = { items: List[Int] }
+
+fn push9(mut v: List[Int], x: Int) -> Int = { list.push(v, x); list.len(v) - 1 }
+fn addall(mut v: List[Int], n: Int) -> Unit = { var k = 0; while k < n { list.push(v, k); k = k + 1 } }
+fn addc(mut s: String, n: Int) -> Int = { var k = 0; while k < n { string.push(s, "x"); k = k + 1 } string.len(s) }
+fn addb(mut b: Bytes, n: Int) -> Unit = { var k = 0; while k < n { bytes.push(b, 65); k = k + 1 } }
+
+fn main() -> Unit = {
+  // Bind-RHS + realloc from a 1-element list (the issue's headline).
+  var v: List[Int] = [10]
+  let _i = push9(v, 7)
+  let _j = push9(v, 99)
+  println("len=" + int.to_string(list.len(v)) + " v0=" + int.to_string(v[0]))
+  // Growing from empty (the silent variant).
+  var e: List[Int] = []
+  let _k = push9(e, 7)
+  let _l = push9(e, 99)
+  println("e=" + int.to_string(list.len(e)))
+  // Statement-position discard, Assign-RHS, in-loop, Unit callee.
+  var a: List[Int] = [1]
+  push9(a, 2)
+  var r = 0
+  var b: List[Int] = []
+  r = push9(b, 5)
+  var c: List[Int] = []
+  var w = 0
+  while w < 3 { let _z = push9(c, w); w = w + 1 }
+  var d: List[Int] = []
+  addall(d, 4)
+  println("a=" + int.to_string(list.len(a)) + " r=" + int.to_string(r)
+    + " b=" + int.to_string(list.len(b)) + " c=" + int.to_string(list.len(c))
+    + " d=" + int.to_string(list.len(d)))
+  // Record-field argument: the buffer FieldAssigns back into the record.
+  var bx = Box { items: [1] }
+  let _m = push9(bx.items, 7)
+  println("items=" + int.to_string(list.len(bx.items)))
+  // Nested expression position.
+  var nv: List[Int] = [1]
+  let t = 100 + push9(nv, 2)
+  println("t=" + int.to_string(t) + " nlen=" + int.to_string(list.len(nv)))
+  // The whole class: mut String and mut Bytes grow-and-realloc the same way.
+  var s = "ab"
+  let sl = addc(s, 30)
+  println("sl=" + int.to_string(sl) + " s_len=" + int.to_string(string.len(s)))
+  var by = bytes.new(0)
+  addb(by, 20)
+  println("by=" + int.to_string(bytes.len(by)))
+}

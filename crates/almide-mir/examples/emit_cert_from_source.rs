@@ -19,7 +19,8 @@ use almide_frontend::lower::lower_program;
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
 use almide_mir::certificate::{
-    cap_witness_string, name_witness_string, ownership_certificate, transitive_cap_witness_string,
+    apply_manifest_caps, call_modes_witness, cap_witness_string, name_witness_string,
+    ownership_certificate, transitive_cap_witness_string,
 };
 use almide_optimize::{mono, optimize};
 use std::collections::BTreeMap;
@@ -27,6 +28,42 @@ use std::collections::BTreeMap;
 fn die(msg: String) -> ! {
     eprintln!("{msg}");
     std::process::exit(2);
+}
+
+/// Read `[permissions] allow = ["IO", …]` from an `almide.toml`-shaped manifest
+/// — the SAME section `src/project.rs` parses for the production permission
+/// check (`cli::check_permissions`); this example cannot depend on the root
+/// crate (it is above almide-mir), so the section reader is mirrored here.
+/// The strings feed `apply_manifest_caps`: the effect fn's declared bound
+/// becomes the OPERATOR's written manifest instead of the all-caps default.
+fn read_manifest_allow(path: &str) -> Vec<String> {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| die(format!("cannot read manifest {path}: {e}")));
+    let mut in_permissions = false;
+    let mut allow: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_permissions = line == "[permissions]";
+            continue;
+        }
+        if in_permissions {
+            if let Some(rest) = line.strip_prefix("allow") {
+                if let Some(eq) = rest.find('=') {
+                    allow.extend(
+                        rest[eq + 1..]
+                            .trim()
+                            .trim_start_matches('[')
+                            .trim_end_matches(']')
+                            .split(',')
+                            .map(|s| s.trim().trim_matches('"').to_string())
+                            .filter(|s| !s.is_empty()),
+                    );
+                }
+            }
+        }
+    }
+    allow
 }
 
 /// Lower `.almd` source to a linked `IrProgram` at the pre-codegen cut point
@@ -64,10 +101,11 @@ fn source_to_ir(source: &str) -> almide_ir::IrProgram {
 fn main() {
     let mut args = std::env::args().skip(1);
     let path = args.next().unwrap_or_else(|| {
-        die("usage: emit_cert_from_source <file.almd> [function] [ownership|names|caps]".into())
+        die("usage: emit_cert_from_source <file.almd> [function] [ownership|names|caps] [manifest.toml]".into())
     });
     let func_name = args.next().unwrap_or_else(|| "main".to_string());
     let property = args.next().unwrap_or_else(|| "ownership".to_string());
+    let manifest_allow: Option<Vec<String>> = args.next().map(|p| read_manifest_allow(&p));
 
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| die(format!("cannot read {path}: {e}")));
@@ -149,8 +187,14 @@ fn main() {
 
     // The single ownership+layout DECISION: real linked IR → MIR. Outside the
     // value-semantics subset this is an explicit Unsupported (honest boundary).
-    let mir = almide_mir::lower::lower_function(func, &globals)
+    let mut mir = almide_mir::lower::lower_function(func, &globals)
         .unwrap_or_else(|e| die(format!("lowering `{func_name}` is out of subset: {e:?}")));
+    // A manifest refines the effect fn's declared capability bound to the
+    // operator's `[permissions].allow` (pure fns keep ∅) — the 2c ACCEPT case:
+    // the proven `used ⊆ declared` check runs against a NON-VACUOUS bound.
+    if let Some(allow) = &manifest_allow {
+        apply_manifest_caps(&mut mir, allow);
+    }
 
     match property.as_str() {
         "ownership" => print!("{}", ownership_certificate(&mir)),
@@ -167,8 +211,36 @@ fn main() {
             }
             print!("{}", transitive_cap_witness_string(&mir, &program));
         }
+        // Call-mode signature witness (brick 2c): whole-program — every function's
+        // declared heap-param modes + every CallFn site's actual modes; the proven
+        // checker re-verifies per-site agreement (caller and callee assumed the
+        // same calling convention). Lambdas are LIFTED during MIR lowering (not at
+        // the IR level), so the all-variant lowering is used: its lifted
+        // `__lambda_*` auxiliaries are the FuncRef table targets the indirect
+        // (closure) sites' possible-callee sets are computed from (brick 5c) —
+        // without them every CallIndirect would be unknowable (sentinel REJECT).
+        "modes" => {
+            let record_layouts = almide_mir::lower::build_record_layouts(&ir.type_decls);
+            let variant_layouts = almide_mir::lower::build_variant_layouts(&ir.type_decls);
+            let mut program: BTreeMap<String, almide_mir::MirFunction> = BTreeMap::new();
+            for f in &ir.functions {
+                if let Ok(mirs) = almide_mir::lower::lower_function_all_with_globals(
+                    f, &globals, &global_inits, &record_layouts, &variant_layouts,
+                ) {
+                    for m in mirs {
+                        program.insert(m.name.clone(), m);
+                    }
+                }
+            }
+            // Dotted callees are self-hosted stdlib calls — purity-gated at
+            // lowering, borrowing heap args by the renderer contract (the same
+            // class classify_corpus's `is_known_free` names for caps).
+            print!("{}", call_modes_witness(&program, &|n: &str| n.contains('.')));
+        }
         other => {
-            die(format!("unknown property: {other} (try: ownership | names | caps | tcaps)"))
+            die(format!(
+                "unknown property: {other} (try: ownership | names | caps | tcaps | modes)"
+            ))
         }
     }
 }

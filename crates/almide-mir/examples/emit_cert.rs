@@ -7,9 +7,10 @@
 //!   emit_cert <scenario> [ownership|names]   (property defaults to ownership)
 
 use almide_mir::{
-    certificate::{cap_witness_string, name_witness_string, ownership_certificate},
-    CallArg, Capability, Init, MirFunction, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT,
+    certificate::{call_modes_witness, cap_witness_string, name_witness_string, ownership_certificate},
+    CallArg, Capability, Init, MirFunction, MirParam, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT,
 };
+use std::collections::BTreeMap;
 
 fn heap() -> Repr {
     Repr::Ptr { layout: PLACEHOLDER_LAYOUT }
@@ -70,26 +71,161 @@ fn scenario(which: &str) -> MirFunction {
             declared_caps: vec![], // declares no capability
             ..Default::default()
         },
+        // A one-shot BRANCH whose arms AGREE at net +1 on a pre-branch object
+        // (each arm acquires one alias of `a` — the heap-result-branch class):
+        // cert `i{a|a}dd`, ACCEPTED by the proven CBranch agreement rule.
+        "branch-agree" => {
+            let (x, y, z, c) = (ValueId(0), ValueId(1), ValueId(2), ValueId(3));
+            MirFunction {
+                name: "f".into(),
+                ops: vec![
+                    Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
+                    Op::Const { dst: c },
+                    Op::IfThen { cond: c, dst: None },
+                    Op::Dup { dst: y, src: x },
+                    Op::Else { val: None },
+                    Op::Dup { dst: z, src: x },
+                    Op::EndIf { val: None },
+                    Op::Drop { v: x },
+                    Op::Drop { v: y },
+                ],
+                ..Default::default()
+            }
+        }
+        // The arms DISAGREE (+1 vs 0): a mis-lowered branch — one path leaks the
+        // alias the other path acquired. Cert `i{a|}d` → the checker REJECTS.
+        "branch-mismatch" => {
+            let (x, y, c) = (ValueId(0), ValueId(1), ValueId(2));
+            MirFunction {
+                name: "f".into(),
+                ops: vec![
+                    Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
+                    Op::Const { dst: c },
+                    Op::IfThen { cond: c, dst: None },
+                    Op::Dup { dst: y, src: x },
+                    Op::Else { val: None },
+                    Op::EndIf { val: None },
+                    Op::Drop { v: x },
+                ],
+                ..Default::default()
+            }
+        }
+        // An in-place unique use (`xs[i] = v` → MakeUnique) of a LIVE owned
+        // object: cert `ibd` (+0 liveness-guarded `b`) → ACCEPT.
+        "borrow-live" => MirFunction {
+            name: "f".into(),
+            ops: vec![
+                Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+                Op::MakeUnique { v: a },
+                Op::Drop { v: a },
+            ],
+            ..Default::default()
+        },
+        // The SAME use AFTER the release — a use-after-free the cert previously
+        // could not witness: cert `idb` → the `b` guard faults → REJECT.
+        "borrow-uaf" => MirFunction {
+            name: "f".into(),
+            ops: vec![
+                Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+                Op::Drop { v: a },
+                Op::MakeUnique { v: a },
+            ],
+            ..Default::default()
+        },
         other => {
             eprintln!(
                 "unknown scenario: {other} \
-                 (try: balanced | leak | dangling | sandboxed | undeclared)"
+                 (try: balanced | leak | dangling | sandboxed | undeclared | \
+                 branch-agree | branch-mismatch | borrow-live | borrow-uaf)"
             );
             std::process::exit(2);
         }
     }
 }
 
+/// Two-function programs for the CALL-MODE witness (brick 2c). `main` passes a
+/// heap Handle to `beep`; in the AGREE program `beep` declares one heap param
+/// (borrow — the v1 convention), in the MISMATCH program `beep` declares NO heap
+/// param, so the site's actual modes cannot equal the signature — the shape a
+/// mis-lowered call boundary produces, which the proven checker must REJECT.
+fn modes_scenario(which: &str) -> BTreeMap<String, MirFunction> {
+    let (a, p) = (ValueId(0), ValueId(1));
+    let mut program = BTreeMap::new();
+    match which {
+        // CLOSURE dispatch (brick 5c): main takes a funcref to `lam` and calls it
+        // indirectly. AGREE: the site's shape (one scalar arg) matches `lam`'s
+        // params, so the possible-callee set is {lam} and the site's actual heap
+        // modes ([]) equal lam's declared signature ([]) → ACCEPT.
+        // UNKNOWABLE: the site passes a HEAP handle but `lam` takes a scalar —
+        // no table target matches the dispatch shape, so the emitter writes the
+        // out-of-range sentinel → conservative REJECT.
+        "closure-agree" | "closure-unknowable" => {
+            let lam = MirFunction {
+                name: "lam".into(),
+                params: vec![MirParam { value: p, repr: Repr::Scalar { width: almide_mir::ScalarWidth::Double } }],
+                ..Default::default()
+            };
+            let (fr, t) = (ValueId(2), ValueId(3));
+            let call = if which == "closure-agree" {
+                Op::CallIndirect { dst: None, table_idx: t, args: vec![CallArg::Imm(5)], result: None }
+            } else {
+                Op::CallIndirect { dst: None, table_idx: t, args: vec![CallArg::Handle(a)], result: None }
+            };
+            let main = MirFunction {
+                name: "main".into(),
+                ops: vec![
+                    Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+                    Op::FuncRef { dst: fr, name: "lam".into() },
+                    call,
+                    Op::Drop { v: a },
+                ],
+                ..Default::default()
+            };
+            program.insert(lam.name.clone(), lam);
+            program.insert(main.name.clone(), main);
+        }
+        _ => {
+            let beep_params = if which == "modes-agree" {
+                vec![MirParam { value: p, repr: heap() }]
+            } else {
+                vec![]
+            };
+            let beep = MirFunction { name: "beep".into(), params: beep_params, ..Default::default() };
+            let main = MirFunction {
+                name: "main".into(),
+                ops: vec![
+                    Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+                    Op::CallFn {
+                        dst: None,
+                        name: "beep".into(),
+                        args: vec![CallArg::Handle(a)],
+                        result: None,
+                    },
+                    Op::Drop { v: a },
+                ],
+                ..Default::default()
+            };
+            program.insert(beep.name.clone(), beep);
+            program.insert(main.name.clone(), main);
+        }
+    }
+    program
+}
+
 fn main() {
     let which = std::env::args().nth(1).unwrap_or_else(|| "balanced".to_string());
     let property = std::env::args().nth(2).unwrap_or_else(|| "ownership".to_string());
+    if property == "modes" {
+        print!("{}", call_modes_witness(&modes_scenario(&which), &|_: &str| false));
+        return;
+    }
     let f = scenario(&which);
     match property.as_str() {
         "ownership" => print!("{}", ownership_certificate(&f)),
         "names" => print!("{}", name_witness_string(&f)),
         "caps" => print!("{}", cap_witness_string(&f)),
         other => {
-            eprintln!("unknown property: {other} (try: ownership | names | caps)");
+            eprintln!("unknown property: {other} (try: ownership | names | caps | modes)");
             std::process::exit(2);
         }
     }

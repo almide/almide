@@ -514,3 +514,212 @@
             Some(ValueId(1)),
         )));
     }
+
+    #[test]
+    fn manifest_caps_refine_the_effect_bound_and_never_grant_a_pure_fn() {
+        // The manifest vocabulary projects onto the registry: IO covers the
+        // console + filesystem caps, Rand → Entropy; unmodeled effects (Net)
+        // project to nothing (they cannot widen the bound).
+        let allow = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            manifest_caps(&allow(&["IO"])),
+            vec![Capability::Stdout, Capability::Stdin, Capability::FsRead, Capability::FsWrite]
+        );
+        assert_eq!(manifest_caps(&allow(&["Rand", "Net"])), vec![Capability::Entropy]);
+
+        // An effect fn's all-caps default is REFINED to the manifest…
+        let mut eff = func(vec![]);
+        eff.declared_caps = vec![Capability::Stdout, Capability::Entropy];
+        apply_manifest_caps(&mut eff, &allow(&["Rand"]));
+        assert_eq!(eff.declared_caps, vec![Capability::Entropy]);
+
+        // …but a pure fn (declares ∅) is NEVER granted host access by a
+        // manifest: pure stays pure (the soundness floor).
+        let mut pure = func(vec![]);
+        apply_manifest_caps(&mut pure, &allow(&["IO"]));
+        assert!(pure.declared_caps.is_empty());
+    }
+
+    #[test]
+    fn call_modes_witness_matches_the_coq_parser_format() {
+        use std::collections::BTreeMap;
+        let no = |_: &str| false;
+        // main passes a heap Handle to use_it (one borrow param). Sorted order:
+        // 0=main (no heap params → empty sig), 1=use_it (`0`). One site:
+        // callee 1, actual [borrow] — `check_modes_cert` ACCEPTS the agreement.
+        let use_it = param_fn("use_it", vec![Op::Borrow { v: ValueId(0) }], None);
+        let mut main = func(vec![
+            Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Opaque },
+            Op::CallFn {
+                dst: None,
+                name: "use_it".into(),
+                args: vec![CallArg::Handle(ValueId(0))],
+                result: None,
+            },
+            Op::Drop { v: ValueId(0) },
+        ]);
+        main.name = "main".into();
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [main.clone(), use_it] {
+            program.insert(f.name.clone(), f);
+        }
+        assert_eq!(call_modes_witness(&program, &no), ";0|1 0");
+
+        // An UNKNOWN callee gets the out-of-range index (conservative REJECT by
+        // the proven checker) — unless the caller's policy names it as a
+        // known-convention (renderer-contract) callee, in which case the site
+        // is omitted (its args follow the fixed borrow contract, not a
+        // per-function signature).
+        let mut m2 = main;
+        m2.ops[1] = Op::CallFn {
+            dst: None,
+            name: "list.len".into(),
+            args: vec![CallArg::Handle(ValueId(0))],
+            result: None,
+        };
+        let mut prog2: BTreeMap<String, MirFunction> = BTreeMap::new();
+        prog2.insert(m2.name.clone(), m2);
+        assert_eq!(call_modes_witness(&prog2, &no), "|1 0");
+        assert_eq!(call_modes_witness(&prog2, &|n: &str| n.contains('.')), "|");
+    }
+
+    #[test]
+    fn branch_grouping_accepts_agreement_and_rejects_cross_arm_compensation() {
+        // AGREEMENT at net +1: each arm acquires one alias of a pre-branch
+        // object (the heap-result-branch class). Neither arm self-balances, so
+        // the emitter GROUPS them (`{a|a}`) and the proven CBranch rule accepts
+        // (both arms leave the same count); verify_ownership's branch join agrees.
+        let (x, y, z, c) = (ValueId(0), ValueId(1), ValueId(2), ValueId(3));
+        let agree = func(vec![
+            Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+            Op::Dup { dst: y, src: x },
+            Op::Else { val: None },
+            Op::Dup { dst: z, src: x },
+            Op::EndIf { val: None },
+            Op::Drop { v: x },
+            Op::Drop { v: y },
+        ]);
+        assert_eq!(ownership_certificate(&agree), "i{a|a}dd\n");
+        assert_eq!(verify_ownership(&agree), Ok(()));
+
+        // CROSS-ARM COMPENSATION (the closed accept-but-unsafe class): the then
+        // arm acquires, the else arm releases — FLAT the events balance
+        // (`iadd`), yet at runtime either path is wrong (leak on then, double
+        // release on else). Grouped, the arms disagree (+1 vs −1): the cert
+        // carries `{a|d}` (proven-checker REJECT — the gate's branch-mismatch
+        // row) and verify_ownership flags BranchDisagreement.
+        let cross = func(vec![
+            Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+            Op::Dup { dst: y, src: x },
+            Op::Else { val: None },
+            Op::Drop { v: x },
+            Op::EndIf { val: None },
+            Op::Drop { v: x },
+        ]);
+        assert_eq!(ownership_certificate(&cross), "i{a|d}d\n");
+        let errs = verify_ownership(&cross).unwrap_err();
+        assert!(
+            errs.iter().any(|v| v.kind == crate::ViolationKind::BranchDisagreement),
+            "expected a BranchDisagreement, got {errs:?}"
+        );
+
+        // Arms that EACH self-balance flush FLAT — byte-identical to the
+        // pre-brick-5 emission (the zero-churn ratchet): per-arm alias+release.
+        let flat = func(vec![
+            Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+            Op::Dup { dst: y, src: x },
+            Op::Drop { v: y },
+            Op::Else { val: None },
+            Op::Dup { dst: z, src: x },
+            Op::Drop { v: z },
+            Op::EndIf { val: None },
+            Op::Drop { v: x },
+        ]);
+        assert_eq!(ownership_certificate(&flat), "iadadd\n");
+        assert_eq!(verify_ownership(&flat), Ok(()));
+    }
+
+    #[test]
+    fn make_unique_is_a_liveness_guarded_borrow_event() {
+        // An in-place unique use (`xs[i] = v` → MakeUnique) of a LIVE owned
+        // object is a `b` (+0, guarded): balanced overall.
+        let a = ValueId(0);
+        let live = func(vec![
+            Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+            Op::MakeUnique { v: a },
+            Op::Drop { v: a },
+        ]);
+        assert_eq!(ownership_certificate(&live), "ibd\n");
+        assert_eq!(verify_ownership(&live), Ok(()));
+
+        // The SAME use after the last release is a use-after-free the cert can
+        // now witness: `idb` — the `b` guard faults in the proven checker, and
+        // verify_ownership flags it too (the verdicts stay in lockstep).
+        let uaf = func(vec![
+            Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+            Op::Drop { v: a },
+            Op::MakeUnique { v: a },
+        ]);
+        assert_eq!(ownership_certificate(&uaf), "idb\n");
+        assert!(verify_ownership(&uaf).is_err());
+        assert!(!cert_all_balanced(&ownership_certificate(&uaf)));
+    }
+
+    #[test]
+    fn call_indirect_witness_expands_the_possible_callee_set() {
+        use std::collections::BTreeMap;
+        let no = |_: &str| false;
+        // `lam` takes one SCALAR param; main creates its funcref and dispatches
+        // one scalar arg. The possible-callee set is {lam} (shape match), so the
+        // site expands to ONE agreement row against callee 0 — `forallb site_ok`
+        // in the proven checker is the Forall lift over the set.
+        let mut lam = func(vec![]);
+        lam.name = "lam".into();
+        lam.params = vec![MirParam {
+            value: ValueId(9),
+            repr: Repr::Scalar { width: crate::ScalarWidth::Double },
+        }];
+        let mut main = func(vec![
+            Op::FuncRef { dst: ValueId(1), name: "lam".into() },
+            Op::CallIndirect {
+                dst: None,
+                table_idx: ValueId(1),
+                args: vec![CallArg::Imm(5)],
+                result: None,
+            },
+        ]);
+        main.name = "main".into();
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [lam.clone(), main] {
+            program.insert(f.name.clone(), f);
+        }
+        assert_eq!(call_modes_witness(&program, &no), ";|0");
+
+        // A dispatch whose shape matches NO table target (a heap handle where
+        // every target takes a scalar — the call_indirect type gate would trap)
+        // is UNKNOWABLE: the sentinel row (out-of-range callee) makes the proven
+        // checker REJECT conservatively.
+        let mut main2 = func(vec![
+            Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Opaque },
+            Op::FuncRef { dst: ValueId(1), name: "lam".into() },
+            Op::CallIndirect {
+                dst: None,
+                table_idx: ValueId(1),
+                args: vec![CallArg::Handle(ValueId(0))],
+                result: None,
+            },
+            Op::Drop { v: ValueId(0) },
+        ]);
+        main2.name = "main".into();
+        let mut prog2: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [lam, main2] {
+            prog2.insert(f.name.clone(), f);
+        }
+        assert_eq!(call_modes_witness(&prog2, &no), ";|2 0");
+    }

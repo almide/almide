@@ -1646,3 +1646,25 @@ evidence  = [
   { path = "spec/wasm_cross/option_unwrap_or_else_heap.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_fold_heap_acc.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-131"
+spec      = "ALS-C5"
+title     = "Loop-rebuilt buffers are O(n): COW guards only LIVE aliases, and LICM never hoists heap allocations"
+statement = "A loop that rebuilds a heap container via in-place mutation (`list.push` per element, the buffer dropped or swap-carried each round) costs O(n) bytes and byte-matches native at 152k elements. Two static rules make the COW guard precise without weakening it: (1) LICM never hoists a heap-typed result out of a loop — hoisting the `[]` allocation had aliased every iteration to one shared `__licm` temp, making the guard load-bearing on every push; (2) a DIRECT whole-var copy (`cur = merged`) whose source has no read or mutation after the edge — same-loop sources are re-declared before any use — is a MOVE and adds no alias edge. A LIVE alias (the source read after the copy) still clones on mutation, and param-reachable targets remain unconditionally guarded, so value semantics are unchanged (alias_cow, bytes_set_value_semantics). Previously the unconditional per-push clone was O(n²) and drove the 32-bit heap arithmetic out of bounds past ~128 KiB per round — the merge-sort OOM at n≳8000 (#696)."
+since     = "0.28.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/loop_buffer_churn.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-132"
+spec      = "ALS-M13"
+title     = "mut parameters of reallocating containers persist to the caller at every call position"
+statement = "A `mut` parameter of a REALLOCATING container (List, String, Bytes) mutated in place inside the callee persists to the caller on wasm exactly as native, at EVERY call position — statement, Bind/Assign RHS, nested expression, loop bodies — and for both bare-var and record-FIELD arguments (`push9(b.items, 7)` writes the buffer back into the field). Value-returning callees return an (orig, buffer) tuple destructured at the call site; Unit callees return the buffer. Previously only Unit callees in statement position were lowered: `let i = push9(v, 7)` pushed into a discarded copy (wasm len=1 vs native len=3, silent len=0 from empty; a real MLP printed loss 0.0), the #705 class."
+since     = "0.28.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/mut_heap_param.almd", class = "fixture" },
+]

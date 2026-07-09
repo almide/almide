@@ -86,6 +86,12 @@ impl NanoPass for AliasCowPass {
             }
         }
 
+        if std::env::var("ALMIDE_COW_PROBE").is_ok() {
+            for v in &needs_cow {
+                eprintln!("[cow] needs_cow: {:?} name={} ty={:?}",
+                    v, program.var_table.get(*v).name, program.var_table.get(*v).ty);
+            }
+        }
         program.codegen_annotations.needs_cow = needs_cow;
         PassResult { program, changed: false }
     }
@@ -104,7 +110,7 @@ fn collect_module_vars(program: &IrProgram) -> std::collections::HashSet<VarId> 
 
 /// Is `ty` a heap-allocated value that aliases by pointer on WASM (so an in-place
 /// mutation through one binding is observable through another that shares it)?
-fn is_heap_aliasable(ty: &Ty) -> bool {
+pub(crate) fn is_heap_aliasable(ty: &Ty) -> bool {
     use almide_lang::types::TypeConstructorId;
     match ty {
         Ty::String | Ty::Bytes | Ty::Matrix
@@ -133,6 +139,22 @@ struct AliasAnalysis<'a> {
     /// inside `touch`), so a param — and anything in its alias class — is
     /// treated as aliased unconditionally.
     params: std::collections::HashSet<VarId>,
+    /// Monotone visit counter — a lexical position for the MOVE refinement.
+    pos: usize,
+    /// Innermost-loop stack: ids (= entry pos) of the `While`/`ForIn` bodies
+    /// currently being walked.
+    loop_stack: Vec<usize>,
+    /// loop id → its body's end position (recorded on exit).
+    loop_end: HashMap<usize, usize>,
+    /// var → (decl position, innermost loop id at the decl) from its `Bind`.
+    decl_at: HashMap<VarId, (usize, Option<usize>)>,
+    /// var → positions of every READ (`Var` expr) and in-place MUTATION.
+    occurrences: HashMap<VarId, Vec<usize>>,
+    /// DIRECT `target = src` whole-var edges, deferred so `finish` can elide
+    /// the ones that are MOVES (src never used after the edge — the
+    /// `cur = merged` buffer-swap shape, #696). Derived provenance (`y =
+    /// r.field`, branch-arm tails) unions immediately: the owner keeps access.
+    deferred_edges: Vec<(VarId, VarId, usize, Option<usize>)>,
 }
 
 impl<'a> AliasAnalysis<'a> {
@@ -140,7 +162,12 @@ impl<'a> AliasAnalysis<'a> {
         let params = params.iter().copied()
             .filter(|v| (v.0 as usize) < var_table.len() && is_heap_aliasable(&var_table.get(*v).ty))
             .collect();
-        AliasAnalysis { var_table, parent: HashMap::new(), mutated: Default::default(), params }
+        AliasAnalysis {
+            var_table, parent: HashMap::new(), mutated: Default::default(), params,
+            pos: 0, loop_stack: Vec::new(), loop_end: HashMap::new(),
+            decl_at: HashMap::new(), occurrences: HashMap::new(),
+            deferred_edges: Vec::new(),
+        }
     }
 
     fn is_heap_var(&self, v: VarId) -> bool {
@@ -159,13 +186,21 @@ impl<'a> AliasAnalysis<'a> {
     /// the same may-alias class. Only heap-typed vars participate.
     fn alias(&mut self, x: VarId, y: VarId) {
         if !self.is_heap_var(x) || !self.is_heap_var(y) { return; }
+        if std::env::var("ALMIDE_COW_PROBE").is_ok() {
+            eprintln!("[cow-edge] {:?}({}) — {:?}({})",
+                x, self.var_table.get(x).name, y, self.var_table.get(y).name);
+        }
         let rx = self.find(x);
         let ry = self.find(y);
         if rx != ry { self.parent.insert(rx, ry); }
     }
 
     fn mark_mutated(&mut self, v: VarId) {
-        if self.is_heap_var(v) { self.mutated.insert(v); }
+        if self.is_heap_var(v) {
+            self.mutated.insert(v);
+            let p = self.pos;
+            self.occurrences.entry(v).or_default().push(p);
+        }
     }
 
     /// If `value` is a bare/derived reference to a single heap var, return its id.
@@ -194,6 +229,15 @@ impl<'a> AliasAnalysis<'a> {
                 for arm in arms { self.alias_from_value(target, &arm.body); }
             }
             IrExprKind::Block { expr: Some(tail), .. } => self.alias_from_value(target, tail),
+            // A DIRECT whole-var copy is a MOVE candidate: defer it so `finish`
+            // can elide the edge when src is never used after it (#696's
+            // `cur = merged` swap). Everything derived stays immediate.
+            IrExprKind::Var { id: src } => {
+                if self.is_heap_var(target) && self.is_heap_var(*src) {
+                    let (p, l) = (self.pos, self.loop_stack.last().copied());
+                    self.deferred_edges.push((target, *src, p, l));
+                }
+            }
             _ => {
                 if let Some(src) = Self::provenance_var(value) {
                     self.alias(target, src);
@@ -207,6 +251,40 @@ impl<'a> AliasAnalysis<'a> {
     /// value) or the class reaches a fn param (the CALLER may still hold the
     /// value — cross-function aliasing the per-function analysis cannot see).
     fn finish(mut self) -> Vec<VarId> {
+        // Resolve the deferred DIRECT edges: an edge `target = src` at position
+        // E is a MOVE (elided) iff src has no read/mutation after E within its
+        // proven-dead extent — (a) src is DECLARED in the same innermost loop
+        // body as the edge and has no occurrence in (E, loop_end]: the next
+        // iteration re-declares src before any use can see the old value
+        // (scoping forbids use-before-decl); or (b) the edge is outside any
+        // loop and src has no occurrence after E anywhere. Everything else is
+        // a LIVE alias and unions as before (#696).
+        let edges = std::mem::take(&mut self.deferred_edges);
+        for (target, src, e_pos, e_loop) in edges {
+            let occ_after = |hi: Option<usize>| -> bool {
+                self.occurrences.get(&src).map_or(false, |ps| ps.iter().any(|&p| {
+                    p > e_pos && hi.map_or(true, |h| p <= h)
+                }))
+            };
+            let is_move = match e_loop {
+                Some(l) => {
+                    let decl_in_same_loop =
+                        self.decl_at.get(&src).map_or(false, |&(_, dl)| dl == Some(l));
+                    let end = self.loop_end.get(&l).copied();
+                    decl_in_same_loop && !occ_after(end)
+                }
+                None => !occ_after(None),
+            };
+            if is_move {
+                if std::env::var("ALMIDE_COW_PROBE").is_ok() {
+                    eprintln!("[cow-move] {:?}({}) = {:?}({}) — src dead after edge, elided",
+                        target, self.var_table.get(target).name,
+                        src, self.var_table.get(src).name);
+                }
+            } else {
+                self.alias(target, src);
+            }
+        }
         // class size per root.
         let mutated: Vec<VarId> = self.mutated.iter().copied().collect();
         let members: Vec<VarId> = self.parent.keys().copied().collect();
@@ -228,6 +306,24 @@ impl<'a> AliasAnalysis<'a> {
 
 impl IrVisitor for AliasAnalysis<'_> {
     fn visit_expr(&mut self, expr: &IrExpr) {
+        self.pos += 1;
+        // Positions/loops for the MOVE refinement: every `Var` read is an
+        // occurrence; `While`/`ForIn` bodies open a loop scope whose end pos
+        // bounds the same-loop dead-extent check.
+        if let IrExprKind::Var { id } = &expr.kind {
+            if self.is_heap_var(*id) {
+                let p = self.pos;
+                self.occurrences.entry(*id).or_default().push(p);
+            }
+        } else if matches!(expr.kind, IrExprKind::While { .. } | IrExprKind::ForIn { .. }) {
+            let loop_id = self.pos;
+            self.loop_stack.push(loop_id);
+            walk_expr(self, expr);
+            self.loop_stack.pop();
+            let end = self.pos;
+            self.loop_end.insert(loop_id, end);
+            return;
+        }
         // In-place stdlib mutator: `list.push(a, x)`, `map.insert(a, k, v)`, …
         if let IrExprKind::RuntimeCall { symbol, args } = &expr.kind {
             if is_inplace_mutator(symbol.as_str()) || symbol.as_str() == "almide_rt_bytes_set" {
@@ -252,9 +348,23 @@ impl IrVisitor for AliasAnalysis<'_> {
     }
 
     fn visit_stmt(&mut self, stmt: &IrStmt) {
+        self.pos += 1;
         match &stmt.kind {
-            IrStmtKind::Bind { var, value, .. } => self.alias_from_value(*var, value),
-            IrStmtKind::Assign { var, value } => self.alias_from_value(*var, value),
+            // Walk the value FIRST so its own reads land BEFORE the edge
+            // position — otherwise `cur = merged` would count merged's RHS
+            // read as \"after the edge\" and never elide the move.
+            IrStmtKind::Bind { var, value, .. } => {
+                self.visit_expr(value);
+                let (p, l) = (self.pos, self.loop_stack.last().copied());
+                self.decl_at.entry(*var).or_insert((p, l));
+                self.alias_from_value(*var, value);
+                return;
+            }
+            IrStmtKind::Assign { var, value } => {
+                self.visit_expr(value);
+                self.alias_from_value(*var, value);
+                return;
+            }
             // In-place mutation statement kinds — `target` is read-and-written.
             IrStmtKind::IndexAssign { target, .. }
             | IrStmtKind::FieldAssign { target, .. }
@@ -267,7 +377,12 @@ impl IrVisitor for AliasAnalysis<'_> {
             // `map.insert(a, ...)` STDLIB CALL (handled in visit_expr) is the one
             // that mutates in place.
             IrStmtKind::ListCopySlice { dst, .. } => self.mark_mutated(*dst),
-            _ => {}
+            // Explicit-preserve: no alias edge, no mutation target — children
+            // are still walked by walk_stmt below.
+            IrStmtKind::BindDestructure { .. } | IrStmtKind::MapInsert { .. }
+            | IrStmtKind::Guard { .. } | IrStmtKind::Comment { .. }
+            | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. }
+            | IrStmtKind::Expr { .. } => {}
         }
         walk_stmt(self, stmt);
     }

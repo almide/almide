@@ -1,0 +1,5 @@
+# The operator's capability manifest for manifest_print.almd (the REJECT case):
+# only Rand (entropy) is allowed, so the SAME printing program is rejected —
+# Stdout is an undeclared host effect under this manifest.
+[permissions]
+allow = ["Rand"]
