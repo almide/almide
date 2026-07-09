@@ -3,9 +3,11 @@
 > Status: **design accepted; bricks 1–2 and 5 shipped** (ownership alphabet
 > i/a/d/m; calls 2a/2b/2c — effect calls, per-call-site caps, param-mode
 > signatures + manifest-declared caps; full mode 5a/5b/5c — branch agreement
-> `{…|…}`, the `b` letter, closure-dispatch signatures), 3a/3b + 4a/4b shipped
-> inside their bricks. Remaining: 3c (WasmCert ISA byte binding), A2 raw-byte
-> encoding, brick 6 (CertiCoq).
+> `{…|…}`, the `b` letter, closure-dispatch signatures + capturing closures),
+> 3a/3b/3c + 4a/4b shipped inside their bricks (3c = the in-tree raw-byte ⟶ ISA
+> decoder, WasmDecode.v). Remaining: brick 6 (CertiCoq extraction of the
+> checker); A2's residual is the rc-fragment scope (whole-function bodies stay
+> the renderer contract).
 > Supersedes the implicit "i/d-per-object" format. Grounded in a prior-art +
 > adversarial design pass (Perceus/Koka reuse, linear/foundational PCC,
 > WasmCert-Coq byte semantics, the v0 ownership taxonomy).
@@ -219,9 +221,26 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      accepted certificate (balanced from rc 0) is realized by a machine that
      NEVER double-frees in memory. So the abstract Dec is no longer a free-floating
      token — it is bound to a concrete memory operation (both theorems axiom-clean,
-     coqchk-verified). REMAINING (3c): bind this memory machine to the actual wasm
-     BYTES — that the wasm `call $rc_dec` INSTRUCTION executes precisely these cell
-     writes — the WasmCert-Coq ISA layer, the last mile of G1.2.
+     coqchk-verified).
+   - **3c: the raw-byte ⟶ ISA binding (the G1.2 last mile, in-tree).** ✅
+     **SHIPPED (2026-07-09, `proofs/WasmDecode.v`).** A proven DECODER
+     `decode : bytes → option (list instr)` for the rc opcode subset (unknown
+     opcode / malformed memarg / non-zero global index / missing `end` ⇒ None —
+     conservative reject) binds the REAL assembler bytes to WasmIsa's relational
+     small-step semantics: `decode rc_inc_bytes` and `decode rc_dec_real_bytes`
+     (BOTH wat2wasm-grounded per build by check-wasm-bytes.sh — the renderer's
+     actual shapes, `p + 0` adds included) yield programs whose EVERY `irun`
+     reduction carries the proven effects — `rc_inc_bytes_isa_effect` (+1 on the
+     cell), `rc_dec_bytes_isa_traps` (a double-free is STUCK in the spec at the
+     byte level), `rc_dec_bytes_isa_frees` (a unique release zeroes the cell AND
+     links it onto $freelist). Chain closed: real bytes ⟹(decode, proven) ISA
+     program ⟹(irun, proven) memory effect. HONEST residual (recorded, same
+     class as WasmCert-Coq's own): the wasm ENGINE's fidelity to the ISA spec
+     (cross-checked per build by wasmtime in check-wasm-exec.sh), the assembler
+     grounding, the kernel; whole-function bodies beyond the rc primitives
+     remain the §3 renderer contract. A full WasmCert-Coq IMPORT stays
+     infeasible in-tree (it targets older Coq, not Rocq 9) — the in-tree ISA +
+     decoder is the accepted architecture (WasmIsa.v header).
 4. **perceus mode (`r`) + leak-freedom.**
    - **4a: the `r` event + memory-level leak-freedom.** ✅ **SHIPPED.**
      `OwnershipChecker.v` gains `Reuse` (`r`) — a reuse-eligible release (perceus
@@ -325,11 +344,20 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      out-of-range sentinel → conservative REJECT. Real-source gate row:
      `funcref_call.almd` (a returned lifted funcref dispatched via
      CallIndirect; lifted `__lambda_*` auxiliaries included in the witness
-     program). HONEST SCOPE: capturing closures still WALL at lowering (no
-     closure ENV exists in-profile yet), so `b`'s closure-env emission — the
-     env is a heap value the closure body borrows — awaits that lowering brick;
-     when it lands, the env rides the existing `b` semantics and the captured
-     sig section, no new checker rule.
+     program). **FOLLOW-UP SHIPPED (2026-07-09): capturing closures.** First-
+     class function values are now UNIFORMLY a CLOSURE BLOCK — a heap
+     `[rc][len][cap][fnidx][captured…]` DynList; a call loads the fnidx from
+     slot 0 and passes the block as the leading BORROWED env arg, and the
+     lifted lambda's prologue reads its captures back out (`fn adder(n) =
+     (x) => x + n` returned/bound/dispatched, v0-byte-identical —
+     closure_capturing_wasm.almd; corpus in-profile 4,693 → 4,745, walls 317 →
+     306). ZERO new ops / render rules / checker rules: the block is an
+     ordinary owned heap object (`i`/`d`/`m` certs), the env an ordinary
+     borrowed heap param (the CallModes agreement covers the closure boundary —
+     the possible-callee expansion now matches on the env+args shape). HONEST
+     SCOPE: captures are i64 SCALARS (Int/Bool) — a heap or Float capture still
+     defers; heap captures (env-owned nested handles + the `b` env-borrow
+     events) are the remaining ratchet.
    - Gates: build-checker byte demos ×6 (borrow live/uaf/nothing, branch
      agree/disagree/cross-arm), gate.sh 29 rows (8 new: branch A/R, borrow A/R,
      closure A/R, real `heap_result_if.almd` + `funcref_call.almd`),
