@@ -9,12 +9,11 @@ ownership 13121→13129, all three properties ACCEPT.
 
 REMAINING under this slice: heap-result `match` (desugar via `desugar_match_to_if`),
 and non-literal arms (direct calls — step 1 below). A SEPARATE pre-existing bug the
-audit surfaced: the wasm `$alloc` free-list reuse formula uses `LIST_HEADER +
-cap*ELEM_SIZE` but String blocks size as `LIST_HEADER + bytes`, so freed String
-blocks are never reused → a String-allocating LOOP OOMs (fail-stop, not an rc-leak;
-frees happen, the ownership claim holds — it is the FreeList.v bounded-churn
-property that is false for Strings). Fix: key the free-list on the block's real
-byte-size, not `cap*ELEM`.
+audit surfaced — **since FIXED** (render_wasm_p2.rs): String/Bytes blocks are now
+sized LIST-COMPATIBLY (`cap = ceil(bytes/ELEM_SIZE)` elements, allocation =
+`LIST_HEADER + cap*ELEM_SIZE` — exactly what the `$alloc` reuse check recomputes),
+so freed String blocks ARE reclaimed and String-churning loops run in bounded
+memory (pinned by the churn tests in render_wasm/tests_part1_b.rs / tests_part2.rs).
 
 ## The problem
 
