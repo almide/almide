@@ -916,13 +916,24 @@ pub fn generate_variant_repr_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
         out.push_str(&format!("  let t = prim.load64(h + {})\n", layout::slot_offset(0)));
         let mut first = true;
         for (tag, case) in cases.iter().enumerate() {
-            let (cname, tys): (&str, Vec<Ty>) = match &case.kind {
+            // A RECORD-variant case renders v0's `Tag {{ name: "hi", n: 3 }}` (field names,
+            // brace form); a tuple case renders `Pair(3, true)`. Field names ride as
+            // `Some(name)` so the concat seed/separators/closer pick the right form.
+            let (cname, fields): (&str, Vec<(Option<String>, Ty)>) = match &case.kind {
                 IrVariantKind::Unit => (case.name.as_str(), vec![]),
-                IrVariantKind::Tuple { fields } => (case.name.as_str(), fields.clone()),
-                IrVariantKind::Record { fields } => {
-                    (case.name.as_str(), fields.iter().map(|f| f.ty.clone()).collect())
+                IrVariantKind::Tuple { fields } => {
+                    (case.name.as_str(), fields.iter().map(|t| (None, t.clone())).collect())
                 }
+                IrVariantKind::Record { fields } => (
+                    case.name.as_str(),
+                    fields
+                        .iter()
+                        .map(|f| (Some(f.name.as_str().to_string()), f.ty.clone()))
+                        .collect(),
+                ),
             };
+            let is_record = fields.iter().any(|(n, _)| n.is_some());
+            let tys: Vec<Ty> = fields.iter().map(|(_, t)| t.clone()).collect();
             let kw = if first { "if" } else { "  else if" };
             first = false;
             if tys.is_empty() {
@@ -930,11 +941,18 @@ pub fn generate_variant_repr_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                 continue;
             }
             out.push_str(&format!("  {kw} t == {tag} then {{\n"));
-            let mut concat = format!("\"{cname}(\"");
+            let mut concat = if is_record {
+                format!("\"{cname} {{ \"")
+            } else {
+                format!("\"{cname}(\"")
+            };
             for (i, ty) in tys.iter().enumerate() {
                 let off = layout::slot_offset(1 + i);
                 if i > 0 {
                     concat.push_str(" + \", \"");
+                }
+                if let Some(fname) = &fields[i].0 {
+                    concat.push_str(&format!(" + \"{fname}: \""));
                 }
                 match ty {
                     Ty::Int => {
@@ -963,7 +981,7 @@ pub fn generate_variant_repr_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                 }
                 concat.push_str(&format!(" + f{i}"));
             }
-            concat.push_str(" + \")\"");
+            concat.push_str(if is_record { " + \" }\"" } else { " + \")\"" });
             out.push_str(&format!("    {concat}\n  }}\n"));
         }
         out.push_str("  else \"\"\n}\n");

@@ -370,6 +370,14 @@ scale design pieces, NOT linkage gaps:
    the first, any-position version left a match-over-match and REGRESSED
    fan_any_allfail/fan_race_any_wasm (by-name diff caught it; reworked).
 
+2o. **Record-variant repr FORM FIX (correctness, walls unchanged)**: adversarial
+   probing of the shipped 2a generator found a WRONG-BYTES latent: a
+   RECORD-variant case (`Tag { name: String, n: Int }`) rendered
+   tuple-style `Tag("hi", 3)` where v0 renders `Tag { name: "hi", n: 3 }` —
+   no corpus in-profile shape exercised it, so parity never saw it. The
+   generator now carries field names per case and emits the brace form
+   (name-prefixed fields, ` }` closer). vr/vr2/vr3/vr4 probes v0-identical.
+
 **NEXT PIECES DIAGNOSED (at 198→188, 2026-07-11):**
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
