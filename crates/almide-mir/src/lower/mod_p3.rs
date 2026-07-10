@@ -185,6 +185,9 @@ impl LowerCtx {
         if let Some(rewritten) = desugar_heap_branches(body) {
             return self.lower_body_into(&rewritten);
         }
+        if let Some(rewritten) = crate::lower::desugar_scalar_tuple_literal_match(body) {
+            return self.lower_body_into(&rewritten);
+        }
         // DEBUG (env `DBG_LOWER_FN`): the FULLY-desugared body this function actually lowers — the
         // real lowering path (`desugar_heap_branches → TCO → here`), distinct from `desugar_all`.
         // Diff two functions' dumps to see why an identical `desugar_all` yields different MIR.

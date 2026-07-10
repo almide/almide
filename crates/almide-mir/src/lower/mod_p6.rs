@@ -886,6 +886,10 @@ pub fn desugar_all(body: &IrExpr, unit_main: bool) -> IrExpr {
             cur = r;
             continue;
         }
+        if let Some(r) = desugar_scalar_tuple_literal_match(&cur) {
+            cur = r;
+            continue;
+        }
         break;
     }
     cur
@@ -3210,6 +3214,162 @@ pub fn desugar_interp_literal_aggregate_hoist(
         }
     }
     if changed { Some(out) } else { None }
+}
+
+
+/// A `match` over a TUPLE LITERAL of SCALAR components whose every arm is a tuple pattern of
+/// scalar literals / binds / wildcards (`match (a, b) { (true, true) => "tt", … }` —
+/// bool_pair, the truth-table class) — rewrite to the PROVEN hoist + if-chain form:
+///   `{ let $t0 = a; let $t1 = b; if $t0 == true and $t1 == true then <arm0> else if … else
+///   <last arm> }`
+/// First-match semantics IS the if-chain order; the LAST arm becomes the unconditional else
+/// (sound: the frontend enforces exhaustiveness, so a value reaching the last test matches
+/// it — v0's own codegen compiles `_` the same way). Components hoist ONCE (evaluation
+/// order/count preserved); a Bind component prefixes the arm body (`(x, true) => f(x)` →
+/// `{ let x = $t0; f(x) }`). No calls duplicated (mir == ir holds).
+pub fn desugar_scalar_tuple_literal_match(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use almide_ir::{BinOp, IrPattern};
+    use almide_lang::types::Ty;
+    struct V {
+        next: u32,
+        changed: bool,
+    }
+    fn admits_arm(p: &IrPattern, n: usize) -> bool {
+        matches!(p, IrPattern::Tuple { elements }
+            if elements.len() == n
+                && elements.iter().all(|c| matches!(c,
+                    IrPattern::Wildcard
+                        | IrPattern::Bind { .. }
+                        | IrPattern::Literal { .. })))
+    }
+    impl IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Match { subject, arms } = &e.kind else { return };
+            let IrExprKind::Tuple { elements } = &subject.kind else { return };
+            if elements.is_empty()
+                || elements.iter().any(|c| is_heap_ty(&c.ty))
+                || arms.len() < 2
+                || arms.iter().any(|a| a.guard.is_some())
+                || arms.iter().any(|a| !admits_arm(&a.pattern, elements.len()))
+            {
+                return;
+            }
+            let span = e.span.clone();
+            // Hoist each component ONCE into a fresh scalar temp.
+            let mut stmts = Vec::with_capacity(elements.len());
+            let mut temp_refs = Vec::with_capacity(elements.len());
+            for c in elements {
+                let t = VarId(self.next);
+                self.next += 1;
+                stmts.push(IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: t,
+                        ty: c.ty.clone(),
+                        value: c.clone(),
+                        mutability: almide_ir::Mutability::Let,
+                    },
+                    span: span.clone(),
+                });
+                temp_refs.push(IrExpr {
+                    kind: IrExprKind::Var { id: t },
+                    ty: c.ty.clone(),
+                    span: span.clone(),
+                    def_id: None,
+                });
+            }
+            // One arm → (condition over the temps, body with bind prefixes).
+            let arm_parts: Vec<(Option<IrExpr>, IrExpr)> = arms
+                .iter()
+                .map(|a| {
+                    let IrPattern::Tuple { elements: pats } = &a.pattern else { unreachable!() };
+                    let mut cond: Option<IrExpr> = Option::None;
+                    let mut binds: Vec<IrStmt> = Vec::new();
+                    for (i, pat) in pats.iter().enumerate() {
+                        match pat {
+                            IrPattern::Literal { expr } => {
+                                let eq = IrExpr {
+                                    kind: IrExprKind::BinOp {
+                                        op: BinOp::Eq,
+                                        left: Box::new(temp_refs[i].clone()),
+                                        right: Box::new(expr.clone()),
+                                    },
+                                    ty: Ty::Bool,
+                                    span: span.clone(),
+                                    def_id: None,
+                                };
+                                cond = Some(match cond.take() {
+                                    Some(c) => IrExpr {
+                                        kind: IrExprKind::BinOp {
+                                            op: BinOp::And,
+                                            left: Box::new(c),
+                                            right: Box::new(eq),
+                                        },
+                                        ty: Ty::Bool,
+                                        span: span.clone(),
+                                        def_id: None,
+                                    },
+                                    Option::None => eq,
+                                });
+                            }
+                            IrPattern::Bind { var, ty } => binds.push(IrStmt {
+                                kind: IrStmtKind::Bind {
+                                    var: *var,
+                                    ty: ty.clone(),
+                                    value: temp_refs[i].clone(),
+                                    mutability: almide_ir::Mutability::Let,
+                                },
+                                span: span.clone(),
+                            }),
+                            IrPattern::Wildcard => {}
+                            _ => unreachable!(),
+                        }
+                    }
+                    let body_e = if binds.is_empty() {
+                        a.body.clone()
+                    } else {
+                        IrExpr {
+                            kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(a.body.clone())) },
+                            ty: a.body.ty.clone(),
+                            span: span.clone(),
+                            def_id: a.body.def_id,
+                        }
+                    };
+                    (cond, body_e)
+                })
+                .collect();
+            // Right-fold into the if-chain; the FIRST unconditional arm (or the last arm)
+            // terminates the chain as the else (later arms are unreachable by first-match).
+            let mut chain: Option<IrExpr> = Option::None;
+            for (cond, body_e) in arm_parts.into_iter().rev() {
+                chain = Some(match (cond, chain.take()) {
+                    (_, Option::None) | (Option::None, _) => body_e,
+                    (Some(c), Some(rest)) => IrExpr {
+                        kind: IrExprKind::If {
+                            cond: Box::new(c),
+                            then: Box::new(body_e),
+                            else_: Box::new(rest),
+                        },
+                        ty: e.ty.clone(),
+                        span: span.clone(),
+                        def_id: e.def_id,
+                    },
+                });
+            }
+            *e = IrExpr {
+                kind: IrExprKind::Block { stmts, expr: Some(Box::new(chain.unwrap())) },
+                ty: e.ty.clone(),
+                span: span.clone(),
+                def_id: e.def_id,
+            };
+            self.changed = true;
+        }
+    }
+    let mut v = V { next: max_var_id(body) + 1, changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    v.changed.then_some(out)
 }
 
 pub fn desugar_grouped_variant_match(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {

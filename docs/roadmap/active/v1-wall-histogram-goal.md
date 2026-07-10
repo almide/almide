@@ -271,6 +271,14 @@ scale design pieces, NOT linkage gaps:
    seeded payload bind lowers through the ordinary Option/Result machinery.
    Parity on Option[Option[Int]] / Option[Result[Int,String]] /
    Result[Option[Int],String] probes; full ladder green.
+2f. **Scalar-tuple literal match SHIPPED (walls 238 → 237)**:
+   `desugar_scalar_tuple_literal_match` — a match over a TUPLE literal of
+   scalar components with literal/bind/wildcard tuple arms (`match (a, b) {
+   (true, true) => "tt", … }`, bool_pair) rewrites to the PROVEN hoist +
+   if-chain form (components hoisted once, first-match = chain order, last
+   arm = the unconditional else — sound by frontend exhaustiveness). Small
+   yield (most remaining tuple-subject matches carry VARIANT components —
+   `(some(a), some(b))` — the next extension).
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):
