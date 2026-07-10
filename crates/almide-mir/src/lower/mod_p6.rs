@@ -2884,8 +2884,17 @@ fn group_option_result_arms(
         Err_,
         User(String),
     }
-    let scalar_col =
-        |p: &IrPattern| matches!(p, IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::Wildcard);
+    // A column pattern the sub-match can re-dispatch on: a scalar leaf (Bind /
+    // Literal / Wildcard) or a NESTED user-ctor pattern (`err(Overflow(msg))` —
+    // the Result-with-variant-payload class: the inner match over the bound
+    // payload var re-dispatches on the variant tag, which the custom-variant
+    // machinery lowers once the payload bind is seeded).
+    let scalar_col = |p: &IrPattern| {
+        matches!(p, IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::Wildcard)
+            || matches!(p, IrPattern::Constructor { args, .. }
+                if args.iter().all(|a| matches!(a, IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::Wildcard)))
+    };
+    let is_nested_ctor = |p: &IrPattern| matches!(p, IrPattern::Constructor { .. });
     // `(key, field_patterns)` for one arm — `None` (bail) for a top-level catch-all/binder, a
     // record-variant, or a nested column. Field arity: 0 (nullary), 1 (Some/Ok/Err/single-field), or
     // N (a multi-field user ctor `KV(String, Int)` → grouped via a TUPLE payload sub-match).
@@ -2907,7 +2916,10 @@ fn group_option_result_arms(
     let mut any_guard_or_lit = false;
     for arm in arms {
         let (key, fields) = parse(&arm.pattern)?;
-        if arm.guard.is_some() || fields.iter().any(|p| matches!(p, IrPattern::Literal { .. })) {
+        if arm.guard.is_some()
+            || fields.iter().any(|p| matches!(p, IrPattern::Literal { .. }))
+            || fields.iter().any(is_nested_ctor)
+        {
             any_guard_or_lit = true;
         }
         match groups.iter_mut().find(|(k, _)| *k == key) {
@@ -2959,7 +2971,9 @@ fn group_option_result_arms(
         let needs_inner = arity >= 1
             && (bucket.len() > 1
                 || bucket.iter().any(|(pats, g, _)| {
-                    g.is_some() || pats.iter().any(|p| matches!(p, IrPattern::Literal { .. }))
+                    g.is_some()
+                        || pats.iter().any(|p| matches!(p, IrPattern::Literal { .. }))
+                        || pats.iter().any(is_nested_ctor)
                 }));
         if !needs_inner {
             // A single arm for this ctor (a lone `some(x)`/`none`/`Ctor(a, b)` with no guard/literal)
