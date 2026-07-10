@@ -882,6 +882,10 @@ pub fn desugar_all(body: &IrExpr, unit_main: bool) -> IrExpr {
                 continue;
             }
         }
+        if let Some(r) = desugar_to_option_calls(&cur) {
+            cur = r;
+            continue;
+        }
         if let Some(r) = desugar_heap_branches(&cur) {
             cur = r;
             continue;
@@ -3367,6 +3371,53 @@ pub fn desugar_scalar_tuple_literal_match(body: &IrExpr) -> Option<IrExpr> {
         }
     }
     let mut v = V { next: max_var_id(body) + 1, changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    v.changed.then_some(out)
+}
+
+
+/// Rewrite `r?` (`ToOption`) over a `Result[Int, String]` operand into the SELF-HOST bridge
+/// call `result.to_option(r)` — a REAL IR Call node, so every position (bind / call-arg /
+/// tail) lowers through the proven Module-call machinery and the caps `mir == ir` count sees
+/// the call on BOTH sides by construction (desugar-before-both). `result.to_option` is pure
+/// (prim reads + an Option ctor), registered, and `is_self_host_option_module_fn`-seeded, so
+/// a later `match`/`??` over the bound result reads a real materialized Option. ToOption was
+/// previously fully deferred (the strict-value wall) — a pure widening.
+pub fn desugar_to_option_calls(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, CallTarget, IrMutVisitor};
+    use almide_lang::intern::sym;
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    struct V {
+        changed: bool,
+    }
+    impl IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::ToOption { expr } = &e.kind else { return };
+            let admits = matches!(&expr.ty,
+                Ty::Applied(TypeConstructorId::Result, a)
+                    if a.len() == 2 && matches!(a[0], Ty::Int) && matches!(a[1], Ty::String))
+                && matches!(&e.ty,
+                    Ty::Applied(TypeConstructorId::Option, oa)
+                        if oa.len() == 1 && matches!(oa[0], Ty::Int));
+            if !admits {
+                return;
+            }
+            e.kind = IrExprKind::Call {
+                target: CallTarget::Module {
+                    module: sym("result"),
+                    func: sym("to_option"),
+                    def_id: None,
+                },
+                args: vec![(**expr).clone()],
+                type_args: Vec::new(),
+            };
+            self.changed = true;
+        }
+    }
+    let mut v = V { changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     v.changed.then_some(out)

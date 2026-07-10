@@ -279,6 +279,22 @@ scale design pieces, NOT linkage gaps:
    arm = the unconditional else — sound by frontend exhaustiveness). Small
    yield (most remaining tuple-subject matches carry VARIANT components —
    `(some(a), some(b))` — the next extension).
+2g. **`?` bridge + str-str `??` SHIPPED (walls 237 → 231, −6, zero
+   newly-walled)**: `desugar_to_option_calls` rewrites `r?` over
+   `Result[Int, String]` into the SELF-HOST bridge call `result.to_option(r)`
+   — a REAL IR Call node, so every position lowers through the proven
+   Module-call machinery and the caps `mir == ir` count sees it on both sides
+   BY CONSTRUCTION (the desugar-before-both discipline; ToOption was
+   previously fully deferred → strict-value wall). And the `??` Var gate now
+   admits a `materialized_results_str` Var for `Result[String, String]`
+   ONLY (routing to the existing `result.str_unwrap_or` helper — any other
+   _str-set shape would misread the len-as-tag String branch); the
+   classify-side `value_operand_lowers` Var case credits the +1 (the mir>ir
+   breach the corpus gate caught on first run — fixed same stage). NOTE: a
+   blanket "??/?-to-Match" desugar was BUILT AND REVERTED first: the by-name
+   diff showed it net-negative (the existing UnwrapOr executable subset
+   handles Value/json/base64 shapes BETTER than the match form) — decline-
+   point extension beats blanket rewriting.
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):

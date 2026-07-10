@@ -80,6 +80,12 @@ impl LowerCtx {
                         // OPTION[String], and counting a str-Result there falsely taints mir>ir).
                         || self.value_result_results.contains(&v)
                         || self.value_result_lists.contains(&v)
+                        // A `Result[String, String]` Var (cap-as-tag, materialized_results_str)
+                        // routes to the `result.str_unwrap_or` helper below — admitted ONLY for
+                        // that type (any other _str-set shape would mis-take the len-as-tag
+                        // String branch, reading an Err payload as Some).
+                        || (self.materialized_results_str.contains(&v)
+                            && crate::lower::is_result_str_str_ty(&expr.ty))
                         || self.param_values.contains(&v) =>
                 {
                     v

@@ -311,13 +311,12 @@ fn count_ir_calls(
                     // mir == ir, mirroring the Option[Value] case.
                     || almide_mir::lower::is_option_listvalue_ty(&expr.ty)
                     || almide_mir::lower::is_option_liststr_ty(&expr.ty);
-                // value/list-Ok Result + Option[Value] Vars route (the handle Var-case admits them);
-                // a str-str Var keeps its original path, so only a DIRECT str-result CALL lowers there.
-                // An Option[Value] operand is a self-host option CALL (list.get) or a Var.
+                // value/list-Ok Result + Option[Value] Vars route (the handle Var-case admits
+                // them) — INCLUDING a str-str Var, which now routes to `result.str_unwrap_or`
+                // (the materialized_results_str Var-gate admission). An Option[Value] operand
+                // is a self-host option CALL (list.get) or a Var.
                 let value_operand_lowers = match &expr.kind {
-                    almide_ir::IrExprKind::Var { .. } => {
-                        !almide_mir::lower::is_result_str_str_ty(&expr.ty)
-                    }
+                    almide_ir::IrExprKind::Var { .. } => true,
                     almide_ir::IrExprKind::Call {
                         target: almide_ir::CallTarget::Module { module, func, .. },
                         ..
