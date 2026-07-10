@@ -1,18 +1,14 @@
 // wasm:enabled
-// Locks in CLOSURE ENV FULL MODE — heap, list and Fn captures. A capture is co-owned
-// by the closure block (Dup + move-in; CowSafety keeps the share value-semantics-safe)
+// Locks in HEAP captures (closure env full mode, part 1). A capture is co-owned by
+// the closure block (Dup + move-in; CowSafety keeps the share value-semantics-safe)
 // and read back as a borrowed handle by the lambda prologue. The block is
 // SELF-DESCRIBING (slot 0 fnidx, slot 1 = n_heap | n_closure << 16) so the uniform
-// generated `$__drop_closure` frees any closure at any drop site: captured closures
-// recurse (the `compose` shape), captured heap values rc_dec, the fnidx slot is never
-// touched. Byte-identical to v0 --target wasm. (Heap captures are the one-level-exact
-// kinds — String / List[Int] / List[Float]; nested-heap and Float captures still defer.)
+// generated `$__drop_closure` frees any closure at any drop site — the fnidx slot is
+// never touched. Byte-identical to v0 on BOTH targets. (Fn captures — closures
+// capturing closures — are part 2, closure_capturing_fn_wasm.almd: v0's wasm target
+// still traps on those, so they verify against v0 native.)
 
 fn greeter(name: String) -> (String) -> String = (x) => name + ", " + x
-
-fn adder(n: Int) -> (Int) -> Int = (x) => x + n
-
-fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int = (x) => g(f(x))
 
 effect fn main() -> Unit = {
   let hi = greeter("Hello")
@@ -23,15 +19,11 @@ effect fn main() -> Unit = {
   let ns = [10, 20, 30]
   let picker = (i: Int) => list.get(ns, i) ?? 0
   println(int.to_string(picker(1)))
-  let h = compose(adder(3), adder(100))
-  println(int.to_string(h(5)))
 }
 
-test "heap and Fn captures carry independent co-owned envs" {
+test "heap captures carry independent co-owned envs" {
   let hi = greeter("Hello")
   let bye = greeter("Bye")
   assert_eq(hi("world"), "Hello, world")
   assert_eq(bye("now"), "Bye, now")
-  let h = compose(adder(3), adder(100))
-  assert_eq(h(5), 108)
 }
