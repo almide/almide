@@ -185,6 +185,9 @@ impl LowerCtx {
         if let Some(rewritten) = crate::lower::desugar_to_option_calls(body) {
             return self.lower_body_into(&rewritten);
         }
+        if let Some(rewritten) = crate::lower::desugar_offtype_testing_asserts(body) {
+            return self.lower_body_into(&rewritten);
+        }
         if let Some(rewritten) = desugar_heap_branches(body) {
             return self.lower_body_into(&rewritten);
         }

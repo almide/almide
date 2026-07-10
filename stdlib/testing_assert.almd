@@ -1,0 +1,35 @@
+// testing_assert — SELF-HOSTED `testing.assert_*` family for v1. Each assert is
+// PURE-OR-HALT: the comparison is pure; a FAILURE aborts through the prim floor
+// (`prim.die` — a halt, not an effect, the same class as the div-zero trap), so the
+// fns ride the pure whitelist (`is_pure_fn_in_impure_module`) without widening the
+// capability model. v0's native side panics into the test harness; the failure path
+// never executes in a green suite, so the observable pass-path surface (no output)
+// is byte-identical. The die lines mirror v0's assert messages in prefix form.
+//
+// TYPED SIGS ONLY: `assert_some` reads the len-as-tag Option (`Some` = len 1) and
+// `assert_ok` the cap-as-tag `Result[String, String]` (tag@16 == 0 = Ok) — an
+// OFF-SIGNATURE call site is rewritten to the unlinkable `_x` name by the lowering
+// (`desugar_offtype_testing_asserts`), so a different instantiation walls honestly
+// instead of misreading a block.
+
+fn testing_assert_gt(a: Int, b: Int) -> Unit =
+  if a > b then () else prim.die(prim.handle("assert_gt failed\n"))
+
+fn testing_assert_lt(a: Int, b: Int) -> Unit =
+  if a < b then () else prim.die(prim.handle("assert_lt failed\n"))
+
+fn testing_assert_approx(a: Float, b: Float, epsilon: Float) -> Unit =
+  if float.abs(a - b) < epsilon then () else prim.die(prim.handle("assert_approx failed\n"))
+
+fn testing_assert_contains(haystack: String, needle: String) -> Unit =
+  if string.contains(haystack, needle) then () else prim.die(prim.handle("assert_contains failed\n"))
+
+fn testing_assert_some(o: Option[String]) -> Unit = {
+  let h = prim.handle(o)
+  if prim.load32(h + 4) != 0 then () else prim.die(prim.handle("assert_some failed: got None\n"))
+}
+
+fn testing_assert_ok(r: Result[String, String]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 16) == 0 then () else prim.die(prim.handle("assert_ok failed\n"))
+}

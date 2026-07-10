@@ -886,6 +886,10 @@ pub fn desugar_all(body: &IrExpr, unit_main: bool) -> IrExpr {
             cur = r;
             continue;
         }
+        if let Some(r) = desugar_offtype_testing_asserts(&cur) {
+            cur = r;
+            continue;
+        }
         if let Some(r) = desugar_heap_branches(&cur) {
             cur = r;
             continue;
@@ -3415,6 +3419,52 @@ pub fn desugar_to_option_calls(body: &IrExpr) -> Option<IrExpr> {
                 type_args: Vec::new(),
             };
             self.changed = true;
+        }
+    }
+    let mut v = V { changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    v.changed.then_some(out)
+}
+
+
+/// Rewrite an OFF-SIGNATURE `testing.assert_some` / `testing.assert_ok` call to the
+/// unlinkable `_x` name so it WALLS at render instead of misreading a block: the self-host
+/// sigs are `Option[String]` (len-as-tag) and `Result[String, String]` (cap-as-tag@16) —
+/// a different instantiation has a DIFFERENT tag layout, and the linked reader would
+/// silently pass/fail wrongly. Count-invariant (the call node is unchanged, only renamed).
+pub fn desugar_offtype_testing_asserts(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, CallTarget, IrMutVisitor};
+    use almide_lang::intern::sym;
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    struct V {
+        changed: bool,
+    }
+    impl IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
+                &mut e.kind
+            else {
+                return;
+            };
+            if module.as_str() != "testing" {
+                return;
+            }
+            let ok_sig = match func.as_str() {
+                "assert_some" => matches!(args.first().map(|a| &a.ty),
+                    Some(Ty::Applied(TypeConstructorId::Option, a))
+                        if a.len() == 1 && matches!(a[0], Ty::String)),
+                "assert_ok" => matches!(args.first().map(|a| &a.ty),
+                    Some(Ty::Applied(TypeConstructorId::Result, a))
+                        if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String)),
+                _ => return,
+            };
+            if !ok_sig {
+                *func = sym(&format!("{}_x", func.as_str()));
+                self.changed = true;
+            }
         }
     }
     let mut v = V { changed: false };

@@ -348,6 +348,16 @@ scale design pieces, NOT linkage gaps:
    colliding global — silent latent miscompiles, now honest walls. Module
    variant-layout defaults also union (`ctor_field_defaults.extend` was
    missing in both pipeline and classify).
+2m. **testing.assert_* self-host SHIPPED (walls 204 → 198, −6, zero
+   newly-walled) — UNDER 200**: `stdlib/testing_assert.almd` (assert_gt/lt/
+   approx/contains/some/ok — each PURE-OR-HALT: the comparison is pure, a
+   failure aborts via prim.die, the same class as the div-zero trap), on the
+   `is_pure_fn_in_impure_module` per-fn whitelist (the `testing` MODULE stays
+   impure-plain) + PURE_MODULES for the file-level drift gate. TYPED SIGS
+   ONLY: `assert_some` = Option[String] (len-as-tag), `assert_ok` =
+   Result[String,String] (cap-as-tag@16) — an off-signature call site is
+   renamed `_x` by `desugar_offtype_testing_asserts` (count-invariant), so a
+   different instantiation walls honestly instead of misreading a block.
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):
