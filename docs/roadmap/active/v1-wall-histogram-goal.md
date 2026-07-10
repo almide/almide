@@ -150,8 +150,18 @@ scale design pieces, NOT linkage gaps:
    roundtrips. **MATCH side SHIPPED (0b98c23e)**: `group_option_result_arms`
    now admits nested user-ctor columns (`err(Overflow(msg))` regroups to
    `err($q) => match $q { Overflow(msg) => … }`), walls 296 → 292. The
-   REMAINING half is the CONSTRUCTION side: `err(<variant ctor>)` for
-   `Result[T_scalar, <user variant>]`. **LAYOUT RESOLVED (seed_variant_param
+   CONSTRUCTION side **SHIPPED (030e9d85)**: `err(<variant ctor>)` for
+   `Result[T_scalar, <user variant>]` — `try_lower_result_err_variant_ctor`
+   (len-as-tag via `materialize_opt_str_some`; rich payloads route to the
+   GENERATED `$__drop_res_<V>` wrapper drop, flat payloads keep the exact
+   flat drop), wired at bind / arm-chain / tail. NOT self-tracked at bind —
+   the corpus PCC gate caught the call-arg double-track (`idd`) on first
+   contact and it was root-fixed (ctor arms leave tracking to callers). The
+   regroup was RESTRICTED to Option/Result subject columns (user-variant
+   nested arms keep the #610 refinement machinery — regrouping shadowed it).
+   Net +3 corpus fns (by-name diff, zero newly-walled); v0-identical on
+   rich/flat err paths and the ok path. (The resolved design, for the
+   record:) **LAYOUT (seed_variant_param
    audit)**: the reader seeds Result[scalar, heap] as **LEN-AS-TAG**
    (`materialized_results` + `heap_elem_lists`; Err = len 1 + payload HANDLE
    at slot 0, bound BORROWED by the err arm — existing machinery), so the
