@@ -724,6 +724,32 @@ fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr
                 Some(to_string_call("compound", "to_string", expr.clone()))
             }
         }
+        // A custom-VARIANT part (`"${Overflow(\"x\")}"` / a bound variant var): route
+        // to the GENERATED `__repr_<V>` (render-pipeline-injected; the classify gate
+        // counts the same call node). A variant the generator does not emit (a field
+        // outside Int/Bool/String/nested-variant) leaves an unlinked call — the same
+        // honest render wall the `compound.to_string` wrapper gives records.
+        IrStringPart::Expr { expr }
+            if matches!(&expr.ty, Ty::Named(..))
+                && resolve_aggregate(&expr.ty, registry).is_none() =>
+        {
+            let Ty::Named(name, _) = &expr.ty else { unreachable!() };
+            Some(IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Named {
+                        name: sym(&format!(
+                            "__repr_{}",
+                            crate::lower::drop_fn_ident(name.as_str())
+                        )),
+                    },
+                    args: vec![expr.clone()],
+                    type_args: Vec::new(),
+                },
+                ty: Ty::String,
+                span: None,
+                def_id: None,
+            })
+        }
         IrStringPart::Expr { expr } => {
             let (module, func) = interp_to_string_call(&expr.ty)?;
             Some(to_string_call(module, func, expr.clone()))

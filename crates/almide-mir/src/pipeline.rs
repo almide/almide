@@ -215,9 +215,10 @@ pub fn try_render_wasm_source(
     let closure_drop =
         if crate::lower::program_uses_closures(&ir) { crate::lower::CLOSURE_DROP_SRC } else { "" };
     let drops = format!(
-        "{}{}{}",
+        "{}{}{}{}",
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
+        crate::lower::generate_variant_repr_sources(&all_type_decls),
         closure_drop,
     );
     // The generated drops free a `Value` field via value_core's INTERNAL `__drop_value` — bring

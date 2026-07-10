@@ -189,7 +189,22 @@ scale design pieces, NOT linkage gaps:
    and recursive/anonymous-record reprs — needs **GENERATED repr sources**
    symmetric to the generated drops (`generate_variant_repr_sources` emitting
    per-ADT `__repr_<V>` Almide fns, v0's compound Display as the byte oracle),
-   plus nested list-of-maps and the annotated empty map.
+   plus nested list-of-maps and the annotated empty map. **VARIANT REPRS
+   SHIPPED**: `generate_variant_repr_sources` (lower/mod.rs, symmetric to the
+   generated drops) emits per-variant `__repr_<V>` Almide fns for the
+   FIXPOINT-emittable set (ctor fields all Int/Bool/String/emittable-variant —
+   covers nullary, tuple-payload, NESTED and RECURSIVE variants), with shared
+   `__repr_quote`/`__repr_esc_*` string-escape helpers (v0's Display escape
+   set `\" \\ \n \r \t`, byte-oracled via od). Leaf routing: `interp_part_leaf`
+   routes a `Ty::Named` part with `resolve_aggregate == None` to a
+   `CallTarget::Named __repr_<drop_fn_ident>` call — previously ALL such parts
+   hit the catch-all unlinked `compound.to_string` (wall), so the change is
+   STRICTLY opening (a non-emittable variant leaves `__repr_` unlinked = the
+   same honest wall). Injected in pipeline.rs + the tests_part1 lower_source
+   drops block. Parity: `Overflow("x")`/`DivZero`/`Pair(3, true)`/record,
+   escapes, `Wrap(A(3))` nested, recursive `Node(Leaf(1), …)` — all
+   v0-identical. **Walls 290 → 272 (−18)**; mir 583, spec 283/283, gate,
+   corpus PCC + kernel oracle all green.
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):

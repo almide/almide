@@ -329,9 +329,10 @@
             ""
         };
         let drops = format!(
-            "{}{}{}",
+            "{}{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),
             crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
+            crate::lower::generate_variant_repr_sources(&ir.type_decls),
             closure_drop,
         );
         let ir = if drops.trim().is_empty() { ir } else { to_ir(&format!("{src}\n{drops}")) };

@@ -745,6 +745,161 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
     out
 }
 
+/// Generate the ALMIDE SOURCE for each variant type's REPR `__repr_<V>` (the Display
+/// counterpart of [`generate_variant_drop_sources`]) — what a string interpolation
+/// `"${e}"` over a custom-ADT value prints, byte-matching v0's compound Display:
+/// `Overflow("x")` (String fields QUOTED with the \" \\ \n \r \t escapes),
+/// `DivZero` (bare nullary), `Pair(3, true)`. Emitted for every variant whose ctor
+/// fields are all Int / Bool / String / another emittable variant (a FIXPOINT — so
+/// recursive ADTs like `Node(Tree, Tree)` repr themselves); a variant outside that
+/// subset gets NO repr fn, so the interp's `__repr_<V>` call stays unlinked and the
+/// using function keeps the same honest render wall it had. Like every generated
+/// routine: trusted prim-only, injected on the render path, outside the witness
+/// surface.
+pub fn generate_variant_repr_sources(type_decls: &[almide_ir::IrTypeDecl]) -> String {
+    use almide_ir::{IrTypeDeclKind, IrVariantKind};
+    let names = variant_type_names(type_decls);
+    // Fixpoint: which variants are repr-EMITTABLE (every ctor field Int/Bool/String
+    // or an emittable variant)?
+    let mut emittable: std::collections::HashSet<String> = type_decls
+        .iter()
+        .filter(|d| matches!(&d.kind, IrTypeDeclKind::Variant { .. }))
+        .map(|d| d.name.as_str().to_string())
+        .collect();
+    loop {
+        let mut removed = false;
+        for decl in type_decls {
+            let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else { continue };
+            let tname = decl.name.as_str();
+            if !emittable.contains(tname) {
+                continue;
+            }
+            let ok = cases.iter().all(|case| {
+                let tys: Vec<Ty> = match &case.kind {
+                    IrVariantKind::Unit => vec![],
+                    IrVariantKind::Tuple { fields } => fields.clone(),
+                    IrVariantKind::Record { fields } => {
+                        fields.iter().map(|f| f.ty.clone()).collect()
+                    }
+                };
+                tys.iter().all(|ty| {
+                    matches!(ty, Ty::Int | Ty::Bool | Ty::String)
+                        || variant_field_name(ty, &names)
+                            .map(|fv| emittable.contains(&fv))
+                            .unwrap_or(false)
+                })
+            });
+            if !ok {
+                emittable.remove(tname);
+                removed = true;
+            }
+        }
+        if !removed {
+            break;
+        }
+    }
+    if emittable.is_empty() {
+        return String::new();
+    }
+    // The shared QUOTE helper (v0's escape set: \" \\ \n \r \t).
+    let mut out = String::from(
+        "fn __repr_is_escaped(b: Int) -> Bool = b == 34 or b == 92 or b == 10 or b == 13 or b == 9\n\
+         fn __repr_esc_len(src: Int, slen: Int, i: Int, acc: Int) -> Int =\n  \
+           if i >= slen then acc\n  \
+           else {\n    let b = prim.load8(src + i)\n    let w = if __repr_is_escaped(b) then 2 else 1\n    __repr_esc_len(src, slen, i + 1, acc + w)\n  }\n\
+         fn __repr_esc_char(b: Int) -> Int =\n  \
+           if b == 10 then 110\n  \
+           else if b == 13 then 114\n  \
+           else if b == 9 then 116\n  \
+           else b\n\
+         fn __repr_fill_esc(src: Int, slen: Int, i: Int, pos: Int) -> Int =\n  \
+           if i >= slen then pos\n  \
+           else {\n    let b = prim.load8(src + i)\n    \
+             let pos1 = if __repr_is_escaped(b) then {\n      prim.store8(pos, 92)\n      prim.store8(pos + 1, __repr_esc_char(b))\n      pos + 2\n    } else {\n      prim.store8(pos, b)\n      pos + 1\n    }\n    \
+             __repr_fill_esc(src, slen, i + 1, pos1)\n  }\n\
+         fn __repr_quote(s: String) -> String = {\n  \
+           let h = prim.handle(s)\n  \
+           let n = prim.load32(h + 4)\n  \
+           let elen = __repr_esc_len(h + 12, n, 0, 0)\n  \
+           let out = prim.alloc_str(elen + 2)\n  \
+           let d = prim.handle(out) + 12\n  \
+           prim.store8(d, 34)\n  \
+           let e = __repr_fill_esc(h + 12, n, 0, d + 1)\n  \
+           prim.store8(e, 34)\n  \
+           out\n}\n",
+    );
+    let mut sorted: Vec<&almide_ir::IrTypeDecl> = type_decls
+        .iter()
+        .filter(|d| {
+            matches!(&d.kind, IrTypeDeclKind::Variant { .. })
+                && emittable.contains(d.name.as_str())
+        })
+        .collect();
+    sorted.sort_by_key(|d| d.name.as_str());
+    for decl in sorted {
+        let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else { continue };
+        let tname = decl.name.as_str();
+        let fname = drop_fn_ident(tname);
+        out.push_str(&format!("fn __repr_{fname}(e: {tname}) -> String = {{\n"));
+        out.push_str("  let h = prim.handle(e)\n");
+        out.push_str(&format!("  let t = prim.load64(h + {})\n", layout::slot_offset(0)));
+        let mut first = true;
+        for (tag, case) in cases.iter().enumerate() {
+            let (cname, tys): (&str, Vec<Ty>) = match &case.kind {
+                IrVariantKind::Unit => (case.name.as_str(), vec![]),
+                IrVariantKind::Tuple { fields } => (case.name.as_str(), fields.clone()),
+                IrVariantKind::Record { fields } => {
+                    (case.name.as_str(), fields.iter().map(|f| f.ty.clone()).collect())
+                }
+            };
+            let kw = if first { "if" } else { "  else if" };
+            first = false;
+            if tys.is_empty() {
+                out.push_str(&format!("  {kw} t == {tag} then \"{cname}\"\n"));
+                continue;
+            }
+            out.push_str(&format!("  {kw} t == {tag} then {{\n"));
+            let mut concat = format!("\"{cname}(\"");
+            for (i, ty) in tys.iter().enumerate() {
+                let off = layout::slot_offset(1 + i);
+                if i > 0 {
+                    concat.push_str(" + \", \"");
+                }
+                match ty {
+                    Ty::Int => {
+                        out.push_str(&format!(
+                            "    let f{i} = int.to_string(prim.load64(h + {off}))\n"
+                        ));
+                    }
+                    Ty::Bool => {
+                        out.push_str(&format!(
+                            "    let f{i} = if prim.load64(h + {off}) == 1 then \"true\" else \"false\"\n"
+                        ));
+                    }
+                    Ty::String => {
+                        out.push_str(&format!(
+                            "    let f{i} = __repr_quote(prim.load_str(h + {off}))\n"
+                        ));
+                    }
+                    _ => {
+                        // an emittable nested variant (the fixpoint admitted it)
+                        let fv = variant_field_name(ty, &names).expect("fixpoint-admitted");
+                        let fv_fn = drop_fn_ident(&fv);
+                        out.push_str(&format!(
+                            "    let v{i}: {fv} = prim.load_handle(h + {off})\n    let f{i} = __repr_{fv_fn}(v{i})\n"
+                        ));
+                    }
+                }
+                concat.push_str(&format!(" + f{i}"));
+            }
+            concat.push_str(" + \")\"");
+            out.push_str(&format!("    {concat}\n  }}\n"));
+        }
+        out.push_str("  else \"\"\n}\n");
+    }
+    out
+}
+
 /// Does a record carrying a field of type `ty` need a generated recursive `$__drop_<R>` (rather than
 /// a flat one-level `rc_dec` of its block)? ANY heap field does: a flat `rc_dec` of the record block
 /// frees only the block, leaking every owned heap SLOT (a `String` handle, a `List`/`Map`/`Value`
