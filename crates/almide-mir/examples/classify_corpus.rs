@@ -1096,7 +1096,7 @@ fn main() {
                     // BOTH the MIR and this counted IR — `mir == ir` by construction. A subset
                     // (only guard + heap-branches) missed `desugar_tuple_unwrap_or`, so a
                     // `let r = opt.unwrap_or((tuple)); f(r.0)` mir>ir-breached.
-                    let eff_body = almide_mir::lower::desugar_all(&func.body);
+                    let eff_body = almide_mir::lower::desugar_all(&func.body, func.name.as_str() == "main");
                     // INTERP COVERAGE (a): this function LOWERED, so its FULLY-LINKABLE
                     // interps (Lit/String/Int/Bool parts) fold to a registered __str_concat /
                     // int.to_string / bool.to_string chain (proven byte-match v0 by the

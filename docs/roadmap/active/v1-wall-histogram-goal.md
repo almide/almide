@@ -228,6 +228,32 @@ scale design pieces, NOT linkage gaps:
    (decline → honest wall). option.collect opens with the literals
    (self-hosted already); result.collect self-host is the follow-up. Parity:
    bind/tail/match/leak-loop probes v0-identical; full ladder green.
+2c. **Unit-main unwrap + the main-err protocol SHIPPED (walls 262 → 251, −12
+   opened / +1 honest)**: THREE pieces. (i) Option-`!` in the effect-unwrap
+   desugar: `build_unwrap_match` now builds Option-POLARITY arms (`none =>
+   fail, some(x) => cont` — Option's len-as-tag is opposite Result's, so the
+   Ok/Err skeleton fired the fail arm on success), gated to SCALAR Some
+   payloads; this opened the sized_conversion family
+   (`int.to_int8_checked(42)!.to_int64()` chains). (ii) The UNIT-MAIN failure
+   protocol (v0 oracle: `Error: <msg>` stderr + exit 1): main is void (the
+   err arm value was silently DISCARDED — erring mains exited 0), so a
+   `unit_main` flag threads through `desugar_effect_unwrap`/`desugar_all`
+   (same tree on the lowering AND count-gate sides) and the fail arms become
+   `{ let $m = "Error: " + e + "\n"; let $h = prim.handle($m); prim.die($h) }`
+   (the SPLIT form — a nested `prim.handle(<Var>)` declines inside a match
+   arm), plus `desugar_unit_main_err_arms` for the FRONTEND auto-? residue
+   (`err(e) => err(e)` arms built before the MIR desugar sees an Unwrap; a
+   user cannot type `err(e)` as a Unit arm, so every such arm IS the auto-?
+   artifact). (iii) The RETURNING-main `_start` protocol: the old Err check
+   read @16 (the cap-as-tag offset — always 0 under len-as-tag, so an erring
+   explicit-Result main silently exited 0); now len@4 != 0 routes to the new
+   `$__main_err` preamble helper (three-span STDERR write reusing the
+   div-zero line's "Error: " head + "\n" tail, then proc_exit(1)) — C-035's
+   v1 realization, added to TERMINATION_FLOOR_FNS. Failure-path probes:
+   unwrap-none main and auto-?-err main both `Error: <msg>` + exit 1,
+   v0-identical. One main newly-walled (cross_module_unit_effect — its
+   previously-"open" lowering silently swallowed the err; now an honest
+   heap-result-match-returned wall). Full ladder green.
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):

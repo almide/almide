@@ -633,9 +633,9 @@ pub fn desugar_option_str_literal_match(body: &mut IrExpr) {
 /// a bare `f()!` Expr stmt); a tail `f()!` is the fn's return (tail.rs pass-through), and a `!` nested in
 /// an operand is handled by `desugar_callarg_unwrap`. Closes the porta.start / dojo effect-monad wall
 /// WITHOUT the major Return-op subsystem.
-pub fn desugar_effect_unwrap(body: &IrExpr) -> Option<IrExpr> {
+pub fn desugar_effect_unwrap(body: &IrExpr, unit_main: bool) -> Option<IrExpr> {
     let mut next_var = max_var_id(body) + 1;
-    desugar_effect_unwrap_inner(body, &mut next_var)
+    desugar_effect_unwrap_inner(body, &mut next_var, unit_main)
 }
 
 /// GUARD-ELSE → conditional (Phase A of the v1→v0 parity plan). `guard cond else E; rest`
@@ -780,9 +780,9 @@ pub fn dump_ir(e: &IrExpr) -> String {
 pub fn dump_desugared_ir(fn_name: &str, body: &IrExpr) {
     if std::env::var("DBG_DESUGAR_FN").is_ok_and(|v| v == fn_name) {
         if std::env::var("DBG_DESUGAR_RAW").is_ok() {
-            eprintln!("=== RAW {fn_name} ===\n{:#?}", desugar_all(body));
+            eprintln!("=== RAW {fn_name} ===\n{:#?}", desugar_all(body, fn_name == "main"));
         } else {
-            eprintln!("=== DESUGARED {fn_name} ===\n{}", dump_ir(&desugar_all(body)));
+            eprintln!("=== DESUGARED {fn_name} ===\n{}", dump_ir(&desugar_all(body, fn_name == "main")));
         }
     }
 }
@@ -853,7 +853,7 @@ pub fn desugar_method_calls(body: &IrExpr) -> Option<IrExpr> {
     }
 }
 
-pub fn desugar_all(body: &IrExpr) -> IrExpr {
+pub fn desugar_all(body: &IrExpr, unit_main: bool) -> IrExpr {
     let mut cur = body.clone();
     loop {
         if let Some(r) = desugar_method_calls(&cur) {
@@ -872,9 +872,15 @@ pub fn desugar_all(body: &IrExpr) -> IrExpr {
             cur = r;
             continue;
         }
-        if let Some(r) = desugar_effect_unwrap(&cur) {
+        if let Some(r) = desugar_effect_unwrap(&cur, unit_main) {
             cur = r;
             continue;
+        }
+        if unit_main {
+            if let Some(r) = desugar_unit_main_err_arms(&cur) {
+                cur = r;
+                continue;
+            }
         }
         if let Some(r) = desugar_heap_branches(&cur) {
             cur = r;
@@ -1030,7 +1036,7 @@ fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
     }
 }
 
-fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32, unit_main: bool) -> Option<IrExpr> {
     use almide_ir::{IrMatchArm, IrPattern};
     use almide_lang::types::Ty;
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
@@ -1068,6 +1074,14 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             },
             _ => continue,
         };
+        // An Option-`!` is admitted for a SCALAR Some payload only (the sized_conversion
+        // family — no drop on either arm); a heap Some payload's bind/drop discipline is a
+        // later extension: leave the raw `!` so it walls honestly.
+        if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) = &inner.ty {
+            if a.len() != 1 || is_heap_ty(&a[0]) {
+                continue;
+            }
+        }
         // The continuation = the rest of the block `{ stmts[i+1..]; tail }`, typed as the whole body
         // (it produces the fn's return). RECURSE so a LATER `!` in the continuation also desugars.
         let cont = IrExpr {
@@ -1076,8 +1090,8 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             span: body.span.clone(),
             def_id: body.def_id,
         };
-        let cont = desugar_effect_unwrap_inner(&cont, next_var).unwrap_or(cont);
-        let m = build_unwrap_match(inner, ok_pat, cont, body, next_var);
+        let cont = desugar_effect_unwrap_inner(&cont, next_var, unit_main).unwrap_or(cont);
+        let m = build_unwrap_match(inner, ok_pat, cont, body, next_var, unit_main);
         return Some(IrExpr {
             kind: IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(m)) },
             ty: body.ty.clone(),
@@ -1090,7 +1104,7 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
     // … }`, signal_instance's nested if-arms). `desugar_tail_effect_unwrap` navigates that control
     // flow and applies the SAME gated stmt-`!` rewrite inside each arm/tail block.
     if let Some(t) = tail.as_deref() {
-        if let Some(nt) = desugar_tail_effect_unwrap(t, next_var) {
+        if let Some(nt) = desugar_tail_effect_unwrap(t, next_var, unit_main) {
             return Some(IrExpr {
                 kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
                 ty: body.ty.clone(),
@@ -1107,21 +1121,237 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
 /// (NOT a strip): a fresh `e: String` bound by the Err-pattern, reconstructed as `ResultErr` at the
 /// return type. The continuation nests ONLY in the ok-arm. Shared by the stmt-position and the
 /// tail/return-position (`desugar_tail_effect_unwrap`) rewrites.
+/// Build the UNIT-MAIN fail-arm body: v0's main wrapper prints `Error: <msg>` to STDERR and
+/// exits 1 — main is declared `-> Unit` (the void convention: an `err(…)` arm value would be
+/// silently DISCARDED), so the arm aborts through the prim floor instead:
+/// `prim.die(prim.handle(<full line>))` ($__die = STDERR write + proc_exit(1), the
+/// int_rotate/math_int precedent). `msg` is either the static line (Option-`!`: "Error:
+/// none\n") or a bound payload Var (Result-`!`: a `let $m = "Error: " + e + "\n"` bind
+/// precedes the die and the die consumes $m's handle — the arm's scope-end drop after the
+/// never-returning die balances the cert, exactly the checked-overflow abort shape).
+/// Build the whole unit-main die BLOCK for a DYNAMIC String payload `e`:
+/// `{ let $m = "Error: " + e + "\n"; prim.die(prim.handle($m)) }` — the v0 main-err line.
+fn build_main_die_line(payload: IrExpr, at: &IrExpr, next_var: &mut u32) -> IrExpr {
+    use almide_ir::BinOp;
+    use almide_lang::types::Ty;
+    let m_var = VarId(*next_var);
+    *next_var += 1;
+    let lit = |v: &str| IrExpr {
+        kind: IrExprKind::LitStr { value: v.into() },
+        ty: Ty::String,
+        span: at.span.clone(),
+        def_id: None,
+    };
+    let concat = |a: IrExpr, b: IrExpr| IrExpr {
+        kind: IrExprKind::BinOp { op: BinOp::ConcatStr, left: Box::new(a), right: Box::new(b) },
+        ty: Ty::String,
+        span: at.span.clone(),
+        def_id: None,
+    };
+    let line = concat(concat(lit("Error: "), payload), lit("\n"));
+    let m_ref = IrExpr {
+        kind: IrExprKind::Var { id: m_var },
+        ty: Ty::String,
+        span: at.span.clone(),
+        def_id: None,
+    };
+    // SPLIT form (`let $h = prim.handle($m); prim.die($h)`): a NESTED `prim.handle(<Var>)`
+    // inside a match ARM declines at the arm's prim lowering (the top-level form is fine) —
+    // the split is the shape the arm path proves.
+    let h_var = VarId(*next_var);
+    *next_var += 1;
+    let handle_call = IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module {
+                module: almide_lang::intern::sym("prim"),
+                func: almide_lang::intern::sym("handle"),
+                def_id: None,
+            },
+            args: vec![m_ref],
+            type_args: Vec::new(),
+        },
+        ty: Ty::Int,
+        span: at.span.clone(),
+        def_id: None,
+    };
+    let h_ref =
+        IrExpr { kind: IrExprKind::Var { id: h_var }, ty: Ty::Int, span: at.span.clone(), def_id: None };
+    let die_call = IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module {
+                module: almide_lang::intern::sym("prim"),
+                func: almide_lang::intern::sym("die"),
+                def_id: None,
+            },
+            args: vec![h_ref],
+            type_args: Vec::new(),
+        },
+        ty: Ty::Unit,
+        span: at.span.clone(),
+        def_id: None,
+    };
+    IrExpr {
+        kind: IrExprKind::Block {
+            stmts: vec![
+                IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: m_var,
+                        ty: Ty::String,
+                        value: line,
+                        mutability: almide_ir::Mutability::Let,
+                    },
+                    span: at.span.clone(),
+                },
+                IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: h_var,
+                        ty: Ty::Int,
+                        value: handle_call,
+                        mutability: almide_ir::Mutability::Let,
+                    },
+                    span: at.span.clone(),
+                },
+            ],
+            expr: Some(Box::new(die_call)),
+        },
+        ty: Ty::Unit,
+        span: at.span.clone(),
+        def_id: at.def_id,
+    }
+}
+
+/// UNIT-MAIN auto-? residue: the FRONTEND builds `match f() { ok(v) => …, err(e) => err(e) }`
+/// directly (no `Unwrap` node reaches the MIR desugar), and in the VOID main the `err(e)` arm
+/// value is DISCARDED — the failure path silently exited 0 (v0: `Error: <msg>` + exit 1).
+/// Rewrite every bare-`ResultErr` arm body under a UNIT-typed match to the same die block the
+/// `!` desugar builds. Sound: a user cannot type-check `err(e)` as a Unit match arm, so every
+/// such arm IS the auto-? artifact (main's early error return). Gated to main by the caller.
+pub fn desugar_unit_main_err_arms(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::types::Ty;
+    struct Rw {
+        next_var: u32,
+        changed: bool,
+    }
+    impl IrMutVisitor for Rw {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Match { arms, .. } = &mut e.kind else { return };
+            if !matches!(e.ty, Ty::Unit) {
+                return;
+            }
+            for arm in arms.iter_mut() {
+                if let IrExprKind::ResultErr { expr } = &arm.body.kind {
+                    if matches!(expr.ty, Ty::String) {
+                        let payload = (**expr).clone();
+                        let at = arm.body.clone();
+                        arm.body = build_main_die_line(payload, &at, &mut self.next_var);
+                        self.changed = true;
+                    }
+                }
+            }
+        }
+    }
+    let mut rw = Rw { next_var: max_var_id(body) + 1, changed: false };
+    let mut out = body.clone();
+    rw.visit_expr_mut(&mut out);
+    rw.changed.then_some(out)
+}
+
+fn build_main_die(msg: IrExpr, body: &IrExpr) -> IrExpr {
+    use almide_lang::intern::sym;
+    use almide_lang::types::Ty;
+    let handle = IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module { module: sym("prim"), func: sym("handle"), def_id: None },
+            args: vec![msg],
+            type_args: Vec::new(),
+        },
+        ty: Ty::Int,
+        span: body.span.clone(),
+        def_id: None,
+    };
+    IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module { module: sym("prim"), func: sym("die"), def_id: None },
+            args: vec![handle],
+            type_args: Vec::new(),
+        },
+        ty: Ty::Unit,
+        span: body.span.clone(),
+        def_id: None,
+    }
+}
+
 fn build_unwrap_match(
     inner: IrExpr,
     ok_pat: almide_ir::IrPattern,
     cont: IrExpr,
     body: &IrExpr,
     next_var: &mut u32,
+    unit_main: bool,
 ) -> IrExpr {
     use almide_ir::{IrMatchArm, IrPattern};
+    use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
+    // An OPTION subject (`int.to_int8_checked(v)!` — the sized_conversion family): the fail
+    // arm is `none => err("none")` (v0's unwrap-of-none message, oracle: `Error: none`,
+    // exit 1), and the continuation binds under the SOME pattern — Option's len-as-tag
+    // polarity is OPPOSITE Result's (Some = len 1, Err = len 1), so reusing the Ok/Err
+    // skeleton would fire the fail arm on the SUCCESS value.
+    if matches!(&inner.ty, Ty::Applied(TypeConstructorId::Option, _)) {
+        let none_body = if unit_main {
+            // main is void — abort with v0's whole line instead of a discarded err().
+            build_main_die(
+                IrExpr {
+                    kind: IrExprKind::LitStr { value: "Error: none\n".into() },
+                    ty: Ty::String,
+                    span: body.span.clone(),
+                    def_id: None,
+                },
+                body,
+            )
+        } else {
+            IrExpr {
+                kind: IrExprKind::ResultErr {
+                    expr: Box::new(IrExpr {
+                        kind: IrExprKind::LitStr { value: "none".into() },
+                        ty: Ty::String,
+                        span: body.span.clone(),
+                        def_id: None,
+                    }),
+                },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            }
+        };
+        let none_arm = IrMatchArm { pattern: IrPattern::None, guard: None, body: none_body };
+        let some_pat = match ok_pat {
+            IrPattern::Ok { inner } => IrPattern::Some { inner },
+            other => other,
+        };
+        let some_arm = IrMatchArm { pattern: some_pat, guard: None, body: cont };
+        return IrExpr {
+            kind: IrExprKind::Match { subject: Box::new(inner), arms: vec![none_arm, some_arm] },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        };
+    }
     let e_var = VarId(*next_var);
     *next_var += 1;
-    let err_arm = IrMatchArm {
-        pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: e_var, ty: Ty::String }) },
-        guard: None,
-        body: IrExpr {
+    let err_body = if unit_main {
+        // main is void — build the full line (`let $m = "Error: " + e + "\n"`) then abort.
+        let e_ref = IrExpr {
+            kind: IrExprKind::Var { id: e_var },
+            ty: Ty::String,
+            span: body.span.clone(),
+            def_id: None,
+        };
+        build_main_die_line(e_ref, body, next_var)
+    } else {
+        IrExpr {
             kind: IrExprKind::ResultErr {
                 expr: Box::new(IrExpr {
                     kind: IrExprKind::Var { id: e_var },
@@ -1133,7 +1363,12 @@ fn build_unwrap_match(
             ty: body.ty.clone(),
             span: body.span.clone(),
             def_id: body.def_id,
-        },
+        }
+    };
+    let err_arm = IrMatchArm {
+        pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: e_var, ty: Ty::String }) },
+        guard: None,
+        body: err_body,
     };
     let ok_arm = IrMatchArm { pattern: ok_pat, guard: None, body: cont };
     IrExpr {
@@ -1152,13 +1387,13 @@ fn build_unwrap_match(
 /// `count_ir_calls` stays exact (`f()` once, continuation in one arm, `err(e)` is a ctor). HOLE-1
 /// (admitted Ok-payload reprs only) is enforced inside the block path (`desugar_effect_unwrap_inner`).
 /// Returns `None` if no `!` is reachable in a return position of `tail` (the body keeps its form).
-fn desugar_tail_effect_unwrap(tail: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+fn desugar_tail_effect_unwrap(tail: &IrExpr, next_var: &mut u32, unit_main: bool) -> Option<IrExpr> {
     match &tail.kind {
         // A nested block — its own stmts/tail may carry a stmt-`!`.
-        IrExprKind::Block { .. } => desugar_effect_unwrap_inner(tail, next_var),
+        IrExprKind::Block { .. } => desugar_effect_unwrap_inner(tail, next_var, unit_main),
         IrExprKind::If { cond, then, else_ } => {
-            let nt = desugar_tail_effect_unwrap(then, next_var);
-            let ne = desugar_tail_effect_unwrap(else_, next_var);
+            let nt = desugar_tail_effect_unwrap(then, next_var, unit_main);
+            let ne = desugar_tail_effect_unwrap(else_, next_var, unit_main);
             if nt.is_none() && ne.is_none() {
                 return None;
             }
@@ -1177,7 +1412,7 @@ fn desugar_tail_effect_unwrap(tail: &IrExpr, next_var: &mut u32) -> Option<IrExp
             let mut changed = false;
             let new_arms: Vec<almide_ir::IrMatchArm> = arms
                 .iter()
-                .map(|a| match desugar_tail_effect_unwrap(&a.body, next_var) {
+                .map(|a| match desugar_tail_effect_unwrap(&a.body, next_var, unit_main) {
                     Some(nb) => {
                         changed = true;
                         almide_ir::IrMatchArm {

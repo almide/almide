@@ -65,6 +65,27 @@ pub(crate) fn preamble() -> String {
       (i32.const 1) (i32.const {NWRITTEN_ADDR})))
     (call $proc_exit (i32.const 1))
     (unreachable))
+  ;; __main_err(s): the explicit-Result main Err protocol — v0 prints `Error: <msg>` to
+  ;; STDERR and exits 1 (the native main wrapper); this writes the same three spans
+  ;; (prefix / payload bytes / newline) and proc_exit(1). The prefix + newline reuse the
+  ;; div-zero line's bytes ("Error: " head, "\n" tail) — no new data segment.
+  (func $__main_err (param $s i32)
+    (i32.store (i32.const {IOVEC_ADDR}) (i32.const {DIVZERO_MSG_ADDR}))
+    (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const {IOVEC_LEN_OFFSET}))
+      (i32.const {MAIN_ERR_PREFIX_LEN}))
+    (drop (call $fd_write (i32.const 2) (i32.const {IOVEC_ADDR})
+      (i32.const 1) (i32.const {NWRITTEN_ADDR})))
+    (i32.store (i32.const {IOVEC_ADDR}) (i32.add (local.get $s) (i32.const {LIST_HEADER})))
+    (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const {IOVEC_LEN_OFFSET}))
+      (i32.load (i32.add (local.get $s) (i32.const {LIST_LEN_OFFSET}))))
+    (drop (call $fd_write (i32.const 2) (i32.const {IOVEC_ADDR})
+      (i32.const 1) (i32.const {NWRITTEN_ADDR})))
+    (i32.store (i32.const {IOVEC_ADDR}) (i32.const {MAIN_ERR_NL_ADDR}))
+    (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const {IOVEC_LEN_OFFSET})) (i32.const 1))
+    (drop (call $fd_write (i32.const 2) (i32.const {IOVEC_ADDR})
+      (i32.const 1) (i32.const {NWRITTEN_ADDR})))
+    (call $proc_exit (i32.const 1))
+    (unreachable))
   ;; __die(s): abort with the String block s as the STDERR message + exit 1 —
   ;; the prim.die self-host abort (message bytes at s+12, byte length at s+4).
   (func $__die (param $s i32)

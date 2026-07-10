@@ -65,6 +65,10 @@ const MKDIR_ERR_LEN: u32 = 12; // len of "mkdir failed"
 const REMOVE_ERR_ADDR: u32 = 124; // "remove failed" message bytes (fs.remove_all Err) — 124..137
 const REMOVE_ERR_LEN: u32 = 13; // len of "remove failed"
 const DIVZERO_MSG_ADDR: u32 = 144; // "Error: division by zero\n" — 144..169 (__div_trap)
+// The explicit-Result main Err protocol ($__main_err) REUSES the div-zero line's bytes:
+// its first 7 bytes are "Error: " and its byte 23 is the trailing "\n" — no new data.
+const MAIN_ERR_PREFIX_LEN: u32 = 7; // "Error: "
+const MAIN_ERR_NL_ADDR: u32 = DIVZERO_MSG_ADDR + 23; // the div-zero line's "\n"
 const OVERFLOW_MSG_ADDR: u32 = 176; // "Error: integer overflow\n" — 176..200 (__div_trap)
 const BOUNDS_MSG_ADDR: u32 = 208; // "Error: index out of bounds\n" — 208..235 (__div_trap)
 const LABELS_ADDR: u32 = 376; // print labels (the data section) — after ALL fixed messages (incl. fs errno)
@@ -393,8 +397,13 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
         ""
     };
     let start = if main_returns {
+        // main's Result[Unit, String] is LEN-AS-TAG (scalar Ok): len@4 == 0 ⇒ Ok (discard),
+        // len 1 ⇒ Err with the String handle in slot 0's low half (@12). The Err path runs
+        // v0's protocol via $__main_err: `Error: <msg>\n` on STDERR + exit 1. (The former
+        // @16 read was the cap-as-tag offset — always 0 here, so an erring main silently
+        // exited 0.)
         format!(
-            "  (func (export \"_start\") (local $r i32)\n{ginit}    (local.set $r (call $main))\n    (if (i32.ne (i32.load (i32.add (local.get $r) (i32.const 16))) (i32.const 0))\n      (then unreachable))\n    (call $rc_dec (local.get $r)))\n"
+            "  (func (export \"_start\") (local $r i32)\n{ginit}    (local.set $r (call $main))\n    (if (i32.ne (i32.load (i32.add (local.get $r) (i32.const {LIST_LEN_OFFSET}))) (i32.const 0))\n      (then (call $__main_err (i32.load (i32.add (local.get $r) (i32.const {LIST_HEADER}))))))\n    (call $rc_dec (local.get $r)))\n"
         )
     } else {
         format!("  (func (export \"_start\")\n{ginit}    (call $main))\n")
