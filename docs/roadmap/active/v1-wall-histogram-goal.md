@@ -64,6 +64,14 @@ zero trusted runtime growth), linked by registry name with typed routing.
   by feature (literals, `.`, `[...]`/`[^...]`, `*`/`+`/`?`, `^`/`$`, groups
   `(...)`, alternation `|`, escapes `\d\w\s`, `{n,m}`). The feature set the
   corpus USES is the stage-1 scope — record the histogram of features.
+  **DONE (2026-07-10): 270 unique literal patterns in spec/. Feature counts:
+  alternation 164, `+` 132, class-escapes (`\d\w\s…`) 123, charclass 117,
+  `*` 111, non-ASCII text 108 (UTF-8 correctness is load-bearing!), `.` 108,
+  `?` 104, anchors 96, negated charclass 35, groups/captures 19,
+  `{n,m}` counted repetition ZERO — the stage-1 scope is the full basic
+  alphabet WITHOUT counted repetition. Adversarial alternation edges are
+  IN-CORPUS (`a|`, `|a`, `a||b`, `a|||` — empty alternatives) and must match
+  v0's semantics exactly.**
 - Read `runtime/rs/src/regex.rs` + `rt_regex.rs` for the exact SEMANTICS v0
   implements (greediness, empty-match advance, capture numbering, replace `$n`
   syntax, split edge cases — empty pattern, trailing empty fields). These
