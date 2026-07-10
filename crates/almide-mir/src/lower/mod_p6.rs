@@ -2889,10 +2889,12 @@ fn group_option_result_arms(
     // the Result-with-variant-payload class: the inner match over the bound
     // payload var re-dispatches on the variant tag, which the custom-variant
     // machinery lowers once the payload bind is seeded).
+    let plain_col =
+        |p: &IrPattern| matches!(p, IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::Wildcard);
     let scalar_col = |p: &IrPattern| {
-        matches!(p, IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::Wildcard)
+        plain_col(p)
             || matches!(p, IrPattern::Constructor { args, .. }
-                if args.iter().all(|a| matches!(a, IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::Wildcard)))
+                if args.iter().all(plain_col))
     };
     let is_nested_ctor = |p: &IrPattern| matches!(p, IrPattern::Constructor { .. });
     // `(key, field_patterns)` for one arm — `None` (bail) for a top-level catch-all/binder, a
@@ -2904,7 +2906,11 @@ fn group_option_result_arms(
             IrPattern::None => Some((CKey::None_, vec![])),
             IrPattern::Ok { inner } if scalar_col(inner) => Some((CKey::Ok_, vec![(**inner).clone()])),
             IrPattern::Err { inner } if scalar_col(inner) => Some((CKey::Err_, vec![(**inner).clone()])),
-            IrPattern::Constructor { name, args } if args.iter().all(scalar_col) => {
+            // A USER-variant subject keeps the STRICT columns: its nested-ctor arms
+            // (`Node(Leaf(a), Leaf(b))` then `Node(l, r)` — #610 fall-through
+            // refinement) already lower via the custom-variant machinery, and
+            // regrouping them here would shadow that working path.
+            IrPattern::Constructor { name, args } if args.iter().all(plain_col) => {
                 Some((CKey::User(name.clone()), args.clone()))
             }
             _ => Option::None,

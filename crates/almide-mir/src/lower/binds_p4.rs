@@ -881,6 +881,16 @@ impl LowerCtx {
                 self.materialized_results.insert(dst);
                 Some(dst)
             }
+            // `err(<user-variant ctor>)` for `Result[T_scalar, <user variant>]` — the
+            // structured-error class (`let e: Result[Int, MathError] =
+            // err(Overflow("m"))`, `assert_eq(f(x), err(DivideByZero))`). The
+            // len-as-tag Err wrapper the reader seeds for this type; rich payloads
+            // route to `$__drop_res_<V>`. NOT self-tracked: like every ctor arm here,
+            // the CALLER owns the tracking (a call-arg site re-tracks via
+            // `materialized_call_arg` — a push here double-freed at scope end).
+            IrExprKind::ResultErr { .. } if self.is_scalar_ok_variant_err_result(ty) => {
+                self.try_lower_result_err_variant_ctor(value, ty)
+            }
             // HEAP-Ok `Result[(Int,Int), String]` etc. — `Err(msg)` RETURNED / bound directly
             // (`fn __rzip_err(..) = Err(copy)`). The Err message goes into the SAME cap-as-tag 1-slot
             // DynListStr as the heap-Ok arm (payload @12, tag @16 = 1), so a `match` reading tag @16

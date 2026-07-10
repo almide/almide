@@ -569,6 +569,14 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_result_variant_ctor(tail, &tail.ty) {
                         return Ok(Some(dst));
                     }
+                    // `err(Overflow(msg))` RETURNED for `Result[T_scalar, <user variant>]`
+                    // (the structured-error class): the len-as-tag Err wrapper, moved out.
+                    if self.is_scalar_ok_variant_err_result(&tail.ty) {
+                        if let Some(dst) = self.try_lower_result_err_variant_ctor(tail, &tail.ty) {
+                            self.live_heap_handles.retain(|h| *h != dst);
+                            return Ok(Some(dst));
+                        }
+                    }
                     if let Some(dst) = self.try_lower_option_ctor(tail, &tail.ty) {
                         return Ok(Some(dst));
                     }

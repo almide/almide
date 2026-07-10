@@ -729,6 +729,18 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                if i >= n then ()\n  \
                else {{ let e: {vn} = prim.load_handle(h + 12 + i * 8)\n         __drop_{vn_fn}(e)\n         __drop_list_{vn_fn}_loop(h, n, i + 1) }}\n"
         ));
+        // The LEN-AS-TAG Result wrapper holding a rich-variant ERR payload
+        // (`Result[T_scalar, V]` — the structured-error class `err(Overflow(msg))`):
+        // at the wrapper's last ref, an Err (len == 1) recurses into the slot-0
+        // variant via `$__drop_<V>`, then the block frees. An Ok (len == 0) has no
+        // payload. Same trusted prim-only class as every generated drop.
+        out.push_str(&format!(
+            "fn __drop_res_{vn_fn}(e: List[Int]) -> Unit = {{\n  \
+               let h = prim.handle(e)\n  \
+               if prim.load32(h + 0) == 1 and prim.load32(h + 4) == 1 then {{\n    \
+                 let q: {vn} = prim.load_handle(h + 12)\n    __drop_{vn_fn}(q)\n  }} else ()\n  \
+               prim.rc_dec(h)\n}}\n"
+        ));
     }
     out
 }

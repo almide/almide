@@ -439,6 +439,17 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // SCALAR-Ok `Result[T_scalar, <user variant>]` ERR arm (the structured-error
+            // class: `err(Overflow(msg))`, `err(DivZero)` — bidirectional_type): the
+            // reader seeds this type LEN-AS-TAG, so materialize the variant payload into
+            // the len-1 wrapper; a rich payload routes the drop to `$__drop_res_<V>`.
+            IrExprKind::ResultErr { .. } if self.is_scalar_ok_variant_err_result(result_ty) => {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_result_err_variant_ctor(arm, result_ty)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // HEAP-Ok `Result[<user variant>, String]` (derived variant decode's `ok(Pair(..))` /
             // `ok(Plain)` if/match arms): materialize the variant Ok / String Err, recursive `$__drop_<V>`.
             IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
@@ -1231,6 +1242,64 @@ impl LowerCtx {
             }
             _ => None,
         }
+    }
+
+    /// Is `ty` a `Result[T_scalar, <user variant>]` — the structured-error shape whose
+    /// reader seeds LEN-AS-TAG (`seed_variant_param`'s scalar-Ok branch)?
+    pub(crate) fn is_scalar_ok_variant_err_result(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+            if a.len() == 2
+                && !is_heap_ty(&a[0])
+                && self.custom_variant_type_name(&a[1]).is_some())
+    }
+
+    /// `err(<user-variant ctor>)` for `Result[T_scalar, <user variant>]` — the
+    /// STRUCTURED-ERROR class (`err(Overflow(msg))` / `err(DivZero)`). The reader
+    /// (`seed_variant_param`) seeds this type LEN-AS-TAG (Err = len 1 + the payload
+    /// HANDLE at slot 0, bound BORROWED by the err arm), so the ctor materializes
+    /// exactly that via the len-1 builder (`materialize_opt_str_some` — "Err IS Some
+    /// physically"), moving the variant block in. A RICH variant payload
+    /// (`Overflow(String)` — its block owns nested heap) routes the wrapper's drop to
+    /// the generated `$__drop_res_<V>` (at the wrapper's last ref, an Err recurses
+    /// into slot 0 via `$__drop_<V>`); a FLAT payload (`DivZero`) keeps the exact
+    /// flat DropListStr. `ok(<scalar>)` for this family keeps the existing scalar-Ok
+    /// materializer — the same len-as-tag layout, nothing new. `None` outside the
+    /// shape or a non-materializable payload (the sound wall).
+    pub(crate) fn try_lower_result_err_variant_ctor(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let err_ty = match result_ty {
+            Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && !is_heap_ty(&a[0]) =>
+            {
+                &a[1]
+            }
+            _ => return None,
+        };
+        let type_name = self.custom_variant_type_name(err_ty)?;
+        let repr = repr_of(result_ty).ok()?;
+        let IrExprKind::ResultErr { expr: inner } = &expr.kind else {
+            return None;
+        };
+        let piece = self.try_lower_variant_ctor(inner)?;
+        let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name, &|rn| {
+            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+        });
+        // The variant block is MOVED into the Result @slot 0 — detach its own
+        // scope-end drop so it frees exactly once, through the wrapper.
+        self.variant_drop_handles.remove(&piece);
+        self.heap_elem_lists.remove(&piece);
+        self.live_heap_handles.retain(|h| *h != piece);
+        let obj = self.materialize_opt_str_some(piece, repr);
+        if needs_rec {
+            self.heap_elem_lists.remove(&obj);
+            self.variant_drop_handles.insert(obj, format!("res_{type_name}"));
+        }
+        Some(obj)
     }
 
     /// `ok(<Option[R] value>)` / `ok(none)` / `err(<String>)` for `Result[Option[R], String]` where R is
