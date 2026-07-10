@@ -198,6 +198,7 @@ pub(crate) fn preamble() -> String {
                (i32.add (i32.load (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET})))
                         (i32.const 1))))
 
+
   (func $elem_addr (param $list i32) (param $idx i32) (result i32)
     ;; SAFETY WALL: an out-of-range index would compute an address OUTSIDE the
     ;; block (idx < 0 below it, idx >= cap beyond it) and a $list_set there would

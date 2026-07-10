@@ -961,6 +961,24 @@ impl LowerCtx {
                             }
                             self.ops.truncate(mark);
                             self.live_heap_handles.truncate(lhh);
+                            // A heap-result call THROUGH a KNOWN CLOSURE value
+                            // (`println(hi("world"))` where `hi` bound a closure block):
+                            // EXECUTE it via the closure dispatch — a fresh OWNED value
+                            // (cert `i`, scope-end drop), borrowed into the outer call.
+                            // Mirrors the bind-position closure call (binds_p2).
+                            if let Some(blk) = self.closure_value_of(callee) {
+                                if let (Ok(crepr), Ok(lowered)) =
+                                    (repr_of(&a.ty), self.lower_call_args(inner))
+                                {
+                                    let dst = self.fresh_value();
+                                    self.emit_closure_call(blk, Some(dst), lowered, Some(crepr));
+                                    self.live_heap_handles.push(dst);
+                                    out.push(CallArg::Handle(dst));
+                                    continue;
+                                }
+                                self.ops.truncate(mark);
+                                self.live_heap_handles.truncate(lhh);
+                            }
                         }
                         // An unresolvable `Method`/`Computed` call with a HEAP result as a
                         // call ARGUMENT (`f(obj.m())`, `f((g)())`) would borrow an empty

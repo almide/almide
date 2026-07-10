@@ -1189,6 +1189,77 @@ pub fn program_uses_result_option_str(program: &almide_ir::IrProgram) -> bool {
     false
 }
 
+/// Does the program create or carry FIRST-CLASS FUNCTION values (a `Lambda` expr or a
+/// `Ty::Fn`-typed value anywhere)? Gates the injection of [`CLOSURE_DROP_SRC`] — a program
+/// with no closures pays neither the second lowering pass nor the dead drop routine.
+pub fn program_uses_closures(program: &almide_ir::IrProgram) -> bool {
+    struct Finder {
+        found: bool,
+    }
+    impl almide_ir::visit::IrVisitor for Finder {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if matches!(expr.kind, almide_ir::IrExprKind::Lambda { .. })
+                || matches!(expr.ty, Ty::Fn { .. })
+            {
+                self.found = true;
+            }
+            if !self.found {
+                almide_ir::visit::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut finder = Finder { found: false };
+    let funcs = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in funcs {
+        if matches!(f.ret_ty, Ty::Fn { .. }) || f.params.iter().any(|p| matches!(p.ty, Ty::Fn { .. }))
+        {
+            return true;
+        }
+        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
+        if finder.found {
+            return true;
+        }
+    }
+    false
+}
+
+/// The ALMIDE SOURCE of the UNIFORM closure-block release `$__drop_closure` (the closures
+/// machinery — injected by the render pipeline whenever the program carries first-class
+/// function values). A closure block is SELF-DESCRIBING: slot 0 = fnidx (a table index —
+/// NEVER dereferenced here), slot 1 = n_heap | (n_closure << 16), slots 2.. = captured
+/// closures (freed by RECURSING into this very routine — the `compose` shape), then
+/// captured heap values (each freed by ONE `rc_dec` — the lowering's capture gate admits
+/// only one-level-exact kinds), then scalars (untouched). Any drop site can free any
+/// closure value without knowing its captures (a call-result closure's layout is
+/// unknowable at the caller). Like every generated `$__drop_*`, a trusted prim-only
+/// routine (outside the witness surface), pinned by the closure leak-loop test.
+pub const CLOSURE_DROP_SRC: &str = "\
+fn __drop_closure(c: List[Int]) -> Unit = {
+  let h = prim.handle(c)
+  if prim.load32(h + 0) == 1 then {
+    let hdr = prim.load64(h + 20)
+    let nc = hdr / 65536
+    let nh = hdr - nc * 65536
+    __drop_closure_loop(h, nc, nh, 0)
+  } else ()
+  prim.rc_dec(h)
+}
+fn __drop_closure_loop(h: Int, nc: Int, nh: Int, i: Int) -> Unit =
+  if i >= nc + nh then ()
+  else {
+    if i < nc then {
+      let q: List[Int] = prim.load_handle(h + 28 + i * 8)
+      __drop_closure(q)
+    } else {
+      prim.rc_dec(prim.load64(h + 28 + i * 8))
+    }
+    __drop_closure_loop(h, nc, nh, i + 1)
+  }
+";
+
 /// Generate the ALMIDE SOURCE for each RECORD type's recursive drop `$__drop_<R>` (the records
 /// counterpart of [`generate_variant_drop_sources`]). Records have NO tag — fields sit at
 /// `slot_offset(i)`, freed per CONCRETE field type: `String → rc_dec`, `Map[String,String] →

@@ -210,10 +210,15 @@ pub fn try_render_wasm_source(
         all_type_decls.extend(m.type_decls.iter().cloned());
     }
     let uses_result_opt_str = crate::lower::program_uses_result_option_str(&ir);
+    // First-class function values need the UNIFORM closure-block release
+    // (`$__drop_closure` — self-describing recursive drop, DropVariant "closure").
+    let closure_drop =
+        if crate::lower::program_uses_closures(&ir) { crate::lower::CLOSURE_DROP_SRC } else { "" };
     let drops = format!(
-        "{}{}",
+        "{}{}{}",
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
+        closure_drop,
     );
     // The generated drops free a `Value` field via value_core's INTERNAL `__drop_value` — bring
     // value_core's source into scope for the re-lower's type check; the auto-link dedups it.

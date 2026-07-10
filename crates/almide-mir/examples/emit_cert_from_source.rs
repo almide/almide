@@ -232,10 +232,19 @@ fn main() {
                     }
                 }
             }
-            // Dotted callees are self-hosted stdlib calls — purity-gated at
-            // lowering, borrowing heap args by the renderer contract (the same
-            // class classify_corpus's `is_known_free` names for caps).
-            print!("{}", call_modes_witness(&program, &|n: &str| n.contains('.')));
+            // Dotted callees are self-hosted stdlib calls, and `__`-prefixed
+            // OUT-OF-PROGRAM callees are the render-linked runtime helpers
+            // (`__str_concat` / `__list_concat` — the greeter-lambda class):
+            // both are purity-gated at lowering and borrow heap args by the
+            // renderer contract (the same class classify_corpus's
+            // `is_known_free` names for caps). An in-program `__lambda_*` /
+            // `__drop_*` resolves by index FIRST, so the policy only reaches
+            // genuinely out-of-program names.
+            print!(
+                "{}",
+                call_modes_witness(&program, &|n: &str| n.contains('.')
+                    || n.starts_with("__"))
+            );
         }
         other => {
             die(format!(

@@ -932,6 +932,14 @@ impl LowerCtx {
             Op::DropListStr { v }
         } else if self.value_handles.contains(&v) {
             Op::DropValue { v }
+        } else if self.closure_values.contains(&v) {
+            // A CLOSURE BLOCK frees through the uniform, SELF-DESCRIBING
+            // `$__drop_closure` (fixed runtime): at the last ref it reads the drop
+            // header (slot 1), recursively drops the captured-closure slots, rc_decs
+            // the captured-heap slots, and NEVER touches slot 0 (the fnidx — a table
+            // index, not a pointer). Works for any closure value regardless of where
+            // it was created (a call-result's captures are unknowable here).
+            Op::DropVariant { v, ty: "closure".to_string() }
         } else {
             Op::Drop { v }
         }

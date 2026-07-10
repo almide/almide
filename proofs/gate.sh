@@ -213,6 +213,12 @@ run_src_mode funcref_call.almd   main modes call-modes 0
 # agreement both re-verified by the proven checkers.
 run_src      closure_capture.almd main ownership 0
 run_src_mode closure_capture.almd main modes call-modes 0
+# A HEAP capture (closure env full mode): the block CO-OWNS the captured String
+# (`a`+`m` on the caller's object) and the dispatch passes TWO heap args
+# (env + argument) — both witnesses proven, kernel-agreed.
+run_src      closure_heap_capture.almd greeter ownership 0
+run_src      closure_heap_capture.almd main    ownership 0
+run_src_mode closure_heap_capture.almd main    modes call-modes 0
 
 echo "-- kernel-oracle TAMPER DRILL (the extraction-divergence detector, every build) --"
 # (i) a CORRUPTED witness (one extra release byte → double-free) must be rejected

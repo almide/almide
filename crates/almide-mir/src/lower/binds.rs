@@ -64,17 +64,55 @@ impl LowerCtx {
         }
         let mut cc = CapCollect { free: &free, out: Vec::new() };
         almide_ir::visit::IrVisitor::visit_expr(&mut cc, body);
-        let captures = cc.out;
-        // Slice gate: i64-scalar captures only (Int/Bool — stored/loaded as raw 64-bit
-        // slots). A heap capture needs env-owned nested drops, a Float capture an f64
-        // reinterpret — both later ratchets. Every capture must also resolve to a lowered
-        // local value HERE (a capture of a deferred/opaque binding has no readable value).
-        let mut cap_vals: Vec<ValueId> = Vec::new();
-        for (v, ty) in &captures {
-            if !matches!(ty, Ty::Int | Ty::Bool) {
+        // Partition the captures by DROP CLASS — the env layout is self-describing so the
+        // uniform `$__drop_closure` runtime can free ANY closure block without lowering-time
+        // mask knowledge (a call-result closure's captures are unknowable at the drop site):
+        //   slot 0            = fnidx (SCALAR — the drop must never touch it)
+        //   slot 1            = header: n_heap | (n_closure << 16)
+        //   slots 2..         = closure captures (freed by recursive $__drop_closure),
+        //                       then heap captures (freed by one flat $rc_dec each),
+        //                       then scalar captures (untouched).
+        // Heap captures are gated to ONE-LEVEL-EXACT kinds (String, List[Int], List[Float]
+        // — a single rc_dec frees them completely); a nested-heap capture (List[String],
+        // Value, variant, heap-field record) or a Float (f64↔i64 reinterpret not in the prim
+        // vocabulary) still defers — honest wall, recorded in the goal file.
+        use almide_lang::types::constructor::TypeConstructorId;
+        let one_level_exact = |ty: &Ty| -> bool {
+            matches!(ty, Ty::String)
+                || matches!(ty, Ty::Applied(TypeConstructorId::List, a)
+                    if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Float))
+        };
+        let mut closure_caps: Vec<(VarId, Ty)> = Vec::new();
+        let mut heap_caps: Vec<(VarId, Ty)> = Vec::new();
+        let mut scalar_caps: Vec<(VarId, Ty)> = Vec::new();
+        for (v, ty) in cc.out {
+            if matches!(ty, Ty::Fn { .. }) {
+                closure_caps.push((v, ty));
+            } else if one_level_exact(&ty) {
+                heap_caps.push((v, ty));
+            } else if matches!(ty, Ty::Int | Ty::Bool) {
+                scalar_caps.push((v, ty));
+            } else {
                 return None;
             }
-            cap_vals.push(*self.value_of.get(v)?);
+        }
+        let n_closure = closure_caps.len();
+        let n_heap = heap_caps.len();
+        let captures: Vec<(VarId, Ty)> = closure_caps
+            .into_iter()
+            .chain(heap_caps)
+            .chain(scalar_caps)
+            .collect();
+        // Every capture must resolve to a lowered local value HERE (a capture of a
+        // deferred/opaque binding has no readable value). A captured Fn var must be a
+        // KNOWN closure block (closure_values), or its slot would hold a non-block.
+        let mut cap_vals: Vec<ValueId> = Vec::new();
+        for (i, (v, _)) in captures.iter().enumerate() {
+            let cv = *self.value_of.get(v)?;
+            if i < n_closure && !self.closure_values.contains(&cv) {
+                return None;
+            }
+            cap_vals.push(cv);
         }
         // Lower the body in a FRESH sub-context sharing only the globals (its own value
         // space + params). A failure (a body outside the subset) aborts the lift cleanly —
@@ -119,20 +157,39 @@ impl LowerCtx {
             }
             mir_params.push(crate::MirParam { value: pv, repr });
         }
-        // PROLOGUE: read each capture back out of the env block (slot 1 + i — slot 0 is
-        // the fnidx). A raw 64-bit load through the borrowed env handle — a Prim read, no
-        // ownership event (the block is the caller's).
+        // PROLOGUE: read each capture back out of the env block (slot 2 + i — slot 0 is
+        // the fnidx, slot 1 the drop header). A closure/heap capture loads its HANDLE
+        // (`LoadHandle`) and is BORROWED inside the body (the env owns it — the param
+        // discipline: a body that consumes/returns it must Dup first); a captured Fn
+        // handle also joins the sub-context's `closure_values` so `g(x)` inside the body
+        // dispatches (the `compose` shape). A scalar capture is a raw 64-bit load. All
+        // Prim reads — no ownership events (the block is the caller's).
         for (i, (v, _)) in captures.iter().enumerate() {
             let h = sub.fresh_value();
             sub.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![env_pv] });
             let off = sub.fresh_value();
             sub.ops
-                .push(Op::ConstInt { dst: off, value: layout::slot_offset(1 + i) as i64 });
+                .push(Op::ConstInt { dst: off, value: layout::slot_offset(2 + i) as i64 });
             let addr = sub.fresh_value();
             sub.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
             let val = sub.fresh_value();
-            sub.ops
-                .push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(val), args: vec![addr] });
+            if i < n_closure + n_heap {
+                sub.ops.push(Op::Prim {
+                    kind: PrimKind::LoadHandle,
+                    dst: Some(val),
+                    args: vec![addr],
+                });
+                sub.param_values.insert(val);
+                if i < n_closure {
+                    sub.closure_values.insert(val);
+                }
+            } else {
+                sub.ops.push(Op::Prim {
+                    kind: PrimKind::Load { width: 8 },
+                    dst: Some(val),
+                    args: vec![addr],
+                });
+            }
             sub.value_of.insert(*v, val);
         }
         let ret = sub.lower_body_into(body).ok()?;
@@ -152,10 +209,12 @@ impl LowerCtx {
         };
         self.lifted.push(lifted_fn);
         self.lifted.append(&mut nested);
-        // Materialize the CLOSURE BLOCK: a DynList of 1 + k slots — slot 0 the funcref
-        // table index, slots 1… the captured scalars, copied in by VALUE at creation.
+        // Materialize the CLOSURE BLOCK: a DynList of 2 + k slots — slot 0 the funcref
+        // table index, slot 1 the SELF-DESCRIBING drop header (n_heap | n_closure << 16 —
+        // what lets the uniform `$__drop_closure` free any closure block at any drop site
+        // without lowering-time mask knowledge), then the captures (closure, heap, scalar).
         let len_c = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: len_c, value: (1 + cap_vals.len()) as i64 });
+        self.ops.push(Op::ConstInt { dst: len_c, value: (2 + cap_vals.len()) as i64 });
         let blk = self.fresh_value();
         self.ops.push(Op::Alloc {
             dst: blk,
@@ -164,18 +223,48 @@ impl LowerCtx {
         });
         let fr = self.fresh_value();
         self.ops.push(Op::FuncRef { dst: fr, name });
+        let hdr = self.fresh_value();
+        self.ops.push(Op::ConstInt {
+            dst: hdr,
+            value: (n_heap as i64) | ((n_closure as i64) << 16),
+        });
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![blk] });
-        for (i, v) in std::iter::once(fr).chain(cap_vals.iter().copied()).enumerate() {
+        for (i, v) in [fr, hdr].into_iter().chain(cap_vals.iter().copied()).enumerate() {
             let off = self.fresh_value();
             self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(i) as i64 });
             let addr = self.fresh_value();
             self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
-            self.ops
-                .push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, v] });
+            // A closure/heap capture: the closure CO-OWNS it — `Dup` a fresh reference
+            // (CowSafety makes the share value-semantics-safe: any later in-place
+            // mutation clones-on-shared), store its handle, `Consume` the fresh ref into
+            // the block (cert `a` + `m`; the original var's scope-end drop is untouched).
+            // The fnidx/header/scalar slots store the raw value.
+            let cap_index = i as i64 - 2; // captures start at slot 2
+            if cap_index >= 0 && (cap_index as usize) < n_closure + n_heap {
+                let owned = self.fresh_value();
+                self.ops.push(Op::Dup { dst: owned, src: v });
+                let handle = self.fresh_value();
+                self.ops
+                    .push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![owned] });
+                self.ops.push(Op::Prim {
+                    kind: PrimKind::Store { width: 8 },
+                    dst: None,
+                    args: vec![addr, handle],
+                });
+                self.ops.push(Op::Consume { v: owned });
+                self.live_heap_handles.retain(|x| *x != owned);
+            } else {
+                self.ops.push(Op::Prim {
+                    kind: PrimKind::Store { width: 8 },
+                    dst: None,
+                    args: vec![addr, v],
+                });
+            }
         }
         // A fresh owned heap value: dropped at scope end unless a consumer moves it out
-        // (a tail return removes it from the live set).
+        // (a tail return removes it from the live set). `closure_values` routes its drop
+        // to the recursive `$__drop_closure` (`drop_op_for`).
         self.live_heap_handles.push(blk);
         self.closure_values.insert(blk);
         Some(blk)

@@ -1,5 +1,24 @@
 <!-- description: GOAL PROMPT — closure env full mode: heap/Float/Fn captures with masked recursive drop -->
+<!-- done: 2026-07-10 -->
 # GOAL PROMPT — closure env full mode: heap, Float and Fn captures
+
+> **OUTCOME (2026-07-10): SHIPPED** — heap captures (String / List[Int] /
+> List[Float], co-owned via Dup + move-in, `a`+`m` certs), Fn captures
+> (`compose` — closures capturing closures, freed by `$__drop_closure`
+> SELF-RECURSION), and arg-position heap-result closure calls
+> (`println(hi("world"))`). The mask design evolved during grounding: instead
+> of lowering-time masks (unknowable at a call-result drop site), the block is
+> SELF-DESCRIBING (slot 1 = n_heap | n_closure << 16) and freed by a UNIFORM
+> generated-Almide `$__drop_closure` — the runtime-ratchet test correctly
+> rejected a fixed-WAT version, and the generated-source route (the
+> `$__drop_value` precedent) is the house-style answer. slot 0 (fnidx) is
+> structurally untouched by the drop (recursion + heap loops start at slot 2);
+> the clean byte-matched runs pin it. `b`'s consumer question RESOLVED (env
+> reads are event-free by the 5b param discipline; `b` = MakeUnique/Borrow on
+> owned streams — the "env-borrow letter" framing retired). Float captures and
+> nested-heap captures (List[String]/Value/variant) remain honestly deferred
+> (reinterpret prim / typed recursive slot free). Full record:
+> certificate-format-v1.md item 5's follow-up paragraph.
 
 > **Read first**: `crates/almide-mir/src/lower/binds.rs::lift_lambda` (the
 > shipped scalar-capture closure block — the code you extend),

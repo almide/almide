@@ -321,10 +321,18 @@
         // re-lower with them in scope (the same two-pass as examples/render_program.rs).
         let anon_recs = crate::lower::collect_recursive_anon_records(&ir);
         let uses_result_opt_str = crate::lower::program_uses_result_option_str(&ir);
+        // First-class function values need the uniform `$__drop_closure` (same
+        // injection as the production pipeline).
+        let closure_drop = if crate::lower::program_uses_closures(&ir) {
+            crate::lower::CLOSURE_DROP_SRC
+        } else {
+            ""
+        };
         let drops = format!(
-            "{}{}",
+            "{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),
             crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
+            closure_drop,
         );
         let ir = if drops.trim().is_empty() { ir } else { to_ir(&format!("{src}\n{drops}")) };
         let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =

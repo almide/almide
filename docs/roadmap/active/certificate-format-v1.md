@@ -357,10 +357,30 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      306). ZERO new ops / render rules / checker rules: the block is an
      ordinary owned heap object (`i`/`d`/`m` certs), the env an ordinary
      borrowed heap param (the CallModes agreement covers the closure boundary —
-     the possible-callee expansion now matches on the env+args shape). HONEST
-     SCOPE: captures are i64 SCALARS (Int/Bool) — a heap or Float capture still
-     defers; heap captures (env-owned nested handles + the `b` env-borrow
-     events) are the remaining ratchet.
+     the possible-callee expansion now matches on the env+args shape).
+     **CLOSURE ENV FULL MODE shipped 2026-07-10**: captures now include HEAP
+     values (one-level-exact kinds — String / List[Int] / List[Float]) and Fn
+     values (closures capturing closures — `compose`). A heap capture is
+     CO-OWNED: `Dup` + move-in at creation (cert `a`+`m` on the caller's
+     object; CowSafety makes the share value-semantics-safe), read back as a
+     BORROWED handle by the prologue (`LoadHandle`, the param discipline). The
+     block is SELF-DESCRIBING — slot 0 fnidx, slot 1 = n_heap | n_closure<<16 —
+     so the uniform GENERATED-ALMIDE `$__drop_closure` (injected by the render
+     pipeline, outside the witness surface like every generated `$__drop_*`)
+     frees any closure at any drop site: captured closures via SELF-RECURSION,
+     heap captures via one rc_dec each, the fnidx slot NEVER touched. Heap-
+     result closure calls now also lower in call-ARGUMENT position
+     (`println(hi("world"))`). v0-byte-identical (closure_capturing_heap_wasm);
+     gate rows `closure_heap_capture.almd` (greeter `im|am` + the 2-heap-arg
+     dispatch modes row), kernel-agreed. **`b`'s consumer question RESOLVED**:
+     env reads inside the lambda are loads through a zero-seeded borrowed
+     stream — event-free by the 5b param discipline — so `b`'s load-bearing
+     cert consumer is `Op::MakeUnique`/`Op::Borrow` on OWNED streams (shipped
+     in 5b), and the earlier "closure-env borrow letter" framing is retired:
+     the env boundary is carried by the CallModes agreement + the co-owned
+     capture accounting, not by `b`. REMAINING ratchet: nested-heap captures
+     (List[String]/Value/variant envs — needs a typed recursive slot free) and
+     Float captures (an f64↔i64 reinterpret prim).
    - Gates: build-checker byte demos ×6 (borrow live/uaf/nothing, branch
      agree/disagree/cross-arm), gate.sh 29 rows (8 new: branch A/R, borrow A/R,
      closure A/R, real `heap_result_if.almd` + `funcref_call.almd`),
