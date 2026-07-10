@@ -140,8 +140,32 @@ generic buckets (assert-arg shapes → match-untracked 33 / interp-in-call-arg
 30). **bytes.append_u8 SHIPPED (48d700c3)**: the same statement-rewrite as
 bytes.push (`buf = bytes.append(buf, x)` — the self-hosted functional append);
 parity incl. loop pushes. Its bucket is gone (50 → 0).
-REMAINING for the double-digits target (all walls are MULTI-BLOCKER — a
-function opens only when its LAST blocker falls):
+**THE ROAD TO DOUBLE DIGITS, decomposed (2026-07-10 diagnosis — per-function
+wall names via `WALL_NAMES=1 classify_corpus`)**: the 291 walled-real fns
+spread thin over ~60 files (top file = 15); they decompose into SIX brick-
+scale design pieces, NOT linkage gaps:
+1. **Nested-variant-payload matches** (the match-untracked 33 bucket's core):
+   `match e { err(Overflow(msg)) => … }` — a ctor pattern INSIDE ok/err/some
+   (the Camp-4 frontier); also the cross-module `mod.Type.method()` Codec
+   roundtrips. Needs the payload sub-match regrouping generalized to
+   heap-payload variants.
+2. **Interp repr coverage** (the interp-in-call-arg 30 bucket +
+   compound_repr_interp's 15): heterogeneous tuples, nested list-of-maps,
+   Set/Map variants — the `interp_to_string_call` self-host family's known
+   tail (the memory's "nested interp 残" list). Small each, numerous.
+3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
+   traversal.
+4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):
+   generated range-table .almd (ASCII would silently diverge).
+5. **Families**: result.collect (10), sized_conversion (9), fan_value (9),
+   default_fields (9), pattern_test (8), zlib (6), matrix.shape (26),
+   float.to_fixed (24).
+6. **Honest permanent walls**: random (7), http (6+) — entropy/network are
+   not byte-verifiable; the double-digit target nets these out.
+Each stage ships with the same discipline: v0 parity probe → mir tests →
+spec → gate + corpus (PCC + kernel oracle) → push at green.
+
+(Historical note — the buckets already OPENED in this arc:)
 - **json path family** (root 46 / field 41 / index 29 / set_path 28): a
   JsonPath DSL SUBSYSTEM — needs a heap JsonPath representation + the
   get_path/set_path traversal over Value; design piece, not a linkage gap.
