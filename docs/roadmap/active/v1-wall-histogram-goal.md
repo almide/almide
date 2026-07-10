@@ -93,9 +93,22 @@ zero trusted runtime growth), linked by registry name with typed routing.
     `is_match` = find anywhere; `full_match` = top-level alts from 0 AND
     `end == chars.len()` (checked AFTER the alt match — NOT per-alt anchored);
     `find` returns the matched SUBSTRING (`Option<String>`), positions are
-    char-index internal only. STILL TO READ (lines 260–406): find_all's
-    empty-match advance rule, replace/`$n`, split field semantics, captures'
-    return shape; then rt_regex.rs only to confirm wasm parity of the same.
+    char-index internal only.
+  - **API semantics COMPLETE (lines 260–406)**: `find_all` — repeat leftmost;
+    zero-width advance = `end + 1` (skip one char). `replace` — the
+    replacement is a PLAIN LITERAL (NO `$n` group refs!); scan loop: emit
+    `chars[pos..start]`, emit rep; zero-width → ALSO emit the char at `end`
+    and advance `end + 1` (at end-of-string: just advance — the
+    `replace_empty_match_at_end_no_panic` regression). `replace_first` — one
+    find from 0, splice, else the input unchanged. `split` — zero-width match
+    AT the current pos → push ONE char and advance 1; else push
+    `chars[pos..start]`, `pos = end`; on no-match push the tail (NO
+    trailing-empty suppression: `split(",", "a,")` = ["a", ""]).
+    `captures` — `ncap == 0 → None`; else the FIRST match's groups,
+    an unmatched group = "" (not None). The v0 unit tests at the file's end
+    are the exact parity oracle set (`x*`/"ab"→"-a-b-", `b?`/"abc"→"-a--c-",
+    `a*`/"aaa"→"--", "本a" multibyte boundaries, the empty-alternation
+    family) — port them VERBATIM into the engine's spec tests first.
 - Check how v0 wasm exposes regex (per-call WAT emit? a compiled NFA?) — for
   UNDERSTANDING only (invariant 2).
 
