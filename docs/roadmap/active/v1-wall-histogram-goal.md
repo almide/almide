@@ -137,9 +137,24 @@ ncap-0 → NONE, `(a)(b)?` unmatched-group-"" — all v0-identical. The regex
 buckets are GONE from the histogram (381 → 0). Walled-real stays 296: the
 regex-test FUNCTIONS are multi-blocked — their residual blockers are the
 generic buckets (assert-arg shapes → match-untracked 33 / interp-in-call-arg
-30). REMAINING for the double-digits target: bytes.append_u8 (50), json.root
-(46) / json.field (41) / json.index (29), the two generic lowering buckets,
-string.is_alpha (27), matrix.shape (26), float.to_fixed (24).
+30). **bytes.append_u8 SHIPPED (48d700c3)**: the same statement-rewrite as
+bytes.push (`buf = bytes.append(buf, x)` — the self-hosted functional append);
+parity incl. loop pushes. Its bucket is gone (50 → 0).
+REMAINING for the double-digits target (all walls are MULTI-BLOCKER — a
+function opens only when its LAST blocker falls):
+- **json path family** (root 46 / field 41 / index 29 / set_path 28): a
+  JsonPath DSL SUBSYSTEM — needs a heap JsonPath representation + the
+  get_path/set_path traversal over Value; design piece, not a linkage gap.
+- **generic lowering buckets**: match-over-untracked-subject with call-bearing
+  arms (33) and string-interpolation in call-arg position (30) — these hold
+  the regex/bytes test functions hostage after their primary buckets opened.
+- **string.is_alpha/is_lower/is_upper (~70 combined)**: v0 uses FULL UNICODE
+  char properties (`is_alphabetic()`), so an ASCII self-host would silently
+  diverge — the honest route is a GENERATED range-table .almd (binary search
+  over the alphabetic/uppercase/lowercase range lists derived from the same
+  Unicode data Rust's std uses).
+- matrix.shape (26 — the Matrix subsystem), float.to_fixed (24 — decimal
+  formatting, the float_to_string self-host family's sibling).
 
 **1 — the engine core (`stdlib/regex_engine.almd` or split files).**
 A backtracking matcher over the scouted feature set: `__re_match_at(pattern,
