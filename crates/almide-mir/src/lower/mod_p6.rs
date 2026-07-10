@@ -3497,10 +3497,17 @@ fn group_option_result_arms(
             || matches!(p, IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
                 if plain_col(inner))
             || matches!(p, IrPattern::None)
+            // A RECORD-variant pattern (`ok(Tag { name, c })` — the derived-Codec roundtrip
+            // class): the inner match re-dispatches the record-variant pattern over the bound
+            // payload var — the custom-variant machinery the `describe`-style direct matches
+            // already lower. Every named field must carry an explicit plain sub-pattern.
+            || matches!(p, IrPattern::RecordPattern { fields, .. }
+                if fields.iter().all(|f| matches!(&f.pattern, Some(fp) if plain_col(fp))))
     };
     let is_nested_ctor = |p: &IrPattern| {
         matches!(p,
             IrPattern::Constructor { .. }
+                | IrPattern::RecordPattern { .. }
                 | IrPattern::Some { .. }
                 | IrPattern::None
                 | IrPattern::Ok { .. }
@@ -3525,11 +3532,25 @@ fn group_option_result_arms(
             _ => Option::None,
         }
     };
+    // A TRAILING `_` catch-all (`_ => assert(false)` — the codec-roundtrip class) regroups:
+    // its body becomes each multi-arm bucket's inner fallback AND the outer last arm (an
+    // `ok(<unmatched ctor>)` value must fall through the INNER match; an `err(_)` through
+    // the OUTER). Body duplication is admissible — the count gate reads this same desugared
+    // tree on both sides (the tail-duplication precedent). A guarded/binder catch-all bails.
+    let (ctor_arms, trailing_wild): (&[IrMatchArm], Option<&IrMatchArm>) = match arms.split_last()
+    {
+        Some((last, rest))
+            if matches!(last.pattern, IrPattern::Wildcard) && last.guard.is_none() =>
+        {
+            (rest, Some(last))
+        }
+        _ => (arms, Option::None),
+    };
     // Ordered per-ctor buckets (first-occurrence order — the constructors are DISJOINT so outer arm
     // order is immaterial). Each entry: (key, Vec<(field_patterns, guard, body)>).
     let mut groups: Vec<(CKey, Vec<(Vec<IrPattern>, Option<IrExpr>, IrExpr)>)> = Vec::new();
     let mut any_guard_or_lit = false;
-    for arm in arms {
+    for arm in ctor_arms {
         let (key, fields) = parse(&arm.pattern)?;
         if arm.guard.is_some()
             || fields.iter().any(|p| matches!(p, IrPattern::Literal { .. }))
@@ -3636,7 +3657,7 @@ fn group_option_result_arms(
                 def_id: None,
             }
         };
-        let inner_arms: Vec<IrMatchArm> = bucket
+        let mut inner_arms: Vec<IrMatchArm> = bucket
             .into_iter()
             .map(|(fields, guard, body)| IrMatchArm {
                 pattern: if arity == 1 {
@@ -3648,6 +3669,15 @@ fn group_option_result_arms(
                 body,
             })
             .collect();
+        // The trailing catch-all falls through INTO this ctor's sub-match (an
+        // `ok(<other ctor>)` subject must reach it, not vanish).
+        if let Some(w) = trailing_wild {
+            inner_arms.push(IrMatchArm {
+                pattern: IrPattern::Wildcard,
+                guard: Option::None,
+                body: w.body.clone(),
+            });
+        }
         let body_ty = inner_arms[0].body.ty.clone();
         let sub = IrExpr {
             kind: IrExprKind::Match {
@@ -3670,6 +3700,9 @@ fn group_option_result_arms(
     }
     if new_arms.is_empty() {
         return Option::None;
+    }
+    if let Some(w) = trailing_wild {
+        new_arms.push(w.clone());
     }
     Some(new_arms)
 }

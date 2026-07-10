@@ -305,6 +305,19 @@ scale design pieces, NOT linkage gaps:
    Gated CALL-FREE via the new `expr_contains_call` (a call-bearing default
    would add a MIR call the counted IR lacks — mir>ir). Parity on
    omit-all/override-one/override-all/empty-list-default probes.
+2i. **Trailing-wildcard + record-pattern regroup SHIPPED (walls 216 → 213,
+   −3, zero newly-walled)**: `group_option_result_arms` now (a) admits a
+   TRAILING `_` catch-all (`_ => assert(false)` — the codec-roundtrip class):
+   its body duplicates into each multi-arm bucket's inner fallback AND stays
+   the outer last arm (an `ok(<unmatched ctor>)` falls through the INNER
+   match, an `err(_)` through the OUTER; duplication is count-safe — both
+   sides read this tree); (b) admits nested `RecordPattern` columns
+   (`ok(Tag { name, c })`) with all-plain field patterns. RESIDUAL (recorded):
+   the codec-roundtrip family itself still walls one level deeper —
+   `try_lower_result_match` does not yet bind a heap-Ok USER-VARIANT payload
+   (`Result[Shape, String]`'s `ok($q) => match $q { <variant arms> }`; the
+   payload var needs the custom-variant seed) — the next design piece for
+   the untracked-subject bucket (~7 codec fns).
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):
