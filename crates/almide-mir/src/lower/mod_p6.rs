@@ -3279,8 +3279,22 @@ fn group_option_result_arms(
         plain_col(p)
             || matches!(p, IrPattern::Constructor { args, .. }
                 if args.iter().all(plain_col))
+            // A nested BUILTIN wrapper (`some(some(n))`, `some(ok(v))`, `some(none)` — the
+            // match_exhaustive nested-Option/Result class): the inner match over the bound
+            // payload re-dispatches on the wrapper's own len/cap tag, which the ordinary
+            // Option/Result machinery lowers once the payload bind is seeded.
+            || matches!(p, IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
+                if plain_col(inner))
+            || matches!(p, IrPattern::None)
     };
-    let is_nested_ctor = |p: &IrPattern| matches!(p, IrPattern::Constructor { .. });
+    let is_nested_ctor = |p: &IrPattern| {
+        matches!(p,
+            IrPattern::Constructor { .. }
+                | IrPattern::Some { .. }
+                | IrPattern::None
+                | IrPattern::Ok { .. }
+                | IrPattern::Err { .. })
+    };
     // `(key, field_patterns)` for one arm — `None` (bail) for a top-level catch-all/binder, a
     // record-variant, or a nested column. Field arity: 0 (nullary), 1 (Some/Ok/Err/single-field), or
     // N (a multi-field user ctor `KV(String, Int)` → grouped via a TUPLE payload sub-match).

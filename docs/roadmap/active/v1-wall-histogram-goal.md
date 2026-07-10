@@ -261,6 +261,16 @@ scale design pieces, NOT linkage gaps:
    and move THAT into the wrapper — the borrow-then-Dup discipline the
    spread-record copy proves; all four Var piece arms in binds_p4 gained the
    sibling case. Parity + PCC ownership ACCEPT.
+2e. **Nested-BUILTIN pattern regroup SHIPPED (walls 244 → 238, −6, zero
+   newly-walled)**: `group_option_result_arms`' column classifiers admitted
+   nested `IrPattern::Constructor` (user ctors) but NOT the nested BUILTIN
+   wrappers — `some(some(n))` / `some(ok(v))` / `ok(none)` (the
+   match_exhaustive nested-Option/Result class) failed `scalar_col` and the
+   whole regroup bailed. `scalar_col`/`is_nested_ctor` now admit
+   Some/None/Ok/Err with plain inners; the regrouped inner match over the
+   seeded payload bind lowers through the ordinary Option/Result machinery.
+   Parity on Option[Option[Int]] / Option[Result[Int,String]] /
+   Result[Option[Int],String] probes; full ladder green.
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):
