@@ -720,6 +720,27 @@ fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr
         {
             if aggregate_part_expandable(expr, registry) {
                 display_aggregate(expr, &expr.ty, registry)
+            } else if let Ty::Named(name, _) = &expr.ty {
+                // A NAMED record outside the inline-expand subset (a recursive record, a
+                // List[record] field — the compound_repr class): route to the GENERATED
+                // `__repr_rec_<R>` (render-pipeline-injected). A record the generator does
+                // not emit leaves the call unlinked — the same honest render wall the
+                // `compound.to_string` wrapper gives, with the SAME call-count (one node).
+                Some(IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Named {
+                            name: sym(&format!(
+                                "__repr_rec_{}",
+                                crate::lower::drop_fn_ident(name.as_str())
+                            )),
+                        },
+                        args: vec![expr.clone()],
+                        type_args: Vec::new(),
+                    },
+                    ty: Ty::String,
+                    span: None,
+                    def_id: None,
+                })
             } else {
                 Some(to_string_call("compound", "to_string", expr.clone()))
             }

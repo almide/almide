@@ -869,7 +869,10 @@ pub fn generate_variant_repr_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
             break;
         }
     }
-    if emittable.is_empty() {
+    // Records also emit through this generator (the section below) — only bail when
+    // NEITHER kind has an emittable member.
+    let any_record = type_decls.iter().any(|d| matches!(&d.kind, IrTypeDeclKind::Record { .. }));
+    if emittable.is_empty() && !any_record {
         return String::new();
     }
     // The shared QUOTE helper (v0's escape set: \" \\ \n \r \t).
@@ -985,6 +988,170 @@ pub fn generate_variant_repr_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
             out.push_str(&format!("    {concat}\n  }}\n"));
         }
         out.push_str("  else \"\"\n}\n");
+    }
+    // ── NAMED-RECORD reprs (`__repr_rec_<R>` + the `__repr_list_rec_<R>` element loop) ──
+    // The record sibling: `Node {{ val: 1, kids: [Node {{ … }}] }}` (v0's brace Display,
+    // declared field order). The record fixpoint admits Int/Bool/String fields, an emittable
+    // nested variant/record, and `List[<emittable record>]` (the recursion that makes the
+    // compound_repr recursive/mutually-recursive shapes renderable). Fields at slot_offset(i)
+    // (records carry NO tag). Anonymous records stay unhandled (compound.to_string wall).
+    let record_decls: Vec<(&str, Vec<(String, Ty)>)> = type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            IrTypeDeclKind::Record { fields } => Some((
+                d.name.as_str(),
+                fields
+                    .iter()
+                    .map(|f| (f.name.as_str().to_string(), f.ty.clone()))
+                    .collect(),
+            )),
+            _ => None,
+        })
+        .collect();
+    let rec_names: std::collections::HashSet<String> =
+        record_decls.iter().map(|(n, _)| n.to_string()).collect();
+    let record_field_of = |ty: &Ty| -> Option<String> {
+        match ty {
+            Ty::Named(n, _) if rec_names.contains(n.as_str()) => Some(n.as_str().to_string()),
+            _ => None,
+        }
+    };
+    let list_record_field_of = |ty: &Ty| -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        match ty {
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+                match &a[0] {
+                    Ty::Named(n, _) if rec_names.contains(n.as_str()) => {
+                        Some(n.as_str().to_string())
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    };
+    let mut rec_emittable: std::collections::HashSet<String> = rec_names.clone();
+    loop {
+        let mut removed = false;
+        for (tname, fields) in &record_decls {
+            if !rec_emittable.contains(*tname) {
+                continue;
+            }
+            let ok = fields.iter().all(|(_, ty)| {
+                matches!(ty, Ty::Int | Ty::Bool | Ty::String)
+                    || variant_field_name(ty, &names)
+                        .map(|fv| emittable.contains(&fv))
+                        .unwrap_or(false)
+                    || record_field_of(ty).map(|r| rec_emittable.contains(&r)).unwrap_or(false)
+                    || list_record_field_of(ty)
+                        .map(|r| rec_emittable.contains(&r))
+                        .unwrap_or(false)
+            });
+            if !ok {
+                rec_emittable.remove(*tname);
+                removed = true;
+            }
+        }
+        if !removed {
+            break;
+        }
+    }
+    let mut rec_sorted: Vec<&(&str, Vec<(String, Ty)>)> = record_decls
+        .iter()
+        .filter(|(n, _)| rec_emittable.contains(*n))
+        .collect();
+    rec_sorted.sort_by_key(|(n, _)| *n);
+    // Which emittable records need the LIST loop (referenced as a List[R] field anywhere)?
+    let mut need_list: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for (n, fields) in &record_decls {
+        if !rec_emittable.contains(*n) {
+            continue;
+        }
+        for (_, ty) in fields {
+            if let Some(r) = list_record_field_of(ty) {
+                if rec_emittable.contains(&r) {
+                    need_list.insert(r);
+                }
+            }
+        }
+    }
+    for (tname, fields) in rec_sorted.iter() {
+        let fname = drop_fn_ident(tname);
+        out.push_str(&format!("fn __repr_rec_{fname}(e: {tname}) -> String = {{
+"));
+        out.push_str("  let h = prim.handle(e)
+");
+        let mut concat = format!("\"{tname} {{ \"");
+        for (i, (fld, ty)) in fields.iter().enumerate() {
+            let off = layout::slot_offset(i);
+            if i > 0 {
+                concat.push_str(" + \", \"");
+            }
+            concat.push_str(&format!(" + \"{fld}: \""));
+            match ty {
+                Ty::Int => out.push_str(&format!(
+                    "  let f{i} = int.to_string(prim.load64(h + {off}))
+"
+                )),
+                Ty::Bool => out.push_str(&format!(
+                    "  let f{i} = if prim.load64(h + {off}) == 1 then \"true\" else \"false\"
+"
+                )),
+                Ty::String => out.push_str(&format!(
+                    "  let f{i} = __repr_quote(prim.load_str(h + {off}))
+"
+                )),
+                _ => {
+                    if let Some(fv) = variant_field_name(ty, &names) {
+                        let fv_fn = drop_fn_ident(&fv);
+                        out.push_str(&format!(
+                            "  let v{i}: {fv} = prim.load_handle(h + {off})
+  let f{i} = __repr_{fv_fn}(v{i})
+"
+                        ));
+                    } else if let Some(r) = record_field_of(ty) {
+                        let r_fn = drop_fn_ident(&r);
+                        out.push_str(&format!(
+                            "  let v{i}: {r} = prim.load_handle(h + {off})
+  let f{i} = __repr_rec_{r_fn}(v{i})
+"
+                        ));
+                    } else {
+                        let r = list_record_field_of(ty).expect("fixpoint-admitted");
+                        let r_fn = drop_fn_ident(&r);
+                        out.push_str(&format!(
+                            "  let v{i}: List[{r}] = prim.load_handle(h + {off})
+  let f{i} = __repr_list_rec_{r_fn}(v{i})
+"
+                        ));
+                    }
+                }
+            }
+            concat.push_str(&format!(" + f{i}"));
+        }
+        concat.push_str(" + \" }\"");
+        out.push_str(&format!("  {concat}
+}}
+"));
+    }
+    for r in &need_list {
+        let r_fn = drop_fn_ident(r);
+        out.push_str(&format!(
+            "fn __repr_list_rec_{r_fn}_go(h: Int, n: Int, i: Int, acc: String) -> String =
+                 if i >= n then acc + \"]\"
+                 else {{
+                     let v: {r} = prim.load_handle(h + 12 + i * 8)
+                     let s = __repr_rec_{r_fn}(v)
+                     let acc2 = if i == 0 then acc + s else acc + \", \" + s
+                     __repr_list_rec_{r_fn}_go(h, n, i + 1, acc2)
+  }}
+             fn __repr_list_rec_{r_fn}(xs: List[{r}]) -> String = {{
+                 let h = prim.handle(xs)
+                 let n = prim.load32(h + 4)
+                 __repr_list_rec_{r_fn}_go(h, n, 0, \"[\")
+}}
+"
+        ));
     }
     out
 }

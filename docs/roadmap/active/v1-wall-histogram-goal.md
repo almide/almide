@@ -378,7 +378,18 @@ scale design pieces, NOT linkage gaps:
    generator now carries field names per case and emits the brace form
    (name-prefixed fields, ` }` closer). vr/vr2/vr3/vr4 probes v0-identical.
 
-**NEXT PIECES DIAGNOSED (at 198→188, 2026-07-11):**
+2p. **Named-record reprs SHIPPED (walls 188 → 185, −3, zero newly-walled)**:
+   the generator emits `__repr_rec_<R>` for the record fixpoint (fields Int/
+   Bool/String/emittable-variant/emittable-record/`List[<emittable record>]`
+   — the recursion that renders `Node { val: 1, kids: [Node { … }] }` and
+   the mutually-recursive A/B shapes) plus the `__repr_list_rec_<R>` element
+   loop; `interp_part_leaf`'s non-expandable NAMED-record branch routes to
+   it (an unemitted record leaves the call unlinked = the same honest wall,
+   same single call node). ANONYMOUS records stay walled (the sorted-field
+   hash-name variant is the residual sub-piece). The early `emittable
+   variants empty → bail` now also considers records.
+
+**NEXT PIECES DIAGNOSED (at 198→188→185, 2026-07-11):**
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines
