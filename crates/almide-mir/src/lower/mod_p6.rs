@@ -1474,6 +1474,13 @@ fn desugar_match_subject_hoist(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             // (its auto-`!` desugars to exactly this match).
             IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. }
                 if module.as_str() == "fan" && func.as_str() == "map"
+        ) || matches!(
+            &subject.kind,
+            // `regex.find(...)` (a self-host Option[String] call) as a match subject —
+            // hoist so the bind seeds its materialized-Option read-shape, then
+            // `match $t { some/none }` lowers (the regex-corpus match shape).
+            IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. }
+                if module.as_str() == "regex" && func.as_str() == "find"
         );
         if (has_literal_arm
             && !is_pure_match_subject(subject)
