@@ -1028,11 +1028,15 @@ fn main() {
             globals.insert(tl.var, tl.ty.clone());
             global_inits.insert(tl.var, tl.value.clone());
         }
-        for m in &ir.modules {
-            for tl in &m.top_lets {
-                globals.insert(tl.var, tl.ty.clone());
-                global_inits.insert(tl.var, tl.value.clone());
-            }
+        // MAIN-REGION precedence (this loop lowers the MAIN program's fns only): the raw
+        // module union above stays as the FALLBACK (a shared-allocator id matches it — the
+        // init_order shapes), the cross-module NAME bridge OVERRIDES a colliding module-raw
+        // key (the byvalue shapes), and main's own top-lets (re-inserted last) win where the
+        // name bridge would misfire — composition order: module union → bridge → main.
+        almide_mir::lower::bridge_cross_module_toplets(&ir, &mut globals, &mut global_inits);
+        for tl in &ir.top_lets {
+            globals.insert(tl.var, tl.ty.clone());
+            global_inits.insert(tl.var, tl.value.clone());
         }
         // The functions DEFINED in this file (their names). A PROTOCOL METHOD is a
         // user-defined function whose name is dotted (`Type.method`, e.g. `MathExpr.eval`)
@@ -1055,6 +1059,7 @@ fn main() {
             let m_vl = almide_mir::lower::build_variant_layouts(&m.type_decls);
             variant_layouts.by_type.extend(m_vl.by_type);
             variant_layouts.ctor_to_type.extend(m_vl.ctor_to_type);
+            variant_layouts.ctor_field_defaults.extend(m_vl.ctor_field_defaults);
         }
         // PROGRAM pre-pass: inline mutual-recursive tail siblings → direct self-recursion (exposed to
         // the append-accumulator TCO). Guarded: only where it makes a walled fn lower (no regression).

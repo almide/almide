@@ -256,6 +256,19 @@ pub fn try_render_wasm_source(
             global_inits.insert(tl.var, tl.value.clone());
         }
     }
+    // PER-REGION globals: the shared union above keys BOTH the main program's and each
+    // module's top-let VarIds — two PRIVATE numbering regions that can COLLIDE (main-side
+    // VarId(2) vs a module's VarId(2) are unrelated). MAIN functions must resolve through
+    // main's own entries first (re-inserted last, winning collisions) plus the cross-module
+    // NAME bridge (`toplib.SYSTEM` referenced through a main-side id); MODULE functions keep
+    // the module-entries-win union (their region, as today).
+    let mut main_globals = globals.clone();
+    let mut main_global_inits = global_inits.clone();
+    crate::lower::bridge_cross_module_toplets(&ir, &mut main_globals, &mut main_global_inits);
+    for tl in &ir.top_lets {
+        main_globals.insert(tl.var, tl.ty.clone());
+        main_global_inits.insert(tl.var, tl.value.clone());
+    }
 
     // Record-layout registry (type name → fields) for the VALUE MODEL.
     let mut record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
@@ -285,6 +298,7 @@ pub fn try_render_wasm_source(
         let m_vl = crate::lower::build_variant_layouts(&m.type_decls);
         variant_layouts.by_type.extend(m_vl.by_type);
         variant_layouts.ctor_to_type.extend(m_vl.ctor_to_type);
+        variant_layouts.ctor_field_defaults.extend(m_vl.ctor_field_defaults);
     }
     {
         let mut owners: std::collections::HashMap<String, Vec<String>> = Default::default();
@@ -303,7 +317,7 @@ pub fn try_render_wasm_source(
 
     // PROGRAM pre-pass: inline mutual-recursive tail siblings (semantics-preserving TCO exposure).
     let inlined_fns =
-        crate::lower::inline_mutual_tail_recursion(&ir.functions, &globals, &record_layouts);
+        crate::lower::inline_mutual_tail_recursion(&ir.functions, &main_globals, &record_layouts);
 
     let mut functions = Vec::new();
     let mut walled = Vec::new();
@@ -315,8 +329,8 @@ pub fn try_render_wasm_source(
         }
         match crate::lower::lower_function_all_with_globals(
             func,
-            &globals,
-            &global_inits,
+            &main_globals,
+            &main_global_inits,
             &record_layouts,
             &variant_layouts,
         ) {

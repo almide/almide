@@ -352,6 +352,7 @@
                 globals.insert(tl.var, tl.ty.clone());
             }
         }
+        // (single-file test helper: no cross-module bridge needed — no sibling modules)
         let mut record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
         for m in &ir.modules {
             record_layouts.extend(crate::lower::build_record_layouts(&m.type_decls));

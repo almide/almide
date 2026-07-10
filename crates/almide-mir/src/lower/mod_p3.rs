@@ -760,6 +760,20 @@ impl LowerCtx {
             // The fresh owned copy is dropped at scope end like any literal (cert: one `i` + one `d`);
             // `value_of[var]` caches it so repeated references in the SAME function reuse the one copy.
             if let Some(init) = self.global_inits.get(&var) {
+                // A global whose init is ANOTHER global (`let DIRECT = letlib.GREETING` —
+                // the #632 alias-let): recurse through value_or_global on the SOURCE id (a
+                // fresh owned copy of ITS const init, cached + dropped at scope end); this
+                // reference aliases the same local copy (reads only — no second owner).
+                // Zero calls injected (the source resolves through the same const-only
+                // machinery), so the count gate stays exact.
+                if let IrExprKind::Var { id: src } = &init.kind {
+                    let src = *src;
+                    if self.globals.contains_key(&src) {
+                        let v = self.value_or_global(src)?;
+                        self.value_of.insert(var, v);
+                        return Ok(v);
+                    }
+                }
                 if let Some(const_init) = const_global_init(init) {
                     let repr = repr_of(&ty)?;
                     let dst = self.fresh_value();

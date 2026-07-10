@@ -426,6 +426,45 @@ pub fn expr_contains_call(e: &almide_ir::IrExpr) -> bool {
     c.0
 }
 
+/// CROSS-MODULE top-let NAME BRIDGE: the main program references `toplib.SYSTEM` through a
+/// MAIN-side VarId (per-module VarId regions — no IR-level flatten), while the globals union
+/// keys the MODULE-side id — so the reference was "unbound" (or COLLIDED with an unrelated
+/// module id, resolving to the wrong init). Alias every main-side var-table id whose NAME +
+/// TYPE match a module top-let's onto that top-let's (ty, init). By-NAME, so an AMBIGUOUS
+/// name (a top-let in two modules) is skipped — those references stay walled; a same-named
+/// function LOCAL is harmless (locals resolve through `value_of` first — the globals map is
+/// only consulted for otherwise-unbound ids). Registration only: the reference site still
+/// materializes through the CONST-init machinery (count-exact, unchanged certs).
+pub fn bridge_cross_module_toplets(
+    ir: &almide_ir::IrProgram,
+    globals: &mut std::collections::HashMap<almide_ir::VarId, Ty>,
+    global_inits: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+) {
+    use std::collections::HashMap;
+    let mut by_name: HashMap<&str, Option<(Ty, &almide_ir::IrExpr)>> = HashMap::new();
+    for m in &ir.modules {
+        for tl in &m.top_lets {
+            let Some(info) = m.var_table.entries.get(tl.var.0 as usize) else { continue };
+            by_name
+                .entry(info.name.as_str())
+                .and_modify(|e| *e = Option::None) // second definition ⇒ ambiguous, drop
+                .or_insert(Some((tl.ty.clone(), &tl.value)));
+        }
+    }
+    // OVERRIDES an existing (module-raw, possibly colliding) entry — callers order the
+    // composition as: module union → this bridge → main top-lets re-inserted last, so the
+    // precedence is main > bridged-name > raw module id.
+    for (i, info) in ir.var_table.entries.iter().enumerate() {
+        let id = almide_ir::VarId(i as u32);
+        if let Some(Some((ty, init))) = by_name.get(info.name.as_str()) {
+            if *ty == info.ty {
+                globals.insert(id, ty.clone());
+                global_inits.insert(id, (*init).clone());
+            }
+        }
+    }
+}
+
 pub fn build_variant_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> VariantLayouts {
     use almide_ir::{IrTypeDeclKind, IrVariantKind};
     let mut out = VariantLayouts::default();

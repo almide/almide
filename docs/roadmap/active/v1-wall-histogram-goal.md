@@ -333,6 +333,21 @@ scale design pieces, NOT linkage gaps:
    heap-result-arm position in control_p4) admit a PURE Module call yielding
    a String payload (`some(string.slice(s, 4, n))` — the parse_tag tail-if
    family) via lower_pure_module_value_call, moved into the Some slot.
+2l. **Cross-module top-let bridge SHIPPED (walls 205 → 204 net; +3 opened /
+   2 honest)**: main-program references to a sibling module's top-let
+   (`toplib.SYSTEM`) carry MAIN-side VarIds while the globals union keyed
+   MODULE-side ids — unrelated regions that COLLIDE (main VarId(2) resolved
+   an unrelated module entry's init) or miss (unbound). New
+   `bridge_cross_module_toplets` aliases main-side var-table ids by NAME +
+   TYPE onto the module top-let's (ty, init), skipping ambiguous names;
+   composition order = module union (fallback) → bridge (overrides
+   collisions) → main's own top-lets (win). A global whose init is ANOTHER
+   global (`let DIRECT = letlib.GREETING`, #632) recurses through
+   value_or_global. The 2 newly-walled init_order shapes (`letlib.welcome()`
+   / `list.len(...)` call-inits) previously "lowered" by resolving the WRONG
+   colliding global — silent latent miscompiles, now honest walls. Module
+   variant-layout defaults also union (`ctor_field_defaults.extend` was
+   missing in both pipeline and classify).
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):
