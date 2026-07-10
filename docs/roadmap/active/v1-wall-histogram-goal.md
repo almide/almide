@@ -151,13 +151,24 @@ scale design pieces, NOT linkage gaps:
    now admits nested user-ctor columns (`err(Overflow(msg))` regroups to
    `err($q) => match $q { Overflow(msg) => … }`), walls 296 → 292. The
    REMAINING half is the CONSTRUCTION side: `err(<variant ctor>)` for
-   `Result[T, <user variant>]` — the Err-side sibling of
-   `try_lower_result_variant_ctor`, **blocked on a LAYOUT-CONSISTENCY design
-   decision**: `ok(5)` of `Result[Int, MathError]` materializes len-as-tag
-   while an err-variant block wants cap-as-tag@16 — the reader (seeding),
-   both ctor forms, and the drop must agree on ONE canonical layout (the same
-   trap as the recorded "Result[Int,Int] err→ok misread" gap). Design it
-   deliberately; adversarial probes on ok/err both-paths before shipping.
+   `Result[T_scalar, <user variant>]`. **LAYOUT RESOLVED (seed_variant_param
+   audit)**: the reader seeds Result[scalar, heap] as **LEN-AS-TAG**
+   (`materialized_results` + `heap_elem_lists`; Err = len 1 + payload HANDLE
+   at slot 0, bound BORROWED by the err arm — existing machinery), so the
+   err-variant ctor must materialize exactly that: build the variant block
+   (`try_lower_variant_ctor`), store its handle at slot 0, len = 1 (the
+   `materialize_result_str(value_ok=false)`-family len-as-tag builder), and
+   DETACH the variant's own scope-end drop (moved into the Result). The ONE
+   NEW piece is the DROP of a RICH-variant Err payload: the seed's flat
+   `DropListStr` rc_decs slot 0 only — leaking the variant's own heap fields
+   (`Overflow(String)`) — so a rich payload needs a len-as-tag wrapper
+   recursion (a `reserr:<V>` sibling of `optrec:`/`resrec:` in
+   `variant_drop_handles` whose render recurses into slot 0 via
+   `$__drop_<V>` when len == 1); a FLAT variant payload (`DivZero`) is exact
+   under the existing flat drop. Adversarial probes required on: ok-path
+   scalar read, err-path rich/flat payloads, the leak loop, and the
+   `Result[Int,Int]` both-scalar sibling (recorded misread gap — do NOT
+   regress it).
 2. **Interp repr coverage** (the interp-in-call-arg 30 bucket +
    compound_repr_interp's 15): heterogeneous tuples, nested list-of-maps,
    Set/Map variants — the `interp_to_string_call` self-host family's known
