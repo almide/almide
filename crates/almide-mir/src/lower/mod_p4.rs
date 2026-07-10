@@ -718,7 +718,29 @@ fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr
             if matches!(expr.ty, Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..))
                 && resolve_aggregate(&expr.ty, registry).is_some() =>
         {
-            if aggregate_part_expandable(expr, registry) {
+            // An ANONYMOUS record ALWAYS takes the generated sorted-field repr: v0 sorts
+            // anon fields by name, while the inline display_aggregate expansion reads the
+            // STRUCTURAL (source) order — expanding it would emit wrong bytes.
+            if let Ty::Record { fields } = &expr.ty {
+                // An ANONYMOUS record part — route to the generated
+                // `__repr_anonrec_<hash>` (sorted-field render); an unemitted shape
+                // (a nested payload) leaves the call unlinked = the honest wall.
+                Some(IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Named {
+                            name: sym(&format!(
+                                "__repr_{}",
+                                crate::lower::anon_record_drop_name(fields)
+                            )),
+                        },
+                        args: vec![expr.clone()],
+                        type_args: Vec::new(),
+                    },
+                    ty: Ty::String,
+                    span: None,
+                    def_id: None,
+                })
+            } else if aggregate_part_expandable(expr, registry) {
                 display_aggregate(expr, &expr.ty, registry)
             } else if let Ty::Named(name, _) = &expr.ty {
                 // A NAMED record outside the inline-expand subset (a recursive record, a
@@ -917,14 +939,26 @@ pub fn interp_synthetic_call_names(parts: &[IrStringPart], registry: &RecordLayo
             if matches!(expr.ty, Ty::String) {
                 continue; // a String part is a no-call passthrough
             }
-            // A TOP-LEVEL record/tuple part mirrors `interp_part_leaf`'s expand-vs-wrap: an
-            // EXPAND-foldable part (a materialized Var with displayable fields) credits the full
-            // recursive tree; a NON-expandable one credits ONE `compound.to_string` (the wall).
+            // A TOP-LEVEL record/tuple part mirrors `interp_part_leaf`'s decision tree
+            // EXACTLY (the mir == ir contract): an ANON record is ALWAYS one generated
+            // `__repr_anonrec_<hash>` call; an expand-foldable named/tuple part credits the
+            // full recursive tree; a non-expandable NAMED record one `__repr_rec_<R>`; any
+            // other non-expandable aggregate one `compound.to_string` (the wall).
             if matches!(expr.ty, Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..))
                 && resolve_aggregate(&expr.ty, registry).is_some()
             {
-                if aggregate_part_expandable(expr, registry) {
+                if let Ty::Record { fields } = &expr.ty {
+                    names.push(format!(
+                        "__repr_{}",
+                        crate::lower::anon_record_drop_name(fields)
+                    ));
+                } else if aggregate_part_expandable(expr, registry) {
                     aggregate_synthetic_names(&expr.ty, registry, &mut names);
+                } else if let Ty::Named(name, _) = &expr.ty {
+                    names.push(format!(
+                        "__repr_rec_{}",
+                        crate::lower::drop_fn_ident(name.as_str())
+                    ));
                 } else {
                     names.push("compound.to_string".to_string());
                 }

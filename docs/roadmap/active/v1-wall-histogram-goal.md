@@ -389,7 +389,21 @@ scale design pieces, NOT linkage gaps:
    hash-name variant is the residual sub-piece). The early `emittable
    variants empty → bail` now also considers records.
 
-**NEXT PIECES DIAGNOSED (at 198→188→185, 2026-07-11):**
+2q. **Anonymous-record reprs SHIPPED (walls 185 → 182, −3, zero
+   newly-walled)**: `collect_interp_anon_records` scans interp parts for
+   structural `Ty::Record` shapes; the generator emits `__repr_anonrec_<hash>`
+   per shape (scalar/String fields) reading slots at SOURCE index while
+   concatenating in SORTED-name order (v0 sorts anon fields; the v1 block
+   lays them in source order). `interp_part_leaf` routes anon records to it
+   UNCONDITIONALLY — the inline display_aggregate expansion reads structural
+   order and would emit WRONG bytes for an unsorted literal. The
+   `interp_synthetic_call_names` mirror was updated to the NEW leaf decision
+   tree (anon → 1 repr call; non-expandable Named → `__repr_rec_<R>`) — the
+   corpus mir>ir gate caught the drift on first run (3 fns), fixed same
+   stage. Oracle: `{ zebra: 1, apple: 2, mango: 3 }` → `{ apple: 2, mango:
+   3, zebra: 1 }` v0-identical.
+
+**NEXT PIECES DIAGNOSED (at 198→188→185→182, 2026-07-11):**
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines

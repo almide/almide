@@ -827,7 +827,50 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
 /// using function keeps the same honest render wall it had. Like every generated
 /// routine: trusted prim-only, injected on the render path, outside the witness
 /// surface.
-pub fn generate_variant_repr_sources(type_decls: &[almide_ir::IrTypeDecl]) -> String {
+/// Collect every ANONYMOUS-record shape that appears as a STRING-INTERP part anywhere in
+/// the program (`"${ { ax: 1, ay: 2 } }"` / a structurally-typed bound var) — the shapes
+/// [`generate_variant_repr_sources`] emits `__repr_anonrec_<hash>` for. Order-sensitive
+/// (the hash keys the SOURCE field order — the block layout); dedup'd by hash.
+pub fn collect_interp_anon_records(
+    program: &almide_ir::IrProgram,
+) -> Vec<Vec<(almide_lang::intern::Sym, Ty)>> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct C {
+        out: Vec<Vec<(almide_lang::intern::Sym, Ty)>>,
+        seen: std::collections::HashSet<String>,
+    }
+    impl IrVisitor for C {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if let almide_ir::IrExprKind::StringInterp { parts } = &e.kind {
+                for p in parts {
+                    if let almide_ir::IrStringPart::Expr { expr } = p {
+                        if let Ty::Record { fields } = &expr.ty {
+                            let key = anon_record_drop_name(fields);
+                            if self.seen.insert(key) {
+                                self.out.push(fields.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut c = C { out: Vec::new(), seen: std::collections::HashSet::new() };
+    let funcs = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in funcs {
+        almide_ir::visit::IrVisitor::visit_expr(&mut c, &f.body);
+    }
+    c.out
+}
+
+pub fn generate_variant_repr_sources(
+    type_decls: &[almide_ir::IrTypeDecl],
+    interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
+) -> String {
     use almide_ir::{IrTypeDeclKind, IrVariantKind};
     let names = variant_type_names(type_decls);
     // Fixpoint: which variants are repr-EMITTABLE (every ctor field Int/Bool/String
@@ -872,7 +915,7 @@ pub fn generate_variant_repr_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
     // Records also emit through this generator (the section below) — only bail when
     // NEITHER kind has an emittable member.
     let any_record = type_decls.iter().any(|d| matches!(&d.kind, IrTypeDeclKind::Record { .. }));
-    if emittable.is_empty() && !any_record {
+    if emittable.is_empty() && !any_record && interp_anon_recs.is_empty() {
         return String::new();
     }
     // The shared QUOTE helper (v0's escape set: \" \\ \n \r \t).
@@ -1153,6 +1196,52 @@ pub fn generate_variant_repr_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
 "
         ));
     }
+    // ── ANONYMOUS-record reprs (`__repr_anonrec_<hash>`) ──
+    // v0 renders an anon record `{ apple: 2, mango: 3, zebra: 1 }` with fields SORTED BY
+    // NAME while the v1 BLOCK lays fields in SOURCE order — so each generated body reads
+    // slots at the SOURCE index but concatenates in sorted-name order. No type-name prefix.
+    // Scalar/String fields only (a nested payload keeps the compound.to_string wall).
+    let mut anon_sorted: Vec<&Vec<(almide_lang::intern::Sym, Ty)>> =
+        interp_anon_recs.iter().collect();
+    anon_sorted.sort_by_key(|f| anon_record_drop_name(f));
+    anon_sorted.dedup_by_key(|f| anon_record_drop_name(f));
+    for fields in anon_sorted {
+        if fields.is_empty()
+            || !fields.iter().all(|(_, ty)| matches!(ty, Ty::Int | Ty::Bool | Ty::String))
+        {
+            continue;
+        }
+        let name = anon_record_drop_name(fields);
+        let param_ty = anon_record_source_ty(fields);
+        out.push_str(&format!("fn __repr_{name}(e: {param_ty}) -> String = {{\n"));
+        out.push_str("  let h = prim.handle(e)\n");
+        for (i, (_, ty)) in fields.iter().enumerate() {
+            let off = layout::slot_offset(i);
+            match ty {
+                Ty::Int => out.push_str(&format!(
+                    "  let f{i} = int.to_string(prim.load64(h + {off}))\n"
+                )),
+                Ty::Bool => out.push_str(&format!(
+                    "  let f{i} = if prim.load64(h + {off}) == 1 then \"true\" else \"false\"\n"
+                )),
+                _ => out.push_str(&format!(
+                    "  let f{i} = __repr_quote(prim.load_str(h + {off}))\n"
+                )),
+            }
+        }
+        let mut order: Vec<usize> = (0..fields.len()).collect();
+        order.sort_by_key(|&i| fields[i].0.as_str());
+        let mut concat = String::from("\"{ \"");
+        for (k, &i) in order.iter().enumerate() {
+            if k > 0 {
+                concat.push_str(" + \", \"");
+            }
+            concat.push_str(&format!(" + \"{}: \" + f{i}", fields[i].0.as_str()));
+        }
+        concat.push_str(" + \" }\"");
+        out.push_str(&format!("  {concat}\n}}\n"));
+    }
+
     out
 }
 

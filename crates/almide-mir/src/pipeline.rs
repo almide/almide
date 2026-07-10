@@ -225,7 +225,7 @@ pub fn try_render_wasm_source(
         "{}{}{}{}{}",
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
-        crate::lower::generate_variant_repr_sources(&all_type_decls),
+        crate::lower::generate_variant_repr_sources(&all_type_decls, &crate::lower::collect_interp_anon_records(&ir)),
         closure_drop,
         lenlist_drop,
     );
