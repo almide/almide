@@ -180,9 +180,16 @@ scale design pieces, NOT linkage gaps:
    `Result[Int,Int]` both-scalar sibling (recorded misread gap — do NOT
    regress it).
 2. **Interp repr coverage** (the interp-in-call-arg 30 bucket +
-   compound_repr_interp's 15): heterogeneous tuples, nested list-of-maps,
-   Set/Map variants — the `interp_to_string_call` self-host family's known
-   tail (the memory's "nested interp 残" list). Small each, numerous.
+   compound_repr_interp's 15). **PARTIAL (32232105)**: literal record/tuple
+   parts now HOIST to statement-level binds
+   (`desugar_interp_literal_aggregate_hoist` — a Block in call-arg walls, so
+   the binds prepend to the enclosing statement), opening the heterogeneous-
+   tuple class; walls 293 → 290. REMAINING sub-family (diagnosed): VARIANT
+   reprs (`${Overflow("x")}` — tuple/record-payload/nullary/recursive/generic)
+   and recursive/anonymous-record reprs — needs **GENERATED repr sources**
+   symmetric to the generated drops (`generate_variant_repr_sources` emitting
+   per-ADT `__repr_<V>` Almide fns, v0's compound Display as the byte oracle),
+   plus nested list-of-maps and the annotated empty map.
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):
