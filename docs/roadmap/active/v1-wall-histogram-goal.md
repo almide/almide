@@ -112,6 +112,27 @@ zero trusted runtime growth), linked by registry name with typed routing.
 - Check how v0 wasm exposes regex (per-call WAT emit? a compiled NFA?) — for
   UNDERSTANDING only (invariant 2).
 
+**STAGES 1+2 SHIPPED (2026-07-10, bcc02de4)**: `stdlib/regex_engine.almd` — the
+full byte-address/char-decode backtracking engine (UTF-8 on the fly, v0
+quirk-for-quirk: first-win alternation, atomic group boundary, zero-width rep
+guard, anchor-quantifier-ignored, in-class escape expansions) + SEVEN APIs
+linked: is_match, full_match, find, find_all, replace, replace_first, split.
+Parity probes v0-identical on 40 oracle cases (incl. `-a-b-`/`--`/`-本-a-`
+zero-width replaces, empty-field splits, `(a|ab)c`→F group quirk, `[あ-ん]+`).
+mir 583, spec 283/283, gate 36 rows, corpus PCC+kernel ACCEPT.
+**Histogram insight**: the corpus walls are MULTI-BLOCKER — opening
+find/replace moved their functions to the NEXT blocker (captures 49 remains,
+plus match-over-untracked-subject for `match regex.find(...)` shapes — the
+fan.map-style subject hoist + seed for self-host Option-returning fns is the
+unlock), so walled-real stays 296 until the LAST blocker per function falls.
+REMAINING: (a) regex.captures — needs the capture-threading matcher variant
+(v0 clones caps at every alt/rep choice point; port as a parallel `_c` matcher
+family writing into an owned Int-list buffer with copy-save/restore); (b) the
+match-subject hoist wiring for regex.find/captures (mirror
+`is_self_host_result_str_module_fn` + `desugar_match_subject_hoist`'s fan.map
+entries — but for Option[String]/Option[List[String]] subjects); then the
+json/bytes tail below.
+
 **1 — the engine core (`stdlib/regex_engine.almd` or split files).**
 A backtracking matcher over the scouted feature set: `__re_match_at(pattern,
 text, pos) -> Int` (match end or −1) style helpers with public-sig entry
