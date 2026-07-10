@@ -153,7 +153,19 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
             if let Some(parent) = bin_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            if let Err(e) = std::fs::copy(&built_path, &bin_path) {
+            // Stage via copy-to-temp + ATOMIC RENAME: a direct fs::copy onto the
+            // cached path leaves a window where the file is open for writing while
+            // a PARALLEL test thread execs it — ETXTBSY ("Text file busy") on
+            // Linux, the CI examples-suite flake. The rename swaps a fully-written
+            // inode into place atomically, so an exec sees either the complete old
+            // binary or the complete new one, never a half-staged file.
+            let staged = bin_path.with_extension(format!("stage-{}", std::process::id()));
+            if let Err(e) = std::fs::copy(&built_path, &staged) {
+                return Err(format!("failed to stage built binary {} -> {}: {}",
+                    built_path.display(), staged.display(), e));
+            }
+            if let Err(e) = std::fs::rename(&staged, &bin_path) {
+                let _ = std::fs::remove_file(&staged);
                 return Err(format!("failed to stage built binary {} -> {}: {}",
                     built_path.display(), bin_path.display(), e));
             }
@@ -167,12 +179,29 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
 
 /// Run a compiled binary with the given args, returning exit code.
 pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
-    let status = Command::new(bin)
-        .env("RUST_MIN_STACK", "8388608")
-        .args(program_args)
-        .status()
-        .unwrap_or_else(|e| { eprintln!("Failed to execute: {}", e); std::process::exit(1); });
-    status.code().unwrap_or(1)
+    // Belt for the parallel-test ETXTBSY race (the staging rename above is the
+    // root fix): if another thread's stale write handle still overlaps the exec,
+    // back off briefly and retry instead of failing the whole suite.
+    let mut delay = std::time::Duration::from_millis(20);
+    for _ in 0..6 {
+        match Command::new(bin)
+            .env("RUST_MIN_STACK", "8388608")
+            .args(program_args)
+            .status()
+        {
+            Ok(status) => return status.code().unwrap_or(1),
+            Err(e) if e.raw_os_error() == Some(26) => {
+                std::thread::sleep(delay);
+                delay *= 2;
+            }
+            Err(e) => {
+                eprintln!("Failed to execute: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+    eprintln!("Failed to execute: Text file busy (persisted after retries)");
+    1
 }
 
 pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool, release: bool) -> i32 {
