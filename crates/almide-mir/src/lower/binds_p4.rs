@@ -756,6 +756,18 @@ impl LowerCtx {
                         self.live_heap_handles.retain(|h| *h != p);
                         p
                     }
+                    // `some(string.slice(s, …))` — a PURE Module call yielding a fresh owned
+                    // STRING payload (the parse_tag tail-if family): lower_owned_heap_field
+                    // routes it via lower_pure_module_value_call; MOVE it into the Some slot
+                    // (retain-remove — materialize_opt_str_some is the sole owner, its flat
+                    // heap_elem_lists drop frees the one String exactly).
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     // A `Map[String, Int]` (map_skv) Some payload (`some(["a": 1])` → `some(map.from_list
                     // (…))`) — lower the map (a Module call) and MOVE it into the Some slot. The map's own
                     // block is freed by the flat heap_elem_lists drop, exactly as a bare `let m = […]`

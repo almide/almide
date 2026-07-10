@@ -317,6 +317,19 @@ impl LowerCtx {
                         });
                         p
                     }
+                    // `some(string.slice(s, …))` — a PURE Module call yielding a fresh owned
+                    // String payload (the parse_tag tail-`if` family): the self-host call's
+                    // result moves into the Option (retain-removed — the Option is the sole
+                    // owner); its arg temps free within the arm frame below.
+                    IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self
+                            .lower_pure_module_value_call(module.as_str(), func.as_str(), args, &expr.ty)
+                            .ok()?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     _ => return None,
                 };
                 let obj = self.materialize_opt_str_some(piece, repr);

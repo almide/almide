@@ -328,6 +328,11 @@ scale design pieces, NOT linkage gaps:
    custom-variant match dispatches TYPE-driven off the borrowed @12 payload
    handle (no extra seed needed — the ok(<variant>) construction side
    already lowered). cd1/cd2/cd3 probes v0-identical.
+2k. **`some(<pure module call>)` payloads SHIPPED (walls 206 → 205)**: the
+   OptionSome heap piece matches (bind position in binds_p4 AND the
+   heap-result-arm position in control_p4) admit a PURE Module call yielding
+   a String payload (`some(string.slice(s, 4, n))` — the parse_tag tail-if
+   family) via lower_pure_module_value_call, moved into the Some slot.
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):
