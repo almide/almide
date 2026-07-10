@@ -255,7 +255,25 @@ impl LowerCtx {
                 };
                 let mut ordered = Vec::with_capacity(case_fields.len());
                 for (fname, _) in &case_fields {
-                    let e = fields.iter().find(|(n, _)| n == fname).map(|(_, e)| e.clone())?;
+                    let e = match fields.iter().find(|(n, _)| n == fname) {
+                        Some((_, e)) => e.clone(),
+                        // An OMITTED defaulted field (`Rect { width, height }` with
+                        // `color = ""`): fill the DECLARED default expr, evaluated at
+                        // construction exactly as v0 does. Gated CALL-FREE (a call-bearing
+                        // default would add a MIR call the counted IR lacks — mir>ir);
+                        // the corpus defaults are literals (`""`, `false`, `[]`).
+                        Option::None => {
+                            let d = self
+                                .variant_layouts
+                                .ctor_field_defaults
+                                .get(&ctor_s)
+                                .and_then(|m| m.get(fname.as_str()))?;
+                            if crate::lower::expr_contains_call(d) {
+                                return Option::None;
+                            }
+                            d.clone()
+                        }
+                    };
                     ordered.push(e);
                 }
                 (ctor_s, ordered)

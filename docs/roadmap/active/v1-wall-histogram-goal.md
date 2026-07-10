@@ -295,6 +295,16 @@ scale design pieces, NOT linkage gaps:
    diff showed it net-negative (the existing UnwrapOr executable subset
    handles Value/json/base64 shapes BETTER than the match form) — decline-
    point extension beats blanket rewriting.
+2h. **Defaulted variant-record fields SHIPPED (walls 231 → 216, −15, zero
+   newly-walled — the session's best single lever)**: `IrFieldDecl.default`
+   (the declared default EXPR) now rides `VariantLayouts.ctor_field_defaults`
+   (populated in `build_variant_layouts`), and `try_lower_variant_ctor`'s
+   record-ctor arm FILLS an omitted defaulted field with the declared expr —
+   evaluated at construction exactly as v0 does — instead of declining
+   (`Rect { width, height }` with `color = ""`, the default_fields family).
+   Gated CALL-FREE via the new `expr_contains_call` (a call-bearing default
+   would add a MIR call the counted IR lacks — mir>ir). Parity on
+   omit-all/override-one/override-all/empty-list-default probes.
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):

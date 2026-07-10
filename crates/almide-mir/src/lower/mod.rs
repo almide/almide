@@ -402,6 +402,30 @@ pub fn build_record_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> RecordLayou
 /// fields are named `_0`, `_1`, … — both matching v0's `emit_wasm` registration, so the
 /// backends agree on tag and field identity. Call once per program and pass the result
 /// into [`lower_function_all_with_layouts`].
+/// Does `e` contain ANY call node (Named/Module/Method/Computed Call, RuntimeCall,
+/// TailCall)? Used to gate synthesized-expr admissions (a default-field fill) whose calls
+/// the counted IR would not see (the caps `mir == ir` invariant).
+pub fn expr_contains_call(e: &almide_ir::IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct C(bool);
+    impl IrVisitor for C {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if matches!(
+                e.kind,
+                almide_ir::IrExprKind::Call { .. }
+                    | almide_ir::IrExprKind::RuntimeCall { .. }
+                    | almide_ir::IrExprKind::TailCall { .. }
+            ) {
+                self.0 = true;
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut c = C(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut c, e);
+    c.0
+}
+
 pub fn build_variant_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> VariantLayouts {
     use almide_ir::{IrTypeDeclKind, IrVariantKind};
     let mut out = VariantLayouts::default();
@@ -428,6 +452,14 @@ pub fn build_variant_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> VariantLay
                     .map(|(i, ty)| (almide_lang::intern::sym(&format!("_{i}")), ty.clone()))
                     .collect(),
                 IrVariantKind::Record { fields } => {
+                    for f in fields {
+                        if let Some(d) = &f.default {
+                            out.ctor_field_defaults
+                                .entry(case.name.as_str().to_string())
+                                .or_default()
+                                .insert(f.name.as_str().to_string(), d.clone());
+                        }
+                    }
                     fields.iter().map(|f| (f.name, f.ty.clone())).collect()
                 }
             };

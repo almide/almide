@@ -976,6 +976,11 @@ impl VariantLayout {
 pub struct VariantLayouts {
     pub by_type: HashMap<String, VariantLayout>,
     pub ctor_to_type: HashMap<String, String>,
+    /// Record-variant field DEFAULT exprs (`Rect { color: String = "" }`), keyed
+    /// `ctor → field → expr` — consulted by the ctor builder when a literal OMITS a
+    /// defaulted field (v0 fills the default at construction; leaving the slot would be
+    /// garbage, and declining walled the whole default_fields family).
+    pub ctor_field_defaults: HashMap<String, HashMap<String, almide_ir::IrExpr>>,
 }
 
 impl VariantLayouts {
