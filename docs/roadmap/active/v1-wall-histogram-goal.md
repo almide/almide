@@ -147,8 +147,17 @@ scale design pieces, NOT linkage gaps:
 1. **Nested-variant-payload matches** (the match-untracked 33 bucket's core):
    `match e { err(Overflow(msg)) => … }` — a ctor pattern INSIDE ok/err/some
    (the Camp-4 frontier); also the cross-module `mod.Type.method()` Codec
-   roundtrips. Needs the payload sub-match regrouping generalized to
-   heap-payload variants.
+   roundtrips. **MATCH side SHIPPED (0b98c23e)**: `group_option_result_arms`
+   now admits nested user-ctor columns (`err(Overflow(msg))` regroups to
+   `err($q) => match $q { Overflow(msg) => … }`), walls 296 → 292. The
+   REMAINING half is the CONSTRUCTION side: `err(<variant ctor>)` for
+   `Result[T, <user variant>]` — the Err-side sibling of
+   `try_lower_result_variant_ctor`, **blocked on a LAYOUT-CONSISTENCY design
+   decision**: `ok(5)` of `Result[Int, MathError]` materializes len-as-tag
+   while an err-variant block wants cap-as-tag@16 — the reader (seeding),
+   both ctor forms, and the drop must agree on ONE canonical layout (the same
+   trap as the recorded "Result[Int,Int] err→ok misread" gap). Design it
+   deliberately; adversarial probes on ok/err both-paths before shipping.
 2. **Interp repr coverage** (the interp-in-call-arg 30 bucket +
    compound_repr_interp's 15): heterogeneous tuples, nested list-of-maps,
    Set/Map variants — the `interp_to_string_call` self-host family's known
