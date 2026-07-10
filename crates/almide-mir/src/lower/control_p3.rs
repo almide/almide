@@ -955,6 +955,8 @@ impl LowerCtx {
             self.str_str_elem_lists.insert(obj);
         } else if crate::lower::is_list_int_str_ty(ty) {
             self.variant_drop_handles.insert(obj, "list_int_str".to_string());
+        } else if crate::lower::is_lenlist_list_ty(ty) {
+            self.variant_drop_handles.insert(obj, "list_lenlist".to_string());
         } else if is_heap_elem_list_ty(ty) {
             // List[heap] / Option[heap] / Result[_, heap] — the DynListStr recursive free.
             self.heap_elem_lists.insert(obj);

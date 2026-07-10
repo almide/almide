@@ -551,12 +551,17 @@ impl LowerCtx {
                 _ => return None,
             },
         };
-        // The element's drop kind: a recursive-drop record (`$__drop_list_<R>`) OR a `(String,String)`
-        // tuple (`Op::DropListStrStr` — the map.entries / `[(k,v), …]` literal shape). Anything else
-        // → `None` (the caller keeps the scalar / wall path).
+        // The element's drop kind: a recursive-drop record (`$__drop_list_<R>`), a `(String,String)`
+        // tuple (`Op::DropListStrStr` — the map.entries / `[(k,v), …]` literal shape), OR an
+        // Option/Result CTOR element (`[some(1), none]`, `[ok(1), err("x")]` — the collect-test
+        // shapes): a Flat class (scalar payload — the per-element `rc_dec` of `DropListStr` is
+        // exact) or a LenLoop class (owned handle slots — the generated `$__drop_list_lenlist`).
+        // Anything else → `None` (the caller keeps the scalar / wall path).
         enum ListElemDrop {
             Record(String),
             StrStr,
+            CtorFlat,
+            CtorLenLoop,
         }
         // A STRUCTURAL record element (`[{key: "x", val: "2"}]` in argument position —
         // the checker leaves the literal structural, so `record_drop_type_name` alone
@@ -570,6 +575,11 @@ impl LowerCtx {
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String))
         {
             ListElemDrop::StrStr
+        } else if let Some(class) = crate::lower::lenlist_elem_class(&elem_ty) {
+            match class {
+                crate::lower::CtorElemClass::Flat => ListElemDrop::CtorFlat,
+                crate::lower::CtorElemClass::LenLoop => ListElemDrop::CtorLenLoop,
+            }
         } else {
             return None;
         };
@@ -589,6 +599,29 @@ impl LowerCtx {
                 }
                 _ => e,
             };
+            // A CTOR-class element (`some(1)`, `err("x")`) materializes through the Option/Result
+            // ctor builder (a fresh OWNED wrapper block; the ctor arms leave tracking to callers,
+            // so push it for the uniform Consume below). A Var/call element of the SAME type takes
+            // `lower_owned_heap_field` (Dup / fresh CallFn result) — the drop class is TYPE-driven,
+            // so both produce blocks the registered list drop frees exactly.
+            if matches!(kind, ListElemDrop::CtorFlat | ListElemDrop::CtorLenLoop) {
+                if let Some(obj) = self.try_lower_option_ctor(e_ref, &elem_ty) {
+                    if !self.live_heap_handles.contains(&obj) {
+                        self.live_heap_handles.push(obj);
+                    }
+                    objs.push(obj);
+                    continue;
+                }
+                // A non-ctor element (a Var / call) must CARRY the list's element type — a
+                // never-err LIFTED effect call (`[step(), step()]`, autotry_construction) has
+                // its call type rewritten to the RAW payload (Int), so lowering it here would
+                // store a SCALAR where the registered drop expects an owned handle (invalid
+                // wasm + an unacquired `m` witness — the PCC gate caught exactly this).
+                // Decline → the caller walls, never a wrong byte.
+                if e_ref.ty != elem_ty {
+                    return None;
+                }
+            }
             objs.push(self.lower_owned_heap_field(e_ref)?);
         }
         let n = elements.len();
@@ -619,6 +652,16 @@ impl LowerCtx {
             }
             ListElemDrop::StrStr => {
                 self.str_str_elem_lists.insert(dst);
+            }
+            // Flat ctor elements (Option[scalar]) free exactly under the per-element `rc_dec`
+            // of the masked `DropListStr`; LenLoop elements route to the generated
+            // `$__drop_list_lenlist` (injected iff the pre-scan saw this literal — the shared
+            // `lenlist_elem_class` keeps the two decisions identical by construction).
+            ListElemDrop::CtorFlat => {
+                self.heap_elem_lists.insert(dst);
+            }
+            ListElemDrop::CtorLenLoop => {
+                self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
             }
         }
         self.live_heap_handles.push(dst);

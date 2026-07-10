@@ -612,6 +612,8 @@ impl LowerCtx {
                         self.value_result_lists.insert(dst);
                     } else if crate::lower::is_value_result_ty(&call.ty) {
                         self.value_result_results.insert(dst);
+                    } else if crate::lower::is_lenlist_list_ty(&call.ty) {
+                        self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
                     } else if crate::lower::is_heap_elem_list_ty(&call.ty) {
                         self.heap_elem_lists.insert(dst);
                     }

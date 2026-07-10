@@ -451,6 +451,8 @@ impl LowerCtx {
                         self.list_list_str_lists.insert(acc);
                     } else if let Some(rname) = self.record_or_anon_drop_type_name(&init_expr.ty) {
                         self.variant_drop_handles.insert(acc, rname);
+                    } else if crate::lower::is_lenlist_list_ty(&init_expr.ty) {
+                        self.variant_drop_handles.insert(acc, "list_lenlist".to_string());
                     } else if is_heap_elem_list_ty(&init_expr.ty) {
                         self.heap_elem_lists.insert(acc);
                     }

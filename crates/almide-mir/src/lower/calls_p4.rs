@@ -1324,6 +1324,8 @@ impl LowerCtx {
                 // `List[(String,String)]` (map.entries) arg temp — DropListStrStr frees each tuple's
                 // two Strings; the flat heap_elem_lists fallback would leak them.
                 self.str_str_elem_lists.insert(dst);
+            } else if crate::lower::is_lenlist_list_ty(ty) {
+                self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
             } else if crate::lower::is_heap_elem_list_ty(ty) {
                 self.heap_elem_lists.insert(dst);
             }

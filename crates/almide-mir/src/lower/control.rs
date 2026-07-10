@@ -883,12 +883,16 @@ impl LowerCtx {
                 use almide_lang::types::constructor::TypeConstructorId;
                 if matches!(&bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
                     self.materialized_options.insert(payload);
-                    if crate::lower::is_heap_elem_list_ty(&bind_ty) {
+                    if crate::lower::is_lenlist_list_ty(&bind_ty) {
+                        self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+                    } else if crate::lower::is_heap_elem_list_ty(&bind_ty) {
                         self.heap_elem_lists.insert(payload);
                     }
                 } else if crate::lower::is_result_ty(&bind_ty) {
                     self.materialized_results.insert(payload);
-                    if crate::lower::is_heap_elem_list_ty(&bind_ty) {
+                    if crate::lower::is_lenlist_list_ty(&bind_ty) {
+                        self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+                    } else if crate::lower::is_heap_elem_list_ty(&bind_ty) {
                         self.heap_elem_lists.insert(payload);
                     }
                 }

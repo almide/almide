@@ -328,12 +328,18 @@
         } else {
             ""
         };
+        let lenlist_drop = if crate::lower::program_uses_lenlist_elem_lists(&ir) {
+            crate::lower::LENLIST_DROP_SRC
+        } else {
+            ""
+        };
         let drops = format!(
-            "{}{}{}{}",
+            "{}{}{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),
             crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
             crate::lower::generate_variant_repr_sources(&ir.type_decls),
             closure_drop,
+            lenlist_drop,
         );
         let ir = if drops.trim().is_empty() { ir } else { to_ir(&format!("{src}\n{drops}")) };
         let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =

@@ -205,6 +205,29 @@ scale design pieces, NOT linkage gaps:
    escapes, `Wrap(A(3))` nested, recursive `Node(Leaf(1), …)` — all
    v0-identical. **Walls 290 → 272 (−18)**; mir 583, spec 283/283, gate,
    corpus PCC + kernel oracle all green.
+2b. **List[Option/Result] LITERALS SHIPPED (walls 272 → 262, −10 by-name, zero
+   newly-walled)**: `try_lower_record_list_literal_as` gained TWO ctor element
+   classes via the shared `lenlist_elem_class` (lower/mod.rs — the classifier
+   the injection pre-scan and the builder BOTH consult): `Flat`
+   (`Option[scalar]` — per-element `rc_dec` of `DropListStr`/`heap_elem_lists`
+   is exact) and `LenLoop` (`Option[String]`, `Result[scalar,String]`,
+   `Result[String,String]` — owned handle slots under len-as-tag, freed by the
+   GENERATED `$__drop_list_lenlist` source, `variant_drop_handles` key
+   `list_lenlist`). Elements lower via `try_lower_option_ctor` (ctors) or
+   `lower_owned_heap_field` (Var/call). TYPE-driven caller-side routing added
+   at ALL TEN `is_heap_elem_list_ty` registration sites (`is_lenlist_list_ty`
+   checked first — a call-returned `List[Result[_,String]]` bound by a caller
+   would otherwise take the flat drop and LEAK each Err payload);
+   `copy_heap_drop_class` propagates via variant_drop_handles. StringInterp
+   payload arms added beside every ConcatStr piece arm (`err("bad ${id}")`,
+   `some("v=${x}")`). **The PCC ownership gate caught the never-err-LIFTED
+   effect-call element on first contact** (`[step(), step()]`,
+   autotry_construction: the lift rewrites the call type to the RAW payload,
+   so a scalar landed in a handle slot — invalid wasm + an unacquired `m`
+   witness): non-ctor ctor-class elements now REQUIRE `e.ty == elem_ty`
+   (decline → honest wall). option.collect opens with the literals
+   (self-hosted already); result.collect self-host is the follow-up. Parity:
+   bind/tail/match/leak-loop probes v0-identical; full ladder green.
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):

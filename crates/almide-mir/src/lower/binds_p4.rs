@@ -700,6 +700,21 @@ impl LowerCtx {
                     | IrExprKind::OptionNone
                     | IrExprKind::ResultOk { .. }
                     | IrExprKind::ResultErr { .. } => self.try_lower_option_ctor(expr, &expr.ty)?,
+                    // A COMPUTED String Some payload (`some("v=" + s)` / `some("v=${x}")`) — the
+                    // fresh-owned `__str_concat` chain, operand temps dropped here (the ok/err
+                    // ConcatStr/StringInterp arms' Option sibling).
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_concat_str(expr)?;
+                        self.drop_arm_locals(mark);
+                        obj
+                    }
+                    IrExprKind::StringInterp { parts } if matches!(expr.ty, Ty::String) => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_string_interp(parts)?;
+                        self.drop_arm_locals(mark);
+                        obj
+                    }
                     // A SCALAR-element LIST-literal Some payload (`some([1, 2, 3])`, `some([])`) — build
                     // the fresh owned block (0-length for the empty case, which `try_lower_scalar_list_
                     // construct` declines), moved into the Some slot; `materialize_opt_str_some`'s
@@ -830,6 +845,15 @@ impl LowerCtx {
                         self.drop_arm_locals(mark);
                         obj
                     }
+                    // An INTERPOLATED String payload (`err("bad ${id}")`, `ok("v=${x}")`) — the
+                    // same fresh-owned `__str_concat` chain as the ConcatStr arm (the interp IS a
+                    // concat fold); operand temps drop here so only the result survives the move.
+                    IrExprKind::StringInterp { parts } if matches!(expr.ty, Ty::String) => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_string_interp(parts)?;
+                        self.drop_arm_locals(mark);
+                        obj
+                    }
                     // `ok(some(5))` / `ok(none)` / `ok(ok(7))` / `ok(err("x"))` — a NESTED Option/Result
                     // ctor Ok payload. Build the inner Option/Result block recursively (a fresh OWNED
                     // handle), moved into the outer Ok's slot — exactly like the OptionSome nested arm.
@@ -935,6 +959,15 @@ impl LowerCtx {
                         self.drop_arm_locals(mark);
                         obj
                     }
+                    // An INTERPOLATED String payload (`err("bad ${id}")`, `ok("v=${x}")`) — the
+                    // same fresh-owned `__str_concat` chain as the ConcatStr arm (the interp IS a
+                    // concat fold); operand temps drop here so only the result survives the move.
+                    IrExprKind::StringInterp { parts } if matches!(expr.ty, Ty::String) => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_string_interp(parts)?;
+                        self.drop_arm_locals(mark);
+                        obj
+                    }
                     _ => return None,
                 };
                 Some(self.materialize_result_str(piece, repr, true, false))
@@ -977,6 +1010,15 @@ impl LowerCtx {
                     IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
                         let mark = self.live_heap_handles.len();
                         let obj = self.try_lower_concat_str(expr)?;
+                        self.drop_arm_locals(mark);
+                        obj
+                    }
+                    // An INTERPOLATED String payload (`err("bad ${id}")`, `ok("v=${x}")`) — the
+                    // same fresh-owned `__str_concat` chain as the ConcatStr arm (the interp IS a
+                    // concat fold); operand temps drop here so only the result survives the move.
+                    IrExprKind::StringInterp { parts } if matches!(expr.ty, Ty::String) => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_string_interp(parts)?;
                         self.drop_arm_locals(mark);
                         obj
                     }

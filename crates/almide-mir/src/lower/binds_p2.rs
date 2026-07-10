@@ -624,6 +624,10 @@ impl LowerCtx {
                 } else if crate::lower::is_map_hval_ty(ty) {
                     // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
                     self.variant_drop_handles.insert(dst, "map_hval".to_string());
+                } else if crate::lower::is_lenlist_list_ty(ty) {
+                    // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
+                    // flat DropListStr would leak each element's owned payload slots.
+                    self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -793,6 +797,10 @@ impl LowerCtx {
                 } else if crate::lower::is_map_hval_ty(ty) {
                     // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
                     self.variant_drop_handles.insert(dst, "map_hval".to_string());
+                } else if crate::lower::is_lenlist_list_ty(ty) {
+                    // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
+                    // flat DropListStr would leak each element's owned payload slots.
+                    self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
