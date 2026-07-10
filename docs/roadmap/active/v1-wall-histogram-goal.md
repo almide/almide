@@ -76,6 +76,26 @@ zero trusted runtime growth), linked by registry name with typed routing.
   implements (greediness, empty-match advance, capture numbering, replace `$n`
   syntax, split edge cases — empty pattern, trailing empty fields). These
   edge cases are where parity dies; list them as test cases up front.
+  **PARTIAL (2026-07-10, runtime/rs/src/regex.rs lines 1–260 read):**
+  - The engine is **CHAR-based** (`Vec<char>` — Unicode scalar values): `.`
+    and classes match one CHAR; the Almide port must decode UTF-8 (the 108
+    non-ASCII corpus patterns make this load-bearing).
+  - AST: `Lit(char) | Dot | Class(Vec<(char,char)>, negated) | AnchorStart |
+    AnchorEnd | Group(alts, capture_idx_1based)`; reps `(min, max)` from
+    `* + ?` ONLY (no `{n,m}` — matches the corpus scout).
+  - BACKTRACKING, GREEDY (`rx_match_rep`: try one more first, then the rest
+    once `count >= min`), with the ZERO-WIDTH GUARD `consumed > 0 || count ==
+    0` (prevents `(a*)*`-style hangs — port this exact guard).
+  - Alternation: alts split on top-level/group `|`; EMPTY alternatives are
+    natural (an empty alt seq matches zero-width) — the corpus `a|`/`|a`/
+    `a||b` edges fall out of this.
+  - `rx_find_at`: leftmost scan `i in start..=len`, per-alt order preference;
+    `is_match` = find anywhere; `full_match` = top-level alts from 0 AND
+    `end == chars.len()` (checked AFTER the alt match — NOT per-alt anchored);
+    `find` returns the matched SUBSTRING (`Option<String>`), positions are
+    char-index internal only. STILL TO READ (lines 260–406): find_all's
+    empty-match advance rule, replace/`$n`, split field semantics, captures'
+    return shape; then rt_regex.rs only to confirm wasm parity of the same.
 - Check how v0 wasm exposes regex (per-call WAT emit? a compiled NFA?) — for
   UNDERSTANDING only (invariant 2).
 
