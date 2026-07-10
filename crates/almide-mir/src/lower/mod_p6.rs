@@ -1480,7 +1480,7 @@ fn desugar_match_subject_hoist(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             // hoist so the bind seeds its materialized-Option read-shape, then
             // `match $t { some/none }` lowers (the regex-corpus match shape).
             IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. }
-                if module.as_str() == "regex" && func.as_str() == "find"
+                if module.as_str() == "regex" && (func.as_str() == "find" || func.as_str() == "captures")
         );
         if (has_literal_arm
             && !is_pure_match_subject(subject)

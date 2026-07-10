@@ -447,7 +447,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/fan_map.almd"), &[("fan_map", "fan.map"), ("fan_map_is", "fan.map_is"), ("fan_map_ss", "fan.map_ss"), ("fan_map_si", "fan.map_si")]),
         // The self-hosted regex ENGINE (Stage 1: is_match/full_match — v0's
         // runtime regex ported quirk-for-quirk; see stdlib/regex_engine.almd).
-        (include_str!("../../../../stdlib/regex_engine.almd"), &[("regex_is_match", "regex.is_match"), ("regex_full_match", "regex.full_match"), ("regex_find", "regex.find"), ("regex_find_all", "regex.find_all"), ("regex_replace", "regex.replace"), ("regex_replace_first", "regex.replace_first"), ("regex_split", "regex.split")]),
+        (include_str!("../../../../stdlib/regex_engine.almd"), &[("regex_is_match", "regex.is_match"), ("regex_full_match", "regex.full_match"), ("regex_find", "regex.find"), ("regex_find_all", "regex.find_all"), ("regex_replace", "regex.replace"), ("regex_replace_first", "regex.replace_first"), ("regex_split", "regex.split"), ("regex_captures", "regex.captures")]),
         (include_str!("../../../../stdlib/list_to_string.almd"), &[("list_to_string", "list.to_string")]),
         (include_str!("../../../../stdlib/list_to_string_ll.almd"), &[("list_to_string_ll", "list.to_string_ll"), ("list_to_string_llf", "list.to_string_llf")]),
         (include_str!("../../../../stdlib/list_to_string_b.almd"), &[("list_to_string_b", "list.to_string_b")]),

@@ -195,7 +195,7 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         // regex.find builds a materialized Option[String] via the self-hosted
         // engine's ordinary some()/none ctors (stdlib/regex_engine.almd) — a
         // `match` over the bound result EXECUTES.
-        "regex" => matches!(func, "find"),
+        "regex" => matches!(func, "find" | "captures"),
         // result.to_option builds a materialized Option[Int] from a Result's len-tag (Ok → Some,
         // Err → None); option.map rebuilds a materialized Option (Some(f(x)) / None) — a `match`
         // over either result EXECUTES.
