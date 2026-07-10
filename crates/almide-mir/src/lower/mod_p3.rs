@@ -595,9 +595,11 @@ impl LowerCtx {
                 // SetLocal via the general heap-reassign, or a top-level rebind). `bytes.append` is the
                 // self-hosted functional append (bytes_core). Only a bare `Var` first arg qualifies; any
                 // other receiver keeps the (walling) effect-call path. Unblocks bigint.from_int / rsa.
+                // `bytes.append_u8(buf, x)` is the SAME in-place byte push under another
+                // name (`almide_rt_bytes_append_u8`) — identical rewrite.
                 IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
                     if module.as_str() == "bytes"
-                        && func.as_str() == "push"
+                        && (func.as_str() == "push" || func.as_str() == "append_u8")
                         && args.len() == 2
                         && matches!(&args[0].kind, IrExprKind::Var { .. }) =>
                 {
