@@ -125,13 +125,21 @@ find/replace moved their functions to the NEXT blocker (captures 49 remains,
 plus match-over-untracked-subject for `match regex.find(...)` shapes — the
 fan.map-style subject hoist + seed for self-host Option-returning fns is the
 unlock), so walled-real stays 296 until the LAST blocker per function falls.
-REMAINING: (a) regex.captures — needs the capture-threading matcher variant
-(v0 clones caps at every alt/rep choice point; port as a parallel `_c` matcher
-family writing into an owned Int-list buffer with copy-save/restore); (b) the
-match-subject hoist wiring for regex.find/captures (mirror
-`is_self_host_result_str_module_fn` + `desugar_match_subject_hoist`'s fan.map
-entries — but for Option[String]/Option[List[String]] subjects); then the
-json/bytes tail below.
+**STAGE 3 SHIPPED (2026-07-10, d13c0163): the regex FAMILY is COMPLETE — all
+8 APIs self-hosted** (`regex.captures` via the `_c` capture-threading matcher:
+caller-owned Int-list buffer passed as a raw data address, v0's clone-save/
+restore at every alternative and greedy-extension choice point, group ordinal
+= pre-order '(' count, unmatched group = ""). `regex.find`/`captures` are also
+seeded (`is_self_host_option_module_fn`) + subject-hoisted
+(`desugar_match_subject_hoist`) so `match regex.find(...) { some/none }`
+executes. Parity: capture pairs `10|25`, `bob|host`, the `(a|)` empty group,
+ncap-0 → NONE, `(a)(b)?` unmatched-group-"" — all v0-identical. The regex
+buckets are GONE from the histogram (381 → 0). Walled-real stays 296: the
+regex-test FUNCTIONS are multi-blocked — their residual blockers are the
+generic buckets (assert-arg shapes → match-untracked 33 / interp-in-call-arg
+30). REMAINING for the double-digits target: bytes.append_u8 (50), json.root
+(46) / json.field (41) / json.index (29), the two generic lowering buckets,
+string.is_alpha (27), matrix.shape (26), float.to_fixed (24).
 
 **1 — the engine core (`stdlib/regex_engine.almd` or split files).**
 A backtracking matcher over the scouted feature set: `__re_match_at(pattern,
