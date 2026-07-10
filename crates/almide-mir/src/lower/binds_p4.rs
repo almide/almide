@@ -672,6 +672,22 @@ impl LowerCtx {
                     {
                         self.value_for(*id).ok()?
                     }
+                    // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
+                    // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
+                    // (cert `a`) and move THAT in — the caller keeps its own reference (freed by
+                    // its owner once), the wrapper owns the Dup. The borrow-then-Dup discipline
+                    // the spread-record copy already proves.
+                    IrExprKind::Var { id }
+                        if self
+                            .value_for(*id)
+                            .map(|v| self.param_values.contains(&v))
+                            .unwrap_or(false) =>
+                    {
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
+                    }
                     IrExprKind::LitStr { value } => {
                         let pr = repr_of(&expr.ty).ok()?;
                         let p = self.fresh_value();
@@ -800,6 +816,22 @@ impl LowerCtx {
                             .unwrap_or(false) =>
                     {
                         self.value_for(*id).ok()?
+                    }
+                    // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
+                    // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
+                    // (cert `a`) and move THAT in — the caller keeps its own reference (freed by
+                    // its owner once), the wrapper owns the Dup. The borrow-then-Dup discipline
+                    // the spread-record copy already proves.
+                    IrExprKind::Var { id }
+                        if self
+                            .value_for(*id)
+                            .map(|v| self.param_values.contains(&v))
+                            .unwrap_or(false) =>
+                    {
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     IrExprKind::LitStr { value } => {
                         let pr = repr_of(&expr.ty).ok()?;
@@ -933,6 +965,22 @@ impl LowerCtx {
                     {
                         self.value_for(*id).ok()?
                     }
+                    // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
+                    // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
+                    // (cert `a`) and move THAT in — the caller keeps its own reference (freed by
+                    // its owner once), the wrapper owns the Dup. The borrow-then-Dup discipline
+                    // the spread-record copy already proves.
+                    IrExprKind::Var { id }
+                        if self
+                            .value_for(*id)
+                            .map(|v| self.param_values.contains(&v))
+                            .unwrap_or(false) =>
+                    {
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
+                    }
                     IrExprKind::LitStr { value } => {
                         let pr = repr_of(&expr.ty).ok()?;
                         let p = self.fresh_value();
@@ -987,6 +1035,22 @@ impl LowerCtx {
                             .unwrap_or(false) =>
                     {
                         self.value_for(*id).ok()?
+                    }
+                    // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
+                    // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
+                    // (cert `a`) and move THAT in — the caller keeps its own reference (freed by
+                    // its owner once), the wrapper owns the Dup. The borrow-then-Dup discipline
+                    // the spread-record copy already proves.
+                    IrExprKind::Var { id }
+                        if self
+                            .value_for(*id)
+                            .map(|v| self.param_values.contains(&v))
+                            .unwrap_or(false) =>
+                    {
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     IrExprKind::LitStr { value } => {
                         let pr = repr_of(&expr.ty).ok()?;

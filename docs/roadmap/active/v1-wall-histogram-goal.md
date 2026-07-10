@@ -254,6 +254,13 @@ scale design pieces, NOT linkage gaps:
    v0-identical. One main newly-walled (cross_module_unit_effect — its
    previously-"open" lowering silently swallowed the err; now an honest
    heap-result-match-returned wall). Full ladder green.
+2d. **Borrowed-param ctor payloads SHIPPED (walls 251 → 244, −7, zero
+   newly-walled)**: `err(msg)` / `ok(s)` / `some(s)` of a BORROWED PARAM
+   (`effect fn fail_with(msg: String) = err(msg)` — the fan-family tail
+   ctors) now Dup the param's handle into a fresh CO-OWNED ref (cert `a`)
+   and move THAT into the wrapper — the borrow-then-Dup discipline the
+   spread-record copy proves; all four Var piece arms in binds_p4 gained the
+   sibling case. Parity + PCC ownership ACCEPT.
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):
