@@ -1679,6 +1679,14 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             cur = Some(r);
             continue;
         }
+        // Hoist a LITERAL record/tuple interpolation part (`"${(1, \"x\", true)}"`) to a
+        // temp binding so the part becomes a materialized Var the EXPAND display folds
+        // (a literal part is never a tracked block, so it fell to the unlinked
+        // `compound.to_string` wall).
+        if let Some(r) = desugar_interp_literal_aggregate_hoist(src, next_var) {
+            cur = Some(r);
+            continue;
+        }
         // Lower a match over a TUPLE subject into element index-tests + an if-chain (also handles the
         // tuple sub-match a multi-field variant regroup produces).
         if let Some(r) = desugar_tuple_match(src) {
@@ -2828,6 +2836,147 @@ pub fn desugar_flatten_empty_block(body: &IrExpr) -> Option<IrExpr> {
 /// heap-result path walls). Regrouping is sound because a variant's constructors are DISJOINT: a
 /// `none` arm can never intercept a `some` value, so collecting all `some` arms in order preserves
 /// arm order + fall-through byte-for-byte. Runs in BOTH the lowering and the `count_ir_calls` gate.
+/// Hoist LITERAL record/tuple STRING-INTERPOLATION parts (`"${(1, \"x\", true)}"`,
+/// `"${P{x: 1}}"`) to temp bindings at the enclosing STATEMENT level, so each part
+/// becomes a materialized `Var` the EXPAND-fold display can read (a literal part is
+/// never a tracked block — `aggregate_part_expandable` requires a Var — so it fell
+/// to the unlinked `compound.to_string` wall). `println("${(1, 2)}")` becomes
+/// `{ let $t = (1, 2); println("${$t}") }` — the binds are PREPENDED to the
+/// statement (a Block in call-arg position would itself wall), and a literal
+/// construction is effect-free so the hoist preserves evaluation order. A part the
+/// display still cannot expand keeps the same wall it had; the bind rides the
+/// ordinary materialized-aggregate ownership (`i` + scope-end `d`).
+pub fn desugar_interp_literal_aggregate_hoist(
+    body: &IrExpr,
+    next_var: &mut u32,
+) -> Option<IrExpr> {
+    use almide_ir::{IrStmt, IrStmtKind, IrStringPart, Mutability, VarId};
+
+    // Rewrite every literal-aggregate interp part INSIDE `e` to a fresh Var,
+    // collecting the hoisted binds (in evaluation order).
+    fn rewrite_expr(e: &mut IrExpr, next: &mut u32, binds: &mut Vec<IrStmt>, changed: &mut bool) {
+        // Do NOT descend into nested Blocks — their own statement lists are the
+        // hoist points for their contents (handled by rewrite_block below).
+        if matches!(e.kind, IrExprKind::Block { .. }) {
+            return;
+        }
+        if let IrExprKind::StringInterp { parts } = &mut e.kind {
+            for p in parts.iter_mut() {
+                let IrStringPart::Expr { expr } = p else { continue };
+                if !matches!(expr.kind, IrExprKind::Record { .. } | IrExprKind::Tuple { .. }) {
+                    continue;
+                }
+                let tmp = VarId(*next);
+                *next += 1;
+                binds.push(IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: tmp,
+                        mutability: Mutability::Let,
+                        ty: expr.ty.clone(),
+                        value: expr.clone(),
+                    },
+                    span: expr.span.clone(),
+                });
+                *expr = IrExpr {
+                    kind: IrExprKind::Var { id: tmp },
+                    ty: expr.ty.clone(),
+                    span: expr.span.clone(),
+                    def_id: None,
+                };
+                *changed = true;
+            }
+        }
+        // Recurse into children manually (skipping Block, handled above).
+        use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+        struct Kids<'a> {
+            next: &'a mut u32,
+            binds: &'a mut Vec<IrStmt>,
+            changed: &'a mut bool,
+        }
+        impl IrMutVisitor for Kids<'_> {
+            fn visit_expr_mut(&mut self, c: &mut IrExpr) {
+                rewrite_expr(c, self.next, self.binds, self.changed);
+            }
+        }
+        let mut k = Kids { next, binds, changed };
+        walk_expr_mut(&mut k, e);
+    }
+
+    fn rewrite_block(e: &mut IrExpr, next: &mut u32, changed: &mut bool) {
+        // First recurse structurally so INNER blocks hoist into themselves.
+        use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+        struct B<'a> {
+            next: &'a mut u32,
+            changed: &'a mut bool,
+        }
+        impl IrMutVisitor for B<'_> {
+            fn visit_expr_mut(&mut self, c: &mut IrExpr) {
+                if matches!(c.kind, IrExprKind::Block { .. }) {
+                    rewrite_block(c, self.next, self.changed);
+                } else {
+                    walk_expr_mut(self, c);
+                }
+            }
+        }
+        let IrExprKind::Block { stmts, expr } = &mut e.kind else { return };
+        let mut out: Vec<IrStmt> = Vec::with_capacity(stmts.len());
+        for mut st in stmts.drain(..) {
+            let mut binds = Vec::new();
+            match &mut st.kind {
+                IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
+                    rewrite_expr(value, next, &mut binds, changed);
+                }
+                IrStmtKind::Expr { expr } => {
+                    rewrite_expr(expr, next, &mut binds, changed);
+                }
+                _ => {}
+            }
+            // Nested blocks inside this statement's exprs hoist into themselves.
+            {
+                let mut b = B { next, changed };
+                match &mut st.kind {
+                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
+                        b.visit_expr_mut(value)
+                    }
+                    IrStmtKind::Expr { expr } => b.visit_expr_mut(expr),
+                    _ => {}
+                }
+            }
+            out.extend(binds);
+            out.push(st);
+        }
+        *stmts = out;
+        if let Some(tail) = expr {
+            let mut binds = Vec::new();
+            rewrite_expr(tail, next, &mut binds, changed);
+            let mut b = B { next, changed };
+            b.visit_expr_mut(tail);
+            stmts.extend(binds);
+        }
+    }
+
+    let mut out = body.clone();
+    let mut changed = false;
+    if matches!(out.kind, IrExprKind::Block { .. }) {
+        rewrite_block(&mut out, next_var, &mut changed);
+    } else {
+        // A non-block body (`fn f() = "${(1, 2)}"`): hoist into a wrapping Block
+        // (allowed in tail position).
+        let mut binds = Vec::new();
+        let mut tail = out.clone();
+        rewrite_expr(&mut tail, next_var, &mut binds, &mut changed);
+        if changed {
+            out = IrExpr {
+                kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(tail.clone())) },
+                ty: tail.ty.clone(),
+                span: tail.span.clone(),
+                def_id: tail.def_id,
+            };
+        }
+    }
+    if changed { Some(out) } else { None }
+}
+
 pub fn desugar_grouped_variant_match(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     struct V<'a> {
