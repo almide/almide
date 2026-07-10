@@ -358,6 +358,35 @@ scale design pieces, NOT linkage gaps:
    Result[String,String] (cap-as-tag@16) — an off-signature call site is
    renamed `_x` by `desugar_offtype_testing_asserts` (count-invariant), so a
    different instantiation walls honestly instead of misreading a block.
+
+**NEXT PIECES DIAGNOSED (at 198, 2026-07-11):**
+- **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
+  the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
+  combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines
+  to building the results `List[Result[…]]` (NOW materializable — the 2b
+  lenlist stage), `any` to a first-ok if-chain. `fan.map` over a captured
+  closure value stays walled (opaque fn-value arg).
+- **http.response builders (6)**: PURE data constructors on the blanket-
+  impure `http` module — but `HttpResponse` is an OPAQUE NOMINAL type backed
+  by Rust (`@intrinsic`), so the self-host needs the value_core pattern
+  (redefine as a bundle almd record `{status: Int, body: String, headers:
+  List[(String,String)]}` + rewrite the builder section of stdlib/http.almd
+  to almd bodies, keeping serve/network intrinsic). A whole-module migration
+  — the "opaque nominal stdlib type self-host" design piece.
+- **zlib.compress/deflate (6)**: a real DEFLATE port — large; candidates for
+  the permanent-wall netting if not undertaken.
+- **compute-style Result-arm tail matches (~part of 23)**: `match
+  safe_div(a,b) { ok(v) => ok(int.to_string(v)), err(DivideByZero) =>
+  ok("infinity"), err(e) => err(e) }` at tail returning
+  `Result[String, MathError]` — heap-Ok + VARIANT-err (cap-as-tag with
+  variant payload) — needs the resvar sibling of the reserr work on BOTH
+  construction (`err(e)` re-wrap of a bound variant payload) and match sides.
+- **result.collect / partition / collect_map (5)**: self-host returning
+  `Result[List[Int], List[String]]` — needs the cap-as-tag Result-of-two-
+  lists drop design (recorded in 2b's revert note: the err-List arm was
+  reverted pending an exact `__drop_res_errlenlist`-class drop).
+- **random (7) / http network (rest)**: permanent walls (entropy/network not
+  byte-verifiable) — net out of the double-digit target.
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):
