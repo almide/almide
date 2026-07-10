@@ -318,6 +318,16 @@ scale design pieces, NOT linkage gaps:
    (`Result[Shape, String]`'s `ok($q) => match $q { <variant arms> }`; the
    payload var needs the custom-variant seed) — the next design piece for
    the untracked-subject bucket (~7 codec fns).
+2j. **Wildcard-as-err SHIPPED (walls 213 → 206, −7, zero newly-walled) — the
+   codec-roundtrip family OPENS end-to-end**: `try_lower_result_match`'s arm
+   parser admits a top-level `_` catch-all as the non-Ok arm (tag != 0 ⇒ the
+   wildcard body, binding nothing — positionally `err(_)` once Ok holds the
+   other arm). With 2i's regroup, `match Shape.decode(Shape.encode(X)) {
+   ok(<ctor pattern>) …, _ => assert(false) }` now lowers: the Named-call
+   subject materializes inline (already tracked), the regrouped inner
+   custom-variant match dispatches TYPE-driven off the borrowed @12 payload
+   handle (no extra seed needed — the ok(<variant>) construction side
+   already lowered). cd1/cd2/cd3 probes v0-identical.
 3. **JsonPath subsystem** (~144 rows): heap JsonPath repr + get/set_path
    traversal.
 4. **Unicode range tables** (string.is_alpha/is_lower/is_upper ~70 rows):

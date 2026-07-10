@@ -59,6 +59,15 @@ impl LowerCtx {
                     }
                     err = Some((&arm.body, bind));
                 }
+                // A TOP-LEVEL `_` catch-all as the non-Ok arm (`match r { ok($q) => …, _ => … }`
+                // — the regrouped codec-roundtrip shape): tag != 0 ⇒ not-Ok ⇒ the wildcard body,
+                // binding nothing. Positionally identical to `err(_)` once Ok holds the other arm.
+                IrPattern::Wildcard => {
+                    if err.is_some() {
+                        return false;
+                    }
+                    err = Some((&arm.body, Option::None));
+                }
                 _ => return false,
             }
         }
