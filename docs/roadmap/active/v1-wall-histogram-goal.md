@@ -359,7 +359,18 @@ scale design pieces, NOT linkage gaps:
    renamed `_x` by `desugar_offtype_testing_asserts` (count-invariant), so a
    different instantiation walls honestly instead of misreading a block.
 
-**NEXT PIECES DIAGNOSED (at 198, 2026-07-11):**
+2n. **fan.settle / fan.any value positions SHIPPED (walls 198 → 188, −10,
+   zero newly-walled)**: `desugar_fan_race_any` gained POSITION-LIMITED
+   (bind-value / block-tail) rewrites — `fan.settle([thunks])` becomes the
+   results LIST LITERAL (the 2b lenlist machinery materializes it);
+   `fan.any([thunks])` becomes the first-Ok chain VALUE (`match t0 { ok($x)
+   => ok($x), err(_) => <next … err("fan.any: all candidates failed")> }`).
+   Position-limiting matters: an `!`-wrapped `fan.any(…)!` must stay for the
+   effect-unwrap desugar (whose match shape the PRE-order inliner handles) —
+   the first, any-position version left a match-over-match and REGRESSED
+   fan_any_allfail/fan_race_any_wasm (by-name diff caught it; reworked).
+
+**NEXT PIECES DIAGNOSED (at 198→188, 2026-07-11):**
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines
