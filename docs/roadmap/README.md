@@ -6,7 +6,7 @@
 
 ## Active
 
-62 items
+64 items
 
 | Item | Description |
 |------|-------------|
@@ -18,6 +18,7 @@
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
 | [Closure Architecture v2](active/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
 | [Closure cross-target completeness](active/closure-cross-target-completeness.md) |  |
+| [Code Health: Codopsy-Driven File Splits and Function Decomposition](active/code-health-codopsy.md) | Codopsy-driven code health: split 1000+ line files, decompose cog>100 fns |
 | [Codegen traversal totality](active/codegen-traversal-totality.md) |  |
 | [Completeness by Construction](active/completeness-by-construction.md) |  |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
@@ -66,6 +67,7 @@
 | [v1 TCO — self-recursive tail calls → scalar-state loop (the yaml parser keystone)](active/v1-tco-self-recursion.md) |  |
 | [V1 → V0 Parity — the completion plan](active/v1-v0-parity.md) | The completion plan to bring the v1 MIR trust-spine to full v0 parity |
 | [v1 dynamic Value model — the yaml keystone (path A: self-host + ONE trusted recursive-drop routine)](active/v1-value-model.md) |  |
+| [GOAL PROMPT — v1 wall histogram: the regex family, then the json/bytes tail](active/v1-wall-histogram-goal.md) | GOAL PROMPT — v1 wall histogram: self-host the regex family (381 walls), then json/bytes tail |
 | [柱C extension: bring Value rc into the certified region](active/value-rc-cert.md) |  |
 | [Almide WASM Engine — Complete Redesign](active/wasm-engine-redesign.md) |  |
 | [WASM Reference-Count Frees: the Ownership-Discipline Drain](active/wasm-frees-ownership-discipline.md) |  |
@@ -112,13 +114,16 @@
 
 ## Done
 
-253 items
+256 items
 
 <details>
-<summary>Show all 253 completed items</summary>
+<summary>Show all 256 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-07-10 | [GOAL PROMPT — closure env full mode: heap, Float and Fn captures](done/closure-env-heap-captures-goal.md) | GOAL PROMPT — closure env full mode: heap/Float/Fn captures with masked recursive drop |
+| 2026-07-09 | [GOAL PROMPT — cert format brick 6: retire the extraction trust (kernel oracle + verified extraction)](done/cert-format-brick6-goal.md) | GOAL PROMPT — cert format brick 6: retire extraction trust (kernel-as-oracle gate + verified extraction) |
+| 2026-07-08 | [GOAL PROMPT — cert format brick 5: full mode (branch agreement + `b` + closure signatures)](done/cert-format-brick5-goal.md) | GOAL PROMPT — cert format brick 5: full mode (branch resource-state agreement + closure-env borrow + closure signatures) |
 | 2026-07-04 | [Crush-Pass Continuation — gguf + Matrix walls closed](done/crush-pass-continuation.md) | gguf ADT walls, the Matrix value model, and coverage pins — all closed; nn walls 0 |
 | 2026-07-02 | [Handoff — porta wall=0 + read_message cross-module on v1 (session record)](done/v1-porta-read-message-handoff.md) | PC-switch handoff: porta wall=0 + read_message cross-module on v1 (steps 1-3 done) |
 | 2026-06-05 | [WASM Remaining 15 Skips — Fix Roadmap](done/wasm-remaining-15.md) | WASM spec skip burndown — fixable skips all resolved, 233/233 wasm-eligible (8 intentional skips) |
