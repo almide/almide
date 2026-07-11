@@ -482,6 +482,15 @@ scale design pieces, NOT linkage gaps:
    (`some((Int, Int))`) in arm context (probe tv3 nested_scalar).
 
 **NEXT PIECES DIAGNOSED (at 198→188→185→182→181→179→177→176→175, 2026-07-11):**
+- **transparent newtype (`mod type SafeHtml = String`) — probe uh1**: BOTH sides
+  missing, not just the match: the CTOR call `SafeHtml(s)` lowers as an opaque
+  Named call to a nonexistent `$SafeHtml` (unlinked wall), and `unwrap_html`'s
+  single-ctor match declines. Design: treat the newtype TRANSPARENTLY —
+  `repr_of(Named)` delegates to the inner ty, `SafeHtml(x)` lowers as the
+  payload itself (Dup-if-borrowed move), the 1-arm match binds `s` = subject
+  (borrow; move-out auto-Dups). Same design piece as the http.response opaque
+  nominal migration, in miniature — opens `unwrap_html` (+ `escape`/
+  `wrap_in_div` callers if they are also walled).
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines
