@@ -425,7 +425,23 @@ scale design pieces, NOT linkage gaps:
    Only 1 corpus fn opened directly (multi-blocker as usual) but the
    machinery unblocks the 23-bucket's core shape for future compounding.
 
-**NEXT PIECES DIAGNOSED (at 198→188→185→182→181, 2026-07-11):**
+2s. **List-subject tail-value match SHIPPED (walls 181 → 179)**:
+   `try_lower_list_match_value` — the len-tag TWIN of the Result opener for
+   `match list.filter(xs, f) { [] => None, ys => list.get(ys, 0) }`. Gate:
+   heap result, exactly one `[]` arm + one catch-all (`_` | bind-all), no
+   guards. tag = len@4 with INVERTED polarity vs Result (THEN = non-empty).
+   The bind-all var ALIASES the owned subject temp (arm calls borrow it; an
+   arm MOVE-OUT `ys => ys` is compensated by the release-parity sweep with a
+   drop on the empty side — probe lm3 verified). Opened `first_even` and
+   `quicksort` (Block arm body + closure captures + recursion + `??` all
+   compose). Probes lm1–lm4 v0-identical, incl. param-var subjects (Dup'd)
+   and multi-use binds. The heap-result-match bucket (18, ALL single-blocker
+   — the largest single-reason family) is now: multi-arm list patterns
+   (`describe` — element reads + guards), tuple subjects (`zip_first`),
+   custom-variant value matches with fn-value arms (`tree_fold`), single-ctor
+   heap-payload move-out (`unwrap_html`), branch_lift synthetics.
+
+**NEXT PIECES DIAGNOSED (at 198→188→185→182→181→179, 2026-07-11):**
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines

@@ -957,6 +957,130 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// TAIL-VALUE match over a LIST subject with exactly one `[]` arm and one catch-all
+    /// (`_` or a bind-all `ys`) — the len-tag twin of [`Self::try_lower_result_match_value`]:
+    ///   `match list.filter(xs, f) { [] => None, ys => list.get(ys, 0) }`
+    /// The subject is an OWNED tracked temp (a call result is fresh-owned; a Var is Dup'd).
+    /// tag = len@4: THEN (len != 0) = the non-empty arm — a bind-all var ALIASES the subject
+    /// temp itself (arm calls borrow it; if the arm MOVES it out, the release-parity sweep
+    /// compensates with a drop on the empty side). ELSE (len == 0) = the `[]` arm. Same
+    /// IfThen/Else/EndIf merge + release-parity discipline as the Result opener.
+    pub(crate) fn try_lower_list_match_value(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        use almide_lang::types::constructor::TypeConstructorId;
+        if !is_heap_ty(result_ty) || arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
+            return None;
+        }
+        if !matches!(&subject.ty, Ty::Applied(TypeConstructorId::List, a) if a.len() == 1) {
+            return None;
+        }
+        let mut empty_arm: Option<&IrExpr> = None;
+        let mut rest_arm: Option<(&IrExpr, Option<VarId>)> = None;
+        for arm in arms {
+            match &arm.pattern {
+                IrPattern::List { elements } if elements.is_empty() => {
+                    if empty_arm.is_some() {
+                        return None;
+                    }
+                    empty_arm = Some(&arm.body);
+                }
+                IrPattern::Bind { var, .. } => {
+                    if rest_arm.is_some() {
+                        return None;
+                    }
+                    rest_arm = Some((&arm.body, Some(*var)));
+                }
+                IrPattern::Wildcard => {
+                    if rest_arm.is_some() {
+                        return None;
+                    }
+                    rest_arm = Some((&arm.body, None));
+                }
+                _ => return None,
+            }
+        }
+        let (empty_body, (rest_body, rest_bind)) = match (empty_arm, rest_arm) {
+            (Some(e), Some(r)) => (e, r),
+            _ => return None,
+        };
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let subj = match self
+            .lower_call_args(std::slice::from_ref(subject))
+            .ok()
+            .and_then(|a| a.into_iter().next())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        if self.deferred_opaque_binds.contains(&subj) {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return None;
+        }
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: tag, dst: Some(dst) });
+        // THEN (len != 0): the non-empty arm; the bind-all aliases the subject temp.
+        if let Some(var) = rest_bind {
+            self.value_of.insert(var, subj);
+        }
+        let outer: Vec<ValueId> = self.live_heap_handles.clone();
+        let rest_obj = match self.lower_heap_result_arm(rest_body, result_ty) {
+            Some(v) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let consumed_by_rest: Vec<ValueId> =
+            outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
+        let else_marker_at = self.ops.len();
+        self.ops.push(Op::Else { val: Some(rest_obj) });
+        // ELSE (len == 0): the `[]` arm.
+        let live_after_rest: Vec<ValueId> = self.live_heap_handles.clone();
+        let empty_obj = match self.lower_heap_result_arm(empty_body, result_ty) {
+            Some(v) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let consumed_by_empty: Vec<ValueId> = live_after_rest
+            .iter()
+            .copied()
+            .filter(|x| !self.live_heap_handles.contains(x))
+            .collect();
+        // Release parity across the arms (the lower_heap_result_if_inner discipline).
+        for x in &consumed_by_rest {
+            if !consumed_by_empty.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.push(op);
+            }
+        }
+        for x in &consumed_by_empty {
+            if !consumed_by_rest.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.insert(else_marker_at, op);
+            }
+        }
+        self.ops.push(Op::EndIf { val: Some(empty_obj) });
+        Some(dst)
+    }
+
     pub(crate) fn try_lower_custom_variant_match(
         &mut self,
         subject: &IrExpr,
