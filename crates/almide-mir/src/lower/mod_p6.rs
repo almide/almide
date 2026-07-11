@@ -898,6 +898,10 @@ pub fn desugar_all(body: &IrExpr, unit_main: bool) -> IrExpr {
             cur = r;
             continue;
         }
+        if let Some(r) = desugar_scalar_guard_match(&cur) {
+            cur = r;
+            continue;
+        }
         break;
     }
     cur
@@ -3367,6 +3371,103 @@ pub fn desugar_scalar_tuple_literal_match(body: &IrExpr) -> Option<IrExpr> {
             }
             *e = IrExpr {
                 kind: IrExprKind::Block { stmts, expr: Some(Box::new(chain.unwrap())) },
+                ty: e.ty.clone(),
+                span: span.clone(),
+                def_id: e.def_id,
+            };
+            self.changed = true;
+        }
+    }
+    let mut v = V { next: max_var_id(body) + 1, changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    v.changed.then_some(out)
+}
+
+
+/// Rewrite a SCALAR-subject match whose arms are guarded BINDS (`match Package.weight(p) {
+/// w if w <= 1 => "envelope", w if w <= 10 => "box", _ => "freight" }`) into a hoisted
+/// scalar temp + an `if` chain — the guard-match twin of `desugar_scalar_tuple_literal_match`.
+/// The subject evaluates ONCE into a fresh temp; every arm's bind var aliases that temp at
+/// the block TOP (a scalar copy, no ownership — guards must see their var before the chain),
+/// each guard becomes an `if` condition in arm order, and the single UNGUARDED catch-all
+/// (`_` or a bare bind) terminates the chain as the else. Heap-result bodies then lower
+/// through the proven heap-result-`if` machinery (previously: an honest wall).
+/// Call-count-invariant: the subject and every guard/body appear EXACTLY ONCE
+/// (desugar-before-both keeps `mir == ir`).
+pub fn desugar_scalar_guard_match(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use almide_ir::IrPattern;
+    struct V {
+        next: u32,
+        changed: bool,
+    }
+    impl IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Match { subject, arms } = &e.kind else { return };
+            if is_heap_ty(&subject.ty) || arms.len() < 2 {
+                return;
+            }
+            // Every arm but the last must be a GUARDED Bind/Wildcard; the last an UNGUARDED
+            // Bind/Wildcard catch-all. Literal/ctor patterns stay for the other paths.
+            let (last, init) = arms.split_last().unwrap();
+            if last.guard.is_some()
+                || !matches!(last.pattern, IrPattern::Wildcard | IrPattern::Bind { .. })
+                || init.iter().any(|a| {
+                    a.guard.is_none()
+                        || !matches!(a.pattern, IrPattern::Wildcard | IrPattern::Bind { .. })
+                })
+            {
+                return;
+            }
+            let span = e.span.clone();
+            let t = VarId(self.next);
+            self.next += 1;
+            let mut stmts = vec![IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: t,
+                    ty: subject.ty.clone(),
+                    value: (**subject).clone(),
+                    mutability: almide_ir::Mutability::Let,
+                },
+                span: span.clone(),
+            }];
+            let temp_ref = IrExpr {
+                kind: IrExprKind::Var { id: t },
+                ty: subject.ty.clone(),
+                span: span.clone(),
+                def_id: None,
+            };
+            for arm in arms {
+                if let IrPattern::Bind { var, ty } = &arm.pattern {
+                    stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: *var,
+                            ty: ty.clone(),
+                            value: temp_ref.clone(),
+                            mutability: almide_ir::Mutability::Let,
+                        },
+                        span: span.clone(),
+                    });
+                }
+            }
+            // Right-fold the guarded arms over the catch-all body.
+            let mut chain = last.body.clone();
+            for arm in init.iter().rev() {
+                chain = IrExpr {
+                    kind: IrExprKind::If {
+                        cond: Box::new(arm.guard.clone().unwrap()),
+                        then: Box::new(arm.body.clone()),
+                        else_: Box::new(chain),
+                    },
+                    ty: e.ty.clone(),
+                    span: span.clone(),
+                    def_id: e.def_id,
+                };
+            }
+            *e = IrExpr {
+                kind: IrExprKind::Block { stmts, expr: Some(Box::new(chain)) },
                 ty: e.ty.clone(),
                 span: span.clone(),
                 def_id: e.def_id,

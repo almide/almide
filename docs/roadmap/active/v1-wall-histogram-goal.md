@@ -441,7 +441,21 @@ scale design pieces, NOT linkage gaps:
    custom-variant value matches with fn-value arms (`tree_fold`), single-ctor
    heap-payload move-out (`unwrap_html`), branch_lift synthetics.
 
-**NEXT PIECES DIAGNOSED (at 198→188→185→182→181→179, 2026-07-11):**
+2t. **Scalar-subject guard-match desugar SHIPPED (walls 179 → 177)**:
+   `desugar_scalar_guard_match` (mod_p6) — `match weight(p) { w if w <= 1 =>
+   "envelope", w if w <= 10 => "box", _ => "freight" }` rewrites to a hoisted
+   scalar temp + an `if` chain BEFORE lowering (added to BOTH chains:
+   `desugar_all` + `lower_body_into`, desugar-before-both). Gate: scalar
+   subject, every non-final arm a GUARDED Bind/Wildcard, final an unguarded
+   catch-all. All arm bind vars alias the one temp at block top (scalar
+   copies — guards need their var in scope before the chain); guards/bodies
+   appear exactly once (count-invariant). Opened `shipping_label` and
+   `Temp.classify`; heap-result guard matches now ride the proven
+   heap-result-`if` machinery in every position (tail/bind/arg). Probes
+   gm1–gm2 v0-identical (call subjects evaluated once, final-arm binds,
+   let-bound position).
+
+**NEXT PIECES DIAGNOSED (at 198→188→185→182→181→179→177, 2026-07-11):**
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines
