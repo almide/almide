@@ -522,6 +522,28 @@ scale design pieces, NOT linkage gaps:
    element-load desugar; `pick`/nested_boxed need depth-2 ctor patterns).
 
 **NEXT PIECES DIAGNOSED (at …→176→175→173→171→170, 2026-07-11):**
+- **json_path family (4-5 walls, DESIGN READY)**: the untracked-subject bucket's
+  biggest coherent sub-family (json_path_test ×4 + json_path_edges p_set).
+  `json.root/field/index/get_path` are Rust intrinsics over the opaque nominal
+  `JsonPath` (undeclared in the checker — just `Ty::Named("JsonPath", [])`
+  from the stdlib sigs). Self-host plan:
+  (1) `stdlib/json_path.almd` — rep = `List[String]` of segments root-first,
+  `"f<name>"` / `"i<int>"`; `root()=[]`, `field(p,n)=p+["f"+n]`,
+  `index(p,i)=p+["i"+int.to_string(i)]`; `get_path` walks via the PROVEN
+  json.get / json.as_array / list.get_value path. v0 oracle semantics
+  (runtime/rs/src/json.rs almide_json_get_path): a field step on a non-object
+  → none; an index step wraps NEGATIVE i as len+i, misses OOB. Segment decode:
+  `string.take/drop(seg,1)` + `int.parse` (all self-hosted already).
+  (2) registry entry mapping json.root/field/index/get_path; purity module
+  "json_path" into PURE_MODULES (sorted); "get_path" into the
+  is_self_host_option_module_fn "json" arm (tracked subject).
+  (3) THE KEY PIECE: teach `erase_transparent_newtypes` a SELF-HOST REP table
+  (`"JsonPath"` → `List[String]`) so every `Ty::Named("JsonPath")` bind/param
+  erases to List[String] and the drop routing (heap_elem_list str) is correct —
+  the self-host OWNS the rep, the eraser publishes it. JsonPath is opaque to
+  user code (only these fns consume it), so the rep swap is unobservable.
+  set_path (p_set) is the follow-up (needs Value rebuild — value.merge /
+  list.set_value precedents exist in value_core).
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines
