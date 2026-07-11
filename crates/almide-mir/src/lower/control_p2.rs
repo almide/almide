@@ -802,6 +802,161 @@ impl LowerCtx {
     /// with NO heap ownership event beyond the arm's own move-out — exactly the per-arm
     /// linearization the cert proves, wrapped so one arm runs. The LAST arm is the unconditional
     /// `else` (the frontend guarantees the match is exhaustive).
+    /// TAIL-VALUE Result match over a len-as-tag subject with HEAP-result arms — the
+    /// Camp-4 opener for the `compute` class:
+    ///   `match safe_div(a, b) { ok(v) => ok(int.to_string(v)), err(e) => <heap arm> }`
+    /// The SUBJECT is materialized as an OWNED tracked temp (a call result / Dup'd var —
+    /// dropped at scope end, AFTER the arms: each arm binds its payload as a BORROW (a
+    /// scalar copy for Ok @12; the slot-0 HANDLE for a heap Err — `param_values`, not a
+    /// second owner) and constructs its own FRESH result via `lower_heap_result_arm`
+    /// (which Dups any borrowed payload it re-wraps), so nothing outlives the subject.
+    /// The IfThen/Else/EndIf merge carries the arm value out — the released-merge cert
+    /// shape `lower_heap_result_if_inner` already proves, incl. the release-parity sweep.
+    pub(crate) fn try_lower_result_match_value(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        use almide_lang::types::constructor::TypeConstructorId;
+        if !is_heap_ty(result_ty) || arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
+            return None;
+        }
+        // len-as-tag subjects only: a SCALAR Ok payload (Err payload scalar or heap).
+        let (ok_pay_ty, err_pay_ty) = match &subject.ty {
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && !is_heap_ty(&a[0]) => {
+                (a[0].clone(), a[1].clone())
+            }
+            _ => return None,
+        };
+        let mut ok_arm: Option<(&IrExpr, Option<VarId>)> = None;
+        let mut err_arm: Option<(&IrExpr, Option<VarId>)> = None;
+        for arm in arms {
+            match &arm.pattern {
+                IrPattern::Ok { inner } => {
+                    let bind = match inner.as_ref() {
+                        IrPattern::Bind { var, .. } => Some(*var),
+                        IrPattern::Wildcard => None,
+                        _ => return None,
+                    };
+                    if ok_arm.is_some() {
+                        return None;
+                    }
+                    ok_arm = Some((&arm.body, bind));
+                }
+                IrPattern::Err { inner } => {
+                    let bind = match inner.as_ref() {
+                        IrPattern::Bind { var, .. } => Some(*var),
+                        IrPattern::Wildcard => None,
+                        _ => return None,
+                    };
+                    if err_arm.is_some() {
+                        return None;
+                    }
+                    err_arm = Some((&arm.body, bind));
+                }
+                IrPattern::Wildcard => {
+                    if err_arm.is_some() {
+                        return None;
+                    }
+                    err_arm = Some((&arm.body, None));
+                }
+                _ => return None,
+            }
+        }
+        let ((ok_body, ok_bind), (err_body, err_bind)) = match (ok_arm, err_arm) {
+            (Some(o), Some(e)) => (o, e),
+            _ => return None,
+        };
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        // Materialize the subject to an OWNED tracked temp (a call result is fresh-owned; a
+        // Var is borrowed — Dup it so the scope-end drop discipline is uniform). The temp is
+        // in live_heap_handles → freed by the epilogue AFTER the merge move-out.
+        let subj = match self
+            .lower_call_args(std::slice::from_ref(subject))
+            .ok()
+            .and_then(|a| a.into_iter().next())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        if self.deferred_opaque_binds.contains(&subj) {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return None;
+        }
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: tag, dst: Some(dst) });
+        // THEN (tag != 0 = Err): payload = slot 0 (borrowed).
+        if let Some(var) = err_bind {
+            let payload = if is_heap_ty(&err_pay_ty) {
+                let p = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                self.param_values.insert(p);
+                p
+            } else {
+                self.load_at_offset(h, 12, PrimKind::Load { width: 8 })
+            };
+            self.value_of.insert(var, payload);
+        }
+        let outer: Vec<ValueId> = self.live_heap_handles.clone();
+        let err_obj = match self.lower_heap_result_arm(err_body, result_ty) {
+            Some(v) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let consumed_by_err: Vec<ValueId> =
+            outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
+        let else_marker_at = self.ops.len();
+        self.ops.push(Op::Else { val: Some(err_obj) });
+        // ELSE (tag == 0 = Ok): scalar payload copy.
+        if let Some(var) = ok_bind {
+            let _ = &ok_pay_ty;
+            let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+            self.value_of.insert(var, payload);
+        }
+        let live_after_err: Vec<ValueId> = self.live_heap_handles.clone();
+        let ok_obj = match self.lower_heap_result_arm(ok_body, result_ty) {
+            Some(v) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let consumed_by_ok: Vec<ValueId> = live_after_err
+            .iter()
+            .copied()
+            .filter(|x| !self.live_heap_handles.contains(x))
+            .collect();
+        // Release parity across the arms (the lower_heap_result_if_inner discipline).
+        for x in &consumed_by_err {
+            if !consumed_by_ok.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.push(op);
+            }
+        }
+        for x in &consumed_by_ok {
+            if !consumed_by_err.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.insert(else_marker_at, op);
+            }
+        }
+        self.ops.push(Op::EndIf { val: Some(ok_obj) });
+        Some(dst)
+    }
+
     pub(crate) fn try_lower_custom_variant_match(
         &mut self,
         subject: &IrExpr,
@@ -866,9 +1021,9 @@ impl LowerCtx {
         let tag = self.load_at_offset(h, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 });
         let emitted = if sole_ctor_heap {
             let (kind, body) = &plans[0];
-            self.emit_single_ctor_heap_arm(h, tag, kind, body, result_ty)
+            self.emit_single_ctor_heap_arm(h, tag, kind, body, result_ty, subj)
         } else {
-            self.emit_variant_arm_chain(h, tag, &plans, result_ty)
+            self.emit_variant_arm_chain(h, tag, &plans, result_ty, subj)
         };
         match emitted {
             Some(dst) => Some(dst),
@@ -892,10 +1047,11 @@ impl LowerCtx {
         kind: &VariantArmKind,
         body: &IrExpr,
         result_ty: &Ty,
+        subj: ValueId,
     ) -> Option<ValueId> {
         let arm_tag = match kind {
             VariantArmKind::Ctor { tag, .. } => *tag,
-            VariantArmKind::Wildcard => return None,
+            VariantArmKind::Wildcard | VariantArmKind::BindAll { .. } => return None,
         };
         let dst = self.fresh_value();
         let tc = self.fresh_value();
@@ -903,7 +1059,7 @@ impl LowerCtx {
         let cond = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
         self.ops.push(Op::IfThen { cond, dst: Some(dst) });
-        let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, true)?;
+        let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, true, subj)?;
         self.ops.push(Op::Else { val: Some(then_v) });
         // The dead `else`: a fresh owned empty-string block (a heap i32 handle, repr-compatible with
         // any heap result). `Consume` moves it into `dst` exactly as a real arm value would.
@@ -987,7 +1143,10 @@ impl LowerCtx {
                     VariantArmKind::Ctor { tag: case.tag as i64, binds }
                 }
                 IrPattern::Wildcard => VariantArmKind::Wildcard,
-                // a binder catch-all `x => …` over a variant — walled for now (later brick)
+                // A BINDER catch-all (`e => …`): binds the whole subject (borrow), any tag.
+                IrPattern::Bind { var, ty } if is_heap_ty(ty) => {
+                    VariantArmKind::BindAll { var: *var }
+                }
                 _ => return None,
             };
             plans.push((kind, &arm.body));
@@ -1002,7 +1161,14 @@ impl LowerCtx {
     /// before this call). The OWNED copy — not a borrow — is what the proven checker needs: a
     /// consuming re-use moves an owned ref, a read-only use drops it, a move-out hands it off,
     /// all rc-balanced; a BORROW would `Consume`/`m` at rc 0 on a re-use (the rejected double-free).
-    fn bind_variant_arm(&mut self, kind: &VariantArmKind, h: ValueId) {
+    fn bind_variant_arm(&mut self, kind: &VariantArmKind, h: ValueId, subj: ValueId) {
+        if let VariantArmKind::BindAll { var } = kind {
+            // The whole-subject borrow: the subject's owner (an outer temp / param) keeps
+            // the reference; a consuming re-use in the arm (`err(e)`) Dups it.
+            self.value_of.insert(*var, subj);
+            self.param_values.insert(subj);
+            return;
+        }
         if let VariantArmKind::Ctor { binds, .. } = kind {
             for (slot, var, is_heap) in binds {
                 let off = layout::slot_offset(*slot) as i64;
@@ -1067,7 +1233,7 @@ impl LowerCtx {
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
         let tag = self.load_at_offset(h, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 });
-        self.emit_variant_unit_chain(h, tag, &plans)
+        self.emit_variant_unit_chain(h, tag, &plans, subj)
     }
 
     /// Emit the right-nested `if tag == t0 { arm0 } else if … else { last }` chain for a
@@ -1080,25 +1246,28 @@ impl LowerCtx {
         h: ValueId,
         tag: ValueId,
         plans: &[(VariantArmKind, &IrExpr)],
+        subj: ValueId,
     ) -> Result<(), LowerError> {
         let Some(((kind, body), rest)) = plans.split_first() else {
             return Ok(());
         };
-        if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard) {
-            return self.lower_variant_unit_arm(kind, body, h);
+        if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard | VariantArmKind::BindAll { .. }) {
+            return self.lower_variant_unit_arm(kind, body, h, subj);
         }
         let arm_tag = match kind {
             VariantArmKind::Ctor { tag, .. } => *tag,
-            VariantArmKind::Wildcard => unreachable!("handled above"),
+            VariantArmKind::Wildcard | VariantArmKind::BindAll { .. } => {
+                unreachable!("handled above")
+            }
         };
         let tc = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: tc, value: arm_tag });
         let cond = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
         self.ops.push(Op::IfThen { cond, dst: None });
-        self.lower_variant_unit_arm(kind, body, h)?;
+        self.lower_variant_unit_arm(kind, body, h, subj)?;
         self.ops.push(Op::Else { val: None });
-        self.emit_variant_unit_chain(h, tag, rest)?;
+        self.emit_variant_unit_chain(h, tag, rest, subj)?;
         self.ops.push(Op::EndIf { val: None });
         Ok(())
     }
@@ -1112,9 +1281,10 @@ impl LowerCtx {
         kind: &VariantArmKind,
         body: &IrExpr,
         h: ValueId,
+        subj: ValueId,
     ) -> Result<(), LowerError> {
         let mark = self.live_heap_handles.len();
-        self.bind_variant_arm(kind, h);
+        self.bind_variant_arm(kind, h, subj);
         self.lower_branch_arm(None, body)?;
         self.drop_arm_locals(mark);
         Ok(())
@@ -1133,16 +1303,19 @@ impl LowerCtx {
         tag: ValueId,
         plans: &[(VariantArmKind, &IrExpr)],
         result_ty: &Ty,
+        subj: ValueId,
     ) -> Option<ValueId> {
         let heap = is_heap_ty(result_ty);
         let ((kind, body), rest) = plans.split_first()?;
         // The last arm, or any Wildcard, is the unconditional else (no tag test).
-        if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard) {
-            return self.lower_variant_arm_value(kind, body, h, result_ty, heap);
+        if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard | VariantArmKind::BindAll { .. }) {
+            return self.lower_variant_arm_value(kind, body, h, result_ty, heap, subj);
         }
         let arm_tag = match kind {
             VariantArmKind::Ctor { tag, .. } => *tag,
-            VariantArmKind::Wildcard => unreachable!("handled above"),
+            VariantArmKind::Wildcard | VariantArmKind::BindAll { .. } => {
+                unreachable!("handled above")
+            }
         };
         let dst = self.fresh_value();
         let tc = self.fresh_value();
@@ -1155,13 +1328,13 @@ impl LowerCtx {
         // versa — otherwise the accounting is path-dependent (the branch-grouped
         // cert `{m|}` rejects it; this keeps the lowering ahead of the checker).
         let outer: Vec<ValueId> = self.live_heap_handles.clone();
-        let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, heap)?;
+        let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, heap, subj)?;
         let consumed_by_then: Vec<ValueId> =
             outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
         let else_marker_at = self.ops.len();
         self.ops.push(Op::Else { val: Some(then_v) });
         let live_after_then: Vec<ValueId> = self.live_heap_handles.clone();
-        let else_v = self.emit_variant_arm_chain(h, tag, rest, result_ty)?;
+        let else_v = self.emit_variant_arm_chain(h, tag, rest, result_ty, subj)?;
         let consumed_by_else: Vec<ValueId> = live_after_then
             .iter()
             .copied()
@@ -1197,9 +1370,10 @@ impl LowerCtx {
         h: ValueId,
         result_ty: &Ty,
         heap: bool,
+        subj: ValueId,
     ) -> Option<ValueId> {
         let mark = self.live_heap_handles.len();
-        self.bind_variant_arm(kind, h);
+        self.bind_variant_arm(kind, h, subj);
         let v = if heap {
             self.lower_heap_result_arm(body, result_ty)
         } else {

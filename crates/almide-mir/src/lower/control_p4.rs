@@ -166,10 +166,18 @@ impl LowerCtx {
             // machinery the fn-tail position already uses (rollback-safe: a shape outside
             // its subset returns None and the caller keeps the wall — never invalid wasm).
             IrExprKind::Match { subject, arms }
-                if crate::lower::is_variant_ty(&subject.ty) =>
+                if crate::lower::is_variant_ty(&subject.ty)
+                    || self.custom_variant_type_name(&subject.ty).is_some() =>
             {
                 let arm_mark = self.live_heap_handles.len();
-                let obj = self.try_lower_variant_value_match(subject, arms, result_ty)?;
+                // Option/Result subjects via the value match; a CUSTOM-variant subject (the
+                // regrouped `err($q)` INNER match over a borrowed variant payload — the
+                // `compute` class) via the tag@slot0 dispatcher, which accepts a heap result
+                // over a BORROWED subject (the recursive-to_string precedent).
+                let obj = match self.try_lower_variant_value_match(subject, arms, result_ty) {
+                    Some(v) => v,
+                    _ => self.try_lower_custom_variant_match(subject, arms, result_ty)?,
+                };
                 self.ops.push(Op::Consume { v: obj });
                 self.drop_arm_locals(arm_mark);
                 Some(obj)

@@ -403,7 +403,29 @@ scale design pieces, NOT linkage gaps:
    stage. Oracle: `{ zebra: 1, apple: 2, mango: 3 }` → `{ apple: 2, mango:
    3, zebra: 1 }` v0-identical.
 
-**NEXT PIECES DIAGNOSED (at 198→188→185→182, 2026-07-11):**
+2r. **Camp-4 opener: merge-based tail Result match SHIPPED (walls 182 → 181,
+   the machinery compounds)**: THREE pieces open the `compute` class
+   (`match safe_div(a,b) { ok(v) => ok(int.to_string(v)), err(DivideByZero)
+   => ok("infinity"), err(e) => err(e) }` — v0-identical end-to-end):
+   (i) `try_lower_result_match_value` — a TAIL-value match over a len-as-tag
+   Result subject with HEAP-result arms: the subject materializes as an
+   owned tracked temp (freed by the scope epilogue AFTER the merge
+   move-out), each arm binds its payload as a BORROW (scalar copy @12 for
+   Ok; the slot-0 HANDLE + param_values for a heap Err), arms construct
+   fresh results via lower_heap_result_arm (which Dups borrowed payloads),
+   and the IfThen/Else/EndIf merge + release-parity sweep carries the value
+   out (the released-merge cert shape heap-result-if already proves).
+   (ii) `VariantArmKind::BindAll` — a BINDER catch-all (`e => err(e)`)
+   matches any tag and binds the WHOLE subject as a borrow (the regrouped
+   fall-through arm; previously "walled for now").
+   (iii) the heap-result-arm Match case now routes CUSTOM-variant subjects
+   (`match $q { DivideByZero => …, e => … }` over the borrowed err payload)
+   through try_lower_custom_variant_match — which already accepted heap
+   results over borrowed subjects (the recursive-to_string precedent).
+   Only 1 corpus fn opened directly (multi-blocker as usual) but the
+   machinery unblocks the 23-bucket's core shape for future compounding.
+
+**NEXT PIECES DIAGNOSED (at 198→188→185→182→181, 2026-07-11):**
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines

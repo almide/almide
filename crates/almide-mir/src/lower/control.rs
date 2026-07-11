@@ -16,6 +16,10 @@ use almide_lang::types::Ty;
 enum VariantArmKind {
     Ctor { tag: i64, binds: Vec<(usize, VarId, bool)> },
     Wildcard,
+    /// A BINDER catch-all (`e => err(e)` — the regrouped compute fall-through): matches any
+    /// tag and binds the WHOLE subject value as a BORROW (`param_values` — a consuming
+    /// re-use Dups, exactly the borrowed-param ctor discipline).
+    BindAll { var: VarId },
 }
 
 impl LowerCtx {

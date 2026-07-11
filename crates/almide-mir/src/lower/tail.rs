@@ -780,6 +780,12 @@ impl LowerCtx {
                             return Ok(Some(dst));
                         }
                     }
+                    // A len-as-tag RESULT subject with HEAP-result arms — the merge-based
+                    // value match (the Camp-4 `compute` opener; borrowed payload binds, the
+                    // subject temp freed by the scope epilogue after the merge move-out).
+                    if let Some(dst) = self.try_lower_result_match_value(subject, arms, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
                     if let Some(if_expr) = self.desugar_match_to_if(subject, arms, &tail.ty) {
                         if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
                             if let Some(dst) =
