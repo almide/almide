@@ -72,7 +72,7 @@ jobs:
       # broken opam root is never cached.
       - name: Restore opam root (OCaml + Rocq)
         id: opam-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.opam
           key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq9-${{ env.OPAM_CACHE_VERSION }}
@@ -137,7 +137,7 @@ jobs:
       # the cache always holds a known-good toolchain.
       - name: Save opam root (OCaml + Rocq)
         if: success() && steps.opam-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.opam
           key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq9-${{ env.OPAM_CACHE_VERSION }}

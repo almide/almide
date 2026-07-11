@@ -40,7 +40,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -81,7 +81,7 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Cache wasmtime tarball
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: wasmtime-v42.0.1-x86_64-linux.tar.xz
           key: wasmtime-v42.0.1-x86_64-linux
@@ -164,7 +164,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -198,7 +198,7 @@ jobs:
         run: chmod +x /tmp/almide-bin/almide
 
       - name: Cache wasmtime tarball
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: wasmtime-v42.0.1-x86_64-linux.tar.xz
           key: wasmtime-v42.0.1-x86_64-linux
@@ -256,7 +256,7 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -267,7 +267,7 @@ jobs:
           restore-keys: wasmgen-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Cache wasmtime tarball
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: wasmtime-v42.0.1-x86_64-linux.tar.xz
           key: wasmtime-v42.0.1-x86_64-linux
@@ -320,7 +320,7 @@ jobs:
           echo "✓ 0 sorry in Lean proofs"
 
       - name: Cache elan + Lean toolchain
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.elan
           key: elan-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain') }}
@@ -419,7 +419,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
