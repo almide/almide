@@ -649,14 +649,72 @@ cargo test -q
 
 ## Exit criteria
 
-- [ ] Every regex.* corpus call site either EXECUTES v0-byte-identically or
-      walls on a RECORDED unsupported feature (list the residue here).
-- [ ] Engine edge-case suite green (greediness, empty match, anchors, split
+- [x] Every regex.* corpus call site either EXECUTES v0-byte-identically or
+      walls on a RECORDED unsupported feature (regex family opened 2026-07-10).
+- [x] Engine edge-case suite green (greediness, empty match, anchors, split
       empties — the scouted list), on BOTH targets.
-- [ ] json.root/field/index + bytes.append_u8 buckets opened or their real
-      blocker recorded.
+- [x] json.root/field/index + bytes.append_u8 buckets opened or their real
+      blocker recorded (json_path self-hosted at 2z, walls 170→166).
 - [ ] Histogram deltas recorded; corpus PCC (binary + kernel oracle) ACCEPT
-      throughout; pushed at all-green; Trust Spine green.
+      throughout; pushed at all-green; Trust Spine green (ongoing per stage).
+
+## ENDGAME: walled-real → 0 (set 2026-07-11, at 166)
+
+The target is ZERO — no allowlist, no "permanent wall" netting. Every corpus
+function lowers, witnesses, and kernel-ACCEPTs. The 166 decompose into FIVE
+campaigns (wall LINES below; fns often multi-blocker so campaigns compound):
+
+**A. Call-argument materialization (~35 lines — the biggest mechanical seam).**
+string-interp-in-arg (7), List arg (7), ResultErr arg (5), concat-in-arg (3),
+`??`-in-arg (3+1), Fan arg (4), EmptyMap arg (2), method/computed-in-arg (4),
+Match-in-arg (1), OptionSome arg (1), heap-result-other-in-arg (2). ONE
+systematic fix: generalize the ANF lift (`desugar_callarg_heap_if` precedent)
+— EVERY non-trivial heap arg lifts to a let-temp, then the existing bind
+machinery lowers it. Work the desugar once, verify per-shape.
+
+**B. Let-bound / returned heap-result forms (~25 lines).** let-bound variant
+match (5), tail variant match (4), heap-result match remainder (8: multi-arm
+list patterns `describe`, fieldless-ctor tuple columns `r5 classify` — needs a
+tag-test IR node or a ctor-eq desugar, depth-2 ctor patterns `pick`,
+branch_lift synthetics), let-bound match/if with the scope-end-drop question
+(2+1: the merged dst needs a drop-class registration — design the
+"merged-result drop class" once), heap Record return (3), move-out other (3).
+
+**C. Loop control flow (6 lines).** while/for-in with break/continue: real
+loop lowering with exit branches (wasm `br` out of the loop block; the cert
+stays a flat fold if the loop body remains per-iteration balanced and the
+break edge carries no live heap — scout the TCO rewrite precedent).
+
+**D. Effectful/impure module calls (~40 lines) — TWO distinct halves.**
+- D1 PURE-ON-IMPURE (open WITHOUT capability machinery, the testing_assert
+  precedent): http.url_decode(4)/response(3)/json(1)/redirect(1)/
+  with_headers(1) — pure builders/codecs on the blanket-impure http module
+  (the opaque-nominal HttpResponse migrates via the SELF-HOST REP table, the
+  JsonPath precedent); datetime.parse_iso (3); zlib.compress/level/gzip/
+  deflate (6 — the DEFLATE port, pure and deterministic); testing.
+  assert_throws (2). ≈ 22 lines.
+- D2 GENUINELY EFFECTFUL: random.shuffle/choice (7), process.* (7), fs.stat
+  (3), env.* (3), http.serve (1), fan.timeout (2). The capability system
+  already PROVES the bound (caps witness = one of the three kernel-proven
+  properties); the missing brick is LOWERING an effectful call with its
+  declared capability to the WASI-shim import — v1 then matches v0-WASM
+  behavior exactly (including v0-wasm's own error paths where native-only).
+  Design piece: "capability-declared effectful call brick".
+
+**E. Singles & bugs (~15 lines).** module-level globals with computed inits
+(5 — a run-once init-fn brick); HOF opaque fn-value args (5: list.map/
+option.flat_map/fan.map/filter_map/or_else over captured closures — the
+funcref closure-table machinery from 2x extends); ADT brick 5 recursive ctor
+heap fields (3); RawPtr Repr (2 — FFI decls); `use of unbound var` (2 —
+smells like a real lowering BUG: diagnose first, these may be latent
+miscompiles being walled honestly); LitInt heap bind (2); effect-fn error
+model non-`ok(x)` pattern (1); never-err lift residue.
+
+Waypoints: **<150** (A opened), **<120** (B+C), **<100 二桁** (D1), **<60**
+(D2 design lands), **0** (E swept + loop-until-dry re-classify). Every stage
+keeps the invariant ladder: v0 byte parity probes → mir tests → spec suite →
+gate.sh → corpus-wall.sh (PCC + kernel ACCEPT) → by-name diff (zero
+newly-walled) → push at green.
 
 ## What NOT to do
 
