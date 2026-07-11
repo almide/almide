@@ -455,7 +455,23 @@ scale design pieces, NOT linkage gaps:
    gm1–gm2 v0-identical (call subjects evaluated once, final-arm binds,
    let-bound position).
 
-**NEXT PIECES DIAGNOSED (at 198→188→185→182→181→179→177, 2026-07-11):**
+2u. **Tuple-subject 2-arm variant match desugar SHIPPED (walls 177 → 176)**:
+   `desugar_tuple_variant_match` (desugar_match.rs) — `match (s, 0) { (Full(x),
+   _) => …, (Empty, _) => … }` rewrites to per-component temps (Var components
+   used direct — keeps a borrowed param BORROWED for the brick-4 heap-result
+   gate) + NESTED single-subject matches; the catch-all body duplicates into
+   each conditional component's wildcard arm (branch-exclusive; VarId
+   uniqueness guarded by `introduces_binder` when >1 conditional component;
+   the last arm must be `_`/non-binding — frontend exhaustiveness). Opened
+   `payload` (probe tv1: payload + zip_first shapes v0-identical on v0; tv2
+   isolates the remaining gap). REMAINING GAP (zip_first): a NESTED
+   heap-payload Option match INSIDE an arm body (`match a { some(x) => match
+   b { some(y) => …, _ => none }, _ => none }`) — the om2 single-match path
+   (heap-payload Some at tail) does not fire inside `lower_heap_result_arm`
+   arm-body context. r5 `classify` (3 arms) needs the arm-matrix
+   generalization (Maranget-style specialization) — a later brick.
+
+**NEXT PIECES DIAGNOSED (at 198→188→185→182→181→179→177→176, 2026-07-11):**
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines
