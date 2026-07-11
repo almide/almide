@@ -297,6 +297,26 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // `some((i, s))` — an `(Int, String)` TUPLE payload (the zip_first merge arm:
+            // `(some(a), some(b)) => some((a, b))` after the tuple-variant desugar). The fresh
+            // owned tuple (`lower_owned_heap_field` — literal construct or borrowed-Var Dup)
+            // moves into the 1-element Option whose scope drop is the RECURSIVE
+            // `$__drop_list_int_str` (`materialize_opt_int_str_some`, which Consumes the piece)
+            // — the same shape as try_lower_option_ctor's `list.find` case. Per-arm `"im"`
+            // balance: the Option `Alloc` (`i`) + the move-out `Consume` (`m`).
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.ty,
+                    Ty::Tuple(tys) if tys.len() == 2
+                        && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let repr = repr_of(result_ty).ok()?;
+                let piece = self.lower_owned_heap_field(expr)?;
+                let obj = self.materialize_opt_int_str_some(piece, repr);
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             IrExprKind::OptionSome { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(result_ty).ok()?;
                 // The owned String payload: a let-bound Var (its handle), or a direct user-call

@@ -471,7 +471,17 @@ scale design pieces, NOT linkage gaps:
    arm-body context. r5 `classify` (3 arms) needs the arm-matrix
    generalization (Maranget-style specialization) — a later brick.
 
-**NEXT PIECES DIAGNOSED (at 198→188→185→182→181→179→177→176, 2026-07-11):**
+2v. **(Int,String)-tuple Some payload in arm context SHIPPED (walls 176 → 175)**:
+   `lower_heap_result_arm` gains an `OptionSome` case for an `(Int, String)`
+   TUPLE payload (`some((a, b))` — the zip_first merge arm after the
+   tuple-variant desugar): `lower_owned_heap_field` constructs/Dups the tuple,
+   `materialize_opt_int_str_some` wraps it (recursive `$__drop_list_int_str`
+   drop, Consumes the piece), per-arm `im` balance. Opened
+   `zip_first__Int_String` — the 2u + 2v pieces compose end-to-end (tv1/tv2
+   v0-identical). Known non-corpus gap: a SCALAR-tuple Some payload
+   (`some((Int, Int))`) in arm context (probe tv3 nested_scalar).
+
+**NEXT PIECES DIAGNOSED (at 198→188→185→182→181→179→177→176→175, 2026-07-11):**
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines
