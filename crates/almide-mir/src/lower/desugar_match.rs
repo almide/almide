@@ -1027,3 +1027,167 @@ pub fn desugar_tuple_variant_match(body: &IrExpr) -> Option<IrExpr> {
     v.visit_expr_mut(&mut out);
     v.changed.then_some(out)
 }
+
+/// N-ARM tuple-of-lists match whose tests are all BINDLESS `[]` patterns
+/// (`match (a, b) { ([], []) => "both", ([], _) => "a", (_, []) => "b", _ => "none" }`
+/// — the regression `classify` shape): specialize on the FIRST conditional column
+/// recursively (a mini decision tree — trivial here because `[]` binds nothing):
+/// THEN keeps every row whose column accepts `[]` (the `[]` rows and the `_` rows),
+/// ELSE keeps only the `_` rows; rows after the first all-`_` row prune (first-match).
+/// Each level emits a 2-arm `[] / _` match over ONE hoisted component — exactly the
+/// `try_lower_list_match_value` subset. A body on a row with any `_` column can
+/// appear in BOTH branches (duplication is branch-exclusive at runtime and
+/// desugar-before-both keeps the count gate exact); such a body must not introduce
+/// binders (VarId uniqueness — [`introduces_binder`]).
+pub fn desugar_tuple_empty_list_match(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use almide_ir::IrPattern;
+    #[derive(Clone, Copy, PartialEq)]
+    enum Cp {
+        Empty,
+        Any,
+    }
+    fn build(
+        rows: &[(Vec<Cp>, IrExpr)],
+        refs: &[IrExpr],
+        cols: &[usize],
+        out_ty: &Ty,
+        span: &Option<almide_lang::span::Span>,
+    ) -> IrExpr {
+        // First-match pruning: rows after the first all-`_` row are unreachable.
+        let mut live: Vec<&(Vec<Cp>, IrExpr)> = Vec::new();
+        for r in rows {
+            live.push(r);
+            if cols.iter().all(|&j| r.0[j] == Cp::Any) {
+                break;
+            }
+        }
+        let first = live[0];
+        let Some(j) = cols.iter().copied().find(|&j| first.0[j] == Cp::Empty) else {
+            return first.1.clone();
+        };
+        let rest_cols: Vec<usize> = cols.iter().copied().filter(|&c| c != j).collect();
+        let then_rows: Vec<(Vec<Cp>, IrExpr)> = live.iter().map(|r| (*r).clone()).collect();
+        let else_rows: Vec<(Vec<Cp>, IrExpr)> = live
+            .iter()
+            .filter(|r| r.0[j] == Cp::Any)
+            .map(|r| (*r).clone())
+            .collect();
+        let then_e = build(&then_rows, refs, &rest_cols, out_ty, span);
+        let else_e = build(&else_rows, refs, &rest_cols, out_ty, span);
+        IrExpr {
+            kind: IrExprKind::Match {
+                subject: Box::new(refs[j].clone()),
+                arms: vec![
+                    almide_ir::IrMatchArm {
+                        pattern: IrPattern::List { elements: Vec::new() },
+                        guard: Option::None,
+                        body: then_e,
+                    },
+                    almide_ir::IrMatchArm {
+                        pattern: IrPattern::Wildcard,
+                        guard: Option::None,
+                        body: else_e,
+                    },
+                ],
+            },
+            ty: out_ty.clone(),
+            span: span.clone(),
+            def_id: None,
+        }
+    }
+    struct V {
+        next: u32,
+        changed: bool,
+    }
+    impl IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Match { subject, arms } = &e.kind else { return };
+            let IrExprKind::Tuple { elements } = &subject.kind else { return };
+            let k = elements.len();
+            if k < 2 || arms.len() < 3 || !is_heap_ty(&e.ty) || arms.iter().any(|a| a.guard.is_some())
+            {
+                return;
+            }
+            let (last, init) = arms.split_last().unwrap();
+            if !matches!(last.pattern, IrPattern::Wildcard) {
+                return;
+            }
+            let mut rows: Vec<(Vec<Cp>, IrExpr)> = Vec::new();
+            for a in init {
+                let IrPattern::Tuple { elements: pats } = &a.pattern else { return };
+                if pats.len() != k {
+                    return;
+                }
+                let mut cps = Vec::with_capacity(k);
+                let mut cond_n = 0usize;
+                for p in pats {
+                    match p {
+                        IrPattern::List { elements } if elements.is_empty() => {
+                            cps.push(Cp::Empty);
+                            cond_n += 1;
+                        }
+                        IrPattern::Wildcard => cps.push(Cp::Any),
+                        _ => return,
+                    }
+                }
+                if cond_n == 0 {
+                    return;
+                }
+                rows.push((cps, a.body.clone()));
+            }
+            rows.push((vec![Cp::Any; k], last.body.clone()));
+            // A row with an `_` column can land in both spec branches — its body
+            // duplicates, so it must not introduce binders.
+            for (cps, b) in &rows {
+                if cps.iter().any(|c| *c == Cp::Any) && introduces_binder(b) {
+                    return;
+                }
+            }
+            let span = e.span.clone();
+            let mut stmts: Vec<IrStmt> = Vec::new();
+            let mut refs: Vec<IrExpr> = Vec::new();
+            for c in elements {
+                if matches!(c.kind, IrExprKind::Var { .. }) {
+                    refs.push(c.clone());
+                } else {
+                    let t = VarId(self.next);
+                    self.next += 1;
+                    stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: t,
+                            ty: c.ty.clone(),
+                            value: c.clone(),
+                            mutability: almide_ir::Mutability::Let,
+                        },
+                        span: span.clone(),
+                    });
+                    refs.push(IrExpr {
+                        kind: IrExprKind::Var { id: t },
+                        ty: c.ty.clone(),
+                        span: span.clone(),
+                        def_id: None,
+                    });
+                }
+            }
+            let cols: Vec<usize> = (0..k).collect();
+            let tree = build(&rows, &refs, &cols, &e.ty, &span);
+            *e = if stmts.is_empty() {
+                tree
+            } else {
+                IrExpr {
+                    kind: IrExprKind::Block { stmts, expr: Some(Box::new(tree)) },
+                    ty: e.ty.clone(),
+                    span,
+                    def_id: e.def_id,
+                }
+            };
+            self.changed = true;
+        }
+    }
+    let mut v = V { next: max_var_id(body) + 1, changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    v.changed.then_some(out)
+}

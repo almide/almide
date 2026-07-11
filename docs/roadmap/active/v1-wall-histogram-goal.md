@@ -505,7 +505,23 @@ scale design pieces, NOT linkage gaps:
    v0-identical) AND `option_chain__Int_Int` (`some(v) => f(v)`). The
    heap-result-match bucket is now 9.
 
-**NEXT PIECES DIAGNOSED (at …→176→175→173→171, 2026-07-11):**
+2y. **Bindless `[]`-column tuple specialization SHIPPED (walls 171 → 170)**:
+   `desugar_tuple_empty_list_match` — an N-arm tuple-of-lists match whose tests
+   are all bindless `[]` patterns (`([], []) / ([], _) / (_, []) / _` — the
+   regression `classify` shape) specializes on the first conditional column
+   recursively (mini decision tree, trivial because `[]` binds nothing): each
+   level is a 2-arm `[] / _` match over one hoisted component — exactly the
+   `try_lower_list_match_value` subset. First-match pruning after an all-`_`
+   row; duplicated bodies (a row with an `_` column reaches both branches)
+   must not introduce binders. PLUS: `lower_heap_result_arm`'s Match case now
+   also tries `try_lower_list_match_value` (the nested inner match — same
+   no-extra-Consume convention as the recursive Match case). Probe cl1 all-4
+   branches v0-identical. Opened regression `classify`; heap-result-match
+   bucket now 8 (r5 classify needs fieldless-CTOR columns — tag reads have no
+   IR-level test node, a later brick; `describe` needs the len-group +
+   element-load desugar; `pick`/nested_boxed need depth-2 ctor patterns).
+
+**NEXT PIECES DIAGNOSED (at …→176→175→173→171→170, 2026-07-11):**
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines

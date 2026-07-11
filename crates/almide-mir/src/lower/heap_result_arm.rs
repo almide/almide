@@ -697,6 +697,15 @@ impl LowerCtx {
                         return Some(dst);
                     }
                 }
+                // A nested LIST `[] / catch-all` match arm (the tuple-of-lists classify
+                // shape after desugar_tuple_empty_list_match): the same merge-based
+                // machinery the tail uses — its EndIf merge moves the value out (no
+                // extra Consume, like the recursive Match case below); the Dup'd
+                // subject temp frees within the arm (`drop_arm_locals`).
+                if let Some(dst) = self.try_lower_list_match_value(subject, arms, result_ty) {
+                    self.drop_arm_locals(arm_mark);
+                    return Some(dst);
+                }
                 if let Some(if_expr) = self.desugar_match_to_if(subject, arms, result_ty) {
                     if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
                         if let Some(dst) =
