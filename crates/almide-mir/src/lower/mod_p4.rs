@@ -249,6 +249,7 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
             func,
             "as_int" | "as_float" | "as_bool" | "as_string" | "get" | "as_array"
                 | "get_string" | "get_int" | "get_float" | "get_bool" | "get_array"
+                | "get_path"
         ),
         _ => false,
     }

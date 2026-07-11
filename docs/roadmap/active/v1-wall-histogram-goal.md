@@ -521,8 +521,21 @@ scale design pieces, NOT linkage gaps:
    IR-level test node, a later brick; `describe` needs the len-group +
    element-load desugar; `pick`/nested_boxed need depth-2 ctor patterns).
 
-**NEXT PIECES DIAGNOSED (at …→176→175→173→171→170, 2026-07-11):**
-- **json_path family (4-5 walls, DESIGN READY)**: the untracked-subject bucket's
+2z. **json_path self-host SHIPPED (walls 170 → 166)**: `stdlib/json_path.almd`
+   per the design below — rep List[String] ("f<name>"/"i<int>"), get_path over
+   value.get / value.as_array / GENERIC list.get (typed variants like
+   list.get_str are v1-lowering names, NOT frontend fns — the almd must use
+   the generic and let type-directed routing pick the variant; `json.*` needs
+   an import so value.* is the self-host-internal spelling). Registry maps
+   json.root/field/index/get_path; "json_path" in PURE_MODULES; "get_path" in
+   the json tracked-subject arm; the eraser's new SELF-HOST REP table erases
+   `Named("JsonPath")` → List[String] (guarded on the program not declaring
+   its own JsonPath). Probe jp1: 8 cases v0-identical (field / nested / index /
+   NEGATIVE index wraps len+i / OOB / missing key / index-on-non-array / root
+   identity). Opened all 4 json_path_test fns. p_set (set_path) remains.
+
+**NEXT PIECES DIAGNOSED (at …→175→173→171→170→166, 2026-07-11):**
+- **json_path family (REMAINING: p_set / set_path)**: the untracked-subject bucket's
   biggest coherent sub-family (json_path_test ×4 + json_path_edges p_set).
   `json.root/field/index/get_path` are Rust intrinsics over the opaque nominal
   `JsonPath` (undeclared in the checker — just `Ty::Named("JsonPath", [])`

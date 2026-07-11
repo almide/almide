@@ -83,6 +83,26 @@ pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
     for m in &program.modules {
         collect(&m.type_decls, &mut map);
     }
+    // SELF-HOST REP table: opaque STDLIB nominals whose v1 self-host owns the
+    // representation (`stdlib/json_path.almd` — JsonPath = a List[String] of
+    // segments). Publishing the rep here makes every user-side bind/param of the
+    // opaque type route the CORRECT drop (heap_elem_list str). Only when the
+    // program does not declare its own type of the same name.
+    let declared: std::collections::HashSet<&str> = program
+        .type_decls
+        .iter()
+        .map(|td| td.name.as_str())
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter().map(|td| td.name.as_str())))
+        .collect();
+    if !declared.contains("JsonPath") {
+        map.insert(
+            "JsonPath".to_string(),
+            Ty::Applied(
+                almide_lang::types::constructor::TypeConstructorId::List,
+                vec![Ty::String],
+            ),
+        );
+    }
     if map.is_empty() {
         return;
     }
