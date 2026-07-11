@@ -921,7 +921,10 @@ impl LowerCtx {
 
 include!("control_p2.rs");
 include!("control_p3.rs");
-include!("control_p4.rs");
+include!("heap_result_arm.rs");
+include!("result_materialize.rs");
+include!("result_ctors.rs");
+include!("scalar_for.rs");
 // The defunc HOF family (formerly one 3.5k-line control_p5.rs), split by concern:
 include!("defunc_hof.rs");
 include!("defunc_fold.rs");
