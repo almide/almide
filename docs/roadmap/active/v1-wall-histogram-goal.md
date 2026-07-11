@@ -716,6 +716,23 @@ keeps the invariant ladder: v0 byte parity probes → mir tests → spec suite �
 gate.sh → corpus-wall.sh (PCC + kernel ACCEPT) → by-name diff (zero
 newly-walled) → push at green.
 
+E1. **unbound-var diagnosis + cross-module toplet fixes SHIPPED (166 → 163)**:
+   the two "use of unbound var" walls were NOT miscompiles (honest walls) but
+   lowering gaps in the cross-module top-let machinery (#486/#502 shapes,
+   probe xm1): (i) `lower_bind`'s heap Var-ALIAS arm used strict `value_for`
+   — now `value_or_global`, so `let x = toplib.SYSTEM` materializes the
+   global's cached const-init copy and Dups it; (ii) a RECORD-literal heap
+   global (`let CFG = Cfg { name: "c" }`) materializes through
+   `try_lower_record_construct` (allocs + stores, zero CallFn — the count
+   gate stays exact) + `materialized_aggregates` registration; (iii) the
+   Var-alias Dup PROPAGATES `materialized_aggregates` (the alias denotes the
+   same block), so `{ ...x, override }` spreads over rebound globals read
+   real slots. Mid-diagnosis a WRONG-BYTES intermediate (a spread over an
+   unregistered-materialized base fell to Opaque and printed empty instead of
+   walling) confirmed the register-then-spread order matters — the shipped
+   form gates on registration. Opened both #486/#502 tests + the record
+   top-let member-access test.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

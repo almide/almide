@@ -259,13 +259,22 @@ impl LowerCtx {
         match &value.kind {
             // Alias: `var b = a` — b is a NEW handle denoting the SAME heap
             // object as a, acquiring its own owned reference (the single
-            // fresh-vs-alias decision).
+            // fresh-vs-alias decision). `value_or_global` (not `value_for`):
+            // `let x = toplib.SYSTEM` aliases a MODULE-LEVEL global — the global
+            // materializes its cached fresh owned copy (const-init only, zero
+            // calls injected), and the Dup below co-owns it (#486 bind shape).
             IrExprKind::Var { id } => {
-                let src = self.value_for(*id)?;
+                let src = self.value_or_global(*id)?;
                 let dst = self.fresh_value();
                 self.value_of.insert(var, dst);
                 self.ops.push(Op::Dup { dst, src });
                 self.live_heap_handles.push(dst);
+                // The alias denotes the SAME block: a materialized aggregate/option/
+                // result source keeps those properties through the Dup (`let x =
+                // toplib.CFG; { ...x, name: "y" }` — the #502 rebound spread base).
+                if self.materialized_aggregates.contains(&src) {
+                    self.materialized_aggregates.insert(dst);
+                }
                 Ok(())
             }
             // A fresh heap value (literal container / string / Option·Result

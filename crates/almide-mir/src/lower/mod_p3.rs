@@ -771,7 +771,7 @@ impl LowerCtx {
             // count never sees (mir>ir = a false caps de-taint), so it keeps WALLING (no regression).
             // The fresh owned copy is dropped at scope end like any literal (cert: one `i` + one `d`);
             // `value_of[var]` caches it so repeated references in the SAME function reuse the one copy.
-            if let Some(init) = self.global_inits.get(&var) {
+            if let Some(init) = self.global_inits.get(&var).cloned() {
                 // A global whose init is ANOTHER global (`let DIRECT = letlib.GREETING` —
                 // the #632 alias-let): recurse through value_or_global on the SOURCE id (a
                 // fresh owned copy of ITS const init, cached + dropped at scope end); this
@@ -786,7 +786,7 @@ impl LowerCtx {
                         return Ok(v);
                     }
                 }
-                if let Some(const_init) = const_global_init(init) {
+                if let Some(const_init) = const_global_init(&init) {
                     let repr = repr_of(&ty)?;
                     let dst = self.fresh_value();
                     self.ops.push(Op::Alloc { dst, repr, init: const_init });
@@ -805,10 +805,29 @@ impl LowerCtx {
                 // builder registers the right recursive drop set (`heap_elem_lists` →
                 // `DropListStr`); we add it to `live_heap_handles` so the fresh owned copy is
                 // freed at scope end (cert one `i` + one `d`), the real module global untouched.
-                if is_pure_literal_list(init) {
-                    let init = init.clone();
+                if is_pure_literal_list(&init) {
                     if let Some(dst) = self.try_lower_str_list_literal(&init) {
                         self.live_heap_handles.push(dst);
+                        self.value_of.insert(var, dst);
+                        return Ok(dst);
+                    }
+                }
+                // A RECORD-literal heap global (`let CFG = Cfg { name: "c" }` — the #502
+                // spread/member base): call-free fields construct through the SAME builder
+                // a local record `let` uses (`try_lower_record_construct` — allocs + stores
+                // ONLY, zero `CallFn`, so the gate's `mir == ir` count stays exact), which
+                // registers the record's own drop route. The fresh owned copy frees at
+                // scope end; the real module global is untouched.
+                if matches!(init.kind, IrExprKind::Record { .. })
+                    && !crate::lower::expr_contains_call(&init)
+                {
+                    if let Some(dst) = self.try_lower_record_construct(&init) {
+                        if !self.live_heap_handles.contains(&dst) {
+                            self.live_heap_handles.push(dst);
+                        }
+                        // The copy's slots are REAL — register it so member reads and
+                        // `{ ...global, override }` spreads take the materialized path.
+                        self.materialized_aggregates.insert(dst);
                         self.value_of.insert(var, dst);
                         return Ok(dst);
                     }
