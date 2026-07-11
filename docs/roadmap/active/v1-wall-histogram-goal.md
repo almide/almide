@@ -496,7 +496,16 @@ scale design pieces, NOT linkage gaps:
    test fn (probe uh1 v0-identical). This is the miniature of the
    http.response opaque-nominal migration.
 
-**NEXT PIECES DIAGNOSED (at …→176→175→173, 2026-07-11):**
+2x. **Funcref call arm SHIPPED (walls 173 → 171)**: `lower_heap_result_arm`
+   gains a Computed-callee case for a KNOWN funcref (`closure_value_of` — a
+   fn-typed param / lifted lambda): `emit_closure_call` + Consume +
+   drop_arm_locals, the tail-position machinery (tail.rs) ported per-arm with
+   the Named-call arm's `im` balance. Opened `tree_fold__String_String`
+   (recursive self-calls as merge args + funcref arms — probe tf1
+   v0-identical) AND `option_chain__Int_Int` (`some(v) => f(v)`). The
+   heap-result-match bucket is now 9.
+
+**NEXT PIECES DIAGNOSED (at …→176→175→173→171, 2026-07-11):**
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines

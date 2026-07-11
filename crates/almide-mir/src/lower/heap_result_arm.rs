@@ -265,6 +265,26 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // A heap-result call through a KNOWN funcref arm (`Leaf(v) => leaf(v)`,
+            // `Node(l, r) => merge(…)` — tree_fold's arms call fn-typed PARAMS): execute
+            // via the closure-table call, the tail-position machinery ported per-arm
+            // (tail.rs's Computed case). Same per-arm `"im"` balance as the Named-call
+            // arm: the indirect call returns a FRESH owned heap value (`i`), the arm's
+            // `Consume` moves it out (`m`); arg temps free within the arm. An UNKNOWN
+            // callee falls through to the C1 direct-lambda inline case below.
+            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+                if is_heap_ty(&arm.ty) && self.closure_value_of(callee).is_some() =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let blk = self.closure_value_of(callee)?;
+                let lowered = self.lower_call_args(args).ok()?;
+                let obj = self.fresh_value();
+                let repr = repr_of(result_ty).ok()?;
+                self.emit_closure_call(blk, Some(obj), lowered, Some(repr));
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // A direct Option ctor arm (`if c then Some(x*2) else None` — the filter_map / map
             // closure body): materialize the 0-or-1-element Option block + Consume (move-out)
             // — the SAME per-arm `"im"` balance as a literal arm (init-agnostic `Alloc` = `i`,
