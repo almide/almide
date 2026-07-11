@@ -80,24 +80,30 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v5
+        with:
+          path: wasmtime-v42.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v42.0.1-x86_64-linux
       - name: Install wasmtime
         # Required by the cross-target gate (wasm_cross_target_spec) and the
         # wasm_runtime_test capture tests — without it they skip, so the
         # cross-target ratchet would not actually enforce here.
         run: |
-          # Pinned (not "latest"): the unauthenticated releases/latest API call is
-          # rate-limited per runner IP and intermittently returns an error body,
-          # yielding an empty VERSION and a garbage download (hit 2026-06-06).
-          # A pinned toolchain is also reproducible. Bump deliberately.
+          # Pinned + cached + retried. On a cache hit the tarball is already here,
+          # so the per-IP-rate-limited release download runs at most once per key
+          # (the uncached variant burned all 5 retries on a 429 storm, 2026-07-11).
+          # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
+          # "not a tar archive". Bump VERSION and the cache key together.
           VERSION=v42.0.1
-          # Retry with `-f` (fail on HTTP error, e.g. a 403 rate-limit body) so a
-          # transient per-IP rate-limit on the release asset is retried, not saved
-          # as a 92-byte "not a tar archive".
-          for i in 1 2 3 4 5; do
-            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" && break
-            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f wasmtime-*.tar.xz
-          done
-          tar -xf wasmtime-*.tar.xz
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
 

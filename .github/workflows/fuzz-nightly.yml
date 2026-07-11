@@ -64,15 +64,27 @@ jobs:
         working-directory: tools/xtarget-fuzz
         run: cargo build --release
 
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v5
+        with:
+          path: wasmtime-v42.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v42.0.1-x86_64-linux
       - name: Install wasmtime
-        # Pinned to an exact release rather than the `releases/latest` API:
-        # the unauthenticated API call is rate-limited and broke CI when it
-        # returned a 403 instead of a tag. A fixed version is also more
-        # reproducible for the differential gate (matches develop's ci.yml).
+        # Pinned + cached + retried (matches develop's ci.yml): the exact-release
+        # asset download is per-IP rate-limited (a 429 storm burned all retries
+        # on 2026-07-11); on a cache hit it never downloads at all. `-f` turns a
+        # rate-limit body into a retry instead of a garbage tarball. Bump VERSION
+        # and the cache key together.
         run: |
           VERSION=v42.0.1
-          curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          tar -xf wasmtime-*.tar.xz
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
 
