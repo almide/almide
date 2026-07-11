@@ -481,16 +481,22 @@ scale design pieces, NOT linkage gaps:
    v0-identical). Known non-corpus gap: a SCALAR-tuple Some payload
    (`some((Int, Int))`) in arm context (probe tv3 nested_scalar).
 
-**NEXT PIECES DIAGNOSED (at 198→188→185→182→181→179→177→176→175, 2026-07-11):**
-- **transparent newtype (`mod type SafeHtml = String`) — probe uh1**: BOTH sides
-  missing, not just the match: the CTOR call `SafeHtml(s)` lowers as an opaque
-  Named call to a nonexistent `$SafeHtml` (unlinked wall), and `unwrap_html`'s
-  single-ctor match declines. Design: treat the newtype TRANSPARENTLY —
-  `repr_of(Named)` delegates to the inner ty, `SafeHtml(x)` lowers as the
-  payload itself (Dup-if-borrowed move), the 1-arm match binds `s` = subject
-  (borrow; move-out auto-Dups). Same design piece as the http.response opaque
-  nominal migration, in miniature — opens `unwrap_html` (+ `escape`/
-  `wrap_in_div` callers if they are also walled).
+2w. **Transparent-newtype ERASURE SHIPPED (walls 175 → 173)**:
+   `erase_transparent_newtypes` (lower/newtype_erase.rs) — a whole-program
+   pre-lowering pass (post-ir_link, in BOTH pipeline + classify =
+   desugar-before-both) erasing non-generic `Alias` type decls: `Ty::Named`
+   tags substitute to the inner ty everywhere (exprs, params/ret, binds,
+   patterns, lambda params, top-lets, OTHER type decls' fields; alias chains
+   fixpoint-resolved), the 1-arg ctor CALL becomes its payload expr, the
+   1-arg ctor PATTERN becomes its inner pattern, and a match reduced to one
+   bare-Bind arm folds to `{ let s = subject; body }`. Sound because the
+   frontend already rejects every wrapper-observing op (direct print,
+   arithmetic) — by IR time the newtype is purely nominal, exactly v0's
+   `#[repr(transparent)]` story. Opened `unwrap_html` + the opaque-in-list
+   test fn (probe uh1 v0-identical). This is the miniature of the
+   http.response opaque-nominal migration.
+
+**NEXT PIECES DIAGNOSED (at …→176→175→173, 2026-07-11):**
 - **fan.settle / fan.any / fan.timeout over literal thunk lists (7)**: extend
   the `desugar_fan_race` inline pattern (mod_p6 ~3677) — on wasm the fan
   combinators are DETERMINISTIC (sequential), so `settle([t0,t1,…])` inlines

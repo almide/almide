@@ -745,6 +745,9 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         optimize::optimize_program(&mut ir);
         mono::monomorphize(&mut ir);
         ir_link::ir_link(&mut ir);
+        // Transparent-newtype erasure LAST (post-link, pre-lowering) — the SAME pass the
+        // pipeline runs, so the caps mir == ir count sees the erased tree on both sides.
+        almide_mir::lower::erase_transparent_newtypes(&mut ir);
         Ok(ir)
     }));
     match result {

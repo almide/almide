@@ -796,6 +796,7 @@ mod tests;
 
 include!("drop_sources.rs");
 include!("repr_sources.rs");
+include!("newtype_erase.rs");
 include!("mod_p2.rs");
 include!("mod_p3.rs");
 include!("mod_p4.rs");
