@@ -922,7 +922,13 @@ impl LowerCtx {
 include!("control_p2.rs");
 include!("control_p3.rs");
 include!("control_p4.rs");
-include!("control_p5.rs");
+// The defunc HOF family (formerly one 3.5k-line control_p5.rs), split by concern:
+include!("defunc_hof.rs");
+include!("defunc_fold.rs");
+include!("defunc_str_acc.rs");
+include!("defunc_find.rs");
+include!("defunc_tuple_fold.rs");
+include!("control_while.rs");
 
 /// Is `subject` a call to a SELF-HOST Option-returning stdlib fn? Such a call returns a
 /// real MATERIALIZED 0-or-1-element-list Option (its impl returns through `Some(scalar)`/
