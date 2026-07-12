@@ -971,6 +971,19 @@ block the caller's chain compensation re-drops. NEXT: dump dn4's MIR
 the skip-arm drop imbalance. Ship parse_iso only after this is fixed (its
 almd hits the same shape).
 
+E2+D1b. **Scalar-Ok arm frame FIX + parse_iso SHIPPED (136 → 133)**: the dn4
+   bisect landed — the `ResultOk(scalar)` arm case in lower_heap_result_arm
+   was the ONLY sibling without a per-arm frame: a `?? 0` operand inside
+   `ok(list.get(date, 0) ?? 0 + …)` materialized its Option temp into
+   live_heap_handles, LEAKED it to the function scope end, and the teardown's
+   unconditional rc_dec read an UNINITIALIZED local when the err path ran
+   (rc_dec(0) trap — the yaml parse_number class; fail-stop, never wrong
+   bytes). Fixed with arm_mark + drop_arm_locals (10fcddd9). That unblocked
+   `stdlib/datetime_parse_iso.almd` (dd7e7218) — trim + strip-all-Z + split-T
+   + filter_map-parse halves + exact err strings, delegating to the
+   self-hosted datetime.from_parts / int.parse; probe pi1 6 edges
+   v0-identical. Opened all 3 datetime_test parse_iso fns.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
