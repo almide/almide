@@ -632,6 +632,23 @@ impl LowerCtx {
                 let piece = self.lower_owned_heap_field(expr)?;
                 Some(self.materialize_opt_int_str_some(piece, repr))
             }
+            // `Some((1, 2))` — an ALL-SCALAR tuple literal payload (`match x { some((a, b))
+            // => a + b, … }` — the nested-some-tuple pattern shape). Build the flat tuple
+            // block, move it into the 1-element Option: the payload block owns NO inner
+            // heap, so DropListStr's flat slot-0 free is EXACT (frees the tuple block, then
+            // the option block) — the same discipline as the (Int,String) case above minus
+            // the recursive element drop.
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind, IrExprKind::Tuple { .. })
+                    && matches!(&expr.ty,
+                        Ty::Tuple(tys) if !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t))) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let IrExprKind::Tuple { elements } = &expr.kind else { return None };
+                let elements = elements.clone();
+                let piece = self.try_lower_scalar_tuple_construct(&elements)?;
+                Some(self.materialize_opt_str_some(piece, repr))
+            }
             IrExprKind::OptionSome { expr }
                 if crate::lower::is_value_ty(&expr.ty)
                     || matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e)

@@ -767,6 +767,17 @@ A2. **Pure fan blocks SHIPPED (160 → 156)**: `desugar_fan_block` (desugar_fan.
    declined — its auto-unwrap + Err early-return is a later brick. Opened all
    4 fan_test fns.
 
+B1. **Scalar-tuple Some ctor SHIPPED (156 → 154)**: `try_lower_option_ctor`
+   gains `some((1, 2))` — an ALL-SCALAR tuple literal payload: the flat tuple
+   block (`try_lower_scalar_tuple_construct`) moves into the 1-element Option
+   via `materialize_opt_str_some`; the payload owns no inner heap so
+   DropListStr's flat slot-0 free is exact. With the ctor materialized, the
+   let-bound `match x { some((a, b)) => a + b, none => 0 }` composes through
+   the EXISTING tuple-payload desugar + destructure (probe nt1 v0-identical).
+   Opened both pattern_test nested-tuple fns. The let-bound variant-match
+   bucket's remainder: if_let over Result (frontend if-let desugar shape) and
+   the option-of-variant none case — separate sub-shapes.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
