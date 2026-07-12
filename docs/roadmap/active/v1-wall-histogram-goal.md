@@ -947,6 +947,17 @@ D1a. **http.url_decode self-host SHIPPED (140 → 136)**: the FIRST
    walled). Probe ud1: 8 edges v0-identical (multibyte, bad hex, lone '%',
    lossy U+FFFD, empty). Opened all 4 http_url_decode_test fns.
 
+IN-FLIGHT (UNCOMMITTED): datetime.parse_iso self-host —
+`stdlib/datetime_parse_iso.almd` + purity ("parse_iso" whitelist,
+"datetime_parse_iso" module) + registry, ON DISK. Probe pi1: cases 1-3
+v0-identical, case 4 ("2024-XX-15…" — the filter_map path where int.parse
+ERRS and the part drops) TRAPS in rc_dec inside datetime.parse_iso (an
+ownership bug in the self-host's own v1 lowering — suspect: the `match
+int.parse(p) { ok/err }` inside __dpi_nums with the `acc + [v]` continuation,
+or the err("…") ctor after the len check double-freeing a borrowed piece).
+Debug: minimize to __dpi_nums alone over a mixed list; check the err-arm's
+drop of the parse Result. Ship only at full pi1 parity.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
