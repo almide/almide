@@ -955,8 +955,21 @@ ERRS and the part drops) TRAPS in rc_dec inside datetime.parse_iso (an
 ownership bug in the self-host's own v1 lowering — suspect: the `match
 int.parse(p) { ok/err }` inside __dpi_nums with the `acc + [v]` continuation,
 or the err("…") ctor after the len check double-freeing a borrowed piece).
-Debug: minimize to __dpi_nums alone over a mixed list; check the err-arm's
-drop of the parse Result. Ship only at full pi1 parity.
+BISECT COMPLETE (dn1–dn6, all plain USER code — this is a LATENT SHIPPED
+rc_dec TRAP, fail-stop not wrong-bytes): dn4 reproduces WITHOUT the self-host
+— `fn nums(parts, i, acc: List[Int]) -> List[Int]` (tail-recursive
+accumulator: ok-arm `nums(.., acc + [v])`, err-arm PASS-THROUGH `nums(..,
+acc)`) called TWICE in a fn whose 3-arm heap-result if chain follows; the
+FIRST err arm traps in rc_dec. Controls that PASS: dn1 (same nums, caller
+uses the result immediately), dn3 (ONE list + 2-arm chain), dn5 (split-built
+List[String] locals, no nums), dn6 (non-recursive user fn returning
+List[Int]). ⇒ the trap needs the TCO'd mixed-arm accumulator (reassign in one
+arm, pass-through in the other) × a caller with a multi-arm heap-result chain
+after — suspect the TCO loop's acc-reassign drop discipline leaves a freed
+block the caller's chain compensation re-drops. NEXT: dump dn4's MIR
+(DBG_LOWER_FN=nums + f), inspect try_tco_rewrite's reassign path (mod_p5) for
+the skip-arm drop imbalance. Ship parse_iso only after this is fixed (its
+almd hits the same shape).
 
 ## What NOT to do
 
