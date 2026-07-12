@@ -66,6 +66,25 @@ impl LowerCtx {
             IrExprKind::If { cond, then, else_ } => {
                 // The condition is evaluated ONCE before the branch — it is scalar
                 // (Bool), so no ownership, but capture the caps of any call in it.
+                //
+                // A CALL-BEARING arm must NOT linearize: reaching here means every
+                // real-branch path (try_lower_unit_if / the scalar-if machinery)
+                // declined the condition, and the linearized render RUNS BOTH arms —
+                // the rc4 double-print (`println(if e == err("a") then "eq" else
+                // "ne")` printed eq AND ne, 2026-07-12). WALL it, mirroring the
+                // untracked-subject match rule below: an unlowered shape must be a
+                // clean Unsupported, never wrong output. (Call-free arms stay
+                // linearizable — their double-evaluation has no observable effect;
+                // the merged Opaque result carries the content.)
+                if crate::lower::expr_contains_call(then) || crate::lower::expr_contains_call(else_)
+                {
+                    return Err(LowerError::Unsupported(
+                        "if over an unresolvable condition with a call-bearing arm cannot \
+                         take the both-arms linearization (it would run the untaken arm's \
+                         effects) not in this brick"
+                            .into(),
+                    ));
+                }
                 self.record_elided_calls(cond);
                 self.lower_branch_arm(None, then)?;
                 self.lower_branch_arm(None, else_)?;

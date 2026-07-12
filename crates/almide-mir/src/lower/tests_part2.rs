@@ -166,11 +166,14 @@
     }
 
     #[test]
-    fn unit_if_with_effect_arms_linearizes_balanced() {
+    fn unit_if_with_effect_arms_walls_instead_of_linearizing() {
         use almide_lang::intern::sym;
-        // if c then println("a") else println("b")  — each arm is a Unit effect call;
-        // its string arg is materialized into an arm-local temp and dropped by the
-        // per-arm frame. BOTH printlns lower (caps union); ownership balanced.
+        // if c then println("a") else println("b") — when the real-branch paths decline
+        // the condition, the linearized render RUNS BOTH arms (the rc4 double-print:
+        // `println(if e == err("a") then "eq" else "ne")` printed eq AND ne,
+        // 2026-07-12). A call-bearing arm therefore WALLS instead of linearizing —
+        // a clean Unsupported, never wrong output. (The former contract asserted the
+        // both-arms caps-union lowering; rc4 proved that observably wrong.)
         let prn = |s: &str| {
             ir_expr(
                 IrExprKind::Call {
@@ -182,13 +185,12 @@
             )
         };
         let b = body(vec![stmt(IrStmtKind::Expr { expr: iff(prn("a"), prn("b"), Ty::Unit) })]);
-        let mir = lower_body(&b, "main").expect("unit if lowers");
-        let prints = mir.ops.iter().filter(|o| matches!(o, Op::Call { .. })).count();
-        assert_eq!(prints, 2, "both arms' println are lowered (caps union, not Const-skipped)");
-        assert_eq!(verify_ownership(&mir), Ok(()));
-        let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
-        let drops = mir.ops.iter().filter(|o| matches!(o, Op::Drop { .. })).count();
-        assert_eq!(allocs, drops, "every arm-local alloc has its per-arm drop (balanced)");
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(m)) => {
+                assert!(m.contains("call-bearing arm"), "got: {m}")
+            }
+            other => panic!("expected the call-bearing linearization wall, got {other:?}"),
+        }
     }
 
     #[test]

@@ -883,7 +883,16 @@ A4. **Err(List[String]) ctor SHIPPED (144 → 139)**: the both-heap ResultErr
    the "exact drop" the 2b revert was pending — a LENLIST_DROP_SRC-style
    generated source + program_uses gate + drop_op_for arm.
 
-**CRITICAL FINDING (2026-07-12, probe rc4 — FIX FIRST, before ANY new stage)**:
+**CRITICAL FINDING — FIXED (2026-07-12, the linearization wall)**: root cause
+= `lower_branch`'s If arm linearized CALL-BEARING arms when every real-branch
+path (try_lower_unit_if etc.) had declined the condition — the render then
+RUNS BOTH arms (rc4's double print). Fix: the If arm now WALLS on a
+call-bearing arm exactly like the untracked-subject match rule (call-free
+arms stay linearizable — double-evaluation without effects is unobservable).
+The mir unit test that pinned the OLD contract
+(unit_if_with_effect_arms_linearizes_balanced) now pins the WALL. Corpus
+impact: +1 honest wall (deep_eq_heap main — a previously silently
+double-executing shape), 139→140. ORIGINAL FINDING (for the record):
 `let e: Result[Int, String] = err("a"); println(if e == err("a") then "eq"
 else "ne")` — v0 prints ONE line (eq), v1 prints TWO (eq|ne): the println
 executes twice, the second with a wrong value. INDEPENDENT of the in-flight
