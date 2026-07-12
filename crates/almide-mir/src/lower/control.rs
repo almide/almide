@@ -684,8 +684,31 @@ impl LowerCtx {
         let cond_v = match self.lower_scalar_value(cond) {
             Some(v) => v,
             None => {
-                self.ops.truncate(ops_mark);
-                return false;
+                // A HEAP `==`/`!=` condition (`if e == err("a") then println(…) …` —
+                // the rc4 shape, previously the call-bearing linearization wall): the
+                // typed materialized eq yields a REAL scalar Bool (rollback-safe on
+                // decline), so the if executes ONE arm like any scalar cond.
+                let heap_eq = if let IrExprKind::BinOp { op, left, right } = &cond.kind {
+                    match op {
+                        almide_ir::BinOp::Eq if is_heap_ty(&left.ty) => {
+                            self.lower_heap_eq_cond(left, right, false)
+                        }
+                        almide_ir::BinOp::Neq if is_heap_ty(&left.ty) => {
+                            self.lower_heap_eq_cond(left, right, true)
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                match heap_eq {
+                    Some(v) => v,
+                    None => {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        return false;
+                    }
+                }
             }
         };
         self.ops.push(Op::IfThen { cond: cond_v, dst: None });

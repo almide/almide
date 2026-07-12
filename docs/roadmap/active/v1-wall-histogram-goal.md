@@ -927,6 +927,15 @@ prints come from a statement-match linearization admitted by the new
 tracking; (3) verify the eq path for Result[List,List] (slot-0 is a LIST
 handle — a string-compare of it is garbage). Ship only at full parity.
 
+B5. **Heap-eq unit-if conditions SHIPPED (140 held)**: `try_lower_unit_if`'s
+   cond fallback now routes a heap `==`/`!=` through `lower_heap_eq_cond`
+   (rollback-safe typed materialized eq — String/Value/List[scalar|Value]/
+   Option/Result[scalar,String]), so `println(if e == err("a") …)` (rc4)
+   EXECUTES one arm with the correct value instead of walling. Zero corpus
+   delta (deep_eq_heap's operands are outside the eq type coverage —
+   extending lower_heap_eq_typed_materialized to deep records/lists and
+   Result[List,List] is the follow-up that reopens it + rc1/rc2 shapes).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
