@@ -1191,3 +1191,76 @@ pub fn desugar_tuple_empty_list_match(body: &IrExpr) -> Option<IrExpr> {
     v.visit_expr_mut(&mut out);
     v.changed.then_some(out)
 }
+
+/// Rewrite a match over a PLAIN RECORD subject whose first arm is that record's
+/// OWN RecordPattern (`match f { Flags { ok: o, err: e, .. } => B, _ => C }` —
+/// the soft-keyword-field destructure shape) into the unconditional destructure
+/// `{ let o = f.ok; let e = f.err; B }`. GATES: the pattern NAME equals the
+/// subject's Named TYPE (a variant CASE pattern carries the case name, not the
+/// type name), every later arm is a bare Wildcard (a real variant match has
+/// sibling ctor arms), fields bind with plain Bind/Wildcard only, no guards.
+/// Under those gates the first arm always matches, so `C` is dead — dropped on
+/// BOTH sides (desugar-before-both keeps the count exact).
+pub fn desugar_record_destructure_match(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use almide_ir::IrPattern;
+    struct V {
+        changed: bool,
+    }
+    impl IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Match { subject, arms } = &e.kind else { return };
+            let Ty::Named(tname, targs) = &subject.ty else { return };
+            if !targs.is_empty() || arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
+                return;
+            }
+            let IrPattern::RecordPattern { name, fields, .. } = &arms[0].pattern else {
+                return;
+            };
+            if name != tname.as_str() {
+                return;
+            }
+            if !arms[1..].iter().all(|a| matches!(a.pattern, IrPattern::Wildcard)) {
+                return;
+            }
+            let mut binds: Vec<IrStmt> = Vec::new();
+            for f in fields {
+                match &f.pattern {
+                    Some(IrPattern::Bind { var, ty }) => binds.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: *var,
+                            ty: ty.clone(),
+                            value: IrExpr {
+                                kind: IrExprKind::Member {
+                                    object: Box::new((**subject).clone()),
+                                    field: almide_lang::intern::sym(&f.name),
+                                },
+                                ty: ty.clone(),
+                                span: e.span.clone(),
+                                def_id: None,
+                            },
+                            mutability: almide_ir::Mutability::Let,
+                        },
+                        span: e.span.clone(),
+                    }),
+                    Some(IrPattern::Wildcard) => {}
+                    // A shorthand/nested field pattern — outside this brick.
+                    _ => return,
+                }
+            }
+            let body_e = arms[0].body.clone();
+            *e = IrExpr {
+                kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(body_e)) },
+                ty: e.ty.clone(),
+                span: e.span.clone(),
+                def_id: e.def_id,
+            };
+            self.changed = true;
+        }
+    }
+    let mut v = V { changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    v.changed.then_some(out)
+}

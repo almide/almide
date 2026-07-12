@@ -274,6 +274,10 @@ pub fn desugar_all(body: &IrExpr, unit_main: bool) -> IrExpr {
             cur = r;
             continue;
         }
+        if let Some(r) = desugar_record_destructure_match(&cur) {
+            cur = r;
+            continue;
+        }
         break;
     }
     cur

@@ -997,6 +997,14 @@ D1c. **http.response family self-host SHIPPED (133 → 127)**: the opaque
    stay walled); http.get_header joins the tracked-subject predicate. Probe
    hr1: 7 cases v0-identical. Opened all 6 http_response_test fns.
 
+B6. **Record-destructure match desugar SHIPPED (127 → 126)**: `match f {
+   Flags { ok: o, err: e, .. } => B, _ => C }` over a PLAIN-RECORD subject
+   rewrites to the unconditional destructure `{ let o = f.ok; …; B }` —
+   gated on the pattern NAME equalling the subject's Named type (a variant
+   CASE pattern carries the case name), all later arms bare Wildcards, and
+   plain Bind/Wildcard fields; the dead `_` arm drops on both sides. Probe
+   sk1 v0-identical. Opened the soft-keyword-field test.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
