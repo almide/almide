@@ -822,6 +822,18 @@ B3. **Option-of-variant ctors SHIPPED (151 → 150)**: three pieces (probe ov1,
    emptied binds_p4.rs mid-stage — restored from HEAD (own commit) and
    re-applied atomically; the build error was loud, nothing shipped broken.
 
+NEXT (diagnosed at 150, probe uu1): **the unannotated-effect-fn lift** — the
+#485 shape desugars to a TAIL `match eff() { err(e) => err(e), ok(v) => v }`
+whose tail.ty is the RAW scalar (Int), while the arms build Result blocks:
+the LIFTED signature exists only in the frontend's arm bodies, not in the
+tail/ret types the lowering dispatches on — so the scalar-tail path takes it
+and dies on the Err-ctor arm. The fix is fn-LEVEL: when `is_effect` and the
+declared ret is non-Result, the MIR ret (repr + tail result_ty + the CALLER
+convention `f()!`) must use the lifted `Result[ret, String]` — the effect-fn
+error-model frontier proper, NOT an arm-local patch (a speculative ok-wrap
+fallback in try_lower_result_match_value was tried and reverted: the dispatch
+never reaches it because is_heap_ty(tail.ty) gates first).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
