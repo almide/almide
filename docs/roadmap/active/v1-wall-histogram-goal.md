@@ -792,6 +792,20 @@ B2. **Result wildcard arm in the value match SHIPPED (154 → 151)**: the
    il1/il2/il3 + nt1 all v0-identical. Opened both if_let_test fns +
    guard_let's unwrap_res.
 
+NEXT (diagnosed at 151, probe ov1): **Option-of-variant ctors** — the
+codegen_patterns none case needs BOTH: (i) `let x: Option[Msg] = none` (an
+empty len-0 block + materialized_options + the variant payload class), and
+(ii) `some(Number(7))` — Some wrapping a CUSTOM-VARIANT payload: today the
+inner ctor defers to an unlinked `$Number` CallFn (the render wall catches it
+honestly — classify counts some_case open but the program cannot render);
+the fix is try_lower_variant_ctor for the payload + a 1-element Option whose
+drop routes to the RECURSIVE `$__drop_Msg` (the materialize_opt_aggregate_some
+/ DropWrapperRec pattern). Also diagnosed: `unannotated_unwraps` (the #485
+implicit auto-unwrap of a lifted Result on plain assign in an unannotated
+effect fn), `nested_unwrap` (`o!` over an OPTION in an effect fn — the
+none→error propagation model), `is_balanced` (fold with an Option[List]
+accumulator — defunc family). Tail variant bucket = these + the fold shape.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
