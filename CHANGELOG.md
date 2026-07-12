@@ -11,6 +11,17 @@ care about.
 
 ## [Unreleased]
 
+### Fixed — WASM codegen
+
+- **Perceus RC: `guard`-`else` heap temporaries** (#755): a heap local bound
+  inside a `guard … else { … }` block was never reference-count processed on
+  the WASM target. `Guard` is an `IrStmtKind`, so `block_to_fnbody` funnelled
+  it into perceus's `FnBody::Stmt` pass-through arm, which recursed into
+  nothing — the else block's temps got no scope-end `Dec` and WASM RC
+  verification refused the build (`[perceus-belt] LEAK: no RcDec`). The Stmt
+  arm now `perceus_expr`s a Guard's `cond` and `else_`, so the divergent else
+  block is round-tripped and Dec-balanced like any other block.
+
 ## [0.23.3] — 2026-05-24
 
 ### Performance — WASM parity with Rust
