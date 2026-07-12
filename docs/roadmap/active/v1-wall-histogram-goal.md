@@ -671,6 +671,18 @@ Match-in-arg (1), OptionSome arg (1), heap-result-other-in-arg (2). ONE
 systematic fix: generalize the ANF lift (`desugar_callarg_heap_if` precedent)
 — EVERY non-trivial heap arg lifts to a let-temp, then the existing bind
 machinery lowers it. Work the desugar once, verify per-shape.
+DIAGNOSIS UPDATE (2026-07-12, probes ia1/ia2): the interp-in-arg 7 are NOT an
+ANF-lift problem — `${g(n)}` (String call part) and `${list.min([ints])}`
+(Option call part) ALREADY lower in-arg. The 7 decompose into THREE deeper
+families the wall message groups together: (i) `list_total_order` — typed
+`list.min/max` over String/tuple/nested-list/Option elements = the TOTAL-ORDER
+comparator self-host (lexicographic tuples/lists, none<some — a real project,
+the list_sort_float registry precedent × the whole lattice); (ii)
+`sized_int_record_fields` + `drain_smalls` (4) — Int8/16/32 record-field READS
++ negative sized-int literal repr inside interps; (iii)
+`compound_repr_interp` (3) — literal-aggregate parts `${[1,2,3]}`, map parts
+`${["a":1]}`, and EMPTY-map parts (desugar_interp_literal_aggregate_hoist
+declines these today).
 
 **B. Let-bound / returned heap-result forms (~25 lines).** let-bound variant
 match (5), tail variant match (4), heap-result match remainder (8: multi-arm
