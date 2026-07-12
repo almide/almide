@@ -848,6 +848,22 @@ B4. **Record defaults + scalar field ANF lift SHIPPED (150 → 146 — the <150
    unannotated-effect-fn lift (see the NEXT note above — fn-level, not
    arm-local).
 
+A3. **List[List[String]] literals + string-key sort_by honest wall SHIPPED
+   (146 → 144)**: (i) a new `ListStr` element class in the record-list-literal
+   builder — each inner `List[String]` literal builds through the str-list
+   builder and the outer list drop routes `list_list_str_lists` (the recursive
+   list-of-list-str free); a type-rewritten (never-err-lifted) element
+   declines, the ctor-class guard. (ii) CORRECTNESS: opening the literal
+   EXPOSED a latent mis-route — a STRING-key `list.sort_by` has no registered
+   typed variant and fell to the generic scalar impl (probe ll1: wasm
+   "indirect call type mismatch" TRAP in __sb_init). It now routes to the
+   unlinkable `list.sort_by_str_key_x` (the `_x` honest-wall convention) —
+   fail-closed at render, never a trap. NOTE the metric nuance: sort_by-test
+   and list_total_order count OPEN at classify (lower succeeds) while the
+   RENDER wall holds the `_x` boundary — FORBIDDEN=0 still proves no dangling
+   call escapes. Follow-up recorded: registered sort_by_str_key / min/max
+   typed variants over heap-elem lists = the total-order comparator family.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

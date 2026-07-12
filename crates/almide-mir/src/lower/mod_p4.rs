@@ -1191,6 +1191,14 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                         "list.sort_by_float".to_string()
                     };
                 }
+                // A STRING-key sort_by has NO registered typed variant: the generic
+                // impl compares scalar slots (a String key = handle order, and a
+                // heap-elem list traps the funcref signature — the ll1 indirect-call
+                // mismatch). Route to the unlinkable `_x` name so the caller WALLS
+                // honestly instead of trapping or handle-sorting.
+                if **ret == Ty::String {
+                    return "list.sort_by_str_key_x".to_string();
+                }
             }
         }
         // `list.map` is the one combinator whose SOURCE and RESULT element reprs may DIFFER (the

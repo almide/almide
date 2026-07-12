@@ -604,6 +604,7 @@ impl LowerCtx {
         enum ListElemDrop {
             Record(String),
             StrStr,
+            ListStr,
             CtorFlat,
             CtorLenLoop,
         }
@@ -619,6 +620,14 @@ impl LowerCtx {
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String))
         {
             ListElemDrop::StrStr
+        } else if matches!(&elem_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
+                if i.len() == 1 && matches!(i[0], Ty::String))
+        {
+            // A `List[List[String]]` literal (`[["b","2"], ["a","1"]]` — the sort_by
+            // string-key shape): each inner list is a fresh owned DynListStr; the outer
+            // drop is the recursive list-of-list-str free (`list_list_str_lists`).
+            ListElemDrop::ListStr
         } else if let Some(class) = crate::lower::lenlist_elem_class(&elem_ty) {
             match class {
                 crate::lower::CtorElemClass::Flat => ListElemDrop::CtorFlat,
@@ -648,6 +657,25 @@ impl LowerCtx {
             // so push it for the uniform Consume below). A Var/call element of the SAME type takes
             // `lower_owned_heap_field` (Dup / fresh CallFn result) — the drop class is TYPE-driven,
             // so both produce blocks the registered list drop frees exactly.
+            if matches!(kind, ListElemDrop::ListStr) {
+                // An inner `List[String]` LITERAL element builds through the str-list
+                // builder (fresh owned, tracked by it); a Var/call element of the exact
+                // element type takes the generic owned-field path below. A type-rewritten
+                // (never-err-lifted) element declines — the same guard as the ctor class.
+                if matches!(e_ref.kind, IrExprKind::List { .. }) {
+                    if let Some(obj) = self.try_lower_str_list_literal(e_ref) {
+                        if !self.live_heap_handles.contains(&obj) {
+                            self.live_heap_handles.push(obj);
+                        }
+                        objs.push(obj);
+                        continue;
+                    }
+                    return None;
+                }
+                if e_ref.ty != elem_ty {
+                    return None;
+                }
+            }
             if matches!(kind, ListElemDrop::CtorFlat | ListElemDrop::CtorLenLoop) {
                 if let Some(obj) = self.try_lower_option_ctor(e_ref, &elem_ty) {
                     if !self.live_heap_handles.contains(&obj) {
@@ -696,6 +724,9 @@ impl LowerCtx {
             }
             ListElemDrop::StrStr => {
                 self.str_str_elem_lists.insert(dst);
+            }
+            ListElemDrop::ListStr => {
+                self.list_list_str_lists.insert(dst);
             }
             // Flat ctor elements (Option[scalar]) free exactly under the per-element `rc_dec`
             // of the masked `DropListStr`; LenLoop elements route to the generated
