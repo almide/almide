@@ -1,0 +1,59 @@
+// http_response — SELF-HOSTED HttpResponse builder family (PURE data ctors on
+// the blanket-impure http module; serve/network stay walled). v0's
+// AlmideHttpResponse { status, body, headers: Vec<(String,String)> } is opaque
+// nominal — the v1 self-host owns the rep (the JsonPath precedent): a
+// List[String] `[int.to_string(status), body, k1, v1, k2, v2, …]` — header
+// pairs flat from slot 2, insertion-ordered exactly like v0's Vec pushes.
+// get_header scans pairs first-match; set_header overwrites in place or
+// appends (v0 upsert). The newtype eraser publishes
+// Named("HttpResponse") → List[String].
+
+fn http_response(status: Int, body: String) -> List[String] = {
+  let st = int.to_string(status)
+  [st, body, "Content-Type", "text/plain"]
+}
+
+fn http_json(status: Int, body: String) -> List[String] = {
+  let st = int.to_string(status)
+  [st, body, "Content-Type", "application/json"]
+}
+
+fn http_redirect(url: String) -> List[String] =
+  ["302", "", "Location", url]
+
+fn __hr_hdrs(headers: Map[String, String], ks: List[String], i: Int, acc: List[String]) -> List[String] =
+  if i >= list.len(ks) then acc
+  else {
+    let k = list.get(ks, i) ?? ""
+    let v = map.get(headers, k) ?? ""
+    __hr_hdrs(headers, ks, i + 1, acc + [k, v])
+  }
+
+fn http_with_headers(status: Int, body: String, headers: Map[String, String]) -> List[String] = {
+  let st = int.to_string(status)
+  __hr_hdrs(headers, map.keys(headers), 0, [st, body])
+}
+
+fn http_status(resp: List[String], code: Int) -> List[String] = {
+  let st = int.to_string(code)
+  [st] + list.drop(resp, 1)
+}
+
+fn http_body(resp: List[String]) -> String = list.get(resp, 1) ?? ""
+
+fn http_get_header(resp: List[String], key: String) -> Option[String] =
+  __hr_find(resp, 2, key)
+
+fn __hr_find(resp: List[String], i: Int, key: String) -> Option[String] =
+  if i + 1 >= list.len(resp) + 1 then none
+  else if i >= list.len(resp) then none
+  else if (list.get(resp, i) ?? "") == key then list.get(resp, i + 1)
+  else __hr_find(resp, i + 2, key)
+
+fn http_set_header(resp: List[String], key: String, value: String) -> List[String] =
+  __hr_set(resp, 2, key, value)
+
+fn __hr_set(resp: List[String], i: Int, key: String, value: String) -> List[String] =
+  if i >= list.len(resp) then resp + [key, value]
+  else if (list.get(resp, i) ?? "") == key then list.set(resp, i + 1, value)
+  else __hr_set(resp, i + 2, key, value)

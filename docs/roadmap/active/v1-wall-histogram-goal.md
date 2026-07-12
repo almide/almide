@@ -984,6 +984,19 @@ E2+D1b. **Scalar-Ok arm frame FIX + parse_iso SHIPPED (136 → 133)**: the dn4
    self-hosted datetime.from_parts / int.parse; probe pi1 6 edges
    v0-identical. Opened all 3 datetime_test parse_iso fns.
 
+D1c. **http.response family self-host SHIPPED (133 → 127)**: the opaque
+   nominal HttpResponse migrates via the SELF-HOST REP table (the JsonPath
+   precedent) — rep = `List[String]` `[int.to_string(status), body, k1, v1,
+   …]`, insertion-ordered like v0's Vec pushes, so NO new drop class. Eight
+   fns in `stdlib/http_response.almd`: response/json/redirect (default
+   headers exactly v0's), with_headers (map.keys + map.get iteration —
+   insertion order), status (head-replace + list.drop), body, get_header
+   (pair scan → Option), set_header (upsert via generic list.set — typed
+   routing picks set_str; `list.set_str` is a LOWERING name the frontend
+   rejects). Purity: the http arm widens to the 8 pure fns (serve/network
+   stay walled); http.get_header joins the tracked-subject predicate. Probe
+   hr1: 7 cases v0-identical. Opened all 6 http_response_test fns.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

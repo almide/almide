@@ -103,6 +103,17 @@ pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
             ),
         );
     }
+    // HttpResponse — the self-host rep is `[status, body, k1, v1, …]`
+    // (stdlib/http_response.almd, the same List[String] discipline).
+    if !declared.contains("HttpResponse") {
+        map.insert(
+            "HttpResponse".to_string(),
+            Ty::Applied(
+                almide_lang::types::constructor::TypeConstructorId::List,
+                vec![Ty::String],
+            ),
+        );
+    }
     if map.is_empty() {
         return;
     }
