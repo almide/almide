@@ -224,12 +224,20 @@ pub fn try_render_wasm_source(
     } else {
         ""
     };
+    // `Result[List[Int], List[String]]` (result.collect) routes its drop to the
+    // TAG-AWARE `$__drop_res_ilsl` (Err → recursive string free; Ok → flat).
+    let res_ilsl_drop = if crate::lower::program_uses_res_intlist_strlist(&ir) {
+        crate::lower::RES_ILSL_DROP_SRC
+    } else {
+        ""
+    };
     let drops = format!(
-        "{}{}{}{}{}",
+        "{}{}{}{}{}{}",
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
         crate::lower::generate_variant_repr_sources(&all_type_decls, &crate::lower::collect_interp_anon_records(&ir)),
         closure_drop,
+        res_ilsl_drop,
         lenlist_drop,
     );
     // The generated drops free a `Value` field via value_core's INTERNAL `__drop_value` — bring

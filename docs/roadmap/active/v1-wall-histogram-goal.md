@@ -905,7 +905,13 @@ rc4 against past commits to find the introducing stage, root-cause, fix, add
 a spec/wasm_cross fixture pinning the shape (+ siblings: ok-ctor, option
 some/none ctor eq forms).
 
-IN-FLIGHT (UNCOMMITTED, at 139 — DEBUG FIRST): the result.collect render-side
+SHIPPED (after the linearization fix unblocked it): the result.collect
+render-side stage — probe rc3 (`result.collect` + `result.is_err`) is
+v0-identical end-to-end; rc1/rc2's remaining gap is the SEPARATE heap-Result
+`==`-condition piece (now an HONEST wall via the linearization fix, next
+stage: try_lower_unit_if × lower_heap_eq_typed_materialized). Original
+in-flight note (the rc1 MISMATCH was the linearization bug, not this stage):
+the result.collect render-side
 stage is ON DISK but NOT shipped — probe rc1 MISMATCHES: v0 prints 3 lines
 (eq|eq|eq), v1 prints those PLUS 11 extra ne/eq lines — a print-multiplying
 shape (a both-arms linearization or a tail-duplication running the untaken

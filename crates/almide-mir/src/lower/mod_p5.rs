@@ -7,6 +7,7 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             | ("float", "parse")
             | ("int", "from_hex")
             | ("option", "to_result")
+            | ("result", "collect")
             | ("result", "map")
             | ("result", "flat_map")
             | ("result", "map_err")

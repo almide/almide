@@ -617,6 +617,72 @@ fn __drop_lenlist_slots(e: Int, k: Int, j: Int) -> Unit =
   }
 ";
 
+/// The ALMIDE SOURCE of `$__drop_res_ilsl` — the TAG-AWARE release of a
+/// `Result[List[Int], List[String]]` (the result.collect return): tag@16 = Err(1)
+/// → the @12 payload is a `List[String]` whose Strings free at ITS last ref
+/// (recursive); tag = Ok(0) → the @12 `List[Int]` block frees FLAT (freeing it
+/// recursively would rc_dec raw int values as handles — unsound). This is the
+/// "exact drop" the collect family was pending. Like every generated `$__drop_*`,
+/// a trusted prim-only routine (outside the witness surface).
+pub const RES_ILSL_DROP_SRC: &str = "\
+fn __drop_res_ilsl(r: List[Int]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 0) == 1 then {
+    let inner = prim.load32(h + 12)
+    if prim.load32(h + 16) == 1 then {
+      if prim.load32(inner + 0) == 1 then {
+        let n = prim.load32(inner + 4)
+        __drop_res_ilsl_strs(inner, n, 0)
+      } else ()
+    } else ()
+    prim.rc_dec(inner)
+  } else ()
+  prim.rc_dec(h)
+}
+fn __drop_res_ilsl_strs(e: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    prim.rc_dec(prim.load64(e + 12 + i * 8))
+    __drop_res_ilsl_strs(e, n, i + 1)
+  }
+";
+
+/// Is `ty` exactly `Result[List[Int], List[String]]` (the result.collect return —
+/// the tag-aware `$__drop_res_ilsl` class)?
+pub fn is_res_intlist_strlist_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    matches!(ty, Ty::Applied(TC::Result, a) if a.len() == 2
+        && matches!(&a[0], Ty::Applied(TC::List, i) if i.len() == 1 && matches!(i[0], Ty::Int))
+        && matches!(&a[1], Ty::Applied(TC::List, s) if s.len() == 1 && matches!(s[0], Ty::String)))
+}
+
+/// Does the program mention `Result[List[Int], List[String]]` anywhere a drop could
+/// fire (fn sigs, binds, exprs)? Gates the `$__drop_res_ilsl` source injection.
+pub fn program_uses_res_intlist_strlist(program: &almide_ir::IrProgram) -> bool {
+    struct C(bool);
+    impl almide_ir::visit::IrVisitor for C {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if is_res_intlist_strlist_ty(&e.ty) {
+                self.0 = true;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut c = C(false);
+    for f in program.functions.iter().chain(program.modules.iter().flat_map(|m| m.functions.iter())) {
+        if f.params.iter().any(|p| is_res_intlist_strlist_ty(&p.ty))
+            || is_res_intlist_strlist_ty(&f.ret_ty)
+        {
+            return true;
+        }
+        almide_ir::visit::IrVisitor::visit_expr(&mut c, &f.body);
+        if c.0 {
+            return true;
+        }
+    }
+    false
+}
+
 /// The ALMIDE SOURCE of the UNIFORM closure-block release `$__drop_closure` (the closures
 /// machinery — injected by the render pipeline whenever the program carries first-class
 /// function values). A closure block is SELF-DESCRIBING: slot 0 = fnidx (a table index —

@@ -617,7 +617,13 @@ impl LowerCtx {
                     result: Some(repr),
                 });
                 self.live_heap_handles.push(dst);
-                if crate::lower::is_list_list_str_ty(ty) {
+                if crate::lower::is_res_intlist_strlist_ty(ty) {
+                    // `result.collect` — Result[List[Int], List[String]]: the TAG-AWARE
+                    // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;
+                    // either flat class would leak or double-free one side).
+                    self.variant_drop_handles.insert(dst, "res_ilsl".to_string());
+                    self.materialized_results_str.insert(dst);
+                } else if crate::lower::is_list_list_str_ty(ty) {
                     self.list_list_str_lists.insert(dst);
                 } else if crate::lower::is_list_str_str_ty(ty) {
                     // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
@@ -790,7 +796,13 @@ impl LowerCtx {
                 }
                 // A `List[String]` result (string.split / a List[String] combinator) is a
                 // nested-ownership list — its scope-end drop must recursively free elements.
-                if crate::lower::is_list_list_str_ty(ty) {
+                if crate::lower::is_res_intlist_strlist_ty(ty) {
+                    // `result.collect` — Result[List[Int], List[String]]: the TAG-AWARE
+                    // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;
+                    // either flat class would leak or double-free one side).
+                    self.variant_drop_handles.insert(dst, "res_ilsl".to_string());
+                    self.materialized_results_str.insert(dst);
+                } else if crate::lower::is_list_list_str_ty(ty) {
                     self.list_list_str_lists.insert(dst);
                 } else if crate::lower::is_list_str_str_ty(ty) {
                     // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
