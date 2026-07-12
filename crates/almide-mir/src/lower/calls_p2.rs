@@ -514,6 +514,18 @@ impl LowerCtx {
                     // no heap, so the scope-end drop is a flat `Drop`). Both yield a REAL populated
                     // block, vs the `alloc_init` `Init::Opaque` that an all-literal-only path leaves
                     // (rejected below). Closes `f([pos])` / the `acc + [pos]` append-accumulator element.
+                    // An EMPTY-map arg (`fold(xs, [:], …)` seed, `takes([:])` with ascription):
+                    // the SAME layout-agnostic 0-length block an empty-map BIND builds (a v1
+                    // Map is a paired-slot List; len 0 ⇒ the drop frees only the block) —
+                    // REAL (never Opaque), borrowed into the call + dropped at scope end.
+                    if matches!(&a.kind, IrExprKind::EmptyMap)
+                        || matches!(&a.kind, IrExprKind::MapLiteral { entries } if entries.is_empty())
+                    {
+                        if let Some(dst) = self.try_lower_scalar_list_slots(&[]) {
+                            out.push(self.materialized_call_arg(dst, repr, &a.ty));
+                            continue;
+                        }
+                    }
                     if matches!(&a.kind, IrExprKind::List { .. }) {
                         // A List[Record] literal arg (`group([rect(…), …])`): the record-list builder
                         // already pushes it to live_heap_handles + routes its drop to $__drop_list_<R>,

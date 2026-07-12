@@ -745,6 +745,17 @@ E1. **unbound-var diagnosis + cross-module toplet fixes SHIPPED (166 → 163)**:
    form gates on registration. Opened both #486/#502 tests + the record
    top-let member-access test.
 
+A1. **Empty-map call args SHIPPED (163 → 160)**: `lower_call_args` intercepts
+   `[:]` / empty `MapLiteral` args before the deferred-Opaque arm — the SAME
+   layout-agnostic 0-length block an empty-map BIND builds
+   (`try_lower_scalar_list_slots(&[])`, now pub(crate)) via
+   `materialized_call_arg` (live-tracked, ty-routed drop). Opened
+   `frequencies` (the `fold(xs, [:], …)` seed), the ascription test, AND the
+   `${emap}` interp part (compound_repr — the part now reads a real len-0
+   block). Note: a probe main aggregating fold results still links
+   `list.fold_hacc` (heap-accumulator fold variant, unimplemented) — a
+   defunc-family follow-up, recorded here.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

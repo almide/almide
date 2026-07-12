@@ -331,7 +331,7 @@ impl LowerCtx {
 
     /// Shared block-builder for a scalar tuple/list: lower each element to a scalar value, alloc a
     /// `DynList` of `n` i64 slots, `store64` each. Element ownership-free (scalars), flat drop.
-    fn try_lower_scalar_list_slots(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
+    pub(crate) fn try_lower_scalar_list_slots(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
         use crate::{IntOp, PrimKind};
         if elements.iter().any(|e| is_heap_ty(&e.ty)) {
             return None;
