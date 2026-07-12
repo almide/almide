@@ -492,7 +492,12 @@ impl LowerCtx {
                 IrPattern::Some { inner } if is_option => {
                     heap_or_scalar_bind(self, inner).map(|b| (true, b))
                 }
-                IrPattern::None | IrPattern::Wildcard if is_option => Ok((false, None)),
+                IrPattern::None if is_option => Ok((false, None)),
+                // A Wildcard takes the Option else-side ONLY when the subject is not ALSO
+                // result-tracked: a Result Err CTOR bind reuses the Some(string) machinery
+                // (materialize_opt_str_some inserts materialized_options), so both flags are
+                // true — Result semantics must win (the flexible-side arm below).
+                IrPattern::Wildcard if is_option && !is_result => Ok((false, None)),
                 // Result Err (then) / Ok (else). BOTH use `heap_or_scalar_bind`: a scalar Result
                 // binds a scalar payload, a str-result (`value.as_string`) binds its slot-0 String
                 // as a BORROW (gated on `heap_elem_lists` — only a nested-ownership subject, so a
@@ -503,6 +508,15 @@ impl LowerCtx {
                 }
                 IrPattern::Ok { inner } if is_result => {
                     heap_or_scalar_bind(self, inner).map(|b| (false, b))
+                }
+                // A WILDCARD arm over a RESULT subject (`if let v = x { A } else { B }` —
+                // the frontend's if-let desugar emits `Ok(v) => A, _ => B`): it takes
+                // whichever side the ctor arm did NOT (then=Err when Ok is filled, else=Ok
+                // when Err is filled). A wildcard BEFORE any ctor arm is ambiguous → reject.
+                IrPattern::Wildcard
+                    if is_result && (then_slot.is_some() != else_slot.is_some()) =>
+                {
+                    Ok((then_slot.is_none(), None))
                 }
                 _ => Err(()),
             };

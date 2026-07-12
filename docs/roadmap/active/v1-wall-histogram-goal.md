@@ -778,6 +778,20 @@ B1. **Scalar-tuple Some ctor SHIPPED (156 → 154)**: `try_lower_option_ctor`
    bucket's remainder: if_let over Result (frontend if-let desugar shape) and
    the option-of-variant none case — separate sub-shapes.
 
+B2. **Result wildcard arm in the value match SHIPPED (154 → 151)**: the
+   let-bound variant value match rejected `match x { Ok(v) => A, _ => B }`
+   (the frontend's if-let desugar) twice over: (i) a Wildcard arm was only
+   admitted for OPTION subjects; (ii) a Result Err CTOR bind reuses the
+   Some(string) machinery (`materialize_opt_str_some` inserts
+   `materialized_options`), so the subject is BOTH option- and result-tracked
+   and the Wildcard got eaten by the Option else-side arm → slot collision →
+   rollback (found via a temporary DBG_VVM arm-fill trace, removed). Fixes:
+   the Option Wildcard arm gates on `!is_result` (Result semantics win on
+   double-tracking), and a new Result Wildcard arm takes whichever slot the
+   ctor arm did NOT fill (ambiguous wildcard-first rejects). Probes
+   il1/il2/il3 + nt1 all v0-identical. Opened both if_let_test fns +
+   guard_let's unwrap_res.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
