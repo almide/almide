@@ -1,0 +1,42 @@
+// datetime_parse_iso — SELF-HOSTED datetime.parse_iso (a PURE parser on the
+// impure-plain datetime module, whitelist-admitted like from_parts/to_iso).
+// v0 (runtime/rs datetime.rs): trim, strip EVERY trailing 'Z'
+// (trim_end_matches), split on 'T' (exactly 2 halves or
+// "expected YYYY-MM-DDTHH:MM:SSZ"), split the halves on '-' / ':' keeping
+// only the parts Rust's i64 parse accepts (filter_map — an invalid part is
+// DROPPED, and the count check catches it), require exactly 3 + 3 or
+// "invalid datetime format", then delegate to the self-hosted
+// datetime.from_parts. int.parse IS the exact-ParseIntError self-host, so
+// the accept/reject set matches v0's filter_map byte-for-byte.
+
+fn __dpi_strip_z(s: String) -> String =
+  match string.strip_suffix(s, "Z") {
+    some(t) => __dpi_strip_z(t)
+    none => s
+  }
+
+fn __dpi_nums(parts: List[String], i: Int, acc: List[Int]) -> List[Int] =
+  if i >= list.len(parts) then acc
+  else {
+    let p = list.get(parts, i) ?? ""
+    match int.parse(p) {
+      ok(v) => __dpi_nums(parts, i + 1, acc + [v])
+      err(_) => __dpi_nums(parts, i + 1, acc)
+    }
+  }
+
+fn datetime_parse_iso(s: String) -> Result[Int, String] = {
+  let t = __dpi_strip_z(string.trim(s))
+  let tparts = string.split(t, "T")
+  if list.len(tparts) != 2 then err("expected YYYY-MM-DDTHH:MM:SSZ")
+  else {
+    let date = __dpi_nums(string.split(list.get(tparts, 0) ?? "", "-"), 0, [])
+    let time = __dpi_nums(string.split(list.get(tparts, 1) ?? "", ":"), 0, [])
+    if list.len(date) != 3 then err("invalid datetime format")
+    else if list.len(time) != 3 then err("invalid datetime format")
+    else
+      ok(datetime.from_parts(
+        list.get(date, 0) ?? 0, list.get(date, 1) ?? 0, list.get(date, 2) ?? 0,
+        list.get(time, 0) ?? 0, list.get(time, 1) ?? 0, list.get(time, 2) ?? 0))
+  }
+}
