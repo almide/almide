@@ -883,6 +883,19 @@ A4. **Err(List[String]) ctor SHIPPED (144 → 139)**: the both-heap ResultErr
    the "exact drop" the 2b revert was pending — a LENLIST_DROP_SRC-style
    generated source + program_uses gate + drop_op_for arm.
 
+**CRITICAL FINDING (2026-07-12, probe rc4 — FIX FIRST, before ANY new stage)**:
+`let e: Result[Int, String] = err("a"); println(if e == err("a") then "eq"
+else "ne")` — v0 prints ONE line (eq), v1 prints TWO (eq|ne): the println
+executes twice, the second with a wrong value. INDEPENDENT of the in-flight
+result.collect work (none of its gates match this program) — a SHIPPED latent
+wrong-behavior in the v1 line that no corpus/spec shape happens to exercise.
+Suspects: the let-bound err-ctor bind + `==`-with-err-ctor-arg + println(if)
+continuation — a tail-duplication (desugar_heap_branches /
+desugar_let_bound_heap_branch family) whose arms BOTH execute. Plan: bisect
+rc4 against past commits to find the introducing stage, root-cause, fix, add
+a spec/wasm_cross fixture pinning the shape (+ siblings: ok-ctor, option
+some/none ctor eq forms).
+
 IN-FLIGHT (UNCOMMITTED, at 139 — DEBUG FIRST): the result.collect render-side
 stage is ON DISK but NOT shipped — probe rc1 MISMATCHES: v0 prints 3 lines
 (eq|eq|eq), v1 prints those PLUS 11 extra ne/eq lines — a print-multiplying
