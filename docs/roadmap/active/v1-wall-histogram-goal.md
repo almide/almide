@@ -936,6 +936,17 @@ B5. **Heap-eq unit-if conditions SHIPPED (140 held)**: `try_lower_unit_if`'s
    extending lower_heap_eq_typed_materialized to deep records/lists and
    Result[List,List] is the follow-up that reopens it + rc1/rc2 shapes).
 
+D1a. **http.url_decode self-host SHIPPED (140 → 136)**: the FIRST
+   pure-on-impure D1 piece — `stdlib/http_url_decode.almd` (percent-decode
+   over the prim floor: '+' → space, strict `i+2 < n` boundary + hex-validity
+   passthrough matching v0's percent_decode byte-for-byte; the decoded bytes
+   go through the SELF-HOSTED `string.from_bytes` for v0's from_utf8_lossy
+   semantics — public-sig delegation, no internals). Wiring: registry,
+   PURE_MODULES "http_url_decode", and a NEW "http" arm in
+   is_pure_fn_in_impure_module (url_decode only — the network fns stay
+   walled). Probe ud1: 8 edges v0-identical (multibyte, bad hex, lone '%',
+   lossy U+FFFD, empty). Opened all 4 http_url_decode_test fns.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
