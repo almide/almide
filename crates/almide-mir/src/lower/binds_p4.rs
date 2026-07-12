@@ -632,6 +632,34 @@ impl LowerCtx {
                 let piece = self.lower_owned_heap_field(expr)?;
                 Some(self.materialize_opt_int_str_some(piece, repr))
             }
+            // `some(Number(7))` — Some wrapping a CUSTOM-VARIANT ctor payload (the
+            // option-of-variant shape): build the variant block, move it into the
+            // 1-element Option. Drop routing by the payload's own discipline: a
+            // recursive-drop variant routes "optrec:<Type>" → the generated
+            // `$__drop_<Type>` frees the payload (fields, then block) then the option
+            // block; a flat variant (no heap fields, `Number(Int)`) uses the
+            // Some(string) shape — DropListStr's flat slot-0 free IS its exact drop.
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind,
+                    IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                        if self.variant_layouts.ctor_to_type.contains_key(name.as_str())) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind
+                else {
+                    return None;
+                };
+                let type_name = self.variant_layouts.ctor_to_type.get(name.as_str())?.clone();
+                let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name, &|rn| {
+                    crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+                });
+                let piece = self.try_lower_variant_ctor(expr)?;
+                Some(if needs_rec {
+                    self.materialize_opt_aggregate_some(piece, repr, type_name)
+                } else {
+                    self.materialize_opt_str_some(piece, repr)
+                })
+            }
             // `Some((1, 2))` — an ALL-SCALAR tuple literal payload (`match x { some((a, b))
             // => a + b, … }` — the nested-some-tuple pattern shape). Build the flat tuple
             // block, move it into the 1-element Option: the payload block owns NO inner
@@ -821,6 +849,15 @@ impl LowerCtx {
                 // free-list reuses a block between Some/None results; tracked as materialized.
                 self.ops.push(Op::Alloc { dst, repr, init: Init::OptNone });
                 self.materialized_options.insert(dst);
+                // A HEAP-payload Option (`let x: Option[Msg] = none`) ALSO registers the
+                // nested-ownership class so a downstream match ADMITS its Some-arm payload
+                // bind (heap_or_scalar_bind gates on it); DropListStr over len 0 frees only
+                // the block, so the class change is drop-equivalent for a None value.
+                if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) = ty {
+                    if a.len() == 1 && is_heap_ty(&a[0]) {
+                        self.heap_elem_lists.insert(dst);
+                    }
+                }
                 Some(dst)
             }
             // A `Result[Int, String]` ctor RETURNED / bound directly (`fn f() = Ok(y)` / `… = Err(

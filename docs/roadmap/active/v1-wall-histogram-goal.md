@@ -806,6 +806,22 @@ effect fn), `nested_unwrap` (`o!` over an OPTION in an effect fn — the
 none→error propagation model), `is_balanced` (fold with an Option[List]
 accumulator — defunc family). Tail variant bucket = these + the fold shape.
 
+B3. **Option-of-variant ctors SHIPPED (151 → 150)**: three pieces (probe ov1,
+   none/some subjects + inner variant dispatch v0-identical): (i)
+   `some(Number(7))` — Some wrapping a CUSTOM-VARIANT ctor payload builds the
+   variant block (`try_lower_variant_ctor`) and moves it into the 1-element
+   Option, drop-routed by the payload's own discipline (recursive variant →
+   `optrec:<T>` → `$__drop_<T>`; flat variant → the Some(string) shape whose
+   flat slot-0 free is exact). Previously the inner ctor deferred to an
+   unlinked `$Number` CallFn (honest render wall, but the fn counted open —
+   now it lowers for real). (ii) `let x: Option[Msg] = none` — a HEAP-payload
+   OptNone also registers `heap_elem_lists` so the downstream match ADMITS
+   its Some-arm payload bind (len-0 DropListStr is drop-equivalent). (iii)
+   `heap_or_scalar_bind` admits `optrec:`-tracked subjects (the resrec
+   precedent). Opened the codegen_patterns none case. NOTE: a botched patch
+   emptied binds_p4.rs mid-stage — restored from HEAD (own commit) and
+   re-applied atomically; the build error was loud, nothing shipped broken.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

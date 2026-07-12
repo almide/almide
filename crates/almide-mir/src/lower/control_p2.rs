@@ -470,9 +470,13 @@ impl LowerCtx {
                             // binds the @12 handle as a BORROW; the subject's recursive
                             // `DropWrapperRec` frees the live block (record or Err String) once
                             // after the arms. A bare-Var move-out arm auto-`Dup`s, so no double-free.
+                            // An option-of-variant subject (`optrec:<T>`, `some(Number(7))`):
+                            // the Some-arm payload binds the @12 variant handle as a BORROW;
+                            // the subject's recursive drop frees the payload once after the
+                            // arms — the same resrec discipline.
                             || s.variant_drop_handles
                                 .get(&subj)
-                                .is_some_and(|h| h.starts_with("resrec:"))) =>
+                                .is_some_and(|h| h.starts_with("resrec:") || h.starts_with("optrec:"))) =>
                 {
                     Ok(Some((*var, true, ty.clone())))
                 }
