@@ -168,6 +168,26 @@ fn main() -> Unit = {
 }
 
 #[test]
+fn wasm_guard_else_heap_temp() {
+    // Regression (#755): a heap temp inside a `guard … else { … }` block was
+    // never RC-processed on the WASM target. `Guard` is an `IrStmtKind`, so
+    // `block_to_fnbody` funnelled it into perceus's `FnBody::Stmt`
+    // pass-through arm, which recursed into nothing — the else block's heap
+    // locals got no scope-end Dec and WASM RC verification refused the build
+    // (`[perceus-belt] LEAK: no RcDec`). The else block's temp (`"hi " + w`)
+    // is a fresh heap String here; it must be Dec'd before the guard's
+    // divergent return, exactly as any other block-local.
+    assert_cross_target(r#"
+fn pick(b: Bool) -> Bool = b
+fn main() -> Unit = {
+  let w = "world"
+  guard pick(false) else { let s = "hi " + w; println(s) }
+  println("passed")
+}
+"#);
+}
+
+#[test]
 fn wasm_list_map() {
     assert_cross_target(r#"
 fn main() -> Unit = {

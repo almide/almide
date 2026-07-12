@@ -327,7 +327,23 @@ fn perceus_fnbody(fb: FnBody, var_table: &mut VarTable) -> FnBody {
                 perceus_expr(&mut expr, var_table);
                 FnBody::Expr { expr, body: Box::new(result) }
             }
-            ChainHead::Stmt { stmt } => FnBody::Stmt { stmt, body: Box::new(result) },
+            ChainHead::Stmt { mut stmt } => {
+                // A `Guard { cond, else_ }` statement reaches perceus NOWHERE
+                // else: `block_to_fnbody` funnels every stmt kind that isn't
+                // Bind/Assign/RcInc/RcDec/Expr into this pass-through arm, so
+                // without recursing here its `cond` and its divergent `else_`
+                // block get ZERO Rc processing — every heap temp inside the
+                // else block leaks (repro: `guard c else { io.print("v${x}"); ok(()) }`,
+                // the interpolation temp is never Dec'd). `perceus_expr` on the
+                // else Block round-trips it through the Block arm, which inserts
+                // the scope-end Decs before its (divergent) Ret, exactly as for
+                // any other block.
+                if let IrStmtKind::Guard { cond, else_ } = &mut stmt.kind {
+                    perceus_expr(cond, var_table);
+                    perceus_expr(else_, var_table);
+                }
+                FnBody::Stmt { stmt, body: Box::new(result) }
+            }
             ChainHead::Inc { var } => FnBody::Inc { var, body: Box::new(result) },
             ChainHead::Dec { var } => FnBody::Dec { var, body: Box::new(result) },
         };
