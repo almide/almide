@@ -469,6 +469,20 @@ pub fn build_variant_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> VariantLay
     use almide_ir::{IrTypeDeclKind, IrVariantKind};
     let mut out = VariantLayouts::default();
     for decl in type_decls {
+        // A plain RECORD's field defaults ride the same map, keyed by the record TYPE
+        // name (`AllDefault()` — the paren-empty ctor fills them in
+        // try_lower_record_construct; a variant record-ctor keys by CTOR name below).
+        if let IrTypeDeclKind::Record { fields } = &decl.kind {
+            for f in fields {
+                if let Some(d) = &f.default {
+                    out.ctor_field_defaults
+                        .entry(decl.name.as_str().to_string())
+                        .or_default()
+                        .insert(f.name.as_str().to_string(), d.clone());
+                }
+            }
+            continue;
+        }
         let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else {
             continue;
         };

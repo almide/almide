@@ -846,6 +846,50 @@ impl LowerCtx {
                             Some(v) => CallArg::Scalar(v),
                             None => {
                                 self.ops.truncate(mark);
+                                // ANF-LIFT `f().x` (a scalar field on a call result — the
+                                // paren-defaults `mk_defaults().port` shape): bind the call
+                                // to a SYNTHETIC temp exactly like `let tmp = f(); tmp.x`
+                                // (the tail.rs heap-extraction discipline — the bind tracks
+                                // + seeds the record's read shape), then the field-slot load
+                                // resolves over the tracked temp.
+                                let lifted = if let IrExprKind::Member { object, field } = &a.kind
+                                {
+                                    if matches!(object.kind, IrExprKind::Call { .. })
+                                        && is_heap_ty(&object.ty)
+                                    {
+                                        let tmp = self.fresh_synth_var();
+                                        let field = *field;
+                                        let obj_ty = object.ty.clone();
+                                        self.lower_bind(tmp, &obj_ty, object).ok().and_then(
+                                            |_| {
+                                                let synth = IrExpr {
+                                                    kind: IrExprKind::Member {
+                                                        object: Box::new(IrExpr {
+                                                            kind: IrExprKind::Var { id: tmp },
+                                                            ty: obj_ty,
+                                                            span: object.span.clone(),
+                                                            def_id: None,
+                                                        }),
+                                                        field,
+                                                    },
+                                                    ty: a.ty.clone(),
+                                                    span: a.span.clone(),
+                                                    def_id: None,
+                                                };
+                                                self.lower_scalar_value(&synth)
+                                            },
+                                        )
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+                                if let Some(v) = lifted {
+                                    out.push(CallArg::Scalar(v));
+                                    continue;
+                                }
+                                self.ops.truncate(mark);
                                 // A scalar field access on a COMPUTED CALL result (`mk(5).x`)
                                 // — the call result is not a tracked aggregate, so a Const-0
                                 // reads a WRONG value (and the record-returning callee now

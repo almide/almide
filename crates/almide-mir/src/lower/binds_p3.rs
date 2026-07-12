@@ -447,6 +447,32 @@ impl LowerCtx {
         if tys.is_empty() {
             return None;
         }
+        // DEFAULT FILL: an omitted slot with a DECLARED default (`type AllDefault = {
+        // host: String = "localhost", port: Int = 8080 }`; `AllDefault()`) synthesizes
+        // the default as a supplied field — CALL-FREE defaults only (a call default
+        // would inject an uncounted CallFn, breaching the caps mir == ir gate; it
+        // keeps walling via the omitted-heap check below).
+        let mut fields = fields.clone();
+        if let Ty::Named(rec_name, _) = &value.ty {
+            if let Some(defs) = self
+                .variant_layouts
+                .ctor_field_defaults
+                .get(rec_name.as_str())
+                .cloned()
+            {
+                for nm in &names {
+                    if fields.iter().any(|(fname, _)| fname == nm) {
+                        continue;
+                    }
+                    if let Some(d) = defs.get(nm.as_str()) {
+                        if !crate::lower::expr_contains_call(d) {
+                            fields.push((*nm, d.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        let fields = &fields;
         let n = tys.len();
         // Per-slot heap-ness from the SUPPLIED field's CONCRETE type (`expr.ty`), NOT the
         // declared field type — a generic field (`first: A` in `Pair[A,B]`) may leave the

@@ -834,6 +834,20 @@ error-model frontier proper, NOT an arm-local patch (a speculative ok-wrap
 fallback in try_lower_result_match_value was tried and reverted: the dispatch
 never reaches it because is_heap_ty(tail.ty) gates first).
 
+B4. **Record defaults + scalar field ANF lift SHIPPED (150 → 146 — the <150
+   WAYPOINT falls)**: (i) plain-record field DEFAULTS ride
+   `ctor_field_defaults` keyed by the record TYPE name (build_variant_layouts
+   gains a Record branch), and `try_lower_record_construct` fills omitted
+   slots from them (CALL-FREE defaults only — the count-gate discipline), so
+   `AllDefault()` paren-empty ctors materialize; (ii) `f().x` — a SCALAR
+   field on a call result in ARG position ANF-lifts to a synthetic temp
+   (`fresh_synth_var` + lower_bind, the tail.rs heap-extraction discipline)
+   and loads the real slot. Probe pc1 v0-identical. Opened the 3
+   record_paren_ctor fns + codec_p0's unknown-ignored (compound). Also
+   REVERTED-BY-DESIGN: a speculative ok-wrap fallback for the
+   unannotated-effect-fn lift (see the NEXT note above — fn-level, not
+   arm-local).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
