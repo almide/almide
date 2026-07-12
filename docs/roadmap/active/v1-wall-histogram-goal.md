@@ -864,6 +864,25 @@ A3. **List[List[String]] literals + string-key sort_by honest wall SHIPPED
    call escapes. Follow-up recorded: registered sort_by_str_key / min/max
    typed variants over heap-elem lists = the total-order comparator family.
 
+A4. **Err(List[String]) ctor SHIPPED (144 → 139)**: the both-heap ResultErr
+   arm gains a `List[String]` LITERAL payload case — the inner list builds
+   fresh-owned (`try_lower_str_list_literal`), `materialize_result_str` wraps
+   it, and the drop RECLASSIFIES from the flat `heap_elem_lists` (which would
+   free slot-0 as a String, leaking the inner list's elements) to
+   `list_list_str_lists` (the recursive list-of-list-str free). Opened all 5
+   result_collect_test fns at classify (probe rc1: v0 oracle `eq|eq|eq`); the
+   `result.collect` CALL itself stays a dotted-call render wall.
+   **DESIGN CONFIRMED for the render-side completion**: the self-host
+   (filter_str-style prim passes: outer slots @12+8i, elem tag @4, Err String
+   deep-copied via string.repeat·1, Ok ints via load64/store64 into
+   alloc_list, len patched @4) is straightforward EXCEPT the caller-side
+   call-result drop for `Result[List[Int], List[String]]` needs a TAG-AWARE
+   generated drop (`$__drop_res_intlist_strlist`: tag=err → slot-0 recursive
+   list-of-str free; tag=ok → slot-0 flat block free — freeing the Ok side
+   recursively would rc_dec garbage int "handles" = UNSOUND). This is exactly
+   the "exact drop" the 2b revert was pending — a LENLIST_DROP_SRC-style
+   generated source + program_uses gate + drop_op_for arm.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

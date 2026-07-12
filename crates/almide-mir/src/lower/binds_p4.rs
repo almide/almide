@@ -1082,6 +1082,22 @@ impl LowerCtx {
                         self.drop_arm_locals(mark);
                         obj
                     }
+                    // `err(["a", "b"])` — a `List[String]` LITERAL payload (the result.collect
+                    // Err side, `Result[List[Int], List[String]]`): the inner list builds
+                    // fresh-owned; the Result block's flat DropListStr would free slot-0 as a
+                    // STRING (leaking the inner list's elements), so RECLASSIFY the drop below
+                    // to the recursive list-of-list-str free.
+                    IrExprKind::List { .. }
+                        if matches!(&expr.ty,
+                            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
+                                if i.len() == 1 && matches!(i[0], Ty::String)) =>
+                    {
+                        let obj = self.try_lower_str_list_literal(expr)?;
+                        let dst = self.materialize_result_str(obj, repr, true, false);
+                        self.heap_elem_lists.remove(&dst);
+                        self.list_list_str_lists.insert(dst);
+                        return Some(dst);
+                    }
                     _ => return None,
                 };
                 Some(self.materialize_result_str(piece, repr, true, false))
