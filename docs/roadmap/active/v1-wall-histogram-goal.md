@@ -756,6 +756,17 @@ A1. **Empty-map call args SHIPPED (163 → 160)**: `lower_call_args` intercepts
    `list.fold_hacc` (heap-accumulator fold variant, unimplemented) — a
    defunc-family follow-up, recorded here.
 
+A2. **Pure fan blocks SHIPPED (160 → 156)**: `desugar_fan_block` (desugar_fan.rs,
+   both chains) — `fan { e1; e2 }` over PLAIN Named calls rewrites to the tuple
+   `(e1, e2)` (v0's wasm emission IS the sequential fallback, contract C-004's
+   determinism family). KEY FINDING: the checker types EVERY fan expr as a
+   PHANTOM `Result[T, String]` even for a plain callee whose runtime value is
+   the raw T — the desugar strips the phantom to the Ok type for direct Named
+   calls (probe fb1: 3 chained fan blocks with captures + staged deps,
+   v0-identical). A Module/Method/Computed thunk (really fallible) stays
+   declined — its auto-unwrap + Err early-return is a later brick. Opened all
+   4 fan_test fns.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

@@ -226,3 +226,73 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
     }
 }
 
+
+/// Rewrite a `fan { e1; e2; … }` BLOCK whose expressions are all NON-Result into the
+/// plain tuple `(e1, e2, …)` — v0's wasm emission for the fan block IS the sequential
+/// fallback (expressions_g2 "Fan block — no parallelism in WASM"): each expr evaluated
+/// in list order, results stored into a fresh tuple. A Tuple literal evaluates its
+/// elements in exactly that order, so the rewrite is byte-identical on the wasm
+/// target (contract C-004's determinism family). A Result-typed expr (an effect-fn
+/// thunk) needs v0's auto-unwrap + Err early-return — DECLINED here (a later brick),
+/// so the function stays honestly walled. Count-invariant: every expr appears once.
+pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    struct V {
+        changed: bool,
+    }
+    impl IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            use almide_lang::types::constructor::TypeConstructorId;
+            walk_expr_mut(self, e);
+            let IrExprKind::Fan { exprs } = &e.kind else { return };
+            // The checker types EVERY fan expr as `Result[T, String]` (the fan thunk
+            // convention) even when the callee is a PLAIN fn whose runtime value is the
+            // raw T (v0 native builds the raw tuple; a plain call never errs, so the
+            // wasm auto-unwrap is a no-op on it). Admit a direct NAMED call with that
+            // PHANTOM Result type and strip it to the Ok type — the v1 call of a plain
+            // fn yields the raw T, so the element ty must say T for the tuple build.
+            // A Module/Method/Computed expr (a REAL fallible thunk, `fs.read` etc.)
+            // stays declined — its unwrap + Err early-return is a later brick.
+            let phantom_ok_ty = |x: &IrExpr| -> Option<Ty> {
+                match &x.ty {
+                    Ty::Applied(TypeConstructorId::Result, a)
+                        if a.len() == 2
+                            && matches!(
+                                &x.kind,
+                                IrExprKind::Call {
+                                    target: almide_ir::CallTarget::Named { .. },
+                                    ..
+                                }
+                            ) =>
+                    {
+                        Some(a[0].clone())
+                    }
+                    _ if !crate::lower::is_result_ty(&x.ty) => Some(x.ty.clone()),
+                    _ => None,
+                }
+            };
+            if exprs.len() < 2 || exprs.iter().any(|x| phantom_ok_ty(x).is_none()) {
+                return;
+            }
+            let elements: Vec<IrExpr> = exprs
+                .iter()
+                .map(|x| {
+                    let mut nx = x.clone();
+                    nx.ty = phantom_ok_ty(x).expect("gated above");
+                    nx
+                })
+                .collect();
+            *e = IrExpr {
+                kind: IrExprKind::Tuple { elements },
+                ty: e.ty.clone(),
+                span: e.span.clone(),
+                def_id: e.def_id,
+            };
+            self.changed = true;
+        }
+    }
+    let mut v = V { changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    v.changed.then_some(out)
+}
