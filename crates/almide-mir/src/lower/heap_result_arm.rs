@@ -596,6 +596,13 @@ impl LowerCtx {
                 // `if cond then err(msg) else ok(())`). Unit has no value, so lower_scalar_value declines
                 // it; use a 0 placeholder — the Ok tag (@4 = 0) is what consumers read, the payload @12 is
                 // never extracted for a Unit Ok. Without this the whole heap-result `if` walled.
+                //
+                // PER-ARM FRAME (the dn4 rc_dec(0) trap, 2026-07-12): a scalar payload expr can
+                // still materialize HEAP TEMPS — `ok(list.get(date, 0) ?? 0 + …)` builds the
+                // `??`-operand Option in live_heap_handles. Leaked to the FUNCTION scope end,
+                // its unconditional rc_dec reads an UNINITIALIZED local when the OTHER arm ran
+                // (the yaml parse_number class). Frame + drop them WITHIN the arm.
+                let arm_mark = self.live_heap_handles.len();
                 let payload = if matches!(&expr.kind, IrExprKind::Unit) {
                     let z = self.fresh_value();
                     self.ops.push(Op::ConstInt { dst: z, value: 0 });
@@ -606,6 +613,7 @@ impl LowerCtx {
                 let repr = repr_of(result_ty).ok()?;
                 let obj = self.materialize_result_ok(payload, repr);
                 self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
             IrExprKind::ResultErr { expr } if is_heap_ty(&expr.ty) => {
