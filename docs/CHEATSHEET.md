@@ -330,6 +330,19 @@ assert(cond)               // assert true
 **There is no `print` function.** Use `println` for all output (including error messages to user).
 `eprintln` is for debug/internal errors only — user-facing messages MUST use `println`.
 
+### Stdin & parsing
+```
+import io                                     // io is NOT auto-imported
+effect fn main() -> Unit = {
+  let line = io.read_line()                   // plain String — NOT a Result. Do not add ! or ?
+  let n = int.parse(string.trim(line)) ?? 0   // int.parse(s) -> Result[Int, String]
+  println(int.to_string(n))
+}
+```
+`io.read_line()` reads one stdin line with the trailing newline stripped, returns `""` on EOF,
+and requires an `effect fn` caller. `int.parse` / `float.parse` return `Result` — unwrap with
+`??`, `!` (effect fn), or `?`. There is no `int.from_string`.
+
 ## Entry point
 ```
 effect fn main() -> Unit = {
