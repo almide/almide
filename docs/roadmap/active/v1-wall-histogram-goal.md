@@ -883,6 +883,22 @@ A4. **Err(List[String]) ctor SHIPPED (144 → 139)**: the both-heap ResultErr
    the "exact drop" the 2b revert was pending — a LENLIST_DROP_SRC-style
    generated source + program_uses gate + drop_op_for arm.
 
+IN-FLIGHT (UNCOMMITTED, at 139 — DEBUG FIRST): the result.collect render-side
+stage is ON DISK but NOT shipped — probe rc1 MISMATCHES: v0 prints 3 lines
+(eq|eq|eq), v1 prints those PLUS 11 extra ne/eq lines — a print-multiplying
+shape (a both-arms linearization or a tail-duplication running the untaken
+side's effects) somewhere in `println(if result.collect(..) == err([..]) …)`.
+Pieces on disk: RES_ILSL_DROP_SRC + program_uses gate (drop_sources.rs),
+pipeline injection, binds_p2 call-result registration (res_ilsl +
+materialized_results_str — SUSPECT: the results_str tracking may route the
+`==` or a linearization wrongly for this type), ("result","collect") in
+is_self_host_result_module_fn, "result_collect" in PURE_MODULES, the registry
+entry, stdlib/result_collect.almd (filter_str-style two-pass prim impl).
+Debug order: (1) minimize rc1 to one println; (2) check whether the extra
+prints come from a statement-match linearization admitted by the new
+tracking; (3) verify the eq path for Result[List,List] (slot-0 is a LIST
+handle — a string-compare of it is garbage). Ship only at full parity.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
