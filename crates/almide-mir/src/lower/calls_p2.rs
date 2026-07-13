@@ -487,7 +487,22 @@ impl LowerCtx {
                 // (porta `format_tool_log`) + any call/concat with a heap-result-`if` arg.
                 IrExprKind::If { cond, then, else_ } if is_heap_ty(&a.ty) => {
                     match self.try_lower_heap_result_if(cond, then, else_, &a.ty) {
-                        Some(dst) => CallArg::Handle(dst),
+                        // Route through `materialized_call_arg` (the sibling `Match` arm's own
+                        // B52 fix) rather than a bare `CallArg::Handle`: it tracks `dst` in
+                        // `live_heap_handles` AND, for a Tuple/Record `a.ty`, seeds the
+                        // precise-destructure masks `lower_destructure` (binds_p2.rs) needs —
+                        // without it, `let (a,b) = if c then (..) else (..)` materialized the
+                        // tuple fine but its scalar-component destructure fell to the generic
+                        // container-grain fallback (STRICT mode's `Const-0` wall). Verified
+                        // SAFE for the pre-existing plain-value case too (`println(if c then
+                        // "x" else "y")` in a 10,000× loop, 4MB cap, no leak/double-free before
+                        // OR after this change — `live_heap_handles` is the SAME scope-end-drop
+                        // list either path already respects, so adding the tracking here closes
+                        // a genuine latent gap rather than introducing a double-free).
+                        Some(dst) => {
+                            let repr = repr_of(&a.ty)?;
+                            self.materialized_call_arg(dst, repr, &a.ty)
+                        }
                         None => {
                             return Err(LowerError::Unsupported(
                                 "heap-result `if` in a call-argument position outside the executable \

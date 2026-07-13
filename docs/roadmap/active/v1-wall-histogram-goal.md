@@ -2878,6 +2878,30 @@ B52. **Two-layer fix for `codegen_patterns_test.almd`'s "match arms
    classify 24 zero newly-walled (one entry closed) / spec 283 / GATE OK /
    CORPUS WALL OK (FORBIDDEN=0).
 
+B53. **Closed B52's own scoped follow-up: the sibling `If` arm in
+   `calls_p2.rs`'s `lower_call_args` had the IDENTICAL `live_heap_handles`-
+   tracking gap as the Match arm, latent (not a corpus regression) but a
+   real wrong-behavior trap for the exact shape B52's DIAGNOSIS note called
+   out — `let (a,b) = if c then (...) else (...)` in a call-argument
+   position**. Before touching PRE-EXISTING, already-relied-upon code, ran
+   two double-free safety probes: (a) the UNFIXED If-arm's ordinary
+   (non-destructure) call-arg use — `println(if c then "yes" else "no")`,
+   10,000 iterations under a 4MB wasmtime cap — no leak; (b) B52's own
+   Match-arm fix under the analogous ordinary-value shape, same cap/count —
+   also no leak. Both confirmed `materialized_call_arg`'s `live_heap_
+   handles.push` doesn't conflict with whatever cleanup already handles the
+   untracked case, so applied the IDENTICAL routing to the If arm (bare
+   `CallArg::Handle(dst)` → `materialized_call_arg(dst, repr, &a.ty)`).
+   Verified: `let (label, len) = if string.len(x) > 3 then (...) else (...)`
+   (previously walled "scalar destructure component outside the value
+   subset") now renders and matches v0 byte-for-byte (`long`/`5`); a
+   combined 10,000-iteration leak-loop exercising BOTH the plain If-arm
+   call-arg AND the destructuring If-arm call-arg together, under a 4MB
+   cap, completed with the correct accumulated value (50000), no leak/trap.
+   Ladder: mir 583 / classify 24 zero newly-walled zero closed (expected —
+   classify has no fixture for this shape, matching B52's own DIAGNOSIS) /
+   spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
