@@ -816,14 +816,30 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_list_match_value(subject, arms, &tail.ty) {
                         return Ok(Some(dst));
                     }
-                    if let Some(if_expr) = self.desugar_match_to_if(subject, arms, &tail.ty) {
-                        if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
-                            if let Some(dst) =
-                                self.try_lower_heap_result_if(cond, then, else_, &tail.ty)
-                            {
-                                return Ok(Some(dst));
-                            }
+                    // `desugar_match_to_if` wraps its OUTPUT in a `Block` (hoisted `let`s
+                    // preceding the `If`) whenever the subject isn't one of `subject_pure`'s
+                    // freely-substitutable kinds (`Var`/`LitInt`/`LitBool`/`LitFloat` —
+                    // notably missing `LitStr`: a single-use `let s = "hello world"` subject
+                    // gets constant-propagated to a bare `LitStr` upstream, same gap B52
+                    // fixed for the call-argument consumer in `calls_p2.rs`). Unwrap it
+                    // generically here too — lower the hoisted `let`s via `self.lower_stmt`,
+                    // then extract the inner `If` — rather than widening `subject_pure`
+                    // itself (a general fix, not LitStr-specific: ANY subject needing the
+                    // hoist now works in this tail position too).
+                    let lifted = self.desugar_match_to_if(subject, arms, &tail.ty).and_then(|e| {
+                        let (stmts, if_expr) = match e.kind {
+                            IrExprKind::If { .. } => (Vec::new(), e),
+                            IrExprKind::Block { stmts, expr: Some(t) } => (stmts, *t),
+                            _ => return None,
+                        };
+                        let IrExprKind::If { cond, then, else_ } = &if_expr.kind else { return None };
+                        for s in &stmts {
+                            self.lower_stmt(s).ok()?;
                         }
+                        self.try_lower_heap_result_if(cond, then, else_, &tail.ty)
+                    });
+                    if let Some(dst) = lifted {
+                        return Ok(Some(dst));
                     }
                     // Outside the executable heap-result-match subset, the RETURN value would
                     // be one deferred Opaque EMPTY heap object the caller observes = a SILENT

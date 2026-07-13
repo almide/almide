@@ -3059,6 +3059,55 @@ DIAGNOSIS — `map_fold_heap_acc.almd`'s "List argument cannot be faithfully
    syntax). **Current 24, unchanged** (zero source edits made or
    reverted).
 
+B107. **Closed 2 of 3 "heap-result match/if outside the executable subset"
+   entries — the SAME `Block`-wrapping gap B52 fixed for the call-argument
+   consumer, but at a DIFFERENT consumer site (tail.rs's own heap-result
+   Match handler) that had never been touched (26 → 24 in this narrower
+   cluster; 24 → 22 corpus-wide)**: `branch_lift_synth_3`/`branch_lift_
+   synth_4` are NOT source identifiers — they're SYNTHESIZED tail-helper
+   functions `almide-optimize/branch_lift.rs` creates by lifting a
+   let-bound heap `if`/`match` (Some/None/Ok/Err/Bind/Wildcard arms only)
+   out of its enclosing scope into a fresh top-level function, so the
+   proven tail-position lowering can render it. Bisected the ACTUAL source
+   trigger via a greedy block-removal script over `control_flow_test.almd`
+   (60 top-level test/fn blocks, iteratively drop-and-recheck) since the
+   synthesized name carries no back-reference to source — converged on
+   `test "match with string guard" { let result = match s { x if string.
+   contains(x,"world") => "has world", _ => "no world" }; assert_eq(...) }`
+   (a GUARDED Bind pattern + Wildcard fallback, String subject, OUT of any
+   loop — eligible because `visit_stmt_mut`'s fire condition is `loop_depth
+   > 0 OR all-arms-are-{Some,None,Ok,Err,Bind,Wildcard}`, unconditionally
+   admitting this out-of-loop shape too). Traced via debug instrumentation
+   in `tail.rs`'s heap-result `Match` handler (added then fully removed):
+   `desugar_match_to_if` returned a `Block`-wrapped result (hoisted `let`s
+   before the `If`), not a bare `If` — the EXACT same `subject_pure` gap
+   B52 diagnosed (`Var`/`LitInt`/`LitBool`/`LitFloat` only, missing
+   `LitStr` — a single-use `let s = "hello world"` gets constant-propagated
+   to a bare `LitStr` subject upstream) — but this consumer (the tail
+   position's OWN heap-result Match dispatch) only ever matched a bare
+   `IrExprKind::If`, declining outright on the Block-wrapped form, exactly
+   like `calls_p2.rs` did before B52. Applied the IDENTICAL generic fix:
+   unwrap the `Block` (lower its hoisted `let`s via `self.lower_stmt`, then
+   extract the inner `If`) before calling `try_lower_heap_result_if` — not
+   LitStr-specific, any subject needing the hoist now works here too.
+   Verified: a hand-written non-test-block equivalent (both a direct-tail
+   `fn classify(s) = match s {...}` AND a let-bound form that actually
+   triggers the branch-lift, confirmed via `branch_lift_synth_0` appearing
+   in the WAT) matches v0 byte-for-byte on both inputs (`has world`/`no
+   world`); a dedicated 10,000-iteration leak-loop (fresh string match
+   every iteration) under a 4MB wasmtime cap completed with the correct
+   accumulated value (90000), no leak. **`wrap_lists` (playground_default.
+   almd) is a DIFFERENT root cause, NOT fixed by this change** — its wall
+   is a bare `IrExprKind::If` (not a `Match`) directly as the function's
+   own tail (`if result.in_ul then result.out + ["</ul>"] else result.out`,
+   both arms Member-access + list-concat), never touching `desugar_match_
+   to_if` at all — `try_lower_heap_result_if` itself declines on this
+   shape for an unrelated reason, not investigated further this stage (out
+   of scope — this stage targeted the `Match`-Block-unwrap gap
+   specifically). Ladder: mir 583 / classify 22 zero newly-walled (2
+   closed) / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0). **Current
+   22**.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
