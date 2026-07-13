@@ -1980,6 +1980,59 @@ B37. **(String,Int)/(Int,String) widened to any scalar (40 → 39) + a newly-
    Ladder: mir 583 / classify 39 zero newly-walled / spec 283 / GATE OK /
    CORPUS WALL OK.
 
+DIAGNOSIS (at 39): **two further root causes pinned by direct probing**,
+   both confirmed genuine (not quick fixes) — recorded so a future session
+   doesn't re-derive them:
+   - **`lift_lambda`'s `List[String]` capture ratchet (binds.rs ~L75-97,
+     `one_level_exact`) blocks `record_fn_field_test`'s `mock_source`
+     (entry 20) and likely more.** Isolated via probes rfc2 (non-capturing
+     closure record field, WORKS) → rfc3 (scalar-capturing, WORKS) → rfc4
+     (`List[String]`-capturing, WALLS) → rfc5/rfc6 (the SAME
+     `List[String]` capture returned DIRECTLY, not via a record — WALLS
+     identically, confirming this is `lift_lambda`'s OWN capture-type gate,
+     not a record- or tail-position-specific bug). The record CONSTRUCTION
+     side, the record DROP generator (`Ty::Fn` field arm), and the
+     TAIL-position Record-return path are ALL already fully wired for a
+     closure field (confirmed by reading each) — the ONLY gap is
+     `lift_lambda` declining a `List[String]` (or `Value`/variant/heap-field-
+     record) capture, exactly as the code's OWN comment documents
+     ("nested-heap capture... still defers — honest wall, recorded in the
+     goal file" — this IS that record). Fixing it needs a THIRD closure-env
+     capture category (current: closure_caps [recursive `$__drop_closure`],
+     heap_caps [flat `rc_dec`, one-level-exact only], scalar_caps
+     [untouched]) — a `nested_heap_caps` category freed via the
+     TYPE-SPECIFIC recursive drop (`$__drop_list_str` for `List[String]`,
+     analogous to B33's variant-field extension), which means widening the
+     packed env header (currently `nh | nc<<16`, two fields) to a third
+     count AND updating both construction (which slot group each capture
+     lands in) and `$__drop_closure_loop`'s per-slot dispatch to a 3-way
+     split. A real, bounded, but NOT small brick — touches the closure
+     representation used everywhere (including this session's B36 List[
+     Closure] literals), so it needs its own careful session, not a
+     drive-by widening.
+   - **Tail-position `Result`/`Option` match needing error-propagation in
+     the non-Ok/Some arm is a shared root cause across ≥3 entries**
+     (`effect_assign_unwrap_test::unannotated_unwraps`,
+     `nested_match_option_string_test::is_balanced`,
+     `result_option_matrix_test::nested_unwrap` — all three share the
+     IDENTICAL wall text "variant (Option/Result) match in tail position
+     outside the executable subset... a Const-0 would silently pick a
+     wrong arm", from `tail.rs:1082` when `try_lower_variant_value_match`
+     declines for a TAIL match whose non-Ok/Some arm must construct an
+     early-return/error value rather than a plain scalar expression, e.g.
+     `let v = declared_result(); v` in an un-annotated effect fn — the
+     auto-`?` desugar produces a tail `match { ok(x)=>x, err(e)=>
+     <propagate> }` whose Err arm doesn't fit `try_lower_variant_value_match`'s
+     current admitted-arm shapes). Likely the SAME family as entry 1
+     (`find_first_even`'s "needs early-return propagation" — that one is a
+     LOOP-carried case, these three are the plain-tail case, probably an
+     easier subset of the same missing mechanism). Not attempted — probe
+     uw2 confirmed the repro but the actual FIX (giving
+     `try_lower_variant_value_match` or its tail-position caller a real
+     error-arm-propagation path) needs design work, not a quick widening.
+   Both are legitimate next targets for a session with fresh context
+   budget; neither is safe to rush.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
