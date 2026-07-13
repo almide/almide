@@ -344,13 +344,15 @@ impl LowerCtx {
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
                 Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(&b[0],
                     Ty::Applied(TypeConstructorId::List, c) if c.len() == 1 && !is_heap_ty(&c[0]))));
-        // A `List[(Int, String)]` (`[(i, line)]` — the list.enumerate append) — each element is a
-        // (Int @12 scalar, String @20 heap) tuple, materialized via `try_lower_tuple_construct` and
-        // reclaimed RECURSIVELY at scope end via `$__drop_list_int_str` (per tuple: rc_dec the String
-        // only). A flat `DropListStr` would leak each tuple's String.
+        // A `List[(<scalar>, String)]` (`[(i, line)]` — list.enumerate; `[(true, "yes")]` —
+        // the bool-key map literal): each element is a (scalar @12, String @20) tuple,
+        // materialized via `try_lower_tuple_construct` and reclaimed RECURSIVELY at scope end
+        // via `$__drop_list_int_str` (per tuple: rc_dec the String only — correct for ANY
+        // scalar key, the slot layout is identical). A flat `DropListStr` would leak each
+        // tuple's String.
         let elem_int_str = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
-                Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)));
+                Ty::Tuple(tys) if tys.len() == 2 && !is_heap_ty(&tys[0]) && matches!(tys[1], Ty::String)));
         // A `(String, Int)` TUPLE element (`[("alpha", 1), …]` — the tokenizer vocab
         // pairs) — `DropListStrInt` rc_decs each tuple's String slot0 only.
         let elem_str_int = matches!(&value.ty,

@@ -96,7 +96,7 @@ impl LowerCtx {
         // tuple, freed recursively by `$__drop_list_int_str` (per tuple: rc_dec the String slot @20 only,
         // the Int @12 is scalar). Routed via variant_drop_handles (a DropVariant, like the record case).
         let int_str_elem = matches!(&elem_ty,
-            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String));
+            Ty::Tuple(tys) if tys.len() == 2 && !is_heap_ty(&tys[0]) && matches!(tys[1], Ty::String));
         // A `(String, Int)` TUPLE element (the gguf `entries + [(key, pos)]` metadata
         // accumulator) — the MIRROR of `int_str_elem`: rc-own each tuple, recursive drop via
         // `DropListStrInt` (rc_dec the String slot @12 only; the Int @20 is scalar).

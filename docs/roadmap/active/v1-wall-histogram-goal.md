@@ -1481,6 +1481,20 @@ D2e. **fan.timeout literal-thunk inline SHIPPED (51 → 49)**: v0's WASM leg
    Ladder (with the CORRECTED corpus grep incl. FAIL lines): mir 583 /
    classify 49 zero newly-walled / spec 283 / GATE OK / CORPUS WALL OK.
 
+B21. **Scalar-key (String-value) tuple lists SHIPPED (49 → 48)**: the
+   `List[(Int, String)]` literal machinery's key gate widens from Ty::Int
+   to ANY non-heap scalar (`[(true, "yes"), (false, "no")]` — the bool-key
+   map literal's from_list argument): the (scalar @12, String @20) slot
+   layout and the `$__drop_list_int_str` per-tuple String rc_dec are
+   identical for every scalar key, so the two literal-materialization
+   gates (binds.rs bind-position + calls_p2 call-arg) widen with no drop
+   change. Probe bk6 (bool tuple list + destructuring find) v0-byte PARITY;
+   the hash_protocol bool-keys test opened fn-level (map.from_list stays
+   render-unlinked for non-String keys — the honest fallback, FORBIDDEN 0).
+   Record/variant Map keys remain the hash-protocol-proper frontier.
+   Ladder: mir 583 / classify 48 zero newly-walled / spec 283 / GATE OK /
+   CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
