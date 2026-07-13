@@ -1096,6 +1096,18 @@ B9. **Sized-int interp display SHIPPED (117 → 114)**: `interp_to_string_call`
    construction-site narrowing only covers bare literals. v1 handles the
    same program CORRECTLY (`neg=-5 -300 -100000`).
 
+NEXT (diagnosed at 114): **hash_protocol Map keys (4)** — the map literal
+desugars to `map.from_list([(k, v), …])`; a BOOL key makes the list
+`List[(Bool, String)]` (no tuple element class) and from_list has no
+bool-key variant. Bool→Int retyping is WRONG (map.keys display: true/false
+vs 0/1) — the piece is a bool-key map variant family (map_bkv: the int-key
+machinery + bool display) plus record/variant keys via the hash protocol
+(bigger). **depth-2 ctor patterns (pick, 2-3 walls)** — the chain emitter
+needs nested-tag conds with FALLTHROUGH (a wrong-outer-ctor payload slot can
+hold a raw Int whose truncated address could OOB-trap on a naive AND — the
+inner tag load must sit UNDER the outer match; single-outer-ctor subjects
+(pick's Wrap) skip the outer test entirely — that sub-shape first).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
