@@ -548,6 +548,46 @@ pub fn program_uses_closure_list(program: &almide_ir::IrProgram) -> bool {
     false
 }
 
+/// Does the program call `map.find` anywhere (a `Some((key,value))` predicate-search result
+/// — the Option-tuple payload `$__drop_opt_str_int` frees) — gates `OPT_STR_INT_DROP_SRC`'s
+/// injection. Conservative on the call NAME alone (not the key/value TYPE, which would need
+/// re-deriving `map.find`'s exact concrete instantiation here) — a program calling
+/// `map.find` over a non-`(String,scalar)`-keyed map would pay one unused generated
+/// routine, never a missing one.
+pub fn program_calls_map_find(program: &almide_ir::IrProgram) -> bool {
+    struct Finder {
+        found: bool,
+    }
+    impl almide_ir::visit::IrVisitor for Finder {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if let almide_ir::IrExprKind::Call {
+                target: almide_ir::CallTarget::Module { module, func, .. },
+                ..
+            } = &expr.kind
+            {
+                if module.as_str() == "map" && func.as_str() == "find" {
+                    self.found = true;
+                }
+            }
+            if !self.found {
+                almide_ir::visit::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut finder = Finder { found: false };
+    let funcs = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in funcs {
+        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
+        if finder.found {
+            return true;
+        }
+    }
+    false
+}
+
 /// The element-drop class a `List[Option/Result]` LITERAL's elements take — the SINGLE
 /// classifier the injection pre-scan ([`program_uses_lenlist_elem_lists`]) and the literal
 /// builder (`try_lower_record_list_literal_as`) BOTH consult, so `$__drop_list_lenlist` is

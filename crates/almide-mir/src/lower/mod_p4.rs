@@ -206,7 +206,14 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         "option" => matches!(func, "map" | "filter" | "flat_map" | "or_else" | "flatten" | "zip" | "collect"),
         // map.get(m, k) builds a materialized Option[Int] (Some(value) when the key is found via
         // the paired-slot scan, None otherwise) — a `match` over it EXECUTES.
-        "map" => matches!(func, "get"),
+        // map.find(m, pred) — the predicate-search HOF — builds a materialized
+        // Option[(K, V)] (Some((key, value)) on the first predicate hit, None otherwise); a
+        // `match` over it should ALSO execute. See the paired routing in control.rs (near
+        // `is_self_host_option_call`), which detects an Option[(String, <scalar>)] SUBJECT
+        // and routes its DROP to the type-specific generated `$__drop_opt_str_int` instead of
+        // the generic flat one-level-exact path — the payload is a TUPLE that itself owns a
+        // heap slot (the String), not a single flat handle a blind `rc_dec` would free.
+        "map" => matches!(func, "get" | "find"),
         // int.to_{int,uint}N_checked builds a materialized Option[Int] (Some(n) when n fits the
         // N-bit range, None otherwise) — a `match` over it EXECUTES.
         "int" => matches!(
@@ -1666,6 +1673,7 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                     func,
                     "new" | "set" | "remove" | "filter" | "get" | "get_or" | "keys" | "values"
                         | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold" | "eq"
+                        | "find"
                 )
                 .then_some("_skv"),
                 // A non-String heap KEY (tuple/record/nested list) reaching here has no correct

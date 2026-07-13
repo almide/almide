@@ -801,6 +801,35 @@ fn __drop_list_closure_loop(h: Int, n: Int, i: Int) -> Unit =
   }
 ";
 
+/// The ALMIDE SOURCE of `__drop_opt_str_int` — the recursive release of an
+/// `Option[(String, Int)]` (`map.find`'s predicate-search result: `Some((key,
+/// value))` on a hit). Wrapper `[rc][len@4=0-or-1 (Option's tag)][cap@8][@12
+/// payload]`: at the wrapper's last ref (rc==1), IFF len==1 (Some) the @12
+/// payload is the `(String, Int)` tuple's handle — at the TUPLE's own last ref,
+/// `rc_dec` its String slot0 @12 (the Int slot1 @20 is scalar), then the tuple
+/// block; len==0 (None) frees nothing at the payload. THEN the wrapper block,
+/// always. A blind flat `rc_dec` of the @12 payload slot (the generic
+/// `heap_elem_lists`/`DropListStr` route every OTHER self-host Option call
+/// uses) would only decrement the TUPLE's own refcount, leaking its String —
+/// the exact class of bug this session's `_str`-dispatch fix caught elsewhere.
+/// Named for the (String, Int) shape specifically; a (String, Bool)/(String,
+/// Float) `map.find` result reuses the SAME generated fn (the render never
+/// reads the Int slot's bits, only rc_decs the String slot — the established
+/// type-stand-in convention, e.g. `list_hshare.almd`'s `List[Int]` stand-in).
+pub const OPT_STR_INT_DROP_SRC: &str = "\
+fn __drop_opt_str_int(o: List[Int]) -> Unit = {
+  let h = prim.handle(o)
+  if prim.load32(h + 0) == 1 then {
+    if prim.load32(h + 4) == 1 then {
+      let th = prim.load64(h + 12)
+      if prim.load32(th + 0) == 1 then prim.rc_dec(prim.load64(th + 12)) else ()
+      prim.rc_dec(th)
+    } else ()
+  } else ()
+  prim.rc_dec(h)
+}
+";
+
 /// Header layout: `n_heap | (n_nested_heap << 16) | (n_closure << 32)` — three
 /// 16-bit counts (ample for any realistic capture count). Widened from the
 /// original 2-field `n_heap | (n_closure << 16)` to add the `n_nested_heap`

@@ -715,6 +715,27 @@ impl LowerCtx {
                 let piece = self.try_lower_scalar_tuple_construct(&elements)?;
                 Some(self.materialize_opt_str_some(piece, repr))
             }
+            // `Some((k, v))` — a `(String, <scalar>)` tuple literal payload (`map.find`'s
+            // `__skv_find_some(k, v) = Some((kc, v))`). Build the tuple (`try_lower_tuple_
+            // construct`, one heap slot: the String), move it into the 1-element Option. The
+            // DEFAULT `materialize_opt_str_some` flat drop would only `rc_dec` the TUPLE's
+            // own handle, leaking its String (the same class of bug the `_str`-dispatch fix
+            // and the drop-authority swap below both guard against) — override the routing
+            // to the type-specific recursive `$__drop_opt_str_int` (generated,
+            // OPT_STR_INT_DROP_SRC), mirroring the `(Value, scalar)` swap immediately below.
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind, IrExprKind::Tuple { .. })
+                    && matches!(&expr.ty,
+                        Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && !is_heap_ty(&tys[1])) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let IrExprKind::Tuple { elements } = &expr.kind else { return None };
+                let elements = elements.clone();
+                let piece = self.try_lower_tuple_construct(&elements)?;
+                let obj = self.materialize_opt_str_some(piece, repr);
+                self.variant_drop_handles.insert(obj, "opt_str_int".to_string());
+                Some(obj)
+            }
             IrExprKind::OptionSome { expr }
                 if crate::lower::is_value_ty(&expr.ty)
                     || matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e)

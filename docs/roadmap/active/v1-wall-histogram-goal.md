@@ -2181,6 +2181,52 @@ B40. **`List[Closure]` as a HOF data argument opened (35 → 34)**:
    no OOM/hang. Ladder: mir 583 / classify 34 zero newly-walled / spec
    283 / GATE OK / CORPUS WALL OK.
 
+B41. **`map.find` self-hosted end-to-end — the confirmed near-miss soundness
+   trap from the earlier DIAGNOSIS is now CLOSED, not just avoided (34 →
+   33)**: `map.find` turned out to not merely need drop-routing (my earlier
+   diagnosis) — the CALL ITSELF was unlinked (no v1 self-host existed at
+   all; the earlier "UNTRACKED subject" wall MASKED this, since a
+   lowering-time `Err` short-circuits before the render-time link check
+   ever runs). Built `map_find_skv`/`__skv_find_loop`/`__skv_find_at`/
+   `__skv_find_some`/`__skv_find_none` (stdlib/map_skv.almd), modeled
+   directly on the PROVEN `list_find_str` shape from list_str.almd — **hit
+   the SAME "heap-result if" lowering trap TWICE while writing it**: (1) a
+   single recursive fn with `if hit then {let...; Some(...)} else recurse`
+   declined ("a block with lets as a heap-result-if's arm does not lower")
+   — fixed by splitting into `_at` (holds the lets, tail is a bare
+   two-arm-call `if`) and `_loop` (the bounds check), mirroring
+   `list_str.almd`'s own documented precedent exactly; (2) `Some((kc, v))`
+   — a `(String, Int)` tuple Some-payload — had NO admission arm in
+   `try_lower_option_ctor` at all (only all-scalar tuples were admitted,
+   B31) — added one, reusing `try_lower_tuple_construct` + the SAME mask-
+   swap pattern the existing `(Value, scalar)` tuple case already
+   establishes (remove the flat `heap_elem_lists` routing,
+   `variant_drop_handles.insert(obj, "opt_str_int")` instead). Wired:
+   `is_self_host_option_module_fn` gains `"map" => "find"`; a new
+   `program_calls_map_find` scanner gates a new generated
+   `OPT_STR_INT_DROP_SRC` (`$__drop_opt_str_int` — Some recurses into the
+   tuple's own last-ref check + frees its String slot, None frees
+   nothing, the wrapper always frees — the SAME "blind flat rc_dec leaks
+   the tuple's String" trap the DIAGNOSIS entry predicted, now fixed
+   rather than avoided) mirrored in pipeline.rs AND tests_part1.rs (the
+   B33 lesson, third time applied); `control.rs`'s `is_self_host_option_call`
+   handling detects an `Option[(String, <scalar>)]` subject and layers
+   the SAME `variant_drop_handles` override on top of the existing
+   `heap_elem_lists` bind-admission tracking (both coexist — cascade order
+   in `drop_op_for` picks the variant-handle route first); `mod_p4.rs`'s
+   map dispatch admits `"find"` into the `_skv` family. Verified with
+   escalating adversarial depth given the stakes (this is the EXACT shape
+   the earlier DIAGNOSIS flagged as a near-miss): mf1 (bare match, hit),
+   mf2 (destructuring `let (k,v) = pair` — `map_insertion_order`'s ACTUAL
+   shape — both hit AND miss paths) v0-byte PARITY; a dedicated 10,000×
+   leak-loop (fresh 3-entry map + `map.find` + destructure per iteration)
+   completed instantly with matching output (50005000), no OOM/hang.
+   `map_insertion_order.almd`'s `branch_lift_synth_0` entry (the map.find
+   match specifically) fully vanished from classify; the FULL fixture
+   still doesn't compile (an unrelated for-in-loop wall elsewhere in the
+   same file — out of scope here). Ladder: mir 583 / classify 33 zero
+   newly-walled / spec 283 / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

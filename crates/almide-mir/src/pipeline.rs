@@ -260,8 +260,17 @@ pub fn try_render_wasm_source(
     } else {
         ""
     };
+    // `map.find`'s `Option[(String, <scalar>)]` result routes its drop to the TAG-AWARE
+    // `$__drop_opt_str_int` (Some → recursive String-slot free; None → nothing) — a blind
+    // flat `rc_dec` of the Option's payload slot would only free the TUPLE's own refcount,
+    // leaking its String.
+    let opt_str_int_drop = if crate::lower::program_calls_map_find(&ir) {
+        crate::lower::OPT_STR_INT_DROP_SRC
+    } else {
+        ""
+    };
     let drops = format!(
-        "{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}",
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
         crate::lower::generate_variant_repr_sources(&all_type_decls, &crate::lower::collect_interp_anon_records(&ir)),
@@ -270,6 +279,7 @@ pub fn try_render_wasm_source(
         lenlist_drop,
         list_str_drop,
         list_closure_drop,
+        opt_str_int_drop,
     );
     // The generated drops free a `Value` field via value_core's INTERNAL `__drop_value` — bring
     // value_core's source into scope for the re-lower's type check; the auto-link dedups it.

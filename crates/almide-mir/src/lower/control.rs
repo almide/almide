@@ -147,6 +147,30 @@ impl LowerCtx {
                         if crate::lower::is_heap_elem_list_ty(&subject.ty) {
                             self.heap_elem_lists.insert(v);
                         }
+                        // `map.find`'s `Option[(String, <scalar>)]` payload OWNS a HEAP slot (the
+                        // String) inside the tuple — the flat `heap_elem_lists`/`DropListStr` route
+                        // above would only `rc_dec` the TUPLE's own handle, leaking its String (the
+                        // exact class of bug this session's `_str`-dispatch fix already caught
+                        // elsewhere). Override with the type-specific recursive
+                        // `$__drop_opt_str_int` (generated, gated on `program_calls_map_find`) —
+                        // `variant_drop_handles` is checked BEFORE `heap_elem_lists` in the drop-op
+                        // cascade (`drop_op_for`), so this takes priority for the SAME value; the
+                        // `heap_elem_lists` entry above still stands and is harmlessly unused for
+                        // drop purposes (kept only so the Some-arm heap-bind admission gate, which
+                        // checks `heap_elem_lists.contains`, still fires).
+                        use almide_lang::types::constructor::TypeConstructorId;
+                        if let Ty::Applied(TypeConstructorId::Option, oa) = &subject.ty {
+                            if oa.len() == 1 {
+                                if let Ty::Tuple(tys) = &oa[0] {
+                                    if tys.len() == 2
+                                        && matches!(tys[0], Ty::String)
+                                        && !is_heap_ty(&tys[1])
+                                    {
+                                        self.variant_drop_handles.insert(v, "opt_str_int".to_string());
+                                    }
+                                }
+                            }
+                        }
                     }
                     if is_self_host_result_call(subject) {
                         self.materialized_results.insert(v);
