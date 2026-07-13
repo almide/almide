@@ -35,3 +35,88 @@ fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   let _x = __take_h_fill(prim.handle(out), h, k, 0)
   out
 }
+
+
+// list.unique / list.dedup over FLAT-BLOCK heap elements (List[List[Int]] /
+// List[(Int, Int)] — compound_eq): SLOT-WISE structural equality (length + raw
+// i64 slots — exact for inline-scalar blocks), kept elements rc_inc-SHARED into an
+// over-allocated block whose len is patched to the kept count (the alloc_set
+// convention; cap keeps the free-list exact).
+fn __uh_eq_at(ah: Int, bh: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else if prim.load64(ah + 12 + i * 8) != prim.load64(bh + 12 + i * 8) then false
+  else __uh_eq_at(ah, bh, n, i + 1)
+
+fn __uh_eq(ah: Int, bh: Int) -> Bool = {
+  let la = prim.load32(ah + 4)
+  let lb = prim.load32(bh + 4)
+  if la != lb then false
+  else __uh_eq_at(ah, bh, la, 0)
+}
+
+fn __uh_seen(oh: Int, k: Int, eh: Int, i: Int) -> Int =
+  if i >= k then 0
+  else {
+    let hit = __uh_eq(prim.load64(oh + 12 + i * 8), eh)
+    if hit then 1
+    else __uh_seen(oh, k, eh, i + 1)
+  }
+
+// Store `e` into out[k] (rc-shared) UNLESS already seen — the __ivh_set_append
+// shape (const-result arms); the caller advances k branchlessly by `1 - seen`.
+fn __uh_acquire(e: Int) -> Int = {
+  prim.rc_inc(e)
+  0
+}
+
+fn __uh_store(oh: Int, k: Int, e: Int, seen: Int) -> Int =
+  if seen >= 1 then 0
+  else {
+    prim.store64(oh + 12 + k * 8, e)
+    __uh_acquire(e)
+  }
+
+fn __uh_fill(sh: Int, oh: Int, n: Int, i: Int, k: Int) -> Int =
+  if i >= n then k
+  else {
+    let e = prim.load64(sh + 12 + i * 8)
+    let seen = __uh_seen(oh, k, e, 0)
+    let _s = __uh_store(oh, k, e, seen)
+    __uh_fill(sh, oh, n, i + 1, k + 1 - seen)
+  }
+
+fn list_unique_hshare(xs: List[List[Int]]) -> List[List[Int]] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let out: List[List[Int]] = prim.alloc_list_str(n)
+  let oh = prim.handle(out)
+  let k = __uh_fill(h, oh, n, 0, 0)
+  prim.store32(oh + 4, k)
+  out
+}
+
+fn __dh_last_eq(oh: Int, k: Int, e: Int) -> Int =
+  if k > 0 then {
+    let hit = __uh_eq(prim.load64(oh + 12 + (k - 1) * 8), e)
+    if hit then 1 else 0
+  }
+  else 0
+
+fn __dh_fill(sh: Int, oh: Int, n: Int, i: Int, k: Int) -> Int =
+  if i >= n then k
+  else {
+    let e = prim.load64(sh + 12 + i * 8)
+    let last_eq = __dh_last_eq(oh, k, e)
+    let _s = __uh_store(oh, k, e, last_eq)
+    __dh_fill(sh, oh, n, i + 1, k + 1 - last_eq)
+  }
+
+fn list_dedup_hshare(xs: List[List[Int]]) -> List[List[Int]] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let out: List[List[Int]] = prim.alloc_list_str(n)
+  let oh = prim.handle(out)
+  let k = __dh_fill(h, oh, n, 0, 0)
+  prim.store32(oh + 4, k)
+  out
+}

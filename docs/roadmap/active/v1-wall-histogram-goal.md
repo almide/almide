@@ -1674,6 +1674,23 @@ B31. **All-scalar tuple lists via the OWNED route (43 held, an enabler)**:
    tuple-key Map literal — next. Ladder: mir 583 / classify 43 / spec 283 /
    ownership ACCEPT / CORPUS WALL OK.
 
+B32. **list.unique/dedup over flat-block heap elements + List[List[scalar]]
+   literal ARGs (43 held, an enabler)**: stdlib/list_hshare.almd gains
+   `list_unique_hshare` / `list_dedup_hshare` — over-allocate n slots,
+   keep-scan with slot-wise structural eq (`__uh_eq_at` prim loads),
+   rc_inc-SHARE kept elements in (`__uh_acquire`, whitelisted in
+   coown_names.rs), patch the final len via `prim.store32(oh+4, k)`. Plus
+   the List[List[scalar]] LITERAL element class in
+   try_lower_record_list_literal_as (ScalarAggregate route,
+   try_lower_scalar_list_slots per element). LESSON: "if over an
+   unresolvable condition" self-host walls were the rc_inc CALLER-NAME
+   GATE cascading up — fix is the whitelist + shaping the setter like the
+   proven `__ivh_set_append` (const-result arms) + branchless `k+1-seen`
+   advancement, not fighting the condition. Probes ce1–ce3 v0-byte PARITY
+   (contains + unique over List[List[Int]]). Ladder: mir 583 / classify 43
+   zero newly-walled / spec 283 / GATE OK / ownership 30,070 ACCEPT /
+   CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

@@ -665,6 +665,15 @@ impl LowerCtx {
             // call result, moved in); the list frees per-element via the self-hosted
             // `$__drop_list_map_hval` (each element through `__drop_map_hval`).
             ListElemDrop::MapHval
+        } else if matches!(&elem_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
+                if b.len() == 1 && !is_heap_ty(&b[0]))
+        {
+            // A `List[List[<scalar>]]` literal ARG (`[[1, 2], [3, 4]]` — compound_eq's
+            // lnl): each inner list is a fresh FLAT block (inline scalars), so the
+            // per-element rc_dec of the masked DropListStr is its full free — the same
+            // ScalarAggregate physics with a list-literal element materializer.
+            ListElemDrop::ScalarAggregate
         } else if matches!(&elem_ty, Ty::Tuple(tys) if !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t)))
         {
             // An ALL-SCALAR tuple element (`[(1, 2), (3, 4)]` — the compound_eq
@@ -722,6 +731,19 @@ impl LowerCtx {
                 }
             }
             if matches!(kind, ListElemDrop::ScalarAggregate) {
+                // An inner `List[<scalar>]` LITERAL element builds through the flat
+                // slots builder (fresh owned; the uniform Consume below moves it in).
+                if let IrExprKind::List { elements: iels } = &e_ref.kind {
+                    let iels = iels.clone();
+                    if let Some(obj) = self.try_lower_scalar_list_slots(&iels) {
+                        if !self.live_heap_handles.contains(&obj) {
+                            self.live_heap_handles.push(obj);
+                        }
+                        objs.push(obj);
+                        continue;
+                    }
+                    return None;
+                }
                 if let IrExprKind::Tuple { elements: tels } = &e_ref.kind {
                     let tels = tels.clone();
                     if let Some(obj) = self.try_lower_scalar_tuple_construct(&tels) {

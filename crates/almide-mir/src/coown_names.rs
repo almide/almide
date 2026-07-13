@@ -52,6 +52,7 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__enum_fill_h",      // list.enumerate_str — rc_inc the element into its (i, x) pair
     "__zip_fill_rc",      // list.zip_rc — rc_inc both elements into each pair
     "__take_h_fill",      // list.take_hshare — rc_inc each shared element slot
+    "__uh_acquire",       // list.unique_hshare / dedup_hshare — rc_inc each KEPT shared element
     "__skv_entries_fill", // map.entries_skv — rc_inc each key into its (k, v) pair
 ];
 
