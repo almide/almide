@@ -2150,6 +2150,37 @@ DIAGNOSIS (at 35): **B39's flat-heap generalization incidentally opened the
    inspection, this one requires genuinely new self-host machinery, not
    just wiring existing pieces).
 
+B40. **`List[Closure]` as a HOF data argument opened (35 → 34)**:
+   `call_closure_lambda_param.almd`'s `list.map(fns, (f) => f(10))` (`fns:
+   List[(Int)->Int]`) walled at TWO stacked, independent gaps, both fixed:
+   (1) `lift_lambda` (binds.rs) never inserted a Fn-TYPED PARAMETER (as
+   opposed to a Fn-typed CAPTURE) into `closure_values` — so `f(10)` inside
+   the lifted `(f) => f(10)` body couldn't dispatch as a closure call,
+   `lift_lambda` returned `None`. Fixed by mirroring `bind_params`'s
+   IDENTICAL 3-line Fn-param arm (mod_p3.rs) into `lift_lambda`'s own param
+   loop — confirmed by reading `bind_params` that this was always the
+   intended parity, just never carried over when `lift_lambda` grew its
+   own separate param-binding loop. (2) A SEPARATE, STALE guard
+   (binds_p2.rs's `data_arg_has_fn`, the bind-position HOF faithfulness
+   check) explicitly walled ANY DATA argument whose type contains `Fn`
+   ANYWHERE — with a comment stating "`fns: List[(Int)->Int]` — a list of
+   closures **the v1 model cannot represent**" — TRUE when written, FALSE
+   now: B36 (this session) shipped exactly that representation
+   (`List[<Fn>]` literals + a generated per-element `$__drop_list_closure`).
+   Narrowed the guard to exclude the specific `List[Fn]` shape (a Fn
+   buried in some OTHER shape — a record/tuple field, `List[List[Fn]]` —
+   stays walled; only the now-proven-representable direct case is
+   excluded). **Neither fix alone was sufficient** — isolating showed (1)
+   makes a STANDALONE lifted closure-calling-its-param lambda work, but
+   the FULL HOF call still declined at gate (2) until BOTH landed.
+   Verified: ccl2 (the isolated `list.map` reproduction) AND the FULL
+   `call_closure_lambda_param.almd` fixture (both the `List[(Int)->Int]`
+   and `List[(String)->String]` halves) v0-byte PARITY (`11 20 hi!`); a
+   dedicated 10,000× leak-loop (construct 2 closures + `list.map` over
+   them each iteration) completed instantly with matching output (20000),
+   no OOM/hang. Ladder: mir 583 / classify 34 zero newly-walled / spec
+   283 / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

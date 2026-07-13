@@ -158,6 +158,18 @@ impl LowerCtx {
         for (v, ty) in params {
             let pv = sub.fresh_value();
             sub.value_of.insert(*v, pv);
+            // A FUNCTION-typed PARAM (`list.map(fns, (f) => f(10))` — `f`'s own type is
+            // `(Int)->Int`, NOT a capture): mirrors `bind_params`'s IDENTICAL Fn-param arm
+            // exactly — the caller passes a closure block, and `f(x)` inside the lifted
+            // body must lower to `Op::CallIndirect` through it. `lift_lambda`'s param loop
+            // never had this (only a CAPTURED closure got `closure_values.insert`, at the
+            // prologue loop below) — a lifted lambda whose OWN parameter is itself callable
+            // (the `list.map` over a `List[Closure]` shape) fell to `lower_body_into`
+            // declining `f(10)` as a call through an unknown target, so `lift_lambda`
+            // returned `None` and the whole HOF call walled.
+            if matches!(ty, Ty::Fn { .. }) {
+                sub.closure_values.insert(pv);
+            }
             let repr = repr_of(ty).ok()?;
             if repr.is_heap() {
                 sub.param_values.insert(pv);

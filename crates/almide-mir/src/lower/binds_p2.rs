@@ -710,11 +710,17 @@ impl LowerCtx {
                 // POPULATED block — admit a direct `xs[i]` — ONLY when the call is FAITHFULLY executable:
                 //  (1) every closure arg LIFTED (an unlifted `list.map(fns, (f) => f(10))` runs the
                 //      combinator with a missing slot → empty/garbage), AND
-                //  (2) no DATA argument carries a function type (`list.map(fns, …)` over `fns:
-                //      List[(Int)->Int]` — a list of closures the v1 model cannot represent →
-                //      empty/garbage). The combinator's OWN closure arg (a `Lambda`/`FnRef`, function-
-                //      typed by construction) is EXCLUDED — it is handled by (1), and `(p) => p.x` over
-                //      `points: List[Point]` is the faithful case that must stay tracked.
+                //  (2) no DATA argument carries an UN-REPRESENTABLE function type (this comment
+                //      historically said "list.map(fns, …) over fns: List[(Int)->Int] — a list of
+                //      closures the v1 model cannot represent" — no longer true: B36 shipped
+                //      `List[<Fn>]` literal construction + a generated per-element `$__drop_
+                //      list_closure`, so a `List[Fn]` DATA arg is now a REAL, populated,
+                //      correctly-freed block — excluded below). A Fn buried in some OTHER shape
+                //      (a record/tuple field, a nested nested-List[List[Fn]]) is still unrepresented
+                //      and stays walled. The combinator's OWN closure arg (a `Lambda`/`FnRef`,
+                //      function-typed by construction) is EXCLUDED too — it is handled by (1), and
+                //      `(p) => p.x` over `points: List[Point]` is the faithful case that must stay
+                //      tracked.
                 // Otherwise the result is unmaterialized and a `xs[i]` over it would TRAP on cap 0, so
                 // it is left deferring to `Const 0` (mis-valued, never a new runtime crash).
                 let data_arg_has_fn = args.iter().any(|a| {
@@ -729,7 +735,11 @@ impl LowerCtx {
                         &a.kind,
                         IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::ClosureCreate { .. }
                     ) || matches!(&a.kind, IrExprKind::Var { id } if self.lambda_bindings.contains_key(id));
-                    !is_closure_arg && crate::lower::ty_contains_fn(&a.ty)
+                    // `List[<Fn>]` is B36's representable shape — excluded from the wall.
+                    let is_representable_closure_list = matches!(&a.ty,
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e)
+                            if e.len() == 1 && matches!(e[0], Ty::Fn { .. }));
+                    !is_closure_arg && !is_representable_closure_list && crate::lower::ty_contains_fn(&a.ty)
                 });
                 let faithful = !self.last_call_had_unlifted_closure && !data_arg_has_fn;
                 // WALL the UNFAITHFUL higher-order combinator instead of silently
