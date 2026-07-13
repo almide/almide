@@ -2263,6 +2263,42 @@ B42. **Tail-position variant constructor calls opened — a general gap, not
    functions were silently unlinkable before this). Ladder: mir 583 /
    classify 33 zero newly-walled / spec 283 / GATE OK / CORPUS WALL OK.
 
+B43. **`Option[<custom variant>] ?? <ctor fallback>` opened — closes
+   `variant_ctor_fn_test`'s THIRD layer, B42's diagnosed follow-up (33 →
+   32)**: `try_lower_option_unwrap_or` (control_p3.rs) had no branch for a
+   custom-variant Option payload — every existing arm covers Value/List/
+   String/record payloads or a bare scalar, so `list.get(xs,1) ?? Empty`
+   fell all the way to the final scalar fallback, which reads the payload
+   as a raw `Load{width:8}` scalar — wrong for a variant HANDLE (walled,
+   not mis-valued, per the existing gate: `matches!(fallback.ty, Ty::String)`
+   already excludes non-scalar fallbacks from that path, and no other arm
+   claimed it, so it correctly stayed a wall rather than emitting a corrupt
+   read). Added a new branch, inserted right after the `value_unwrap_helper`
+   block and before the String-specific `??` handling: gated to `expr.ty`
+   being `Option[<named type registered in variant_layouts>]` AND the
+   fallback being a call/record-construct whose name is a registered ctor
+   for that SAME type (so a mismatched-type fallback still declines, not
+   silently miscompiles). Built via the SAME `Op::IfThen`/`Else`/`EndIf`
+   heap-result-if skeleton the scalar fallback below already proves, but
+   with heap-shaped arms: Some → `LoadHandle` @12 (BORROW — the source
+   list/Option keeps ownership) then `Dup` to a fresh OWNED reference (the
+   same borrowed-param `Some(p)` precedent used throughout this file); None
+   → `try_lower_variant_ctor(fallback)` (already a fresh owned value, no
+   Dup needed) — both arms end up uniformly owned, matching this file's
+   established merge discipline. Verified with a standalone repro (vc1.almd:
+   `list.map(Wrap)` then both a Some hit AND an out-of-bounds/empty-list
+   None miss) — v0 native and v1-via-wasmtime both printed `3 / 2 / none /
+   none` (byte-identical, all three arms of the fallback logic exercised);
+   a dedicated 2,000,000× leak-loop (fresh 3-elem Wrap list + hit-match +
+   fresh empty list + miss-match per iteration) under a 16MB wasmtime
+   memory cap completed in ~190ms with the correct accumulated value
+   (6000000), confirming the Dup/ctor-fallback merge doesn't leak even at
+   200× the standard 10,000× stress multiple. `variant_ctor_fn_test.almd`'s
+   "constructor in list.map" entry fully vanished from classify (all three
+   B42-diagnosed layers now closed). Ladder: mir 583 / classify 32 zero
+   newly-walled (one entry closed, `variant_ctor_fn_test.almd`) / spec 283
+   / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

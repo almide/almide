@@ -219,6 +219,63 @@ impl LowerCtx {
                 return Some(dst);
             }
         }
+        // `Option[<custom variant>] ?? <ctor(...)>` (`list.get(xs, i) ?? Empty` — a
+        // custom-ADT element list's search-with-fallback shape, `variant_ctor_fn_test`):
+        // Some → BORROW the payload handle (LoadHandle @12 — the Option/its source list
+        // keeps owning it) then `Dup` to a fresh OWNED reference (the SAME borrowed-param
+        // Some(p) precedent used throughout this file); None → build the fallback via
+        // `try_lower_variant_ctor` (already a fresh owned value, no Dup needed). Both arms
+        // now produce UNIFORM (owned) values, merged via the proven `Op::IfThen`/`Else`/
+        // `EndIf` heap-result-if skeleton (the SAME shape the scalar path below uses for
+        // scalar payloads) — never the scalar `Load{width:8}` fallback further down, which
+        // would misread the payload HANDLE as a raw i64 scalar.
+        if !is_result {
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) =
+                &expr.ty
+            {
+                if a.len() == 1 {
+                    if let Ty::Named(tn, _) = &a[0] {
+                        if self.variant_layouts.by_type.contains_key(tn.as_str()) {
+                            let is_ctor_fallback = matches!(
+                                &fallback.kind,
+                                IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                                    if self.variant_layouts.ctor_to_type.contains_key(name.as_str())
+                            ) || matches!(
+                                &fallback.kind,
+                                IrExprKind::Record { name: Some(n), .. }
+                                    if self.variant_layouts.ctor_to_type.contains_key(n.as_str())
+                            );
+                            if is_ctor_fallback {
+                                use crate::PrimKind;
+                                let h = self.fresh_value();
+                                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![handle] });
+                                let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+                                let result = self.fresh_value();
+                                self.ops.push(Op::IfThen { cond: tag, dst: Some(result) });
+                                let borrowed = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                                let owned = self.fresh_value();
+                                self.ops.push(Op::Dup { dst: owned, src: borrowed });
+                                self.ops.push(Op::Else { val: Some(owned) });
+                                match self.try_lower_variant_ctor(fallback) {
+                                    Some(fb) => {
+                                        self.ops.push(Op::EndIf { val: Some(fb) });
+                                    }
+                                    None => {
+                                        self.ops.truncate(ops_mark);
+                                        self.live_heap_handles.truncate(lhh_mark);
+                                        return None;
+                                    }
+                                }
+                                if track_result {
+                                    self.live_heap_handles.push(result);
+                                }
+                                return Some(result);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // HEAP-String result (`Option[String] ?? "default"` — the most common heap `??`): the scalar
         // unwrap below can't carry a heap payload (it would mis-read the slot-0 String HANDLE as an
         // i64 scalar). Route to the self-host `option.unwrap_or_str` CALL — a call returning a FRESH
