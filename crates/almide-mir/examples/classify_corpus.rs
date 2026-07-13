@@ -570,10 +570,25 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                     CallTarget::Named { name } => self.edges.push(name.as_str().to_string()),
                     CallTarget::Module { module, func, .. } => {
                         let (m, fname) = (module.as_str(), func.as_str());
-                        // net.* (any func) / process.exec|exit|run / http.request — the tight,
-                        // enumerated no-wasm set. process.args is EXCLUDED (WASI args_get exists).
+                        // net.* (any func) / the no-wasm process fns / http.request / zlib.* —
+                        // the tight, enumerated no-wasm set. process.args is EXCLUDED (WASI
+                        // args_get exists AND v0's emit_wasm implements it — calls_process.rs
+                        // handles exactly exit/stdin_lines/args). spawn/kill/is_alive/
+                        // exec_status/env have NO v0 wasm form (the fixture headers declare
+                        // them native-only: "wasm:skip — process.env/spawn/kill are
+                        // native-only" / "process.exec_status is native-only"), and WASI
+                        // preview1 has no child-process API — structural, not a v1 gap.
+                        // zlib has NO v0 wasm runtime at all ("wasm:skip — OS/native-only").
+                        // random is deliberately NOT here: v0's emit_wasm implements it over
+                        // WASI random_get (calls_random.rs) — a REAL v1 gap.
                         if m == "net"
-                            || (m == "process" && matches!(fname, "exec" | "exit" | "run"))
+                            || m == "zlib"
+                            || (m == "process"
+                                && matches!(
+                                    fname,
+                                    "exec" | "exit" | "run" | "spawn" | "kill" | "is_alive"
+                                        | "exec_status" | "env"
+                                ))
                             || (m == "http" && fname == "request")
                         {
                             self.native_call = true;

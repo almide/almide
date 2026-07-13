@@ -1216,6 +1216,21 @@ B14. **Option-`?` identity desugar SHIPPED (102 → 99 — waypoint <100
    repr interp mains ~8, heap-acc loop C-tail (find_factor, guard-continue
    filtering, map_fold_heap_acc), branch_lift synths 3, singles.
 
+E4. **process/zlib native-root reclassification (99 → 86)**: root-(b)'s
+   enumerated no-wasm set gains `zlib.*` (v0's emit_wasm has NO zlib runtime
+   at all; fixture header "wasm:skip — OS/native-only") and
+   `process.spawn|kill|is_alive|exec_status|env` (v0's calls_process.rs
+   implements exactly exit/stdin_lines/args; WASI preview1 has no
+   child-process API; fixture headers declare these native-only). 13 walls
+   (process_ext 4 + process_exec_status 3 + zlib 6) → walled_native_ffi.
+   `random` is deliberately NOT reclassified: v0's emit_wasm DOES implement
+   it over WASI random_get (calls_random.rs — its fixture's wasm:skip header
+   is stale), so random_test's 7 stay REAL — the implementable D2 slice
+   (prim entropy import + Fisher-Yates/choice self-hosts + Entropy cap
+   witness), alongside fs.stat (v0 wasm calls_fs_p3.rs "stat" exists),
+   env_extra, fs_preopen, process_args (v0 wasm "args" exists). Metric-only;
+   corpus FORBIDDEN 0 / CORPUS WALL OK re-verified.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
