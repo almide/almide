@@ -620,6 +620,8 @@ impl LowerCtx {
         enum ListElemDrop {
             Record(String),
             StrStr,
+            StrInt,
+            IntStr,
             ListStr,
             MapHval,
             ScalarAggregate,
@@ -646,6 +648,20 @@ impl LowerCtx {
             // map literal's `("xs", [1, 2, 3])` pairs (the OWNED-builder route the PCC
             // ownership gate accepts, unlike the raw-handle view widening it rejected).
             ListElemDrop::StrStr
+        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::Int))
+        {
+            // A `(String, Int)` TUPLE element (`[("k0", 1), ("k1", 2)]` — the `[key: value]`
+            // map-literal desugar's pairs list, map_fold_heap_acc's initial accumulator):
+            // the MIRROR of the IntStr arm below. Recursive drop via the EXISTING
+            // `Op::DropListStrInt` (rc_dec the String slot @12 only; the Int @20 is scalar) —
+            // the same Op calls_p2.rs's concat-operator path already routes to for this exact
+            // tuple shape, just not previously wired to the list-LITERAL classifier.
+            ListElemDrop::StrInt
+        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String))
+        {
+            // An `(Int, String)` TUPLE element (`[(0, "a"), (1, "b")]` — `list.enumerate`
+            // shaped literals): recursive drop via the existing `Op::DropListIntStr`.
+            ListElemDrop::IntStr
         } else if matches!(&elem_ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
                 if i.len() == 1 && matches!(i[0], Ty::String))
@@ -757,6 +773,26 @@ impl LowerCtx {
                     return None;
                 }
             }
+            if matches!(kind, ListElemDrop::StrInt | ListElemDrop::IntStr) {
+                // A `(String, Int)` / `(Int, String)` TUPLE LITERAL element builds through the
+                // general masked-tuple builder (String slot fresh OWNED + moved in, Int slot a
+                // plain scalar store; `try_lower_tuple_construct` already handles this exact
+                // mix for other callers). The list's OWN drop (registered below via
+                // `variant_drop_handles`) frees each tuple's String slot recursively, so the
+                // tuple's own `record_masks` entry never scope-end-fires — mirrored from the
+                // `(Int, String)` precedent in calls_p2.rs/binds.rs.
+                if let IrExprKind::Tuple { elements: tels } = &e_ref.kind {
+                    let tels = tels.clone();
+                    if let Some(obj) = self.try_lower_tuple_construct(&tels) {
+                        if !self.live_heap_handles.contains(&obj) {
+                            self.live_heap_handles.push(obj);
+                        }
+                        objs.push(obj);
+                        continue;
+                    }
+                    return None;
+                }
+            }
             if matches!(kind, ListElemDrop::CtorFlat | ListElemDrop::CtorLenLoop) {
                 if let Some(obj) = self.try_lower_option_ctor(e_ref, &elem_ty) {
                     if !self.live_heap_handles.contains(&obj) {
@@ -805,6 +841,12 @@ impl LowerCtx {
             }
             ListElemDrop::StrStr => {
                 self.str_str_elem_lists.insert(dst);
+            }
+            ListElemDrop::StrInt => {
+                self.variant_drop_handles.insert(dst, "list_str_int".to_string());
+            }
+            ListElemDrop::IntStr => {
+                self.variant_drop_handles.insert(dst, "list_int_str".to_string());
             }
             ListElemDrop::MapHval => {
                 self.variant_drop_handles.insert(dst, "list_map_hval".to_string());

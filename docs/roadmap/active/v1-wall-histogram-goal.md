@@ -1784,6 +1784,34 @@ B33. **Variant ctor `List[String]` field opened — ADT brick 5 extension (41 �
    v0-byte PARITY. Ladder: mir 583 / classify 40 zero newly-walled / spec 283
    / GATE OK / CORPUS WALL OK.
 
+B34. **(String, Int) / (Int, String) tuple list literals (40 held, an enabler)**:
+   `["k0": 1, "k1": 2]` (a `[key: value]` map-literal desugar with a scalar
+   value) as a call ARGUMENT desugars to `map.from_list([("k0",1),…])` — a
+   `List[(String, Int)]` literal `try_lower_record_list_literal_as` had no
+   class for (only `(String,String)`/`(String,List[scalar])` StrStr and
+   all-scalar ScalarAggregate existed). The needed drop machinery already
+   existed and is ALREADY used elsewhere: `Op::DropListStrInt` /
+   `Op::DropListIntStr` (calls_p2.rs's `+`/concat-operator dispatch and
+   binds.rs both already route this exact tuple shape via
+   `variant_drop_handles = "list_str_int"`/`"list_int_str"`) — this fix is
+   purely wiring the SAME established Op to the LIST-LITERAL classifier,
+   which was the one path that hadn't grown it. New `ListElemDrop::StrInt` /
+   `IntStr` variants; materialize via the GENERAL masked-tuple builder
+   `try_lower_tuple_construct` (already proven — same fn (String,Int)/
+   (Int,String) construction already uses via `lower_owned_heap_field`'s
+   dispatch, binds_p4.rs:187-215). si1 probe (map literal + a List[(Int,
+   String)] literal) v0-byte PARITY. **Scope note**: this does NOT open
+   map_fold_heap_acc (entry in the 40) — that fixture's literal now
+   materializes fine, but its `main` hits a SEPARATE, already-known gap
+   (`map.fold` over a HEAP accumulator, `map.fold_hacc` unlinked — the
+   previously-diagnosed "fold_hacc" family, LOW yield, deferred). Does NOT
+   help hash_protocol_test (needs `(Record, String)` / `(Variant, String)`
+   keys) or generic_chain_unwrap_or (needs `(String, <custom variant>)`) —
+   confirmed by direct probe, different tuple shapes, out of this fix's
+   scope. Ladder: mir 583 / classify 40 (unchanged — a verified capability
+   completion, not a corpus-exercised path yet) / spec 283 / GATE OK /
+   CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
