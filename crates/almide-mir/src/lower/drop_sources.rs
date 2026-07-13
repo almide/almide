@@ -775,6 +775,32 @@ pub fn program_uses_res_intlist_strlist(program: &almide_ir::IrProgram) -> bool 
 /// closure value without knowing its captures (a call-result closure's layout is
 /// unknowable at the caller). Like every generated `$__drop_*`, a trusted prim-only
 /// routine (outside the witness surface), pinned by the closure leak-loop test.
+/// The ALMIDE SOURCE of `__drop_list_closure` — the per-element release of a
+/// `List[<Fn>]` (each slot an OWNED closure block): recurse into `__drop_closure`
+/// per element (the uniform, self-describing closure free — correct whether or not
+/// each element captures anything), then free the list block. Requires
+/// `CLOSURE_DROP_SRC` in scope (the program already carries it whenever any closure
+/// value exists, which a `List[<Fn>]` literal necessarily does). A blind per-element
+/// `rc_dec` (the plain masked `DropListStr`) would be unsound for a CAPTURING
+/// closure element (it would decrement the block's own refcount without recursively
+/// freeing its captured heap slots) — `__drop_closure` is required, not optional,
+/// even though this session's only current caller (`call_closure_lambda_param`)
+/// happens to use only non-capturing lambdas.
+pub const LIST_CLOSURE_DROP_SRC: &str = "\
+fn __drop_list_closure(xs: List[List[Int]]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_closure_loop(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+fn __drop_list_closure_loop(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let e: List[Int] = prim.load_handle(h + 12 + i * 8)
+    __drop_closure(e)
+    __drop_list_closure_loop(h, n, i + 1)
+  }
+";
+
 pub const CLOSURE_DROP_SRC: &str = "\
 fn __drop_closure(c: List[Int]) -> Unit = {
   let h = prim.handle(c)

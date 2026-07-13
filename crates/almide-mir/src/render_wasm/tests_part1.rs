@@ -342,14 +342,21 @@
         } else {
             ""
         };
+        // `List[<Fn>]` LITERAL — `$__drop_list_closure` (see pipeline.rs's mirror).
+        let list_closure_drop = if crate::lower::program_uses_closure_list(&ir) {
+            crate::lower::LIST_CLOSURE_DROP_SRC
+        } else {
+            ""
+        };
         let drops = format!(
-            "{}{}{}{}{}{}",
+            "{}{}{}{}{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),
             crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
             crate::lower::generate_variant_repr_sources(&ir.type_decls, &crate::lower::collect_interp_anon_records(&ir)),
             closure_drop,
             lenlist_drop,
             list_str_drop,
+            list_closure_drop,
         );
         let ir = if drops.trim().is_empty() { ir } else { to_ir(&format!("{src}\n{drops}")) };
         let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =

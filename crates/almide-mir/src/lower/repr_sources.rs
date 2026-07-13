@@ -508,6 +508,46 @@ pub fn program_uses_closures(program: &almide_ir::IrProgram) -> bool {
     false
 }
 
+/// Does the program carry a `List[<Fn>]` LITERAL anywhere (a bind/return/call-arg type) —
+/// gates `LIST_CLOSURE_DROP_SRC`'s injection (a program with closures but no closure LIST
+/// pays no dead drop routine, unlike the broader `program_uses_closures` gate).
+pub fn program_uses_closure_list(program: &almide_ir::IrProgram) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let is_closure_list = |ty: &Ty| {
+        matches!(ty, Ty::Applied(TypeConstructorId::List, a)
+            if a.len() == 1 && matches!(a[0], Ty::Fn { .. }))
+    };
+    struct Finder<'a> {
+        found: bool,
+        pred: &'a dyn Fn(&Ty) -> bool,
+    }
+    impl almide_ir::visit::IrVisitor for Finder<'_> {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if (self.pred)(&expr.ty) {
+                self.found = true;
+            }
+            if !self.found {
+                almide_ir::visit::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut finder = Finder { found: false, pred: &is_closure_list };
+    let funcs = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in funcs {
+        if is_closure_list(&f.ret_ty) || f.params.iter().any(|p| is_closure_list(&p.ty)) {
+            return true;
+        }
+        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
+        if finder.found {
+            return true;
+        }
+    }
+    false
+}
+
 /// The element-drop class a `List[Option/Result]` LITERAL's elements take — the SINGLE
 /// classifier the injection pre-scan ([`program_uses_lenlist_elem_lists`]) and the literal
 /// builder (`try_lower_record_list_literal_as`) BOTH consult, so `$__drop_list_lenlist` is

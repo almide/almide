@@ -220,6 +220,16 @@ pub fn try_render_wasm_source(
     // (`$__drop_closure` — self-describing recursive drop, DropVariant "closure").
     let closure_drop =
         if crate::lower::program_uses_closures(&ir) { crate::lower::CLOSURE_DROP_SRC } else { "" };
+    // A `List[<Fn>]` LITERAL (`[(x)=>x+1, (x)=>x*2]`) routes its scope-end drop to the
+    // generated `$__drop_list_closure` (per-element `$__drop_closure` — required, not a
+    // blind rc_dec, since a captured heap slot would otherwise leak). Needs
+    // `CLOSURE_DROP_SRC` in scope, which `program_uses_closures` already guarantees
+    // whenever a closure LIST exists (the list's elements are Lambda exprs).
+    let list_closure_drop = if crate::lower::program_uses_closure_list(&ir) {
+        crate::lower::LIST_CLOSURE_DROP_SRC
+    } else {
+        ""
+    };
     // A `List[Option/Result]` literal with owned-handle-slot elements routes its drop to the
     // generated `$__drop_list_lenlist` (the shared `lenlist_elem_class` decides both sides).
     let lenlist_drop = if crate::lower::program_uses_lenlist_elem_lists(&ir) {
@@ -243,7 +253,7 @@ pub fn try_render_wasm_source(
         ""
     };
     let drops = format!(
-        "{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}",
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
         crate::lower::generate_variant_repr_sources(&all_type_decls, &crate::lower::collect_interp_anon_records(&ir)),
@@ -251,6 +261,7 @@ pub fn try_render_wasm_source(
         res_ilsl_drop,
         lenlist_drop,
         list_str_drop,
+        list_closure_drop,
     );
     // The generated drops free a `Value` field via value_core's INTERNAL `__drop_value` — bring
     // value_core's source into scope for the re-lower's type check; the auto-link dedups it.

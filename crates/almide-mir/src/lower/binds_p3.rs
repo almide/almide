@@ -627,6 +627,7 @@ impl LowerCtx {
             ScalarAggregate,
             CtorFlat,
             CtorLenLoop,
+            Closure,
         }
         // A STRUCTURAL record element (`[{key: "x", val: "2"}]` in argument position —
         // the checker leaves the literal structural, so `record_drop_type_name` alone
@@ -704,6 +705,14 @@ impl LowerCtx {
                 crate::lower::CtorElemClass::Flat => ListElemDrop::CtorFlat,
                 crate::lower::CtorElemClass::LenLoop => ListElemDrop::CtorLenLoop,
             }
+        } else if matches!(&elem_ty, Ty::Fn { .. }) {
+            // A `List[<Fn>]` LITERAL element (`[(x: Int) => x + 1, (x: Int) => x * 2]` —
+            // #623's closure-parameter shape): each element is a fresh closure BLOCK (lifted
+            // via `lift_lambda`, the SAME mechanism a call-argument lambda already uses),
+            // freed per-element via the generated `$__drop_list_closure` (recurses into the
+            // uniform `$__drop_closure` — required even for a non-capturing lambda, since the
+            // LIST's TYPE alone (`List[(Int)->Int]`) does not preclude a capturing element).
+            ListElemDrop::Closure
         } else {
             return None;
         };
@@ -793,6 +802,26 @@ impl LowerCtx {
                     return None;
                 }
             }
+            if matches!(kind, ListElemDrop::Closure) {
+                // A LAMBDA literal element: lift it to a fresh `__lambda_*` fn + closure block
+                // via the SAME proven mechanism a call-argument lambda already uses (calls_p2.rs).
+                if let IrExprKind::Lambda { params, body, .. } = &e_ref.kind {
+                    if let Some(obj) = self.lift_lambda(params, body) {
+                        if !self.live_heap_handles.contains(&obj) {
+                            self.live_heap_handles.push(obj);
+                        }
+                        objs.push(obj);
+                        continue;
+                    }
+                    return None;
+                }
+                // A non-lambda element (a Var holding a closure / a call returning one) must
+                // carry the list's element type; anything else declines rather than storing a
+                // mismatched value into a closure-drop-typed slot.
+                if e_ref.ty != elem_ty {
+                    return None;
+                }
+            }
             if matches!(kind, ListElemDrop::CtorFlat | ListElemDrop::CtorLenLoop) {
                 if let Some(obj) = self.try_lower_option_ctor(e_ref, &elem_ty) {
                     if !self.live_heap_handles.contains(&obj) {
@@ -866,6 +895,9 @@ impl LowerCtx {
             }
             ListElemDrop::CtorLenLoop => {
                 self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+            }
+            ListElemDrop::Closure => {
+                self.variant_drop_handles.insert(dst, "list_closure".to_string());
             }
         }
         self.live_heap_handles.push(dst);

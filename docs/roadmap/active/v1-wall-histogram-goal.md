@@ -1903,6 +1903,44 @@ DIAGNOSIS (at 40): **the remaining 40 were triaged in full** (a fork read
    this near-miss) — always trace the drop, not just the tag-read, before
    wiring a new admission.
 
+B36. **`List[<Fn>]` literal construction opened (40 held, an enabler)**:
+   `[(x: Int) => x + 1, (x: Int) => x * 2]` (a list of non-capturing lambdas,
+   #623's closure-parameter shape) had no `ListElemDrop` class —
+   `try_lower_record_list_literal_as` walled at the literal itself. Fixed by
+   (1) a new `Closure` class, materialized per element via the EXISTING,
+   PROVEN `lift_lambda` (the same call-argument lambdas already use), and
+   (2) a NEW generated helper `$__drop_list_closure`
+   (`LIST_CLOSURE_DROP_SRC`) that recurses into the EXISTING, PROVEN
+   `$__drop_closure` per element — required rather than a blind per-element
+   `rc_dec`, since the LIST's TYPE (`List[(Int)->Int]`) does not preclude a
+   CAPTURING element even though this fixture's elements happen not to
+   capture (a blind rc_dec would leak a capturing element's captured heap
+   slots — the same trap class documented in the DIAGNOSIS entry above).
+   Gated on a new precise scanner `program_uses_closure_list` (mirroring
+   `program_uses_closures`'s shape) rather than piggy-backing the broader
+   closures gate, so a program with closures but no closure LIST pays no
+   dead drop routine. Wired in BOTH `pipeline.rs` and the
+   `render_wasm/tests_part1.rs` test-helper's mirrored two-pass injection
+   (the B33 lesson, applied proactively this time). VERIFIED via a 10,000×
+   leak-loop (construct + scope-end-drop a 2-closure list per iteration,
+   no `list.map` needed to isolate the drop itself): completed instantly
+   with matching v0/v1 output (20000) — no OOM/hang, which would be the
+   signature of a leak at this iteration count. **Does NOT fully open**
+   `call_closure_lambda_param.almd` (needs a SEPARATE gap: `list.map` CALLING
+   a closure stored in a list element — "list.map with an
+   unliftable/closure-list higher-order argument", a different HOF-over-
+   closure-elements capability) nor `fan_var_thunk_list.almd` (progressed to
+   a SEPARATE gap: `fan.race`/`settle` over a VAR-bound thunk list — not
+   inline — never reaches the HOF dispatch since `is_higher_order` only
+   recognizes a bare `Fn`-typed/Lambda argument, not a `List[Fn]`-typed Var;
+   and even fixing that predicate alone would not suffice unless
+   `try_lower_defunc_list_hof` also has a race/settle/any dispatch arm —
+   untraced, likely another real gap, not just a predicate widening).
+   Ladder: mir 583 / classify 40 (unchanged — both affected fixtures'
+   wall MESSAGE changed to reflect the new, narrower blocker; a verified,
+   leak-loop-proven capability completion) / spec 283 / GATE OK /
+   CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
