@@ -2299,6 +2299,78 @@ B43. **`Option[<custom variant>] ?? <ctor fallback>` opened — closes
    newly-walled (one entry closed, `variant_ctor_fn_test.almd`) / spec 283
    / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
 
+B44. **`unwrap_never_err_call_types` regression fixed for List/Record/Tuple
+   CONSTRUCTION positions — a real, previously-undiscovered v1-only bug (32 →
+   31)**: the largest remaining wall bucket (6 entries, "non-empty List[heap]
+   literal with nested-ownership elements") turned out to NOT be one deep
+   mechanism — it was several UNRELATED walls sharing the same generic error
+   text (autotry_construction/compound_repr_*/generic_chain_unwrap_or/
+   generic_fn_in_inferred_lambda). Isolated `autotry_construction.almd`'s
+   `[step(), step()]: List[Result[Int, String]]` (a never-err effect fn's
+   call kept as Result in a list-literal position — the file's own C-068
+   contract: "construction positions are target-directed, a Result-typed
+   element must KEEP its Result"). `almide-frontend`'s `auto_try.rs` gets
+   this exactly right (confirmed by instrumenting the frontend directly: the
+   list element's type is `Result[Int,String]` immediately after
+   `insert_auto_try` and stays that way through `optimize`/`mono`/`ir_link`/
+   `erase_transparent_newtypes`/`inline_pure_call_globals` — traced with a
+   temporary per-stage type-printer in `pipeline.rs`). The type flip to raw
+   `Int` happens ONE step later, inside `inline_mutual_tail_recursion`
+   (mod_p2.rs) — a PROGRAM-level pre-pass whose DOCSTRING says it only
+   touches mutually-recursive sibling PAIRS, but which actually computes
+   `stripped: Vec<IrFunction> = fns.iter().map(|f| { ...; unwrap_never_err_
+   call_types(...); rewrap_never_err_into_result_targets(...); ... })` — i.e.
+   applies `unwrap_never_err_call_types` (which blindly rewrites ANY
+   never-err lifted call's type from `Result[T,_]` back to raw `T`,
+   regardless of WHERE the call sits) to **every function in the program**,
+   including ones with no mutual-recursion partner at all (like `main`), and
+   the RETURN VALUE uses this same `stripped` set for every non-inlined fn
+   too. The existing "undo" pass, `rewrap_never_err_into_result_targets`,
+   only re-wraps the two cases its docstring names — a `let`/`var` BIND or
+   ASSIGN whose declared type is Result (the #485 rule) — it has NO coverage
+   for a call sitting inside a List literal element, a Record field, or a
+   Tuple slot, so those three C-068 construction positions were silently
+   getting their Result-ness stripped by this pre-pass, walling immediately
+   downstream (the registered list/record/tuple drop expects an owned Result
+   handle in that slot, gets a bare scalar, declines rather than corrupt).
+   **This is a genuine v1-only regression of the ALREADY-FIXED-AT-FRONTEND
+   C-068 bug** — v0/native has never had this problem (confirmed:
+   `almide run` on all repros gives correct output) since v0 never runs
+   `inline_mutual_tail_recursion` at all. Fixed by extending
+   `rewrap_never_err_into_result_targets` with a THIRD covered position: a
+   new `visit_expr_mut` override (alongside its existing `visit_stmt_mut`)
+   that walks List/Tuple/Record CONSTRUCTION exprs and re-wraps any raw
+   never-err call sitting in a slot whose OWN target type is Result — List's
+   elem type from the list expr's own `Ty::Applied(List,[T])`, Tuple's slot
+   types positionally from `Ty::Tuple`, Record's field types from the
+   record's own structural `Ty::Record`/`Ty::OpenRecord` OR (for a NAMED
+   record) a `record_layouts` lookup by type name — mirroring exactly the
+   `field_tys`/`elem_is_result` logic `auto_try.rs` already uses at the
+   frontend, just re-applied post-strip. Required threading a new
+   `record_layouts: &RecordLayouts` parameter through the function's single
+   call site (already available in the caller). Verified with 4 standalone
+   repros (scratchpad vc1-style): the bare List[Result] shape (byte-parity
+   `list [42, 42]` v0==v1-wasmtime); Record-field + Tuple-slot shapes via
+   `match` consumption (byte-parity `42/42/9`); a combined leak-loop
+   exercising all three construction positions together in a `while` loop
+   at 50× the standard stress multiple (500,000 iterations under a 16MB
+   wasmtime memory cap, 51ms, correct accumulated value `88500000`, no
+   OOM/hang — this pre-pass runs on EVERY function unconditionally so a
+   pervasive-mechanism-grade leak check was warranted). **Investigation
+   note**: my first two leak-loop attempts appeared to still wall — turned
+   out to be a STALE `target/release/examples/render_program-*` binary not
+   yet rebuilt after the fix (the debug binary I'd tested against WAS
+   current); re-running `cargo build --release` for that example before
+   retesting resolved it — the fix was correct the whole time. Only
+   `autotry_construction.almd`'s specific classify entry closed this round
+   (the other 5 files in the original 6-entry bucket wall for SEPARATE,
+   unrelated reasons — compound_repr_* needs deeper nested-container repr
+   work, generic_chain_unwrap_or/generic_fn_in_inferred_lambda are the
+   already-diagnosed generics/monomorphization frontier — confirming the
+   "6-entry bucket" was several coincidentally-identically-worded walls, not
+   one mechanism). Ladder: mir 583 / classify 31 zero newly-walled (one
+   entry closed) / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

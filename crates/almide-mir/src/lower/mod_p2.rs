@@ -313,14 +313,21 @@ pub fn unwrap_never_err_call_types(
 
 /// Re-wrap a NEVER-ERR lifted call assigned/bound to an EXPLICITLY `Result`-typed target
 /// (`var r: Result[Int, String] = ok(0); r = step(5)` / `let r2: Result[Int, String] =
-/// step(7)` — the #485 "annotated Result keeps the Result" rule). The never-err type
-/// rewrite makes the CALL yield raw `T` on v1, but the target slot IS a Result block —
-/// assigning the raw i64 into the i32 handle slot emitted invalid wasm
-/// (effect_assign_unwrap). Since the callee never errs, `ok(call)` is exact.
+/// step(7)` — the #485 "annotated Result keeps the Result" rule) OR sitting in a
+/// CONSTRUCTION position whose declared slot type is Result (`[step(), step()]: List[Result[..]]`,
+/// `Holder { r: step() }`, `(step(), 9): (Result[..], Int)` — the SAME C-068 "construction
+/// positions are target-directed" rule `auto_try.rs` already applies at the frontend). The
+/// never-err type rewrite (`unwrap_never_err_call_types`, run unconditionally over EVERY
+/// function by this pre-pass, not just the mutually-recursive ones it exists for) makes the
+/// CALL yield raw `T` on v1 — but a List/Record/Tuple slot whose OWN type says Result must
+/// still hold a Result block (autotry_construction: v0 already keeps the Result via C-068;
+/// this pre-pass silently undid it for v1, since the original bind/assign-only re-wrap never
+/// covered construction positions). Since the callee never errs, `ok(call)` is exact.
 pub fn rewrap_never_err_into_result_targets(
     body: &mut IrExpr,
     can_err: &std::collections::HashSet<String>,
     lifted_effect_fns: &std::collections::HashSet<String>,
+    record_layouts: &RecordLayouts,
 ) {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
     use almide_lang::types::constructor::TypeConstructorId;
@@ -347,6 +354,7 @@ pub fn rewrap_never_err_into_result_targets(
         can_err: &'a std::collections::HashSet<String>,
         lifted: &'a std::collections::HashSet<String>,
         result_vars: std::collections::HashSet<u32>,
+        record_layouts: &'a RecordLayouts,
     }
     impl S<'_> {
         fn is_raw_never_err_call(&self, e: &IrExpr) -> bool {
@@ -390,8 +398,75 @@ pub fn rewrap_never_err_into_result_targets(
                 _ => {}
             }
         }
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            match &mut expr.kind {
+                // `[step(), step()]: List[Result[..]]` — the element slot type is the LIST's
+                // own type's sole type arg (mirrors auto_try.rs's `elem_is_result`).
+                IrExprKind::List { elements } => {
+                    if let Ty::Applied(TypeConstructorId::List, a) = &expr.ty {
+                        if a.len() == 1 {
+                            if let Ty::Applied(TypeConstructorId::Result, _) = &a[0] {
+                                let elem_ty = a[0].clone();
+                                for el in elements.iter_mut() {
+                                    if self.is_raw_never_err_call(el) {
+                                        self.wrap(el, elem_ty.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // `(step(), 9): (Result[..], Int)` — each slot's type comes directly from the
+                // TUPLE expr's own `Ty::Tuple` positionally (no registry lookup needed).
+                IrExprKind::Tuple { elements } => {
+                    if let Ty::Tuple(tys) = &expr.ty {
+                        if tys.len() == elements.len() {
+                            for (el, t) in elements.iter_mut().zip(tys.iter()) {
+                                if matches!(t, Ty::Applied(TypeConstructorId::Result, _))
+                                    && self.is_raw_never_err_call(el)
+                                {
+                                    self.wrap(el, t.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                // `Holder { r: step() }` — field types come from the record expr's own
+                // structural type (`Ty::Record`/`Ty::OpenRecord`) or, for a NAMED record, the
+                // declared layout registry — mirrors auto_try.rs's `field_tys` construction.
+                IrExprKind::Record { name, fields } => {
+                    let field_tys: std::collections::HashMap<almide_lang::intern::Sym, Ty> =
+                        match &expr.ty {
+                            Ty::Record { fields: fs } | Ty::OpenRecord { fields: fs } => {
+                                fs.iter().cloned().collect()
+                            }
+                            Ty::Named(tn, _) => self
+                                .record_layouts
+                                .get(tn.as_str())
+                                .map(|(_, fs)| fs.iter().cloned().collect())
+                                .unwrap_or_default(),
+                            _ => name
+                                .as_ref()
+                                .and_then(|n| self.record_layouts.get(n.as_str()))
+                                .map(|(_, fs)| fs.iter().cloned().collect())
+                                .unwrap_or_default(),
+                        };
+                    for (k, v) in fields.iter_mut() {
+                        if let Some(ft) = field_tys.get(k) {
+                            if matches!(ft, Ty::Applied(TypeConstructorId::Result, _))
+                                && self.is_raw_never_err_call(v)
+                            {
+                                self.wrap(v, ft.clone());
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
-    S { can_err, lifted: lifted_effect_fns, result_vars }.visit_expr_mut(body);
+    S { can_err, lifted: lifted_effect_fns, result_vars, record_layouts }.visit_expr_mut(body);
 }
 
 /// Rewrite `match <never-err lifted-effect call> { ok(pat) => A, err(_) => B }` to `{ let pat =
@@ -536,7 +611,12 @@ pub fn inline_mutual_tail_recursion(
             crate::lower::desugar_option_str_literal_match(&mut nf.body);
             rewrite_never_err_effect_match(&mut nf.body, &can_err, &lifted_effect_fns);
             unwrap_never_err_call_types(&mut nf.body, &can_err, &lifted_effect_fns);
-            rewrap_never_err_into_result_targets(&mut nf.body, &can_err, &lifted_effect_fns);
+            rewrap_never_err_into_result_targets(
+                &mut nf.body,
+                &can_err,
+                &lifted_effect_fns,
+                record_layouts,
+            );
             nf
         })
         .collect();
