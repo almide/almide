@@ -2495,6 +2495,55 @@ B46. **`unit_main` die-on-error gate narrowed to the VOID convention only —
    reverted): mir 583 / classify 28 zero newly-walled (one entry closed) /
    spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
 
+CORRECTION (post-B46): the repr-mismatch root-cause guess above (a
+   `control_p2.rs` subject-tracking dispatch confusing cap-as-tag vs
+   len-as-tag for a NAMED call) was **WRONG** — traced further and found
+   the ACTUAL bug, one layer earlier. Built the discriminator sketched
+   above (a new `LIFTED_EFFECT_FNS` thread_local, populated by
+   `inline_mutual_tail_recursion`, consulted in `control_p2.rs`'s subject
+   dispatch) and it compiled clean — but `DBG`-instrumenting
+   `try_lower_variant_value_match` showed it is **NEVER CALLED** for the
+   `mixedok2.almd` repro (`handler2() = match fetch(p) {ok(ls)=>ls,
+   err(e)=>[...]}` alone, no outer `if`): `fetch` is a NEVER-ERR lifted
+   effect fn (body only ever `ok(...)`s), so `rewrite_never_err_effect_match`
+   (mod_p2.rs, runs BEFORE any match-dispatch code) already rewrote the
+   whole match into `{ let ls = fetch(p); ls }` — a bare bind + tail Var,
+   bypassing `control_p2.rs` entirely. The discriminator fix was **reverted
+   as ineffective-for-this-bug** (harmless in isolation, but doesn't touch
+   the actual defect — not worth carrying dead code).
+   Reading the GENERATED WAT for `fetch` pinned the REAL bug: `fetch`'s own
+   BODY (`= ok(["a", "b"])`) compiles to a REAL cap-as-tag `materialize_
+   result_str` WRAPPER block (rc@0, len@4=1, cap@8=1, slot0@12=handle-to-
+   the-actual-list, slot0's HIGH 32 bits @16=0-as-Ok-tag) — NOT the raw
+   `List[String]` `fetch`'s OWN DECLARED signature promises callers. `tail.
+   rs`'s dispatch for a bare `IrExprKind::ResultOk` tail (`try_lower_
+   option_ctor(tail, &tail.ty)`, ~L580) builds this wrapper because `tail.
+   ty` (the `ok([...])` EXPRESSION's own type, assigned by the checker
+   following normal `ok()`-construction typing) is `Result[List[String],
+   String]` — DIFFERENT from `func.ret_ty` (`List[String]`, the function's
+   DECLARED/lowered-signature type, preserved as-is for a lifted fn per
+   `lifted_effect_fn_names`'s filter). `auto_try.rs`'s `insert_try_body`
+   only strips a tail wrapper when `fn_returns_result` is true (via
+   `strip_tail_try`, which targets an auto-inserted `Try` node specifically)
+   — for a NON-Result-declared effect fn (`fn_returns_result=false`,
+   our case) NOTHING strips an EXPLICIT `ok(...)` sugar wrapper at the
+   function's own tail, even when its payload already matches the declared
+   return type. `handler2`/`main` then use `fetch`'s returned WRAPPER
+   POINTER as if it were the raw list (per `fetch`'s promised signature),
+   reading garbage — the `0` output. **Root cause is at the FRONTEND
+   level** (`auto_try.rs`'s `insert_try_body`, NOT anywhere in
+   almide-mir/control_p2.rs) — a genuinely new stripping rule needed: a
+   tail-position explicit `ok(x)`/`err(e)` in a NON-Result-declared effect
+   fn body, whose payload type already matches the DECLARED return, must
+   collapse to just `x` (mirroring `strip_top_try`'s role for the
+   IMPLICIT/auto-`?` case, but for the EXPLICIT sugar case, which that
+   function does not touch). Scope: touches `auto_try.rs`'s tail handling
+   broadly (every non-Result effect fn whose body EVER uses explicit `ok`/
+   `err` sugar, not just `fetch`-shaped ones) — a real, dedicated-session
+   item, not a drive-by. `effect_if_branch_unwrap_test.almd::handler`
+   stays walled (correctly — no fix landed); NO code changed by this
+   correction pass (both attempted fixes were reverted before commit).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
