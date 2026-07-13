@@ -337,6 +337,31 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // `some((x, y))` — an ALL-SCALAR tuple literal payload as a MATCH/if ARM value
+            // (`match e { Click{x,y,..} => some((x,y)), _ => none }` — extract_click_positions,
+            // the closure body a `list.filter_map` lambda lifts). Build the flat tuple block,
+            // move it into the 1-element Option: the payload owns NO inner heap, so
+            // `materialize_opt_str_some`'s flat slot-0 free is EXACT (the SAME shape
+            // `try_lower_option_ctor`'s BIND-position twin already proves, binds_p4.rs — this
+            // arm-position mirror was simply never added). Checked BEFORE the generic
+            // `is_heap_ty` fallback below, whose inner `match &expr.kind` has no `Tuple` case
+            // (it only covers Var / Named-call / pure-String-Module-call payloads) and would
+            // otherwise decline a Tuple literal outright.
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind, IrExprKind::Tuple { .. })
+                    && matches!(&expr.ty,
+                        Ty::Tuple(tys) if !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t))) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let repr = repr_of(result_ty).ok()?;
+                let IrExprKind::Tuple { elements } = &expr.kind else { return None };
+                let elements = elements.clone();
+                let piece = self.try_lower_scalar_tuple_construct(&elements)?;
+                let obj = self.materialize_opt_str_some(piece, repr);
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             IrExprKind::OptionSome { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(result_ty).ok()?;
                 // The owned String payload: a let-bound Var (its handle), or a direct user-call

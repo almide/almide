@@ -2544,6 +2544,40 @@ CORRECTION (post-B46): the repr-mismatch root-cause guess above (a
    stays walled (correctly — no fix landed); NO code changed by this
    correction pass (both attempted fixes were reverted before commit).
 
+B47. **All-scalar tuple `Some((x, y))` admitted as a heap-result MATCH/IF ARM
+   value — closes `extract_click_positions` (28 → 27)**:
+   `codegen_variant_record_test.almd`'s `list.filter_map(events, (e) => match
+   e { Click{x,y,..} => some((x,y)), _ => none })` walled with "unliftable/
+   closure-list higher-order argument" — traced to the LAMBDA's own body
+   failing to lower when lifted as a standalone fn: `match e {Click{x,y,..}
+   => some((x,y)), _ => none}` in TAIL position hit the generic "heap-result
+   match outside the executable subset" fallback. `try_lower_custom_variant_
+   match` (ADT brick 4, tag@slot0 dispatch with heap-result arms) delegates
+   each arm's body to `lower_heap_result_arm` (`heap_result_arm.rs`) — which
+   had an `OptionSome{expr} if is_heap_ty(&expr.ty)` fallback arm whose
+   INNER `match &expr.kind` only covers `Var`/`Named`-call/pure-String-
+   Module-call payloads, no `Tuple` case — so `some((x,y))` (`expr.kind =
+   Tuple{[x,y]}`, `expr.ty = Tuple([Int,Int])`, itself heap per
+   `is_heap_ty`) matched the OUTER guard but fell to `_ => return None`
+   inside, declining. The exact fix ALREADY EXISTED one file over —
+   `binds_p4.rs`'s `try_lower_option_ctor` (the BIND-position `let x = some
+   ((a,b))` entry point, established by B31) has precisely this arm: build
+   the flat tuple via `try_lower_scalar_tuple_construct`, wrap via
+   `materialize_opt_str_some` (flat drop is exact — the payload owns no
+   inner heap). `heap_result_arm.rs`'s ARM-position mirror had simply never
+   been added — the SAME "two sibling functions, one got the fix, the other
+   didn't" shape as several earlier stages this campaign. Ported the
+   identical arm (same guard, same builders) into `heap_result_arm.rs`,
+   checked before the generic `is_heap_ty` fallback. Verified: `click_pos`
+   (the isolated lambda body) and the full `extract_click_positions` both
+   PARITY-matched v0 (`2` / `10,20` / `30,40`, byte-identical via wasmtime);
+   a dedicated 10,000× leak-loop (fresh `Click`/`KeyPress` construct +
+   `click_pos` + match-consume per iteration, mixing the hit AND miss arms)
+   completed in 13ms under a 16MB cap with the correct accumulated value
+   (100010000), no leak. `extract_click_positions` fully vanished from
+   every bucket. Ladder: mir 583 / classify 27 zero newly-walled (one entry
+   closed) / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
