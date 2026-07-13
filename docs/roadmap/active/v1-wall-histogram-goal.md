@@ -3356,6 +3356,59 @@ DIAGNOSIS — `cross_module_variant_test.almd`'s TWO "heap bind from LitInt"
    (no code touched — pure investigation, confirmed via `git status`
    clean throughout).
 
+FOLLOW-UP DIAGNOSIS (same session, continued digging, still no fix) — narrowed
+   the search space for the #412/#631 `Ty::Unknown` bug above considerably,
+   via two more rounds of temporary debug instrumentation (both fully
+   reverted — `git checkout --` on `crates/almide-frontend/src/lower/
+   statements.rs`, confirmed classify matches the B109 baseline exactly,
+   zero diff each time). **RULED OUT**: `resolve_record_field_ty`
+   (`lower/statements.rs`) — the function that resolves a record-variant
+   PATTERN FIELD's type (`radius`'s type inside `Circle{radius}`) via
+   `ctx.env.lookup_ctor` — traced directly and confirmed it correctly
+   resolves `radius: Int` via the ctor-payload path, EVERY time, for both
+   #412 and #631's repros. So the bug is NOT in field-type resolution for
+   the PATTERN's bound name — that machinery (and its documented #412 fix,
+   the `bare_name` qualified-name stripping at `lower/statements.rs`
+   line ~343) works correctly. **NARROWED TO**: the MATCH EXPRESSION's
+   OWN overall type (not any arm/field/pattern sub-type) never lands in
+   `checker.type_map`. Traced via `LowerCtx::expr_ty` (`lower/mod.rs`):
+   it does `self.type_map.get(&expr.id).cloned().unwrap_or_else(|| ...
+   Ty::Unknown)` — a `None` result (no entry at all, not a stored-but-
+   wrong `Ty::Unknown`) falls to this default UNLESS the expr is a
+   Member/literal (none of which apply to a Match). This means `checker.
+   infer_program` never inserted a `type_map` entry for the match
+   expression's OWN `expr.id` — and `Checker::infer_expr` (`check/
+   infer.rs` line ~28-29) UNCONDITIONALLY does `self.type_map.insert(expr.
+   id, ity)` every time it's called on ANY expr, so the entry's absence
+   means `infer_expr` was simply NEVER CALLED on this specific AST node —
+   a TRAVERSAL gap, not a computation gap. Read `check/infer_p2.rs`'s
+   Match-inference logic (`ExprKind::Match` arm, ~line 355-428): the
+   arm-type-unification logic looks structurally CORRECT for our shape
+   (two Int arms, `first = Ty::Int`, no `Never`-arm complication) — so
+   IF this code path executes, it should produce the right answer; the
+   mystery is narrower than "the match logic is wrong" — it's "why isn't
+   this code path reached at all for a match inside a test block, when
+   the IDENTICAL AST shape inside a regular function IS reached (already
+   verified via hand-written non-test repros in the earlier DIAGNOSIS
+   above)". Also confirmed `check_decl`'s `ast::Decl::Test{..}` handling
+   (`check/mod.rs` ~726-736) sets `env.can_call_effect`/`env.in_test_block`
+   but does NOT touch `env.auto_unwrap` (unlike `check_fn_decl`, which
+   explicitly sets `auto_unwrap = is_effect` for regular functions) — ruled
+   this OUT too as directly causal (the auto-unwrap branch in the match
+   arm-type logic doesn't fire either way for a non-Result match), but it
+   is a genuine STRUCTURAL asymmetry between test-block and fn-body
+   checking worth keeping in mind — the next attempt should look for
+   OTHER such asymmetries (test blocks skip whatever `check_fn_decl` does
+   beyond `can_call_effect`/`auto_unwrap`/`lambda_depth` that regular
+   functions get). **Next concrete step**: instrument `Checker::infer_expr`
+   itself (the outer wrapper, not the match-specific logic) to log every
+   `expr.id` + `ExprKind` variant it's invoked on, diffed between a
+   test-block run and an equivalent-fn-body run of the SAME source shape —
+   this will show EXACTLY where the traversal diverges (which parent node
+   fails to recurse into the match, or recurses into a DIFFERENT clone of
+   it). **Current 21, unchanged** (fully reverted both instrumentation
+   rounds, zero diff).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
