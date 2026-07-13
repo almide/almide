@@ -3987,6 +3987,110 @@ DIAGNOSIS — picked up the auto-wrap ABI investigation exactly where the
    which may need the SAME two-layer fix or may hit yet further layers not
    discovered here). **Current 18, unchanged** (fully reverted, zero diff).
 
+DIAGNOSIS — built the registry (`AUTO_WRAP_ABI_FNS`, mirroring `NEVER_ERR_
+   LIFTED_FNS`'s exact architecture) the prior entry called for, wired it
+   through ALL FOUR consumer sites needed, got `unannotated_unwraps`
+   working END-TO-END (byte-verified, `main`'s own call site too — the
+   full two-layer fix), got a BONUS second entry (`nested_unwrap`) past
+   its wall too — and then the MANDATORY adversarial verification caught
+   that `nested_unwrap` produces **WRONG OUTPUT**, not just "still walled"
+   — reverted everything immediately. This is exactly the class of trap
+   this campaign's discipline exists to catch, and it very nearly shipped:
+   classify_corpus reported ZERO regressions and TWO closures; only the
+   mandatory hand-written-repro-through-wasmtime-vs-v0 check (for a
+   TEST-BLOCK function, since classify's per-function testing proves
+   NOTHING about output correctness there) revealed the problem.
+
+   **What was built** (all in ONE coordinated change, since the pieces are
+   mutually dependent — piggybacked onto `inline_mutual_tail_recursion`,
+   the SAME whole-program pre-pass `NEVER_ERR_LIFTED_FNS` already uses, so
+   `AUTO_WRAP_ABI_FNS` is fully populated before ANY per-function lowering
+   regardless of caller/callee processing order):
+   1. `AUTO_WRAP_ABI_FNS` thread_local (mod_p2.rs) — the names of
+      declared-scalar effect fns with a stmt-position propagating `!`
+      (`body_has_stmt_position_propagating_unwrap`, mod.rs), EXCLUDING
+      `main` (its own `unit_main` die-on-err convention is a DIFFERENT
+      mechanism entirely — a stmt-position `!` in `main`'s OWN body must
+      NOT get this treatment; an UNSCOPED first version of this filter
+      caused a REAL regression, `option_none_unwrap_term.almd`, previously
+      passing, caught and fixed before the bigger problem below).
+   2. `lower_function_all_impl` (mod.rs) consults the registry (not a
+      local re-scan, to stay consistent with what populated it) to
+      override `body.ty` to `Result[<declared>, String]` on an owned copy.
+   3. `heap_result_arm.rs`'s `Var{id}` arm case gets a NEW guarded variant
+      (before the existing one) for `!is_heap_ty(&arm.ty) && result_ty`
+      being the matching `Result[T,String]` — routes through `materialize_
+      result_ok` instead of `Op::Dup` (which was silently duplicating a
+      scalar's raw bits as if they were a heap pointer). CONFIRMED this
+      alone fixes the CALLEE's own construction (verified via offset-
+      tracking the wasmtime error moving from the callee's function to the
+      caller's, across successive fix layers).
+   4. THREE separate consumers of `NEVER_ERR_LIFTED_FNS` (found one at a
+      time, each only revealed by re-testing after the previous fix) each
+      needed an `&& !AUTO_WRAP_ABI_FNS.contains(name)` exclusion added to
+      their existing condition, since each ASSUMES a never-err callee's v1
+      value is the bare unwrapped payload — true before this registry
+      existed, false for a NOW-Result-wrapped auto-wrap callee:
+      `mod_p2.rs`'s `unwrap_never_err_call_types` (downgrades a call
+      expression's `.ty` from `Result[T,String]` back to `T`), `mod_p2.rs`'s
+      `strip_never_err_unwraps` (removes the `!` node from the AST
+      entirely, `*expr = inner`), and `control.rs`'s match-subject wall
+      (declines a match over a never-err callee's `Result`-typed subject
+      — this one should NOT decline for an auto-wrap callee, since the
+      subject IS now genuinely tag-dispatchable).
+
+   **Verified working, byte-for-byte, for `unannotated_unwraps`**: a
+   hand-written repro (`declared_result() -> Result[Int,String] = ok(7)`;
+   `unannotated_unwraps() -> Int = { let v = declared_result(); v }`;
+   `main` calling `unannotated_unwraps()!`) produced `7` via wasmtime,
+   matching v0 exactly — the FULL chain (callee construction → caller's
+   call-site type → caller's match-subject dispatch) worked end-to-end.
+   `classify_corpus` showed ZERO newly-walled entries and closed BOTH
+   `unannotated_unwraps` AND `nested_unwrap` (18 → 16) with no apparent
+   regression.
+
+   **Then the mandatory adversarial check caught the real bug**: a
+   hand-written repro of `nested_unwrap`'s ACTUAL corpus shape (`let r:
+   Result[Option[Int], String] = ok(some(42)); let o = r!; o!` — a
+   DOUBLE unwrap, Result→Option→Int, unlike `unannotated_unwraps`'s
+   single Result unwrap) produced `Error: ` via wasmtime where v0
+   correctly produces `42` — a SILENT WRONG VALUE, not a wall. The
+   DIFFERENCE between the working single-unwrap case and the broken
+   double-unwrap case was not root-caused (out of budget after the
+   revert) — plausibly interacts with the EARLIER-diagnosed `Result[
+   Option[Int],String]` heap-Ok classification gap (`nested_unwrap`'s
+   OWN prior DIAGNOSIS entry, memory ~101/goal-file "DIAGNOSIS — the
+   ROOT CAUSE shared by...") in a way that now produces a WRONG branch
+   selection instead of a clean wall, once the outer match's subject
+   became dispatchable via this session's fix. `is_balanced` (the third
+   member of the original 3-entry auto-wrap cluster) was NOT closed by
+   this fix (remained walled, per classify — not independently re-
+   verified for correctness since it never left the wall).
+
+   **Cleanly reverted ALL FIVE files** (`git checkout --` on `mod.rs`,
+   `mod_p2.rs`, `heap_result_arm.rs`, `control.rs`, `desugar_unwrap.rs` —
+   `desugar_unwrap.rs`'s OWN exclusion, in `desugar_let_unwrap`, turned
+   out to be DEAD CODE for this repro — `unwrap_never_err_call_types`
+   downgrades the call's `.ty` BEFORE `desugar_let_unwrap` ever runs, so
+   its own guard's first condition already fails; harmless to include but
+   not load-bearing, worth re-deriving from scratch rather than assuming
+   next time). Confirmed classify matches the 18-entry baseline exactly,
+   zero diff.
+
+   **A real fix needs, in addition to everything above**: understanding
+   why the DOUBLE-unwrap (nested Result-then-Option) shape produces a
+   WRONG branch/value instead of either a correct value OR a clean wall —
+   this is the ACTUAL remaining blocker, not "no registry exists" (that
+   part is now solved and the design is captured above, ready to
+   re-implement). Given the STAKES (a wrong-value regression came within
+   one verification step of shipping), the next attempt MUST re-run the
+   FULL adversarial check — hand-written repro matching the EXACT corpus
+   shape (not a simplified stand-in), through wasmtime, byte-compared
+   against `almide run` — for EVERY entry this fix appears to close,
+   before trusting any classify-based "0 newly-walled" result. **Current
+   18, unchanged** (fully reverted, zero diff, confirmed via independent
+   classify re-run).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
