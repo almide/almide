@@ -3880,6 +3880,54 @@ DIAGNOSIS — found the missing mechanism the earlier "auto-wrap ABI" DIAGNOSIS
    to ALSO reach some OTHER consumer this pass missed, not just `body.ty`).
    **Current 18, unchanged** (fully reverted, zero diff).
 
+DIAGNOSIS — pinned the EXACT root cause of the `List[heap]` literal cluster's
+   "variant-ctor-list" sub-shapes (3 of the 7 mapped entries: `compound_
+   repr_recursive_interp.almd`, plus the shared root behind `compound_repr_
+   records_interp.almd`/`generic_fn_in_inferred_lambda.almd` from the
+   earlier mapping pass) with concrete debug evidence — a GENERIC
+   MONOMORPHIZATION gap in `VariantLayouts`, not a missing dispatch case.
+   Traced via temporary instrumentation in `needs_recursive_drop` (mod_p2.
+   rs, added then fully reverted — `git checkout --`, classify matches the
+   18-entry baseline exactly). Minimal repro: `type Either[L,R] = Left(L)
+   | Right(R); let es: List[Either[Int,String]] = [Left(1), Right("y")]`.
+   Investigation path: `try_lower_str_list_literal` (binds.rs) ALREADY has
+   full construction support for `List[<variant ctor>]` elements —
+   `elem_flat_variant`/`elem_rich_variant` gates, `IrExprKind::Call{
+   Named{name}}` admission when `name` is a registered ctor, PLUS an
+   EXISTING `$__drop_list_<V>` generator wired via `variant_drop_handles`
+   (confirmed via a SEPARATE, pre-existing `elem_rich_variant` code path in
+   THIS SAME function — contradicting the earlier mapping's claim that "no
+   construction path exists at all"; the REAL gap is narrower and more
+   precise). The debug trace showed WHY `Either[Int,String]`'s Right(String)
+   case doesn't route through this working machinery: `VariantLayouts.
+   by_type.get("Either")` returns the case list `[Left(Named("L",[])),
+   Right(Named("R",[]))]` — the RAW, UNRESOLVED GENERIC PARAMETER NAMES
+   from the DECLARATION (`type Either[L,R] = ...`), never substituted with
+   the ELEMENT TYPE's actual instantiation args (`[Int, String]`) at ANY
+   lookup site. `field_variant_name`/`is_rich_variant_ty`/`is_flat_
+   variant_ty`/`needs_recursive_drop` all resolve an element type like
+   `Ty::Applied(UserDefined("Either"), [Int, String])` down to JUST the
+   bare name `"Either"`, discarding the `[Int, String]` args entirely, then
+   look up the GENERIC (unsubstituted) registry entry — so `is_heap_ty(
+   Named("R",[]))` (a bare, unresolved type-parameter reference, not
+   `Ty::String`) evaluates FALSE, making `Either` look entirely flat/
+   scalar to EVERY consumer of this registry, regardless of what it's
+   actually instantiated with at any given call site. **A real fix needs
+   TYPE SUBSTITUTION**: given an element type's concrete type args, walk
+   the registry's generic field types substituting the declared type
+   parameters (which `VariantLayouts` would need to ALSO store per-type,
+   currently doesn't appear to) before running the heap/flat/recursive-drop
+   classification — genuinely new infrastructure (a small monomorphization
+   step), not a decline-point widening; the STAKES are real too (getting
+   the substitution wrong would flip a MISCLASSIFIED "flat" verdict into a
+   SILENT LEAK via the wrong drop routine, not just a wall) — this needs
+   its own careful, dedicated session, not a drive-by extension. Applies
+   to ANY generic user variant instantiated with at least one heap type
+   argument used as a list element — likely the SAME underlying gap behind
+   `Holder[T]`-style generic RECORDS too, if any corpus entry exercises
+   that combination (not checked this pass). **Current 18, unchanged**
+   (fully reverted, zero diff).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
