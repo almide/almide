@@ -1371,6 +1371,23 @@ E5. **http.serve native-root reclassification (68 → 67)**: root-(b) gains
    never-err effect-fn structured match (protocol_edge — the error-model
    frontier), generic variant ctor with heap field (type_system Node).
 
+B18. **First-class fn values into pure combinators SHIPPED (67 → 62)**: a
+   Fn-typed VAR argument (`fn transform(xs, f, pred) = xs |> list.map(f) |>
+   list.filter(pred)`) now passes its closure BLOCK by handle — the
+   self-host combinator CallIndirects it exactly like a lifted lambda's
+   block (the 5c possible-callee rows bound the witness). Capability-sound:
+   a PURE combinator can only receive a PURE closure (the frontend's effect
+   typing), so the callback contributes no host capability of its own; a
+   lifted lambda's caps were folded at its creation site. An UNBOUND
+   Fn-typed var still walls (unresolved-function-value; the pinning mir
+   test updated to the new contract). Opened 5: transform + closure-factory
+   + apply_all__A (the targeted 3) PLUS option.flat_map chains and fan.map
+   over a captured closure value (bonuses — same admission). Probe tf1
+   (map+filter through fn params) v0-byte PARITY and the
+   protocol_ufcs_inferred_lambda fixture is END-TO-END PARITY. Ladder: mir
+   583 / classify 62 zero newly-walled / spec 283 / GATE OK / CORPUS WALL
+   OK (the caps corpus re-verified with the new handle args).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

@@ -322,6 +322,25 @@ impl LowerCtx {
                     args: Vec::new(),
                     result: None,
                 }),
+                // A FIRST-CLASS fn VALUE argument (`fn transform(xs, f, …) = xs |>
+                // list.map(f)` — a Fn-typed PARAM/let flowing into the pure combinator):
+                // pass its closure BLOCK by handle — the self-host combinator
+                // CallIndirects it exactly like a lifted lambda's block (the 5c
+                // possible-callee rows bound the witness). Capability-sound: a PURE
+                // combinator can only receive a PURE closure (the frontend's effect
+                // typing — an effectful closure is not a plain `(A) -> B` value), so the
+                // callback contributes no host capability of its own; a lifted lambda's
+                // caps were already folded at its creation site.
+                IrExprKind::Var { id } if matches!(a.ty, Ty::Fn { .. }) => {
+                    match self.value_for(*id) {
+                        Ok(v) => out.push(CallArg::Handle(v)),
+                        Err(_) => {
+                            return Err(LowerError::Unsupported(format!(
+                                "Module call {module}.{func} with an unresolved function-value argument not in this brick"
+                            )))
+                        }
+                    }
+                }
                 _ if matches!(a.ty, Ty::Fn { .. }) => {
                     return Err(LowerError::Unsupported(format!(
                         "Module call {module}.{func} with an opaque function-value argument (capabilities unanalyzable) not in this brick"

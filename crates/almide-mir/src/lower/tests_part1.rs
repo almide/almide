@@ -210,10 +210,14 @@
             ),
         ]);
         match lower_body(&b, "main") {
+            // An UNBOUND Fn-typed Var (no creation site — VarId(2) was never bound)
+            // has no closure block to pass and no crea­tion-site caps fold: it walls
+            // with the unresolved-function-value reason (a RESOLVED fn-value var now
+            // passes by handle — the first-class-fn-to-HOF opening).
             Err(LowerError::Unsupported(m)) => {
-                assert!(m.contains("opaque function-value"), "got: {m}")
+                assert!(m.contains("function-value"), "got: {m}")
             }
-            other => panic!("expected an opaque-function-value wall, got {other:?}"),
+            other => panic!("expected a function-value wall, got {other:?}"),
         }
     }
 
