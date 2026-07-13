@@ -1028,7 +1028,15 @@ C2. **For-loop conditional breaks SHIPPED (122 → 121)**: both scalar for
    desugar's continue elimination) all execute (probe fb2 v0-identical:
    filter-sum, break-sum, range break). Opened `for guard else break`; the
    codegen_loop_guard "for with guard continue filtering" test has a further
-   blocker (by-name unchanged — diagnose next).
+   blocker — DIAGNOSED: `var odds: List[Int] = []` + `odds = odds + [i]` (a
+   HEAP-ACCUMULATOR reassign) × the guard-continue filter-if whose THEN arm
+   nests the break-guard: the stmt is `if c then <block-with-breaks> else ()`
+   (else is unit, not break), so the conditional-break handler defers and the
+   per-stmt break check honestly aborts. Opening it needs (i) a FILTER-IF
+   form in the loop-body handler (`IfThen(c); recurse; EndIf` — WAT labels
+   resolve $brk through nesting) AND (ii) the heap-accumulator for machinery
+   to accept it — the br must not skip the per-iteration acc-reassign frees
+   (design the early-exit × Option-C slot interplay before coding).
 
 ## What NOT to do
 
