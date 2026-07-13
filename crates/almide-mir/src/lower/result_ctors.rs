@@ -264,6 +264,15 @@ impl LowerCtx {
         self.heap_elem_lists.remove(&piece);
         self.live_heap_handles.retain(|h| *h != piece);
         let obj = self.materialize_opt_str_some(piece, repr);
+        // `materialize_opt_str_some` is the SHARED builder genuine Option construction also
+        // uses — it only ever marks `materialized_options`. This object is conceptually a
+        // RESULT (an `err(<variant ctor>)`), so ALSO track it in `materialized_results` —
+        // scoped to just this call site (not the shared builder, which stays Option-only for
+        // its other callers). `try_lower_variant_value_match` (the value-position twin) already
+        // resolves the both-flags-true conflict in favor of Result; this closes the same gap
+        // for its statement-position sibling `try_lower_result_match`, which had no Option
+        // fallback at all and always saw this subject as untracked.
+        self.materialized_results.insert(obj);
         if needs_rec {
             self.heap_elem_lists.remove(&obj);
             self.variant_drop_handles.insert(obj, format!("res_{type_name}"));

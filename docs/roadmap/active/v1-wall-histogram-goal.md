@@ -3692,6 +3692,45 @@ DIAGNOSIS — refined findings for the LAST TWO "match over an UNTRACKED
    produces Lambdas). **Current 18, unchanged for both** (zero source
    edits remain, `git status` clean).
 
+B112. **Closed HALF of the two-part `bidirectional_type_test` gap the
+   previous DIAGNOSIS scoped out — a real, narrow tracking-set fix,
+   correctness improvement shipped, corpus count UNCHANGED (18 held, this
+   entry needs its OTHER half too)**: `try_lower_result_err_variant_ctor`
+   (result_ctors.rs) builds an `err(<custom variant ctor>)` Result value
+   via the SHARED `materialize_opt_str_some` builder (the "Err IS Some
+   physically" len-as-tag reuse) — which only ever marks `materialized_
+   options` (correct for its OTHER callers, genuine Option construction).
+   This object is conceptually a Result, so `try_lower_result_match`
+   (the STATEMENT-position match consumer, gated strictly on `materialized_
+   results`/`materialized_results_str` with NO Option fallback) always saw
+   it as an untracked subject — even for the SIMPLEST possible 2-arm `ok/
+   err` match, which should have worked fine. Fixed by adding `self.
+   materialized_results.insert(obj)` at the `try_lower_result_err_variant_
+   ctor` call site ONLY (not inside the shared builder itself, so genuine
+   Option construction elsewhere is untouched — checked: the corpus has
+   exactly ONE user of this exact err-variant-ctor shape, `bidirectional_
+   type_test.almd`, so the zero-delta classify result was expected. `try_
+   lower_variant_value_match`, the value-position twin, already resolves
+   the analogous both-flags-true state in Result's favor — this closes
+   the same gap for its statement-position sibling, which had no such
+   fallback at all). Verified: a standalone 2-arm-match repro (`match
+   safe_op(fail) { ok(n)=>.., err(e)=>.. }` over `Result[Int, MathError]`)
+   matches v0 byte-for-byte (`err`/`ok:42`); a 10,000-iteration leak-loop
+   (fresh `Overflow(<interpolated string>)` construction + match every
+   iteration) under a 4MB cap completed with the correct accumulated value
+   (25005000), no leak. **`bidirectional_type_test` ITSELF remains walled**
+   — its OTHER blocker (the earlier DIAGNOSIS's second half) is unrelated
+   to tracking: `try_lower_result_match` also hard-requires exactly 2 arms
+   with simple `Ok`/`Err` binds, and the test's actual 3-arm match with a
+   NESTED ctor pattern inside the Err arm (`err(Overflow(msg))`, matching
+   one SPECIFIC variant case among several) is a genuinely different,
+   unsupported shape — extending pattern support there is real new
+   capability work, not a decline-point widening, and NOT attempted here.
+   Ladder: mir 583 / classify 18 zero newly-walled zero closed (expected
+   — corpus has only the one, still-walled-for-a-different-reason user of
+   this shape) / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
+   **Current 18, unchanged** (a real correctness fix shipped regardless).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
