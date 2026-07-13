@@ -317,6 +317,42 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // `some(Number(7))` — Some wrapping a CUSTOM-VARIANT ctor payload as a MATCH/if ARM
+            // value (the option-of-variant shape, `try_lower_option_ctor`'s BIND-position twin,
+            // binds_p4.rs — never mirrored here). Build the variant block
+            // (`try_lower_variant_ctor`), move it into the 1-element Option. Drop routing by the
+            // payload's OWN discipline: a recursive-drop variant routes "optrec:<Type>" → the
+            // generated `$__drop_<Type>` frees the payload (fields, then block) then the option
+            // block; a flat variant (no heap fields) uses the Some(string) shape — DropListStr's
+            // flat slot-0 free IS its exact drop. Checked BEFORE the generic Named-call arm
+            // further below (a ctor is NOT a real wasm fn — `try_lower_variant_ctor` inlines its
+            // block construction at every call site, so the plain Named-call route would emit an
+            // unlinked call).
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind,
+                    IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                        if self.variant_layouts.ctor_to_type.contains_key(name.as_str())) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let repr = repr_of(result_ty).ok()?;
+                let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind
+                else {
+                    return None;
+                };
+                let type_name = self.variant_layouts.ctor_to_type.get(name.as_str())?.clone();
+                let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name, &|rn| {
+                    crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+                });
+                let piece = self.try_lower_variant_ctor(expr)?;
+                let obj = if needs_rec {
+                    self.materialize_opt_aggregate_some(piece, repr, type_name)
+                } else {
+                    self.materialize_opt_str_some(piece, repr)
+                };
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // `some((i, s))` — an `(Int, String)` TUPLE payload (the zip_first merge arm:
             // `(some(a), some(b)) => some((a, b))` after the tuple-variant desugar). The fresh
             // owned tuple (`lower_owned_heap_field` — literal construct or borrowed-Var Dup)

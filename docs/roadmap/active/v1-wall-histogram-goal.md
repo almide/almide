@@ -2608,6 +2608,43 @@ B48. **`(String, <scalar>)` tuple `Some((k, v))` admitted as a heap-result
    classify 27 zero newly-walled (zero closed too — expected) / spec 283 /
    GATE OK / CORPUS WALL OK (FORBIDDEN=0).
 
+B49. **`some(<custom variant ctor>)` admitted as a heap-result MATCH/IF ARM
+   value too — third and final `try_lower_option_ctor` twin ported, zero
+   classify delta (27 held)**: completing the sweep started by B47/B48 —
+   diffed EVERY `IrExprKind::` arm in `binds_p4.rs`'s `try_lower_option_ctor`
+   (the BIND-position ctor materializer) against `heap_result_arm.rs`'s
+   `lower_heap_result_arm` (the ARM-position twin) and found ONE more
+   uncovered case: `some(Number(7))` — Some wrapping a CUSTOM-VARIANT
+   constructor call (the option-of-variant shape). `heap_result_arm.rs` had
+   NO handling for `OptionSome{expr: Call{Named{name}}} if ctor_to_type.
+   contains_key(name)` at all — a match/if arm producing this shape would
+   have either fallen to the generic `is_heap_ty` fallback (whose inner
+   `match` has no ctor-call case, declining honestly) or, worse, the LATER
+   generic `Call{Named}` arm (which assumes a REAL wasm fn exists — a ctor
+   has none, `try_lower_variant_ctor` inlines its block construction at
+   every call site, so that route would emit an UNLINKED call). Ported the
+   identical logic (build via `try_lower_variant_ctor`, route the drop by
+   the payload's OWN discipline — `needs_recursive_drop` selects
+   `materialize_opt_aggregate_some`/"optrec:<Type>" for a variant with heap
+   fields, `materialize_opt_str_some` for a flat one), checked BEFORE the
+   generic Named-call arm so a ctor never reaches it. Verified BOTH payload
+   classes: a flat ctor (`Number(Int)`, no heap fields) and a recursive-drop
+   ctor (`Tag(String)`) — both custom-variant matches (`match item {A{v}=>
+   some(Number(v)), B=>none}` / the `Tag(String)` twin) PARITY-matched v0
+   byte-for-byte on both targets; a dedicated 10,000× leak-loop (fresh `A`/
+   `B` construct + `pick` + a NESTED match consuming the recursive-drop
+   `Tag(String)` payload, hit AND miss arms) completed in 12ms under a 16MB
+   cap with the correct accumulated value (60000, hello's `string.len`×hits
+   + 1×misses), no leak — the recursive-drop path is the higher-risk one
+   (an extra heap field to free correctly) so it got the dedicated stress
+   test, not just the flat case. classify: zero delta (no current fixture
+   exercises this shape in arm position) — same B33/B36/B46/B48-class
+   proactive-safety shipping rationale. This closes the FULL `try_lower_
+   option_ctor` ↔ `lower_heap_result_arm` twin-coverage sweep — every
+   `OptionSome` payload shape the bind position handles, the arm position
+   now handles identically. Ladder: mir 583 / classify 27 zero newly-walled
+   / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
