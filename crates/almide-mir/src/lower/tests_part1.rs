@@ -364,8 +364,8 @@
                 1,
                 Ty::list(Ty::Int),
                 module_call(
-                    "env",
-                    "temp_dir",
+                    "http",
+                    "serve",
                     vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
                     Ty::list(Ty::Int),
                 ),

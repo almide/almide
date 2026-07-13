@@ -1277,6 +1277,17 @@ D2b. **fs.stat self-host SHIPPED (79 → 76) + LATENT fs.exists regression
    floor set. Ladder: mir 583 / classify 76 zero newly-walled / spec 283 /
    GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
 
+D2c. **env.os / env.temp_dir self-host SHIPPED (76 → 74)**: on the wasm
+   target these are COMPILE-TIME CONSTANTS (v0's calls_env.rs folds os() →
+   "wasi", temp_dir() → "/tmp"), so the v1 self-hosts are the same one-line
+   constants — no host reach, no capability, admitted per-fn via purity.rs's
+   new "env" arm (the effectful env fns stay walled/cap-admitted as before).
+   env_os.almd + env_temp_dir.almd + registry + PURE_MODULES; drift gate OK.
+   Probe ev1 v0-byte PARITY (len>0 invariants — the per-target constant
+   values are never printed by the corpus). The durably-walled test example
+   moved to http.serve (env.temp_dir opened out from under it). Ladder: mir
+   583 / classify 74 zero newly-walled / spec 283 / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
