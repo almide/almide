@@ -1200,6 +1200,22 @@ E3. **@extern(c) native-root reclassification (105 → 102)**: classify's
    key/value class first; record/variant keys additionally need the hash
    protocol proper (tag/field-wise hash + eq, not handle identity).
 
+B14. **Option-`?` identity desugar SHIPPED (102 → 99 — waypoint <100
+   CROSSED)**: `?` is the to-Option CONVERSION (not `!`-propagation), so
+   `Option[T]?` converts to itself — `desugar_to_option_calls` now replaces
+   the ToOption node by its operand when `expr.ty == e.ty` is Option, in any
+   position (count-invariant: ToOption is not a counted call). Probe qo1
+   (`o?`/`none?` in match-subject position + tail `list.first(xs)?`) 4
+   branches v0-byte PARITY. Opened result_option_matrix's two `? Option →
+   identity` tests + unwrap_operators try_first. Ladder: mir 583 / classify
+   99 zero newly-walled / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
+   Next waypoint <60. Remaining 99 概観: record_fn_field 5 (closures in
+   record slots), hash_protocol 4 (map key classes + hash protocol), random
+   7 + zlib 6 + process/fs/env ~12 (D2 capability brick), fan 4,
+   cross-module 7 (call-init globals brick + #412/#484), compound/deep-eq +
+   repr interp mains ~8, heap-acc loop C-tail (find_factor, guard-continue
+   filtering, map_fold_heap_acc), branch_lift synths 3, singles.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

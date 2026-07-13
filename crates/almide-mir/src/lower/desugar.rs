@@ -723,6 +723,17 @@ pub fn desugar_to_option_calls(body: &IrExpr) -> Option<IrExpr> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
             let IrExprKind::ToOption { expr } = &e.kind else { return };
+            // `Option[T]?` is the IDENTITY (the `?` matrix's "Option → identity" row): `?`
+            // is the to-Option CONVERSION (not `!`-propagation), so an already-Option
+            // operand converts to itself — replace the node by its operand, in any
+            // position. Count-invariant (ToOption is not a counted call; the operand's
+            // calls appear exactly once either way).
+            if matches!(&expr.ty, Ty::Applied(TypeConstructorId::Option, _)) && expr.ty == e.ty {
+                let inner = (**expr).clone();
+                *e = inner;
+                self.changed = true;
+                return;
+            }
             let admits = matches!(&expr.ty,
                 Ty::Applied(TypeConstructorId::Result, a)
                     if a.len() == 2 && matches!(a[0], Ty::Int) && matches!(a[1], Ty::String))
