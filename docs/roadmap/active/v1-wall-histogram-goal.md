@@ -3222,6 +3222,55 @@ B108. **Closed a latent dangling-call crash for ANY program using an
    WALL OK (FORBIDDEN=0). **Current 22, unchanged** (the count-affecting
    root cause behind `wrap_lists` remains open for a future attempt).
 
+DIAGNOSIS — `option_result_symmetry_test.almd`'s "option.collect_map all
+   some" (part of the 4-entry UNTRACKED-subject cluster) has TWO SEPARATE
+   gaps, only one of which is safe to fix in isolation — the OTHER attempt
+   reverted before shipping to avoid a MISLEADING wall-count drop. Fork 3's
+   lead ("check whether `is_self_host_option_module_fn` recognizes a
+   self-hosted call") was correct as far as it went: `option.collect_map`
+   is simply MISSING from that registry (`mod_p4.rs`) — `option.collect`,
+   `.map`, `.filter`, etc. are listed, `collect_map` is not, even though
+   `stdlib/option.almd` defines it as a THIN WRAPPER (`fn collect_map[T,U]
+   (xs, f) = option.collect(list.map(xs, f))`) delegating to the ALREADY-
+   admitted `collect`. Adding `"collect_map"` to the registry's `matches!`
+   list correctly fixes the "UNTRACKED subject" wall — classify_corpus
+   confirms the entry closes (22 → 21). **But a hand-written non-test-block
+   repro through `render_program` + wasmtime — the mandatory adversarial
+   check for ANY test-block wall closure (this exact gap has bitten this
+   session twice before, B51/B52) — caught that the underlying function is
+   STILL fundamentally broken**: `option.collect_map` NEVER gets emitted
+   as a WASM function at all, regardless of how its result is consumed
+   (confirmed with `let c = option.collect_map(...); println(int.to_string
+   (list.len(c ?? [])))` — no match involved, still fails) — render_program
+   rejects with "unlinked stdlib/runtime call(s)... option.collect_map —
+   rendering them would emit a dangling call". `option.collect` (its own
+   dependency, single type-param `[T]`) links and runs FINE when called
+   directly the same way. So the registry fix alone would make classify
+   report "not walled" while the function is STILL genuinely un-renderable
+   — exactly the false-green trap the adversarial-probe discipline exists
+   to catch. **Reverted the registry change** (`git checkout --` on
+   `mod_p4.rs` only, confirmed classify matches the B108 baseline exactly,
+   zero diff) rather than ship a misleading count drop. **Root cause of
+   the "unlinked" half NOT found this pass** — `option.map`/`.filter`
+   (already working) ALSO have a callback param and two type params
+   (`[T,U]`), so "generic HOF" alone doesn't distinguish `collect_map`;
+   the likely difference is `collect_map`'s body calling ANOTHER generic
+   stdlib module fn internally (`option.collect(list.map(xs, f))` — a
+   nested two-level generic instantiation chain, `list.map`'s inferred
+   `List[Option[U]]` feeding `collect`'s own `[T]` binding) versus the
+   working siblings' single-level bodies — UNVERIFIED, just the most
+   likely remaining structural difference; the actual "which stdlib
+   functions get bundled into the program" mechanism was not located in
+   this pass (searched `almide_lang::stdlib_info::is_bundled_module` and
+   the `mod_p4.rs`/`mod_p5.rs` self-host registries — none of them gate
+   inclusion; something else does, likely in the frontend's call
+   resolution/monomorphization). **A real fix needs BOTH halves shipped
+   together**: the registry addition (safe, already verified correct) PLUS
+   whatever makes `collect_map` actually emit a linkable WASM function —
+   re-verify with the SAME `println(int.to_string(list.len(c ?? [])))`
+   non-match repro before trusting classify's count on this entry again.
+   **Current 22, unchanged** (reverted, zero diff).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
