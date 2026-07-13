@@ -1108,6 +1108,17 @@ hold a raw Int whose truncated address could OOB-trap on a naive AND — the
 inner tag load must sit UNDER the outer match; single-outer-ctor subjects
 (pick's Wrap) skip the outer test entirely — that sub-shape first).
 
+B10. **Depth-2 single-outer ctor patterns SHIPPED (114 → 113)**:
+   `try_lower_custom_variant_match` strips ONE pattern layer when the outer
+   type has a SINGLE ctor and every arm is `TheCtor(<inner ctor pattern>)`
+   (`match o { Wrap(A(n)) => …, Wrap(B(m)) => … }` — pick): the outer always
+   matches, so the dispatch handle becomes the payload's slot-1 handle (a
+   BORROW in param_values — the subject's recursive drop owns it; loaded only
+   under the guaranteed-matching outer, so no wrong-ctor garbage read
+   exists) and the inner layout drives parse_variant_arms unchanged. Probe
+   pk1 v0-identical. Opened `pick`. Multi-outer-ctor depth-2 (r5 main,
+   nested_boxed classify) still needs the fallthrough design.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
