@@ -3540,6 +3540,77 @@ B111. **Closed `json_path_edges.almd :: p_set`'s "UNTRACKED subject" wall
    diagnosed. Ladder: mir 583 / classify 18 zero newly-walled (1 closed)
    / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0). **Current 18**.
 
+DIAGNOSIS — the "non-empty List[heap] literal with nested-ownership elements"
+   cluster (5 entries) plus `map_fold_heap_acc` (entry 106's diagnosis) is
+   NOT one gap — it's (at least) FOUR DISTINCT sub-shapes, each needing its
+   own new drop-routing/materialization work, confirmed by isolating each
+   file's actual trigger line (zero source edits made — `git status` clean
+   throughout this investigation). Precise findings, replacing the prior
+   vague "generics/monomorphization frontier" label with specifics:
+   (1) `compound_repr_interp.almd`: the trigger is `let deep: List[Map[
+   String, List[Option[Int]]]] = [["k": [some(1), none]]]` — a THREE-level
+   nesting (List → Map[String,·] → List[Option[Int]]). The existing
+   `ListElemDrop::MapHval` case (binds_p3.rs `try_lower_record_list_
+   literal_as`) is hard-gated to `Map[String, List[Int]]` specifically
+   (`matches!(b[0], Ty::Int)` — a flat scalar inner list only); it does not
+   generalize to a HEAP inner-list element (`Option[Int]`), which needs its
+   OWN recursive drop composed with the map's hval drop AND the outer
+   list's drop — a new three-way-composed drop routine, not a decline-
+   point widening. (2) `compound_repr_records_interp.almd` has TWO
+   SEPARATE gaps entangled in one file: (a) `let shapes: List[Shape] =
+   [Circle(1.0), Rect(2,3), Label{text:"box",at:Point{x:0,y:0}}]` — a list
+   of a USER VARIANT with heterogeneous ctor payloads (tuple/record/
+   nested-record) — FAILS AT CONSTRUCTION, because `try_lower_record_list_
+   literal_as`'s dispatch only consults the RECORD registry
+   (`record_or_anon_drop_type_name`), which is the WRONG registry for a
+   variant type entirely (no code path in this function ever checks
+   `variant_layouts` for a "list of variant ctors" shape) — this is what
+   the corpus-visible wall actually reports (it's earlier in lowering than
+   (b) below, so `render_program`/classify report THIS one). (b) SEPARATELY
+   — isolated via a standalone repro after temporarily working around (a)
+   — `let pts: List[Point] = [Point{x:1,y:2}, Point{x:5,y:6}]` (Point =
+   `{x:Int,y:Int}`, ALL-SCALAR fields) turns out to construct FINE already
+   today (confirmed: `list.len(pts)` renders and byte-matches v0) — the
+   flat-record-list case I initially suspected as the root cause is
+   ALREADY HANDLED, contrary to my first hypothesis. But `println("points=
+   ${pts}")` (the file's actual line) fails SEPARATELY with "unlinked
+   stdlib/runtime call(s)... list.to_string_x" — a STRINGIFICATION/repr-
+   generation gap (not a drop/construction gap, and NOT the same as B108's
+   anon-record drop-scan fix from earlier this session) — `list.to_string_
+   x` (the `_x` fail-closed convention, per B34-era memory notes) means the
+   repr generator for `List[<record>]` doesn't yet emit a working element
+   formatter for THIS record shape. (3) `generic_fn_in_inferred_lambda.
+   almd`: `let xs: List[Box[Int]] = [B(1), B(2), B(3)]` where `Box[T] =
+   B(T)` is a GENERIC single-case tuple-payload VARIANT — same root issue
+   as (2)(a): `try_lower_record_list_literal_as` has no "list of variant
+   ctors" path at all (only the narrow `lenlist_elem_class`-gated CtorFlat/
+   CtorLenLoop cases, themselves scoped to Option/Result ctors specifically
+   — not arbitrary user variants). (4) `map_fold_heap_acc.almd`: already
+   precisely diagnosed at entry 106 above (`Map[String, Map[String,
+   String]]`, a nested-Map-VALUE-is-itself-a-Map literal — the Map-literal
+   analogue of shape (1)'s List-of-heap-nesting). NOT individually isolated
+   this pass (ran out of scope budget for one investigation):
+   `compound_repr_recursive_interp.almd`, `generic_chain_unwrap_or.almd`,
+   `compound_eq.almd`'s specific trigger line (likely ALSO shape (2)(a)'s
+   "list of variant ctors" gap or a List[Tuple]-with-heap-element variant,
+   given the file's `List[(Int,Int)]`/`List[List[Int]]` args tests already
+   pass per `ScalarAggregate` — the wall must come from something else in
+   the file, e.g. the record/set/map key sections near the bottom). **A
+   real fix needs, at minimum, TWO separate new pieces**: (i) a genuine
+   "list of variant-ctor elements" materialization path in `try_lower_
+   record_list_literal_as` (mirroring the EXISTING record path but against
+   `variant_layouts` instead of `record_layouts`, handling per-ctor-arm
+   heterogeneous payloads within one list — non-trivial since different
+   elements may need different per-element drop shapes if the variant
+   itself isn't uniformly flat), and (ii) a composed multi-level drop
+   routine generator for arbitrarily-nested Map/List/Option combinations
+   (currently every nested-container drop case in this codebase is a
+   HAND-WRITTEN, TYPE-SPECIFIC pairing — `MapHval`, `ListStr`, `StrStr`,
+   etc. — not a general recursive composition; genuinely new
+   infrastructure, not a decline-point extension). Neither is a safe,
+   scoped fix for a single investigation pass — correctly left unattempted.
+   **Current 18, unchanged** (zero source edits, `git status` clean).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
