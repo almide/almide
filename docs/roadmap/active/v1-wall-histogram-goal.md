@@ -1470,6 +1470,17 @@ HOTFIX (51 held): **B19 shipped with a corpus caps-gate breach** — the
    lifted-mix `some(x) => raw x` arm is the error-model frontier, same
    class as protocol_edge; recorded, not shipped).
 
+D2e. **fan.timeout literal-thunk inline SHIPPED (51 → 49)**: v0's WASM leg
+   has NO timeout — calls_p4.rs calls the thunk INLINE ("just call fn"), so
+   `fan.timeout(ms, () => body)` desugars to `body` (the fan.race
+   head-settle precedent), the ms arg gated CALL-FREE (nothing effectful or
+   counted is discarded), a non-literal thunk declining honestly. Wired
+   into desugar_fan_race_any's shared visitor (heap-branches fixpoint —
+   desugar-before-both). Probe ft1 (`fan.timeout(5000, () => succeed(42))`
+   + `== ok(42)` + `?? -1`) v0-byte PARITY. Opened both fan.timeout tests.
+   Ladder (with the CORRECTED corpus grep incl. FAIL lines): mir 583 /
+   classify 49 zero newly-walled / spec 283 / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
