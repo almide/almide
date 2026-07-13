@@ -310,7 +310,12 @@ fn count_ir_calls(
                     // option.liststr_unwrap_or CALL (pure value_core helpers, no Stdout) — count +1 so
                     // mir == ir, mirroring the Option[Value] case.
                     || almide_mir::lower::is_option_listvalue_ty(&expr.ty)
-                    || almide_mir::lower::is_option_liststr_ty(&expr.ty);
+                    || almide_mir::lower::is_option_liststr_ty(&expr.ty)
+                    // An Option[List[<scalar>]] `??` (`map.get(groups, k) ?? []` — B19's
+                    // group_by class) routes to ONE synthetic option.listint_unwrap_or CALL —
+                    // count +1 so mir == ir (the missing credit was the B19-ship breach the
+                    // corpus gate caught: mir 2 > ir 1 on every listint `??` site).
+                    || almide_mir::lower::is_option_listscalar_ty(&expr.ty);
                 // value/list-Ok Result + Option[Value] Vars route (the handle Var-case admits
                 // them) — INCLUDING a str-str Var, which now routes to `result.str_unwrap_or`
                 // (the materialized_results_str Var-gate admission). An Option[Value] operand
@@ -326,7 +331,8 @@ fn count_ir_calls(
                             func.as_str(),
                         ) || ((almide_mir::lower::is_option_value_ty(&expr.ty)
                             || almide_mir::lower::is_option_listvalue_ty(&expr.ty)
-                            || almide_mir::lower::is_option_liststr_ty(&expr.ty))
+                            || almide_mir::lower::is_option_liststr_ty(&expr.ty)
+                            || almide_mir::lower::is_option_listscalar_ty(&expr.ty))
                             && almide_mir::lower::is_self_host_option_module_fn(
                                 module.as_str(),
                                 func.as_str(),

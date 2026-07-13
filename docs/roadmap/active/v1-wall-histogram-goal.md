@@ -1454,6 +1454,22 @@ A6. **Pure call-init globals inline at use sites SHIPPED (54 → 51)**:
    the existing name bridge). Ladder: mir 583 / classify 51 zero
    newly-walled / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
 
+HOTFIX (51 held): **B19 shipped with a corpus caps-gate breach** — the
+   listint `??` route emitted one synthetic option.listint_unwrap_or CallFn
+   with NO matching count credit, so every such site was mir 2 > ir 1
+   (WALL BREACH on 3 fns). The B19/B20/A6 ladders MISSED it because the
+   corpus-wall check grepped `FORBIDDEN|CORPUS WALL OK | head -2` — on
+   failure the FORBIDDEN line still prints, and head-2 hid the absence of
+   the OK line (B19's own run was green; the breach surfaced when its
+   opened fns' counts entered the comparison). Fix: credit
+   `is_option_listscalar_ty` in BOTH the `??` count arms (classify),
+   mirroring the liststr/listvalue credits. LADDER RULE UPDATE: always grep
+   the FAIL lines too (`CORPUS WALL OK|WALL BREACH|WALL GATE FAIL`) — an
+   OK-only grep is a false-green vector. Also probed and REVERTED a bare
+   tail-Option-`!` desugar (it regressed unwrap_option_some — the
+   lifted-mix `some(x) => raw x` arm is the error-model frontier, same
+   class as protocol_edge; recorded, not shipped).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
