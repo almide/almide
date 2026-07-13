@@ -621,6 +621,7 @@ impl LowerCtx {
             StrStr,
             ListStr,
             MapHval,
+            ScalarAggregate,
             CtorFlat,
             CtorLenLoop,
         }
@@ -664,6 +665,14 @@ impl LowerCtx {
             // call result, moved in); the list frees per-element via the self-hosted
             // `$__drop_list_map_hval` (each element through `__drop_map_hval`).
             ListElemDrop::MapHval
+        } else if matches!(&elem_ty, Ty::Tuple(tys) if !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t)))
+        {
+            // An ALL-SCALAR tuple element (`[(1, 2), (3, 4)]` — the compound_eq
+            // List[(Int, Int)] argument): each element is a fresh flat block (inline
+            // scalars only), so the per-element rc_dec of the masked DropListStr IS its
+            // full free. The OWNED route (build + Consume) — the raw-handle view trap
+            // (B24) double-frees this shape.
+            ListElemDrop::ScalarAggregate
         } else if let Some(class) = crate::lower::lenlist_elem_class(&elem_ty) {
             match class {
                 crate::lower::CtorElemClass::Flat => ListElemDrop::CtorFlat,
@@ -709,6 +718,19 @@ impl LowerCtx {
                     return None;
                 }
                 if e_ref.ty != elem_ty {
+                    return None;
+                }
+            }
+            if matches!(kind, ListElemDrop::ScalarAggregate) {
+                if let IrExprKind::Tuple { elements: tels } = &e_ref.kind {
+                    let tels = tels.clone();
+                    if let Some(obj) = self.try_lower_scalar_tuple_construct(&tels) {
+                        if !self.live_heap_handles.contains(&obj) {
+                            self.live_heap_handles.push(obj);
+                        }
+                        objs.push(obj);
+                        continue;
+                    }
                     return None;
                 }
             }
@@ -763,6 +785,9 @@ impl LowerCtx {
             }
             ListElemDrop::MapHval => {
                 self.variant_drop_handles.insert(dst, "list_map_hval".to_string());
+            }
+            ListElemDrop::ScalarAggregate => {
+                self.heap_elem_lists.insert(dst);
             }
             ListElemDrop::ListStr => {
                 self.list_list_str_lists.insert(dst);

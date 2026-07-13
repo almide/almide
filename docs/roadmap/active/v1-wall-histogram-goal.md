@@ -1660,6 +1660,20 @@ B30. **The 5-chain ceiling OPENED (44 → 43)**: branch_lift (the shared
    mir 583 / classify 43 zero newly-walled / spec 283 / GATE OK /
    CORPUS WALL OK.
 
+B31. **All-scalar tuple lists via the OWNED route (43 held, an enabler)**:
+   ListElemDrop::ScalarAggregate in try_lower_record_list_literal_as —
+   each `(1, 2)` element materializes fresh-flat via
+   try_lower_scalar_tuple_construct and is CONSUMED in; drop =
+   heap_elem_lists (per-element rc_dec IS the full free for inline-scalar
+   blocks). The raw-handle VIEW would double-free this shape (the B24
+   trap); the owned route passes the PCC ownership gate (30,070 objects
+   ACCEPT). Probes ce1 (list.contains over List[(Int,Int)]) and ce2
+   (set.from_list over scalar-tuple pairs — the SET machinery already
+   handles tuple elements!) v0-byte PARITY. compound_eq main's residue:
+   the List[List[Int]]-literal ARG (list-literal elements) and the
+   tuple-key Map literal — next. Ladder: mir 583 / classify 43 / spec 283 /
+   ownership ACCEPT / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
