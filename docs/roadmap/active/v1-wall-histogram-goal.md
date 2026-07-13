@@ -1644,6 +1644,22 @@ DIAGNOSIS (at 44): **value_deep_eq / compound_eq mains — the 5-chain
    compound_eq main, and part of the compound-repr mains (their println
    chains exceed 5 lifts too).
 
+B30. **The 5-chain ceiling OPENED (44 → 43)**: branch_lift (the shared
+   almide-optimize pass) gains a DENSE-CHAIN region — a Block holding >3
+   statements that contain a heap-result `if`/`match` ANYWHERE (counted
+   BEFORE the MIR ANF lift turns call-arg branches into the let chain the
+   bounded-duplication gate refuses at rest > 3). Inside the region every
+   heap-result `if` EXPRESSION lifts in place to a tail-helper call
+   (bottom-up, one helper per if — chain-length immune, no 2^n
+   duplication; pre-both, so the caps counts stay 1:1 by construction).
+   The helper shape (tail heap-result if over a heap-eq cond) was
+   probe-verified first (hl1 PARITY). Probes vc5 / vv8 PARITY and the
+   value_deep_eq fixture is END-TO-END v0-byte PARITY (the C-124 Value
+   deep-eq contract, all 15 lines). compound_eq / compound_repr mains keep
+   their separate List-materialization blockers. Ladder: optimize 11 +
+   mir 583 / classify 43 zero newly-walled / spec 283 / GATE OK /
+   CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

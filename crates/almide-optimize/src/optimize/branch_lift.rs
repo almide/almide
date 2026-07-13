@@ -91,7 +91,8 @@ pub fn lift_heap_branch_binds(program: &mut IrProgram) {
     // against the same VarId namespace.
     {
         let IrProgram { functions, top_lets, var_table, .. } = &mut *program;
-        let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0 };
+        let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0,
+        dense_depth: 0 };
         for func in functions.iter_mut() {
             lifter.visit_expr_mut(&mut func.body);
         }
@@ -107,7 +108,7 @@ pub fn lift_heap_branch_binds(program: &mut IrProgram) {
     // the module's table, not the program's).
     for module in program.modules.iter_mut() {
         let IrModule { functions, top_lets, var_table, .. } = &mut *module;
-        let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0 };
+        let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0, dense_depth: 0 };
         for func in functions.iter_mut() {
             lifter.visit_expr_mut(&mut func.body);
         }
@@ -140,6 +141,12 @@ struct BranchLifter<'a> {
     counter: &'a mut u32,
     new_funcs: Vec<IrFunction>,
     loop_depth: u32,
+    /// >0 while inside a Block whose heap let-bound `if`/`match` COUNT exceeds the MIR
+    /// tail-duplication desugar's bounded-duplication gate (rest > 3 declines there —
+    /// the value_deep_eq 5-chain ceiling). In that region an out-of-loop heap `if` is
+    /// lifted too: each bind becomes ONE helper call (chain-length immune, no 2^n
+    /// duplication), the sound shape the try-lowered helper renders.
+    dense_depth: u32,
 }
 
 impl<'a> IrMutVisitor for BranchLifter<'a> {
@@ -152,9 +159,39 @@ impl<'a> IrMutVisitor for BranchLifter<'a> {
         if is_loop {
             self.loop_depth += 1;
         }
+        // A DENSE straight-line chain: >3 heap let-bound branches in ONE block is past
+        // the MIR desugar's bounded-duplication gate — mark the region so the If arm
+        // below lifts (see `dense_depth`).
+        let is_dense = match &expr.kind {
+            IrExprKind::Block { stmts, .. } => {
+                stmts
+                    .iter()
+                    .filter(|s| stmt_holds_heap_if(s))
+                    .count()
+                    > 3
+            }
+            _ => false,
+        };
+        if is_dense {
+            self.dense_depth += 1;
+        }
         walk_expr_mut(self, expr);
+        if is_dense {
+            self.dense_depth -= 1;
+        }
         if is_loop {
             self.loop_depth -= 1;
+        }
+        // In a DENSE region, lift a heap-result `if` EXPRESSION in place (the call-arg
+        // position the MIR ANF lift would otherwise turn into the >3 let-bound chain the
+        // bounded-duplication gate refuses). One helper call per `if` — chain-length
+        // immune. Bottom-up (children walked above), so nested ifs lift inside-out.
+        if self.dense_depth > 0
+            && matches!(expr.kind, IrExprKind::If { .. })
+            && is_heap_ty(&expr.ty)
+        {
+            let ty = expr.ty.clone();
+            self.lift_bind_value(ty, expr);
         }
     }
 
@@ -193,7 +230,7 @@ impl<'a> IrMutVisitor for BranchLifter<'a> {
                             )
                         })
                 }
-                IrExprKind::If { .. } => self.loop_depth > 0,
+                IrExprKind::If { .. } => self.loop_depth > 0 || self.dense_depth > 0,
                 _ => false,
             };
             if fire {
@@ -300,6 +337,27 @@ impl<'a> BranchLifter<'a> {
 /// that this predicate misclassifies as heap would lift a bind the renderer
 /// already handles inline (harmless but wasteful); a heap type misclassified as
 /// scalar would leave the original wall in place.
+/// Does the statement contain a HEAP-result `if`/`match` anywhere (bind value, call
+/// argument, operand)? The dense-chain scan counts these BEFORE the MIR-side ANF lift
+/// rewrites call-arg branches into let binds.
+fn stmt_holds_heap_if(stmt: &IrStmt) -> bool {
+    use almide_ir::visit::{walk_stmt, IrVisitor};
+    struct V(bool);
+    impl IrVisitor for V {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(e.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
+                && is_heap_ty(&e.ty)
+            {
+                self.0 = true;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut v = V(false);
+    walk_stmt(&mut v, stmt);
+    v.0
+}
+
 fn is_heap_ty(ty: &Ty) -> bool {
     !matches!(
         ty,
