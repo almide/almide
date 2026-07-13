@@ -2964,6 +2964,63 @@ DIAGNOSIS — `nested_unwrap` (`result_option_matrix_test.almd`) reverted, NOT
    bare-tail position) — unexplored, next attempt should start there.
    **Current 24, unchanged** (no commit made).
 
+DIAGNOSIS — the ROOT CAUSE shared by (at least) `unannotated_unwraps`
+   (effect_assign_unwrap_test.almd), `nested_unwrap` (result_option_matrix_
+   test.almd), and plausibly `is_balanced` (nested_match_option_string_
+   test.almd) — all three "variant match in tail position" walls — traced
+   via debug instrumentation directly in `try_lower_variant_value_match`
+   (control_p2.rs, temporarily added then FULLY REVERTED — `git checkout
+   --`, confirmed classify matches the B53 baseline exactly). Repro:
+   `effect fn declared_result() -> Result[Int,String] = ok(7)` /
+   `effect fn unannotated_unwraps() -> Int = { let v = declared_result();
+   v }`. This is the STMT-position `Try`-node auto-`?` path (the SAME
+   mechanism the doc comment atop desugar_unwrap.rs calls "PROVEN... VERIFIED
+   to byte-match... porta.start's every shape") — the stmt loop correctly
+   fires, both arms of the reconstructed `match declared_result() { err(e)
+   => err(e), ok(v) => v }` parse and bind cleanly (confirmed via trace: no
+   rollback anywhere in subject-tracking or arm-pattern-parsing). The ACTUAL
+   failure is later: `try_lower_variant_value_match` receives `result_ty =
+   tail.ty = Int` (the WHOLE MATCH's `.ty`, which `build_unwrap_match` set
+   to `body.ty.clone()` — and `body.ty` here is the function's DECLARED
+   sugar type, `Int`, NOT a Result-wrapped type) — so `heap_res =
+   is_heap_ty(Int) = false`, routing BOTH arms through `lower_scalar_arm`
+   (the SCALAR path). The Err arm's body is `ResultErr{Var{e}}` (a node
+   that structurally CONSTRUCTS a heap Result — conceptually never a
+   "scalar value" regardless of its `.ty` annotation) — `lower_scalar_arm`
+   has no case for `ResultErr` and falls to its default `lower_scalar_
+   value`/`try_lower_scalar_call` bucket, which declines → arm lowering
+   fails → `try_lower_variant_value_match` rolls back → falls to tail.rs's
+   final "variant match in tail position" wall. **Why "porta.start"/`sum_
+   parse` work but this doesn't**: those precedents are declared EXPLICITLY
+   `-> Result[Int,String]` (not a bare scalar), so their `body.ty` IS
+   ALREADY the wrapped type — `result_ty` reaching `try_lower_variant_
+   value_match` is correctly `Result[Int,String]`, `heap_res=true`, and
+   BOTH arms route through `lower_heap_result_arm` (which correctly handles
+   the "one arm raw-scalar implicit-Ok, other arm explicit ResultErr"
+   asymmetry — the actual proven case). `unannotated_unwraps` is declared
+   `-> Int` (auto-wrap sugar: the source-level type is scalar, but the
+   REAL compiled ABI must be `Result[Int,String]` since `main`'s call site
+   `unannotated_unwraps()!` type-checks — the checker treats the CALL as
+   unwrappable, proving the true ABI is Result-shaped — even though `func.
+   ret_ty` AND `func.body.ty` both stay `Int` throughout, matching the
+   user-facing sugar). **This is a genuinely unhandled case, not a
+   regression** — the STMT-position mechanism has apparently ONLY ever been
+   proven for functions ALREADY declared with a Result/Option return; the
+   "declared scalar, auto-wrapped due to an internal propagating unwrap"
+   case has no corpus precedent and no infrastructure. **A real fix needs**
+   a "real ABI return type" for a function, DISTINCT from `func.ret_ty`
+   (which stays the declared sugar type for WASM signature purposes via
+   whatever ALREADY reconciles this at the callee/caller boundary for
+   OTHER auto-wrap cases — unidentified in this pass, needs its own
+   investigation) — threaded into `build_unwrap_match`'s reconstructed
+   arm/match typing INSTEAD of `body.ty` whenever the declared type isn't
+   already Result/Option, so `try_lower_variant_value_match` correctly
+   selects the heap-result (`lower_heap_result_arm`) path instead of the
+   scalar path. High blast radius (signature generation, `repr_of`, the
+   call-site unwrap machinery) — deliberately NOT attempted this session;
+   scope it as its own investigation before touching. **Current 24,
+   unchanged** (fully reverted, zero diff).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
