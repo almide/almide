@@ -2708,6 +2708,56 @@ B50. **`auto_try.rs` explicit-`ok(...)`-sugar stripping — the ACTUAL fix for
    frontend+workspace all-green / classify 26 zero newly-walled (one entry
    closed) / spec 283 (0 failed) / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
 
+DIAGNOSIS (at 26, two REVERTED dead-end attempts, no code shipped):
+   **`protocol_edge_test.almd`'s "match over a never-err effect-fn call with
+   a non-`ok(x)` Ok pattern"** (`assert_eq(e.log_info()!, "started")`,
+   `e.log_info() -> String = e.message` a never-err lifted effect fn) —
+   TWO fix attempts, both reverted, neither closed it (both were zero
+   classify-delta and the second didn't even reach its own target code
+   path — confirmed via `DBG_`-gated eprintln, cleanly removed before
+   revert):
+   1. Widened `mod_p2.rs`'s `rewrite_never_err_effect_match` to also
+      handle an `ok(_)` WILDCARD Ok pattern (minting a fresh throwaway
+      `var` via a new `next_var: &mut u32` param), since its OWN inline
+      comment already correctly documents Wildcard as unhandled (the
+      function's TOP doc-comment claiming otherwise is STALE — a real,
+      small doc-drift bug, still unfixed). Built, verified safe (zero
+      newly-walled), but zero corpus impact: `rewrite_never_err_effect_
+      match` runs ONCE, early, in `inline_mutual_tail_recursion`
+      (pipeline.rs pre-pass) — but THIS test's `!` is nested in a
+      CALL-ARGUMENT (`assert_eq(e.log_info()!, ...)`), which only becomes
+      a `let x = f()!` shape via `desugar_callarg_unwrap`, and the match
+      that shape THEN produces is built by `desugar_effect_unwrap`
+      (desugar_unwrap.rs) — which runs LATER, per-function, inside the
+      main lowering loop (`lower_body_into`, mod_p3.rs). The pre-pass has
+      already finished by the time this match exists, so it can never
+      rewrite it — a genuine TIMING gap, not a pattern-coverage gap.
+   2. Attempted the SAME never-err short-circuit INLINE in `desugar_
+      unwrap.rs`'s `desugar_effect_unwrap_inner` (build the raw let-bind
+      directly instead of ever constructing the err/ok match, checking
+      `NEVER_ERR_LIFTED_FNS` at construction time instead of post-hoc).
+      Compiled clean but a `DBG_`-gated eprintln at the exact check site
+      NEVER FIRED for this file — meaning `desugar_effect_unwrap_inner`'s
+      per-statement loop never even reaches the point my check lives at,
+      for this specific test. Root cause NOT further traced (ran out of
+      budget on this specific item) — candidates: `desugar_callarg_
+      unwrap` may not actually produce a `let tmp = e.log_info()!` BIND
+      shape for a call-arg inside `assert_eq(...)` the way `fetch`/
+      `handler`'s repros assumed (maybe test-block compilation or
+      `assert_eq` itself takes a different desugar path entirely); or the
+      ORDER `desugar_callarg_unwrap` / `desugar_effect_unwrap` run in
+      relative to EACH OTHER in `lower_body_into`'s chain doesn't actually
+      compose the way assumed (need to re-verify the actual mod_p3.rs
+      desugar sequence, not assume it from the file's own doc comments).
+   **Next session**: before attempting fixes again, trace with a debug
+   print in `desugar_callarg_unwrap` itself (not just its downstream
+   consumer) to confirm what shape `assert_eq(e.log_info()!, "started")`
+   ACTUALLY becomes, at EACH desugar stage, for THIS specific test file —
+   don't assume the transform chain from reading doc comments alone (both
+   reverted attempts did, and both were wrong about where the relevant
+   code runs). classify unaffected either way (still 26, both attempts
+   fully reverted before commit — nothing unverified shipped).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
