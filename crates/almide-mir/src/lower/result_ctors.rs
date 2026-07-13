@@ -653,6 +653,38 @@ impl LowerCtx {
     /// int is scalar, owns nothing). Cert: a `None`-like DynListStr (Alloc `i`, no String move-in,
     /// scope-end DropListStr `d`) — the int store + len override are opaque prim ops the checker
     /// ignores. The tag read (len == 0) marks it `Ok`.
+    /// `Err(<scalar>)` for a SCALAR-SCALAR Result (`Result[Int, Int]` — the
+    /// match_container `ck(err(404))` class): the SAME len-as-tag block as
+    /// [`Self::materialize_result_ok`] but the len field STAYS 1 (the Err tag) and slot 0
+    /// holds the SCALAR err payload. Deliberately NOT `heap_elem_lists`-tracked: a
+    /// DropListStr over len 1 would rc_dec the raw scalar as a handle (the rc_dec-trap
+    /// class); the caller's flat `Op::Drop` frees the block exactly (neither arm owns
+    /// children). Cert: one Alloc `i` + the scope-end `d` — the same balanced pair.
+    pub(crate) fn materialize_result_err_scalar(
+        &mut self,
+        payload: ValueId,
+        repr: crate::Repr,
+    ) -> ValueId {
+        use crate::PrimKind;
+        let one = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        let obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynList { len: one } });
+        let oh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![obj] });
+        // slot 0 (handle + 12) = the scalar Err payload; len stays 1 = the Err tag.
+        let twelve = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: twelve, value: 12 });
+        let daddr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: daddr, op: IntOp::Add, a: oh, b: twelve });
+        self.ops.push(Op::Prim {
+            kind: PrimKind::Store { width: 8 },
+            dst: None,
+            args: vec![daddr, payload],
+        });
+        obj
+    }
+
     pub(crate) fn materialize_result_ok(&mut self, payload: ValueId, repr: crate::Repr) -> ValueId {
         use crate::PrimKind;
         let one = self.fresh_value();

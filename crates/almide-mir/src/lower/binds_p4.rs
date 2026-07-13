@@ -1003,6 +1003,24 @@ impl LowerCtx {
                 self.materialized_results.insert(dst);
                 Some(dst)
             }
+            // `err(<scalar>)` for a SCALAR-SCALAR Result (`Result[Int, Int]` — the
+            // match_container `ck(err(404))` class): the len-as-tag Err twin of the
+            // scalar-Ok arm above. NOT heap_elem_lists-tracked — the flat Drop is the
+            // exact free (a DropListStr over len 1 would rc_dec the raw scalar payload
+            // as a handle). Gated to BOTH sides scalar so the heap-err layouts (String
+            // err → DropListStr slot-0 free) keep their existing arms below.
+            IrExprKind::ResultErr { expr }
+                if !is_heap_ty(&expr.ty)
+                    && matches!(ty,
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                            if a.len() == 2 && !is_heap_ty(&a[0]) && !is_heap_ty(&a[1])) =>
+            {
+                let payload = self.lower_scalar_value(expr)?;
+                let repr = repr_of(ty).ok()?;
+                let dst = self.materialize_result_err_scalar(payload, repr);
+                self.materialized_results.insert(dst);
+                Some(dst)
+            }
             // `err(<user-variant ctor>)` for `Result[T_scalar, <user variant>]` — the
             // structured-error class (`let e: Result[Int, MathError] =
             // err(Overflow("m"))`, `assert_eq(f(x), err(DivideByZero))`). The

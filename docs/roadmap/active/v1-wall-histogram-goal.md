@@ -1331,6 +1331,22 @@ C3. **Mid-body conditional break with pre-break statements SHIPPED
    CORPUS WALL OK. Remaining loop-guard C-tail: the heap-acc guard-continue
    filter (`odds = odds + [i]` under 2 guards) — the heap-acc loop family.
 
+B16. **Scalar-scalar Result `err(<scalar>)` ctor SHIPPED (71 → 69)**:
+   `Result[Int, Int]` (match_container_literal's `ck(err(404))`) had a
+   scalar-Ok materializer but NO scalar-Err twin — and the len-1 Err tag
+   makes the DropListStr convention rc_dec slot 0, which for a RAW SCALAR
+   payload is the rc_dec-trap class, so the new
+   `materialize_result_err_scalar` (result_ctors.rs) keeps the same
+   len-as-tag block but is deliberately NOT heap_elem_lists-tracked: the
+   flat Op::Drop frees the block exactly (neither arm owns children). Ctor
+   arm gated to BOTH sides scalar so the heap-err layouts keep their
+   existing arms. Probes mc1–mc4 bisected the fixture (the concat chain and
+   some(String-literal) args already lowered; ok(0)/err(404) ctor args were
+   the gap); match_container_literal.almd is now end-to-end v0-byte PARITY,
+   and result.or_else's ok-passthrough test opened as a bonus (same ctor
+   class). Ladder: mir 583 / classify 69 zero newly-walled / spec 283 /
+   GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
