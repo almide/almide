@@ -1046,6 +1046,17 @@ A5. **from_codepoint global const-fold SHIPPED (121 → 119 — the <120 WAYPOIN
    v0-identical. Opened both json_stringify_escape tests (their concat-in-arg
    wall chained from the computed NL/TAB globals).
 
+B7. **Free-fn UFCS resolution SHIPPED (119 → 117)**: `desugar_method_calls`
+   resolves a surviving Method on a NON-Named, non-record receiver
+   (`3.double()`, `"hello".exclaim()`, `xs.sum_all()`) to the free fn with
+   the receiver prepended — the checker already resolved stdlib UFCS to
+   Module calls and type-checked the rest, so the free fn exists (a
+   genuinely-missing one is caught by the render's unlinked wall). A RECORD
+   receiver stays deferred (a fn-FIELD call needs the Computed-callee brick —
+   record_fn_field's 2 walls). The mir test that pinned the old
+   Method-walls contract now pins the resolution. Probe uf1 v0-identical
+   (basic + chain). Opened both function_test UFCS fns.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

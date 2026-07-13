@@ -181,6 +181,13 @@ pub fn desugar_method_calls(body: &IrExpr) -> Option<IrExpr> {
                         Some(method.as_str().to_string())
                     } else if let Ty::Named(n, _) = &object.ty {
                         Some(format!("{}.{}", n.as_str(), method.as_str()))
+                    } else if !matches!(&object.ty, Ty::Record { .. } | Ty::OpenRecord { .. }) {
+                        // A non-Named, non-record receiver (`3.double()`,
+                        // `"hello".exclaim()`): the checker already resolved stdlib
+                        // UFCS to Module calls, so a SURVIVING Method here is plain
+                        // free-fn UFCS — `x.f(a)` = `f(x, a)`. (A record receiver may
+                        // be a FN-FIELD call — left for the Computed-callee brick.)
+                        Some(method.as_str().to_string())
                     } else {
                         None
                     }

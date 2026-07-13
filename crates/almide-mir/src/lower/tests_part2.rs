@@ -691,9 +691,11 @@
     #[test]
     fn heap_method_call_bound_to_a_var_is_walled_not_an_empty_opaque() {
         use almide_lang::intern::sym;
-        // var x = obj.method()  — an unresolvable Method callee returning a HEAP value. The
-        // OLD path bound `x` to a deferred `Alloc{Opaque}` (an EMPTY list); any later read
-        // of `x` observes empty bytes = a silent miscompile. It now REJECTS explicitly.
+        // var x = obj.method()  — a Method callee on a NON-Named receiver now RESOLVES to
+        // free-fn UFCS (`method(obj)`): the checker guarantees a surviving Method names a
+        // real free fn, so the desugar emits an ordinary Named CallFn with the receiver
+        // prepended (a genuinely-missing fn is caught by the render's unlinked wall, never
+        // an empty Opaque). The OLD contract (Method = unresolvable = wall) is superseded.
         let mcall = ir_expr(
             IrExprKind::Call {
                 target: CallTarget::Method {
@@ -710,8 +712,16 @@
             bind(1, list_int(), mcall),
         ]);
         match lower_body(&b, "main") {
-            Err(LowerError::Unsupported(_)) => {}
-            other => panic!("expected an explicit heap method-call reject, got: {other:?}"),
+            Ok(mir) => {
+                assert!(
+                    mir.ops.iter().any(|o| matches!(o,
+                        Op::CallFn { name, args, .. } if name == "method" && args.len() == 1)),
+                    "the UFCS resolution emits CallFn method(obj): {:?}",
+                    mir.ops
+                );
+                assert_eq!(verify_ownership(&mir), Ok(()));
+            }
+            other => panic!("expected the resolved UFCS call to lower, got: {other:?}"),
         }
     }
 
