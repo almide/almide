@@ -1834,6 +1834,75 @@ B35. **Heap-result `match` as a call argument (40 held, an enabler)**: the
    the one still-walled entry changed to reflect the NEW, narrower blocker)
    / spec 283 / GATE OK / CORPUS WALL OK.
 
+DIAGNOSIS (at 40): **the remaining 40 were triaged in full** (a fork read
+   every fixture at its wall site against the current lower/*.rs code). Full
+   per-entry breakdown lives in the triage transcript; the load-bearing
+   findings:
+   - **UNTRACKED-subject match linearization** (control.rs:304, "cannot take
+     the both-arms linearization") is a HARD/DEEP, shared root cause across
+     ≥5 entries (bidirectional_type_test, option_result_symmetry_test,
+     fan_pure_thunks, json_path_edges, + likely more) — the both-arms
+     linearization is unsound for a call-bearing arm; opening this needs REAL
+     per-arm branching over an untracked (non-Option/Result/variant) subject,
+     not a narrow admission widening. Do not attempt piecemeal.
+   - **Cross-module variant registry gaps** (#412/#631/#484,
+     crossmod_variant_payload_test) — `VariantLayouts` is never populated for
+     a FOREIGN module's ctors; HARD/DEEP, a registry-merge project of its own.
+   - **Generics + monomorphization** (generic_fn_in_inferred_lambda's
+     `List[Box[Int]]`) — tried widening `try_lower_record_list_literal_as`
+     with an `is_flat_variant_ty` arm (binds_p3.rs): WORKED for a concrete
+     flat variant (`IBox = IB(Int)`, probe bx2 PARITY) but FAILED for the
+     generic case — `VariantLayouts` stores the UNRESOLVED generic field type
+     (`T`, not `Int`), so `is_flat_variant_ty`'s `!is_heap_ty(fty)` check
+     sees a bare type-variable and returns false regardless of the concrete
+     instantiation. REVERTED (zero corpus benefit + incomplete + unexercised
+     code is itself a risk this session's `_str`-dispatch bug proved). Fixing
+     for real needs a mono-aware registry lookup, not a narrow arm.
+   - **`map.find`'s Option[(String,Int)] payload — CONFIRMED HARD, a NEAR-
+     MISS SOUNDNESS TRAP (map_insertion_order.almd, branch_lift_synth_0)**:
+     traced the FULL admission chain — `is_self_host_option_module_fn`
+     (mod_p4.rs) is missing `"map" => "find"` (a one-line whitelist gap), and
+     `control.rs`'s `is_self_host_option_call` handler already GENERICALLY
+     seeds `materialized_options` + `heap_elem_lists` for ANY `Option[heap]`
+     subject via `is_heap_elem_list_ty` — so the WIRING looks trivial. It is
+     NOT: `heap_elem_lists` routes to the FLAT (no-mask) `Op::DropListStr`,
+     which does a BLIND blind `rc_dec` of the payload slot (Option's `len@4`
+     doubles as its 0/1 tag, so the "loop" runs 0-or-1 times — the len-as-tag
+     trick, intentional). For a `(String,Int)` TUPLE payload, that blind
+     rc_dec only decrements the TUPLE's OWN refcount — if it hits 0 the
+     tuple's memory frees WITHOUT recursively freeing the tuple's OWN String
+     field = **a LEAK**, the exact class of bug the (Value,scalar)-tuple
+     precedent in binds_p4.rs (~L216-229) already had to special-case via
+     `variant_drop_handles = "value_tuple"` (swapping the flat mask for a
+     recursive `$__drop_value_tuple`). No `Op::DropOption<Tuple>` analogue
+     exists yet (only the LIST-of-tuples `DropListStrInt`/`DropListIntStr`
+     this session's B34 wired up). **Do NOT just add "find" to the
+     whitelist** — it would ship a real (if narrower-than-wrong-bytes) leak.
+     The correct fix needs a NEW `Op::DropOptionStrInt` (mirroring
+     `DropResultStrInt`'s shape but len-as-tag instead of cap-as-tag) wired
+     through the full authority chain (Op def in lib.rs, render_wasm_p2.rs
+     emission, mod_p3.rs cascade, certificate.rs, render_rust.rs,
+     translation_validation.rs) PLUS the admission site
+     (`is_self_host_option_call`'s handler, routing to
+     `variant_drop_handles` instead of `heap_elem_lists` for a tuple-with-
+     heap-field payload) — a real, careful, multi-file brick, not a
+     one-liner. Same likely applies to `pattern_test`'s branch_lift_synth_4
+     (Result[String,String] match — the STANDALONE match already works,
+     probe rss1 PARITY; the fixture-specific failure needs the DENSE branch_
+     lift context reproduced, not yet isolated) and `control_flow_test`'s
+     branch_lift_synth_3 — re-diagnose with this SAME lens (check for a
+     similar blind-flat-drop trap) before touching either.
+   - map_fold_heap_acc's residue (after B34) is the separate, previously-
+     diagnosed `map.fold_hacc` self-host gap (LOW yield, deferred).
+   **Lesson reinforced**: an admission-chain gap that LOOKS like "just add
+   the callee to a whitelist" must be checked against what DROP the
+   resulting tracked value gets routed to — a flat/masked drop is only sound
+   when the payload owns no further heap children one level down. This is
+   the THIRD time this exact class of trap has surfaced this session (the
+   `_str`-dispatch wrong-bytes bug, the Map/Set key `_x` wall fixes, and now
+   this near-miss) — always trace the drop, not just the tag-read, before
+   wiring a new admission.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
