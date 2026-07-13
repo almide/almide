@@ -1231,6 +1231,24 @@ E4. **process/zlib native-root reclassification (99 → 86)**: root-(b)'s
    env_extra, fs_preopen, process_args (v0 wasm "args" exists). Metric-only;
    corpus FORBIDDEN 0 / CORPUS WALL OK re-verified.
 
+D2a. **random.choice / random.shuffle self-host SHIPPED (86 → 79)**: the
+   D2 slice with a real WASI floor — random_choice.almd (empty → `none`,
+   else delegate to the generic `list.get` at a `__rc_rand` index) and
+   random_shuffle.almd (Fisher–Yates on a COW copy — `var ys = xs` +
+   `list.set`, source untouched; in-bounds `?? 0`/`?? ""` are dead
+   fallbacks), each with its own prim.random_get entropy helper so the
+   transitive cap_witness carries Entropy exactly like random.int. Wiring:
+   `is_admitted_effectful` (calls.rs), element-typed routing in
+   `list_heap_call_name` (scalar → flat impl, String → `_str`, else the
+   unlinked `random.<fn>_x` wall), registry entries ×4,
+   `is_self_host_option_module_fn` "random"/choice, IMPURE_PLAIN drift-gate
+   justifications ×2. Probe rn2 (all 7 walled shapes: choice
+   empty/single/from_list, shuffle empty/single/preserves-elements/-length)
+   v0-byte PARITY — the outputs are invariant-based so parity is exact
+   despite entropy. random_test's whole walled set opened. Ladder: mir 583 /
+   classify 79 zero newly-walled / spec 283 / purity drift gate OK / GATE OK
+   / FORBIDDEN 0 / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

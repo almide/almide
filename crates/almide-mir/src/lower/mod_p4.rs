@@ -196,6 +196,9 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         // engine's ordinary some()/none ctors (stdlib/regex_engine.almd) — a
         // `match` over the bound result EXECUTES.
         "regex" => matches!(func, "find" | "captures"),
+        // random.choice delegates to the generic list.get (a materialized Option) /
+        // returns a literal `none` — either way the bound result is a real len-tag block.
+        "random" => func == "choice",
         // result.to_option builds a materialized Option[Int] from a Result's len-tag (Ok → Some,
         // Err → None); option.map rebuilds a materialized Option (Some(f(x)) / None) — a `match`
         // over either result EXECUTES.
@@ -1015,6 +1018,21 @@ pub fn interp_str_desugarable(parts: &[IrStringPart], registry: &RecordLayouts) 
 /// the plain name. `module.func` is unchanged for everything else.
 pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], result_ty: &Ty) -> String {
     use almide_lang::types::constructor::TypeConstructorId;
+    // `random.choice` / `random.shuffle` key on the LIST ELEMENT: a scalar element uses the
+    // flat self-host (i64 slots, flat drops), a String element the rc-aware `_str` variant
+    // (random_choice.almd / random_shuffle.almd). Any other element class routes to the
+    // UNLINKED `random.<func>_x` → a clean render wall (never a wrong-typed link).
+    if module == "random" && matches!(func, "choice" | "shuffle") {
+        if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+            if a.len() == 1 && !is_heap_ty(&a[0]) {
+                return format!("random.{func}");
+            }
+            if a.len() == 1 && matches!(a[0], Ty::String) {
+                return format!("random.{func}_str");
+            }
+        }
+        return format!("random.{func}_x");
+    }
     // `fan.map` selects a monomorphic self-host by (input element A, output element B) — `fan.map<sfx>`
     // where A/B in {Int (""), String ("s")}. The input A is `arg_tys[0] = List[A]`; the output B is
     // `result_ty = Result[List[B], String]`. An unsupported pairing routes to the UNLINKED

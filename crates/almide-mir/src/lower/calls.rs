@@ -236,7 +236,12 @@ impl LowerCtx {
         // input stream is neither a write, a filesystem, an entropy, nor a clock effect). The
         // caller is an `effect fn` (declares the host caps) so the `used ⊆ declared` checker
         // verifies it; a pure caller is a frontend error.
+        // `random.choice` / `random.shuffle` self-host over the SAME prim.random_get floor
+        // (random_choice.almd / random_shuffle.almd — typed element variants selected in
+        // `list_heap_call_name`, unsupported elements route `_x` and wall at render), so the
+        // transitive cap_witness counts Entropy exactly like `random.int`.
         let is_admitted_effectful = (module == "random" && func == "int")
+            || (module == "random" && matches!(func, "choice" | "shuffle"))
             || (module == "env" && func == "args")
             || (module == "env" && func == "unix_timestamp")
             || (module == "fs" && func == "read_text")

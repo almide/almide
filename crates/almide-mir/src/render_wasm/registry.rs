@@ -6,6 +6,8 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
     &[
         (include_str!("../../../../stdlib/int_to_string.almd"), &[("int_to_string", "int.to_string")]),
         (include_str!("../../../../stdlib/random_int.almd"), &[("random_int", "random.int")]),
+        (include_str!("../../../../stdlib/random_choice.almd"), &[("random_choice", "random.choice"), ("random_choice_str", "random.choice_str")]),
+        (include_str!("../../../../stdlib/random_shuffle.almd"), &[("random_shuffle", "random.shuffle"), ("random_shuffle_str", "random.shuffle_str")]),
         (include_str!("../../../../stdlib/env_args.almd"), &[("env_args", "env.args")]),
         (include_str!("../../../../stdlib/env_unix_timestamp.almd"), &[("env_unix_timestamp", "env.unix_timestamp")]),
         (include_str!("../../../../stdlib/fs_read_text.almd"), &[("fs_read_text", "fs.read_text")]),
