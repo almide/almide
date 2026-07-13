@@ -599,7 +599,7 @@ impl LowerCtx {
     /// model-one-iteration argument), the markers only make wasm actually run it N times.
     /// Returns false (and rolls back) when out of subset; `lower_while` then falls back.
     pub(crate) fn try_lower_scalar_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> bool {
-        if !matches!(cond.ty, Ty::Int | Ty::Bool) || body_breaks_or_continues(body) {
+        if !matches!(cond.ty, Ty::Int | Ty::Bool) {
             return false;
         }
         let ops_mark = self.ops.len();
@@ -622,7 +622,7 @@ impl LowerCtx {
         self.scalar_loop_depth += 1;
         let mut ok = true;
         for stmt in body {
-            if self.lower_stmt(stmt).is_err() {
+            if self.lower_while_body_stmt(stmt).is_err() {
                 ok = false;
                 break;
             }
@@ -639,6 +639,102 @@ impl LowerCtx {
         self.drop_arm_locals(body_mark);
         self.ops.push(Op::LoopEnd);
         true
+    }
+
+    /// One while-body statement, admitting the CONDITIONAL-BREAK forms the real loop
+    /// can execute with the EXISTING marker vocabulary (no new op):
+    ///   `if c then <rest> else break`  (the guard-else-break desugar) →
+    ///       `LoopBreakUnless(c)` then <rest> emitted linearly — on the broken path the
+    ///       `br` already exited, exactly like the loop-head condition;
+    ///   `if c then break else ()`      (the do-block shape) →
+    ///       `LoopBreakUnless(1 - c)`.
+    /// Any OTHER Break/Continue in the statement ERRS (aborting the attempt → the
+    /// model-one-iteration fallback then WALLS): `lower_stmt` silently swallows a bare
+    /// Break (mod_p3), so delegating one would silently drop the early exit.
+    fn lower_while_body_stmt(&mut self, stmt: &IrStmt) -> Result<(), LowerError> {
+        fn is_break(e: &IrExpr) -> bool {
+            match &e.kind {
+                IrExprKind::Break => true,
+                IrExprKind::Block { stmts, expr } => {
+                    (stmts.is_empty() && expr.as_deref().is_some_and(is_break))
+                        || (expr.is_none()
+                            && stmts.len() == 1
+                            && matches!(&stmts[0].kind,
+                                IrStmtKind::Expr { expr } if is_break(expr)))
+                }
+                _ => false,
+            }
+        }
+        fn is_unit(e: &IrExpr) -> bool {
+            match &e.kind {
+                IrExprKind::Unit => true,
+                IrExprKind::Block { stmts, expr } => {
+                    stmts.is_empty() && expr.as_deref().map_or(true, is_unit)
+                }
+                _ => false,
+            }
+        }
+        if let IrStmtKind::Expr { expr } = &stmt.kind {
+            // A BARE break statement (`if true then break else ()` const-folds to it):
+            // break unconditionally — LoopBreakUnless over a 0 cond.
+            if matches!(expr.kind, IrExprKind::Break) {
+                let z = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: z, value: 0 });
+                self.ops.push(Op::LoopBreakUnless { cond: z });
+                return Ok(());
+            }
+            if let IrExprKind::If { cond, then, else_ } = &expr.kind {
+                if is_break(else_) {
+                    let c = self.lower_scalar_value(cond).ok_or_else(|| {
+                        LowerError::Unsupported("while conditional-break cond".into())
+                    })?;
+                    self.ops.push(Op::LoopBreakUnless { cond: c });
+                    return self.lower_while_body_inline(then);
+                }
+                if is_break(then) && is_unit(else_) {
+                    let c = self.lower_scalar_value(cond).ok_or_else(|| {
+                        LowerError::Unsupported("while conditional-break cond".into())
+                    })?;
+                    let one = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                    let nc = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: nc, op: IntOp::Sub, a: one, b: c });
+                    self.ops.push(Op::LoopBreakUnless { cond: nc });
+                    return Ok(());
+                }
+            }
+        }
+        if body_breaks_or_continues(std::slice::from_ref(stmt)) {
+            return Err(LowerError::Unsupported(
+                "unrecognized break/continue in a while body (lower_stmt would silently \
+                 swallow it) not in this brick"
+                    .into(),
+            ));
+        }
+        self.lower_stmt(stmt)
+    }
+
+    /// Inline the surviving arm of a while conditional-break (`if c then <rest> else
+    /// break`): a Block's statements re-enter [`Self::lower_while_body_stmt`] (a nested
+    /// conditional break chains), a unit tail is nothing, any other tail lowers as an
+    /// effect statement.
+    fn lower_while_body_inline(&mut self, e: &IrExpr) -> Result<(), LowerError> {
+        match &e.kind {
+            IrExprKind::Unit => Ok(()),
+            IrExprKind::Block { stmts, expr } => {
+                for s in stmts {
+                    self.lower_while_body_stmt(s)?;
+                }
+                match expr.as_deref() {
+                    Some(t) => self.lower_while_body_inline(t),
+                    None => Ok(()),
+                }
+            }
+            _ => self.lower_while_body_stmt(&IrStmt {
+                kind: IrStmtKind::Expr { expr: e.clone() },
+                span: e.span.clone(),
+            }),
+        }
     }
 
     /// Roll back a scalar-loop ATTEMPT (`try_lower_scalar_while` / `_for_range` / `_for_list`),

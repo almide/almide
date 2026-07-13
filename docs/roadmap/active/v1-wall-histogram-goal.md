@@ -1005,6 +1005,21 @@ B6. **Record-destructure match desugar SHIPPED (127 → 126)**: `match f {
    plain Bind/Wildcard fields; the dead `_` arm drops on both sides. Probe
    sk1 v0-identical. Opened the soft-keyword-field test.
 
+C1. **Conditional while breaks SHIPPED (126 → 122)**: `try_lower_scalar_while`
+   now executes break shapes with the EXISTING marker vocabulary (no new op):
+   `if c then <rest> else break` (the guard-else-break desugar) →
+   `LoopBreakUnless(c)` + <rest> emitted linearly (the br already exited on
+   the broken path, exactly like the loop-head cond); `if c then break else
+   ()` → `LoopBreakUnless(1 - c)`; a BARE `break` statement (a const-folded
+   `if true then break`) → `LoopBreakUnless(0)`. SAFETY: any UNRECOGNIZED
+   break/continue in a body statement now ERRS the attempt (lower_stmt
+   silently swallows a bare Break — the pre-gate that guarded that is
+   replaced by the per-stmt check), so the fallback walls honestly. Probes
+   wb1/wb2 v0-identical (guard-else-break ×2 shapes, const-folded break,
+   mid-body conditional break). Opened all 4 while-family walls. for-in
+   guard-break/continue remains (2 walls — the for machinery's sibling
+   extension).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
