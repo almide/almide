@@ -3299,6 +3299,63 @@ B109. **Closed `cross_module_toplet_byvalue_test`'s "heap module-level
    newly-walled (1 closed) / spec 283 / GATE OK / CORPUS WALL OK
    (FORBIDDEN=0). **Current 21**.
 
+DIAGNOSIS — `cross_module_variant_test.almd`'s TWO "heap bind from LitInt"
+   walls (#412 and #631, BOTH `varlib.Circle{radius:..}` record-variant
+   patterns) are a FRONTEND type-checker/lowering gap, NOT a MIR brick
+   gap — genuinely out of scope for almide-mir alone, needs an
+   almide-frontend investigation. Traced via temporary debug instrumentation
+   at the exact wall site (`binds_p2.rs`'s final `lower_bind` catch-all,
+   added then fully reverted — `git checkout --`, confirmed zero diff):
+   the bind that walls is `var=VarId(N) ty=Unknown value.kind=LitInt{value:
+   0}` — a `Ty::Unknown`-typed expression whose VALUE is a bare `LitInt(0)`
+   placeholder. This EXACTLY matches almide-frontend's own documented
+   error-recovery convention (`crates/almide-frontend/CLAUDE.md`: "Error
+   recovery with `Unknown`. When inference fails, the checker emits a
+   diagnostic and assigns `Ty::Unknown`... can leak into IR"). Confirmed
+   BOTH failing tests share this signature (isolated each to its own
+   single-test file + minimal `varlib`, debug-traced individually) —
+   `#412`'s direct `varlib.Circle{radius:7}` literal AND `#631`'s
+   `varlib.make_circle(5)` (calling a producer fn inside `varlib` that
+   constructs the SAME variant) both hit it; the file's OTHER two variant
+   tests in the SAME file (no-payload `varlib.Never`, tuple-payload
+   `varlib.Wrap(x)`) do NOT — so this is SPECIFIC to the RECORD-style
+   variant pattern (`Circle{radius}`, a named-field payload), not variant
+   patterns generally. **Critically, this is NOT reproducible outside a
+   `test{}` block**: a hand-written non-test `effect fn`/`fn` with the
+   IDENTICAL logic (`let c = varlib.Circle{radius:7}; let r = match c
+   {varlib.Circle{radius}=>radius, varlib.Dot=>0}; println(...)`) renders
+   correctly and byte-matches v0 — confirmed with SEVERAL variations (bare
+   `main`, a non-main-named effect fn, a `Result[Unit,String]`-declared
+   fn) before finding the test-block-specific trigger, so this is not a
+   `fn_name=="main"`/`unit_main` special-casing artifact either. **AND —
+   the checker reports ZERO errors**: `almide check` on the exact isolated
+   source says "No errors found", and `almide test`/`almide run` on the
+   real corpus file execute this test CORRECTLY via v0 (283/283 spec
+   files pass, confirmed on every ladder run this session) — so whatever
+   leaves this ONE expression `Ty::Unknown` in `classify_corpus`'s own
+   `checker.infer_program` → `lower_program` pipeline does NOT surface as
+   a user-visible diagnostic anywhere in the NORMAL compiler entry points.
+   This strongly suggests either (a) a checker inference-pass omission
+   specific to record-variant PATTERN matching when the pattern's subject
+   originates inside test-block scope (a scoping/environment difference
+   between test-block bodies and regular function bodies during
+   inference), or (b) a `lower_program` (AST→IR) TypeMap lookup gap for
+   this specific expr shape that happens to only manifest when reached via
+   a test-block's AST structure. **NOT INVESTIGATED FURTHER** — this
+   requires almide-frontend expertise (`check/infer.rs`'s pattern/scope
+   handling, or `lower/` 's TypeMap consumption), a different crate/skill
+   set than this session's almide-mir focus; the MIR-level wall itself is
+   CORRECT and SAFE (an honest refusal on an `Unknown`-typed heap bind,
+   never wrong bytes — exactly the "walled, not wrong" contract working as
+   designed even though the root cause sits upstream). `crossmod_variant_
+   payload_test.almd`'s THIRD "cross-module variant" wall (#484, `Wrapped(
+   [varlib.Never, varlib.Always])` — a `List[<cross-module variant>]`
+   ctor argument) is UNRELATED — a genuine, separately-documented MIR gap
+   ("heap/recursive field — ADT brick 5"), not the same Unknown-type
+   signature; not re-diagnosed this pass. **Current 21, unchanged**
+   (no code touched — pure investigation, confirmed via `git status`
+   clean throughout).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
