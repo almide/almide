@@ -1030,6 +1030,33 @@ impl LowerCtx {
             });
             return Some(dst);
         }
+        // A (String, Int) TUPLE eq (`("a", 1) == ("b", 1)` — deep_eq_heap): composed in
+        // MIR directly — string.eq over the slot-0 handles AND an i64 compare of slot 1.
+        // No self-host needed; the operands materialize like any eq operand (borrowed).
+        if let Ty::Tuple(ts) = ty {
+            if ts.len() == 2 && matches!(ts[0], Ty::String) && !is_heap_ty(&ts[1]) {
+                let lb = self.materialize_eq_operand(left, ty)?;
+                let rb = self.materialize_eq_operand(right, ty)?;
+                let lh = self.handle_of(lb);
+                let rh = self.handle_of(rb);
+                let l0 = self.load_at_offset(lh, 12, crate::PrimKind::LoadHandle);
+                let r0 = self.load_at_offset(rh, 12, crate::PrimKind::LoadHandle);
+                let s_eq = self.fresh_value();
+                self.ops.push(Op::CallFn {
+                    dst: Some(s_eq),
+                    name: "string.eq".to_string(),
+                    args: vec![CallArg::Handle(l0), CallArg::Handle(r0)],
+                    result: Some(repr_of(&Ty::Bool).ok()?),
+                });
+                let l1 = self.load_at_offset(lh, 20, crate::PrimKind::Load { width: 8 });
+                let r1 = self.load_at_offset(rh, 20, crate::PrimKind::Load { width: 8 });
+                let i_eq = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: i_eq, op: IntOp::Eq, a: l1, b: r1 });
+                let both = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: both, op: IntOp::And, a: s_eq, b: i_eq });
+                return Some(both);
+            }
+        }
         // Option[T] — the scalar masked compare or the heap conditional compare, over the two
         // materialized DynListStr / OptSome blocks (read via their handles).
         if let Ty::Applied(TC::Option, oa) = ty {

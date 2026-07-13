@@ -1608,6 +1608,14 @@ NEXT PIECES DIAGNOSED (at 45):
    the eq family. Self-host規約 (B27): prim calls hoist to lets; helpers
    return Int (never Unit) for `let _c =` binds.
 
+B28. **(String, Int) tuple eq (45 held, an enabler)**: the first of the two
+   diagnosed deep_eq classes — composed directly in MIR (string.eq over the
+   slot-0 handles AND an i64 compare of slot 1; borrowed materialized
+   operands, no self-host). Probe te1 both branches v0-byte PARITY.
+   deep_eq_heap main still needs the small-variant eq (Tagged(String) —
+   the tag-guarded field compare, an IfThen/Else merge) — next.
+   Ladder: mir 583 / classify 45 / spec 283 / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
