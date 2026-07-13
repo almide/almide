@@ -2227,6 +2227,42 @@ B41. **`map.find` self-hosted end-to-end — the confirmed near-miss soundness
    same file — out of scope here). Ladder: mir 583 / classify 33 zero
    newly-walled / spec 283 / GATE OK / CORPUS WALL OK.
 
+B42. **Tail-position variant constructor calls opened — a general gap, not
+   just `list.map(Wrap)` (33 held, an enabler)**: investigating
+   `variant_ctor_fn_test`'s `list.map(Wrap)` (a bare constructor passed as a
+   first-class function value) with debug instrumentation showed the
+   FRONTEND already desugars `Wrap` into a synthetic `(x) => Wrap(x)`
+   lambda — so `lift_lambda` (already proven for real lambdas) should have
+   handled it. It didn't, because the REAL bug was one layer deeper and far
+   more general: `tail.rs`'s `IrExprKind::Call{target: Named{name}}` arm
+   (any function-call result returned directly) unconditionally emits a
+   plain `Op::CallFn` — with NO check for whether `name` is a registered
+   variant CONSTRUCTOR (which has no real top-level wasm function —
+   `try_lower_variant_ctor` inlines its block construction at every call
+   site — so the plain `CallFn` route always produces an unlinked call).
+   Confirmed independently of closures: `fn make(x: Int) -> Boxed = Wrap(x)`
+   (an ordinary top-level function, zero relation to HOFs or lambdas) ALSO
+   walled. Fixed with a new guarded arm before the generic one, dispatching
+   to `try_lower_variant_ctor` — which turned out to already have the
+   right ownership shape for tail position (it does NOT itself push its
+   result into `live_heap_handles`, leaving that to the caller — so
+   returning it directly IS the "move out, don't scope-end-drop" tail
+   needs, no extra bookkeeping required). Verified narrow (tc1: a direct
+   `Wrap(x)` tail return) AND the original target (wr1: `list.map(Wrap)`,
+   PARITY `3`) AND a HEAP-FIELD ctor case (`Wrap(List[String])`) via a
+   dedicated 10,000× leak-loop — instant completion, matching output
+   (20000), no OOM/hang. **Does not fully open**
+   `variant_ctor_fn_test.almd`'s "constructor in list.map" test — a
+   SEPARATE, THIRD layer remains: `match list.get(xs,1) ?? Empty {...}`
+   (a custom-variant `??` fallback in a match-subject position) hits its
+   own distinct wall ("non-lowerable `??` with a heap result in a call-
+   argument position", calls_p2.rs) — undiagnosed, out of scope here. Zero
+   classify movement (this specific corpus entry needs all three layers;
+   the fix is still a genuine, leak-loop-verified closure of a real,
+   previously-undiscovered gap — `fn wrapper(x) = Ctor(x)`-shaped
+   functions were silently unlinkable before this). Ladder: mir 583 /
+   classify 33 zero newly-walled / spec 283 / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

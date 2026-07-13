@@ -664,6 +664,30 @@ impl LowerCtx {
                     self.record_elided_calls(tail);
                     Ok(Some(dst))
                 }
+                // A VARIANT CONSTRUCTOR call returned DIRECTLY (`fn make(x) -> Boxed =
+                // Wrap(x)` — a bare ctor with no enclosing `let`/match; also reached via
+                // `lift_lambda`'s body-lowering for a synthesized `(x) => Wrap(x)` wrapper,
+                // the `list.map(Wrap)` desugar's exact shape). A constructor is NOT a real
+                // top-level wasm function — it has no `Op::FuncRef` target, `try_lower_
+                // variant_ctor` inlines its block construction at each call site — so the
+                // GENERIC Named-call arm below (a plain `Op::CallFn` by name) would reference
+                // a symbol that is NEVER linked (an "unlinked call" render wall). Checked
+                // BEFORE the generic arm. `try_lower_variant_ctor` does not itself track its
+                // result in `live_heap_handles` (the caller decides) — returning it directly
+                // IS the move-out tail position needs, no extra bookkeeping.
+                IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                {
+                    match self.try_lower_variant_ctor(tail) {
+                        Some(dst) => Ok(Some(dst)),
+                        None => Err(LowerError::Unsupported(
+                            "variant constructor returned directly cannot be faithfully \
+                             materialized in this brick (a heap/recursive field outside the \
+                             executable subset)"
+                                .into(),
+                        )),
+                    }
+                }
                 // A function-call result returned directly (`fn f() = g(xs)`): the
                 // callee's heap result is a FRESH OWNED value (its return-mode
                 // signature), moved out — NOT added to live_heap_handles. Cert:
