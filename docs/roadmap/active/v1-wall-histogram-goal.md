@@ -1038,6 +1038,14 @@ C2. **For-loop conditional breaks SHIPPED (122 → 121)**: both scalar for
    to accept it — the br must not skip the per-iteration acc-reassign frees
    (design the early-exit × Option-C slot interplay before coding).
 
+A5. **from_codepoint global const-fold SHIPPED (121 → 119 — the <120 WAYPOINT
+   falls)**: `const_global_init` folds `string.from_codepoint(<int literal>)`
+   (`let NL = string.from_codepoint(10)` — the stringify-escape test globals)
+   to its one-char `Init::Str` at lowering time — zero calls injected (the
+   count gate stays exact); an invalid codepoint keeps walling. Probe nl1
+   v0-identical. Opened both json_stringify_escape tests (their concat-in-arg
+   wall chained from the computed NL/TAB globals).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

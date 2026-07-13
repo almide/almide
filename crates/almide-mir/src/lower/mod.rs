@@ -78,6 +78,21 @@ fn const_global_init(init: &IrExpr) -> Option<crate::Init> {
                 .collect();
             ints.map(crate::Init::IntList)
         }
+        // `string.from_codepoint(<int literal>)` (`let NL = string.from_codepoint(10)` —
+        // the stringify-escape test globals) CONST-FOLDS to its one-char string at
+        // lowering time: zero calls injected, so the count gate stays exact. An invalid
+        // codepoint keeps walling (never a wrong byte).
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            if module.as_str() == "string"
+                && func.as_str() == "from_codepoint"
+                && args.len() == 1 =>
+        {
+            let IrExprKind::LitInt { value } = &args[0].kind else { return None };
+            u32::try_from(*value)
+                .ok()
+                .and_then(char::from_u32)
+                .map(|c| crate::Init::Str(c.to_string()))
+        }
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
             if module.as_str() == "bytes" && func.as_str() == "from_list" && args.len() == 1 =>
         {
