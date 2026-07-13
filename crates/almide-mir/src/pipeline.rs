@@ -227,6 +227,14 @@ pub fn try_render_wasm_source(
     } else {
         ""
     };
+    // `__drop_list_str` (a `List[String]` record OR variant ctor field) — SHARED between the
+    // record and variant drop generators, so it is emitted ONCE here rather than by either
+    // generator inline (two independent copies would be a duplicate-fn compile error).
+    let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&all_type_decls) {
+        crate::lower::LIST_STR_DROP_SRC
+    } else {
+        ""
+    };
     // `Result[List[Int], List[String]]` (result.collect) routes its drop to the
     // TAG-AWARE `$__drop_res_ilsl` (Err → recursive string free; Ok → flat).
     let res_ilsl_drop = if crate::lower::program_uses_res_intlist_strlist(&ir) {
@@ -235,13 +243,14 @@ pub fn try_render_wasm_source(
         ""
     };
     let drops = format!(
-        "{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}",
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
         crate::lower::generate_variant_repr_sources(&all_type_decls, &crate::lower::collect_interp_anon_records(&ir)),
         closure_drop,
         res_ilsl_drop,
         lenlist_drop,
+        list_str_drop,
     );
     // The generated drops free a `Value` field via value_core's INTERNAL `__drop_value` — bring
     // value_core's source into scope for the re-lower's type check; the auto-link dedups it.

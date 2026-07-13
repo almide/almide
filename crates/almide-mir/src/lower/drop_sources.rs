@@ -86,6 +86,19 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                         "        prim.rc_dec(prim.load64(h + {off}))
 "
                     ));
+                } else if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                    if a.len() == 1 && matches!(a[0], Ty::String))
+                {
+                    // A `List[String]` ctor field (`Node(String, List[String])`): each element is
+                    // an OWNED String handle — the generic `__drop_list_str` (shared with the
+                    // record-drop generator via `LIST_STR_DROP_SRC`, gated once at the pipeline
+                    // top level so both generators' identical references never double-define it)
+                    // frees every element then the list block. A flat `rc_dec` of just the list
+                    // block would leak each String.
+                    frees.push_str(&format!(
+                        "        let f{idx}: List[String] = prim.load_handle(h + {off})\n        __drop_list_str(f{idx})\n"
+                    ));
+                    idx += 1;
                 } else if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
                     if a.len() == 1 && !is_heap_ty(&a[0]))
                 {
@@ -611,6 +624,53 @@ pub fn collect_recursive_anon_records(
 /// ELEMENT's last ref, then the element block, then the list. The rc==1 masks mirror
 /// `$__drop_closure`. Like every generated `$__drop_*`, a trusted prim-only routine
 /// (outside the witness surface), pinned by the list leak-loop coverage.
+/// The ALMIDE SOURCE of `__drop_list_str` — the generic per-element release of a
+/// `List[String]` (each slot an OWNED String handle: `rc_dec` every element, then the
+/// list block). SHARED by both `generate_record_drop_sources` (a record field) and
+/// `generate_variant_drop_sources` (a variant ctor field) — emitted ONCE here, gated by
+/// [`program_uses_list_str_drop_field`], so two generators referencing the same helper
+/// name never double-define it (a duplicate-fn compile error) when a single program has
+/// both a record AND a variant with a `List[String]` field.
+pub const LIST_STR_DROP_SRC: &str = "\
+fn __drop_list_str(xs: List[String]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_str_loop(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+fn __drop_list_str_loop(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else { prim.rc_dec(prim.load64(h + 12 + i * 8))
+         __drop_list_str_loop(h, n, i + 1) }
+";
+
+/// Does the program's type decls carry a record OR variant field that routes to the
+/// shared `__drop_list_str` — a `List[String]` field, or a `List[<flat variant>]` field
+/// (record side only; the variant generator does not admit that shape yet)? Gates
+/// [`LIST_STR_DROP_SRC`]'s single emission in the pipeline (a program never touching
+/// this shape pays no dead drop routine).
+pub fn program_uses_list_str_drop_field(type_decls: &[almide_ir::IrTypeDecl]) -> bool {
+    use almide_ir::{IrTypeDeclKind, IrVariantKind};
+    use almide_lang::types::constructor::TypeConstructorId;
+    let flat_names = flat_variant_type_names(type_decls);
+    let is_list_str_field = |t: &Ty| {
+        matches!(t, Ty::Applied(TypeConstructorId::List, a)
+            if a.len() == 1
+                && (matches!(a[0], Ty::String) || is_flat_variant_elem(&a[0], &flat_names)))
+    };
+    type_decls.iter().any(|d| match &d.kind {
+        IrTypeDeclKind::Record { fields } => fields.iter().any(|f| is_list_str_field(&f.ty)),
+        IrTypeDeclKind::Variant { cases, .. } => cases.iter().any(|c| {
+            let tys: Vec<&Ty> = match &c.kind {
+                IrVariantKind::Unit => vec![],
+                IrVariantKind::Tuple { fields } => fields.iter().collect(),
+                IrVariantKind::Record { fields } => fields.iter().map(|f| &f.ty).collect(),
+            };
+            tys.iter().any(|t| is_list_str_field(t))
+        }),
+        _ => false,
+    })
+}
+
 pub const LENLIST_DROP_SRC: &str = "\
 fn __drop_list_lenlist(xs: List[Int]) -> Unit = {
   let h = prim.handle(xs)
@@ -982,16 +1042,13 @@ pub fn generate_record_drop_sources(
                else { let e: Matrix = prim.load_handle(h + 12 + i * 8)\n         __drop_matrix(e)\n         __drop_list_matrix_loop(h, n, i + 1) }\n",
         );
     }
-    if need_list_str {
-        out.push_str(
-            "fn __drop_list_str(xs: List[String]) -> Unit = {\n  \
-               let h = prim.handle(xs)\n  \
-               if prim.load32(h + 0) == 1 then __drop_list_str_loop(h, prim.load32(h + 4), 0) else ()\n  \
-               prim.rc_dec(h)\n}\n\
-             fn __drop_list_str_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
-               if i >= n then ()\n  \
-               else { prim.rc_dec(prim.load64(h + 12 + i * 8))\n         __drop_list_str_loop(h, n, i + 1) }\n",
-        );
-    }
+    // `__drop_list_str` itself is no longer emitted HERE — it is now a SHARED source
+    // block (`LIST_STR_DROP_SRC`) the pipeline injects once, gated by
+    // `program_uses_list_str_drop_field` — the generated variant-drop generator ALSO
+    // references this same fn name for its own `List[String]` ctor fields, and two
+    // independent inline copies would be a duplicate-fn compile error. `need_list_str`
+    // is still computed above (by `record_drop_field_frees`) purely to preserve that
+    // function's shared signature with the anon-record caller; its value is unused here.
+    let _ = need_list_str;
     out
 }

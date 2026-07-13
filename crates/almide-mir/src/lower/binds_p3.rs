@@ -215,19 +215,20 @@ impl LowerCtx {
     /// aggregate so a later field read / `==` may load its real slots. Mirrors
     /// [`Self::try_lower_scalar_record_construct`] with a leading tag slot.
     /// Is `ty` a `List` ctor field the GENERATED variant drop can free — a `List[scalar]`
-    /// (the drop body's flat `rc_dec` is a full free: scalar elements own nothing) or a
+    /// (the drop body's flat `rc_dec` is a full free: scalar elements own nothing), a
+    /// `List[String]` (freed per-element via the generic `__drop_list_str`), or a
     /// `List[<rich variant>]` (freed per-element via the generated mutually-recursive
     /// `$__drop_list_<E>`)? The construction-side mirror of the field loop in
     /// [`crate::lower::generate_variant_drop_sources`] — a shape outside this set
-    /// (`List[String]`, `List[<flat variant>]`, `Map`) gets NO free statement there, so
-    /// admitting it here would build a value whose drop leaks.
+    /// (`List[<flat variant>]`, `Map`) gets NO free statement there, so admitting it here
+    /// would build a value whose drop leaks.
     fn ctor_list_field_drop_freeable(&self, ty: &Ty) -> bool {
         use almide_lang::types::constructor::TypeConstructorId;
         let Ty::Applied(TypeConstructorId::List, a) = ty else { return false };
         if a.len() != 1 {
             return false;
         }
-        if !is_heap_ty(&a[0]) {
+        if !is_heap_ty(&a[0]) || matches!(a[0], Ty::String) {
             return true;
         }
         self.variant_layouts

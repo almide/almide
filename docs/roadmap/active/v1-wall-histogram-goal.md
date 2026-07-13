@@ -1749,6 +1749,41 @@ E6. **testing.assert_throws reclassified native-root (43 → 41)**: `catch_unwin
    native-root. Ladder: mir 583 / classify 41 zero newly-walled / spec 283 /
    GATE OK / CORPUS WALL OK.
 
+B33. **Variant ctor `List[String]` field opened — ADT brick 5 extension (41 → 40)**:
+   `Node("root", ["a","b","c"])` (a variant ctor with a String field AND a
+   `List[String]` field) walled because the drop generator's field loop
+   (`generate_variant_drop_sources`) had no case for a `List[String]` ctor
+   field — the record generator already supports this shape (freed via the
+   generic `__drop_list_str`), the VARIANT generator just never grew the
+   mirror. Fixed by widening the SAME 3 drop-authority sites this class
+   always needs together: `variant_needs_recursive_drop` (mod.rs) and
+   `VariantLayouts::needs_recursive_drop` (mod_p2.rs)'s `supported_heap`
+   predicates now admit `List[String]`; `generate_variant_drop_sources`'s
+   field loop emits `__drop_list_str(f{idx})` for it;
+   `ctor_list_field_drop_freeable` (binds_p3.rs, the construction-side
+   admission) now returns `true` for `List[String]` too. **Sharing gotcha**:
+   `__drop_list_str` was previously emitted INLINE by
+   `generate_record_drop_sources` only (gated by its own local
+   `need_list_str`) — naively adding the same inline emission to the variant
+   generator would double-define the fn (a compile error) the moment a SINGLE
+   program has both a record and a variant needing it. Extracted the helper
+   to a shared `LIST_STR_DROP_SRC` const + `program_uses_list_str_drop_field`
+   scan (drop_sources.rs), emitted ONCE in `pipeline.rs`'s two-pass drop
+   injection (the `LENLIST_DROP_SRC`/`RES_ILSL_DROP_SRC` precedent) — both
+   generators now only REFERENCE the name, never define it. **Second
+   fallout**: `render_wasm/tests_part1.rs`'s `lower_source` test helper hand-
+   duplicates this same two-pass injection (a SEPARATE copy from
+   pipeline.rs's `source_to_ir_with`, predating this session) — missed the
+   shared-const wiring on the first pass, breaking 3 unit tests with
+   "unlinked call: __drop_list_str"; fixed by mirroring the same
+   `list_str_drop` gate there too. **Lesson: a two-pass drop-injection
+   pattern that exists in more than one place (production pipeline.rs + this
+   test helper) must be patched in ALL copies — the exact `desugar-before-
+   both` lesson from earlier this session, generalized beyond desugar
+   passes.** nd1 probe (Leaf/Node variant, String + List[String] fields)
+   v0-byte PARITY. Ladder: mir 583 / classify 40 zero newly-walled / spec 283
+   / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

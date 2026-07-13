@@ -333,13 +333,23 @@
         } else {
             ""
         };
+        // `__drop_list_str` (a `List[String]` record OR variant ctor field) — SHARED between
+        // the record and variant drop generators (see pipeline.rs's `source_to_ir_with`, the
+        // same two-pass this helper mirrors), emitted ONCE here rather than by either
+        // generator inline.
+        let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&ir.type_decls) {
+            crate::lower::LIST_STR_DROP_SRC
+        } else {
+            ""
+        };
         let drops = format!(
-            "{}{}{}{}{}",
+            "{}{}{}{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),
             crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
             crate::lower::generate_variant_repr_sources(&ir.type_decls, &crate::lower::collect_interp_anon_records(&ir)),
             closure_drop,
             lenlist_drop,
+            list_str_drop,
         );
         let ir = if drops.trim().is_empty() { ir } else { to_ir(&format!("{src}\n{drops}")) };
         let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =

@@ -1002,14 +1002,18 @@ impl VariantLayouts {
         let Some(layout) = self.by_type.get(type_name) else { return false };
         // Mirrors the generator's `variant_needs_recursive_drop`: a nested-variant field (the
         // original rule) OR heap fields the generated drop can ALL free (String / List[scalar] /
-        // List[variant] / a RECORD — via `$__drop_<R>` or a scalar-only record's flat rc_dec). The
-        // `is_record` predicate is supplied by the caller (LowerCtx checks its record registry).
+        // List[variant] / List[String] (per-element via `__drop_list_str`) / a RECORD — via
+        // `$__drop_<R>` or a scalar-only record's flat rc_dec). The `is_record` predicate is
+        // supplied by the caller (LowerCtx checks its record registry).
         let supported_heap = |t: &Ty| -> bool {
             self.field_is_variant(t)
                 || matches!(t, Ty::Named(n, _) if is_record(n.as_str()))
                 || matches!(t, Ty::String)
                 || matches!(t, Ty::Applied(TypeConstructorId::List, a)
-                    if a.len() == 1 && (!is_heap_ty(&a[0]) || self.field_is_variant(&a[0])))
+                    if a.len() == 1
+                        && (!is_heap_ty(&a[0])
+                            || matches!(a[0], Ty::String)
+                            || self.field_is_variant(&a[0])))
                 || matches!(t, Ty::Applied(TypeConstructorId::Option, a)
                     if a.len() == 1 && !is_heap_ty(&a[0]))
         };
