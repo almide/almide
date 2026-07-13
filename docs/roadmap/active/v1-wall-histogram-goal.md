@@ -2112,6 +2112,44 @@ B39. **Flat record/variant Map keys opened — tuple-pair classifier
    regression). Ladder: mir 583 / classify 35 zero newly-walled / spec
    283 / GATE OK / CORPUS WALL OK.
 
+DIAGNOSIS (at 35): **B39's flat-heap generalization incidentally opened the
+   LITERAL half of two more fixtures, pinning down the SAME single missing
+   piece as the highest-leverage remaining target**:
+   - `compound_eq.almd`'s `Map[(Int,Int), String]` literal now MATERIALIZES
+     (verified via probe ce_tk1 — `aggregate_field_tys` already handles
+     `Ty::Tuple`, so an all-scalar tuple key was already covered by
+     `is_flat_heap_tuple_slot` without extra work). But `map.from_list`/
+     `map.get`/`map.insert`/`map.len` over it hit B37's OWN
+     `_key_wall`/`_hval_wall` safety wall (correctly — no working map
+     family exists for a non-String key yet, so this is an honest wall,
+     not a regression).
+   - `generic_chain_unwrap_or.almd`'s `[("x", ValInt(64)), …]` — a
+     `(String, <RECURSIVE-drop variant>)` tuple (`ValStr(String)` is
+     another ctor of the SAME variant type, so it is NOT flat) — is a
+     DIFFERENT shape than B39 covers (B39 only handles FLAT
+     records/variants, one-level-exact). This needs the
+     `(Value, scalar)`-tuple PRECEDENT (binds_p4.rs ~L216-232: swap
+     `record_masks` for `variant_drop_handles`, routing to a type-specific
+     recursive drop instead of a blind flat `rc_dec`) generalized to ANY
+     recursive-drop variant, which needs a NEW generated helper
+     `$__drop_list_str_<V>` PARAMETRIZED by the variant name (unlike
+     B33's `LIST_STR_DROP_SRC`, a single static const — this would need a
+     generator function emitting one helper per DISTINCT (String, V)
+     shape actually used, mirroring `generate_variant_drop_sources`'s
+     per-type loop). Also has a SEPARATE, unrelated `get_alignment`
+     "scalar tail outside the value subset" wall.
+   **The single highest-leverage next piece is a working `Map[<heap-key>,
+   V>]` family** (from_list/get/insert/len/contains at minimum) for
+   record/variant/tuple keys — needs type-directed KEY EQUALITY (the `==`
+   composition B28/B29 already built for tuples/small-variants this
+   session is the right building block) plus a hash/scan self-host
+   (mirroring `map_skv.almd`'s shape but keyed on structural eq instead of
+   `__str_eq`). This would open `compound_eq` fully and is a substantial,
+   multi-file brick — properly scoped for a dedicated session, not a
+   drive-by extension (unlike B38/B39, which turned out tractable on
+   inspection, this one requires genuinely new self-host machinery, not
+   just wiring existing pieces).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
