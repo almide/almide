@@ -1030,6 +1030,93 @@ impl LowerCtx {
             });
             return Some(dst);
         }
+        // A SMALL-VARIANT eq (`Tagged("x") == Tagged("y")` — deep_eq_heap's Box =
+        // Tagged(String) | Empty): every ctor carries ≤1 field, each scalar or String.
+        // Composed as tag-eq AND a tag-dispatched field-compare chain (String fields via
+        // a borrowed string.eq, scalar fields an i64 compare, fieldless ctors true).
+        // All values are scalar Bools — the IfThen/Else/EndIf merges carry no ownership.
+        if let Some(tyname) = self.custom_variant_type_name(ty) {
+            let layout = self.variant_layouts.by_type.get(&tyname).cloned();
+            if let Some(layout) = layout {
+                let small = layout.cases.iter().all(|c| {
+                    c.fields.len() <= 1
+                        && c.fields
+                            .iter()
+                            .all(|(_, t)| !is_heap_ty(t) || matches!(t, Ty::String))
+                });
+                if small {
+                    let lb = self.materialize_eq_operand(left, ty)?;
+                    let rb = self.materialize_eq_operand(right, ty)?;
+                    let lh = self.handle_of(lb);
+                    let rh = self.handle_of(rb);
+                    let toff = crate::lower::layout::slot_offset(0) as i64;
+                    let foff = crate::lower::layout::slot_offset(1) as i64;
+                    let tl = self.load_at_offset(lh, toff, crate::PrimKind::Load { width: 8 });
+                    let tr = self.load_at_offset(rh, toff, crate::PrimKind::Load { width: 8 });
+                    let t_eq = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: t_eq, op: IntOp::Eq, a: tl, b: tr });
+                    // Field chain under EQUAL tags: nested merges over the field-carrying
+                    // ctors; the fieldless remainder compares true.
+                    let fielded: Vec<(i64, Ty)> = layout
+                        .cases
+                        .iter()
+                        .filter(|c| c.fields.len() == 1)
+                        .map(|c| (c.tag as i64, c.fields[0].1.clone()))
+                        .collect();
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::IfThen { cond: t_eq, dst: Some(dst) });
+                    // then-branch: the chain value.
+                    let mut ends: Vec<(usize, ValueId)> = Vec::new();
+                    let mut chain_val: Option<ValueId> = None;
+                    for (i, (tag, fty)) in fielded.iter().enumerate() {
+                        let tagv = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: tagv, value: *tag });
+                        let is_c = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst: is_c, op: IntOp::Eq, a: tl, b: tagv });
+                        let d2 = self.fresh_value();
+                        self.ops.push(Op::IfThen { cond: is_c, dst: Some(d2) });
+                        let cmp = if matches!(fty, Ty::String) {
+                            let l1 = self.load_at_offset(lh, foff, crate::PrimKind::LoadHandle);
+                            let r1 = self.load_at_offset(rh, foff, crate::PrimKind::LoadHandle);
+                            let s_eq = self.fresh_value();
+                            self.ops.push(Op::CallFn {
+                                dst: Some(s_eq),
+                                name: "string.eq".to_string(),
+                                args: vec![CallArg::Handle(l1), CallArg::Handle(r1)],
+                                result: Some(repr_of(&Ty::Bool).ok()?),
+                            });
+                            s_eq
+                        } else {
+                            let l1 =
+                                self.load_at_offset(lh, foff, crate::PrimKind::Load { width: 8 });
+                            let r1 =
+                                self.load_at_offset(rh, foff, crate::PrimKind::Load { width: 8 });
+                            let f_eq = self.fresh_value();
+                            self.ops.push(Op::IntBinOp { dst: f_eq, op: IntOp::Eq, a: l1, b: r1 });
+                            f_eq
+                        };
+                        self.ops.push(Op::Else { val: Some(cmp) });
+                        ends.push((i, d2));
+                        chain_val = Some(d2);
+                    }
+                    // innermost else: no field-ctor matched (a fieldless ctor) — equal.
+                    let one = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                    let mut inner: ValueId = one;
+                    // close the nested merges inside-out.
+                    for (_i, d2) in ends.iter().rev() {
+                        self.ops.push(Op::EndIf { val: Some(inner) });
+                        inner = *d2;
+                    }
+                    let then_v = chain_val.unwrap_or(one);
+                    let zero = self.fresh_value();
+                    self.ops.push(Op::Else { val: Some(then_v) });
+                    self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+                    self.ops.push(Op::EndIf { val: Some(zero) });
+                    return Some(dst);
+                }
+            }
+        }
         // A (String, Int) TUPLE eq (`("a", 1) == ("b", 1)` — deep_eq_heap): composed in
         // MIR directly — string.eq over the slot-0 handles AND an i64 compare of slot 1.
         // No self-host needed; the operands materialize like any eq operand (borrowed).

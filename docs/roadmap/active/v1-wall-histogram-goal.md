@@ -1616,6 +1616,19 @@ B28. **(String, Int) tuple eq (45 held, an enabler)**: the first of the two
    the tag-guarded field compare, an IfThen/Else merge) — next.
    Ladder: mir 583 / classify 45 / spec 283 / CORPUS WALL OK.
 
+B29. **Small-variant eq + (String, scalar) tuple literals SHIPPED
+   (45 → 44)**: the second diagnosed deep_eq class — a custom variant whose
+   every ctor carries ≤1 field (scalar or String) composes eq directly in
+   MIR: tag-eq AND a tag-dispatched field-compare chain (String fields via
+   a borrowed string.eq, scalar an i64 compare, fieldless ctors true; all
+   values scalar Bools so the nested IfThen/Else/EndIf merges carry no
+   ownership). Plus the (String, <scalar>) TUPLE LITERAL arm in
+   lower_owned_heap_field (te1 used vars; the fixture uses literals).
+   Probes ve1 (4 variant branches incl. cross-ctor and fieldless) and the
+   whole deep_eq_heap fixture END-TO-END v0-byte PARITY (List[String]
+   literal eq confirmed already lowering via le1). Ladder: mir 583 /
+   classify 44 zero newly-walled / spec 283 / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

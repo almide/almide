@@ -184,6 +184,21 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
+            // A `(String, <scalar>)` TUPLE literal (`("a", 1)` — the deep_eq tuple-eq
+            // operand / the gguf (key, pos) accumulator element): String slot 0 (heap
+            // @12), scalar slot 1 (@20). try_lower_tuple_construct builds it; the
+            // enclosing consumer (an eq operand's cond frame, a list's DropListStrInt)
+            // frees the String slot exactly once.
+            IrExprKind::Tuple { elements }
+                if matches!(&expr.ty,
+                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && !is_heap_ty(&tys[1])) =>
+            {
+                let obj = self.try_lower_tuple_construct(elements)?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
             // An `(Int, String)` TUPLE element of a list literal (`[(i, line)]` — the list.enumerate
             // shape): Int slot 0 (scalar @12), String slot 1 (heap @20). try_lower_tuple_construct
             // builds it (heap mask [1]); it is moved into the enclosing list, whose `$__drop_list_int_str`
