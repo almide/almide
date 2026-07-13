@@ -1431,6 +1431,29 @@ B20. **Closures in record slots SHIPPED (58 → 54)**: the B8-diagnosed
    Result-returning-fn tests. Ladder: mir 583 / classify 54 zero
    newly-walled / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
 
+A6. **Pure call-init globals inline at use sites SHIPPED (54 → 51)**:
+   `let BANNER = make_banner()` (the #632 / C-077 family) could not
+   materialize at a use site under the count discipline (a Var reference =
+   0 IR calls; injecting the CallFn breaches mir == ir), and an eager
+   `__init_globals` prologue is a whole new subsystem. But v0 NATIVE
+   globals are LAZY statics — every use evaluates the initializer's value —
+   so for a transitively-PURE initializer, substituting the init EXPRESSION
+   at each use site is byte-equivalent (v0-wasm's dependency-sorted eager
+   init is pinned observably equal by C-077). New program-level pass
+   `inline_pure_call_globals` (newtype_erase.rs), run right after the
+   newtype erasure in BOTH the pipeline and classify IR construction —
+   desugar-before-both by construction, so the counts stay 1:1. Gates:
+   call-bearing init only; transitive purity (non-effect Named callees +
+   pure Module calls, no RuntimeCall, Method/Computed declines);
+   REGION-LOCAL substitution (main↔main, module↔module — the VarId
+   numbering regions can collide, and the bridge owns cross-module reads);
+   self-substitution skip + bounded fixpoint for chains. Opened 3:
+   r5_mod_global_init_order main (END-TO-END v0-byte PARITY — the full
+   BANNER/APP_NAME/ITEMS/FIRST dependency shape) and BOTH
+   cross_module_init_order #632 tests (the module-side substitution feeds
+   the existing name bridge). Ladder: mir 583 / classify 51 zero
+   newly-walled / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

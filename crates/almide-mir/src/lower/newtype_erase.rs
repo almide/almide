@@ -305,3 +305,184 @@ pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
         }
     }
 }
+
+/// INLINE-SUBSTITUTE pure call-bearing GLOBAL initializers at their use sites (a
+/// program-level pre-pass, run right after [`erase_transparent_newtypes`] in BOTH the
+/// pipeline and classify IR construction — desugar-before-both by construction).
+///
+/// `let BANNER = make_banner()` (the #632 / C-077 family) cannot materialize at a USE
+/// site under the count discipline (the reference is a `Var` = 0 IR calls; injecting the
+/// CallFn would breach `mir == ir`), and an eager `__init_globals` prologue is a whole
+/// new count/ownership subsystem. But v0 NATIVE globals are LAZY statics — every use
+/// evaluates the initializer's VALUE — so for a PURE initializer, substituting the init
+/// EXPRESSION at each use site is byte-equivalent (same value each time; v0-wasm's
+/// dependency-sorted eager init is pinned observably equal by C-077). The substitution
+/// happens in the SHARED IR both the lowering and `count_ir_calls` read, so the call
+/// counts stay 1:1.
+///
+/// GATES: (a) the init CONTAINS a call (const inits keep the existing materialization);
+/// (b) the init is transitively PURE — every `Named` callee is a non-`effect` fn whose
+/// body (transitively) makes only pure-module/Named calls (no RuntimeCall, no impure
+/// Module call) — an effectful init keeps walling (substitution would re-run the
+/// effect per use, an observable divergence); (c) REGION-LOCAL — main top-lets
+/// substitute into main functions/top-lets, a module's into its own functions — the
+/// main/module VarId numbering regions can collide, so cross-region substitution by
+/// raw VarId would hit unrelated locals (the bridge owns cross-module reads).
+/// Self-referencing inits never substitute into their own init (cycle guard); chained
+/// call-globals resolve by a bounded fixpoint.
+pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
+    use almide_ir::{CallTarget, IrExpr, IrExprKind};
+    use std::collections::{HashMap, HashSet};
+
+    // Function registry by name (program + modules) for the transitive purity scan.
+    let mut fns_by_name: HashMap<String, IrExpr> = HashMap::new();
+    let mut effect_fns: HashSet<String> = HashSet::new();
+    for f in &program.functions {
+        fns_by_name.insert(f.name.as_str().to_string(), f.body.clone());
+        if f.is_effect {
+            effect_fns.insert(f.name.as_str().to_string());
+        }
+    }
+    for m in &program.modules {
+        for f in &m.functions {
+            let qualified = format!("{}.{}", m.name.as_str(), f.name.as_str());
+            fns_by_name.insert(f.name.as_str().to_string(), f.body.clone());
+            fns_by_name.insert(qualified.clone(), f.body.clone());
+            if f.is_effect {
+                effect_fns.insert(f.name.as_str().to_string());
+                effect_fns.insert(qualified);
+            }
+        }
+    }
+
+    fn expr_is_pure(
+        e: &IrExpr,
+        fns: &HashMap<String, IrExpr>,
+        effects: &HashSet<String>,
+        visiting: &mut HashSet<String>,
+    ) -> bool {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct V<'a> {
+            ok: bool,
+            fns: &'a HashMap<String, IrExpr>,
+            effects: &'a HashSet<String>,
+            visiting: &'a mut HashSet<String>,
+        }
+        impl IrVisitor for V<'_> {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if !self.ok {
+                    return;
+                }
+                match &e.kind {
+                    IrExprKind::RuntimeCall { .. } => self.ok = false,
+                    IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } => {
+                        match target {
+                            CallTarget::Module { module, func, .. } => {
+                                if !crate::purity::is_pure(module.as_str(), func.as_str()) {
+                                    self.ok = false;
+                                }
+                            }
+                            CallTarget::Named { name } => {
+                                let n = name.as_str().to_string();
+                                if self.effects.contains(&n) {
+                                    self.ok = false;
+                                } else if self.visiting.insert(n.clone()) {
+                                    match self.fns.get(&n) {
+                                        Some(body) => {
+                                            let body = body.clone();
+                                            if !expr_is_pure(
+                                                &body,
+                                                self.fns,
+                                                self.effects,
+                                                self.visiting,
+                                            ) {
+                                                self.ok = false;
+                                            }
+                                        }
+                                        // An unknown callee (a variant ctor is fine — no
+                                        // body, no effect; anything else unknown declines).
+                                        None => {}
+                                    }
+                                }
+                            }
+                            // A Method/Computed callee is unanalyzable here — decline.
+                            _ => self.ok = false,
+                        }
+                    }
+                    _ => {}
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut v = V { ok: true, fns, effects, visiting };
+        v.visit_expr(e);
+        v.ok
+    }
+
+    // One REGION: substitute qualifying globals into the given fns + sibling inits.
+    fn run_region(
+        top_lets: &mut [almide_ir::IrTopLet],
+        fn_bodies: &mut [almide_ir::IrFunction],
+        fns: &HashMap<String, IrExpr>,
+        effects: &HashSet<String>,
+    ) {
+        let qualifying: Vec<(almide_ir::VarId, IrExpr)> = top_lets
+            .iter()
+            .filter(|tl| crate::lower::expr_contains_call(&tl.value))
+            .filter(|tl| {
+                let mut visiting = HashSet::new();
+                expr_is_pure(&tl.value, fns, effects, &mut visiting)
+            })
+            .map(|tl| (tl.var, tl.value.clone()))
+            .collect();
+        if qualifying.is_empty() {
+            return;
+        }
+        // Bounded fixpoint: a chained call-global (`let A = f(); let B = g(A)`) resolves
+        // in ≤ chain-depth rounds; the cycle guard is the self-substitution skip.
+        for _ in 0..4 {
+            let mut changed = false;
+            for (var, init) in &qualifying {
+                for f in fn_bodies.iter_mut() {
+                    let nb = almide_ir::substitute_var_in_expr(&f.body, *var, init);
+                    if !exprs_eq_shallow(&nb, &f.body) {
+                        f.body = nb;
+                        changed = true;
+                    }
+                }
+                for tl in top_lets.iter_mut() {
+                    if tl.var == *var {
+                        continue;
+                    }
+                    let nv = almide_ir::substitute_var_in_expr(&tl.value, *var, init);
+                    if !exprs_eq_shallow(&nv, &tl.value) {
+                        tl.value = nv;
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+    // Cheap change detector: substitution either changes the tree or returns an
+    // identical clone — compare the debug forms (bounded corpora; not hot).
+    fn exprs_eq_shallow(a: &almide_ir::IrExpr, b: &almide_ir::IrExpr) -> bool {
+        format!("{a:?}") == format!("{b:?}")
+    }
+
+    let fns_snapshot = fns_by_name;
+    let effects_snapshot = effect_fns;
+    run_region(
+        &mut program.top_lets,
+        &mut program.functions,
+        &fns_snapshot,
+        &effects_snapshot,
+    );
+    let mut modules = std::mem::take(&mut program.modules);
+    for m in modules.iter_mut() {
+        run_region(&mut m.top_lets, &mut m.functions, &fns_snapshot, &effects_snapshot);
+    }
+    program.modules = modules;
+}
