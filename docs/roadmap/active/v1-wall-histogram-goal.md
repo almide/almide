@@ -1301,6 +1301,19 @@ D2d. **process.args self-host SHIPPED (74 → 73)**: `$args_get_list` is now
    end-to-end v0-byte PARITY. Ladder: mir 583 / classify 73 zero
    newly-walled / spec 283 / purity gate OK / GATE OK / CORPUS WALL OK.
 
+B15. **Unit-discard `!` normalization SHIPPED (73 → 72)**: `let _ =
+   fs.write(p, s)!` — the frontend gives `_` a REAL VarId, so the
+   unwrap-desugars built `ok($v: Unit)` and the statement result-match
+   parser declined the Unit-typed bind (fs_preopen_resolve's blocker). Both
+   arm builders (desugar_let_unwrap's Target::Single and
+   desugar_effect_unwrap's ok_pat) now normalize a UNIT-typed Ok bind whose
+   var the continuation NEVER references into the Wildcard arm (exactly the
+   bare-stmt `!` shape, which already lowers) — gated by a VarUse read-scan
+   so a genuinely-read unit var keeps its bind. Probes fp1 + the
+   fs_preopen_resolve fixture (write/read/exists/alloc-churn ×2 rounds,
+   run with --dir=/) end-to-end v0-byte PARITY. Ladder: mir 583 / classify
+   72 zero newly-walled / spec 283 / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

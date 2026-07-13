@@ -23,6 +23,21 @@ pub fn desugar_effect_unwrap(
     desugar_effect_unwrap_inner(body, &mut next_var, unit_main)
 }
 
+/// A tiny read-scan: does the expression tree reference `var`? (The unit-discard
+/// normalization's "never read" gate.)
+struct VarUse<'a> {
+    var: VarId,
+    found: &'a mut bool,
+}
+impl almide_ir::visit::IrVisitor for VarUse<'_> {
+    fn visit_expr(&mut self, e: &IrExpr) {
+        if matches!(&e.kind, IrExprKind::Var { id } if *id == self.var) {
+            *self.found = true;
+        }
+        almide_ir::visit::walk_expr(self, e);
+    }
+}
+
 fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32, unit_main: bool) -> Option<IrExpr> {
     use almide_ir::{IrMatchArm, IrPattern};
     use almide_lang::types::Ty;
@@ -60,6 +75,39 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32, unit_main: boo
                 _ => continue,
             },
             _ => continue,
+        };
+        // A UNIT Ok payload bound to a NEVER-READ var (`let _ = fs.write(p, s)!` — the
+        // frontend gives `_` a real VarId) is semantically a discard: normalize it to the
+        // Wildcard arm (exactly the statement-`!` shape above), so the statement
+        // result-match parser dispatches it instead of declining on a Unit-typed bind.
+        // Gated on ty == Unit AND the continuation (rest stmts + tail) never referencing
+        // the var — a genuinely-read unit var keeps its bind.
+        let ok_pat = match ok_pat {
+            IrPattern::Ok { inner: b } => match *b {
+                IrPattern::Bind { var, ty: bty }
+                    if matches!(bty, Ty::Unit)
+                        && !stmts[i + 1..].iter().any(|s| {
+                            let mut f = false;
+                            almide_ir::visit::walk_stmt(
+                                &mut VarUse { var, found: &mut f },
+                                s,
+                            );
+                            f
+                        })
+                        && !tail.as_deref().is_some_and(|t| {
+                            let mut f = false;
+                            almide_ir::visit::IrVisitor::visit_expr(
+                                &mut VarUse { var, found: &mut f },
+                                t,
+                            );
+                            f
+                        }) =>
+                {
+                    IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) }
+                }
+                other => IrPattern::Ok { inner: Box::new(other) },
+            },
+            p => p,
         };
         // An Option-`!` is admitted for a SCALAR Some payload only (the sized_conversion
         // family — no drop on either arm); a heap Some payload's bind/drop discipline is a
@@ -774,6 +822,28 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
     // hand-written direct-match form that already lowers (a Result destructured directly as a tuple
     // otherwise silently miscompiled: the wrapper @12/@16 was read as the tuple fields).
     let (ok_pattern, cont_stmts): (almide_ir::IrPattern, Vec<IrStmt>) = match target {
+        // A UNIT Ok payload bound to a NEVER-READ var (`let _ = fs.write(p, s)!` — the
+        // frontend gives `_` a real VarId): normalize to the Wildcard arm (exactly the
+        // bare-stmt `!` shape), so the statement result-match parser dispatches it
+        // instead of declining on a Unit-typed bind. A genuinely-read var keeps its bind.
+        Target::Single { var, ty }
+            if matches!(ty, Ty::Unit)
+                && !stmts[i + 1..].iter().any(|s| {
+                    let mut f = false;
+                    almide_ir::visit::walk_stmt(&mut VarUse { var, found: &mut f }, s);
+                    f
+                })
+                && !tail.as_deref().is_some_and(|tl| {
+                    let mut f = false;
+                    almide_ir::visit::IrVisitor::visit_expr(
+                        &mut VarUse { var, found: &mut f },
+                        tl,
+                    );
+                    f
+                }) =>
+        {
+            (almide_ir::IrPattern::Wildcard, stmts[i + 1..].to_vec())
+        }
         Target::Single { var, ty } => {
             (almide_ir::IrPattern::Bind { var, ty }, stmts[i + 1..].to_vec())
         }
