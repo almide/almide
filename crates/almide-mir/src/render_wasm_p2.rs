@@ -688,7 +688,8 @@ fn render_op(
                 // `List[String]` of argv[1..] in the preamble helper. dst is a heap Ptr
                 // (i32 handle, value_reprs_wasm), so the call result sets the local DIRECTLY
                 // (no i64 extend) — exactly like a LoadHandle.
-                PrimKind::ArgsGetList => "(call $args_get_list)".to_string(),
+                PrimKind::ArgsGetList => "(call $args_get_list (i32.const 1))".to_string(),
+                PrimKind::ArgsGetListFull => "(call $args_get_list (i32.const 0))".to_string(),
                 // read_text_file(path) — the WASI file-read floor; opens + reads the file at
                 // `path` and builds a fresh owned `Result[String, String]` in the preamble helper.
                 // The path arg is a heap Ptr local (i32 handle, like a $list ptr), passed DIRECTLY

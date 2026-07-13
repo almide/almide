@@ -528,6 +528,11 @@ pub enum PrimKind {
     /// ownership certificate emits an `i` (alloc) for it, balanced by the caller's
     /// scope-end drop (a recursive `DropListStr` over the owned element Strings).
     ArgsGetList,
+    /// The SAME WASI args floor as [`ArgsGetList`] but INCLUDING argv[0] (the program
+    /// path) — `process.args()` = native `std::env::args()`. Renders as
+    /// `(call $args_get_list (i32.const 0))` (the one parameterized bridge, skip=0);
+    /// same fresh OWNED `List[String]` dst, same [`Capability::CliArgs`] accounting.
+    ArgsGetListFull,
     /// The WASI `fd_read`-from-stdin line-read sequence, packaged as ONE high-level HEAP-RESULT
     /// prim — no args, dst = a fresh OWNED canonical `String` of ONE line of standard input.
     /// Reads fd 0 BYTE-BY-BYTE (so it never over-reads past the newline — a later

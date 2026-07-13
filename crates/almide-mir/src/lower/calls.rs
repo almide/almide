@@ -241,6 +241,9 @@ impl LowerCtx {
         // `list_heap_call_name`, unsupported elements route `_x` and wall at render), so the
         // transitive cap_witness counts Entropy exactly like `random.int`.
         let is_admitted_effectful = (module == "random" && func == "int")
+            // `process.args` = argv[0]-inclusive CLI args (std::env::args) — self-hosted
+            // over the SAME WASI args bridge as env.args (skip=0), Capability::CliArgs.
+            || (module == "process" && func == "args")
             || (module == "random" && matches!(func, "choice" | "shuffle"))
             || (module == "env" && func == "args")
             || (module == "env" && func == "unix_timestamp")

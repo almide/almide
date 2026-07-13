@@ -363,7 +363,10 @@ pub(crate) fn preamble() -> String {
   ;; canonical `[rc][len][cap][bytes…]` String copied from the argv C-string. The
   ;; result is the third sandbox exit (Capability::CliArgs) — its dst is an owned
   ;; heap handle the caller's scope-end DropListStr balances.
-  (func $args_get_list (result i32)
+  ;; $skip = how many leading argv entries to drop: 1 = env.args (argv[1..], the
+  ;; program args only), 0 = process.args (argv[0..] — std::env::args includes the
+  ;; program path). ONE WAT bridge serves both prims (no host-floor growth).
+  (func $args_get_list (param $skip i32) (result i32)
     (local $argc_ptr i32) (local $bufsz_ptr i32) (local $argc i32)
     (local $count i32) (local $bufsz i32) (local $argv i32) (local $argbuf i32)
     (local $result i32) (local $i i32) (local $cstr i32) (local $slen i32)
@@ -374,11 +377,11 @@ pub(crate) fn preamble() -> String {
     (drop (call $args_sizes_get (local.get $argc_ptr) (local.get $bufsz_ptr)))
     (local.set $argc (i32.load (local.get $argc_ptr)))
     (local.set $bufsz (i32.load (local.get $bufsz_ptr)))
-    ;; count = max(argc - 1, 0): drop argv[0]. Clamp so a degenerate argc 0 never
-    ;; underflows the unsigned loop bound below.
+    ;; count = max(argc - $skip, 0). Clamp so a degenerate argc never underflows
+    ;; the unsigned loop bound below.
     (local.set $count
-      (select (i32.sub (local.get $argc) (i32.const 1)) (i32.const 0)
-              (i32.ge_u (local.get $argc) (i32.const 1))))
+      (select (i32.sub (local.get $argc) (local.get $skip)) (i32.const 0)
+              (i32.ge_u (local.get $argc) (local.get $skip))))
     ;; Phase 2: alloc the pointer array (argc i32 ptrs, +4 guard) + the string buffer,
     ;; then fill them via args_get.
     (local.set $argv (call $alloc (i32.add (i32.mul (local.get $argc) (i32.const 4)) (i32.const 4))))
@@ -391,9 +394,9 @@ pub(crate) fn preamble() -> String {
     (local.set $i (i32.const 0))
     (block $done (loop $loop
       (br_if $done (i32.ge_u (local.get $i) (local.get $count)))
-      ;; cstr = argv[$i + 1]
+      ;; cstr = argv[$i + $skip]
       (local.set $cstr (i32.load (i32.add (local.get $argv)
-                                          (i32.mul (i32.add (local.get $i) (i32.const 1)) (i32.const 4)))))
+                                          (i32.mul (i32.add (local.get $i) (local.get $skip)) (i32.const 4)))))
       ;; slen = strlen(cstr): scan to NUL
       (local.set $slen (i32.const 0))
       (block $sdone (loop $sloop

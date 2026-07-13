@@ -1288,6 +1288,19 @@ D2c. **env.os / env.temp_dir self-host SHIPPED (76 → 74)**: on the wasm
    moved to http.serve (env.temp_dir opened out from under it). Ladder: mir
    583 / classify 74 zero newly-walled / spec 283 / GATE OK / CORPUS WALL OK.
 
+D2d. **process.args self-host SHIPPED (74 → 73)**: `$args_get_list` is now
+   PARAMETERIZED by `$skip` (1 = env.args argv[1..], 0 = process.args
+   argv[0..] — std::env::args includes the program path, C-096): ONE WAT
+   bridge serves both prims, no host-floor growth. New
+   PrimKind::ArgsGetListFull (render `(call $args_get_list (i32.const 0))`,
+   CliArgs in certificate.rs, Ptr dst repr in render_wasm's prim repr
+   classification — MISSING it produced the i64/i32 invalid-wasm the probe
+   caught), prim.args_get_list_full decl, process_args.almd (a PLAIN fn
+   matching stdlib/process.almd's plain `fn args()`), admission + registry +
+   IMPURE_PLAIN justification. The process_args.almd fixture itself is
+   end-to-end v0-byte PARITY. Ladder: mir 583 / classify 73 zero
+   newly-walled / spec 283 / purity gate OK / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

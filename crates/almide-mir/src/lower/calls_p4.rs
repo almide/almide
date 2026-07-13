@@ -971,6 +971,15 @@ impl LowerCtx {
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }
+        // `prim.args_get_list_full()` — the argv[0]-INCLUSIVE twin (process.args =
+        // std::env::args()). Same fresh OWNED List[String] + DropListStr + CliArgs
+        // discipline; renders through the SAME parameterized $args_get_list bridge.
+        if func == "args_get_list_full" {
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::ArgsGetListFull, dst: Some(dst), args: vec![] });
+            self.heap_elem_lists.insert(dst);
+            return Ok(Some(dst));
+        }
         // `prim.read_text_file(path)` — the WASI file-read floor (fs.read_text). ONE
         // BORROWED `String` arg (the path; the caller still owns it). Its dst is a FRESH
         // OWNED `Result[String, String]` built by the render in the EXACT

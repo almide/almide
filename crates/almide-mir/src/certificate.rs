@@ -194,7 +194,7 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         // `env.args`, so a fn using it must declare CliArgs (the same accounting as RandomGet →
         // Entropy). The transitive `reachable_caps` follows the CallFn edge into `env.args`, so a
         // caller inherits this CliArgs and is caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::ArgsGetList, .. } = op {
+        if let Op::Prim { kind: crate::PrimKind::ArgsGetList | crate::PrimKind::ArgsGetListFull, .. } = op {
             used.push(Capability::CliArgs);
         }
         // The `read_text_file` primitive is the FS-READ floor op — reached by the self-hosted
