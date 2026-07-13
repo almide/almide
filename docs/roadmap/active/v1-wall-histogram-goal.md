@@ -3928,6 +3928,65 @@ DIAGNOSIS — pinned the EXACT root cause of the `List[heap]` literal cluster's
    that combination (not checked this pass). **Current 18, unchanged**
    (fully reverted, zero diff).
 
+DIAGNOSIS — picked up the auto-wrap ABI investigation exactly where the
+   prior fork left off (its own "next step": debug-trace `heap_result_arm.
+   rs`'s bare-scalar-tail handling) and found + FIXED the first of what
+   turned out to be TWO layers, confirming the fix's scope is genuinely
+   program-wide (not a single-function change) before reverting. Re-applied
+   the fork's `body.ty`-override (`body_has_stmt_position_propagating_
+   unwrap` gating a `Result[<declared>,String]` override on an OWNED body
+   copy, `mod.rs`) and reproduced the exact same invalid-WASM symptom
+   (offset 4920, `unannotated_unwraps`'s own function). Traced with
+   targeted debug instrumentation directly in `heap_result_arm.rs`'s
+   `Var{id}` arm case (added then fully reverted): `arm.ty=Int` (scalar)
+   but `result_ty=Result[Int,String]` (heap) — a genuine TYPE MISMATCH this
+   arm's existing logic (`Op::Dup` + `Consume`, correct ONLY when `arm.ty`
+   is ALREADY heap-shaped, matching `result_ty` — the proven `pick`
+   precedent, `if c then a else b` over two heap locals) silently
+   mishandles: it Dup's the SCALAR's raw i64 bits as if they were a heap
+   pointer, instead of constructing a genuine Ok-wrapped heap object. The
+   EXPLICIT `ok(<scalar>)` case (`ResultOk{expr} if !is_heap_ty(&expr.ty)`,
+   same file) already does this correctly via `lower_scalar_value` +
+   `materialize_result_ok` — but only fires for an EXPLICIT `ok(...)` AST
+   node; `desugar_effect_unwrap`'s STATEMENT-position reconstruction
+   (`build_unwrap_match`, desugar_unwrap.rs) never wraps its Ok-arm
+   continuation in one, leaving a bare `Var` node. **FIXED** this narrowly:
+   added a new `Var{id}` match arm ABOVE the existing one, guarded on
+   `!is_heap_ty(&arm.ty) && result_ty` being `Result[T,String]` with `T ==
+   arm.ty` (Result only, not Option — the only case confirmed to need it),
+   routing through the SAME `materialize_result_ok` the explicit-`ok(...)`
+   case uses. **Verified this FIXED `unannotated_unwraps` itself** — the
+   invalid-WASM error moved from `unannotated_unwraps`'s own function to
+   `main`'s (offset 5102, a DIFFERENT type mismatch) — confirming the
+   callee-side construction bug is real and now fixed, but exposing a
+   SECOND, SEPARATE layer: `main`'s OWN call site (`unannotated_unwraps()
+   !`) still treats the CALL RESULT as scalar `Int` (matching `func.
+   ret_ty`, which the fix deliberately never touches), not the callee's
+   NOW-actually-heap-shaped real return — because NOTHING propagates "this
+   function's real ABI is Result-shaped" to CALLERS; only the function's
+   OWN body saw the override. A complete fix needs a CROSS-FUNCTION
+   registry (mirroring `NEVER_ERR_LIFTED_FNS`'s existing pattern —
+   thread_local, keyed by function name, populated whenever `body_has_
+   stmt_position_propagating_unwrap` fires) consulted at EVERY call site
+   that unwraps/reads a call to a registered auto-wrap function, overriding
+   THAT call expression's `.ty` the same way — genuinely more than a
+   single-function-scoped change, matching (and now more precisely
+   confirming, with a concrete second symptom) both forks' depth
+   assessment. **Cleanly reverted both files** (`git checkout --` on
+   `mod.rs` and `heap_result_arm.rs`, confirmed classify matches the
+   18-entry baseline exactly, zero diff). The `heap_result_arm.rs` Var-arm
+   fix itself is CORRECT and safe in isolation (verified: it only widens
+   admission for a scalar/heap type-mismatch case that previously either
+   fell through to a DIFFERENT arm or produced wrong bytes silently — but
+   shipping it ALONE, without the caller-side registry, would leave a
+   dangling half-fix with no corpus benefit, so it was reverted WITH the
+   rest rather than left in). **Next attempt should build the registry
+   FIRST**, then re-apply both the `body.ty` override and this `heap_
+   result_arm.rs` fix together, verifying end-to-end (both `unannotated_
+   unwraps` AND `main`, plus `is_balanced`/`nested_unwrap`'s own shapes,
+   which may need the SAME two-layer fix or may hit yet further layers not
+   discovered here). **Current 18, unchanged** (fully reverted, zero diff).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
