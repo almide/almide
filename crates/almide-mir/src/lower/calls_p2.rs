@@ -1022,7 +1022,7 @@ impl LowerCtx {
                             // EXECUTE it via the closure dispatch — a fresh OWNED value
                             // (cert `i`, scope-end drop), borrowed into the outer call.
                             // Mirrors the bind-position closure call (binds_p2).
-                            if let Some(blk) = self.closure_value_of(callee) {
+                            if let Some(blk) = self.closure_block_of_mut(callee) {
                                 if let (Ok(crepr), Ok(lowered)) =
                                     (repr_of(&a.ty), self.lower_call_args(inner))
                                 {

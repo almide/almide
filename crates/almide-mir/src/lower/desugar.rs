@@ -137,14 +137,19 @@ pub fn dump_ir(e: &IrExpr) -> String {
 
 /// Env-gated desugar dump: when `DBG_DESUGAR_FN == fn_name`, print the fully-desugared body so the
 /// derived-Codec `decode` chain can be diffed against the proven separate-bind form. No-op otherwise.
-pub fn dump_desugared_ir(fn_name: &str, body: &IrExpr, layouts: &crate::lower::VariantLayouts) {
+pub fn dump_desugared_ir(
+    fn_name: &str,
+    body: &IrExpr,
+    layouts: &crate::lower::VariantLayouts,
+    record_layouts: &crate::lower::RecordLayouts,
+) {
     if std::env::var("DBG_DESUGAR_FN").is_ok_and(|v| v == fn_name) {
         if std::env::var("DBG_DESUGAR_RAW").is_ok() {
-            eprintln!("=== RAW {fn_name} ===\n{:#?}", desugar_all(body, fn_name == "main", layouts));
+            eprintln!("=== RAW {fn_name} ===\n{:#?}", desugar_all(body, fn_name == "main", layouts, record_layouts));
         } else {
             eprintln!(
                 "=== DESUGARED {fn_name} ===\n{}",
-                dump_ir(&desugar_all(body, fn_name == "main", layouts))
+                dump_ir(&desugar_all(body, fn_name == "main", layouts, record_layouts))
             );
         }
     }
@@ -160,15 +165,19 @@ pub fn dump_desugared_ir(fn_name: &str, body: &IrExpr, layouts: &crate::lower::V
 /// is LEFT in place, so it still walls honestly rather than resolving to a bogus name. Run in
 /// BOTH the real lowering (`lower_body_into`) and the `count_ir_calls` gate (`desugar_all`) so
 /// `mir == ir` holds by construction. Returns `None` when no Method was rewritten.
-pub fn desugar_method_calls(body: &IrExpr) -> Option<IrExpr> {
+pub fn desugar_method_calls(
+    body: &IrExpr,
+    record_layouts: &crate::lower::RecordLayouts,
+) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     use almide_ir::{CallTarget, IrExpr, IrExprKind};
     use almide_lang::types::Ty;
 
-    struct V {
+    struct V<'a> {
         changed: bool,
+        record_layouts: &'a crate::lower::RecordLayouts,
     }
-    impl IrMutVisitor for V {
+    impl IrMutVisitor for V<'_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             // Post-order: resolve the receiver / args (which may themselves be method calls)
             // BEFORE rewriting this node, so a chained `a.f().g()` resolves inside-out.
@@ -178,6 +187,46 @@ pub fn desugar_method_calls(body: &IrExpr) -> Option<IrExpr> {
                 IrExprKind::TailCall { target, args } => (target, args),
                 _ => return,
             };
+            // A NAMED-record receiver whose "method" is a declared FN FIELD
+            // (`h.run("hello")` over `type Handler = { run: (String) -> String, … }`):
+            // the Type.method Named resolution below would fabricate an UNDEFINED
+            // `Handler.run` fn — resolve the FIELD ty from the record registry and take
+            // the field-call rewrite instead (the same Computed(Member) the structural
+            // receiver gets).
+            let named_fn_field: Option<Ty> = match &*target {
+                CallTarget::Method { object, method } if !method.as_str().contains('.') => {
+                    match &object.ty {
+                        Ty::Named(n, _) => crate::lower::canonical_record_key(
+                            self.record_layouts,
+                            n.as_str(),
+                        )
+                        .and_then(|k| self.record_layouts.get(k))
+                        .and_then(|(names, fields)| {
+                            let _ = names;
+                            fields
+                                .iter()
+                                .find(|(fname, _)| fname == method)
+                                .map(|(_, t)| t.clone())
+                        })
+                        .filter(|t| matches!(t, Ty::Fn { .. })),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            if let Some(field_ty) = named_fn_field {
+                if let CallTarget::Method { object, method } = &*target {
+                    let callee = IrExpr {
+                        kind: IrExprKind::Member { object: object.clone(), field: *method },
+                        ty: field_ty,
+                        span: None,
+                        def_id: None,
+                    };
+                    *target = CallTarget::Computed { callee: Box::new(callee) };
+                    self.changed = true;
+                    return;
+                }
+            }
             let name = match &*target {
                 CallTarget::Method { object, method } => {
                     if method.as_str().contains('.') {
@@ -245,7 +294,7 @@ pub fn desugar_method_calls(body: &IrExpr) -> Option<IrExpr> {
         }
     }
 
-    let mut v = V { changed: false };
+    let mut v = V { changed: false, record_layouts };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     if v.changed {
@@ -259,10 +308,11 @@ pub fn desugar_all(
     body: &IrExpr,
     unit_main: bool,
     layouts: &crate::lower::VariantLayouts,
+    record_layouts: &crate::lower::RecordLayouts,
 ) -> IrExpr {
     let mut cur = body.clone();
     loop {
-        if let Some(r) = desugar_method_calls(&cur) {
+        if let Some(r) = desugar_method_calls(&cur, record_layouts) {
             cur = r;
             continue;
         }

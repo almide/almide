@@ -580,7 +580,7 @@ impl LowerCtx {
                 // (e.g. `let f = (x) => print_it(x); f(3)`). Otherwise — a dynamic closure
                 // value we cannot name — DEFER as before (calls captured, the Computed call
                 // elided ⇒ honest caps taint).
-                if let Some(blk) = self.closure_value_of(callee) {
+                if let Some(blk) = self.closure_block_of_mut(callee) {
                     let mark = self.ops.len();
                     let lhh = self.live_heap_handles.len();
                     if let Ok(lowered) = self.lower_call_args(args) {

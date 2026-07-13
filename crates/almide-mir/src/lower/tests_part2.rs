@@ -746,7 +746,7 @@
             Ty::Named(sym("Value"), vec![]),
         );
         let rewritten =
-            crate::lower::desugar_method_calls(&mcall).expect("a Named-receiver method resolves");
+            crate::lower::desugar_method_calls(&mcall, &Default::default()).expect("a Named-receiver method resolves");
         match &rewritten.kind {
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
                 assert_eq!(name.as_str(), "Person.encode", "qualified as TypeName.method");

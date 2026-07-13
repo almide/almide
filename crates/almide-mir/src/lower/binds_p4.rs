@@ -48,6 +48,18 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
+            // A LAMBDA field (`{ run: (x) => n + ":" + x, name: n }` — the record_fn_field
+            // make_handler class): LIFT it to a closure block (the full capture machinery —
+            // scalar/heap/Fn/Float captures — builds the self-describing [fnidx][nh|nc<<16][env…]
+            // block and pushes it live), which the enclosing aggregate then Consumes into its
+            // slot. The record's drop frees it via the generated `__drop_closure` field arm.
+            IrExprKind::Lambda { params, body, .. } => {
+                let blk = self.lift_lambda(params, body)?;
+                if !self.live_heap_handles.contains(&blk) {
+                    self.live_heap_handles.push(blk);
+                }
+                Some(blk)
+            }
             IrExprKind::Var { id } => {
                 let src = *self.value_of.get(id)?;
                 let dup = self.fresh_value();

@@ -573,6 +573,13 @@ impl LowerCtx {
             | IrExprKind::TupleIndex { .. } => {
                 let dst = self.lower_heap_extraction(value)?;
                 self.value_of.insert(var, dst);
+                // A Fn-typed field extraction (`let f = h.run` — the record_fn_field
+                // "field access then call" shape): the borrowed slot handle IS a closure
+                // block — track it so a later `f("world")` dispatches via the closure
+                // machinery (closure_value_of) instead of walling as unresolvable.
+                if matches!(ty, Ty::Fn { .. }) {
+                    self.closure_values.insert(dst);
+                }
                 // A precise heap-field BORROW (a `LoadHandle` of a slot in a still-owning
                 // container) is in `param_values` — it is NOT a second owner, so it must NOT
                 // join the scope-end drop set (the container's masked drop frees the field).
@@ -839,9 +846,21 @@ impl LowerCtx {
             // flat_map). A Computed callee that is NOT a known funcref falls through to the
             // deferred Opaque below.
             IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
-                if self.closure_value_of(callee).is_some() =>
+                if self.closure_value_of(callee).is_some()
+                    || Self::is_fn_member_callee(callee) =>
             {
-                let blk = self.closure_value_of(callee).unwrap();
+                // A tracked closure VAR — or a RECORD-SLOT closure (`h.run("hello")` —
+                // B8's Computed(Member); `closure_block_of_mut` loads the slot borrow).
+                let blk = match self.closure_block_of_mut(callee) {
+                    Some(b) => b,
+                    None => {
+                        return Err(LowerError::Unsupported(
+                            "heap-result record-slot closure call over an unresolvable \
+                             container not in this brick"
+                                .into(),
+                        ))
+                    }
+                };
                 let repr = repr_of(ty)?;
                 let lowered = self.lower_call_args(args)?;
                 let dst = self.fresh_value();

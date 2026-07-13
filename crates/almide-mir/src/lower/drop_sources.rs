@@ -407,6 +407,17 @@ fn record_drop_field_frees(
                     "    let f{i}: Value = prim.load_handle(h + {off})\n    __drop_value(f{i})\n"
                 ));
             }
+            // A CLOSURE field (`Handler.run: (String) -> String`): the slot holds a
+            // self-describing closure block ([fnidx][nh|nc<<16][env…]) whose captured heap
+            // env a flat rc_dec would LEAK — free it via the generated `__drop_closure`
+            // (the SAME recursive routine every closure drop site uses; CLOSURE_DROP_SRC
+            // is linked whenever the program creates closures, which a populated Fn field
+            // requires). The binding type is the closure block's List[Int] rep.
+            Ty::Fn { .. } => {
+                frees.push_str(&format!(
+                    "    let f{i}: List[Int] = prim.load_handle(h + {off})\n    __drop_closure(f{i})\n"
+                ));
+            }
             t => {
                 if let Some(rn) = recursive_aggregate_name(t, rec_names) {
                     let src = aggregate_source_ty(t);

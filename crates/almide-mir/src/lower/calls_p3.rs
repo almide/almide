@@ -30,6 +30,36 @@ impl LowerCtx {
         None
     }
 
+    /// The MUTABLE widening of [`Self::closure_value_of`]: additionally loads a
+    /// RECORD-SLOT closure (`(h.run)(...)` — the record_fn_field class, B8's
+    /// `Computed(Member)` desugar) as a BORROW of the slot handle. The record keeps
+    /// ownership (its generated `__drop_<R>` frees the block via `__drop_closure`);
+    /// the borrow joins `param_values` (never dropped here) + `closure_values` (the
+    /// dispatch tracking). Emits the LoadHandle, so `&mut self`.
+    /// PURE guard twin of [`Self::closure_block_of_mut`]'s Member arm — usable in
+    /// match-arm guards (no emission): is the callee a Fn-typed record-slot Member?
+    pub(crate) fn is_fn_member_callee(callee: &IrExpr) -> bool {
+        matches!(&callee.kind, IrExprKind::Member { .. })
+            && matches!(callee.ty, almide_lang::types::Ty::Fn { .. })
+    }
+
+    pub(crate) fn closure_block_of_mut(&mut self, callee: &IrExpr) -> Option<ValueId> {
+        if let Some(v) = self.closure_value_of(callee) {
+            return Some(v);
+        }
+        if let IrExprKind::Member { object, field } = &callee.kind {
+            if matches!(callee.ty, almide_lang::types::Ty::Fn { .. }) {
+                let offset = self.aggregate_field_offset_any(&object.ty, field.as_str())?;
+                let h = self.resolve_aggregate_container_handle(object)?;
+                let p = self.load_at_offset(h, offset as i64, crate::PrimKind::LoadHandle);
+                self.param_values.insert(p);
+                self.closure_values.insert(p);
+                return Some(p);
+            }
+        }
+        None
+    }
+
     /// Load a closure block's table index (slot 0) — the scalar a `call_indirect`
     /// wraps to its i32 table offset. A Prim read through the block handle: no
     /// ownership event (the block is live — the caller holds it).

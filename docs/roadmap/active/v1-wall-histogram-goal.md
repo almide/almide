@@ -1405,6 +1405,32 @@ B19. **Option[List[scalar]] `??` SHIPPED (62 → 58 — waypoint <60 CROSSED)**:
    newly-walled / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
    Next waypoint: 0.
 
+B20. **Closures in record slots SHIPPED (58 → 54)**: the B8-diagnosed
+   "closures-in-record-slots" piece, four coordinated edits. (i)
+   CONSTRUCTION: `lower_owned_heap_field` gets a Lambda arm (lift_lambda —
+   the full 本命 capture machinery — builds the self-describing closure
+   block; the record Consumes it into its slot). (ii) DROP: the record drop
+   generator's field loop gets a `Ty::Fn` arm freeing the slot via the
+   generated `__drop_closure` (a flat rc_dec would leak the captured env);
+   `record_field_needs_recursive_drop` already classified Fn fields
+   recursive (is_heap), so `__drop_<Handler>` existed but leaked. (iii)
+   DIRECT CALL `h.run("hello")`: desugar_method_calls resolves a
+   NAMED-record receiver whose method is a declared FN FIELD to the
+   Computed(Member) rewrite (previously it fabricated an undefined
+   `Handler.run` Named call — record_layouts now threaded through
+   desugar_method_calls/desugar_all); the new `closure_block_of_mut` loads
+   the slot borrow (param_values + closure_values) and the call-arg + bind
+   sites dispatch through it (`is_fn_member_callee` for match-arm guards).
+   (iv) EXTRACTION `let f = h.run; f("world")`: a Fn-typed heap extraction
+   joins closure_values. Probes rf1–rf6 all v0-byte PARITY except
+   mock_source, which stays honestly walled on the KNOWN nested-heap
+   capture ratchet (a List[String] capture — the closure-env ratchet's
+   documented remainder), yet its two TESTS opened fn-level (the ctor and
+   match lower; the lambda lift declines inside mock_source only). Opened
+   4: make_handler, direct-field-call, field-access-then-call,
+   Result-returning-fn tests. Ladder: mir 583 / classify 54 zero
+   newly-walled / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

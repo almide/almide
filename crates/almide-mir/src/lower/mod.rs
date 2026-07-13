@@ -766,7 +766,7 @@ fn lower_function_all_impl(
     // `lower_body_into` desugars again (idempotent) for the non-TCO path; the caps gate counts the
     // SAME desugared tree (desugar-before-both), so mir == ir. Unblocks base64 encode/decode_chunks +
     // toml read_basic/parse_val (the let-bound-heap-`if`-in-a-loop frontier).
-    crate::lower::dump_desugared_ir(func.name.as_str(), &func.body, variant_layouts);
+    crate::lower::dump_desugared_ir(func.name.as_str(), &func.body, variant_layouts, record_layouts);
     let pre_tco = desugar_heap_branches(&func.body, variant_layouts);
     let body_ref: &IrExpr = pre_tco.as_ref().unwrap_or(&func.body);
     let tco_body = try_tco_rewrite(&ctx.fn_name, &func.params, body_ref);
