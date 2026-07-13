@@ -1812,6 +1812,28 @@ B34. **(String, Int) / (Int, String) tuple list literals (40 held, an enabler)**
    completion, not a corpus-exercised path yet) / spec 283 / GATE OK /
    CORPUS WALL OK.
 
+B35. **Heap-result `match` as a call argument (40 held, an enabler)**: the
+   `If`-in-call-arg dispatch (calls_p2.rs) already had a dedicated arm
+   (`try_lower_heap_result_if`) but `Match` fell straight to the generic
+   fallback wall — an established asymmetry (`f(if c then a else b)` worked,
+   `f(match x {...})` never did). Fixed by adding a dedicated `Match` arm
+   that desugars the match to an equivalent if/else-if chain via the
+   EXISTING, PROVEN `desugar_match_to_if` (already used at tail/bind
+   positions), then lowers the resulting `If` through the SAME existing
+   `try_lower_heap_result_if` path — no new lowering machinery. Probe mt4
+   (`println(match x { n if n>3 => "big", n => "small" })`, WITH a guard)
+   v0-byte PARITY. **Does NOT fully open** `codegen_patterns_test`'s "match
+   arms returning tuples" (the tuple-PATTERN-LET desugar,
+   `let (label,len) = match {...}`): with a guard it still declines earlier
+   (inside `desugar_match_to_if`/`build_match_chain` for this exact
+   subject+guard shape — undiagnosed); without a guard it progresses PAST
+   this fix into a SEPARATE later wall ("scalar destructure component
+   outside the value subset") — a different gap in the tuple-destructuring
+   mechanism itself. Both are out of this fix's scope. Ladder: mir 583 /
+   classify 40 (unchanged — verified capability completion, message text on
+   the one still-walled entry changed to reflect the NEW, narrower blocker)
+   / spec 283 / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

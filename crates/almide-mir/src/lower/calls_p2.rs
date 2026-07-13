@@ -497,6 +497,34 @@ impl LowerCtx {
                         }
                     }
                 }
+                // A heap-result `match` operand (`let (label, len) = match x { s if .. => (..), s
+                // => (..) }` — a tuple-pattern-let desugar that routes the match's VALUE through a
+                // call argument): desugar the match to an equivalent `if`/`else if` chain via the
+                // EXISTING, PROVEN `desugar_match_to_if` (the same transform tail/bind positions
+                // already use), then lower it through the EXISTING, PROVEN heap-result-`if`
+                // call-arg path directly above — no new lowering machinery, just wiring Match into
+                // the If arm's already-working call-arg handling. Without this, EVERY heap-result
+                // match operand fell straight to the generic wall below.
+                IrExprKind::Match { subject, arms } if is_heap_ty(&a.ty) => {
+                    let lifted = self.desugar_match_to_if(subject, arms, &a.ty).and_then(|e| {
+                        match e.kind {
+                            IrExprKind::If { cond, then, else_ } => {
+                                self.try_lower_heap_result_if(&cond, &then, &else_, &a.ty)
+                            }
+                            _ => None,
+                        }
+                    });
+                    match lifted {
+                        Some(dst) => CallArg::Handle(dst),
+                        None => {
+                            return Err(LowerError::Unsupported(
+                                "heap-result `match` in a call-argument position outside the \
+                                 executable subset"
+                                    .into(),
+                            ))
+                        }
+                    }
+                }
                 IrExprKind::LitStr { .. }
                 | IrExprKind::List { .. }
                 | IrExprKind::MapLiteral { .. }
