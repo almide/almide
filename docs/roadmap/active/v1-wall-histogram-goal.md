@@ -3459,6 +3459,43 @@ B110. **Found and fixed the actual root cause of the #412/#631 diagnosis
    CORPUS WALL OK (FORBIDDEN=0, pending final confirmation). **Current
    19**.
 
+DIAGNOSIS — `wrap_lists` (playground_default.almd, B107's documented
+   separate root cause, B108's adjacent drop-scan fix) is a DELIBERATE,
+   ALREADY-DOCUMENTED wall — NOT a bug, NOT investigated further, NOT
+   fixed this pass. Bisected via temporary debug instrumentation in
+   `lower_heap_result_if_inner` (control_p3.rs — added then fully
+   reverted, `git checkout --`, confirmed classify matches the B110
+   baseline exactly): even the SIMPLEST possible repro (`fn f(flag) -> ...
+   = { let result = {out:["a","b"], in_ul:flag}; if result.in_ul then
+   result.out+["</ul>"] else result.out }` — a plain record LITERAL
+   binding, no `list.fold` needed) walls identically. The COND and the
+   THEN arm (`result.out + [...]`, a list-concat) both lower successfully
+   — the ELSE arm alone (`result.out`, a BARE record-field access with no
+   concat) is what fails. Traced to `heap_result_arm.rs`'s `lower_heap_
+   result_arm`: its `IrExprKind::Member{object,field}` case is explicitly
+   gated `if self.is_borrowed_param_container(object)` — and its OWN
+   comment (lines ~848-856) explicitly discusses and NAMES `wrap_lists`:
+   "A LOCAL container (`else result.out` over a `list.fold` result, the
+   playground `wrap_lists`) is the LOOP-CARRIED-accumulator frontier (the
+   `(B)` mechanism) — admitting it makes the enclosing fold body lower,
+   whose defunctionalized elided-call count then outruns the source
+   count-gate (a caps WALL BREACH). Defer the local-container case (`None`)
+   so it keeps its existing wall — the loop-slot work owns it." So this
+   isn't a gap nobody noticed — it's a KNOWN, ALREADY-SCOPED frontier
+   (referred to elsewhere as "the `(B)` mechanism" / "loop-slot work"),
+   deliberately deferred because a naive extension (admitting a LOCAL
+   record-field-access arm the same way a BORROWED-PARAM one already is)
+   would violate the `mir_calls <= ir_calls` caps-counting invariant once
+   the enclosing `list.fold` body's own elided/defunctionalized call
+   accounting is dragged into scope — a substantially different, harder
+   problem than a simple gate-widening (every OTHER fix in this session's
+   "twin function"/"sibling arm" pattern was safe specifically BECAUSE it
+   didn't touch caps-counting; this one does). Genuinely out of scope for
+   a quick pass — needs whatever the referenced "(B)"/loop-slot mechanism
+   actually is, likely a substantial new piece of infrastructure for
+   correctly counting calls through a fold-carried accumulator. **Current
+   19, unchanged** (fully reverted, zero diff).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
