@@ -2578,6 +2578,36 @@ B47. **All-scalar tuple `Some((x, y))` admitted as a heap-result MATCH/IF ARM
    every bucket. Ladder: mir 583 / classify 27 zero newly-walled (one entry
    closed) / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
 
+B48. **`(String, <scalar>)` tuple `Some((k, v))` admitted as a heap-result
+   MATCH/IF ARM value too — a safety-net enabler, zero classify delta (27
+   held)**: while porting B47's all-scalar-tuple arm, spotted a SECOND
+   `try_lower_option_ctor` (binds_p4.rs) tuple case never mirrored into
+   `heap_result_arm.rs` — `Some((k, v))` for a `(String, <scalar>)` tuple
+   (map.find's own `__skv_find_some(k, v) = Some((kc, v))` shape, B41).
+   Unlike the all-scalar case, this payload has ONE heap slot (the String),
+   so it needs the RECURSIVE `$__drop_opt_str_int` drop (`variant_drop_
+   handles = "opt_str_int"`, B41's own generated helper) — a flat
+   `DropListStr` (what the bare `is_heap_ty` fallback below it would use)
+   only frees the tuple's OWN refcount and LEAKS the String, the exact
+   near-miss class B41's DIAGNOSIS caught for the bind position. Since
+   `heap_result_arm.rs` had NO `Tuple` case in its `OptionSome` handling at
+   all (confirmed by B47), this ARM-position shape was walling honestly
+   (never reaching the leak) — but porting the drop-routing NOW closes the
+   gap defensively before any future corpus fixture exercises it in arm
+   position. Ported `try_lower_tuple_construct` + `materialize_opt_str_some`
+   + the `opt_str_int` mask-swap verbatim (same builders B41 already
+   proved). Verified: a standalone custom-variant match (`match item {A{k,v}
+   => some((k,v)), B{..} => none}`) PARITY-matched v0 byte-for-byte (`hi,42`
+   / `none`); a dedicated 10,000× leak-loop (fresh `A`/`B` construct + `pick`
+   + match-consume, hit AND miss arms) completed in 11ms under a 16MB cap
+   with the correct accumulated value (50005000), no leak. classify: zero
+   delta (no CURRENT corpus fixture exercises this exact arm-position shape
+   yet) — shipped anyway as a proactive safety fix, mirroring the B33/B36/
+   B46-class "verified enabler, no immediate wall closed" precedent this
+   campaign has used before for genuine correctness gaps. Ladder: mir 583 /
+   classify 27 zero newly-walled (zero closed too — expected) / spec 283 /
+   GATE OK / CORPUS WALL OK (FORBIDDEN=0).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

@@ -362,6 +362,32 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // `some((k, v))` — a `(String, <scalar>)` tuple literal payload as a MATCH/if ARM
+            // value (`map.find`'s `__skv_find_some(k, v) = Some((kc, v))`, B41's find-with-
+            // fallback shape). Build the tuple (`try_lower_tuple_construct`, one heap slot —
+            // the String), move it into the 1-element Option whose scope drop routes to the
+            // RECURSIVE `$__drop_opt_str_int` (`variant_drop_handles = "opt_str_int"`, B41) —
+            // the flat `DropListStr` a bare `is_heap_ty` fallback would use only frees the
+            // TUPLE's own refcount, leaking its String (the same class of bug B41's DIAGNOSIS
+            // caught for the BIND position; this is its ARM-position mirror in
+            // `try_lower_option_ctor`, binds_p4.rs, never ported here). Checked BEFORE the
+            // generic `is_heap_ty` fallback, which has no `Tuple` case at all.
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind, IrExprKind::Tuple { .. })
+                    && matches!(&expr.ty,
+                        Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && !is_heap_ty(&tys[1])) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let repr = repr_of(result_ty).ok()?;
+                let IrExprKind::Tuple { elements } = &expr.kind else { return None };
+                let elements = elements.clone();
+                let piece = self.try_lower_tuple_construct(&elements)?;
+                let obj = self.materialize_opt_str_some(piece, repr);
+                self.variant_drop_handles.insert(obj, "opt_str_int".to_string());
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             IrExprKind::OptionSome { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(result_ty).ok()?;
                 // The owned String payload: a let-bound Var (its handle), or a direct user-call
