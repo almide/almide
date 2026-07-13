@@ -3496,6 +3496,50 @@ DIAGNOSIS — `wrap_lists` (playground_default.almd, B107's documented
    correctly counting calls through a fold-carried accumulator. **Current
    19, unchanged** (fully reverted, zero diff).
 
+B111. **Closed `json_path_edges.almd :: p_set`'s "UNTRACKED subject" wall
+   — the widened Err-bind gate WAS correct all along; the earlier "wrong
+   value" catch was a testing artifact, not a real regression (19 → 18)**:
+   picked up exactly where the earlier DIAGNOSIS left off — widened `try_
+   lower_result_match`'s (control_p2.rs) Err-arm heap-bind admission from
+   `heap_elem_lists.contains(&subj)` alone to also accept `value_result_
+   lists.contains(&subj) || value_result_results.contains(&subj)`,
+   matching its value-position twin `try_lower_variant_value_match`'s
+   `heap_or_scalar_bind` admission set exactly. `p_set` (`Result[Value,
+   String]`) now renders. Diffed the twin's Ok-bind path too (its `bind_
+   payload` routes through the canonical `seed_variant_param`, not a
+   hand-rolled Option/Result split) — tried adding the same call to `try_
+   lower_result_match`'s Ok-bind for symmetry, but `seed_variant_param`
+   is a no-op for a bare `Ty::Value` (only Option/Result/aggregate types
+   match its arms), so this made no observable difference and was
+   reverted (kept the existing hand-rolled Option/Result split as-is).
+   **Root-caused the earlier "wrong value" finding**: it used `let r:
+   Result[Value,String] = ok(json.from_int(5))` as its adversarial probe
+   — inspecting the generated WAT showed this `ok(...)` LET-BINDING
+   construction is ITSELF silently deferring to an empty `list_new(0,8)`
+   placeholder (an UNRELATED, separate construction-site gap for a bare
+   `ok(<Value>)` ctor bound to a `let` — never routes through `materialize_
+   result_str` at all), NOT a bug in the match-lowering fix — the probe
+   was testing the wrong thing. Re-verified with a REALISTIC source
+   instead (`value.get(v, key) -> Result[Value,String]`, a properly-linked
+   self-host function matching how `json.set_path`'s own internals build
+   this shape): `let r1: Result[Value,String] = value.get(obj,"a"); let
+   r2: Result[Value,String] = value.get(obj,"missing")`, fed through
+   `p_set`, renders and matches v0 BYTE-FOR-BYTE (`t1:5` / `t2 err:missing
+   field 'missing'`); a 10,000-iteration leak-loop (fresh `json.parse` +
+   two `value.get` calls + two `p_set` matches every iteration) under a
+   4MB wasmtime cap completed with correct output every iteration, no
+   leak. **The `ok(<Value>)`-let-binding construction gap surfaced above
+   is a genuine, separate latent issue** — not investigated or fixed this
+   stage (out of scope; no current corpus entry appears to exercise it,
+   confirmed by zero newly-walled entries below) — worth flagging for a
+   future pass, since a silent `list_new(0,8)` deferral is exactly the
+   "empty deferred heap value" class of bug this campaign's wall messages
+   exist to prevent. `bidirectional_type_test`/`fan_pure_thunks` in the
+   same UNTRACKED-subject cluster were NOT closed by this fix (checked via
+   the classify diff below — only `p_set` closed) and remain separately
+   diagnosed. Ladder: mir 583 / classify 18 zero newly-walled (1 closed)
+   / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0). **Current 18**.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

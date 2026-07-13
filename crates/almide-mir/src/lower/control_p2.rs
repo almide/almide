@@ -46,8 +46,23 @@ impl LowerCtx {
                 }
                 IrPattern::Err { inner } => {
                     let bind = match inner.as_ref() {
+                        // `heap_elem_lists` covers the flat-drop str-results (`value.as_string`);
+                        // `value_result_lists`/`value_result_results` are the RECURSIVE-drop
+                        // twins (`Result[List[Value],String]` / `Result[Value,String]` —
+                        // `seed_variant_param` routes these there instead, since their Ok
+                        // payload needs `DropResultListValue`/`DropResultValue`, not the flat
+                        // `DropListStr` a String-Ok gets). Mirrors `try_lower_variant_value_
+                        // match`'s `heap_or_scalar_bind` (~line 463-479), the value-position
+                        // twin of this statement-position match — WITHOUT this the Err-bind
+                        // here is strictly narrower than its twin, so a `Result[Value,String]`
+                        // subject (json_path_edges' `p_set`) falls through to the untracked-
+                        // subject both-arms-linearization wall even though the twin would
+                        // admit it.
                         IrPattern::Bind { var, ty }
-                            if is_heap_ty(ty) && self.heap_elem_lists.contains(&subj) =>
+                            if is_heap_ty(ty)
+                                && (self.heap_elem_lists.contains(&subj)
+                                    || self.value_result_lists.contains(&subj)
+                                    || self.value_result_results.contains(&subj)) =>
                         {
                             Some((*var, true))
                         }
