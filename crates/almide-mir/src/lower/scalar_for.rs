@@ -20,7 +20,7 @@ impl LowerCtx {
             return false;
         };
         if var_tuple.is_some()
-            || body_breaks_or_continues(body)
+
             || matches!(find_var_ty(body, var), Some(t) if !matches!(t, Ty::Int))
             || !matches!(start.kind, IrExprKind::LitInt { .. })
         {
@@ -63,7 +63,7 @@ impl LowerCtx {
         self.scalar_loop_depth += 1;
         let mut ok = true;
         for stmt in body {
-            if self.lower_stmt(stmt).is_err() {
+            if self.lower_while_body_stmt(stmt).is_err() {
                 ok = false;
                 break;
             }
@@ -137,7 +137,7 @@ impl LowerCtx {
                 return false;
             }
         }
-        if var_tuple.is_some() || body_breaks_or_continues(body) {
+        if var_tuple.is_some() {
             return false;
         }
         let ops_mark = self.ops.len();
@@ -239,7 +239,7 @@ impl LowerCtx {
         self.scalar_loop_depth += 1;
         let mut ok = true;
         for stmt in body {
-            if self.lower_stmt(stmt).is_err() {
+            if self.lower_while_body_stmt(stmt).is_err() {
                 ok = false;
                 break;
             }

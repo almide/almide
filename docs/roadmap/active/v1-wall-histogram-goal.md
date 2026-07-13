@@ -1020,6 +1020,16 @@ C1. **Conditional while breaks SHIPPED (126 → 122)**: `try_lower_scalar_while`
    guard-break/continue remains (2 walls — the for machinery's sibling
    extension).
 
+C2. **For-loop conditional breaks SHIPPED (122 → 121)**: both scalar for
+   machines (`try_lower_scalar_for_range` / `_for_list`) route body
+   statements through the while-break handler (`lower_while_body_stmt`) and
+   drop their `body_breaks_or_continues` pre-gates — guard-else-break,
+   if-then-break, folded bare breaks and guard-continue FILTERS (the guard
+   desugar's continue elimination) all execute (probe fb2 v0-identical:
+   filter-sum, break-sum, range break). Opened `for guard else break`; the
+   codegen_loop_guard "for with guard continue filtering" test has a further
+   blocker (by-name unchanged — diagnose next).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
