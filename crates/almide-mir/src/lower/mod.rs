@@ -582,8 +582,9 @@ pub fn variant_needs_recursive_drop(
         return false;
     };
     // A ctor field the generated `$__drop_<V>` can free: a nested variant (recurse), a String
-    // (rc_dec), a List[scalar] (flat rc_dec), a List[<variant>] (per-element), or a RECORD (recurse
-    // via `$__drop_<R>` / a scalar-only record's flat rc_dec — see the drop generator's field loop).
+    // (rc_dec), a List[scalar] (flat rc_dec), an Option[scalar] (flat rc_dec — the 0-or-1 block
+    // owns no children), a List[<variant>] (per-element), or a RECORD (recurse via `$__drop_<R>`
+    // / a scalar-only record's flat rc_dec — see the drop generator's field loop).
     let supported_heap = |t: &Ty| -> bool {
         use almide_lang::types::constructor::TypeConstructorId;
         variant_field_name(t, variant_names).is_some()
@@ -593,6 +594,8 @@ pub fn variant_needs_recursive_drop(
                 if a.len() == 1
                     && (!is_heap_ty(&a[0])
                         || variant_field_name(&a[0], variant_names).is_some()))
+            || matches!(t, Ty::Applied(TypeConstructorId::Option, a)
+                if a.len() == 1 && !is_heap_ty(&a[0]))
     };
     let mut any_heap = false;
     let mut all_supported = true;

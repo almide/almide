@@ -352,6 +352,21 @@ impl LowerCtx {
                     _ => self.lower_owned_heap_field(arg)?,
                 };
                 field_vals.push((obj, true));
+            } else if matches!(&arg.ty,
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
+                    if a.len() == 1 && !is_heap_ty(&a[0]))
+            {
+                // An Option[scalar] ctor field (`Box(Some(8))`, `Box(None)`): the 0-or-1-element
+                // len-tag block owns NO children, so its free is one flat rc_dec — emitted by the
+                // generated `$__drop_<T>` (the Option arm in the drop generator's field loop; the
+                // widened `needs_recursive_drop` makes this type recursive-drop) or the masked
+                // DropListStr. A ctor expr builds the fresh block (`try_lower_option_ctor`); a
+                // Var is Dup'd/moved via `lower_owned_heap_field`. Option[heap] / Result payloads
+                // own children a flat free would leak — they stay walled (a later brick).
+                let obj = self
+                    .try_lower_option_ctor(arg, &arg.ty)
+                    .or_else(|| self.lower_owned_heap_field(arg))?;
+                field_vals.push((obj, true));
             } else if is_heap_ty(&arg.ty) {
                 return None; // List[String] / Map / other heap ctor field — a later brick
             } else {

@@ -86,6 +86,17 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                         "        prim.rc_dec(prim.load64(h + {off}))
 "
                     ));
+                } else if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
+                    if a.len() == 1 && !is_heap_ty(&a[0]))
+                {
+                    // An Option[scalar] ctor field (`Box(Option[Int])`) — the 0-or-1-element
+                    // len-tag block owns NO children (a Some payload is a scalar slot), so one
+                    // rc_dec is its full free. Mirrored in BOTH `needs_recursive_drop` gates and
+                    // `try_lower_variant_ctor`'s field admission — construction and drop agree.
+                    frees.push_str(&format!(
+                        "        prim.rc_dec(prim.load64(h + {off}))
+"
+                    ));
                 } else if let Some(ev) = list_rich_variant_elem(ty, &rec_variant_names) {
                     // A `List[<rich variant>]` ctor field (`Block(_, List[Instr])`): each element is a
                     // recursive-drop variant block, freed per-element by the generated `$__drop_list_<ev>`

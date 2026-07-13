@@ -1160,6 +1160,31 @@ B12. **Depth-2 multi-outer ctor fallthrough SHIPPED (112 → 107)**: two compose
    nested_ctor/r5 mains (ctor-in-arg). Ladder: mir 583 / classify 107 zero
    newly-walled / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
 
+B13. **Option[scalar] ctor fields + in-arg tuple-variant matches SHIPPED
+   (107 → 105)**: three composed pieces. (i) A custom-variant ctor field of
+   type `Option[scalar]` (`Box(Some(8))`) now CONSTRUCTS: the 0-or-1 len-tag
+   block owns no children, so its free is one flat rc_dec — mirrored in ALL
+   THREE drop authorities in the same change (the drop generator's field
+   loop, `variant_needs_recursive_drop`'s supported_heap, and the
+   VariantLayouts twin) plus the ctor field admission
+   (`try_lower_option_ctor` / `lower_owned_heap_field`). Option[heap]/Result
+   payloads stay walled (owned children a flat free would leak). (ii)
+   `VariantArmKind::Ctor` binds now carry the FIELD TY, and an Option/Result
+   payload bind seeds its read-shape (`seed_variant_param`) — the inner
+   `match $f { Some(n)/None }` executes instead of walling on a STRICT-mode
+   scalar destructure (classify counted `opt` open but the strict render
+   walled it — the permissive/strict split, now closed). (iii) The 2-arm +
+   deep tuple-variant desugars also run INSIDE the heap-branches fixpoint,
+   AFTER the call-arg lift and BEFORE the let-bound tail-duplication —
+   `println(match (Red, Green) {…})` lifts to a let first, then compiles as
+   a binder-free VALUE match (duplication-gate-safe); order matters both
+   ways (before the lift: a Block-in-call-arg wall; after the duplication:
+   binder-carrying duplicated bodies decline). Probes op1/so1 opened +
+   PARITY, all six prior probes still PARITY, and BOTH fixtures
+   nested_ctor_pattern.almd + r5_wasm_tuple_variant_pattern.almd are
+   end-to-end v0-byte PARITY (mains opened). Ladder: mir 583 / classify 105
+   zero newly-walled / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

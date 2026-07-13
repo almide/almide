@@ -8,13 +8,15 @@ use almide_ir::{
 use almide_lang::types::Ty;
 
 /// One parsed arm of a custom-variant `match` (ADT bricks 3/5c). A `Ctor` arm tests `tag ==
-/// tag` and binds its fields from slots — `(slot index 1+i, bound var, is_heap)`: a SCALAR
-/// field is an i64 value copy; a leaf-heap (`String`) field is a BORROW of the slot handle
-/// (the subject keeps ownership). A move-out arm auto-`Dup`s in `lower_heap_result_arm`; a
-/// consuming re-use `Dup`s in `lower_owned_heap_field` — so the borrow is never released at
-/// rc 0. A `Wildcard` arm is the unconditional catch-all.
+/// tag` and binds its fields from slots — `(slot index 1+i, bound var, is_heap, field ty)`: a
+/// SCALAR field is an i64 value copy; a leaf-heap (`String`) field is a BORROW of the slot
+/// handle (the subject keeps ownership). The field TY lets an Option/Result payload bind seed
+/// its READ-shape (`seed_variant_param`) so an inner `match` over it executes. A move-out arm
+/// auto-`Dup`s in `lower_heap_result_arm`; a consuming re-use `Dup`s in
+/// `lower_owned_heap_field` — so the borrow is never released at rc 0. A `Wildcard` arm is the
+/// unconditional catch-all.
 enum VariantArmKind {
-    Ctor { tag: i64, binds: Vec<(usize, VarId, bool)> },
+    Ctor { tag: i64, binds: Vec<(usize, VarId, bool, Ty)> },
     Wildcard,
     /// A BINDER catch-all (`e => err(e)` — the regrouped compute fall-through): matches any
     /// tag and binds the WHOLE subject value as a BORROW (`param_values` — a consuming

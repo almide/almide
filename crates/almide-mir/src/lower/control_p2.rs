@@ -1300,7 +1300,7 @@ impl LowerCtx {
                             IrPattern::Wildcard => {}
                             // slot 1+i (slot 0 is the tag). A SCALAR field binds by value copy.
                             IrPattern::Bind { var, ty } if !is_heap_ty(ty) => {
-                                binds.push((1 + i, *var, false))
+                                binds.push((1 + i, *var, false, ty.clone()))
                             }
                             // ANY heap field (`String`, a nested VARIANT, a `List[…]` —
                             // `ArrV(xs) => for x in xs`, the gguf ValArray consumer — Bytes,
@@ -1309,7 +1309,7 @@ impl LowerCtx {
                             // type-agnostic (a slot-handle load); what the ARM does with it is
                             // gated by the arm-body lowering as usual.
                             IrPattern::Bind { var, ty } if is_heap_ty(ty) => {
-                                binds.push((1 + i, *var, true))
+                                binds.push((1 + i, *var, true, ty.clone()))
                             }
                             // a nested ctor pattern — a later brick.
                             _ => return None,
@@ -1333,10 +1333,10 @@ impl LowerCtx {
                         match &f.pattern {
                             None | Some(IrPattern::Wildcard) => {}
                             Some(IrPattern::Bind { var, ty }) if !is_heap_ty(ty) => {
-                                binds.push((1 + idx, *var, false))
+                                binds.push((1 + idx, *var, false, ty.clone()))
                             }
                             Some(IrPattern::Bind { var, ty }) if is_heap_ty(ty) => {
-                                binds.push((1 + idx, *var, true))
+                                binds.push((1 + idx, *var, true, ty.clone()))
                             }
                             _ => return None,
                         }
@@ -1371,13 +1371,28 @@ impl LowerCtx {
             return;
         }
         if let VariantArmKind::Ctor { binds, .. } = kind {
-            for (slot, var, is_heap) in binds {
+            for (slot, var, is_heap, fty) in binds {
                 let off = layout::slot_offset(*slot) as i64;
                 if *is_heap {
                     // BORROW the slot handle: the subject owns the String; a move-out auto-Dups
                     // in `lower_heap_result_arm`, a consuming re-use Dups in `lower_owned_heap_field`.
                     let p = self.load_at_offset(h, off, crate::PrimKind::LoadHandle);
                     self.param_values.insert(p);
+                    // An Option/Result PAYLOAD field (`Box(Option[Int])` — the depth-2
+                    // single-outer + builtin-inner class): seed the borrowed handle's
+                    // READ-shape so the inner `match $f { Some(n)/None }` executes (reads the
+                    // len/cap tag) instead of walling on a scalar destructure. Gated to
+                    // Option/Result exactly (the canonical seeder's variant arms) — a
+                    // String/List/nested-variant bind keeps today's borrow-only discipline.
+                    if matches!(fty,
+                        Ty::Applied(
+                            almide_lang::types::constructor::TypeConstructorId::Option
+                                | almide_lang::types::constructor::TypeConstructorId::Result,
+                            _
+                        ))
+                    {
+                        self.seed_variant_param(p, fty);
+                    }
                     self.value_of.insert(*var, p);
                 } else {
                     let payload =

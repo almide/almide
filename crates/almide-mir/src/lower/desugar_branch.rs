@@ -456,6 +456,21 @@ fn desugar_heap_branches_inner(
             cur = Some(r);
             continue;
         }
+        // Compile a tuple-of-VARIANTS match while it is still a VALUE match (binder-free
+        // literal arms) — AFTER the call-arg lift above has pulled it out of an argument
+        // position (`println(match (Red, Green) {…})` → `let tmp = match …; println(tmp)`,
+        // the r5 in-arg shape) but BEFORE the let-bound tail-duplication below pushes
+        // `let tmp = …; <rest>` continuations into its arms (duplicated binder-carrying
+        // bodies the column compilers must decline). Both also run in the outer chains
+        // (idempotent there).
+        if let Some(r) = desugar_tuple_variant_match(src) {
+            cur = Some(r);
+            continue;
+        }
+        if let Some(r) = desugar_tuple_variant_match_deep(src, layouts) {
+            cur = Some(r);
+            continue;
+        }
         if let Some(r) = desugar_let_bound_heap_branch(src) {
             cur = Some(r);
             continue;
