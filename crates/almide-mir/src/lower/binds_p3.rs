@@ -632,8 +632,16 @@ impl LowerCtx {
         let kind = if let Some(rname) = self.record_or_anon_drop_type_name(&elem_ty) {
             ListElemDrop::Record(rname)
         } else if matches!(&elem_ty,
-            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String))
+            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+                && (matches!(tys[1], Ty::String)
+                    || matches!(&tys[1],
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
+                            if b.len() == 1 && !is_heap_ty(&b[0]))))
         {
+            // Widened to (String, <flat block>): DropListStrStr's per-tuple BOTH-slot
+            // rc_dec is a full free for a String OR List[scalar] second slot — the hval
+            // map literal's `("xs", [1, 2, 3])` pairs (the OWNED-builder route the PCC
+            // ownership gate accepts, unlike the raw-handle view widening it rejected).
             ListElemDrop::StrStr
         } else if matches!(&elem_ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)

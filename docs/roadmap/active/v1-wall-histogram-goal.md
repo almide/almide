@@ -1544,6 +1544,21 @@ B24. **hval from_list/display self-hosts + an ownership lesson (48 held)**:
    dedicated owned-tuple-list builder like try_lower_record_list_literal,
    NOT the view). classify 48 / mir 583 / spec 283 / CORPUS WALL OK.
 
+B25. **Owned-route (String, List[scalar]) pairs literal SHIPPED (48 held)**:
+   the B24 follow-up done right — the two OWNED-builder gates widen to the
+   flat-second-slot class ((String, String|List[scalar]) tuples): the
+   `lower_owned_heap_field` (String,String)-tuple arm and
+   `try_lower_record_list_literal_as`'s StrStr element class. Each tuple
+   materializes fresh-owned via try_lower_tuple_construct and is CONSUMED
+   into the owned list (per-element `i…m` + list `i…d` — the record-list
+   balanced shape), drop = DropListStrStr (both-slot rc_dec, a full free
+   for any flat slot). The PCC ownership gate ACCEPTS (30,368 objects) —
+   the same corpus that REJECTED the raw-handle view widening: the checker
+   discriminated the unsound and the sound encoding of the SAME feature
+   exactly as designed. Probe cp4 v0-byte PARITY through the owned route.
+   The List[Map[…]] nesting (cp6) is the remaining compound-repr depth.
+   Ladder: mir 583 / classify 48 / spec 283 / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

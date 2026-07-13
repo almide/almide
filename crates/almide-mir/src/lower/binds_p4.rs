@@ -172,7 +172,11 @@ impl LowerCtx {
             // there — no leak regression).
             IrExprKind::Tuple { elements }
                 if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)) =>
+                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+                        && (matches!(tys[1], Ty::String)
+                        || matches!(&tys[1],
+                            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
+                                if b.len() == 1 && !is_heap_ty(&b[0])))) =>
             {
                 let obj = self.try_lower_tuple_construct(elements)?;
                 if !self.live_heap_handles.contains(&obj) {
