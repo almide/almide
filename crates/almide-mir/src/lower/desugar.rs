@@ -194,6 +194,38 @@ pub fn desugar_method_calls(body: &IrExpr) -> Option<IrExpr> {
                 }
                 _ => None,
             };
+            // A STRUCTURAL-record receiver (`h.run("hello")` where `run: (String) ->
+            // String` is a FN FIELD): the "method" is the field's closure — rewrite to
+            // a Computed call through the Member read (`(h.run)("hello")`), which the
+            // funcref/closure-call machinery executes. (A Named receiver keeps the
+            // Type.method resolution above; count-invariant either way — one call.)
+            let field_call = matches!(&*target,
+                CallTarget::Method { object, .. }
+                    if matches!(&object.ty, Ty::Record { .. } | Ty::OpenRecord { .. }));
+            if field_call {
+                if let CallTarget::Method { object, method } = &*target {
+                    let field_ty = match &object.ty {
+                        Ty::Record { fields } | Ty::OpenRecord { fields } => fields
+                            .iter()
+                            .find(|(n, _)| *n == *method)
+                            .map(|(_, t)| t.clone()),
+                        _ => None,
+                    };
+                    let Some(field_ty) = field_ty else { return };
+                    let callee = IrExpr {
+                        kind: IrExprKind::Member {
+                            object: object.clone(),
+                            field: *method,
+                        },
+                        ty: field_ty,
+                        span: None,
+                        def_id: None,
+                    };
+                    *target = CallTarget::Computed { callee: Box::new(callee) };
+                    self.changed = true;
+                    return;
+                }
+            }
             if let Some(name) = name {
                 if let CallTarget::Method { object, .. } = target {
                     let obj = (**object).clone();

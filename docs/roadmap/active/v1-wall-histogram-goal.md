@@ -1057,6 +1057,17 @@ B7. **Free-fn UFCS resolution SHIPPED (119 → 117)**: `desugar_method_calls`
    Method-walls contract now pins the resolution. Probe uf1 v0-identical
    (basic + chain). Opened both function_test UFCS fns.
 
+B8. **Record fn-field call desugar SHIPPED (117 held, an enabler)**: a Method
+   on a STRUCTURAL-record receiver whose name is a FN FIELD rewrites to the
+   Computed call through the Member read (`h.run("x")` → `(h.run)("x")`,
+   field ty from the record's own fields — count-invariant). Probe ff1 shows
+   the REMAINING blockers for record_fn_field's 2 walls: (i) `make_handler`
+   returns a record with a CAPTURING-CLOSURE field (`run: (x) => n + ":" + x`)
+   — the record ctor with a closure field is unbuilt (heap-result Record
+   return), and (ii) the Member-callee closure call needs the field's closure
+   block loaded from the record slot (the funcref machinery × record slots).
+   Both are the "closures in record slots" piece — design next.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
