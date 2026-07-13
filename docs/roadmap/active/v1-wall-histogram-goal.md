@@ -3731,6 +3731,71 @@ B112. **Closed HALF of the two-part `bidirectional_type_test` gap the
    this shape) / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
    **Current 18, unchanged** (a real correctness fix shipped regardless).
 
+DIAGNOSIS — completed the List[heap]-literal cluster map (an earlier fork
+   this session mapped 4 of 7 sub-shapes; this pass isolates the remaining
+   3, all via read-only investigation — no debug instrumentation needed,
+   no edits made, `git status` never touched by this pass). **All three
+   converge on the SAME already-diagnosed root mechanism** — `try_lower_
+   record_list_literal_as`'s (binds_p3.rs) `ListElemDrop` classification
+   doesn't cover every element shape a `List`/call-arg literal can carry,
+   so the wall (binds_p2.rs:529-545 for let-binds, calls_p2.rs:612-619 for
+   call-args — BOTH already try this SAME builder first) is reached:
+   - `compound_repr_recursive_interp.almd`: bisected (12 independent
+     `let`/`println` pairs tested standalone) to `let es: List[Either[Int,
+     String]] = [Left(1), Right("y")]` — a bare `List[<variant ctor>]`,
+     the EXACT category the earlier fork already named ("`try_lower_
+     record_list_literal_as` only consults the RECORD registry, never
+     `variant_layouts`"). The file's OTHER recursive/mutual/generic-record
+     shapes (self-recursive `Tree`/`RNode`, mutual `A`↔`B`, `Holder[List[
+     Int]]`) all construct FINE standalone — only the `List[Either[..]]`
+     line is the trigger, confirming this file needs no NEW category.
+   - `generic_chain_unwrap_or.almd`: bisected to `let md = [("x", ValInt(
+     64)), ("general.alignment", ValInt(16))]` — a `List[(String, V)]`
+     where `V` is a variant (`ValInt(Int) | ValStr(String)`). A TUPLE
+     wrapping a variant ctor, not a bare variant ctor — `try_lower_record_
+     list_literal_as`'s `ListElemDrop` enum already has SPECIFIC flat-tuple
+     cases (`StrStr`/`StrInt`/`IntStr` — (String,String)/(String,Int)/
+     (Int,String)) but none for "(String, <variant>)"; falls through the
+     same way. Same underlying gap, one layer of tuple-wrapping deeper.
+   - `compound_eq.almd`: bisected to `map.from_list([({name:"alice",
+     age:30}, 1), ({name:"bob",age:25}, 2)])` — a `List[(P, Int)]` (a
+     RECORD, not variant, as the tuple's heap slot) passed as a CALL
+     ARGUMENT (hence the DIFFERENT wall message, "List argument..." vs
+     "List[heap] literal..." — but traced to the SAME builder, `try_lower_
+     record_list_literal` at calls_p2.rs:616, tried first for call-args
+     exactly like the let-bind path). `list.contains`/`set.from_list`
+     (tuple-only, no record) over `List[(Int,Int)]` elements construct
+     fine — only the `(Record, Int)` tuple pairing for `map.from_list`
+     hits the gap. `map_fold_heap_acc.almd` (already diagnosed at memory
+     entry 106 as `Map[String, Map[String, String]]` — a Map literal is
+     internally a paired-slot List, so `List[(String, Map[String,
+     String])]`) is now CONFIRMED the same family too — the tuple's heap
+     slot is a nested Map instead of a Record/Variant, same missing-
+     `ListElemDrop`-case shape.
+
+   **Consolidated map, all 7 entries, ONE underlying gap**: `try_lower_
+   record_list_literal_as`'s `ListElemDrop` classification (binds_p3.rs)
+   needs new cases for tuple/bare elements whose HEAP slot is a variant
+   ctor, a nested Map, or (per the earlier fork's finding) needs an
+   entirely separate variant-ctor-list construction path since bare
+   `List[<variant>]` isn't a tuple shape at all — this is genuinely
+   more than "add one match arm": each new element family needs its own
+   drop-generation (a `$__drop_list_<family>` analog, mirroring how
+   `StrStr`/`StrInt`/`IntStr` each got their own dedicated recursive drop
+   when they were added). Real, scoped, INCREMENTAL infrastructure work
+   (one element-family case at a time, matching how B33 added `List[
+   String]` field support to variant drops earlier in this campaign) —
+   NOT a single quick fix, but also not an unbounded "generics frontier"
+   either now that the exact shapes are enumerated. Suggested order for
+   a future session: (1) bare `List[<variant ctor>]` construction (closes
+   `compound_repr_recursive_interp.almd` alone), (2) a `(String|Int,
+   <variant>)` tuple `ListElemDrop` case (closes `generic_chain_unwrap_
+   or.almd`), (3) a `(<record>, Int)` tuple case (closes `compound_eq.
+   almd`), (4) a `(String, <nested Map>)` tuple case (closes `map_fold_
+   heap_acc.almd`) — likely shares machinery with (2)/(3) once one non-
+   flat-scalar tuple case exists as a template. **Current 18, unchanged**
+   (zero source edits this pass).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
