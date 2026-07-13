@@ -506,16 +506,47 @@ impl LowerCtx {
                 // the If arm's already-working call-arg handling. Without this, EVERY heap-result
                 // match operand fell straight to the generic wall below.
                 IrExprKind::Match { subject, arms } if is_heap_ty(&a.ty) => {
+                    // `desugar_match_to_if` wraps its result in a `Block` (hoisted `let`
+                    // bindings PRECEDING the `If`) whenever the subject isn't one of the
+                    // freely-substitutable KINDS `build_match_chain`'s `subject_pure` admits
+                    // (`Var`/`LitInt`/`LitBool`/`LitFloat` — a `LitStr` subject, e.g. a
+                    // single-use `let x = "hello"; match x {...}` after an EARLIER inlining
+                    // pass propagates `x`'s literal value into the subject position, is NOT
+                    // in that list, so it takes the conservative `bind_subject` path instead
+                    // of inline substitution). This site only ever pattern-matched a BARE
+                    // `If`, declining outright on the Block-wrapped form — closing the ENTIRE
+                    // "match value in a call-argument position" class for any subject shape
+                    // needing the hoist, not just the LitStr case (`match arms returning
+                    // tuples`'s `let (label, len) = match x {s if .. => (..), s => (..)}`).
+                    // Lower the hoisted `let`s first (their own scope-end drops apply
+                    // normally), THEN unwrap to the inner `If` and proceed exactly as before.
                     let lifted = self.desugar_match_to_if(subject, arms, &a.ty).and_then(|e| {
-                        match e.kind {
-                            IrExprKind::If { cond, then, else_ } => {
-                                self.try_lower_heap_result_if(&cond, &then, &else_, &a.ty)
-                            }
-                            _ => None,
+                        let (stmts, if_expr) = match e.kind {
+                            IrExprKind::If { .. } => (Vec::new(), e),
+                            IrExprKind::Block { stmts, expr: Some(tail) } => (stmts, *tail),
+                            _ => return None,
+                        };
+                        let IrExprKind::If { cond, then, else_ } = &if_expr.kind else { return None };
+                        for s in &stmts {
+                            self.lower_stmt(s).ok()?;
                         }
+                        self.try_lower_heap_result_if(cond, then, else_, &a.ty)
                     });
                     match lifted {
-                        Some(dst) => CallArg::Handle(dst),
+                        // Route through `materialized_call_arg` (not a bare `CallArg::Handle`):
+                        // it tracks `dst` in `live_heap_handles` AND, for a Tuple/Record `a.ty`,
+                        // seeds `record_masks`/`variant_drop_handles` from `aggregate_field_tys`
+                        // — the SAME seeding `lower_destructure`'s OWN precise-tuple-extraction
+                        // path (binds_p2.rs) needs to find already done (it only seeds when
+                        // `live_heap_handles.contains(&subj)`, which a bare `CallArg::Handle`
+                        // never satisfies). WITHOUT this, `let (label, len) = match x {...}`
+                        // materialized the tuple fine but its DESTRUCTURE fell to the generic
+                        // container-grain `bind_pattern` fallback, which WALLS a scalar
+                        // component in STRICT mode (a Const-0 would silently corrupt `len`).
+                        Some(dst) => {
+                            let repr = repr_of(&a.ty)?;
+                            self.materialized_call_arg(dst, repr, &a.ty)
+                        }
                         None => {
                             return Err(LowerError::Unsupported(
                                 "heap-result `match` in a call-argument position outside the \

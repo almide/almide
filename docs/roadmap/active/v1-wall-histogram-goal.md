@@ -2816,6 +2816,68 @@ B51. **The THIRD attempt found the real function and closes `protocol_edge_
    mir 583 / classify 25 zero newly-walled (one entry closed) / spec 283 /
    GATE OK / CORPUS WALL OK (FORBIDDEN=0).
 
+B52. **Two-layer fix for `codegen_patterns_test.almd`'s "match arms
+   returning tuples" (25 → 24) — both layers caught by an adversarial
+   probe that classify_corpus alone could NOT see**: `let (label, len) =
+   match x {s if string.len(s)>3 => ("long",string.len(s)), s => ("short",
+   string.len(s))}` walled with "heap-result match in a call-argument
+   position" (`calls_p2.rs`). Traced (debug print at the exact decline
+   site) to a shape-mismatch: `desugar_match_to_if` wraps its OUTPUT in a
+   `Block` (hoisted `let` bindings preceding the `If`) whenever the
+   subject isn't one of the freely-substitutable kinds `build_match_
+   chain`'s `subject_pure` admits (`Var`/`LitInt`/`LitBool`/`LitFloat` —
+   NOTABLY missing `LitStr`; an EARLIER inlining pass had already
+   propagated `let x = "hello"`'s literal value into the match subject
+   position, since `x` is single-use, so by the time this code runs the
+   subject is a bare `LitStr`, not a `Var`). `calls_p2.rs`'s consumer only
+   ever pattern-matched a BARE `IrExprKind::If`, declining outright on the
+   Block-wrapped form. Fixed by unwrapping the Block generically (lower
+   its hoisted `let`s via `self.lower_stmt`, THEN extract the inner `If`)
+   — a GENERAL fix, not LitStr-specific: ANY subject needing the hoist
+   (not just literals) now works in this position.
+   **A first end-to-end parity probe (v0 `long/5/short/2` vs v1) caught a
+   SECOND, layered bug** classify_corpus's per-function isolation never
+   exercises (render_program SKIPS `test{}` blocks entirely — this session
+   confirmed AGAIN that a test-block "not walled by classify" is NOT the
+   same guarantee as "produces correct bytes"; only a hand-written
+   non-test-block equivalent run through wasmtime actually proves it): the
+   materialized tuple rendered, but destructuring `len` (the SCALAR
+   component) fell to the generic container-grain `bind_pattern` fallback
+   and hit STRICT mode's `Const-0` wall. Traced to `lower_destructure`
+   (binds_p2.rs)'s PRECISE tuple-field-extraction seeding, gated on
+   `live_heap_handles.contains(&subj)` — but my Match-arm fix (and the
+   PRE-EXISTING sibling `If` arm right above it) returned a bare
+   `CallArg::Handle(dst)`, never pushing `dst` into `live_heap_handles` at
+   all, so the gate always failed and the precise seeding never ran.
+   `materialized_call_arg` (calls_p4.rs) is the EXISTING helper every
+   OTHER heap call-arg case in this same function already routes through
+   — it does exactly this tracking (`live_heap_handles.push`) PLUS seeds
+   `record_masks`/`variant_drop_handles` from `aggregate_field_tys` for a
+   Tuple/Record `a.ty`. Routed my Match-arm's result through it instead of
+   the bare `CallArg::Handle`. Verified: BOTH the hit (`"long"`/`5`) and
+   miss (`"short"`/`2`) arms parity-match v0 byte-for-byte on both
+   targets; a dedicated 10,000× leak-loop (fresh string + match + tuple
+   destructure, both arms exercised each iteration, 20,000 total
+   materializations) completed in 11ms under a 16MB cap with the correct
+   accumulated value (160000), no leak.
+   **DIAGNOSIS — NOT fixed, deliberately out of scope**: the PRE-EXISTING
+   sibling `If` arm (line ~488, right above my Match-arm edit) has the
+   IDENTICAL `live_heap_handles`-tracking gap — confirmed via a standalone
+   `let (a,b) = if c then (...) else (...)` repro (no Match at all), which
+   STILL hits the same destructure wall after this fix. Left UNCHANGED
+   (not touched by this stage) because it is PRE-EXISTING, already-relied-
+   upon code for OTHER passing corpus entries, and changing its
+   `live_heap_handles` tracking behavior needs its OWN careful regression
+   pass (verifying nothing that currently works starts double-freeing)
+   rather than a drive-by extension riding on this stage's momentum — a
+   real, scoped follow-up (route the `If` arm through `materialized_call_
+   arg` too, exactly like this stage did for `Match`, then re-verify the
+   FULL corpus + a dedicated leak-loop before shipping). classify shows no
+   entry for this shape currently (unexercised by any corpus fixture), so
+   it is a latent gap, not a regression risk today. Ladder: mir 583 /
+   classify 24 zero newly-walled (one entry closed) / spec 283 / GATE OK /
+   CORPUS WALL OK (FORBIDDEN=0).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
