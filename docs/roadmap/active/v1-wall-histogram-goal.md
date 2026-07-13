@@ -1629,6 +1629,21 @@ B29. **Small-variant eq + (String, scalar) tuple literals SHIPPED
    literal eq confirmed already lowering via le1). Ladder: mir 583 /
    classify 44 zero newly-walled / spec 283 / GATE OK / CORPUS WALL OK.
 
+DIAGNOSIS (at 44): **value_deep_eq / compound_eq mains — the 5-chain
+   ceiling.** Every individual piece of value_deep_eq lowers with PARITY
+   (probes vv1–vv5, vv7: Value eq over call operands incl. null/int/cross/
+   str/float/array/object/parse-vs-built, and the ??-let chains). The main
+   walls ONLY when ≥5 call-arg heap-`if` lifts chain in one block (vc4
+   PARITY, vc5 walls with "heap-result if bound to a let/var" — the
+   innermost lifted let is left unduplicated). NOT the
+   MAX_DESUGARED_NODES cap (tested at 4×: same wall). Suspect:
+   `desugar_let_bound_heap_branch` (or the callarg-lift fixpoint
+   interaction) declines at nesting depth 5 — instrument its decline path
+   next (DBG env on the desugar chain, diff the depth-4 vs depth-5
+   desugared trees). Opening this ceiling likely opens value_deep_eq main,
+   compound_eq main, and part of the compound-repr mains (their println
+   chains exceed 5 lifts too).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
