@@ -188,7 +188,7 @@ impl LowerCtx {
         if let Some(rewritten) = crate::lower::desugar_offtype_testing_asserts(body) {
             return self.lower_body_into(&rewritten);
         }
-        if let Some(rewritten) = desugar_heap_branches(body) {
+        if let Some(rewritten) = desugar_heap_branches(body, &self.variant_layouts) {
             return self.lower_body_into(&rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_scalar_tuple_literal_match(body) {
@@ -198,6 +198,11 @@ impl LowerCtx {
             return self.lower_body_into(&rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_tuple_variant_match(body) {
+            return self.lower_body_into(&rewritten);
+        }
+        if let Some(rewritten) =
+            crate::lower::desugar_tuple_variant_match_deep(body, &self.variant_layouts)
+        {
             return self.lower_body_into(&rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_tuple_empty_list_match(body) {

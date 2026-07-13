@@ -1134,6 +1134,32 @@ B11. **Fixed-length list-pattern match desugar SHIPPED (113 → 112)**:
    `regression_v0_11_test :: describe`; zero newly-walled vs walls-pk.txt.
    Ladder: mir 583 / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
 
+B12. **Depth-2 multi-outer ctor fallthrough SHIPPED (112 → 107)**: two composed
+   pieces. (i) `group_option_result_arms` User columns go DEEP (`deep_col`:
+   arbitrary ctor nesting, shallow record sub-patterns) + payload field tys
+   fall back to the variant-layout registry (`lookup_ctor`) when no
+   Bind/Literal names the column (`Box(Some(n))/Box(None)`); layouts threaded
+   explicitly (`desugar_heap_branches`/`desugar_all` now take
+   `&VariantLayouts` — no thread_local). (ii) NEW
+   `desugar_tuple_variant_match_deep` — Maranget-lite column specialization
+   for the N-arm tuple-of-variants matches the 2-arm desugar declines:
+   specialize the leftmost conditional column per ctor head (fresh payload
+   binds = new columns), Bind/Wildcard rows join every head branch (Bind
+   substituted by the component ref — no duplicate binder), `_` default
+   OMITTED when heads cover the type (a dead default would embed a
+   non-exhaustive inner match), first-match pruning, `introduces_binder` gate
+   on >1-branch bodies, 50k node cap. Probes mo1 (sum + classify, 7 branches
+   incl. depth-2 + boxed bind), r5c (3-arm tuple-of-colors), pk2 (B10
+   no-regression), ar1 (record-variant inner) all v0-byte PARITY. Opened
+   nested_boxed sum/classify, nested_ctor area/opt, r5 classify. op1 NOTE:
+   `opt` opened fn-level but `Box(Some(8))` CONSTRUCTION still walls
+   ("heap/recursive field — ADT brick 5"): a custom-variant ctor with a
+   BUILTIN-heap (Option) payload cannot materialize — recursive-variant
+   payloads work (mo1's `Node(Leaf(5), Leaf(7))` in arg position lowered).
+   That ctor gap is the next Campaign B piece and also blocks
+   nested_ctor/r5 mains (ctor-in-arg). Ladder: mir 583 / classify 107 zero
+   newly-walled / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

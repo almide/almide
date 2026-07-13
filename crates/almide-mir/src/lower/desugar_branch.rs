@@ -351,12 +351,15 @@ pub fn desugar_callarg_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExp
 /// `lower_body_into` performs before lowering. Both the lowering and the `count_ir_calls` caps gate
 /// call this, so the duplicated calls are counted 1:1 (mir == ir) regardless of how many branches
 /// a body lifts. Returns `None` if the body is already in normal form (no rewrite applied).
-pub fn desugar_heap_branches(body: &IrExpr) -> Option<IrExpr> {
+pub fn desugar_heap_branches(
+    body: &IrExpr,
+    layouts: &crate::lower::VariantLayouts,
+) -> Option<IrExpr> {
     // Seed a FUNCTION-WIDE fresh-VarId counter ABOVE every id in the whole body, then thread it through
     // the recursion so a lift inside one `if` arm never reuses an id live in a SIBLING arm (block_line's
     // `string.drop` read the then-arm's concat because an arm-local `max_var_id` aliased `line`).
     let mut next_var = max_var_id(body) + 1;
-    let rewritten = desugar_heap_branches_inner(body, &mut next_var)?;
+    let rewritten = desugar_heap_branches_inner(body, &mut next_var, layouts)?;
     // EXPONENTIAL-BLOW-UP guard: each `let s = <heap branch>; rest` duplicates `rest`
     // into both arms, so N chained branch binds yield 2^N copies. Real programs chain
     // 2–4 deep (16 copies — fine); an adversarial/generated 20-chain would be a
@@ -385,7 +388,11 @@ fn count_expr_nodes(e: &IrExpr) -> usize {
     c.0
 }
 
-fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+fn desugar_heap_branches_inner(
+    body: &IrExpr,
+    next_var: &mut u32,
+    layouts: &crate::lower::VariantLayouts,
+) -> Option<IrExpr> {
     let mut cur: Option<IrExpr> = None;
     loop {
         let src = cur.as_ref().unwrap_or(body);
@@ -411,7 +418,7 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
         }
         // Regroup a guarded/literal Option/Result match into ctor-dispatch + a payload sub-match, so
         // the guarded-variant case reduces to the two already-proven pieces.
-        if let Some(r) = desugar_grouped_variant_match(src, next_var) {
+        if let Some(r) = desugar_grouped_variant_match(src, next_var, layouts) {
             cur = Some(r);
             continue;
         }
@@ -485,7 +492,7 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             cur = Some(r);
             continue;
         }
-        if let Some(r) = desugar_nested_branch_arms(src, next_var) {
+        if let Some(r) = desugar_nested_branch_arms(src, next_var, layouts) {
             cur = Some(r);
             continue;
         }
@@ -499,11 +506,15 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
 /// block_scalar two-`if` shape). Normalizing those HERE — inside the SHARED `desugar_heap_branches`
 /// both `lower_body_into` and the `count_ir_calls` caps gate call — keeps the duplicated calls 1:1
 /// (mir == ir); doing it lowering-side only (in `lower_heap_result_arm`) would double-count.
-fn desugar_nested_branch_arms(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+fn desugar_nested_branch_arms(
+    body: &IrExpr,
+    next_var: &mut u32,
+    layouts: &crate::lower::VariantLayouts,
+) -> Option<IrExpr> {
     match &body.kind {
         IrExprKind::If { cond, then, else_ } => {
-            let nt = desugar_heap_branches_inner(then, next_var);
-            let ne = desugar_heap_branches_inner(else_, next_var);
+            let nt = desugar_heap_branches_inner(then, next_var, layouts);
+            let ne = desugar_heap_branches_inner(else_, next_var, layouts);
             if nt.is_none() && ne.is_none() {
                 return None;
             }
@@ -522,7 +533,7 @@ fn desugar_nested_branch_arms(body: &IrExpr, next_var: &mut u32) -> Option<IrExp
             let mut changed = false;
             let new_arms: Vec<almide_ir::IrMatchArm> = arms
                 .iter()
-                .map(|a| match desugar_heap_branches_inner(&a.body, next_var) {
+                .map(|a| match desugar_heap_branches_inner(&a.body, next_var, layouts) {
                     Some(nb) => {
                         changed = true;
                         almide_ir::IrMatchArm {
@@ -577,7 +588,7 @@ fn desugar_nested_branch_arms(body: &IrExpr, next_var: &mut u32) -> Option<IrExp
                     _ => s.clone(),
                 })
                 .collect();
-            let nt = desugar_heap_branches_inner(tail, next_var);
+            let nt = desugar_heap_branches_inner(tail, next_var, layouts);
             if nt.is_some() {
                 changed = true;
             }
@@ -663,8 +674,8 @@ fn desugar_nested_branch_arms(body: &IrExpr, next_var: &mut u32) -> Option<IrExp
         // `Call`/`Block`/arm cases above. Recurse into BOTH operands so the flat_map's lambda-let-if is
         // tail-duplicated (otherwise the outer flat_map declines → the concat walls `heap-result BinOp`).
         IrExprKind::BinOp { op, left, right } => {
-            let nl = desugar_nested_branch_arms(left, next_var);
-            let nr = desugar_nested_branch_arms(right, next_var);
+            let nl = desugar_nested_branch_arms(left, next_var, layouts);
+            let nr = desugar_nested_branch_arms(right, next_var, layouts);
             if nl.is_none() && nr.is_none() {
                 return None;
             }

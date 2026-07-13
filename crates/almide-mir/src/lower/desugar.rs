@@ -137,12 +137,15 @@ pub fn dump_ir(e: &IrExpr) -> String {
 
 /// Env-gated desugar dump: when `DBG_DESUGAR_FN == fn_name`, print the fully-desugared body so the
 /// derived-Codec `decode` chain can be diffed against the proven separate-bind form. No-op otherwise.
-pub fn dump_desugared_ir(fn_name: &str, body: &IrExpr) {
+pub fn dump_desugared_ir(fn_name: &str, body: &IrExpr, layouts: &crate::lower::VariantLayouts) {
     if std::env::var("DBG_DESUGAR_FN").is_ok_and(|v| v == fn_name) {
         if std::env::var("DBG_DESUGAR_RAW").is_ok() {
-            eprintln!("=== RAW {fn_name} ===\n{:#?}", desugar_all(body, fn_name == "main"));
+            eprintln!("=== RAW {fn_name} ===\n{:#?}", desugar_all(body, fn_name == "main", layouts));
         } else {
-            eprintln!("=== DESUGARED {fn_name} ===\n{}", dump_ir(&desugar_all(body, fn_name == "main")));
+            eprintln!(
+                "=== DESUGARED {fn_name} ===\n{}",
+                dump_ir(&desugar_all(body, fn_name == "main", layouts))
+            );
         }
     }
 }
@@ -252,7 +255,11 @@ pub fn desugar_method_calls(body: &IrExpr) -> Option<IrExpr> {
     }
 }
 
-pub fn desugar_all(body: &IrExpr, unit_main: bool) -> IrExpr {
+pub fn desugar_all(
+    body: &IrExpr,
+    unit_main: bool,
+    layouts: &crate::lower::VariantLayouts,
+) -> IrExpr {
     let mut cur = body.clone();
     loop {
         if let Some(r) = desugar_method_calls(&cur) {
@@ -289,7 +296,7 @@ pub fn desugar_all(body: &IrExpr, unit_main: bool) -> IrExpr {
             cur = r;
             continue;
         }
-        if let Some(r) = desugar_heap_branches(&cur) {
+        if let Some(r) = desugar_heap_branches(&cur, layouts) {
             cur = r;
             continue;
         }
@@ -302,6 +309,10 @@ pub fn desugar_all(body: &IrExpr, unit_main: bool) -> IrExpr {
             continue;
         }
         if let Some(r) = desugar_tuple_variant_match(&cur) {
+            cur = r;
+            continue;
+        }
+        if let Some(r) = desugar_tuple_variant_match_deep(&cur, layouts) {
             cur = r;
             continue;
         }
