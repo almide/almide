@@ -171,6 +171,10 @@ impl LowerCtx {
             Some("option.value_unwrap_or")
         } else if crate::lower::is_option_liststr_ty(&expr.ty) {
             Some("option.liststr_unwrap_or")
+        } else if crate::lower::is_option_listscalar_ty(&expr.ty) {
+            // `map.get(groups, k) ?? []` — Option[List[<scalar>]] (the group_by class):
+            // the FLAT sibling (scalar elements own nothing; flat rc drop is exact).
+            Some("option.listint_unwrap_or")
         } else if crate::lower::is_option_listvalue_ty(&expr.ty) {
             Some("option.listvalue_unwrap_or")
         } else {

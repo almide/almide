@@ -1388,6 +1388,23 @@ B18. **First-class fn values into pure combinators SHIPPED (67 → 62)**: a
    583 / classify 62 zero newly-walled / spec 283 / GATE OK / CORPUS WALL
    OK (the caps corpus re-verified with the new handle args).
 
+B19. **Option[List[scalar]] `??` SHIPPED (62 → 58 — waypoint <60 CROSSED)**:
+   `map.get(groups, "0") ?? []` (the group_by class) — the `??` machinery
+   had liststr/value/listvalue payload routes but no FLAT scalar-element
+   list sibling. New `option_listint_unwrap_or` (value_core.almd — the
+   liststr shape with a flat rc drop, scalar elements own nothing) +
+   `is_option_listscalar_ty` + both routing sites (the `??` operator's
+   helper table in control_p3 AND the pipe-form option.unwrap_or rename in
+   list_heap_call_name). Opened 4: group_by test, `?? preserves type: list`,
+   list_chunk_windows main (END-TO-END v0-byte PARITY — the nested
+   `list.get(list.get(list.chunk(...)) ?? [], 0) ?? neg(1)` chain), and
+   map_insertion_order main (fn-level; render still walls honestly on a
+   later for-in-over-map blocker — FORBIDDEN 0 holds). group_by itself
+   stays render-unlinked (no self-host yet) — the fn-level open is honest
+   (fallback, no bytes shipped). Ladder: mir 583 / classify 58 zero
+   newly-walled / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
+   Next waypoint: 0.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

@@ -1199,6 +1199,14 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
             {
                 return "option.liststr_unwrap_or".to_string();
             }
+            // A FLAT scalar-element list payload (`map.get(groups, "0") ?? []` —
+            // Option[List[Int]], the group_by class): the rc-correct flat variant.
+            if a.len() == 1
+                && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+                    if e.len() == 1 && !is_heap_ty(&e[0]))
+            {
+                return "option.listint_unwrap_or".to_string();
+            }
         }
     }
     if module == "list" {

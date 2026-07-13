@@ -137,6 +137,16 @@ pub fn is_option_liststr_ty(ty: &Ty) -> bool {
             if e.len() == 1 && matches!(e[0], Ty::String)))
 }
 
+/// Is `ty` an `Option[List[<scalar>]]` (the `map.get(groups, k) ?? []` group_by shape)? Its `??`
+/// routes to `option.listint_unwrap_or`, the FLAT scalar-element analogue of
+/// `option.liststr_unwrap_or` (the payload list owns nothing — a flat rc drop is exact).
+pub fn is_option_listscalar_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
+        if a.len() == 1 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+            if e.len() == 1 && !is_heap_ty(&e[0])))
+}
+
 /// Is `ty` an `Option[List[Value]]` (the `json.as_array(v)` shape)? Its `??` routes to
 /// `option.listvalue_unwrap_or`, the List[Value] analogue of `option.liststr_unwrap_or`.
 pub fn is_option_listvalue_ty(ty: &Ty) -> bool {
