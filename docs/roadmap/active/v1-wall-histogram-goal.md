@@ -3021,6 +3021,44 @@ DIAGNOSIS — the ROOT CAUSE shared by (at least) `unannotated_unwraps`
    scope it as its own investigation before touching. **Current 24,
    unchanged** (fully reverted, zero diff).
 
+DIAGNOSIS — `map_fold_heap_acc.almd`'s "List argument cannot be faithfully
+   materialized" wall is the compound_repr_* cluster in disguise, NOT an
+   independent bug. Bisected (no source edits made — `git status` clean
+   throughout) down to a single minimal repro with NO `map.fold` involved
+   at all: `let m: Map[String, Map[String, String]] = ["k0": ["k0": "x"]]`
+   — a bare bind of a NESTED Map literal (a Map whose VALUE type is itself
+   a Map) — walls on its own, used or not. A Map is represented internally
+   as a "paired-slot List" (per the existing comment in calls_p2.rs), so
+   this is STRUCTURALLY the same shape the already-documented "non-empty
+   List[heap] literal with nested-ownership elements (a heap-field record/
+   tuple, a list, a call result) cannot be faithfully materialized" wall
+   covers (`compound_repr_interp.almd`/`compound_repr_records_interp.almd`/
+   `compound_repr_recursive_interp.almd`/`generic_chain_unwrap_or.almd`/
+   `generic_fn_in_inferred_lambda.almd` — 5 of the current 24 entries) —
+   just reached via Map-literal construction instead of List-literal
+   construction. `map_fold_heap_acc.almd`'s ACTUAL fold-with-heap-
+   accumulator logic (the file's own stated purpose per its header
+   comment) is unaffected — ALL of its `map.fold` calls over flat
+   (non-nested) Map/List shapes render fine in isolation (verified: the
+   first three `map.fold` lines of the file, extracted alone, lower past
+   this specific wall — they hit a SEPARATE, unrelated "unlinked map.fold_
+   hacc" self-host-registry gap instead, likely just needing all 5 of the
+   file's functions present for correct registry linking, not investigated
+   further here). The ONLY line that hits "List argument cannot be
+   faithfully materialized" is the `map.get_or(["k0": ["k0": "x"]],
+   "missing", y3)` sub-expression's nested map-literal argument. Given
+   this is the SAME "generics/monomorphization frontier" gap already
+   scoped for the compound_repr_* cluster (not a scoped, safe fix — it
+   needs the nested-heap-element container-literal construction work,
+   not a decline-point extension), no fix attempted. Recommend: when the
+   compound_repr_* cluster is eventually tackled, re-classify_corpus
+   afterward — `map_fold_heap_acc` likely closes as a side effect (it may
+   even be worth ADDING to that cluster's fixture list, since it's the
+   only entry currently exercising the Map-literal path instead of the
+   List-literal path — same construction machinery, different literal
+   syntax). **Current 24, unchanged** (zero source edits made or
+   reverted).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
