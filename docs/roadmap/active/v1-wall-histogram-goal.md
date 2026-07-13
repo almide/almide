@@ -2758,6 +2758,64 @@ DIAGNOSIS (at 26, two REVERTED dead-end attempts, no code shipped):
    code runs). classify unaffected either way (still 26, both attempts
    fully reverted before commit — nothing unverified shipped).
 
+B51. **The THIRD attempt found the real function and closes `protocol_edge_
+   test.almd` (26 → 25)** — following the DIAGNOSIS note's own advice
+   (trace empirically, don't infer from doc comments): built a MUCH
+   smaller repro (`type Event={message:String}; effect fn Event.log_info
+   (e)->String=e.message; test{...assert_eq(e.log_info()!,"started")}`)
+   and iterated debug prints across it, MUCH faster than re-testing the
+   full spec file each time. Found `desugar_effect_unwrap_inner`'s stmt-
+   loop (both PREVIOUS attempts' target) is only ever called with `let e =
+   Event{...}` for this test — it correctly declines (no `Unwrap` there)
+   and falls to `desugar_tail_effect_unwrap`, which only recurses into
+   `Block`/`If`/`Match` tails — NOT a bare `Call` (`assert_eq(...)`), so it
+   never reaches the argument at all. The REAL match-builder is a
+   DIFFERENT, similarly-named function in the SAME file —
+   `desugar_let_unwrap` (not `desugar_effect_unwrap_inner`) — called from
+   `desugar_heap_branches`'s OWN internal fixpoint (`desugar_branch.rs`),
+   AFTER `desugar_callarg_unwrap` (in that SAME fixpoint) lifts the
+   call-arg `!` into a real `let tmp = e.log_info()!` statement. Ported
+   the IDENTICAL never-err short-circuit into `desugar_let_unwrap` instead
+   — compiled, but STILL walled. One more debug pass revealed the ACTUAL
+   remaining gap: at the point `desugar_let_unwrap` runs, `e.log_info()`'s
+   `CallTarget` is STILL `Method { object, method }` — UNRESOLVED — because
+   `desugar_method_calls` (the outer `lower_body_into` step that resolves
+   Method → Named) never recurses into an `Unwrap`-wrapped call-argument
+   position either, so it hasn't had a chance to run yet for THIS specific
+   nesting. `NEVER_ERR_LIFTED_FNS` is keyED by the DECLARED fn's own name
+   (`"Event.log_info"` for a UFCS `effect fn Event.log_info(..)` def) —
+   which is EXACTLY the `Sym` a `CallTarget::Method{method}` carries, so
+   checking `method.as_str()` against the SAME set (in addition to the
+   already-checked `Named{name}` case) closes the gap WITHOUT needing
+   method resolution to run first. Verified: the ORIGINAL bare-function
+   (non-method) never-err call-arg-unwrap repro STILL parity-matches
+   (confirms no regression to the case that WAS already working); a NEW
+   method-syntax non-test-block repro (`println(e.log_info()! + "!")`)
+   PARITY-matches v0 byte-for-byte on both targets; a genuinely CAN-ERR
+   UFCS method (`Item.check(i) -> Int = if i.n>0 then ok(i.n) else
+   err("negative")`, called via `match i.check() {ok/err}`) in the SAME
+   program confirms the can-err path is completely untouched (`5`/`-1`,
+   matching B50's `validate` safety story exactly — the SAME never-err
+   local-scan-style discipline). A while-loop-wrapped leak-loop hit an
+   UNRELATED pre-existing wall ("scalar binding outside the value
+   subset") — switched to a 500-repetition STRAIGHT-LINE stress repro
+   (matching the B45 precedent for when loop-wrapping hits unrelated
+   walls): completed in 52ms under a 16MB cap with the correct
+   accumulated value (3500), no leak. `protocol_edge_test.almd`'s
+   `__test_almd_protocol with effect fn` fully vanished from classify.
+   **Lesson for this whole 3-attempt arc**: when a wall's SOURCE COMMENT
+   references a mechanism ("`rewrite_never_err_effect_match`... the rare
+   residue"), don't assume that NAMED function is the one to fix — THREE
+   different functions in TWO files (`rewrite_never_err_effect_match` in
+   mod_p2.rs, `desugar_effect_unwrap_inner` AND `desugar_let_unwrap` both
+   in desugar_unwrap.rs) all independently implement variations of the
+   SAME "never-err lifted call → plain bind" pattern for DIFFERENT desugar
+   ENTRY SHAPES (pre-pass over an existing match / stmt-level `!` / a
+   call-arg-lifted `!`) — empirically trace which one ACTUALLY constructs
+   the match for YOUR specific repro before touching any of them. Ladder:
+   mir 583 / classify 25 zero newly-walled (one entry closed) / spec 283 /
+   GATE OK / CORPUS WALL OK (FORBIDDEN=0).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

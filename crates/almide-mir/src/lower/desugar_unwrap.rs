@@ -872,6 +872,69 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
         guard: None,
         body: cont,
     };
+    // SHORT-CIRCUIT: a NEVER-ERR LIFTED callee (`e.log_info()!` inside `assert_eq(e.log_info()!,
+    // "started")` — `Event.log_info`'s body never builds `err(...)`, so its v1 result is the RAW
+    // payload, not a real Result block) never takes the Err arm — the sound, byte-matching
+    // lowering is a PLAIN bind of the raw call result, mirroring `rewrite_never_err_effect_match`
+    // (mod_p2.rs)'s post-hoc pre-pass rewrite over an ALREADY-EXISTING match. That pre-pass runs
+    // once, early, in `inline_mutual_tail_recursion` — but a `!` nested in a CALL-ARGUMENT position
+    // only becomes a `let v = f()!` shape via `desugar_callarg_unwrap` (desugar_branch.rs), and
+    // THIS function (the one that turns THAT into the err/ok match, called from `desugar_heap_
+    // branches`'s fixpoint) runs LATER, per-function, inside the main lowering loop — too late for
+    // the pre-pass to ever see or rewrite the match it builds here. Doing the SAME short-circuit
+    // at construction time (instead of ever building the doomed match — the match-lowering wall
+    // would reject it: a never-err call's `.ty` is the lifted `Result[T,String]` but its ACTUAL v1
+    // value is raw `T`, so reading it as a Result handle is honestly unsupported) closes that
+    // timing gap. `ok_pattern` is always `Bind` or `Wildcard` here (never `Destructure`'s nested
+    // form — that already reduces to a `Bind` of the tuple payload); Wildcard mints a fresh var
+    // PAST `fresh`/`p2` (this function's own already-minted ids) so it never collides.
+    // A callee name reaches here EITHER already-resolved (`CallTarget::Named`) OR still as an
+    // UNRESOLVED UFCS method call (`CallTarget::Method{method,..}` — `e.log_info()!` nested
+    // inside a call-arg `!`: `desugar_method_calls` (the OUTER `lower_body_into` chain step
+    // that resolves Method → Named) never reaches into an `Unwrap`-wrapped call-argument
+    // position, so by the time `desugar_callarg_unwrap`+THIS function lift/match it, the
+    // subject is STILL `Method` — `NEVER_ERR_LIFTED_FNS` is keyed by the DECLARED fn's OWN
+    // name, `Event.log_info` for a `effect fn Event.log_info(..)` UFCS definition, which is
+    // EXACTLY the `Sym` a `CallTarget::Method{method}` carries — so checking `method.as_str()`
+    // against the SAME set is sound without needing method resolution to have run first).
+    let never_err_callee = match &inner.kind {
+        IrExprKind::Call { target: CallTarget::Named { name }, .. } => Some(*name),
+        IrExprKind::Call { target: CallTarget::Method { method, .. }, .. } => Some(*method),
+        _ => None,
+    };
+    let is_never_err_lifted_call = matches!(&inner.ty,
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2)
+        && never_err_callee.is_some_and(|name| {
+            crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str()))
+        });
+    if is_never_err_lifted_call {
+        let short_var = match &ok_arm.pattern {
+            almide_ir::IrPattern::Ok { inner: ok_inner } => match &**ok_inner {
+                almide_ir::IrPattern::Bind { var, .. } => Some(*var),
+                almide_ir::IrPattern::Wildcard => Some(VarId(max_var_id(body) + 3)),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(var) = short_var {
+            let raw_call = mk(inner.kind.clone(), ok_ty.clone());
+            let bind_stmt = IrStmt {
+                kind: IrStmtKind::Bind {
+                    var,
+                    mutability: almide_ir::Mutability::Let,
+                    ty: ok_ty,
+                    value: raw_call,
+                },
+                span: body.span.clone(),
+            };
+            let mut new_stmts = stmts[..i].to_vec();
+            new_stmts.push(bind_stmt);
+            return Some(mk(
+                IrExprKind::Block { stmts: new_stmts, expr: Some(Box::new(ok_arm.body.clone())) },
+                result_ty,
+            ));
+        }
+    }
     // err($x) => err($x)  (the propagated error IS the function result)
     let err_var = mk(IrExprKind::Var { id: fresh }, err_ty.clone());
     let err_body = mk(IrExprKind::ResultErr { expr: Box::new(err_var) }, result_ty.clone());
