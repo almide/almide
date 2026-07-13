@@ -172,7 +172,12 @@ pub fn repr_of(ty: &Ty) -> Result<Repr, LowerError> {
         Ty::Int16 | Ty::UInt16 => ScalarWidth::Half,
         Ty::Int8 | Ty::UInt8 => ScalarWidth::Byte,
         Ty::Bool => ScalarWidth::Word, // Bool ABI slot is 4 bytes
-        // Unit/Never/RawPtr/Const* are not values that get a scalar slot here.
+        // A RawPtr is a RAW linear-memory ADDRESS carried in the uniform i64 scalar
+        // slot (the same value `prim.handle` yields; on wasm it is an i32 offset the
+        // consuming prim wraps). The bytes_rawptr bridge (#440) reads/writes THROUGH
+        // it via the self-hosted prim loops — never a tracked heap handle.
+        Ty::RawPtr => ScalarWidth::Double,
+        // Unit/Never/Const* are not values that get a scalar slot here.
         other => {
             return Err(LowerError::Unsupported(format!(
                 "no scalar Repr for {other:?}"

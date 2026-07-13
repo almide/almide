@@ -1132,6 +1132,17 @@ impl LowerCtx {
             });
             return Ok(Some(dst));
         }
+        // `prim.ptr_to_int` / `prim.int_to_ptr` — REINTERPRET casts (identity at the
+        // value level: the RawPtr IS the i64 address). No op emitted — the operand's
+        // ValueId passes through, so the cert sees nothing (a pure hat-swap).
+        if func == "ptr_to_int" || func == "int_to_ptr" {
+            let v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported(
+                    "prim ptr cast operand is not a lowerable scalar".into(),
+                )
+            })?;
+            return Ok(Some(v));
+        }
         if func == "path_exists" {
             let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
                 LowerError::Unsupported("prim.path_exists path is not a lowerable scalar/handle".into())

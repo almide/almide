@@ -1572,6 +1572,21 @@ B26. **List[Map] nesting SHIPPED (48 → 47)**: the compound-repr depth-2
    the `deep` line). Ladder: mir 583 / classify 47 zero newly-walled /
    spec 283 / GATE OK / CORPUS WALL OK.
 
+B27. **RawPtr / linear-memory bridge SHIPPED (47 → 45)**: the #440 / C-062
+   family. (i) `repr_of` gains Ty::RawPtr → Scalar Double (a raw address in
+   the uniform i64 slot — never a tracked handle). (ii) NEW identity prim
+   casts `prim.ptr_to_int` / `int_to_ptr` (declared in prim.almd; the
+   lowering emits NO op — the operand ValueId passes through, a pure
+   type-level hat swap). (iii) stdlib/bytes_rawptr.almd self-hosts the four
+   bridge fns: as_ptr/as_mut_ptr = handle+12, from_raw_ptr = fresh
+   alloc_bytes + byte-copy loop, copy_to_ptr = min(len, cap) write-through
+   + count. Debug notes: prim calls decline in ARG position (hoist to
+   lets), and a UNIT-returning helper bound to `let _c` walls on
+   repr_of(Unit) — the ivh helpers' Int-return convention is the pattern.
+   The bytes_rawptr fixture is END-TO-END v0-byte PARITY (read side, write
+   side, capacity clamp); both walls opened. Ladder: mir 583 / classify 45
+   zero newly-walled / spec 283 / purity OK / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

@@ -274,6 +274,14 @@ fn remove_all(path: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_prim_path_exists")
 fn path_exists(path: String) -> Bool = _
 
+// RawPtr ⇄ Int reinterpret casts — the SAME i64 scalar at the value level (a raw
+// linear-memory address); the v1 lowering emits NO op (identity), the type system
+// just changes hats. The bytes_rawptr bridge's address arithmetic runs on Int.
+@intrinsic("almide_rt_prim_ptr_to_int")
+fn ptr_to_int(p: RawPtr) -> Int = _
+@intrinsic("almide_rt_prim_int_to_ptr")
+fn int_to_ptr(a: Int) -> RawPtr = _
+
 // The path_filestat_get WASI FULL-stat query, packaged as ONE high-level SCALAR prim — a
 // FS-READ sandbox exit (Capability::FsRead, same accounting as path_exists). Writes the raw
 // 64-byte WASI filestat at the caller-owned scratch ADDRESS `buf` (the self-host's own Bytes

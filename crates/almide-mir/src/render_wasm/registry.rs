@@ -479,6 +479,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/set_to_string.almd"), &[("set_to_string", "set.to_string")]),
         (include_str!("../../../../stdlib/set_to_string_s.almd"), &[("set_to_string_s", "set.to_string_s")]),
         (include_str!("../../../../stdlib/map_to_string.almd"), &[("map_to_string", "map.to_string")]),
+        (include_str!("../../../../stdlib/bytes_rawptr.almd"), &[("bytes_as_ptr", "bytes.as_ptr"), ("bytes_as_mut_ptr", "bytes.as_mut_ptr"), ("bytes_from_raw_ptr", "bytes.from_raw_ptr"), ("bytes_copy_to_ptr", "bytes.copy_to_ptr")]),
         (include_str!("../../../../stdlib/list_to_string_lo.almd"), &[("list_to_string_lo", "list.to_string_lo")]),
         (include_str!("../../../../stdlib/map_if.almd"), &[("map_from_list_if", "map.from_list_if"), ("map_to_string_if", "map.to_string_if")]),
         // Single-value compound formatters for record/tuple Display (the `${record}`/`${tuple}`
