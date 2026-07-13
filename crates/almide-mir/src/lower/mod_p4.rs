@@ -512,6 +512,13 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
             {
                 ("list", "to_string_llf")
             }
+            // `${List[Option[Int]]}` → `[some(1), none, some(3)]` — composed from the
+            // per-element option display (stdlib/list_to_string_lo.almd).
+            Ty::Applied(TypeConstructorId::Option, inner)
+                if inner.len() == 1 && matches!(inner[0], Ty::Int) =>
+            {
+                ("list", "to_string_lo")
+            }
             // Any other unsupported element type (`List[Map]`, deeper nesting, …) routes to an
             // UNLINKED variant name so the interp DESUGARS to a real `list.to_string_x` CallFn that
             // the render wall then REJECTS — the function walls cleanly. Returning `None` here would
@@ -675,6 +682,9 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
                 // `${Map[Int, String]}` — the ivh display (`[10: "x", 20: "y"]`, raw int
                 // keys + quoted/escaped String values; stdlib/map_ivh.almd).
                 (Ty::Int, Ty::String) => ("map", "to_string_ivh"),
+                // `${Map[Int, Float]}` — `[1: 0.5]` (raw int keys, shortest-round-trip
+                // float values; stdlib/map_if.almd).
+                (Ty::Int, Ty::Float) => ("map", "to_string_if"),
                 _ => ("map", "to_string_x"),
             }
         }
@@ -1560,6 +1570,20 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                     Some("_ivh")
                 }
                 (false, true) => Some("_ivh_wall"),
+                // `Map[Int, Float]` from_list (the float_map literal): ONE scalar-KV impl
+                // (map_if.almd) — the paired i64 slots carry f64 bits verbatim. Display
+                // routes separately (the interp table's to_string_if). Other scalar-scalar
+                // maps keep the plain (unlinked) name — walls cleanly.
+                (false, false)
+                    if func == "from_list"
+                        && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                            if a.len() == 2
+                                && matches!(a[0], Ty::Int)
+                                && matches!(a[1], Ty::Float)) =>
+                {
+                    Some("_if")
+                }
+                (false, false) if func == "to_string_if" => Some(""),
                 _ => None,
             };
             if let Some(suffix) = variant {

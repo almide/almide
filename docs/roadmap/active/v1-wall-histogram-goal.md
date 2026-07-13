@@ -1513,6 +1513,21 @@ B22. **Map[Int,String] from_list + display (48 held, an enabler)**:
    Ladder: mir 583 / classify 48 zero delta / spec 283 / purity gate OK /
    GATE OK / CORPUS WALL OK.
 
+B23. **Display tail continued (48 held, enablers)**: `${List[Option[Int]]}`
+   (list_to_string_lo — the list_to_string_ll composed pattern, each element
+   through its own `"${o}"` interp) and `Map[Int, Float]` from_list +
+   `${fmap}` display (map_if.almd — build via the GENERIC scalar map.set,
+   display composed from map.keys/values + list.zip + the float interp
+   part). Routing: scalar-scalar from_list keyed on the RESULT ty (Float
+   values only — Map[Int,Int] from_list stays unlinked), to_string_if
+   passes through verbatim (the B22 suffix guard pattern). Probes cp2 + cp5
+   v0-byte PARITY; cp1/cp3 confirmed Result-interp and List[String]-escape
+   / List[Float] parts already lower. compound_repr_interp main's residue:
+   `${Map[String, List[Int]]}` (the (String, List[Int]) heap-heap pairs
+   list literal blocks FIRST — cp4) and the List[Map…] nesting — the hval
+   from_list/display family, next. Ladder: mir 583 / classify 48 zero
+   delta / spec 283 / purity OK / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
