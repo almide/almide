@@ -339,6 +339,7 @@
         // emitted ONCE here rather than by either generator inline. Widened on
         // `program_uses_closures` too — mirrors pipeline.rs's same conservative gate.
         let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&ir.type_decls)
+            || crate::lower::program_uses_anon_list_str_record(&ir, &ir.type_decls)
             || crate::lower::program_uses_closures(&ir)
         {
             crate::lower::LIST_STR_DROP_SRC

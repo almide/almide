@@ -643,6 +643,17 @@ fn __drop_list_str_loop(h: Int, n: Int, i: Int) -> Unit =
          __drop_list_str_loop(h, n, i + 1) }
 ";
 
+/// Is `t` a `List[String]` (or `List[<flat variant>]`) — the shape whose scope-end drop
+/// routes to the shared `__drop_list_str`? Shared by [`program_uses_list_str_drop_field`]
+/// (named type decls) and [`program_uses_anon_list_str_record`] (anonymous record shapes,
+/// which never appear in `type_decls`).
+fn is_list_str_field(t: &Ty, flat_names: &std::collections::HashSet<String>) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(t, Ty::Applied(TypeConstructorId::List, a)
+        if a.len() == 1
+            && (matches!(a[0], Ty::String) || is_flat_variant_elem(&a[0], flat_names)))
+}
+
 /// Does the program's type decls carry a record OR variant field that routes to the
 /// shared `__drop_list_str` — a `List[String]` field, or a `List[<flat variant>]` field
 /// (record side only; the variant generator does not admit that shape yet)? Gates
@@ -650,25 +661,71 @@ fn __drop_list_str_loop(h: Int, n: Int, i: Int) -> Unit =
 /// this shape pays no dead drop routine).
 pub fn program_uses_list_str_drop_field(type_decls: &[almide_ir::IrTypeDecl]) -> bool {
     use almide_ir::{IrTypeDeclKind, IrVariantKind};
-    use almide_lang::types::constructor::TypeConstructorId;
     let flat_names = flat_variant_type_names(type_decls);
-    let is_list_str_field = |t: &Ty| {
-        matches!(t, Ty::Applied(TypeConstructorId::List, a)
-            if a.len() == 1
-                && (matches!(a[0], Ty::String) || is_flat_variant_elem(&a[0], &flat_names)))
-    };
     type_decls.iter().any(|d| match &d.kind {
-        IrTypeDeclKind::Record { fields } => fields.iter().any(|f| is_list_str_field(&f.ty)),
+        IrTypeDeclKind::Record { fields } => fields.iter().any(|f| is_list_str_field(&f.ty, &flat_names)),
         IrTypeDeclKind::Variant { cases, .. } => cases.iter().any(|c| {
             let tys: Vec<&Ty> = match &c.kind {
                 IrVariantKind::Unit => vec![],
                 IrVariantKind::Tuple { fields } => fields.iter().collect(),
                 IrVariantKind::Record { fields } => fields.iter().map(|f| &f.ty).collect(),
             };
-            tys.iter().any(|t| is_list_str_field(t))
+            tys.iter().any(|t| is_list_str_field(t, &flat_names))
         }),
         _ => false,
     })
+}
+
+/// Does the program carry an ANONYMOUS record shape (`{ out: List[String], flag: Bool }` —
+/// never declared via `type X = {...}`, so it never appears in `type_decls`) with a
+/// `List[String]`-ish field? These route to the SAME shared `__drop_list_str` as a named
+/// record's field (`anon_record_drop_name`'s generated `$__drop_<anonrec_...>` frees such a
+/// field via the identical flat routine) — but `program_uses_list_str_drop_field` only scans
+/// `type_decls`, so a program whose ONLY such field lives in an anonymous record (a `list.fold`
+/// accumulator record, a plain record literal/param never given a name) rendered a call to
+/// `__drop_list_str` that was never emitted (a dangling `(call $__drop_list_str)` — invalid
+/// wasm the render step's own type-check catches, not a silent wrong-bytes risk, but a hard
+/// failure on an otherwise-lowerable program). Whole-program scan (every expr's `.ty`, plus
+/// every function's param/return types) for a `Record`/`OpenRecord` field of this shape,
+/// mirroring `program_uses_closures`'s visitor.
+pub fn program_uses_anon_list_str_record(
+    program: &almide_ir::IrProgram,
+    type_decls: &[almide_ir::IrTypeDecl],
+) -> bool {
+    let flat_names = flat_variant_type_names(type_decls);
+    let has_field = |fields: &[(almide_lang::intern::Sym, Ty)]| {
+        fields.iter().any(|(_, t)| is_list_str_field(t, &flat_names))
+    };
+    let ty_matches = |t: &Ty| matches!(t, Ty::Record { fields } | Ty::OpenRecord { fields } if has_field(fields));
+    struct Finder<'a> {
+        found: bool,
+        ty_matches: &'a dyn Fn(&Ty) -> bool,
+    }
+    impl almide_ir::visit::IrVisitor for Finder<'_> {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if (self.ty_matches)(&expr.ty) {
+                self.found = true;
+            }
+            if !self.found {
+                almide_ir::visit::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut finder = Finder { found: false, ty_matches: &ty_matches };
+    let funcs = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in funcs {
+        if ty_matches(&f.ret_ty) || f.params.iter().any(|p| ty_matches(&p.ty)) {
+            return true;
+        }
+        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
+        if finder.found {
+            return true;
+        }
+    }
+    false
 }
 
 pub const LENLIST_DROP_SRC: &str = "\

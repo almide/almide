@@ -247,6 +247,7 @@ pub fn try_render_wasm_source(
     // either generator inline (two independent copies would be a duplicate-fn compile
     // error).
     let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&all_type_decls)
+        || crate::lower::program_uses_anon_list_str_record(&ir, &all_type_decls)
         || crate::lower::program_uses_closures(&ir)
     {
         crate::lower::LIST_STR_DROP_SRC

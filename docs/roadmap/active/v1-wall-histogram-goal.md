@@ -3176,6 +3176,52 @@ DIAGNOSIS — the 4-entry "match over an UNTRACKED subject with a
    needs the same extra Value-style seeding) or be its own shape — unknown.
    **Current 22, unchanged this stage** (all 4 entries still open).
 
+B108. **Closed a latent dangling-call crash for ANY program using an
+   ANONYMOUS record with a `List[String]` field — found while investigating
+   `wrap_lists` (playground_default.almd, B107's documented separate root
+   cause), not a wall-count change (22 held) but a real FORBIDDEN-class
+   bug fixed**: minimized `wrap_lists` down to `fn f(flag) -> List[String]
+   = { let r = { out: ["a","b"], in_ul: flag }; if r.in_ul then r.out +
+   ["x"] else r.out }` — even WITHOUT `list.fold` or the custom `Block`
+   variant, render_program hard-crashed with `type errors: ["undefined
+   function '__drop_list_str'"]` (NOT a graceful wall — a genuine dangling-
+   call risk, though caught by the render step's own type-check before any
+   WAT escaped, so never a FORBIDDEN-invariant breach in practice). Root
+   cause: `program_uses_list_str_drop_field` (drop_sources.rs, gates
+   `LIST_STR_DROP_SRC`'s single emission in pipeline.rs) only scans
+   `ir.type_decls` — NAMED `type X = {...}` declarations — so an ANONYMOUS
+   record shape (a `list.fold` accumulator, a bare record literal/param
+   never given a name) with a `List[String]` field is invisible to it: the
+   record's OWN generated recursive drop fn (`anon_record_drop_name`'s
+   `$__drop_<anonrec_...>`) still correctly routes its `List[String]` field
+   through `__drop_list_str` — but that shared helper was never emitted,
+   producing a dangling reference REGARDLESS of whether the record's
+   CONSUMER (`wrap_lists` itself) went on to lower successfully or wall.
+   Fixed by adding `program_uses_anon_list_str_record` (drop_sources.rs) —
+   a whole-program `IrVisitor` scan (mirrors `program_uses_closures`'s
+   shape) over every expr's `.ty` plus every function's param/return types,
+   checking for a `Record`/`OpenRecord` field of this shape — OR'd into
+   BOTH call sites of the two-pass injection (pipeline.rs AND the
+   `tests_part1.rs` test-helper duplicate — B33's hard-learned lesson:
+   fix every copy of a two-pass injection, not just the pipeline one).
+   Verified: the minimized crash repro (and two variants — record from a
+   plain function call, record from `list.fold`) now render cleanly
+   instead of crashing (the non-fold cases now hit `wrap_lists`'s OWN
+   still-open `try_lower_heap_result_if` wall — expected, per B107 — but
+   as an HONEST wall, not a hard crash); a 10,000-iteration leak-loop (a
+   fresh anonymous record with a `List[String]` field constructed +
+   conditionally extended + freed every iteration) under a 4MB wasmtime
+   cap completed with the correct accumulated value (35000), no leak.
+   `wrap_lists` itself REMAINS walled (B107's own separate, undiagnosed
+   `try_lower_heap_result_if` gap — record-field cond + record-field/
+   list-concat arms directly as a function's own tail, not routed through
+   `desugar_match_to_if` at all). Ladder: mir 583 / classify 22 zero
+   newly-walled zero closed (expected — a safety-net fix, no corpus
+   fixture currently exercises the anonymous-record-with-List[String]-
+   field-and-no-consumer-success shape) / spec 283 / GATE OK / CORPUS
+   WALL OK (FORBIDDEN=0). **Current 22, unchanged** (the count-affecting
+   root cause behind `wrap_lists` remains open for a future attempt).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
