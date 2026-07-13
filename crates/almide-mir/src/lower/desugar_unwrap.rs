@@ -109,11 +109,13 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32, unit_main: boo
             },
             p => p,
         };
-        // An Option-`!` is admitted for a SCALAR Some payload only (the sized_conversion
-        // family — no drop on either arm); a heap Some payload's bind/drop discipline is a
-        // later extension: leave the raw `!` so it walls honestly.
+        // An Option-`!` admits BOTH scalar and heap Some payloads: a heap payload binds
+        // as a @12 BORROW over the tracked subject (the heap_elem_lists discipline the
+        // Option match machinery already proves — matrix_misc's `list.get(chunks, 0)!`
+        // Matrix payload); an untracked/unliftable shape still walls honestly at the
+        // match layer (rollback → the untracked-subject wall, never wrong bytes).
         if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) = &inner.ty {
-            if a.len() != 1 || is_heap_ty(&a[0]) {
+            if a.len() != 1 {
                 continue;
             }
         }

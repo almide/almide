@@ -1347,6 +1347,17 @@ B16. **Scalar-scalar Result `err(<scalar>)` ctor SHIPPED (71 → 69)**:
    class). Ladder: mir 583 / classify 69 zero newly-walled / spec 283 /
    GATE OK / CORPUS WALL OK.
 
+B17. **Option-`!` heap payload SHIPPED (69 → 68)**: the effect-unwrap
+   desugar's scalar-only gate on Option payloads dated from before the heap
+   Some-bind discipline existed — a heap payload now binds as a @12 BORROW
+   over the tracked subject (heap_elem_lists + the B13 seeds), so the gate
+   drops to arity-1 only (`list.get(chunks, 0)!` with a Matrix payload —
+   matrix_misc's blocker). An untracked/unliftable shape still walls
+   honestly at the match layer. Probe mm1 (matrix.from_lists →
+   split_cols_even → two `!`-extractions → matrix.get arithmetic) v0-byte
+   PARITY. Ladder: mir 583 / classify 68 zero newly-walled / spec 283 /
+   GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
