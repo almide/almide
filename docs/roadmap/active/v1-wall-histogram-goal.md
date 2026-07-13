@@ -3611,6 +3611,87 @@ DIAGNOSIS — the "non-empty List[heap] literal with nested-ownership elements"
    scoped fix for a single investigation pass — correctly left unattempted.
    **Current 18, unchanged** (zero source edits, `git status` clean).
 
+DIAGNOSIS — refined findings for the LAST TWO "match over an UNTRACKED
+   subject" cluster entries (B111 closed the third, `json_path_edges::
+   p_set`), both traced via temporary debug instrumentation, both fully
+   reverted (`git checkout --` on `control.rs`/`desugar_fan.rs`, confirmed
+   classify matches baseline exactly, zero diff). No code shipped.
+
+   **`bidirectional_type_test.almd`'s "structured error - overflow variant"**
+   (`let e: Result[Int, MathError] = err(Overflow("too big")); match e {
+   ok(_)=>.., err(Overflow(msg))=>.., err(_)=>.. }`, `MathError` a custom
+   variant `DivideByZero | Overflow(String) | NegativeInput(Int)`): refines
+   the EARLIER "would need new Err-payload-is-a-registered-variant drop
+   routing" characterization — that drop routing ALREADY EXISTS and works
+   (`try_lower_result_err_variant_ctor` in `result_ctors.rs`, explicitly
+   built for exactly this `Result[T_scalar, <user variant>]` shape,
+   confirmed via a standalone repro that the CONSTRUCTION alone renders
+   fine). Found a REAL, separate, more precise bug: that constructor
+   builds the Err-variant Result via the SHARED `materialize_opt_str_some`
+   builder ("Err IS Some physically" — same len-as-tag layout) — which
+   internally does `self.materialized_options.insert(obj)` (correct for
+   genuine Option construction, since it's a shared builder) but NEVER
+   `self.materialized_results.insert(obj)`. `try_lower_result_match`
+   (control_p2.rs, the STATEMENT-position match this test needs) gates
+   strictly on `materialized_results`/`materialized_results_str` — with
+   NO Option fallback — so a `let`-bound `err(<variant ctor>)` value is
+   never recognized as a tracked Result subject, falling straight to the
+   untracked-subject wall. (The VALUE-position twin `try_lower_variant_
+   value_match` apparently already has conflict-resolution for "both
+   `materialized_options` AND `materialized_results` true, Result wins" —
+   per an existing code comment — but `try_lower_result_match` has no such
+   fallback at all.) **Even fixing this tracking gap would NOT close this
+   specific entry alone**: `try_lower_result_match` additionally requires
+   `arms.len() == 2` with simple `Ok{bind}`/`Err{bind}` patterns (no nested
+   ctor) — this test's 3-arm match with a NESTED ctor pattern inside the
+   Err arm (`err(Overflow(msg))`, matching a SPECIFIC variant case) is a
+   fundamentally different, unsupported shape for that function regardless
+   of the tracking-set bug. A real fix needs BOTH: (1) track `materialize_
+   opt_str_some`'s structured-error callers into `materialized_results`
+   too (a small, likely-safe addition in `try_lower_result_err_variant_
+   ctor`, NOT attempted — ran out of budget verifying it doesn't interact
+   with the option/result dual-tracking edge cases B32 previously found),
+   AND (2) extending `try_lower_result_match` (or routing this shape
+   through the value-position machinery instead) to support nested ctor
+   patterns in an Err arm — a real capability gap, not a decline-point
+   widening.
+
+   **`fan_pure_thunks.almd::main`** (`fan.race([thunk_a, thunk_b])` /
+   `fan.any([try_c, try_d])` / `fan.settle([quiet_a, quiet_b])`, all with
+   BARE FUNCTION REFERENCES as thunks, not inline `() => ...` lambdas):
+   initially suspected `desugar_fan.rs`'s `fan_bodies` helper (the shared
+   `race`/`settle`/`any` literal-thunk-list inliner) only recognizes
+   `IrExprKind::Lambda` elements, not bare function references — but
+   traced via debug instrumentation and found this hypothesis WRONG: the
+   frontend already ETA-EXPANDS a bare function reference used as a list
+   element into a zero-param `Lambda` (confirmed — `fan_bodies` DOES fire
+   and extract 2 `Lambda` bodies correctly for `fan.race([thunk_a,
+   thunk_b])`). The REAL wall traced to a match with subject `Call{Named{
+   thunk_a}}` (a bare call to `thunk_a`, `ty=Int`) and 2 arms — a
+   STRUCTURALLY INVALID tree `desugar_fan_race_any`'s in-place `walk_expr_
+   mut` mutation appears to produce: `fan.race(...)`'s CHECKED type is
+   `Result[Int,String]` (per the file's own header comment — "FanLowering
+   wraps each non-Result thunk in an Ok adapter"), and the un-annotated
+   `let r = fan.race(...)` presumably goes through SOME auto-unwrap/
+   reconciliation match (`match fan.race(...) { ok(v)=>v, err(e)=>.. }`,
+   mirroring the documented `fan.any` pattern this file's own top comment
+   shows — `match fan.any([...]) { ok(pat)=>.., err(epat)=>.. }` IS an
+   explicitly pre-existing pattern this desugar's PRE-order visitor
+   handles). `desugar_fan_race_any`'s POST-order mutation of the match's
+   SUBJECT (rewriting `fan.race(...)` → `thunk_a()`) appears to leave the
+   SURROUNDING match's `ok`/`err` ARMS in place — over a now-`Int`-typed,
+   non-Result subject that can never satisfy them, producing the
+   untracked-subject wall (2 arms, one call-bearing) instead of the
+   intended plain-value rewrite. NOT fully root-caused (would need to
+   trace the EXACT reconciliation-match construction site, likely in
+   almide-frontend's auto-unwrap/Try handling for MODULE calls specifically
+   — this session's established auto-wrap-ABI investigation for NAMED
+   calls, B105 DIAGNOSIS, may or may not be the same mechanism for `fan.*`
+   Module calls) — genuinely deeper than the "just handle FnRef elements"
+   fix first attempted (which was a no-op, since eta-expansion already
+   produces Lambdas). **Current 18, unchanged for both** (zero source
+   edits remain, `git status` clean).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
