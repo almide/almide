@@ -1941,6 +1941,45 @@ B36. **`List[<Fn>]` literal construction opened (40 held, an enabler)**:
    leak-loop-proven capability completion) / spec 283 / GATE OK /
    CORPUS WALL OK.
 
+B37. **(String,Int)/(Int,String) widened to any scalar (40 → 39) + a newly-
+   discovered PRE-EXISTING invalid-wasm bug flagged**: B34's `StrInt`/`IntStr`
+   tuple-list classification was Int-specific; confirmed via
+   `Op::DropListStrInt`/`DropListIntStr`'s WAT emission (render_wasm_p2.rs)
+   that the render NEVER reads the non-String slot's contents — it is
+   scalar-type-agnostic by construction — so widening the classifier guard
+   from `matches!(tys[1], Ty::Int)` to `!is_heap_ty(&tys[1])` (any scalar)
+   was a pure, zero-risk completion, not a new mechanism. Probes oue2/oue3
+   (`["k0":true,"k1":false]` as a bare bind and as an Option payload)
+   v0-byte PARITY. classify moved `option_unwrap_or_else_heap.almd` OUT of
+   the WALLED-REAL bucket — **but this is a bucket transition, not a full
+   open**: `render_program`'s STRICT check still rejects the fixture, now
+   at a DIFFERENT, separately-tracked site (`map.to_string_x` unlinked — no
+   self-host display for `Map[String,Bool]`, the interp/self-host-gap
+   bucket classify counts separately from WALLED REAL, per its own
+   `count_interp_sites`/`would_wall_callees` accounting — NOT a measurement
+   bug, an intentional bucket split this campaign has never included).
+   **More importantly, isolating the fixture surfaced a PRE-EXISTING,
+   UNRELATED correctness bug**: `option.unwrap_or_else(some(map_literal),
+   fallback)` — for BOTH `Map[String,Int]` (which predates this session
+   entirely, via binds_p4.rs's existing precedent) and `Map[String,Bool]`
+   — compiles to INVALID WASM (`type mismatch: expected i32, found i64`),
+   confirmed via a minimal repro (oue4) with NO Unsupported wall printed —
+   an escaped miscompile at the WHOLE-PROGRAM render step, not a clean
+   `LowerError`. **NOT a regression from this session** (verified: this
+   exact shape was NEVER reachable before — the corpus's only fixture
+   exercising it, `option_unwrap_or_else_heap.almd`, has been walled
+   upstream this entire project). `CORPUS WALL OK` / `FORBIDDEN: 0` hold
+   because the SHIPPED corpus's copy of this fixture still walls overall
+   (via the SEPARATE map-display gap) — this bug is latent, not shipped,
+   but is now ONE gap closer to being reachable. Needs its own
+   investigation before `option.unwrap_or_else` is ever wired for a Map
+   payload — likely a missing/wrong self-host dispatch arm for
+   `option.unwrap_or_else` keyed on a Map-typed Option (mod_p4.rs's
+   `list_heap_call_name`-style dispatch family), analogous to
+   `option.listint_unwrap_or`'s existing List[Int]-specific variant.
+   Ladder: mir 583 / classify 39 zero newly-walled / spec 283 / GATE OK /
+   CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

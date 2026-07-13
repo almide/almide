@@ -649,19 +649,25 @@ impl LowerCtx {
             // map literal's `("xs", [1, 2, 3])` pairs (the OWNED-builder route the PCC
             // ownership gate accepts, unlike the raw-handle view widening it rejected).
             ListElemDrop::StrStr
-        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::Int))
+        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && !is_heap_ty(&tys[1]))
         {
-            // A `(String, Int)` TUPLE element (`[("k0", 1), ("k1", 2)]` — the `[key: value]`
-            // map-literal desugar's pairs list, map_fold_heap_acc's initial accumulator):
-            // the MIRROR of the IntStr arm below. Recursive drop via the EXISTING
-            // `Op::DropListStrInt` (rc_dec the String slot @12 only; the Int @20 is scalar) —
-            // the same Op calls_p2.rs's concat-operator path already routes to for this exact
-            // tuple shape, just not previously wired to the list-LITERAL classifier.
+            // A `(String, <scalar>)` TUPLE element (`[("k0", 1), ("k1", 2)]` — the `[key:
+            // value]` map-literal desugar's pairs list, map_fold_heap_acc's initial
+            // accumulator, `[("k0", true), …]` — option_unwrap_or_else_heap's Map[String,
+            // Bool]): the MIRROR of the IntStr arm below. Recursive drop via the EXISTING
+            // `Op::DropListStrInt` (rc_dec the String slot @12 only — the render NEVER reads
+            // slot1's contents, so it is scalar-type-agnostic: Int/Bool/Float all free
+            // identically here) — the same Op calls_p2.rs's concat-operator path already
+            // routes to for this exact tuple shape, just not previously wired to the
+            // list-LITERAL classifier. Widened from Int-only to any scalar (B34 shipped
+            // Int-only first; the render was already general, only the classifier guard
+            // wasn't — confirmed by reading `Op::DropListStrInt`'s WAT emission).
             ListElemDrop::StrInt
-        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String))
+        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && !is_heap_ty(&tys[0]) && matches!(tys[1], Ty::String))
         {
-            // An `(Int, String)` TUPLE element (`[(0, "a"), (1, "b")]` — `list.enumerate`
-            // shaped literals): recursive drop via the existing `Op::DropListIntStr`.
+            // A `(<scalar>, String)` TUPLE element (`[(0, "a"), (1, "b")]` — `list.enumerate`
+            // shaped literals): recursive drop via the existing `Op::DropListIntStr` (rc_dec
+            // the String slot @20 only — likewise scalar-type-agnostic on slot0).
             ListElemDrop::IntStr
         } else if matches!(&elem_ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
