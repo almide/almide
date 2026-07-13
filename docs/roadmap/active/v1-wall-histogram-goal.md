@@ -1083,6 +1083,19 @@ part's narrow-int to_string routing/concat operand is the decline point
 (NOT the nested member). Next: trace desugar_string_interp's synthetic
 to_string name for narrow int parts and the concat operand's slot load.
 
+B9. **Sized-int interp display SHIPPED (117 → 114)**: `interp_to_string_call`
+   (the interp desugar's leaf dispatch — the ONE `display_leaf_call` defers
+   to) treats Int8/16/32/64 + UInt8/16/32 like Int (the v1 scalar is a
+   uniform i64, widened at the literal/load, so int.to_string prints the
+   exact value incl. negatives; UInt64 stays excluded — above i64::MAX would
+   misprint). Probes si1/si2/si5 v0-identical (flat + nested records, 4-part
+   interp). Opened both drain_smalls fns + sized_int_record_fields main.
+   SECOND v0 BUG in this family (probe si6, needs an issue — EMU gh cannot
+   file): a COMPUTED sized-int field value (`N { a: 0 - 5 }`, a: Int8) emits
+   `-5i64` unwidened into the i8 field — invalid Rust E0308 ×3; the C-038
+   construction-site narrowing only covers bare literals. v1 handles the
+   same program CORRECTLY (`neg=-5 -300 -100000`).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

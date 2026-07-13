@@ -431,7 +431,18 @@ fn display_value(expr: &IrExpr, registry: &RecordLayouts) -> Option<IrExpr> {
 /// `None` for a type with NO Display leaf at all (a bare unresolved var) — the Display declines.
 fn display_leaf_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
     match ty {
-        Ty::Int => Some(("int", "to_string")),
+        // SIZED ints display like Int: a v1 record/variant slot is a uniform i64
+        // (the narrow literal was widened at construction), so int.to_string prints
+        // the exact stored value — incl. negative Int8/16/32 (sign carried in the
+        // i64). UInt64 is EXCLUDED (a value above i64::MAX would misprint).
+        Ty::Int
+        | Ty::Int8
+        | Ty::Int16
+        | Ty::Int32
+        | Ty::Int64
+        | Ty::UInt8
+        | Ty::UInt16
+        | Ty::UInt32 => Some(("int", "to_string")),
         Ty::Bool => Some(("bool", "to_string")),
         Ty::Float => Some(("float", "to_string_compound")),
         Ty::String => Some(("string", "quote")),
@@ -464,7 +475,17 @@ fn display_leaf_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
 fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
     use almide_lang::types::constructor::TypeConstructorId;
     Some(match ty {
-        Ty::Int => ("int", "to_string"),
+        // SIZED ints display like Int: a v1 scalar value is a uniform i64 (widened at
+        // the literal/load), so int.to_string prints the exact stored value including
+        // negative Int8/16/32. UInt64 is EXCLUDED (above i64::MAX would misprint).
+        Ty::Int
+        | Ty::Int8
+        | Ty::Int16
+        | Ty::Int32
+        | Ty::Int64
+        | Ty::UInt8
+        | Ty::UInt16
+        | Ty::UInt32 => ("int", "to_string"),
         Ty::Bool => ("bool", "to_string"),
         // Scalar `${f}` interp uses v0's Display format, which DROPS the `.0` for integer-valued
         // floats (`3.0`->`3`, `100.0`->`100`) — exactly the compound formatter
