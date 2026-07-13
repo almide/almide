@@ -3796,6 +3796,90 @@ DIAGNOSIS — completed the List[heap]-literal cluster map (an earlier fork
    flat-scalar tuple case exists as a template. **Current 18, unchanged**
    (zero source edits this pass).
 
+DIAGNOSIS — found the missing mechanism the earlier "auto-wrap ABI" DIAGNOSIS
+   (search this file for "DIAGNOSIS — the ROOT CAUSE shared by") explicitly
+   flagged as "unidentified, needs its own investigation" for the 3-entry
+   `unannotated_unwraps`/`is_balanced`/`nested_unwrap` cluster — a REAL fix
+   was implemented, but it produces GENUINELY INVALID WASM (not walled, not
+   byte-correct — a real bug), so it was reverted. Documenting precisely so
+   the next attempt doesn't have to re-derive this.
+
+   **The mechanism**: `crates/almide-codegen/src/pass_result_propagation.rs`
+   — `ResultPropagationPass`, a NANOPASS (`impl NanoPass`, `name() ==
+   "ResultPropagation"`) that runs for `Target::Rust | Target::Wasm` (v0's
+   OWN native + its OWN separate legacy WASM emitter, both going through
+   `almide-codegen`'s pipeline) — NEVER for v1 (confirmed: zero references
+   to `almide_codegen`/`ResultPropagation` anywhere in `almide-mir`; v1
+   consumes `almide-frontend::lower::lower_program`'s raw IR directly,
+   bypassing `almide-codegen` entirely). Phase 1 unconditionally lifts
+   EVERY non-test effect fn with a non-Result `ret_ty` to `Result[T,
+   String]`; Phase 2 resolves `err()` types and wraps every exit path in
+   `Ok(...)`; a SEPARATE mechanism (`auto_try.rs`'s `body_never_constructs_
+   err` + `strip_tail_result_ok_sugar`, shared frontend code, ALREADY used
+   by v1 too, B50 this session) then STRIPS the wrap back off for
+   provably-never-err bodies. This confirms the EARLIER diagnosis's
+   suspicion exactly: v0's approach is "wrap everything via a blanket
+   nanopass, then selectively unwrap" — porting it wholesale into v1 would
+   be a blanket rewrite, not a decline-point extension (the exact anti-
+   pattern B51 already burned this session on the `??`→Match rewrite).
+
+   **A narrower, SCOPED alternative was tried instead**: a local per-
+   function scan `body_has_stmt_position_propagating_unwrap` (mirrors
+   `body_never_constructs_err`'s shape — an `IrVisitor` walk checking every
+   `Block`'s stmts for a `Bind`/`Expr` whose value is `Unwrap`/`Try`),
+   gating an override of ONLY `body.ty` (never `func.ret_ty` itself) to
+   `Result[<declared>, String]` at the very top of `lower_function_all_impl`
+   (mod.rs), threaded through the local `body`/`body_ref` bindings instead
+   of `&func.body` everywhere in that function. Reasoning for why this
+   should have been safe (still holds, confirmed no regression on the
+   corpus): a function with NO stmt-position propagating unwrap (`fetch()`-
+   style, or `unwrap_option_some`'s BARE TAIL-position `!`, which
+   `desugar_effect_unwrap` never routes through `body.ty` for at all) is
+   entirely untouched by construction. Also confirmed empirically important:
+   v1's WASM signature emission (`render_wasm_fn`, render_wasm.rs line
+   ~484) is VALUE-REPR-DRIVEN, not declaration-driven — `func.ret`'s repr
+   determines the emitted `(result ...)`, not any `Ty` field read at
+   signature-generation time — so correctly producing a heap Result VALUE
+   was expected to be sufficient, with no separate "signature lifting"
+   step needed (unlike v0's requirement, where Rust needs an explicit
+   upfront type).
+
+   **What actually happened**: the fix DID get `unannotated_unwraps` past
+   the wall — `render_program` produced NO error. But the emitted WASM
+   is INVALID: `wasmtime` rejects it at load time with "type mismatch:
+   expected i64, found i32" (offset 4920), and the function's OWN
+   declared result is `(result i64)` — a SCALAR, not the expected heap
+   pointer (`i32`) a genuine `Result[Int,String]` object needs. This means
+   `heap_res=true` (the `is_heap_ty(result_ty)` gate in `try_lower_variant_
+   value_match`/`try_lower_result_match`, which SHOULD have fired given
+   `body.ty` was correctly overridden) did NOT actually route this through
+   `lower_heap_result_arm` the way expected — OR it did, but SOMETHING in
+   the "implicit Ok-wrap of a bare scalar Ok-arm tail" path (the `cont =
+   Var{v}` continuation, `v: Int`) fails to construct the actual heap
+   Result wrapper object and instead passes the raw scalar through,
+   producing a scalar-typed `ret` whose repr then drives a scalar (i64)
+   WASM signature — while something ELSE downstream (possibly the CALLER
+   side, `main`'s own `unannotated_unwraps()!` unwrap, OR an internal
+   consistency check) expects the i32 heap shape, producing the mismatch.
+   NOT fully root-caused — would need debug tracing INSIDE `lower_heap_
+   result_arm`'s bare-scalar-tail handling specifically (heap_result_arm.
+   rs) to see why the "porta.start" precedent (which this exact "one arm
+   raw-scalar implicit-Ok, other arm explicit ResultErr" shape is supposed
+   to already handle correctly, proven for functions ALREADY declared
+   `-> Result[...]`) doesn't produce the same correct wrapping when the
+   `Result` type arrives via this NEW override path instead of the
+   checker's own declared-type-derived `body.ty`.
+
+   **Cleanly reverted** (`git checkout --` on `crates/almide-mir/src/lower/
+   mod.rs` only, confirmed classify matches the 18-entry baseline exactly,
+   zero diff). **A real fix needs**: EITHER (a) find and fix why the heap-
+   result arm machinery doesn't correctly wrap a bare-scalar Ok-arm tail
+   when reached via this override (likely a genuine, narrower bug once
+   found — the machinery ITSELF is proven for the declared-Result case),
+   OR (b) a different threading point entirely (perhaps the override needs
+   to ALSO reach some OTHER consumer this pass missed, not just `body.ty`).
+   **Current 18, unchanged** (fully reverted, zero diff).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
