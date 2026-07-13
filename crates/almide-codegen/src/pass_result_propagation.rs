@@ -85,17 +85,35 @@ impl NanoPass for ResultPropagationPass {
         // wrongly `Ok(...)`-wrap it, double-wrapping the Result (#434, E0308).
         // Collect their runtime symbols so the tail-wrap can recognize them.
         let intrinsic_effect_syms: HashSet<String> = if wrap_non_result {
-            use almide_lang::ast::{AttrValue, Decl};
+            use almide_lang::ast::{AttrValue, Decl, TypeExpr};
+            // Only intrinsic effect fns whose RUNTIME returns `Result<_, String>`
+            // belong in the tail exemption below: their tail `RuntimeCall` IS the
+            // Result this fn returns, so Ok-wrapping it double-wraps (#434). That
+            // is exactly the ones DECLARED `-> Result[...]`, plus the rare
+            // intrinsic whose runtime returns Result under a non-Result
+            // declaration — currently only `http.serve` (declared `-> Unit`, but
+            // `almide_rt_http_serve -> Result<(), String>`; its runtime wrapper
+            // composes the Result internally).
+            //
+            // A BARE-value intrinsic must NOT be exempted: `io.print -> Unit`,
+            // `io.read_line -> String`, `fs.exists -> Bool`, `env.get -> Option`
+            // all return a plain value from the runtime, so a tail call to one
+            // still needs `Ok(...)`. Exempting them left a bare `()`/value tail
+            // in a `-> Result<_, String>` fn (#758, E0308).
+            const RUNTIME_RESULT_NONRESULT_DECL: &[&str] = &["almide_rt_http_serve"];
             let mut set = HashSet::new();
             for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
                 let Some(source) = almide_lang::stdlib_info::bundled_source(mod_name) else { continue };
                 let Some(parsed) = almide_lang::parse_cached(source) else { continue };
                 for decl in &parsed.decls {
-                    let Decl::Fn { effect, attrs, .. } = decl else { continue };
+                    let Decl::Fn { effect, attrs, return_type, .. } = decl else { continue };
                     if *effect != Some(true) { continue; }
                     let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "intrinsic") else { continue };
                     let Some(first) = attr.args.first() else { continue };
-                    if let AttrValue::String { value: symbol } = &first.value {
+                    let AttrValue::String { value: symbol } = &first.value else { continue };
+                    let declared_result = matches!(return_type,
+                        TypeExpr::Generic { name, .. } if name.as_str() == "Result");
+                    if declared_result || RUNTIME_RESULT_NONRESULT_DECL.contains(&symbol.as_str()) {
                         set.insert(symbol.to_string());
                     }
                 }

@@ -8,11 +8,28 @@
 // They are now recognized and left un-wrapped. http.serve blocks forever, so it
 // is never started here — `_serve_demo` exists only to keep that codegen path
 // compiling (it is emitted, not eliminated).
+//
+// The counterpart (#758): a tail call to a BARE-VALUE @intrinsic effect fn
+// (`io.print -> Unit`, `io.read_line -> String`) must NOT be exempted — its
+// runtime returns a plain value, not a Result, so the tail still needs an
+// `Ok(...)`. Exempting it (the exemption set formerly held every intrinsic
+// effect fn regardless of runtime return type) emitted a bare `()`/value tail
+// in a `-> Result<_, String>` fn — invalid Rust (E0308). These two fns pin
+// both sides of the exemption decision. All three are emitted, not eliminated;
+// none is run (http.serve blocks forever, io.read_line would read stdin).
 import http
+import io
 
 effect fn _serve_demo() -> Unit = {
   http.serve(8080, (req) => http.response(200, http.req_path(req)))
 }
+
+effect fn _print_tail() -> Unit = {
+  let s = "hello"
+  io.print(s)
+}
+
+effect fn _read_tail() -> String = io.read_line()
 
 test "effect-fn tail call to an intrinsic effect fn compiles" {
   assert_eq(1, 1)

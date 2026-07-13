@@ -22,6 +22,19 @@ care about.
   arm now `perceus_expr`s a Guard's `cond` and `else_`, so the divergent else
   block is round-tripped and Dec-balanced like any other block.
 
+### Fixed — Rust codegen
+
+- **Bare-value `@intrinsic` effect fns in tail position** (#758): a tail call
+  to an intrinsic effect fn whose runtime returns a plain value (`io.print →
+  Unit`, `io.read_line → String`, `fs.exists → Bool`, `env.get → Option`) was
+  wrongly exempted from the Result tail-wrap — the exemption set held *every*
+  `@intrinsic` effect fn, not just the runtime-`Result` ones — leaving a bare
+  `()`/value tail in the auto-`Result`-wrapped fn (invalid Rust, E0308). The
+  set is now built from intrinsics that actually return `Result` (declared
+  `-> Result[...]`, plus `http.serve`, whose runtime returns `Result<(),
+  String>` under a `-> Unit` declaration), so bare-value intrinsic tails get
+  their `Ok(...)` like any other tail.
+
 ## [0.23.3] — 2026-05-24
 
 ### Performance — WASM parity with Rust
