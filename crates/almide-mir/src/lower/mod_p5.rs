@@ -57,6 +57,11 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // So a `match`/`!` over it must read tag @16 + bind the @12 payload list handle, exactly
             // like fs.read_text (only the Ok payload type differs: a List[String], not a String).
             | ("fs", "list_dir")
+            // `fs.stat` returns the cap-as-tag `Result[FileStat, String]` (the self-host builds
+            // it with the ordinary ok()/err() ctors — payload @12, tag @16). The Ok payload is a
+            // SCALAR-ONLY record block (size/is_dir/is_file/modified — no heap fields), so the
+            // flat DropListStr @12 free is exact on both arms (record block on Ok, msg on Err).
+            | ("fs", "stat")
             // `fs.write` returns the cap-as-tag `Result[Unit, String]` ($write_text_file builds it in
             // the same layout — Ok with len@4=0 + @12=0 + tag@16=0, Err with len@4=1 + @12=msg +
             // tag@16=1). So a `match`/`!` over it must read tag @16 (NOT len-as-tag @4 — that would

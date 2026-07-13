@@ -1249,6 +1249,34 @@ D2a. **random.choice / random.shuffle self-host SHIPPED (86 → 79)**: the
    classify 79 zero newly-walled / spec 283 / purity drift gate OK / GATE OK
    / FORBIDDEN 0 / CORPUS WALL OK.
 
+D2b. **fs.stat self-host SHIPPED (79 → 76) + LATENT fs.exists regression
+   FOUND & FIXED**: while wiring the new prim the probes exposed that
+   `prim.path_exists` was NEVER DECLARED in stdlib/prim.almd — every program
+   calling fs.exists through the v1 render path walled with "type errors:
+   undefined function 'prim.path_exists'" (an honest wall, v0 fallback — but
+   fs.exists's original opening had silently regressed). Both prims are now
+   declared (path_exists + the new path_filestat). The fs.stat pieces:
+   PrimKind::PathFilestat (args = [bufaddr, path], dst = raw errno;
+   Capability::FsRead in certificate.rs), the `$path_filestat_q` WAT bridge
+   (host writes the 64-byte WASI filestat into the SELF-HOST's own scratch
+   Bytes — field reads stay Almide: filetype@16, size@32, mtim@48 ns→s;
+   accounted in the CLOSED WASI_FLOOR_FNS set, not the open ratchet),
+   stdlib/fs_stat.almd (structural-record Ok payload in fs.almd's field
+   order), admission + registry + result-str tracking, and THREE gate
+   widenings: (i) `effect_unwrap_admitted` admits record-Ok Results
+   (Ty::Record + non-variant Named — control_p2's HOLE-1 resrec/flat
+   machinery already handles both; layouts threaded through
+   desugar_effect_unwrap), (ii) VariantArmKind (B13) already seeds, (iii)
+   NEW FileStat entry in the SELF-HOST REP table (newtype_erase): the
+   BUNDLED fs module's type decls never reach record_layouts, so
+   Named(FileStat) erases to the structural record and `meta.size` member
+   reads resolve without a registry. Probes fst1–fst7 (direct `!`, helper-fn
+   `!`, payload bind, member read, err path, statement match) ALL v0-byte
+   PARITY; mir test updates: the walled-example test now uses env.temp_dir
+   (fs.stat genuinely opened), `$path_filestat_q` documented in the WASI
+   floor set. Ladder: mir 583 / classify 76 zero newly-walled / spec 283 /
+   GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

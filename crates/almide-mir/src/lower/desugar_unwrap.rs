@@ -14,7 +14,11 @@
 /// a bare `f()!` Expr stmt); a tail `f()!` is the fn's return (tail.rs pass-through), and a `!` nested in
 /// an operand is handled by `desugar_callarg_unwrap`. Closes the porta.start / dojo effect-monad wall
 /// WITHOUT the major Return-op subsystem.
-pub fn desugar_effect_unwrap(body: &IrExpr, unit_main: bool) -> Option<IrExpr> {
+pub fn desugar_effect_unwrap(
+    body: &IrExpr,
+    unit_main: bool,
+    layouts: &crate::lower::VariantLayouts,
+) -> Option<IrExpr> {
     let mut next_var = max_var_id(body) + 1;
     desugar_effect_unwrap_inner(body, &mut next_var, unit_main)
 }
@@ -430,7 +434,10 @@ fn desugar_tail_effect_unwrap(tail: &IrExpr, next_var: &mut u32, unit_main: bool
 /// the match-lowering's type dispatch would fall through to the FLAT `heap_elem_lists`/`DropListStr`
 /// cert (control_p2.rs:330-332), which LEAKS that payload's nested heap. So REFUSE it: the fn then
 /// walls cleanly on the raw `!` (an honest `Unsupported` > a gate-invisible leak).
-fn effect_unwrap_admitted(result_ty: &Ty) -> bool {
+fn effect_unwrap_admitted(
+    result_ty: &Ty,
+    layouts: &crate::lower::VariantLayouts,
+) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     let Ty::Applied(TypeConstructorId::Result, a) = result_ty else {
         return false;
@@ -463,6 +470,17 @@ fn effect_unwrap_admitted(result_ty: &Ty) -> bool {
     if matches!(ok, Ty::Applied(TypeConstructorId::Bytes, _) | Ty::Bytes) {
         return true;
     }
+    // RECORD-Ok (`Result[FileStat, String]` — fs.stat): the match layer routes a
+    // recursive-drop record through `resrec:` (result_ok_record_drop_fn → DropWrapperRec)
+    // and a scalar-only record through the flat @12 DropListStr — both exact
+    // (control_p2's HOLE-1 machinery). A Named that is a REGISTERED VARIANT stays
+    // walled (a variant payload's drop is the variant machinery, not the record path).
+    if matches!(ok, Ty::Record { .. }) {
+        return true;
+    }
+    if matches!(ok, Ty::Named(..)) && !layouts.field_is_variant(ok) {
+        return true;
+    }
     // List[Value] Ok + the (String,Int)/(Value,Int)/(List[String],Int)/(List[Value],Int) tuple-Ok
     // shapes — each has a dedicated RECURSIVE result-drop the match-lowering routes to soundly.
     is_result_listval_ty(result_ty)
@@ -479,37 +497,42 @@ fn effect_unwrap_admitted(result_ty: &Ty) -> bool {
 /// `!` is present) and the lift's downstream tail effect-unwrap will lower soundly (no unproven-drop
 /// Ok payload). A NON-admitted `!` flips `all_admitted` so the lift refuses → the raw `!` walls
 /// cleanly (an honest `Unsupported` > a gate-invisible leak).
-fn collect_arm_unwrap_admit(e: &IrExpr, has: &mut bool, all_admitted: &mut bool) {
+fn collect_arm_unwrap_admit(
+    e: &IrExpr,
+    has: &mut bool,
+    all_admitted: &mut bool,
+    layouts: &crate::lower::VariantLayouts,
+) {
     match &e.kind {
         IrExprKind::Unwrap { expr } => {
             *has = true;
-            if !effect_unwrap_admitted(&expr.ty) {
+            if !effect_unwrap_admitted(&expr.ty, layouts) {
                 *all_admitted = false;
             }
-            collect_arm_unwrap_admit(expr, has, all_admitted);
+            collect_arm_unwrap_admit(expr, has, all_admitted, layouts);
         }
         IrExprKind::Block { stmts, expr } => {
             for s in stmts {
                 match &s.kind {
-                    IrStmtKind::Bind { value, .. } => collect_arm_unwrap_admit(value, has, all_admitted),
-                    IrStmtKind::Expr { expr } => collect_arm_unwrap_admit(expr, has, all_admitted),
-                    IrStmtKind::Assign { value, .. } => collect_arm_unwrap_admit(value, has, all_admitted),
+                    IrStmtKind::Bind { value, .. } => collect_arm_unwrap_admit(value, has, all_admitted, layouts),
+                    IrStmtKind::Expr { expr } => collect_arm_unwrap_admit(expr, has, all_admitted, layouts),
+                    IrStmtKind::Assign { value, .. } => collect_arm_unwrap_admit(value, has, all_admitted, layouts),
                     _ => {}
                 }
             }
             if let Some(t) = expr {
-                collect_arm_unwrap_admit(t, has, all_admitted);
+                collect_arm_unwrap_admit(t, has, all_admitted, layouts);
             }
         }
         IrExprKind::If { cond, then, else_ } => {
-            collect_arm_unwrap_admit(cond, has, all_admitted);
-            collect_arm_unwrap_admit(then, has, all_admitted);
-            collect_arm_unwrap_admit(else_, has, all_admitted);
+            collect_arm_unwrap_admit(cond, has, all_admitted, layouts);
+            collect_arm_unwrap_admit(then, has, all_admitted, layouts);
+            collect_arm_unwrap_admit(else_, has, all_admitted, layouts);
         }
         IrExprKind::Match { subject, arms } => {
-            collect_arm_unwrap_admit(subject, has, all_admitted);
+            collect_arm_unwrap_admit(subject, has, all_admitted, layouts);
             for a in arms {
-                collect_arm_unwrap_admit(&a.body, has, all_admitted);
+                collect_arm_unwrap_admit(&a.body, has, all_admitted, layouts);
             }
         }
         _ => {}
@@ -569,7 +592,10 @@ fn append_arm_continuation(
 /// so the duplicated `after` is counted 1:1 by `count_ir_calls` in BOTH the caps gate and the
 /// lowering (mir == ir). HOLE-1: fire only when every triggering `!`-subject's Ok payload has a
 /// proven drop (`effect_unwrap_admitted`); otherwise leave `S` untouched so the raw `!` walls.
-fn desugar_stmt_control_unwrap(body: &IrExpr) -> Option<IrExpr> {
+fn desugar_stmt_control_unwrap(
+    body: &IrExpr,
+    layouts: &crate::lower::VariantLayouts,
+) -> Option<IrExpr> {
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
         return None;
     };
@@ -593,7 +619,7 @@ fn desugar_stmt_control_unwrap(body: &IrExpr) -> Option<IrExpr> {
         // payload is HOLE-1-admitted (else the lift would feed an unprovable-drop Ok into the tail
         // effect-unwrap — refuse so the raw `!` walls cleanly).
         let (mut has, mut all_admitted) = (false, true);
-        collect_arm_unwrap_admit(s_expr, &mut has, &mut all_admitted);
+        collect_arm_unwrap_admit(s_expr, &mut has, &mut all_admitted, layouts);
         if !has || !all_admitted {
             continue;
         }

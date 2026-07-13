@@ -114,6 +114,26 @@ pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
             ),
         );
     }
+    // FileStat — the fs.stat Ok payload. Its decl lives in the BUNDLED stdlib fs module,
+    // which `source_to_ir` skips (defs come from the self-host registry), so the nominal
+    // `Named(FileStat)` never reaches `record_layouts` and a `meta.size` member read walls.
+    // Erase it to the STRUCTURAL record (the SAME field order stdlib/fs.almd declares and
+    // stdlib/fs_stat.almd constructs — `aggregate_field_tys` resolves a `Ty::Record`
+    // without any registry), so member reads land on the right uniform slots.
+    if !declared.contains("FileStat") {
+        use almide_lang::intern::sym;
+        map.insert(
+            "FileStat".to_string(),
+            Ty::Record {
+                fields: vec![
+                    (sym("size"), Ty::Int),
+                    (sym("is_dir"), Ty::Bool),
+                    (sym("is_file"), Ty::Bool),
+                    (sym("modified"), Ty::Int),
+                ],
+            },
+        );
+    }
     if map.is_empty() {
         return;
     }

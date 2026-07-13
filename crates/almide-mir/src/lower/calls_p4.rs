@@ -1099,6 +1099,30 @@ impl LowerCtx {
         // scalar with no scope-end drop and no ownership-cert `i`. Carries Capability::FsRead (a
         // stat IS a filesystem read — counted in cap_witness). The render emits the WASI
         // path_filestat_get query (errno 0 = exists).
+        // `prim.path_filestat(bufaddr, path)` — the WASI FULL-stat floor (fs.stat). TWO args: a
+        // raw scratch ADDRESS (an i64 scalar — the self-host's own Bytes data region, so the
+        // caller owns the buffer) and a BORROWED `String` path. dst = the SCALAR errno (0 = the
+        // 64-byte WASI filestat is at bufaddr). Like path_exists this allocates NO heap result —
+        // the dst joins no classification set. Carries Capability::FsRead (counted in cap_witness).
+        if func == "path_filestat" {
+            let bufaddr = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported(
+                    "prim.path_filestat buffer address is not a lowerable scalar".into(),
+                )
+            })?;
+            let path = self.lower_scalar_value(&args[1]).ok_or_else(|| {
+                LowerError::Unsupported(
+                    "prim.path_filestat path is not a lowerable scalar/handle".into(),
+                )
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: PrimKind::PathFilestat,
+                dst: Some(dst),
+                args: vec![bufaddr, path],
+            });
+            return Ok(Some(dst));
+        }
         if func == "path_exists" {
             let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
                 LowerError::Unsupported("prim.path_exists path is not a lowerable scalar/handle".into())

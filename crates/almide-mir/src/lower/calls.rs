@@ -257,6 +257,11 @@ impl LowerCtx {
             // and the transitive cap_witness counts FsRead. UNLIKE the heap-Result fs prims,
             // it returns a SCALAR Bool (no allocation, no scope-end drop).
             || (module == "fs" && func == "exists")
+            // `fs.stat` READS the filesystem (the full path_filestat_get) — REUSES
+            // Capability::FsRead. Self-hosted to `prim.path_filestat` (fs_stat.almd), so its
+            // prim floor is in the program map and the transitive cap_witness counts FsRead.
+            // Returns Result[FileStat, String] (a record Ok payload).
+            || (module == "fs" && func == "stat")
             || (module == "io" && func == "print")
             || (module == "io" && func == "read_line")
             // `io.read_n_bytes` READS standard input (the SIBLING of read_line) — REUSES

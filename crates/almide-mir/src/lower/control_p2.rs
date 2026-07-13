@@ -711,7 +711,7 @@ impl LowerCtx {
     ///      through `lower_pure_module_value_call` (the SAME emitted CallFn name as every other call
     ///      site — `list_heap_call_name`, never a raw dotted name) so the match reads a real block.
     pub(crate) fn is_effect_result_subject(&self, subject: &IrExpr) -> bool {
-        if !effect_unwrap_admitted(&subject.ty)
+        if !effect_unwrap_admitted(&subject.ty, &self.variant_layouts)
             && self.result_ok_record_drop_fn(&subject.ty).is_none()
         {
             return false;

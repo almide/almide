@@ -740,6 +740,18 @@ fn render_op(
                 PrimKind::PathExists => {
                     format!("(i64.extend_i32_u (call $path_exists (local.get {})))", local(args[0]))
                 }
+                // path_filestat(bufaddr, path) — the WASI FULL-stat floor; path_filestat_get on
+                // `path` writing the 64-byte filestat at `bufaddr`. The bufaddr arg is an i64
+                // scalar local (wrapped to the i32 address); the path arg is a heap Ptr local
+                // (i32 handle, passed directly). dst is the SCALAR errno (i64.extend'd) — the
+                // PathExists scalar-result discipline.
+                PrimKind::PathFilestat => {
+                    format!(
+                        "(i64.extend_i32_u (call $path_filestat_q (i32.wrap_i64 (local.get {})) (local.get {})))",
+                        local(args[0]),
+                        local(args[1])
+                    )
+                }
                 // read_line() — the WASI stdin-line floor; reads fd 0 byte-by-byte until '\n'/EOF
                 // and builds a fresh owned canonical `String` (newline excluded, trailing '\r'
                 // stripped) in the preamble helper. NO args. dst is a heap Ptr (value_reprs_wasm),

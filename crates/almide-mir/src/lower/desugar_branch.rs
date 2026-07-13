@@ -503,7 +503,7 @@ fn desugar_heap_branches_inner(
         // followed by a non-empty continuation. Lift `after` into each arm (tail-duplication) so the
         // branch becomes the block TAIL — the tail effect-unwrap then resolves the `!`. Runs in this
         // SHARED desugar so the duplicated `after` is counted 1:1 by the caps gate (mir == ir).
-        if let Some(r) = desugar_stmt_control_unwrap(src) {
+        if let Some(r) = desugar_stmt_control_unwrap(src, layouts) {
             cur = Some(r);
             continue;
         }

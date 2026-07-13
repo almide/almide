@@ -625,6 +625,22 @@ pub(crate) fn preamble() -> String {
   ;; file OR directory exists there → return 1, else 0 — matching native Path::exists(). The stat
   ;; buffer is 8-aligned $alloc8 scratch (the host writes i64 fields there). Returns a SCALAR i32
   ;; Bool (the caller i64.extend's it) — NO heap result, so no Capability beyond FsRead.
+  ;; fs.stat(path) — the WASI FULL-stat floor. $buf is a CALLER-OWNED 64-byte scratch (the
+  ;; self-host's Bytes data region — the host writes the WASI filestat there: filetype@16,
+  ;; size@32, mtim@48); $path a BORROWED canonical String. Same resolution as $path_exists
+  ;; (leading '/' stripped, preopen fd 3, symlink_follow). Returns the RAW errno (0 = ok).
+  (func $path_filestat_q (param $buf i32) (param $path i32) (result i32)
+    (local $pdata i32) (local $plen i32)
+    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
+    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
+    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
+                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
+      (then
+        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
+        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    (call $path_filestat_get (i32.const 3) (i32.const 1) (local.get $pdata) (local.get $plen)
+                             (local.get $buf)))
+
   (func $path_exists (param $path i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $stat i32) (local $errno i32)
     ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.

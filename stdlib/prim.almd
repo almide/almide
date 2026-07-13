@@ -255,6 +255,29 @@ fn make_dir(path: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_prim_remove_all")
 fn remove_all(path: String) -> Result[Unit, String] = _
 
+// The path_filestat_get WASI EXISTENCE query, packaged as ONE high-level SCALAR prim — a
+// FS-READ sandbox exit (reaches Capability::FsRead — a stat IS a filesystem read, the SAME
+// capability as read_text_file, NOT a new one). Stats `path` (preopen-relative, leading '/'
+// stripped — the same resolution read_text_file uses) and returns `true` iff a file OR
+// directory exists there (errno 0), matching native `Path::exists()`. UNLIKE the fs prims
+// above this is NOT a heap result — a stat allocates nothing. Reached only by the self-hosted
+// `fs.exists` (fs_exists.almd) in the v1 trust-spine wasm backend; the render emits the WASI
+// path_filestat_get query. No native runtime impl — the native target uses fs.exists's own
+// @intrinsic.
+@intrinsic("almide_rt_prim_path_exists")
+fn path_exists(path: String) -> Bool = _
+
+// The path_filestat_get WASI FULL-stat query, packaged as ONE high-level SCALAR prim — a
+// FS-READ sandbox exit (Capability::FsRead, same accounting as path_exists). Writes the raw
+// 64-byte WASI filestat at the caller-owned scratch ADDRESS `buf` (the self-host's own Bytes
+// data region: filetype@16, size@32, mtim@48) for `path` (preopen-relative, leading '/'
+// stripped) and returns the raw errno (0 = the buffer is filled). Reached only by the
+// self-hosted `fs.stat` (fs_stat.almd), which reads the fields back via prim.load* and builds
+// the FileStat record in ordinary Almide. No native runtime impl — the native target uses
+// fs.stat's own @intrinsic.
+@intrinsic("almide_rt_prim_path_filestat")
+fn path_filestat(buf: Int, path: String) -> Int = _
+
 // The fd_read-from-stdin line-read WASI host call, packaged as ONE high-level HEAP-RESULT prim —
 // the STANDARD-INPUT sandbox exit (reaches Capability::Stdin, a DISTINCT capability: reading the
 // operator's input stream is neither a write, a filesystem, an entropy, nor a clock effect).

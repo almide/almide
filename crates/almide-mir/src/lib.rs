@@ -649,6 +649,16 @@ pub enum PrimKind {
     /// the SAME accounting as [`ReadTextFile`] → FsRead); counted in cap_witness. Reached only by
     /// the self-hosted `fs.exists`.
     PathExists,
+    /// The WASI `path_filestat_get` FULL-stat query — `args = [bufaddr, path]` (a raw scratch
+    /// ADDRESS the caller owns — the self-host's 64-byte Bytes data region — plus a BORROWED
+    /// `String` handle), dst = the SCALAR errno (i64; 0 = the host wrote the 64-byte WASI
+    /// filestat at `bufaddr`: filetype@16, size@32, mtim@48). The self-hosted `fs.stat` reads
+    /// the fields off its own scratch via `prim.load*` and builds the FileStat record in
+    /// ordinary Almide — the prim stays a thin syscall wrapper (no heap result, no ownership
+    /// event; the same scalar-dst discipline as [`PathExists`]). A stat IS a filesystem READ,
+    /// so it REUSES [`Capability::FsRead`] (counted in cap_witness). Reached only by the
+    /// self-hosted `fs.stat`.
+    PathFilestat,
     /// Release one reference of a RAW heap handle (`(call $rc_dec …)`), the inverse of [`RcInc`].
     /// The MECHANISM the self-hosted recursive `value.__drop_value` frees a dynamic Value tree with
     /// (the §4.1-compliant alternative to a hand-written WAT drop): it operates on raw Int handles,

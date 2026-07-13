@@ -278,7 +278,7 @@ pub fn desugar_all(
             cur = r;
             continue;
         }
-        if let Some(r) = desugar_effect_unwrap(&cur, unit_main) {
+        if let Some(r) = desugar_effect_unwrap(&cur, unit_main, layouts) {
             cur = r;
             continue;
         }
