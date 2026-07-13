@@ -2371,6 +2371,58 @@ B44. **`unwrap_never_err_call_types` regression fixed for List/Record/Tuple
    one mechanism). Ladder: mir 583 / classify 31 zero newly-walled (one
    entry closed) / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
 
+B45. **`branch_lift.rs`'s dense-region lift widened from `If`-only to
+   `If`|simple-pattern-`Match` — closes the 2-entry "heap-result match bound
+   to a let/var" bucket (31 → 29, a 2-for-1)**: diagnosed via a fork —
+   `alias_combinator_rc.almd`/`codec_decode_errors.almd` both share the
+   IDENTICAL shape: 5+ chained `let X = <call>; println(match X {...})`
+   statement-pairs in one straight-line block, where each match's arms
+   interpolate into a heap `String`. `println(match X {...})` puts a
+   heap-result `Match` in a CALL-ARGUMENT position; the MIR ANF-lift turns
+   this into a synthetic `let $tmp = match X {...}; println($tmp)` — and
+   with 5+ such pairs in one block, the bind-position `Match` handling in
+   `binds_p2.rs` (a narrow 2-case subset: tuple-unwrap_or desugar output,
+   single-arm tuple-destructure) declines outright — no sound per-arm-alloc
+   scope-end-drop encoding exists there for a dense chain. This is EXACTLY
+   the class `branch_lift.rs` (B30, commit `1792e5d7`) was built to solve
+   for `If` — a dense (>3 heap-branch) straight-line block's density SCAN
+   (`stmt_holds_heap_if`, at the top of `visit_expr_mut`) already counted
+   BOTH `If` and `Match` toward the threshold, but the actual LIFT TRIGGER
+   (`self.dense_depth > 0 && matches!(expr.kind, IrExprKind::If{..})`) only
+   ever fired for `If` — `Match` was scanned-for but never wired into the
+   lift itself, a pure oversight from B30's original scope. Fixed by
+   widening the trigger to ALSO fire for a `Match` whose arms are ALL
+   simple patterns (`Some`/`None`/`Ok`/`Err`/`Bind`/`Wildcard` — mirroring
+   the EXISTING stmt-level Bind-arm gate a few lines below, which already
+   uses this exact same subset for the `let $tmp = match {...}` case, for
+   the identical reason: a literal-pattern match desugars to an `if subject
+   == lit` chain that DUPLICATES the subject's calls — an unpredictable
+   `mir > ir` count — and a custom-variant/tuple/list/record-pattern match
+   can still wall inside the tail handler, so lifting it would just
+   relocate the wall into a dead helper). `lift_bind_value` (the
+   capture/helper-synthesis machinery) is kind-agnostic — it lifts whatever
+   `&mut IrExpr` it is given, so no other change was needed; the lifted
+   Match's TAIL position is already proven ("renders it for both scalar AND
+   heap payloads") by `try_lower_variant_value_match` since B30. Verified: a
+   300-repetition straight-line stress repro (1500 total heap-result
+   `Match`-in-call-arg sites, 300 synthesized `branch_lift_synth_N`
+   helpers) — v0 native and v1-via-wasmtime byte-identical over all 1500
+   output lines, completed in 786ms under a 16MB wasmtime memory cap (no
+   leak/double-free across 300 independently-synthesized helpers). A
+   SEPARATE variant (the same dense chain wrapped inside a `while` LOOP,
+   rather than straight-line) still declines with a DIFFERENT, pre-existing
+   wall text ("in a call-argument position outside the executable subset")
+   — confirmed this is NOT a regression (pre-fix, the expr-level lift never
+   existed for `Match` at all, loop or not, so this shape was already
+   broken before B45; out of scope here, a distinct follow-up). classify:
+   `codec_decode_errors.almd` fully vanished from every bucket (confirmed
+   end-to-end PARITY: identical stdout on both targets);
+   `alias_combinator_rc.almd` advanced past this wall to a DIFFERENT,
+   unrelated pre-existing gap (`list.push` unlinked self-host call — a
+   bucket transition, not a full open, tracked separately from WALLED
+   REAL). Ladder: mir 583 / optimize 11 / classify 29 zero newly-walled (two
+   entries closed) / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

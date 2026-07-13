@@ -182,14 +182,33 @@ impl<'a> IrMutVisitor for BranchLifter<'a> {
         if is_loop {
             self.loop_depth -= 1;
         }
-        // In a DENSE region, lift a heap-result `if` EXPRESSION in place (the call-arg
-        // position the MIR ANF lift would otherwise turn into the >3 let-bound chain the
-        // bounded-duplication gate refuses). One helper call per `if` — chain-length
-        // immune. Bottom-up (children walked above), so nested ifs lift inside-out.
-        if self.dense_depth > 0
-            && matches!(expr.kind, IrExprKind::If { .. })
-            && is_heap_ty(&expr.ty)
-        {
+        // In a DENSE region, lift a heap-result `if`/simple-pattern `match` EXPRESSION in
+        // place (the call-arg position the MIR ANF lift would otherwise turn into the >3
+        // let-bound chain the bounded-duplication gate refuses — e.g. `println(match X {
+        // some(v) => …, none => … })` chained 5+ times, alias_combinator_rc/
+        // codec_decode_errors). One helper call per branch — chain-length immune.
+        // Bottom-up (children walked above), so nested branches lift inside-out. `Match` is
+        // gated to the SAME simple-pattern subset the stmt-level Bind arm below uses (Some/
+        // None/Ok/Err/Bind/Wildcard): a literal-pattern match desugars to an `if subject ==
+        // lit` chain that DUPLICATES the subject's calls (an unpredictable `mir > ir` count),
+        // and a custom-variant/tuple/list/record-pattern match can still wall in the tail
+        // handler — lifting either just relocates the wall into a dead helper.
+        let heap_branch_kind = match &expr.kind {
+            IrExprKind::If { .. } => true,
+            IrExprKind::Match { arms, .. } => arms.iter().all(|a| {
+                matches!(
+                    a.pattern,
+                    IrPattern::Some { .. }
+                        | IrPattern::None
+                        | IrPattern::Ok { .. }
+                        | IrPattern::Err { .. }
+                        | IrPattern::Bind { .. }
+                        | IrPattern::Wildcard
+                )
+            }),
+            _ => false,
+        };
+        if self.dense_depth > 0 && heap_branch_kind && is_heap_ty(&expr.ty) {
             let ty = expr.ty.clone();
             self.lift_bind_value(ty, expr);
         }
