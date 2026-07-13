@@ -2074,6 +2074,44 @@ B38. **Closure `List[String]` capture ratchet closed — 3rd env-header
    transition). Ladder: mir 583 / classify 38 zero newly-walled / spec 283
    / GATE OK / CORPUS WALL OK.
 
+B39. **Flat record/variant Map keys opened — tuple-pair classifier
+   generalized past String (38 → 35)**: `hash_protocol_test`'s
+   `Map[Color, String]` (`Color = {r,g,b: Int}`, all-scalar) and
+   `Map[Direction, Int]` (`Direction = North|South|East|West`, all-
+   nullary) — a `[key: value]` map literal over a user Hash-key type.
+   Traced `Op::DropListStrStr`'s self-host body (`__ssdrop_list`,
+   value_core.almd) and confirmed it is PURELY handle-based (`rc_dec` of
+   the raw slot0/slot1 handles, no byte/length interpretation — unlike the
+   `_str`-dispatch bug this session already fixed), so it is exact for
+   ANY pair of ONE-LEVEL-EXACT heap values, not just two Strings. New
+   helper `is_flat_heap_tuple_slot` (binds_p3.rs) — scalar (vacuously
+   flat) OR String OR List[scalar] OR a FLAT record (`aggregate_field_tys`
+   all-scalar, gated behind `record_or_anon_drop_type_name` already being
+   `None` so a RECURSIVE-drop record never reaches it) OR a flat variant
+   (`is_flat_variant_ty`). Widened the list-literal classifier's
+   StrStr/StrInt/IntStr guards (binds_p3.rs) AND the actual per-element
+   MATERIALIZER (binds_p4.rs's `lower_owned_heap_field` Tuple arms — a
+   SEPARATE gate that also needed the same widening, discovered when the
+   classifier alone didn't move the wall) from `Ty::String`-specific to
+   `is_flat_heap_tuple_slot`. **Caught my own bug before shipping**: the
+   first draft of the StrStr guard used `is_heap_ty(a) || is_heap_ty(b)`
+   (OR) instead of AND — `Op::DropListStrStr` unconditionally `rc_dec`s
+   BOTH slots, so a `(Direction, Int)` pair with the OR guard would have
+   `rc_dec`'d the raw Int VALUE as if it were a pointer — caught by
+   re-deriving the exact semantics before testing, fixed to AND
+   (StrInt/IntStr's guards were already correctly AND'd). Probes hp2
+   (isolated `List[(Color,String)]` literal) and hp3 (the Map wrapping it
+   — reaches the ALREADY-WALLED `_key_wall`/`_hval_wall` from B37's Map-
+   key safety fix, confirming no invalid-wasm regression) + a dedicated
+   10,000× leak-loop (`fhleak.almd`, both Color-key and Direction-key
+   pairs) — instant completion, matching v0/v1 output (30000), no
+   OOM/hang. All 3 named `hash_protocol_test` entries fully vanished from
+   classify (confirmed absent from every bucket, not a message
+   transition). `compound_repr_records_interp` advanced to a DIFFERENT,
+   still-walled site (net zero for that one — a message transition, not a
+   regression). Ladder: mir 583 / classify 35 zero newly-walled / spec
+   283 / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

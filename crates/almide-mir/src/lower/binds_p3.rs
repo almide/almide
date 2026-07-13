@@ -236,6 +236,32 @@ impl LowerCtx {
             .is_some_and(|n| self.variant_layouts.needs_recursive_drop(&n, &|_| false))
     }
 
+    /// Is `ty` a scalar, OR a ONE-LEVEL-EXACT heap type — a value whose ENTIRE free is a
+    /// single `rc_dec` (it owns no further heap): `String`, `List[scalar]`, a FLAT record
+    /// (every field scalar — `record_or_anon_drop_type_name` already excludes it from the
+    /// RECURSIVE-drop set, so reaching here at all means flat), or a flat variant (every
+    /// ctor scalar-only, `is_flat_variant_ty`). Gates the list-literal tuple-pair
+    /// classifier (`StrStr`/`StrInt`/`IntStr`) to shapes `Op::DropListStrStr`/
+    /// `DropListStrInt`/`DropListIntStr`'s PURELY HANDLE-BASED renders (confirmed by
+    /// reading their WAT/self-host bodies: each just `rc_dec`s a raw slot handle, no
+    /// byte/length interpretation) free EXACTLY — a NESTED-heap type (`List[String]`, a
+    /// RECURSIVE-drop record, `Value`) would leak under a blind single `rc_dec`, the same
+    /// class of bug this session's `_str`-dispatch fix caught elsewhere.
+    fn is_flat_heap_tuple_slot(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        if !is_heap_ty(ty) {
+            return true; // a scalar needs no free at all — vacuously "flat"
+        }
+        matches!(ty, Ty::String)
+            || matches!(ty, Ty::Applied(TypeConstructorId::List, a)
+                if a.len() == 1 && !is_heap_ty(&a[0]))
+            || self.variant_layouts.is_flat_variant_ty(ty)
+            || (self.record_or_anon_drop_type_name(ty).is_none()
+                && self
+                    .aggregate_field_tys(ty)
+                    .is_some_and(|(_, tys)| tys.iter().all(|t| !is_heap_ty(t))))
+    }
+
     pub(crate) fn try_lower_variant_ctor(&mut self, value: &IrExpr) -> Option<ValueId> {
         use crate::{IntOp, PrimKind};
         // The ctor NAME + its supplied field exprs in DECLARED case order — from a
@@ -649,25 +675,48 @@ impl LowerCtx {
             // map literal's `("xs", [1, 2, 3])` pairs (the OWNED-builder route the PCC
             // ownership gate accepts, unlike the raw-handle view widening it rejected).
             ListElemDrop::StrStr
-        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && !is_heap_ty(&tys[1]))
+        } else if matches!(&elem_ty, Ty::Tuple(tys)
+            if tys.len() == 2
+                && is_heap_ty(&tys[0])
+                && is_heap_ty(&tys[1])
+                && self.is_flat_heap_tuple_slot(&tys[0])
+                && self.is_flat_heap_tuple_slot(&tys[1]))
         {
-            // A `(String, <scalar>)` TUPLE element (`[("k0", 1), ("k1", 2)]` — the `[key:
-            // value]` map-literal desugar's pairs list, map_fold_heap_acc's initial
+            // A `(<flat record/variant>, String)` TUPLE element (`[Color{r,g,b}: "red"]` —
+            // the `[key: value]` map-literal desugar over a user Hash-key type,
+            // hash_protocol_test's Color/Direction shapes): `Op::DropListStrStr`'s render
+            // (`__ssdrop_list` in value_core.almd) is PURELY handle-based — `rc_dec` of the
+            // raw handle at slot0 (@12) and slot1 (@20), reading NEITHER slot's internal
+            // bytes — so it is exact for ANY pair of ONE-LEVEL-EXACT heap values, not just
+            // two Strings (confirmed by reading its body: no `__str_eq`-style length/byte
+            // interpretation, the exact class of bug this session's `_str`-dispatch fix
+            // caught elsewhere). A FLAT record (`record_or_anon_drop_type_name` already
+            // returned `None` above — only a RECURSIVE-drop record reaches that arm; an
+            // all-scalar record like `Color` falls through to here) or a flat variant
+            // (`Direction`, all-nullary) is exactly one-level-exact: a single `rc_dec`
+            // frees the whole block, since it owns no further heap.
+            ListElemDrop::StrStr
+        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && self.is_flat_heap_tuple_slot(&tys[0]) && is_heap_ty(&tys[0]) && !is_heap_ty(&tys[1]))
+        {
+            // A `(<flat heap>, <scalar>)` TUPLE element (`[("k0", 1), ("k1", 2)]` — the
+            // `[key: value]` map-literal desugar's pairs list, map_fold_heap_acc's initial
             // accumulator, `[("k0", true), …]` — option_unwrap_or_else_heap's Map[String,
-            // Bool]): the MIRROR of the IntStr arm below. Recursive drop via the EXISTING
-            // `Op::DropListStrInt` (rc_dec the String slot @12 only — the render NEVER reads
-            // slot1's contents, so it is scalar-type-agnostic: Int/Bool/Float all free
-            // identically here) — the same Op calls_p2.rs's concat-operator path already
-            // routes to for this exact tuple shape, just not previously wired to the
-            // list-LITERAL classifier. Widened from Int-only to any scalar (B34 shipped
-            // Int-only first; the render was already general, only the classifier guard
-            // wasn't — confirmed by reading `Op::DropListStrInt`'s WAT emission).
+            // Bool]; `[East: 90, …]` — hash_protocol_test's `Map[Direction, Int]`): the
+            // MIRROR of the IntStr arm below. Recursive drop via the EXISTING
+            // `Op::DropListStrInt` (rc_dec slot0 @12 only — the render NEVER reads slot1's
+            // contents, so it is scalar-type-agnostic: Int/Bool/Float all free identically;
+            // and slot0-type-agnostic too, since it just rc_decs the raw handle — a flat
+            // record/variant frees exactly like a String there) — the same Op
+            // calls_p2.rs's concat-operator path already routes to for the (String,scalar)
+            // instance, just not previously wired to the list-LITERAL classifier nor
+            // widened past String. Was Int-only (B34), then any-scalar-value (B37); now
+            // any-flat-heap-key too.
             ListElemDrop::StrInt
-        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && !is_heap_ty(&tys[0]) && matches!(tys[1], Ty::String))
+        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && !is_heap_ty(&tys[0]) && self.is_flat_heap_tuple_slot(&tys[1]) && is_heap_ty(&tys[1]))
         {
-            // A `(<scalar>, String)` TUPLE element (`[(0, "a"), (1, "b")]` — `list.enumerate`
-            // shaped literals): recursive drop via the existing `Op::DropListIntStr` (rc_dec
-            // the String slot @20 only — likewise scalar-type-agnostic on slot0).
+            // A `(<scalar>, <flat heap>)` TUPLE element (`[(0, "a"), (1, "b")]` —
+            // `list.enumerate` shaped literals): recursive drop via the existing
+            // `Op::DropListIntStr` (rc_dec slot1 @20 only — likewise type-agnostic).
             ListElemDrop::IntStr
         } else if matches!(&elem_ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)

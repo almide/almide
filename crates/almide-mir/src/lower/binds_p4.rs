@@ -165,18 +165,22 @@ impl LowerCtx {
                 self.live_heap_handles.push(obj);
                 Some(obj)
             }
-            // A `(String, String)` TUPLE element of a list literal (`[(k, v), …]` — the map.entries /
-            // str_str shape): a fresh owned tuple block (try_lower_tuple_construct), tracked so the
-            // list builder's Consume + retain balances it. GATED to (String,String) so other tuples
-            // keep the scalar-only `Record | Tuple` arm below (a bare heap-field tuple still defers
-            // there — no leak regression).
+            // A `(<flat heap>, <flat heap>)` TUPLE element of a list literal (`[(k, v), …]` —
+            // the map.entries / str_str shape, `[Color{r,g,b}: "red"]`'s pairs): a fresh
+            // owned tuple block (try_lower_tuple_construct), tracked so the list builder's
+            // Consume + retain balances it. Widened from (String,String)/(String,List[
+            // scalar]) to ANY pair of ONE-LEVEL-EXACT heap types (String, List[scalar], a
+            // flat record, a flat variant) — `Op::DropListStrStr`'s render is purely
+            // handle-based (confirmed by reading it), so it frees the pair exactly
+            // regardless of which flat-heap kind sits in each slot. GATED so other tuples
+            // keep the scalar-only `Record | Tuple` arm below (a bare heap-field tuple
+            // still defers there — no leak regression).
             IrExprKind::Tuple { elements }
                 if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
-                        && (matches!(tys[1], Ty::String)
-                        || matches!(&tys[1],
-                            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
-                                if b.len() == 1 && !is_heap_ty(&b[0])))) =>
+                    Ty::Tuple(tys) if tys.len() == 2
+                        && is_heap_ty(&tys[0]) && is_heap_ty(&tys[1])
+                        && self.is_flat_heap_tuple_slot(&tys[0])
+                        && self.is_flat_heap_tuple_slot(&tys[1])) =>
             {
                 let obj = self.try_lower_tuple_construct(elements)?;
                 if !self.live_heap_handles.contains(&obj) {
@@ -184,14 +188,15 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
-            // A `(String, <scalar>)` TUPLE literal (`("a", 1)` — the deep_eq tuple-eq
-            // operand / the gguf (key, pos) accumulator element): String slot 0 (heap
-            // @12), scalar slot 1 (@20). try_lower_tuple_construct builds it; the
-            // enclosing consumer (an eq operand's cond frame, a list's DropListStrInt)
-            // frees the String slot exactly once.
+            // A `(<flat heap>, <scalar>)` TUPLE literal (`("a", 1)` — the deep_eq tuple-eq
+            // operand / the gguf (key, pos) accumulator element / `[East: 90]`'s pairs):
+            // flat-heap slot 0 (@12), scalar slot 1 (@20). try_lower_tuple_construct builds
+            // it; the enclosing consumer (an eq operand's cond frame, a list's
+            // DropListStrInt) frees the heap slot exactly once.
             IrExprKind::Tuple { elements }
                 if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && !is_heap_ty(&tys[1])) =>
+                    Ty::Tuple(tys) if tys.len() == 2 && is_heap_ty(&tys[0]) && !is_heap_ty(&tys[1])
+                        && self.is_flat_heap_tuple_slot(&tys[0])) =>
             {
                 let obj = self.try_lower_tuple_construct(elements)?;
                 if !self.live_heap_handles.contains(&obj) {
@@ -199,13 +204,15 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
-            // An `(Int, String)` TUPLE element of a list literal (`[(i, line)]` — the list.enumerate
-            // shape): Int slot 0 (scalar @12), String slot 1 (heap @20). try_lower_tuple_construct
-            // builds it (heap mask [1]); it is moved into the enclosing list, whose `$__drop_list_int_str`
-            // frees each tuple's String + block, so the tuple's own (harmless) mask never scope-end-fires.
+            // A `(<scalar>, <flat heap>)` TUPLE element of a list literal (`[(i, line)]` —
+            // the list.enumerate shape): scalar slot 0 (@12), flat-heap slot 1 (@20).
+            // try_lower_tuple_construct builds it (heap mask [1]); it is moved into the
+            // enclosing list, whose `$__drop_list_int_str` frees each tuple's heap slot +
+            // block, so the tuple's own (harmless) mask never scope-end-fires.
             IrExprKind::Tuple { elements }
                 if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)) =>
+                    Ty::Tuple(tys) if tys.len() == 2 && !is_heap_ty(&tys[0]) && is_heap_ty(&tys[1])
+                        && self.is_flat_heap_tuple_slot(&tys[1])) =>
             {
                 let obj = self.try_lower_tuple_construct(elements)?;
                 if !self.live_heap_handles.contains(&obj) {
