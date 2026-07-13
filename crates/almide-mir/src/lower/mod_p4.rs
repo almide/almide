@@ -1440,8 +1440,23 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 {
                     return format!("list.{func}_value");
                 }
-                if args.len() == 1 && is_heap_ty(&args[0]) {
+                // `find`'s Some() result is a DEEP COPY of the found element (`string.repeat`,
+                // list_find_str's `__lfs_some`) — correct only for an actual String element; any
+                // other heap type here (a flat scalar tuple, a record) falls through to a WALL
+                // rather than corrupting the copy (the same class of bug fixed above for
+                // contains/index_of — `find` just hasn't grown a `_hshare` copy variant yet).
+                if args.len() == 1 && matches!(args[0], Ty::String) {
                     return format!("list.{func}_str");
+                }
+                // Any remaining heap-element shape (find over Value/List/Map/Set; get/first/last
+                // over a non-String heap List element) has no covering arm above — route to a
+                // deliberately UNREGISTERED `_x` name. The bare `list.{func}` name is NOT a safe
+                // fallback here: it links against the Int-typed generic self-host (list_search.almd
+                // et al), which silently "succeeds" via raw i64-slot / pointer-identity comparison
+                // instead of refusing to link (the fallthrough danger confirmed by probe elsewhere
+                // in this dispatch — see the contains/index_of comment above).
+                if args.len() == 1 && is_heap_ty(&args[0]) {
+                    return format!("list.{func}_x");
                 }
             }
         }
@@ -1461,9 +1476,40 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
             return "list.get_or_hshare".to_string();
         }
         // SUBJECT-keyed (arg 0) over a List[heap], where the result is scalar (Bool/Int/Option[Int])
-        // so it can't be keyed on the result type: search (contains/index_of) + the predicate
-        // higher-order all/any/count.
-        if matches!(func, "contains" | "index_of" | "all" | "any" | "count" | "fold") {
+        // so it can't be keyed on the result type: search (contains/index_of) does an ELEMENT-
+        // EQUALITY comparison — String routes to the byte-eq `_str` family (correct only for actual
+        // String elements: __str_eq reads the length FIELD as a byte count); a flat scalar-slot
+        // block (all-scalar tuple / List[scalar]) routes to the slot-wise `_hshare` family (B32's
+        // `__uh_eq`, which reads length as an ELEMENT count and compares raw i64 slots — exact for
+        // this shape). Any OTHER heap element (record, Value, nested heap list, String-bearing
+        // tuple) has no correct comparison variant yet — falls through to a WALL (never routed to
+        // `_str`, which would silently produce WRONG results: a tuple/list `len` misread as a byte
+        // count truncates the compare to its first ~2 bytes, a confirmed false-positive collision).
+        // NOTE: falling through to the bare `list.contains`/`list.index_of` name here is NOT a
+        // safe wall — it links against the Int-typed generic (list_search.almd), which silently
+        // "succeeds" (raw i64-slot compare, i.e. POINTER-IDENTITY on a heap handle — the exact
+        // OLD C-015 bug) rather than refusing to link (CONFIRMED by probe: a record-element
+        // `list.contains` produced invalid wasm via this path, and a tuple-element `set.from_list`
+        // sharing the same generic-fallthrough shape silently mis-deduped). Any excluded heap
+        // element must route to a deliberately UNREGISTERED name (`_x`, the established
+        // wall-suffix convention) so the render step's unlinked-call check catches it.
+        if matches!(func, "contains" | "index_of") {
+            if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+                if a.len() == 1 && is_heap_ty(&a[0]) {
+                    if matches!(a[0], Ty::String) {
+                        return format!("list.{func}_str");
+                    }
+                    if is_flat_scalar_block_ty(&a[0]) {
+                        return format!("list.{func}_hshare");
+                    }
+                    return format!("list.{func}_x");
+                }
+            }
+        }
+        // all/any/count/fold are pure closure-passthrough (each element handle is loaded and handed
+        // to the predicate/accumulator closure — no internal equality compare or deep copy), so the
+        // byte-eq `_str` family's ITERATION shape is safe for ANY heap element type, not just String.
+        if matches!(func, "all" | "any" | "count" | "fold") {
             if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
                 if a.len() == 1 && is_heap_ty(&a[0]) {
                     return format!("list.{func}_str");
@@ -1474,30 +1520,65 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
     if module == "set" {
         // `Set[heap]`-RETURNING constructors key on the RESULT element type; `set.to_list` over a
         // `Set[heap]` returns a `List[heap]`; the predicate `set.contains` keys on its SUBJECT
-        // (arg 0) element type (its result is Bool). Each routes to the heap-element `_str` variant.
-        let result_is_heap_container = matches!(
+        // (arg 0) element type (its result is Bool). Every one of these funcs relies on `__str_eq`
+        // (byte-level String-layout equality, for membership/dedup) AND/OR `string.repeat` (a
+        // String-specific deep copy) internally (set_str.almd) — BOTH are unsound for a non-String
+        // heap element: `__str_eq` misreads a block's slot-count `len` as a byte count (a confirmed
+        // false-positive collision past the first ~2 bytes), and `string.repeat` would corrupt a
+        // tuple/record/list block's bytes. Restrict the `_str` route to an ACTUAL String element;
+        // any other heap element (tuple, record, nested list, Value) falls through to a WALL — no
+        // correct Set variant exists yet for those (the flat-scalar `_hshare` family list.contains
+        // just grew does not cover Set's dedup-on-build/algebra ops).
+        let result_elem_is_string = matches!(
+            result_ty,
+            Ty::Applied(TypeConstructorId::Set | TypeConstructorId::List, a)
+                if a.len() == 1 && matches!(a[0], Ty::String)
+        );
+        // RESULT-keyed: constructors / Set-returning algebra over heap elements. The bare
+        // `set.{func}` fallback is NOT a safe wall for a non-String heap element here — it links
+        // against the Int-typed generic (set_core.almd), which silently "succeeds" via raw i64-slot
+        // / pointer-identity comparison (the OLD C-015 bug) instead of refusing to link (CONFIRMED
+        // by probe: `set.from_list` over a `List[(Int,Int)]` silently mis-deduped, len 3 instead of
+        // 2, then trapped later). Route explicitly to the UNREGISTERED `_x` wall name instead.
+        let result_elem_is_heap = matches!(
             result_ty,
             Ty::Applied(TypeConstructorId::Set | TypeConstructorId::List, a)
                 if a.len() == 1 && is_heap_ty(&a[0])
         );
-        // RESULT-keyed: constructors / Set-returning algebra over heap elements.
         if matches!(
             func,
             "from_list" | "to_list" | "union" | "intersection" | "difference"
                 | "new" | "insert" | "remove" | "symmetric_difference" | "filter"
-        ) && result_is_heap_container
+        ) && result_elem_is_heap
         {
-            return format!("set.{func}_str");
+            return if result_elem_is_string {
+                format!("set.{func}_str")
+            } else {
+                format!("set.{func}_x")
+            };
         }
-        // ARG-keyed: a Bool/scalar-returning fn over a `Set[heap]` subject (arg 0).
-        let arg0_is_heap_set = matches!(
+        // `all`/`any`/`fold` are pure closure-passthrough (no internal eq compare or deep copy) —
+        // safe for any heap element type, same as the list-module analogue above.
+        let arg0_elem_is_heap = matches!(
             arg_tys.first(),
             Some(Ty::Applied(TypeConstructorId::Set, a)) if a.len() == 1 && is_heap_ty(&a[0])
         );
-        if matches!(func, "contains" | "is_subset" | "is_disjoint" | "all" | "any" | "fold" | "eq")
-            && arg0_is_heap_set
-        {
+        if matches!(func, "all" | "any" | "fold") && arg0_elem_is_heap {
             return format!("set.{func}_str");
+        }
+        // ARG-keyed eq/membership: a Bool-returning fn over a `Set[heap]` subject (arg 0) — String
+        // element only (the `__str_eq`/`__set_has_str` unsoundness above); any other heap element
+        // routes to the `_x` wall (the same fallthrough danger as the RESULT-keyed family).
+        let arg0_elem_is_string = matches!(
+            arg_tys.first(),
+            Some(Ty::Applied(TypeConstructorId::Set, a)) if a.len() == 1 && matches!(a[0], Ty::String)
+        );
+        if matches!(func, "contains" | "is_subset" | "is_disjoint" | "eq") && arg0_elem_is_heap {
+            return if arg0_elem_is_string {
+                format!("set.{func}_str")
+            } else {
+                format!("set.{func}_x")
+            };
         }
     }
     if module == "map" {
@@ -1533,6 +1614,18 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 arg_tys.first().or(Some(result_ty)),
                 Some(Ty::Applied(TypeConstructorId::Map, a)) if a.len() == 2 && matches!(a[1], Ty::String)
             );
+            // Both the `_str` (all-String interleaved entries) and `_skv` (String key + i64 value)
+            // families do KEY EQUALITY via `__str_eq`/`__skv_eq` — a byte-level compare that
+            // misreads a non-String heap block's slot-count `len` as a byte count (the same
+            // confirmed false-positive-collision class fixed above for list/set). A non-String heap
+            // KEY (a tuple, record, nested list) must NOT route to either family — CONFIRMED via
+            // probe to currently produce INVALID WASM (an i32/i64 ABI-width mismatch on `map.set`
+            // with a tuple key), not silently wrong bytes, but still not the honest wall this repr
+            // gate is meant to guarantee. Gate both families on an ACTUAL String key.
+            let key_is_string = matches!(
+                arg_tys.first().or(Some(result_ty)),
+                Some(Ty::Applied(TypeConstructorId::Map, a)) if a.len() == 2 && matches!(a[0], Ty::String)
+            );
             // The FLAT-heap-value class map_hval actually implements (List[scalar]).
             let val_is_flat_list = matches!(
                 arg_tys.first().or(Some(result_ty)),
@@ -1562,19 +1655,25 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 }
                 (true, true) if func == "to_string_hval" => Some(""),
                 (true, true) if !val_is_string => Some("_hval_wall"),
-                (true, true) => matches!(
+                (true, true) if key_is_string => matches!(
                     func,
                     "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
                         | "values" | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
                         | "entries"
                 )
                 .then_some("_str"),
-                (true, false) => matches!(
+                (true, false) if key_is_string => matches!(
                     func,
                     "new" | "set" | "remove" | "filter" | "get" | "get_or" | "keys" | "values"
                         | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold" | "eq"
                 )
                 .then_some("_skv"),
+                // A non-String heap KEY (tuple/record/nested list) reaching here has no correct
+                // variant — route to an explicit UNREGISTERED wall name rather than falling through
+                // to the bare `map.{func}` name, which links against the scalar-key map_core generic
+                // and produces INVALID WASM (an i32/i64 ABI-width mismatch, CONFIRMED by probe) —
+                // a crash, not the honest compile-time wall this repr gate exists to guarantee.
+                (true, true) | (true, false) => Some("_key_wall"),
                 // `Map[Int, String]` — the implemented scalar-key/heap-value variant
                 // (new/set/eq). Other funcs, and other heap value types, keep an
                 // UNREGISTERED wall name (never the plain Map[Int,Int] i64-slot link

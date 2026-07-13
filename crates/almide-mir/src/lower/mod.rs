@@ -33,6 +33,26 @@ pub enum LowerError {
     Unsupported(String),
 }
 
+/// A FLAT scalar-slot heap block: an all-scalar tuple (`(Int, Int)`) or a
+/// `List[<scalar>]` (`List[Int]`) — every slot in the block is a raw i64 value,
+/// never a nested handle. Mirrors the `ListElemDrop::ScalarAggregate` gate in
+/// `binds_p3.rs`. This is the exact shape B32's `__uh_eq` (list_hshare.almd)
+/// compares correctly (length + raw-slot equality) — a String or any OTHER heap
+/// element (record, nested heap list, Value) is NOT this shape, and must not be
+/// routed to `__uh_eq`-based comparison (nor to the byte-level `__str_eq` String
+/// family — the source of a CONFIRMED silent wrong-bytes bug when a tuple/nested-
+/// list element was routed there: `__str_eq` misreads a slot-count `len` as a
+/// BYTE count, comparing only the object's first `len` bytes — a false-positive
+/// collision past the first ~2 bytes for any two elements sharing a leading Int).
+pub fn is_flat_scalar_block_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::Tuple(tys) => !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t)),
+        Ty::Applied(TypeConstructorId::List, b) => b.len() == 1 && !is_heap_ty(&b[0]),
+        _ => false,
+    }
+}
+
 /// Heap-managed types (need refcount: `Alloc`/`Dup`/`Drop`) vs `Copy` scalars.
 /// Mirrors the old `pass_perceus::is_heap_type` / `emit_wasm` copy — but here it
 /// is the SINGLE definition both renderers will read off the MIR.

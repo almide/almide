@@ -1691,6 +1691,51 @@ B32. **list.unique/dedup over flat-block heap elements + List[List[scalar]]
    zero newly-walled / spec 283 / GATE OK / ownership 30,070 ACCEPT /
    CORPUS WALL OK.
 
+SAFETY. **CRITICAL correctness fix: `_str`/`_skv` heap-search dispatch was
+   silently WRONG for non-String heap elements (43 held — a soundness fix, not
+   a wall-count move)**: adversarial probing (`list.contains(lt, (1,9))` where
+   `lt` holds `(1,2)`) found v1 answering `T` where v0 answers `F` — a
+   CONFIRMED silent wrong-bytes bug, live on develop since B25/B29/B31 opened
+   tuple/nested-list literal construction (the dispatch itself is older,
+   2026-06-16, but was unreachable dead code until those literals could lower).
+   Root cause: `list.contains`/`index_of`, the whole `set.*` algebra
+   (from_list/contains/union/…), and `map.*_str`/`_skv` (heap-KEY lookup) all
+   routed ANY `is_heap_ty` element to the byte-level `__str_eq`/`__skv_eq`
+   family — correct only for an actual String (whose `len` field IS a byte
+   count); for a tuple/nested-list block `len` is a SLOT count, so `__str_eq`
+   compares only the object's first `len` BYTES — a false-positive collision
+   past ~2 bytes for any two elements sharing a leading Int. `set.from_list`
+   over tuples was worse: narrowing the guard without an explicit wall
+   fallthrough re-links the BARE name against the Int-typed generic
+   (set_core.almd) — silent POINTER-IDENTITY comparison, the old pre-C-015
+   bug, resurrected. Map's heap-key `_str`/`_skv` fallthrough instead produced
+   an i32/i64 invalid-wasm crash — louder, but still not the honest wall this
+   repr gate exists to guarantee. Fix: (1) new `is_flat_scalar_block_ty` gate
+   (mod.rs) — all-scalar tuple / `List[scalar]`, the exact shape B32's
+   `__uh_eq` compares correctly (length as ELEMENT count + raw i64-slot
+   compare); (2) `list.contains`/`index_of` route String→`_str`, flat-scalar→
+   NEW `list_contains_hshare`/`list_index_of_hshare` (list_hshare.almd, reuses
+   `__uh_eq`), anything else → explicit UNREGISTERED `_x` wall (never the bare
+   name); (3) same narrowing + explicit `_x`/`_key_wall` fallthrough for the
+   whole `set.*` family and `map.*`'s key-heap branches; all/any/fold/count
+   (list AND set) stay unguarded — pure closure-passthrough, no internal
+   eq/copy, safe for any heap element by construction. Verified: probes T/F on
+   deliberately-mismatched tuple/list/record elements now WALL cleanly
+   (`unlinked stdlib/runtime call`) instead of silently answering wrong or
+   crashing; cq1/cq2 (the correct flat-scalar path) stay v0-byte PARITY.
+   Ladder: mir 583 / classify 43 zero newly-walled (compound_eq main was
+   ALREADY walled upstream at the tuple-key Map LITERAL stage — this bug was
+   never actually exercised by the spec corpus, only by hand-written
+   adversarial probes) / spec 283 / GATE OK / CORPUS WALL OK. **Lesson: a
+   dispatch guard removal is not automatically a safe wall — the bare
+   fallthrough name can silently RE-LINK against a differently-typed generic
+   self-host (same low-level ABI width) instead of hitting the unlinked-call
+   check. Any narrowed guard must route its excluded cases to an explicit
+   UNREGISTERED name.** This was caught BEFORE opening the tuple-key Map
+   literal (the next planned piece) — had that landed first, compound_eq's
+   main would have run its list.contains/set.from_list lines with silently
+   wrong results before ever reaching the still-walled Map section.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

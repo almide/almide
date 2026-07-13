@@ -120,3 +120,28 @@ fn list_dedup_hshare(xs: List[List[Int]]) -> List[List[Int]] = {
   prim.store32(oh + 4, k)
   out
 }
+
+// list.contains / list.index_of over FLAT-BLOCK heap elements — the same slot-wise
+// `__uh_eq` structural equality, borrowing (no allocation, no copy: search only).
+fn __lch_idx(h: Int, x: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0 - 1
+  else if __uh_eq(prim.load64(h + 12 + i * 8), x) then i
+  else __lch_idx(h, x, n, i + 1)
+
+fn list_contains_hshare(xs: List[List[Int]], x: List[Int]) -> Bool = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let idx = __lch_idx(h, prim.handle(x), n, 0)
+  idx >= 0
+}
+
+fn __lih_none() -> Option[Int] = None
+fn __lih_some(i: Int) -> Option[Int] = Some(i)
+
+fn list_index_of_hshare(xs: List[List[Int]], x: List[Int]) -> Option[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let idx = __lch_idx(h, prim.handle(x), n, 0)
+  if idx < 0 then __lih_none()
+  else __lih_some(idx)
+}
