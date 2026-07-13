@@ -1068,6 +1068,21 @@ B8. **Record fn-field call desugar SHIPPED (117 held, an enabler)**: a Method
    block loaded from the record slot (the funcref machinery × record slots).
    Both are the "closures in record slots" piece — design next.
 
+V0 BUG FOUND (2026-07-13, probe si3 — needs a GitHub issue, EMU gh cannot
+create one): `int.to_string(o.b)` where `b: Int16` is a record field →
+"codegen produced invalid Rust" (E0308: expected i64, found i16). The C-038
+construction-site narrowing stores the declared width but the int.to_string
+CALL SITE never widens back (`o.b as i64`). `almide check` passes — the
+check-passes/build-fails class (#739 sibling). Repro:
+`type Outer = { a: UInt8, b: Int16 }; let o = Outer { a: 200, b: 30000 };
+println(int.to_string(o.b))`.
+
+DIAGNOSIS (v1, the sized-int interp walls — si1/si2): even the single-field
+`"a=${o.a}"` (UInt8 Member part) walls at the interp-in-arg position — the
+part's narrow-int to_string routing/concat operand is the decline point
+(NOT the nested member). Next: trace desugar_string_interp's synthetic
+to_string name for narrow int parts and the concat operand's slot load.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
