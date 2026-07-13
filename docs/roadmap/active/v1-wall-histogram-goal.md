@@ -1119,6 +1119,21 @@ B10. **Depth-2 single-outer ctor patterns SHIPPED (114 → 113)**:
    pk1 v0-identical. Opened `pick`. Multi-outer-ctor depth-2 (r5 main,
    nested_boxed classify) still needs the fallthrough design.
 
+B11. **Fixed-length list-pattern match desugar SHIPPED (113 → 112)**:
+   `desugar_list_pattern_match` (desugar-before-both) rewrites a match over a
+   `List[scalar]` whose arms are fixed-length list patterns (elements ∈
+   Bind/Wildcard/Literal, final arm an unguarded Wildcard) into a hoisted
+   `let $t = subject; let $len = list.len($t)` plus a len==k if-chain: arms
+   group by length in first-occurrence order, each group loads element temps
+   `$e_i = $t[i]` ONCE under its len test, literal elements become `==` conds
+   ANDed with the arm guard, binds alias the element temps, and a group's
+   first unconditional arm terminates it (else the catch-all body duplicates
+   in — `introduces_binder`-gated for VarId uniqueness under duplication).
+   Probe de1 (the exact `describe` shape: `[] / [0] / [n] if n>0 / [_] /
+   [a,b] / _`) v0-byte PARITY on all 6 branches. Opened
+   `regression_v0_11_test :: describe`; zero newly-walled vs walls-pk.txt.
+   Ladder: mir 583 / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
