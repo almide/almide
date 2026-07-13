@@ -1736,6 +1736,19 @@ SAFETY. **CRITICAL correctness fix: `_str`/`_skv` heap-search dispatch was
    main would have run its list.contains/set.from_list lines with silently
    wrong results before ever reaching the still-walled Map section.
 
+E6. **testing.assert_throws reclassified native-root (43 → 41)**: `catch_unwind`
+   over a WASM `unreachable` trap has no unwind mechanism in the WASI MVP ABI
+   — v0's OWN emit_wasm has no wasm form for `assert_throws` either (native-
+   only, same class as E4's process/zlib and E5's http.serve), independently
+   documented by CHANGELOG.md and `wasm_dispatch_coverage_test.rs`, and the
+   fixture header says so verbatim ("wasm:skip — WASM cannot catch panics").
+   Added `(m == "testing" && fname == "assert_throws")` to
+   `compute_native_ffi_set`'s enumerated no-wasm root set. The render step's
+   own wall (capability-gate Unsupported) is unchanged and correct — this
+   only fixes classify's accounting, moving 2 entries from REAL to
+   native-root. Ladder: mir 583 / classify 41 zero newly-walled / spec 283 /
+   GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

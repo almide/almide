@@ -589,6 +589,14 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                         // effect_intrinsic_tail_test) — the same no-wasm class as net.*.
                         // random is deliberately NOT here: v0's emit_wasm implements it over
                         // WASI random_get (calls_random.rs) — a REAL v1 gap.
+                        // testing.assert_throws needs `std::panic::catch_unwind` (runtime/rs/src/
+                        // testing.rs) — WASM's `unreachable` trap is NOT catchable (no unwind
+                        // mechanism in the WASI MVP ABI v0 targets). v0's OWN emit_wasm has no
+                        // wasm form either (calls_p2.rs's `assert_throws` arm is native-only) —
+                        // the fixture header says so verbatim ("wasm:skip — WASM cannot catch
+                        // panics"), matching CHANGELOG.md and wasm_dispatch_coverage_test.rs's
+                        // independent documentation of the same limitation. Structural, not a v1
+                        // lowering gap — the E3/E4/E5 native-root precedent.
                         if m == "net"
                             || m == "zlib"
                             || (m == "process"
@@ -598,6 +606,7 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                                         | "exec_status" | "env"
                                 ))
                             || (m == "http" && matches!(fname, "request" | "serve"))
+                            || (m == "testing" && fname == "assert_throws")
                         {
                             self.native_call = true;
                         }
