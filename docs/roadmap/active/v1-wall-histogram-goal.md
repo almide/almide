@@ -3108,6 +3108,74 @@ B107. **Closed 2 of 3 "heap-result match/if outside the executable subset"
    closed) / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0). **Current
    22**.
 
+DIAGNOSIS — the 4-entry "match over an UNTRACKED subject with a
+   call-bearing arm" cluster, per-entry findings (nothing shipped, one
+   near-miss reverted after a correctness check caught it):
+   `json_path_edges.almd :: p_set` (`fn p_set(label, r: Result[Value,
+   String]) = match r { Ok(v) => println(..json.stringify(v)..), Err(e) =>
+   .. }`): found and CONFIRMED a real twin-function drift — `try_lower_
+   result_match`'s (control_p2.rs) Err-arm heap-bind admission only checks
+   `heap_elem_lists.contains(&subj)`, while its value-position sibling
+   `try_lower_variant_value_match`'s `heap_or_scalar_bind` (same file,
+   ~463-479) ALSO admits `value_result_lists`/`value_result_results`/
+   `resrec:`/`optrec:` — for `Result[Value,String]` (routed to `value_
+   result_results` by `seed_variant_param`, since `Op::DropResultValue`
+   needs the RECURSIVE Value drop, not flat `DropListStr`), the statement-
+   position gate is strictly narrower, so the match falls through to the
+   both-arms linearization wall. Widening the Err-bind gate to match the
+   twin's admission set (`|| value_result_lists.contains(&subj) ||
+   value_result_results.contains(&subj)`) DOES make `p_set` render (no
+   longer walled) — but an adversarial parity check caught it BEFORE
+   shipping: `json.as_int(v)` on the Ok arm's bound payload returned `none`
+   (fallback -999) instead of the real value 5 — a SILENT WRONG VALUE, not
+   a wall. `Op::DropResultValue`'s drop semantics were independently
+   verified sound (frees Err-String OR recursively drops the Ok Value at
+   the subject's own scope-end, same discipline `heap_elem_lists` already
+   relies on) — so the DROP side isn't the problem; the OK-arm's payload
+   BIND (`try_lower_result_match`'s plain `LoadHandle @12` + `param_values.
+   insert`) evidently doesn't set up whatever ADDITIONAL tracking a `Value`
+   payload specifically needs for `json.as_int`/`json.stringify` to read it
+   correctly (unlike a plain String payload, which the SAME LoadHandle
+   path already handles correctly for `heap_elem_lists`-tracked subjects —
+   `Value` is a tagged dynamic union, not a flat byte buffer, so it likely
+   needs the SAME extra seeding `try_lower_result_match`'s nested-variant-
+   payload branch (lines ~110-131) does for Option/Result Ok binds, just
+   generalized to a bare `Value` bind too — NOT investigated to a fix
+   within this session's remaining budget). **Reverted cleanly** (`git
+   checkout --` on control_p2.rs only — this fork's sole edit; unrelated
+   concurrent in-progress edits from a parallel session in drop_sources.rs/
+   pipeline.rs/render_wasm/tests_part1.rs were left untouched per git
+   safety rules). A real fix needs the SAME extra Value-read seeding
+   `try_lower_variant_value_match`'s twin already does correctly (worth
+   diffing the two functions' Ok-bind paths line-by-line, not just the
+   Err-bind gate) — next attempt should start there, and MUST re-run this
+   exact `json.as_int` parity check before shipping.
+   `bidirectional_type_test.almd :: "structured error - overflow variant"`
+   (`let e: Result[Int, MathError] = err(Overflow("too big")); match e {
+   ok(_)=>.., err(Overflow(msg))=>.., err(_)=>.. }`): DIFFERENT and likely
+   DEEPER shape — `MathError` is a CUSTOM VARIANT as the Err type (not the
+   pervasive `Result[_, String]` convention every admission gate in this
+   codebase assumes), AND the Err arm nests a CTOR pattern (`Overflow(msg)`)
+   inside the `err(..)` pattern. Not investigated beyond reading the
+   source — genuinely out of scope for a quick pass (would need a new
+   Err-payload-is-a-registered-variant drop routing, separate from every
+   existing `Result[_,String]`-shaped gate).
+   `option_result_symmetry_test.almd :: "option.collect_map all some"`
+   (`let c: Option[List[Int]] = option.collect_map([1,2,3], (x)=>some(x*2));
+   match c { some(vs)=>.., none=>.. }`): `option.collect_map` is a SELF-
+   HOST stdlib fn (`stdlib/option.almd`), not a `@intrinsic`/registry
+   entry — whether `is_self_host_option_call` (control.rs:1011) recognizes
+   a call to a self-hosted Almide-defined function (vs. only intrinsics)
+   was NOT checked; this is plausibly a simpler, different gap than
+   `p_set`'s (subject-tracking recognition for a CALL, not a param) — worth
+   checking first in a future attempt, quick to rule in/out.
+   `fan_pure_thunks.almd :: main`: not investigated this pass (budget
+   spent on `p_set`'s deeper dive) — `fan.race`/`fan.any`/`fan.settle`
+   results feeding a `println("...${r}...")` interpolation are the likely
+   subject; may share EITHER the `p_set` gap (if some arm's bound payload
+   needs the same extra Value-style seeding) or be its own shape — unknown.
+   **Current 22, unchanged this stage** (all 4 entries still open).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
