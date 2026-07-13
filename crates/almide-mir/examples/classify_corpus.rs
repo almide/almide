@@ -543,10 +543,12 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
             nodes.push((user_module_fn_name(m.name.as_str(), f.name.as_str()), f));
         }
     }
-    // Root-(a): an `@extern` decl whose target is `rust`/`rs` (NOT `wasm`/`ts` — those lower to a
-    // WASI/browser import via `extern_wasm_target` and never wall; this exclusion is the precedent).
+    // Root-(a): an `@extern` decl whose target is `rust`/`rs`/`c` (NOT `wasm`/`ts` — those lower
+    // to a WASI/browser import via `extern_wasm_target` and never wall; this exclusion is the
+    // precedent). `c` is a C-library link (`@extern(c, "m", "sqrt")` — extern_c_test, whose header
+    // says "wasm:skip — @extern(c) not available in WASM"): structurally native, same as rust/rs.
     let is_native_extern = |f: &almide_ir::IrFunction| {
-        f.extern_attrs.iter().any(|a| matches!(a.target.as_str(), "rust" | "rs"))
+        f.extern_attrs.iter().any(|a| matches!(a.target.as_str(), "rust" | "rs" | "c"))
     };
     // Per-body collector: forward `Named` call edges + whether the body DIRECTLY calls an
     // enumerated permanently-no-wasm stdlib effect (root-(b)). A remaining `CallTarget::Module`

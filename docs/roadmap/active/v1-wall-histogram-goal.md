@@ -1185,6 +1185,21 @@ B13. **Option[scalar] ctor fields + in-arg tuple-variant matches SHIPPED
    end-to-end v0-byte PARITY (mains opened). Ladder: mir 583 / classify 105
    zero newly-walled / spec 283 / GATE OK / FORBIDDEN 0 / CORPUS WALL OK.
 
+E3. **@extern(c) native-root reclassification (105 → 102)**: classify's
+   `compute_native_ffi_set` root-(a) matched only `@extern(rust/rs)`;
+   `@extern(c, "m", "sqrt")` (extern_c_test — header: "wasm:skip —
+   @extern(c) not available in WASM") is the SAME structural class (a
+   C-library link no wasm module can satisfy), so its 3 fns
+   (c_sqrt/c_floor/c_ceil) now count walled_native_ffi, not walled_real.
+   Metric-only (no lowering change); corpus FORBIDDEN 0 / CORPUS WALL OK
+   re-verified. DIAGNOSIS while here: bool-key maps are NOT a thin
+   "route-Bool-as-Int" piece — even Map[Int,String] `m[1]` get walls outside
+   the assert_eq shape (bk2/bk4 probes: `??`-in-call-arg + match-over-get
+   wall; the hash_protocol int test passes only via its typed-assert path).
+   The map-key family needs the get/from_list machinery widened per
+   key/value class first; record/variant keys additionally need the hash
+   protocol proper (tag/field-wise hash + eq, not handle identity).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
