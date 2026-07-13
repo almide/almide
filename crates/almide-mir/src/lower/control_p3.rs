@@ -651,6 +651,42 @@ impl LowerCtx {
     /// Any OTHER Break/Continue in the statement ERRS (aborting the attempt → the
     /// model-one-iteration fallback then WALLS): `lower_stmt` silently swallows a bare
     /// Break (mod_p3), so delegating one would silently drop the early exit.
+    /// `{ A…; break }` → `Some({ A… })` — the then-arm of a mid-body conditional break
+    /// with statements BEFORE the break. `None` when the expr does not end in a bare
+    /// trailing break (or has nothing before it — the simpler cases own that shape).
+    fn strip_trailing_break_expr(e: &IrExpr) -> Option<IrExpr> {
+        let IrExprKind::Block { stmts, expr } = &e.kind else { return None };
+        // Trailing break as the block TAIL.
+        if let Some(t) = expr.as_deref() {
+            if matches!(t.kind, IrExprKind::Break) && !stmts.is_empty() {
+                return Some(IrExpr {
+                    kind: IrExprKind::Block { stmts: stmts.clone(), expr: None },
+                    ty: almide_lang::types::Ty::Unit,
+                    span: e.span.clone(),
+                    def_id: e.def_id,
+                });
+            }
+            return None;
+        }
+        // Trailing break as the LAST statement.
+        if stmts.len() >= 2 {
+            if let IrStmtKind::Expr { expr: last } = &stmts[stmts.len() - 1].kind {
+                if matches!(last.kind, IrExprKind::Break) {
+                    return Some(IrExpr {
+                        kind: IrExprKind::Block {
+                            stmts: stmts[..stmts.len() - 1].to_vec(),
+                            expr: None,
+                        },
+                        ty: almide_lang::types::Ty::Unit,
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    });
+                }
+            }
+        }
+        None
+    }
+
     fn lower_while_body_stmt(&mut self, stmt: &IrStmt) -> Result<(), LowerError> {
         fn is_break(e: &IrExpr) -> bool {
             match &e.kind {
@@ -701,6 +737,49 @@ impl LowerCtx {
                     self.ops.push(Op::IntBinOp { dst: nc, op: IntOp::Sub, a: one, b: c });
                     self.ops.push(Op::LoopBreakUnless { cond: nc });
                     return Ok(());
+                }
+                // `if c then { A…; break } else B` (find_factor: `if n % i == 0 then
+                // { result = i; break } else { i = i + 1 }`): CAPTURE the (call-free,
+                // pure-scalar) cond once, run the ordinary unit `if` with the trailing
+                // break STRIPPED (both arms then break-free — the statement-if machinery
+                // branches the arm assigns correctly), and break on the CAPTURED value
+                // after. The capture keeps the break test the value the branch dispatched
+                // on even when an arm mutates the cond's operands (`i = i + 1`).
+                if let Some(then_stripped) = Self::strip_trailing_break_expr(then) {
+                    if !body_breaks_or_continues(std::slice::from_ref(&IrStmt {
+                        kind: IrStmtKind::Expr { expr: then_stripped.clone() },
+                        span: stmt.span.clone(),
+                    })) && !body_breaks_or_continues(std::slice::from_ref(&IrStmt {
+                        kind: IrStmtKind::Expr { expr: (**else_).clone() },
+                        span: stmt.span.clone(),
+                    })) && !crate::lower::expr_contains_call(cond)
+                    {
+                        let c = self.lower_scalar_value(cond).ok_or_else(|| {
+                            LowerError::Unsupported("while conditional-break cond".into())
+                        })?;
+                        let unit_if = IrStmt {
+                            kind: IrStmtKind::Expr {
+                                expr: IrExpr {
+                                    kind: IrExprKind::If {
+                                        cond: cond.clone(),
+                                        then: Box::new(then_stripped),
+                                        else_: else_.clone(),
+                                    },
+                                    ty: almide_lang::types::Ty::Unit,
+                                    span: expr.span.clone(),
+                                    def_id: expr.def_id,
+                                },
+                            },
+                            span: stmt.span.clone(),
+                        };
+                        self.lower_stmt(&unit_if)?;
+                        let one = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                        let nc = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst: nc, op: IntOp::Sub, a: one, b: c });
+                        self.ops.push(Op::LoopBreakUnless { cond: nc });
+                        return Ok(());
+                    }
                 }
             }
         }

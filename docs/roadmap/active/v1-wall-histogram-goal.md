@@ -1314,6 +1314,23 @@ B15. **Unit-discard `!` normalization SHIPPED (73 → 72)**: `let _ =
    run with --dir=/) end-to-end v0-byte PARITY. Ladder: mir 583 / classify
    72 zero newly-walled / spec 283 / GATE OK / CORPUS WALL OK.
 
+C3. **Mid-body conditional break with pre-break statements SHIPPED
+   (72 → 71)**: `if c then { A…; break } else B` (find_factor's
+   `if n % i == 0 then { result = i; break } else { i = i + 1 }`) —
+   `lower_while_body_stmt` now CAPTURES the (call-free pure-scalar) cond
+   once, lowers the ordinary unit `if` with the trailing break STRIPPED
+   (`strip_trailing_break_expr`: break as block tail or last stmt; both arms
+   then break-free, so the statement-if machinery branches the arm assigns),
+   and emits LoopBreakUnless(1 − captured) AFTER — the capture keeps the
+   break test the value the branch dispatched on even when an arm mutates
+   the cond's operands. No calls added (cond gated call-free), so mir == ir
+   holds without count-gate changes. Probe ff4 (guard-else-err + while +
+   assign-then-break, 4 branches incl. the composite factor walk) v0-byte
+   PARITY; probes ff2/ff3 confirmed guard+while alone already lowered.
+   Ladder: mir 583 / classify 71 zero newly-walled / spec 283 / GATE OK /
+   CORPUS WALL OK. Remaining loop-guard C-tail: the heap-acc guard-continue
+   filter (`odds = odds + [i]` under 2 guards) — the heap-acc loop family.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
