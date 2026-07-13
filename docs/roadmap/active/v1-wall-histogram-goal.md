@@ -2902,6 +2902,68 @@ B53. **Closed B52's own scoped follow-up: the sibling `If` arm in
    classify has no fixture for this shape, matching B52's own DIAGNOSIS) /
    spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
 
+DIAGNOSIS — `nested_unwrap` (`result_option_matrix_test.almd`) reverted, NOT
+   fixed, a genuine regression caught before shipping: `{ let r:
+   Result[Option[Int],String] = ok(some(42)); let o = r!; o! }` walls
+   "variant match in tail position" because the SECOND `!` (`o!`, an Option
+   unwrap) sits in TAIL position, which `desugar_tail_effect_unwrap`
+   (desugar_unwrap.rs) has NEVER handled (only Block/If/Match — a bare
+   `Unwrap` tail falls through to `_ => None`) — the doc comment at line 14
+   explicitly punts this to "tail.rs pass-through", which is sound ONLY for
+   a RESULT operand (same repr as the fn's own return) but WRONG for Option
+   (opposite tag polarity: Some=len1/None=len0 vs Result's Err=len1/Ok=
+   len0) — so nothing ever built the required none/some match for the
+   Option case, hence the wall. **Attempted fix**: add an `Unwrap{expr}`
+   arm to `desugar_tail_effect_unwrap` (gated on `expr.ty` being
+   `Option[_]`) that calls the EXISTING `build_unwrap_match` helper — this
+   correctly desugars `o!` into `match o { none=>err("none"), some(v)=>v }`
+   (confirmed via debug trace: the new arm DOES fire and DOES build the
+   right structural shape). **Two problems surfaced, in order**: (1) the
+   OUTER match's Err-arm String bind still declines — `try_lower_variant_
+   value_match`'s Camp-4 sub-case-1 gate (`heap_elem_lists` insertion,
+   control_p2.rs) requires the subject Result's Ok type to be NON-heap
+   (`!is_heap_ty(&a[0])`) before admitting a flat-drop String Err bind;
+   here Ok = `Option[Int]`, which classifies as heap (variants are
+   heap-repr even with a scalar payload) — a genuinely UNHANDLED case
+   (`Result[<flat-heap Ok>, String]`) needing either a widened gate (only
+   safe if `Option[Int]`'s own drop is provably flat — a single rc_dec, no
+   nested heap) or a new drop-routing entry; NOT attempted (correctness of
+   a flat rc_dec for the Ok-side handle vs a dedicated recursive drop
+   wasn't verified — this needs its own careful pass, not a rushed
+   extension). (2) SEPARATELY, and more seriously: **the fix regressed
+   `unwrap_option_some`** (classify showed 1 newly-walled entry) — `{ let
+   o: Option[Int] = some(10); o! }`, a BARE tail Option-unwrap with NO
+   preceding stmt-level unwrap, was previously PASSING via tail.rs's raw
+   pass-through (empirically proven working — the test asserts `unwrap_
+   option_some()! == 10`). The new desugar arm intercepts it too and
+   builds `match o { none=>err("none"), some(v)=>v }`, but types the
+   reconstructed `ResultErr` node at `tail.ty` (`o!`'s own evaluated type,
+   `Int` — the UNWRAPPED scalar, since NO other unwrap in this function
+   establishes Result-wrapping) instead of a genuine `Result[Int,String]`
+   — a type-mismatched `ResultErr{..}, ty: Int` node that `lower_scalar_
+   arm` cannot lower as a scalar value, rolling back the whole match →
+   NEW wall. The root confusion: `tail.ty`/`body.ty` at a bare function
+   tail is the function's DECLARED scalar type, not automatically
+   Result-wrapped — stmt-position `!` (the proven, shipped path) evidently
+   relies on the type CHECKER already having assigned `body.ty` as
+   Result-wrapped for THOSE functions (a fallible operation NOT in tail
+   position needs true early-return, which only a Result ABI supports);
+   tail-position `!` apparently does NOT get this treatment from the
+   checker (by design — pass-through doesn't NEED it for Result operands),
+   so `tail.ty` legitimately stays the bare scalar type there. Reusing
+   `tail.ty` as the "enclosing fn's real Result type" is FALSE precisely in
+   this case. **Reverted cleanly** (`git checkout --`, confirmed classify
+   matches the B53 baseline exactly, zero diff). A real fix needs the
+   function's TRUE compiled return type threaded down independently of
+   `tail.ty` (not derivable locally at the point `desugar_tail_effect_
+   unwrap` sees a bare Unwrap tail) — likely requires either passing the
+   fn's `ret_ty`/a `does-this-fn-need-result-wrapping` flag through the
+   whole `desugar_tail_effect_unwrap` recursion, or restricting the new
+   case to ONLY fire when already nested inside another match/if arm that
+   is ITSELF known to need Result-wrapping (i.e., not at the true top-level
+   bare-tail position) — unexplored, next attempt should start there.
+   **Current 24, unchanged** (no commit made).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
