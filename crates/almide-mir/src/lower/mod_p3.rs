@@ -853,6 +853,26 @@ impl LowerCtx {
                         return Ok(dst);
                     }
                 }
+                // A LIST-OF-RECORDS heap global (`let CFGS = [Cfg { name: "a" }, Cfg { name:
+                // "b" }]` — cross_module_toplet_byvalue's #486 list-of-records shape): a
+                // call-free `List` initializer whose elements are all record ctors builds
+                // through the SAME builder a local `let xs = [Cfg{..}, ..]` uses
+                // (`try_lower_record_list_literal` — per-element `try_lower_record_construct`
+                // MOVED into owned i64 slots, zero `CallFn`, so the gate's `mir == ir` count
+                // stays exact), which registers the list's own recursive `$__drop_list_<R>`
+                // drop route (each element freed via `$__drop_<R>`). The fresh owned copy
+                // frees at scope end; the real module global is untouched.
+                if matches!(init.kind, IrExprKind::List { .. })
+                    && !crate::lower::expr_contains_call(&init)
+                {
+                    if let Some(dst) = self.try_lower_record_list_literal(&init) {
+                        if !self.live_heap_handles.contains(&dst) {
+                            self.live_heap_handles.push(dst);
+                        }
+                        self.value_of.insert(var, dst);
+                        return Ok(dst);
+                    }
+                }
             }
             return Err(LowerError::Unsupported(format!(
                 "reference to a heap module-level global {var:?} cannot be faithfully \

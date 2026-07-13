@@ -3271,6 +3271,34 @@ DIAGNOSIS — `option_result_symmetry_test.almd`'s "option.collect_map all
    non-match repro before trusting classify's count on this entry again.
    **Current 22, unchanged** (reverted, zero diff).
 
+B109. **Closed `cross_module_toplet_byvalue_test`'s "heap module-level
+   global... no CONST initializer" wall — the LIST-OF-RECORDS combination
+   of two already-solved single-shape cases (22 → 21)**: `let CFGS = [Cfg
+   { name: "a" }, Cfg { name: "b" }]` (a cross-module top-let, `toplib`'s
+   `mod.almd`) accessed via `toplib.CFGS |> list.len`. `value_or_global`
+   (mod_p3.rs) already handles a PURE scalar-literal list (`is_pure_
+   literal_list` + `try_lower_str_list_literal`, the `DIFFICULTIES` shape)
+   and a SINGLE record literal (`try_lower_record_construct`, the `CFG`
+   shape) — but nothing in between: a LIST whose ELEMENTS are record
+   ctors fell through both and hit the final wall. The builder needed
+   already existed and is proven elsewhere (call-arg and local-`let`
+   record-list literals): `try_lower_record_list_literal` (binds_p3.rs) —
+   per-element `try_lower_record_construct` moved into owned i64 slots,
+   registering the list's own recursive `$__drop_list_<R>` drop route.
+   Added a THIRD case mirroring the existing two exactly: `IrExprKind::
+   List` + `!expr_contains_call(&init)` (the SAME call-free gate the
+   single-record case uses, keeping `mir == ir` exact — zero `CallFn`
+   injected) → route through `try_lower_record_list_literal`, track the
+   fresh owned copy in `live_heap_handles` for scope-end drop. Verified:
+   a standalone two-module repro (`toplib.CFGS` + `toplib.mk()`, matching
+   the corpus fixture's exact shape) renders and matches v0 byte-for-byte
+   (`2`/`via-fn`); a 10,000-iteration leak-loop (`list.len(toplib.CFGS)`
+   summed every iteration, a fresh module-global materialization touched
+   each time) under a 4MB wasmtime cap completed with the correct
+   accumulated value (30000), no leak. Ladder: mir 583 / classify 21 zero
+   newly-walled (1 closed) / spec 283 / GATE OK / CORPUS WALL OK
+   (FORBIDDEN=0). **Current 21**.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
