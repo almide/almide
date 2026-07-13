@@ -283,12 +283,20 @@ impl Checker {
             }
             ast::Pattern::RecordPattern { name, fields, .. } => {
                 let resolved = self.env.resolve_named(ty);
+                // Normalize module-qualified names: "varlib.Circle" → "Circle" (mirrors
+                // the Constructor arm above, and `lower_pattern`'s already-fixed #412
+                // equivalent in `lower/statements.rs`). Without this a cross-module
+                // record-variant pattern's case lookup below always misses (`c.name` is
+                // the case's bare name), silently leaving every bound field `Ty::Unknown`
+                // — which then leaks through `bind_pattern` into the arm body's `Ident`
+                // inference and poisons the whole match expression's type (#412).
+                let bare_name = name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name);
                 let field_tys: Vec<(Sym, Ty)> = match &resolved {
                     Ty::Record { fields } | Ty::OpenRecord { fields } => fields.clone(),
                     Ty::Variant { cases, .. } => {
                         // Find the specific case matching the pattern name
                         cases.iter()
-                            .find(|c| c.name == *name)
+                            .find(|c| c.name == bare_name)
                             .and_then(|c| match &c.payload {
                                 VariantPayload::Record(fs) => Some(fs.iter().map(|(n, t)| (*n, t.clone())).collect()),
                                 _ => None,

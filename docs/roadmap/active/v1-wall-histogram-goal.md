@@ -3409,6 +3409,56 @@ FOLLOW-UP DIAGNOSIS (same session, continued digging, still no fix) — narrowed
    it). **Current 21, unchanged** (fully reverted both instrumentation
    rounds, zero diff).
 
+B110. **Found and fixed the actual root cause of the #412/#631 diagnosis
+   above — a genuine almide-frontend TYPE CHECKER bug, #412 was only
+   HALF-fixed (21 → 19, closing BOTH `cross_module_variant_test.almd`
+   entries)**: followed the "next concrete step" from the FOLLOW-UP
+   DIAGNOSIS exactly — instrumented `Checker::infer_expr`'s wrapper
+   (`check/infer.rs`) to log every `expr.id`/`ExprKind`/resulting `Ty` it
+   processes (added then FULLY REVERTED — `git checkout --`, confirmed
+   classify matches baseline). The trace showed the Match expression DOES
+   get visited (ruling out the earlier "traversal gap" theory) but
+   `infer_expr_inner` computes `Ty::Unknown` for it DIRECTLY — traced one
+   level deeper into the SAME log: the arm body `radius` (a bare `Ident`
+   reference to the record-pattern-bound field) ALSO infers as `Ty::
+   Unknown`, and THAT propagates up through the arm-unification logic
+   (`check/infer_p2.rs`'s `ExprKind::Match` handling — `arm_types.first()`
+   becomes the whole match's type) to poison the entire match. Root cause
+   pinned in `check/infer_p4.rs`'s `bind_pattern` — the `ast::Pattern::
+   RecordPattern` arm resolves the variant CASE by `cases.iter().find(|c|
+   c.name == *name)`, where `name` is the pattern's RAW, POSSIBLY-
+   QUALIFIED name (`"varlib.Circle"`) but `c.name` is always the case's
+   BARE name (`"Circle"`) — the lookup ALWAYS misses for a cross-module
+   pattern, `field_tys` silently defaults to an empty vec, and EVERY bound
+   field (`radius`) gets `Ty::Unknown`. The SIBLING `ast::Pattern::
+   Constructor` arm just above it (tuple-payload patterns, `Wrap(x)`)
+   ALREADY does the bare-name normalization (`name.rsplit_once('.')...`)
+   — and so does `lower/statements.rs`'s `lower_pattern` (its own comment
+   explicitly cites #412 as the reason). #412's original fix evidently
+   patched the CONSTRUCTION side (`ExprKind::Record` in `check/infer.rs`,
+   also cites #412) and the LOWERING side, but missed this THIRD site —
+   the CHECKING-side field-type resolution for record-variant PATTERNS
+   specifically. Fixed by adding the identical bare-name normalization to
+   `bind_pattern`'s `RecordPattern` arm before the case lookup. **Why this
+   ONLY manifested inside `test{}` blocks and not regular function
+   bodies** (per the earlier DIAGNOSIS's confusion) remains not fully
+   explained — plausibly `Unknown`'s downstream handling differs subtly
+   between the two contexts elsewhere in inference/constraint-solving
+   (unify absorbing it silently in one path, propagating it in the
+   other) — but irrelevant now that the actual TYPE resolution bug is
+   fixed at its source; the field is never `Unknown` in EITHER context
+   anymore. **Elevated verification** (this touches `almide-frontend`,
+   shared by BOTH v0 native/Rust codegen and v1 MIR/WASM — the B50
+   precedent's bar): rebuilt `almide` itself (`cargo build -p almide`),
+   ran `almide check`/`almide test` DIRECTLY on the real corpus file
+   (all 6 tests pass, including #412/#631), `make install && almide test`
+   (283/283, 0 failed), `cargo test -q -p almide-mir` (583/583), AND
+   `cargo test -q --workspace` (every crate, 30 test-result summaries,
+   ALL "0 failed", exit 0 — the full-workspace bar B50 set). Ladder:
+   classify 19 zero newly-walled (2 closed) / spec 283 / GATE OK /
+   CORPUS WALL OK (FORBIDDEN=0, pending final confirmation). **Current
+   19**.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
