@@ -2645,6 +2645,69 @@ B49. **`some(<custom variant ctor>)` admitted as a heap-result MATCH/IF ARM
    now handles identically. Ladder: mir 583 / classify 27 zero newly-walled
    / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
 
+B50. **`auto_try.rs` explicit-`ok(...)`-sugar stripping — the ACTUAL fix for
+   the B46 CORRECTION's diagnosed bug, closes `handler` (27 → 26) AND fixes
+   a REAL pre-existing wrong-bytes class**: the B46 CORRECTION traced
+   `fetch(p) -> List[String] = ok(["a", "b"])`'s bug to `auto_try.rs`'s
+   `insert_try_body`: for a NON-Result-declared effect fn (`fn_returns_
+   result = false`), NOTHING strips an EXPLICIT tail-position `ok(x)` sugar
+   wrapper — `strip_tail_try` only handles the AUTO-INSERTED `Try` node
+   (the implicit `?` machinery), not a user-WRITTEN `ok(...)`. The checker
+   types `ok(x)` as `Result[T,_]` by its normal construction rule
+   regardless of the enclosing fn's declared return, so this survives
+   `insert_try` untouched. But the function's WASM signature is built from
+   its DECLARED type (`repr_of(func.ret_ty)`, `List[String]` here) — a
+   compiled tail that still returns a REAL `materialize_result_str`
+   wrapper object type-checks at the ABI level (both are opaque `i32`
+   pointers) but points at the WRONG block shape; `handler2`/`main` then
+   read the wrapper as if it were the raw list = garbage (`0` instead of
+   `a,b`, confirmed via the generated WAT in the CORRECTION). Added
+   `strip_tail_result_ok_sugar` — mirrors `strip_tail_try`'s exact
+   recursive shape (Block-tail / both `If` arms / every `Match` arm, so a
+   wrapper nested inside a branch like `handler`'s `else { ok([...]) }` is
+   reached too, not just a bare-tail `ok(...)`) but strips `ResultOk`
+   UNCONDITIONALLY (no `inner.ty.is_result()` guard — the node ITSELF, at
+   this position, is always the redundant sugar) and forces every
+   traversed level's `.ty` to the function's OWN declared `ret_ty` (so a
+   stripped `If`/`Match` doesn't disagree with its now-raw-typed children).
+   **CAUGHT A REAL BUG IN MY OWN FIRST DRAFT before shipping**: an
+   UNCONDITIONAL version (stripping `ok(x)` at every non-Result-declared
+   fn's tail with no further gate) broke `validate(n) -> Int = if n>0 then
+   ok(n) else err("negative")` — this file's OWN header comment explicitly
+   documents this as a no-regress guard: "must still type (and run) as a
+   Result" (its callers `match validate(5) {ok(n)=>n, err(e)=>...}` — a
+   GENUINE can-err lifted fn, so its callers need a REAL Result read; my
+   strip touched the `ok(n)` THEN-arm but correctly left the untouched
+   `err(...)` ELSE-arm alone, producing a type-mismatched `If` that then
+   walled with "scalar tail outside the value subset"). Added
+   `body_never_constructs_err` — a LOCAL scan (no transitive `!`-
+   propagation-through-callees analysis needed, unlike almide-mir's
+   `compute_can_err` — just "does this body's OWN AST ever construct
+   `err(...)` anywhere") gating the strip: only fires when the answer is
+   NO. `fetch` (only ever `ok(...)`) qualifies; `validate` (has a genuine
+   `err(...)` branch) does not and is left completely untouched — its
+   PRE-EXISTING (already-correct, already-tested) machinery keeps handling
+   it exactly as before. **This is a SHARED-FRONTEND change (almide-
+   frontend, consumed by BOTH v0 native/Rust codegen AND v1 MIR/WASM)** —
+   the highest-blast-radius change this whole campaign has made, so the
+   verification bar was raised accordingly: rebuilt the `almide` CLI itself
+   (v0) and re-ran `fetch`/`handler` + `validate` + both `unitmain` repros
+   directly through `almide run` (byte-identical to pre-fix expectations on
+   ALL of them — `validate` confirmed completely unaffected: `5`/`-1`);
+   ran the FULL `almide test` suite (283 files, 0 failed, confirming zero
+   v0/native regressions program-wide, not just the two touched files);
+   ran `cargo test --workspace` (every crate, not just almide-mir/
+   almide-frontend — zero failures anywhere) in addition to the standard
+   mir/frontend suites; a dedicated 10,000× leak-loop mixing BOTH the
+   never-err path (`fetch`) and the can-err path (`validate`) in the same
+   loop body completed in 11ms under a 16MB cap with the correct
+   accumulated value (35001), no leak. `effect_if_branch_unwrap_test.almd`'s
+   `handler` AND `fetch` fully vanished from every classify bucket;
+   `validate` was NEVER walled by this change (confirmed present in neither
+   the before nor after wall list). Ladder: mir 583 / frontend 11 / mir+
+   frontend+workspace all-green / classify 26 zero newly-walled (one entry
+   closed) / spec 283 (0 failed) / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
