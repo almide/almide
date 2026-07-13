@@ -1587,6 +1587,27 @@ B27. **RawPtr / linear-memory bridge SHIPPED (47 → 45)**: the #440 / C-062
    side, capacity clamp); both walls opened. Ladder: mir 583 / classify 45
    zero newly-walled / spec 283 / purity OK / GATE OK / CORPUS WALL OK.
 
+NEXT PIECES DIAGNOSED (at 45):
+   **eq mains (3)** — deep_eq_heap main needs exactly two NEW eq classes in
+   `lower_heap_eq_typed_materialized`: (a) a (String, Int) TUPLE eq —
+   composable in RUST MIR (load slot handles, CallFn string.eq on slot0,
+   IntBinOp Eq on slot1, And) with NO self-host; (b) a small-variant eq
+   (`Tagged("x") == Tagged("y")` — Tagged(String)|Empty): tag eq AND a
+   tag-guarded string.eq of the String field (an IfThen/Else merge). Its
+   List[String]-literal eq (case 1) should already route via list.eq_str +
+   literal materialization. value_deep_eq/compound_eq add Set/(Int,Int)
+   list eq + list.contains/index_of over nested operands on top.
+   **deep line (1)** — the full map_hvo round (Map[String, List[Option
+   [Int]]]): value-aware map drop (per-value element loop — __drop_map_hval
+   の flat all-slot rc_dec では Option 要素をリーク), from_list/set/display
+   (to_string_hvo → "${v}" routes list.to_string_lo), outer
+   list_to_string_lmo + __drop_list_map_hvo, pairs-tuple class StrLo (a
+   NEW __drop_list_str_lo — DropListStrStr would leak the value list's
+   Option elements), and a lower_owned_heap_field arm for lenlist List
+   literals in tuple slots. ~1 wall per full round — LOW yield; do after
+   the eq family. Self-host規約 (B27): prim calls hoist to lets; helpers
+   return Int (never Unit) for `let _c =` binds.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
