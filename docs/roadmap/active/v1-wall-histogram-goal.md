@@ -1495,6 +1495,24 @@ B21. **Scalar-key (String-value) tuple lists SHIPPED (49 → 48)**: the
    Ladder: mir 583 / classify 48 zero newly-walled / spec 283 / GATE OK /
    CORPUS WALL OK.
 
+B22. **Map[Int,String] from_list + display (48 held, an enabler)**:
+   map_ivh.almd gains `map_from_list_ivh` (set-fold over (Int,String) pairs
+   — duplicate key keeps first position with last value, map_set_ivh's
+   replace-in-place) and `map_to_string_ivh` (`[10: "x", 20: "y"]` / `[:]`
+   — raw int keys, quoted values via the replace-chain escapes, backslash
+   FIRST). Routing: the ivh admission keys `from_list` on the RESULT type
+   (its first arg is the pairs List), the interp display table gains
+   (Int, String) → map.to_string_ivh, and an already-suffixed synthesized
+   display name passes through VERBATIM (the first probe exposed
+   `to_string_ivh_ivh_wall` — the suffix machinery re-suffixed a suffixed
+   name; the pass-through arm is the general guard). Probe cr4
+   (`"imap=${imap}"`) v0-byte PARITY. compound_repr_interp main still
+   walls on its LONG display tail (List[Map], Map[String,List[Int]],
+   List[Option] parts, Map[Int,Float] …) — each needs its own display
+   self-host; probes cr1–cr6 show list/smap/set/tuple parts already lower.
+   Ladder: mir 583 / classify 48 zero delta / spec 283 / purity gate OK /
+   GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

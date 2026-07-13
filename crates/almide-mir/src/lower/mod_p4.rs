@@ -672,6 +672,9 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
         Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
             match (&args[0], &args[1]) {
                 (Ty::String, Ty::Int) => ("map", "to_string"),
+                // `${Map[Int, String]}` — the ivh display (`[10: "x", 20: "y"]`, raw int
+                // keys + quoted/escaped String values; stdlib/map_ivh.almd).
+                (Ty::Int, Ty::String) => ("map", "to_string_ivh"),
                 _ => ("map", "to_string_x"),
             }
         }
@@ -1535,12 +1538,24 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 // (new/set/eq). Other funcs, and other heap value types, keep an
                 // UNREGISTERED wall name (never the plain Map[Int,Int] i64-slot link
                 // that emitted invalid wasm — map_set_eq's original failure).
+                // An ALREADY-SUFFIXED synthesized display call (`map.to_string_ivh` from
+                // the interp leaf table) — pass through verbatim (re-suffixing would
+                // fabricate `to_string_ivh_ivh_wall`).
+                (false, true) if func == "to_string_ivh" => Some(""),
                 (false, true)
-                    if matches!(
-                        arg_tys.first().or(Some(result_ty)),
-                        Some(Ty::Applied(TypeConstructorId::Map, a))
-                            if a.len() == 2 && matches!(a[0], Ty::Int) && matches!(a[1], Ty::String)
-                    ) && matches!(func, "new" | "set" | "eq") =>
+                    if {
+                        // `from_list`'s FIRST arg is the pairs List, not the Map — key
+                        // its admission on the RESULT type instead (either probe works
+                        // for the Map-first fns).
+                        let is_ivh = |t: &Ty| {
+                            matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+                                if a.len() == 2
+                                    && matches!(a[0], Ty::Int)
+                                    && matches!(a[1], Ty::String))
+                        };
+                        (arg_tys.first().is_some_and(is_ivh) || is_ivh(result_ty))
+                            && matches!(func, "new" | "set" | "eq" | "from_list")
+                    } =>
                 {
                     Some("_ivh")
                 }

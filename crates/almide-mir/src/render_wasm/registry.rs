@@ -500,7 +500,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/list_fold_float.almd"), &[("list_max_float", "list.max_float"), ("list_min_float", "list.min_float")]),
         (
             include_str!("../../../../stdlib/map_ivh.almd"),
-            &[("map_new_ivh", "map.new_ivh"), ("map_set_ivh", "map.set_ivh"), ("map_eq_ivh", "map.eq_ivh")],
+            &[("map_new_ivh", "map.new_ivh"), ("map_set_ivh", "map.set_ivh"), ("map_eq_ivh", "map.eq_ivh"), ("map_from_list_ivh", "map.from_list_ivh"), ("map_to_string_ivh", "map.to_string_ivh")],
         ),
         (
             include_str!("../../../../stdlib/map_hval.almd"),

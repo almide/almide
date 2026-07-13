@@ -96,3 +96,50 @@ fn __drop_map_ivh(m: Map[Int, String]) -> Unit = {
   if prim.load32(h + 0) == 1 then __ivh_drop_vals(h, prim.load32(h + 4), 0) else ()
   prim.rc_dec(h)
 }
+
+
+// v0's `map.from_list` over (Int, String) pairs — duplicate key keeps FIRST position
+// with LAST value (map_set_ivh's replace-in-place gives exactly that). Recursion over
+// the pairs list; each step's map is a fresh block (the previous is dropped by scope).
+fn __ivh_from_list_at(pairs: List[(Int, String)], i: Int, m: Map[Int, String]) -> Map[Int, String] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __ivh_from_list_at(pairs, i + 1, map_set_ivh(m, k, v))
+    },
+    none => m,
+  }
+
+fn map_from_list_ivh(pairs: List[(Int, String)]) -> Map[Int, String] =
+  __ivh_from_list_at(pairs, 0, map_new_ivh())
+
+// `${Map[Int, String]}` display — v0's `[10: "x", 20: "y"]` (insertion order, raw int
+// keys, QUOTED + escaped String values; empty map → `[:]`). Escaping via the
+// replace-chain (backslash FIRST so later escapes never double), matching v0's
+// repr escapes exactly: \\, \", \n, \r, \t.
+fn __ivt_quote(s: String) -> String = {
+  let a = string.replace(s, "\\", "\\\\")
+  let b = string.replace(a, "\"", "\\\"")
+  let c = string.replace(b, "\n", "\\n")
+  let d = string.replace(c, "\r", "\\r")
+  let e = string.replace(d, "\t", "\\t")
+  "\"" + e + "\""
+}
+
+fn __ivt_at(h: Int, n: Int, i: Int, acc: String) -> String =
+  if i >= n then acc
+  else {
+    let k = prim.load64(h + 12 + i * 8)
+    let v = prim.load_str(h + 12 + (n + i) * 8)
+    let piece = int.to_string(k) + ": " + __ivt_quote(v)
+    let acc2 = if i == 0 then acc + piece else acc + ", " + piece
+    __ivt_at(h, n, i + 1, acc2)
+  }
+
+fn map_to_string_ivh(m: Map[Int, String]) -> String = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  if n == 0 then "[:]"
+  else "[" + __ivt_at(h, n, 0, "") + "]"
+}
