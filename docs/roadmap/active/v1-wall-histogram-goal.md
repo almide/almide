@@ -1358,6 +1358,19 @@ B17. **Option-`!` heap payload SHIPPED (69 → 68)**: the effect-unwrap
    PARITY. Ladder: mir 583 / classify 68 zero newly-walled / spec 283 /
    GATE OK / CORPUS WALL OK.
 
+E5. **http.serve native-root reclassification (68 → 67)**: root-(b) gains
+   `http.serve` — a TCP listener with NO v0 wasm form (the fixture header:
+   "wasm:skip — http.serve is native-only"; effect_intrinsic_tail's
+   `_serve_demo` exists only to pin the never-started codegen path). Same
+   no-wasm class as net.*. Metric-only; CORPUS WALL OK re-verified.
+   Batch diagnosis of the remaining test-fn walls while here: list.map with
+   a FIRST-CLASS fn value (3 — transform/closure-factory/apply_all__A: the
+   caps gate walls an opaque Fn-typed var even though 5c possible-callee
+   sets could bound it), heap-result Match in call-arg (codegen_patterns
+   tuples), list.filter_map unliftable closure (extract_click_positions),
+   never-err effect-fn structured match (protocol_edge — the error-model
+   frontier), generic variant ctor with heap field (type_system Node).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

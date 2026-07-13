@@ -579,6 +579,8 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                         // native-only" / "process.exec_status is native-only"), and WASI
                         // preview1 has no child-process API — structural, not a v1 gap.
                         // zlib has NO v0 wasm runtime at all ("wasm:skip — OS/native-only").
+                        // http.serve is a TCP LISTENER ("wasm:skip — http.serve is native-only",
+                        // effect_intrinsic_tail_test) — the same no-wasm class as net.*.
                         // random is deliberately NOT here: v0's emit_wasm implements it over
                         // WASI random_get (calls_random.rs) — a REAL v1 gap.
                         if m == "net"
@@ -589,7 +591,7 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                                     "exec" | "exit" | "run" | "spawn" | "kill" | "is_alive"
                                         | "exec_status" | "env"
                                 ))
-                            || (m == "http" && fname == "request")
+                            || (m == "http" && matches!(fname, "request" | "serve"))
                         {
                             self.native_call = true;
                         }
