@@ -519,6 +519,15 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
             {
                 ("list", "to_string_lo")
             }
+            // `${List[Map[String, List[Int]]]}` → `[["a": [1, 2]], ["b": [3]]]` — each
+            // map through its own interp (stdlib/map_hval.almd's list_to_string_lmh).
+            Ty::Applied(TypeConstructorId::Map, kv)
+                if kv.len() == 2 && matches!(kv[0], Ty::String)
+                    && matches!(&kv[1], Ty::Applied(TypeConstructorId::List, b)
+                        if b.len() == 1 && matches!(b[0], Ty::Int)) =>
+            {
+                ("list", "to_string_lmh")
+            }
             // Any other unsupported element type (`List[Map]`, deeper nesting, …) routes to an
             // UNLINKED variant name so the interp DESUGARS to a real `list.to_string_x` CallFn that
             // the render wall then REJECTS — the function walls cleanly. Returning `None` here would

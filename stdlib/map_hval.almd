@@ -160,3 +160,27 @@ fn map_to_string_hval(m: Map[String, List[Int]]) -> String = {
   if n == 0 then "[:]"
   else "[" + __hvt_at(h, n, 0, "") + "]"
 }
+
+
+// A `List[Map[String, List[Int]]]` (the nested `[["a": [1, 2]], ["b": [3]]]` repr
+// literal): per-element free via __drop_map_hval, then the list block.
+fn __drop_list_map_hval_at(xs: List[Map[String, List[Int]]], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let lh = prim.handle(xs)
+    let m: Map[String, List[Int]] = prim.load_handle(lh + 12 + i * 8)
+    __drop_map_hval(m)
+    __drop_list_map_hval_at(xs, i + 1, n)
+  }
+
+fn __drop_list_map_hval(xs: List[Map[String, List[Int]]]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_map_hval_at(xs, 0, prim.load32(h + 4)) else ()
+  prim.rc_dec(h)
+}
+
+// `${List[Map[String, List[Int]]]}` display — each map through its own `"${m}"`
+// interp (routing picks map.to_string_hval), joined in brackets (the
+// list_to_string_ll composed pattern).
+fn list_to_string_lmh(xs: List[Map[String, List[Int]]]) -> String =
+  "[" + (xs |> list.map((m) => "${m}") |> list.join(", ")) + "]"

@@ -620,6 +620,7 @@ impl LowerCtx {
             Record(String),
             StrStr,
             ListStr,
+            MapHval,
             CtorFlat,
             CtorLenLoop,
         }
@@ -651,6 +652,18 @@ impl LowerCtx {
             // string-key shape): each inner list is a fresh owned DynListStr; the outer
             // drop is the recursive list-of-list-str free (`list_list_str_lists`).
             ListElemDrop::ListStr
+        } else if matches!(&elem_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, kv)
+                if kv.len() == 2 && matches!(kv[0], Ty::String)
+                    && matches!(&kv[1],
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
+                            if b.len() == 1 && matches!(b[0], Ty::Int)))
+        {
+            // A `List[Map[String, List[Int]]]` literal (`[["a": [1, 2]], ["b": [3]]]` —
+            // the nested repr shape): each element is an hval map block (a from_list_hval
+            // call result, moved in); the list frees per-element via the self-hosted
+            // `$__drop_list_map_hval` (each element through `__drop_map_hval`).
+            ListElemDrop::MapHval
         } else if let Some(class) = crate::lower::lenlist_elem_class(&elem_ty) {
             match class {
                 crate::lower::CtorElemClass::Flat => ListElemDrop::CtorFlat,
@@ -747,6 +760,9 @@ impl LowerCtx {
             }
             ListElemDrop::StrStr => {
                 self.str_str_elem_lists.insert(dst);
+            }
+            ListElemDrop::MapHval => {
+                self.variant_drop_handles.insert(dst, "list_map_hval".to_string());
             }
             ListElemDrop::ListStr => {
                 self.list_list_str_lists.insert(dst);

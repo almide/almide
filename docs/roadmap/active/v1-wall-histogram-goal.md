@@ -1559,6 +1559,19 @@ B25. **Owned-route (String, List[scalar]) pairs literal SHIPPED (48 held)**:
    The List[Map[…]] nesting (cp6) is the remaining compound-repr depth.
    Ladder: mir 583 / classify 48 / spec 283 / GATE OK / CORPUS WALL OK.
 
+B26. **List[Map] nesting SHIPPED (48 → 47)**: the compound-repr depth-2
+   nest `${[["a": [1, 2]], ["b": [3]]]}` — three pieces in map_hval.almd +
+   wiring: `__drop_list_map_hval` (per-element `__drop_map_hval`, the
+   rc-guarded hval free), `list_to_string_lmh` (each map through its own
+   `"${m}"` interp — the ll composed pattern), and the owned builder's new
+   ListElemDrop::MapHval class (each element a from_list_hval call result
+   MOVED in; drop via variant_drop_handles "list_map_hval"). Display table:
+   List[Map[String, List[Int]]] → list.to_string_lmh. Probe cp6 v0-byte
+   PARITY; the nested-list-of-maps TEST opened. compound_repr_interp main's
+   last blocker is one MORE level (`List[Map[String, List[Option[Int]]]]` —
+   the `deep` line). Ladder: mir 583 / classify 47 zero newly-walled /
+   spec 283 / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
