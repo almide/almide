@@ -174,10 +174,17 @@ impl LowerCtx {
         if let Some(rewritten) = crate::lower::desugar_tuple_unwrap_or(body) {
             return self.lower_body_into(&rewritten);
         }
-        if let Some(rewritten) = desugar_effect_unwrap(body, self.fn_name == "main", &self.variant_layouts) {
+        // `unit_main` (the void-main die-on-error convention) applies ONLY to a `main` that
+        // declares the SYNTHETIC void return (bare `Unit`, no explicit Result/Option) — a
+        // `main` that EXPLICITLY declares `-> Result[Unit, String]` is a REAL Result-returning
+        // fn the caller inspects (cross_module_unit_effect_test), so its `!`-desugared Err arm
+        // must reconstruct `err(e)` normally, never the abort-line shape. `decl_ret_is_result`
+        // already draws exactly this line (tail.rs's Result[Unit] tail-voiding gate reuses it).
+        let unit_main = self.fn_name == "main" && !self.decl_ret_is_result;
+        if let Some(rewritten) = desugar_effect_unwrap(body, unit_main, &self.variant_layouts) {
             return self.lower_body_into(&rewritten);
         }
-        if self.fn_name == "main" {
+        if unit_main {
             if let Some(rewritten) = crate::lower::desugar_unit_main_err_arms(body) {
                 return self.lower_body_into(&rewritten);
             }

@@ -2423,6 +2423,78 @@ B45. **`branch_lift.rs`'s dense-region lift widened from `If`-only to
    REAL). Ladder: mir 583 / optimize 11 / classify 29 zero newly-walled (two
    entries closed) / spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
 
+B46. **`unit_main` die-on-error gate narrowed to the VOID convention only —
+   closes `cross_module_unit_effect_test.almd::main` (29 → 28)**: diagnosed
+   via a fork — the 5-entry "tail-position heap-result if/match" bucket had
+   TWO tractable, narrow, unrelated bugs bundled under identical wall text.
+   `mod_p3.rs`'s `lower_body_into` gated `desugar_effect_unwrap`'s
+   `unit_main` flag (which routes a `!`-desugar's Err/None arm to
+   `build_main_die_line` — an abort/exit-1 helper call — INSTEAD OF the
+   normal `err(e)`/`none` reconstruction, the "void main" convention) purely
+   on `self.fn_name == "main"`, with NO check on `main`'s DECLARED return
+   type. A `main` that legitimately declares `-> Result[Unit, String]` (a
+   REAL Result-returning main the caller inspects, `cross_module_unit_
+   effect_test`'s regression-test shape) got the die-protocol body anyway,
+   producing an ill-typed match `tail.rs`/`try_lower_variant_value_match`
+   can't lower. `LowerCtx` already carries EXACTLY the right flag for this
+   distinction — `decl_ret_is_result: bool` (set at construction from
+   `func.ret_ty`, consumed already by `tail.rs:396`'s Result[Unit] tail-
+   voiding gate) — just never wired into the `unit_main` computation at
+   `mod_p3.rs`'s two call sites (`desugar_effect_unwrap` and
+   `desugar_unit_main_err_arms`). Fixed: `let unit_main = self.fn_name ==
+   "main" && !self.decl_ret_is_result;`, threaded to both sites. Verified:
+   a standalone `main() -> Result[Unit, String]` with a real `!`-propagated
+   Err PARITY-matched v0 byte-for-byte (stdout `after ok\nError: boom\n`,
+   exit 1, both targets); the EXISTING void-`main() -> Unit` die-on-error
+   convention re-verified unchanged (same output/exit, confirming no
+   regression to the common case); a 200-chained-`!`-unwrap stress repro
+   (each constructing the now-correctly-gated continuation) completed under
+   a 16MB wasmtime cap in 50ms with matching output, no leak (this fix is
+   low-blast-radius — gated to functions literally named `main` — so a
+   lighter stress bound than the pervasive-mechanism 10,000× standard is
+   appropriate; 2000 chained unwraps hit a PRE-EXISTING, unrelated Rust
+   compiler stack-overflow in `desugar_effect_unwrap_inner`'s recursion,
+   not a v1/wasm leak — noted as a possible future recursion-depth item,
+   out of scope here).
+   **DIAGNOSIS — a real correctness bug FOUND, not shipped**: the fork also
+   identified `effect_if_branch_unwrap_test.almd::handler` as tractable — a
+   missing `IrExprKind::ResultOk { expr }` arm in `heap_result_arm.rs`'s
+   `lower_heap_result_arm` (a redundant `ok(e)` wrapper the frontend's
+   target-directed coercion, B44, doesn't reach for `if`/`match` ARM
+   positions specifically, only Bind/List/Record/Tuple). Implemented the
+   arm (strip + recurse when `expr.ty == *result_ty`, mirroring the
+   existing `Unwrap` identity-arm) — it compiled clean and DID close
+   `handler`'s wall — but an end-to-end parity probe (`if c then { match
+   fetch(p) {...} } else { ok([...]) }`, `fetch: -> List[String]`) caught a
+   REAL wrong-bytes bug it exposed: v0 prints `a,b` / `empty`, v1 printed
+   `0 ` / `empty` — the FIRST (match) arm, not the ResultOk arm, is wrong.
+   Root cause (traced, not yet fixed): `control_p2.rs`'s subject-tracking
+   dispatch (`try_lower_variant_value_match`'s `materialized_results_str`
+   branch, ~line 365) routes ANY `Result[<heap-Ok>, String]` NAMED-call
+   subject to the CAP-AS-TAG @16 read (`materialize_result_str`'s repr —
+   correct for a SELF-HOST helper like `value.as_string`) — but a user
+   `effect fn fetch(p) -> List[String]` is a LIFTED/auto-wrapped effect fn,
+   whose underlying WASM ABI is the ordinary LEN-AS-TAG @4 layout (the SAME
+   convention every scalar-Ok effect-fn Result uses) — the dispatch cannot
+   tell these two REPR CONVENTIONS apart from `subject.ty` alone (both are
+   `Result[<heap>, String]` at the IR level), reads the WRONG tag offset,
+   and returns garbage. This is a genuine, previously-unreachable REPR
+   MISMATCH class bug (NOT a Camp-4 payload-shape gap) — was NEVER
+   observable before because `handler`'s whole `if` always declined (due to
+   the OTHER arm's missing ResultOk handling), so the buggy match-arm path
+   was compiled but never actually reachable/tested end-to-end. **Reverted
+   the `heap_result_arm.rs` ResultOk-arm change** (never committed) rather
+   than ship a change that unlocks a reachable wrong-bytes path — `handler`
+   stays honestly walled. Fixing the repr-mismatch itself needs a
+   discriminator between "self-host cap-as-tag str-result" and "lifted-
+   effect-fn len-as-tag Result" at the SUBJECT-tracking dispatch site
+   (`control_p2.rs` ~L300-407) — scoped as a real follow-up, NOT a
+   drive-by; the ResultOk-arm fix can be re-applied once that's sound (it
+   is itself correct in isolation, just currently unsafe to enable given
+   what it makes reachable). Ladder (B46 alone, heap_result_arm.rs
+   reverted): mir 583 / classify 28 zero newly-walled (one entry closed) /
+   spec 283 / GATE OK / CORPUS WALL OK (FORBIDDEN=0).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
