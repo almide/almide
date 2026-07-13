@@ -801,27 +801,39 @@ fn __drop_list_closure_loop(h: Int, n: Int, i: Int) -> Unit =
   }
 ";
 
+/// Header layout: `n_heap | (n_nested_heap << 16) | (n_closure << 32)` — three
+/// 16-bit counts (ample for any realistic capture count). Widened from the
+/// original 2-field `n_heap | (n_closure << 16)` to add the `n_nested_heap`
+/// class (a `List[String]` capture — each element itself owned heap, freed via
+/// `__drop_list_str`, NOT the flat `rc_dec` a one-level-exact heap capture
+/// gets — the same class of bug this session's `_str`-dispatch fix and the
+/// `map.find` near-miss both found, caught here BEFORE it shipped).
 pub const CLOSURE_DROP_SRC: &str = "\
 fn __drop_closure(c: List[Int]) -> Unit = {
   let h = prim.handle(c)
   if prim.load32(h + 0) == 1 then {
     let hdr = prim.load64(h + 20)
-    let nc = hdr / 65536
-    let nh = hdr - nc * 65536
-    __drop_closure_loop(h, nc, nh, 0)
+    let nc = hdr / 4294967296
+    let rem1 = hdr - nc * 4294967296
+    let nnh = rem1 / 65536
+    let nh = rem1 - nnh * 65536
+    __drop_closure_loop(h, nc, nnh, nh, 0)
   } else ()
   prim.rc_dec(h)
 }
-fn __drop_closure_loop(h: Int, nc: Int, nh: Int, i: Int) -> Unit =
-  if i >= nc + nh then ()
+fn __drop_closure_loop(h: Int, nc: Int, nnh: Int, nh: Int, i: Int) -> Unit =
+  if i >= nc + nnh + nh then ()
   else {
     if i < nc then {
       let q: List[Int] = prim.load_handle(h + 28 + i * 8)
       __drop_closure(q)
+    } else if i < nc + nnh then {
+      let ls: List[String] = prim.load_handle(h + 28 + i * 8)
+      __drop_list_str(ls)
     } else {
       prim.rc_dec(prim.load64(h + 28 + i * 8))
     }
-    __drop_closure_loop(h, nc, nh, i + 1)
+    __drop_closure_loop(h, nc, nnh, nh, i + 1)
   }
 ";
 

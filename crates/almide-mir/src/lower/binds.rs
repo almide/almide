@@ -68,28 +68,40 @@ impl LowerCtx {
         // uniform `$__drop_closure` runtime can free ANY closure block without lowering-time
         // mask knowledge (a call-result closure's captures are unknowable at the drop site):
         //   slot 0            = fnidx (SCALAR — the drop must never touch it)
-        //   slot 1            = header: n_heap | (n_closure << 16)
+        //   slot 1            = header: n_heap | (n_nested_heap << 16) | (n_closure << 32)
         //   slots 2..         = closure captures (freed by recursive $__drop_closure),
-        //                       then heap captures (freed by one flat $rc_dec each),
+        //                       then FLAT heap captures (freed by one flat $rc_dec each),
+        //                       then NESTED-heap captures (freed by the type-specific
+        //                       recursive $__drop_list_str — a List[String] element),
         //                       then scalar captures (untouched).
-        // Heap captures are gated to ONE-LEVEL-EXACT kinds (String, List[Int], List[Float]
-        // — a single rc_dec frees them completely); a nested-heap capture (List[String],
-        // Value, variant, heap-field record) or a Float (f64↔i64 reinterpret not in the prim
-        // vocabulary) still defers — honest wall, recorded in the goal file.
+        // Flat heap captures are ONE-LEVEL-EXACT kinds (String, List[Int], List[Float] — a
+        // single rc_dec frees them completely). `List[String]` is NESTED (each element is
+        // itself owned heap — a flat rc_dec of just the list block would leak every String,
+        // the exact class of bug this session's `_str`-dispatch fix + the map.find near-miss
+        // both found) — freed via the generic `__drop_list_str` (B33) instead. A `Value` /
+        // variant / heap-field-record capture (or a `Float`, f64↔i64 reinterpret not in the
+        // prim vocabulary) still defers — honest wall, recorded in the goal file.
         use almide_lang::types::constructor::TypeConstructorId;
         let one_level_exact = |ty: &Ty| -> bool {
             matches!(ty, Ty::String)
                 || matches!(ty, Ty::Applied(TypeConstructorId::List, a)
                     if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Float))
         };
+        let is_nested_list_str = |ty: &Ty| -> bool {
+            matches!(ty, Ty::Applied(TypeConstructorId::List, a)
+                if a.len() == 1 && matches!(a[0], Ty::String))
+        };
         let mut closure_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut heap_caps: Vec<(VarId, Ty)> = Vec::new();
+        let mut nested_heap_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut scalar_caps: Vec<(VarId, Ty)> = Vec::new();
         for (v, ty) in cc.out {
             if matches!(ty, Ty::Fn { .. }) {
                 closure_caps.push((v, ty));
             } else if one_level_exact(&ty) {
                 heap_caps.push((v, ty));
+            } else if is_nested_list_str(&ty) {
+                nested_heap_caps.push((v, ty));
             } else if matches!(ty, Ty::Int | Ty::Bool) {
                 scalar_caps.push((v, ty));
             } else {
@@ -98,9 +110,11 @@ impl LowerCtx {
         }
         let n_closure = closure_caps.len();
         let n_heap = heap_caps.len();
+        let n_nested_heap = nested_heap_caps.len();
         let captures: Vec<(VarId, Ty)> = closure_caps
             .into_iter()
             .chain(heap_caps)
+            .chain(nested_heap_caps)
             .chain(scalar_caps)
             .collect();
         // Every capture must resolve to a lowered local value HERE (a capture of a
@@ -173,7 +187,7 @@ impl LowerCtx {
             let addr = sub.fresh_value();
             sub.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
             let val = sub.fresh_value();
-            if i < n_closure + n_heap {
+            if i < n_closure + n_heap + n_nested_heap {
                 sub.ops.push(Op::Prim {
                     kind: PrimKind::LoadHandle,
                     dst: Some(val),
@@ -210,9 +224,10 @@ impl LowerCtx {
         self.lifted.push(lifted_fn);
         self.lifted.append(&mut nested);
         // Materialize the CLOSURE BLOCK: a DynList of 2 + k slots — slot 0 the funcref
-        // table index, slot 1 the SELF-DESCRIBING drop header (n_heap | n_closure << 16 —
-        // what lets the uniform `$__drop_closure` free any closure block at any drop site
-        // without lowering-time mask knowledge), then the captures (closure, heap, scalar).
+        // table index, slot 1 the SELF-DESCRIBING drop header (n_heap | n_nested_heap<<16
+        // | n_closure<<32 — three 16-bit counts, what lets the uniform `$__drop_closure`
+        // free any closure block at any drop site without lowering-time mask knowledge),
+        // then the captures (closure, flat heap, nested heap, scalar).
         let len_c = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: len_c, value: (2 + cap_vals.len()) as i64 });
         let blk = self.fresh_value();
@@ -226,7 +241,7 @@ impl LowerCtx {
         let hdr = self.fresh_value();
         self.ops.push(Op::ConstInt {
             dst: hdr,
-            value: (n_heap as i64) | ((n_closure as i64) << 16),
+            value: (n_heap as i64) | ((n_nested_heap as i64) << 16) | ((n_closure as i64) << 32),
         });
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![blk] });
@@ -235,13 +250,13 @@ impl LowerCtx {
             self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(i) as i64 });
             let addr = self.fresh_value();
             self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
-            // A closure/heap capture: the closure CO-OWNS it — `Dup` a fresh reference
-            // (CowSafety makes the share value-semantics-safe: any later in-place
+            // A closure/heap/nested-heap capture: the closure CO-OWNS it — `Dup` a fresh
+            // reference (CowSafety makes the share value-semantics-safe: any later in-place
             // mutation clones-on-shared), store its handle, `Consume` the fresh ref into
             // the block (cert `a` + `m`; the original var's scope-end drop is untouched).
             // The fnidx/header/scalar slots store the raw value.
             let cap_index = i as i64 - 2; // captures start at slot 2
-            if cap_index >= 0 && (cap_index as usize) < n_closure + n_heap {
+            if cap_index >= 0 && (cap_index as usize) < n_closure + n_heap + n_nested_heap {
                 let owned = self.fresh_value();
                 self.ops.push(Op::Dup { dst: owned, src: v });
                 let handle = self.fresh_value();

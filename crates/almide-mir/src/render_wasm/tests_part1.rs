@@ -333,11 +333,14 @@
         } else {
             ""
         };
-        // `__drop_list_str` (a `List[String]` record OR variant ctor field) — SHARED between
-        // the record and variant drop generators (see pipeline.rs's `source_to_ir_with`, the
-        // same two-pass this helper mirrors), emitted ONCE here rather than by either
-        // generator inline.
-        let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&ir.type_decls) {
+        // `__drop_list_str` (a `List[String]` record/variant ctor field, OR a closure's
+        // nested-heap capture) — SHARED between the record and variant drop generators
+        // (see pipeline.rs's `source_to_ir_with`, the same two-pass this helper mirrors),
+        // emitted ONCE here rather than by either generator inline. Widened on
+        // `program_uses_closures` too — mirrors pipeline.rs's same conservative gate.
+        let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&ir.type_decls)
+            || crate::lower::program_uses_closures(&ir)
+        {
             crate::lower::LIST_STR_DROP_SRC
         } else {
             ""

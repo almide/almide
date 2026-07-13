@@ -237,10 +237,18 @@ pub fn try_render_wasm_source(
     } else {
         ""
     };
-    // `__drop_list_str` (a `List[String]` record OR variant ctor field) — SHARED between the
-    // record and variant drop generators, so it is emitted ONCE here rather than by either
-    // generator inline (two independent copies would be a duplicate-fn compile error).
-    let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&all_type_decls) {
+    // `__drop_list_str` (a `List[String]` record OR variant ctor field, OR a closure's
+    // nested-heap capture — `CLOSURE_DROP_SRC`'s `__drop_closure_loop` unconditionally
+    // references it once ANY closure exists, since a capture's concrete type isn't known
+    // at this gate without re-running `lift_lambda`'s own free-vars scan; conservatively
+    // widened on `program_uses_closures` rather than precisely detecting a List[String]
+    // capture — always correct, occasionally includes an unused routine) — SHARED between
+    // the record and variant drop generators, so it is emitted ONCE here rather than by
+    // either generator inline (two independent copies would be a duplicate-fn compile
+    // error).
+    let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&all_type_decls)
+        || crate::lower::program_uses_closures(&ir)
+    {
         crate::lower::LIST_STR_DROP_SRC
     } else {
         ""

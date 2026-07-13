@@ -2033,6 +2033,47 @@ DIAGNOSIS (at 39): **two further root causes pinned by direct probing**,
    Both are legitimate next targets for a session with fresh context
    budget; neither is safe to rush.
 
+B38. **Closure `List[String]` capture ratchet closed — 3rd env-header
+   category (39 → 38)**: contrary to the DIAGNOSIS entry above (which
+   flagged this as substantial-but-not-safe-to-rush), on reflection the
+   change was fully scoped after tracing every touch point, so it was
+   attempted carefully with heavy verification. `lift_lambda` (binds.rs)
+   gains a THIRD capture class — `nested_heap_caps` (a `List[String]`
+   capture) alongside the existing `closure_caps`/`heap_caps`/
+   `scalar_caps` — widening the packed env header from 2 fields
+   (`n_heap | n_closure<<16`) to 3 (`n_heap | n_nested_heap<<16 |
+   n_closure<<32`, still one i64). ALL boundary checks touched
+   consistently: the prologue's LoadHandle-vs-scalar-Load split, the
+   construction Dup+store split, and the header packing itself (4
+   call sites in binds.rs, verified by grepping every remaining
+   `n_heap`/`n_closure` reference after the edit). `CLOSURE_DROP_SRC`
+   (drop_sources.rs) gains a 3-way `__drop_closure_loop` dispatch:
+   closure_caps → recursive `__drop_closure` (unchanged), nested_heap_caps
+   → `__drop_list_str` (B33's generic per-element String-list free — NOT
+   the flat `rc_dec` a one-level-exact heap capture gets, which would leak
+   each captured String — the exact bug class this session's `_str`-
+   dispatch fix and the `map.find` near-miss both already caught, this
+   time caught BEFORE shipping), heap_caps → flat `rc_dec` (unchanged).
+   `LIST_STR_DROP_SRC`'s injection gate widened to fire whenever
+   `program_uses_closures` is true (conservative — a closure's captures
+   aren't known without re-running `lift_lambda`'s own free-vars scan, so
+   this may occasionally include an unused routine rather than risk a
+   missing one), mirrored in BOTH pipeline.rs and the tests_part1.rs
+   test-helper (the B33 lesson, applied again). **Verification depth
+   matched the risk** (this touches the closure representation used
+   throughout the compiler, including B36's List[Closure] literals): probe
+   rfc4 (a `List[String]`-capturing closure stored as a record field,
+   returned in tail position — exactly `record_fn_field_test::mock_source`'s
+   shape) v0-byte PARITY; a DEDICATED 10,000× leak-loop (`clsleak.almd` —
+   construct + immediately call a closure capturing a fresh `List[String]`
+   each iteration) completed instantly with matching v0/v1 output (30000),
+   no OOM/hang; `gate.sh`'s kernel-proven ownership checker ACCEPTs the
+   real `closure_capture.almd`/`closure_heap_capture.almd` corpus fixtures.
+   `record_fn_field_test::mock_source` fully disappeared from classify's
+   output (checked: absent from EVERY bucket, not a B37-style bucket
+   transition). Ladder: mir 583 / classify 38 zero newly-walled / spec 283
+   / GATE OK / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
