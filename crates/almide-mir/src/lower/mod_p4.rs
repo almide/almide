@@ -685,6 +685,13 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
                 // `${Map[Int, Float]}` — `[1: 0.5]` (raw int keys, shortest-round-trip
                 // float values; stdlib/map_if.almd).
                 (Ty::Int, Ty::Float) => ("map", "to_string_if"),
+                // `${Map[String, List[Int]]}` — `["xs": [1, 2, 3]]` (quoted keys, list
+                // values through their own interp; stdlib/map_hval.almd).
+                (Ty::String, Ty::Applied(TypeConstructorId::List, b))
+                    if b.len() == 1 && matches!(b[0], Ty::Int) =>
+                {
+                    ("map", "to_string_hval")
+                }
                 _ => ("map", "to_string_x"),
             }
         }
@@ -1530,6 +1537,21 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 (true, true) if val_is_flat_list && matches!(func, "new" | "set" | "eq") => {
                     Some("_hval")
                 }
+                // `Map[String, List[Int]]` from_list / display (the map-of-lists literal):
+                // keyed on the RESULT/first-arg map; to_string_hval passes through
+                // verbatim (the B22 suffix guard).
+                (true, true)
+                    if !val_is_string
+                        && func == "from_list"
+                        && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                            if a.len() == 2
+                                && matches!(a[0], Ty::String)
+                                && matches!(&a[1], Ty::Applied(TypeConstructorId::List, b)
+                                    if b.len() == 1 && matches!(b[0], Ty::Int))) =>
+                {
+                    Some("_hval")
+                }
+                (true, true) if func == "to_string_hval" => Some(""),
                 (true, true) if !val_is_string => Some("_hval_wall"),
                 (true, true) => matches!(
                     func,

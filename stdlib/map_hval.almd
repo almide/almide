@@ -114,3 +114,49 @@ fn __drop_map_hval(m: Map[String, List[Int]]) -> Unit = {
   if prim.load32(h + 0) == 1 then __hvl_drop_slots(h, prim.load32(h + 4) * 2, 0) else ()
   prim.rc_dec(h)
 }
+
+
+// v0's `map.from_list` over (String, List[Int]) pairs — duplicate key keeps FIRST
+// position with LAST value (map_set_hval's replace-in-place). Recursion over the
+// pairs list; each step's map is a fresh block (the previous drops by scope).
+fn __hvf_at(pairs: List[(String, List[Int])], i: Int, m: Map[String, List[Int]]) -> Map[String, List[Int]] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __hvf_at(pairs, i + 1, map_set_hval(m, k, v))
+    },
+    none => m,
+  }
+
+fn map_from_list_hval(pairs: List[(String, List[Int])]) -> Map[String, List[Int]] =
+  __hvf_at(pairs, 0, map_new_hval())
+
+// `${Map[String, List[Int]]}` display — v0's `["xs": [1, 2, 3], "ys": [4, 5]]`
+// (insertion order, QUOTED + escaped String keys, list values through their own
+// interp routing; empty → `[:]`). The replace-chain escapes, backslash FIRST.
+fn __hvt_quote(s: String) -> String = {
+  let a = string.replace(s, "\\", "\\\\")
+  let b = string.replace(a, "\"", "\\\"")
+  let c = string.replace(b, "\n", "\\n")
+  let d = string.replace(c, "\r", "\\r")
+  let e = string.replace(d, "\t", "\\t")
+  "\"" + e + "\""
+}
+
+fn __hvt_at(h: Int, n: Int, i: Int, acc: String) -> String =
+  if i >= n then acc
+  else {
+    let k = prim.load_str(h + 12 + i * 8)
+    let v: List[Int] = prim.load_handle(h + 12 + (n + i) * 8)
+    let piece = __hvt_quote(k) + ": " + "${v}"
+    let acc2 = if i == 0 then acc + piece else acc + ", " + piece
+    __hvt_at(h, n, i + 1, acc2)
+  }
+
+fn map_to_string_hval(m: Map[String, List[Int]]) -> String = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  if n == 0 then "[:]"
+  else "[" + __hvt_at(h, n, 0, "") + "]"
+}

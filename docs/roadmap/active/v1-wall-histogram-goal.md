@@ -1528,6 +1528,22 @@ B23. **Display tail continued (48 held, enablers)**: `${List[Option[Int]]}`
    from_list/display family, next. Ladder: mir 583 / classify 48 zero
    delta / spec 283 / purity OK / GATE OK / CORPUS WALL OK.
 
+B24. **hval from_list/display self-hosts + an ownership lesson (48 held)**:
+   map_hval.almd gains from_list (set-fold) + to_string_hval
+   (`["xs": [1, 2, 3]]` — quoted keys, list values through their own
+   interp), routing + registry wired; probe cp4 reached v0-byte PARITY
+   THROUGH a call-arg literal widening (flat-2-tuple elements in the VIEW
+   materializer) that the PCC OWNERSHIP CHECKER then REJECTED over the
+   corpus (30420 objects) — the view builder stores RAW handles with NO rc
+   events (elements owned elsewhere; plain block-only Drop), and a
+   fresh-owned tuple element pushed live + a ty-driven recursive
+   DropListStrStr re-track double-frees. The widening is REVERTED (gate
+   green again; accept ⟹ safe held exactly as designed); the self-hosts
+   stay (sound, registered, reachable once the pairs-literal materializes
+   through an OWNERSHIP-CORRECT path — the documented follow-up: a
+   dedicated owned-tuple-list builder like try_lower_record_list_literal,
+   NOT the view). classify 48 / mir 583 / spec 283 / CORPUS WALL OK.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

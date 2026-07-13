@@ -90,8 +90,17 @@ impl LowerCtx {
         // A `(String, String)` TUPLE element (the `map.entries` shape) — `__list_concat_rc` rc-owns each
         // tuple, freed recursively by `Op::DropListStrStr` (per tuple: rc_dec BOTH String slots). The
         // (String,String) counterpart of `str_value_elem`.
+        // Widened to (String, <flat block>) — String OR List[scalar] second slot (the
+        // hval map literal's `("xs", [1, 2, 3])` pairs): DropListStrStr's two per-slot
+        // rc_decs are each a FULL free for any flat block (`is_list_str_str_ty`'s
+        // documented physics).
+        let flat_snd = |t: &Ty| {
+            matches!(t, Ty::String)
+                || matches!(t, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
+                    if b.len() == 1 && !is_heap_ty(&b[0]))
+        };
         let str_str_elem = matches!(&elem_ty,
-            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String));
+            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && flat_snd(&tys[1]));
         // An `(Int, String)` TUPLE element (the `list.enumerate` shape) — `__list_concat_rc` rc-owns each
         // tuple, freed recursively by `$__drop_list_int_str` (per tuple: rc_dec the String slot @20 only,
         // the Int @12 is scalar). Routed via variant_drop_handles (a DropVariant, like the record case).
