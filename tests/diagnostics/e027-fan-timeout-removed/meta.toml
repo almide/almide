@@ -1,0 +1,3 @@
+expects_code = "E027"
+expects_error = "fan.timeout was removed"
+hint_substring = "host boundary"

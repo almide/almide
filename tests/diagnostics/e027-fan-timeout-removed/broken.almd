@@ -1,0 +1,6 @@
+effect fn slow() -> Result[Int, String] = ok(42)
+
+effect fn main() -> Unit = {
+  let r: Result[Int, String] = fan.timeout(5000, () => slow())
+  println(int.to_string(r ?? -1))
+}

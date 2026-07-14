@@ -96,7 +96,7 @@ MISRA C / Ada Ravenscar / SPARK subset の analog。`almide check --profile crit
 - 有界再帰・確保上限 (静的に検査可能な形)、RC drop カスケード長の上限
   → WCET 解析可能性
 - capability は deny-all 出発 (`Rand` / `Time` も明示 grant)
-- flagged 契約の機能 (C-006 fan.timeout) は使用不可
+- flagged 契約の機能は使用不可 (現状 flagged はゼロ — C-006 fan.timeout は 0.29.0 で言語ごと削除済み)
 - **Critical は subset であって方言ではない** — 全 Critical コードは通常モードでも
   そのまま有効 (SPARK ⊂ Ada と同じ関係)
 

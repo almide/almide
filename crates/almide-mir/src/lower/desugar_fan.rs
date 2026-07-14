@@ -105,39 +105,8 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
         }
         Some(bodies)
     }
-    // `fan.timeout(ms, () => body)` → `body`: v0's WASM leg has NO timeout — it calls
-    // the thunk INLINE (calls_p4.rs "just call fn (no timeout in WASM)"), so the literal-
-    // thunk form desugars to the body itself (the fan.race head-settle precedent). The ms
-    // arg is DISCARDED — gated CALL-FREE so no effect (or count) is dropped with it; a
-    // non-literal thunk declines (no inlinable body → the honest wall).
-    fn fan_timeout_body(e: &IrExpr) -> Option<IrExpr> {
-        let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
-        else {
-            return None;
-        };
-        if module.as_str() != "fan" || func.as_str() != "timeout" {
-            return None;
-        }
-        let [ms, thunk] = &args[..] else { return None };
-        if crate::lower::expr_contains_call(ms) {
-            return None;
-        }
-        let IrExprKind::Lambda { params, body, .. } = &thunk.kind else {
-            return None;
-        };
-        if !params.is_empty() {
-            return None;
-        }
-        Some((**body).clone())
-    }
     impl IrMutVisitor for V {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-            // `fan.timeout(ms, () => body)` — inline the thunk body (v0-wasm semantics).
-            if let Some(b) = fan_timeout_body(e) {
-                *e = b;
-                self.changed = true;
-                // fall through — the substituted body is walked below.
-            }
             // PRE-order: `match fan.any([() => t0, …]) { ok(pat) => okbody, err(epat) => errbody }` —
             // INLINE the outer arms into each thunk level (avoiding the intermediate Result + a
             // match-over-match). Each thunk `t_i` runs, an Ok takes `okbody`, an Err falls to the NEXT

@@ -33,7 +33,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-003 | Non-aborting integer div/mod stay byte-identical | 0.24.0 | active | fixture | 1 |
 | C-004 | fan.race / fan.any / fan.map / fan.settle are deterministic by list order | 0.24.0 | active | fixture | 4 |
 | C-005 | fan error propagation surfaces as the unified main-error abort | 0.24.0 | active | fixture | 5 |
-| C-006 | [fan.timeout is the SOLE documented wall-clock divergence (wasm warns)](C-006-fan-timeout-divergence.md) | 0.24.0 | flagged-for-revision | by-construction | 0 |
+| C-006 | [fan.timeout does not exist — wall-clock deadlines live at the host boundary](C-006-fan-timeout-removed.md) | 0.29.0 | active | fixture | 0 |
 | C-007 | Abortable top-level lets evaluate eagerly at startup | 0.24.0 | active | fixture | 2 |
 | C-008 | [Compound interpolation renders the Almide-literal repr (containers)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
 | C-009 | [Record / variant / anonymous-record interpolation repr (field sorting)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |

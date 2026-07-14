@@ -412,22 +412,6 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(list_scratch);
             }
-            "timeout" => {
-                // fan.timeout(ms, fn) → Result[T, E]: just call fn (no timeout in WASM)
-                // args[0] = ms (Int), args[1] = closure () -> Result[T, E]
-                let closure = self.scratch.alloc_i32();
-                self.emit_expr(&args[1]);
-                wasm!(self.func, {
-                    local_set(closure);
-                    local_get(closure); i32_load(4); // env
-                    local_get(closure); i32_load(0); // table_idx
-                });
-                {
-                    let ti = self.emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
-                    wasm!(self.func, { call_indirect(ti, 0); });
-                }
-                self.scratch.free_i32(closure);
-            }
             _ => panic!(
                 "[ICE] emit_wasm: no WASM dispatch for `fan.{}` — \
                  add an arm in emit_fan_call or resolve upstream",

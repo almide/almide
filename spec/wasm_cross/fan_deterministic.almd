@@ -1,8 +1,8 @@
 // @contract: C-004
 // fan.map / fan.race / fan.any / fan.settle DETERMINISTIC contract (native == wasm).
 // All cases succeed (exit 0). fan.race is now thunk[0]'s settled result in LIST
-// ORDER (no longer wall-clock), so it joins the gate; only fan.timeout stays
-// excluded (it is a wall-clock effect with no portable meaning). The error paths
+// ORDER (no longer wall-clock), so it joins the gate; fan.timeout was removed
+// outright (a wall-clock effect with no portable meaning, C-006). The error paths
 // (element-Err, all-fail, race head-Err) live in fan_map_err.almd / fan_any_allfail.almd,
 // which terminate with a defined "Error: <msg>" + exit 1 on both targets.
 effect fn dbl(x: Int) -> Result[Int, String] = ok(x * 2)

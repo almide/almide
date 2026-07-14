@@ -191,8 +191,8 @@ Quick wins first (small effort, high leverage):
     現状は回帰テストを `assert(a or b)` で非決定性許容にして整合させただけ。筋は
     両 target を同一の決定的セマンティクス（例: 並列実行は保ったまま list 順で
     最初の OK を勝者にする）へ揃えること。
-  - **fan.timeout が WASM では no-op**: native は thread + recv_timeout で本物の
-    タイムアウト、WASM は ms を無視して thunk を完走。長時間 thunk で挙動が乖離。
+  - ~~**fan.timeout が WASM では no-op**~~: **解消 (0.29.0)** — fan.timeout を言語
+    から削除 (C-006 flip、E027 tombstone)。デッドラインはホスト境界で課す。
   - **fan.map の err 時挙動が乖離**: native は `.unwrap()` で panic、WASM は err を
     包んで enclosing fn の外へ伝播（return）。err を返す thunk で観測差。
   いずれも build は通る（型は付く）が「同一ソースが target で別挙動」を起こす
