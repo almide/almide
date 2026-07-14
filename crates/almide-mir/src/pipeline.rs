@@ -903,5 +903,7 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     crate::render_native::try_render_native_program(&MirProgram {
         functions,
         exports: Vec::new(),
+        // Rung 1 walls every top-let above, so there are no mutable-global slots.
+        mutable_global_count: 0,
     })
 }
