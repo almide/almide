@@ -298,6 +298,22 @@ native-FFI walls.
   `g[i] = v` — v0-wasm aliases (snapshot sees the write), native clones
   (`9 9` vs `9 2.5`). v1's COW matches NATIVE; v0 retirement (Phase 3)
   obsoletes the divergent path.
+- **Borrow-chain follow-ups (same day)**: `node.children[item.idx]` (index
+  whose list is a FIELD of a materialized aggregate) borrows through
+  `try_lower_heap_field_borrow`; `line.items[ii].idx` (scalar read off an
+  INDEXED element) resolves via an IndexAccess container arm. Together they
+  opened the whole Yoga layout core (compute_size / do_layout / resolve_line_
+  flex / layout_line / diff_tree) — ceangal 21→14. Fixtures:
+  `spec/lang/member_index_borrow_test.almd`.
+- **ceangal residual 14**: ~5 are per-file classify artifacts (cross-module
+  `lay.*`/`v.*` refs the real pipeline resolves); real gaps = both-arms-if 2,
+  cell-API method-call assign 1, arg materialization class, heap-result-if 1.
+- **PRE-EXISTING checker bug (blocks ceangal's own suite, NOT this arc's
+  regression)**: `almide test` on ceangal fails the #433 name-pinning
+  postcondition (`Node` in build_lines/resolve_line_flex/layout_line/do_layout
+  should pin `layout.Node`) — reproduced identically on released v0.28.6.
+  Single-file / two-module minimal probes do NOT reproduce; needs ceangal's
+  real module graph. Separate checker workstream.
 
 ## Remaining threads
 
