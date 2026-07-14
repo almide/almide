@@ -157,8 +157,38 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
             }
             walk_expr_mut(self, e);
             // POST-order: `fan.race([() => t0, …])` — the FIRST thunk's body (deterministic head).
+            // The CHECKED type of `fan.race(…)` is uniformly `Result[T, String]` (the fan thunk
+            // convention — see `desugar_fan_block`'s twin comment), even when every thunk is a
+            // PLAIN (non-Result) fn (`fan.race([thunk_a, thunk_b])`, `thunk_a -> Int` — v0's
+            // FanLowering wraps a non-Result thunk in an Ok adapter). A caller reaching `fan.race`
+            // through an un-annotated bind (`let r = fan.race([...])`) gets the frontend's auto-`?`
+            // `Try` node over this Result-checked type — which `desugar_effect_unwrap` (a LATER
+            // pass) turns into a real `match … { err(e)=>.., ok(r)=>.. }`. If this rule substitutes
+            // the RAW thunk body (`t0`, Int-typed) in place of the ORIGINAL Result-typed call, the
+            // surrounding Try/match sees a type it no longer matches — producing a structurally
+            // invalid `Ok/Err`-pattern match over a scalar Int subject (confirmed via debug tracing
+            // on `fan_pure_thunks.almd`: exactly this shape reaches `lower_branch`'s untracked-
+            // subject-with-call-bearing-arm wall). PRESERVE the Result contract instead: when the
+            // ORIGINAL call was Result-typed but `t0` is not, wrap `t0` in a genuine `ok(t0)`
+            // (`ResultOk`) at the original type — sound for EVERY position (Try, match subject, a
+            // scalar use), not just the one that happened to break, and unconditionally in step
+            // with the "FanLowering always Oks a non-Result thunk" contract this file's header
+            // documents. A thunk that is ALREADY Result-typed (a real fallible race — not used in
+            // this corpus but structurally possible) is untouched — its own `!`/match handles the
+            // real Err path.
             if let Some(bodies) = fan_bodies(e, "race") {
-                *e = bodies.into_iter().next().unwrap();
+                let orig_ty = e.ty.clone();
+                let t0 = bodies.into_iter().next().unwrap();
+                *e = if crate::lower::is_result_ty(&orig_ty) && !crate::lower::is_result_ty(&t0.ty) {
+                    IrExpr {
+                        kind: IrExprKind::ResultOk { expr: Box::new(t0) },
+                        ty: orig_ty,
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    }
+                } else {
+                    t0
+                };
                 self.changed = true;
             }
             // POST-order: `fan.settle([() => t0, …])` in ANY position — deterministic sequential

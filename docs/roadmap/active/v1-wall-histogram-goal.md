@@ -4287,6 +4287,76 @@ B114. **Closed `bidirectional_type_test`'s "structured error - overflow
    WALLED-REAL list against the prior baseline). `almide test`: 283/283.
    GATE OK. CORPUS WALL OK. **16, was 17.**
 
+B115. **Fixed a real (previously undiscovered) silent-wrong-value RISK in `desugar_fan_race_any`'s
+   `fan.race` inlining — a genuine correctness fix, corpus count UNCHANGED (16 held) because
+   `fan_pure_thunks.almd::main`'s OTHER blocker (below) is independent and deeper**: root-caused
+   the earlier DIAGNOSIS's (goal file, `fan_pure_thunks.almd::main` entry, pre-B115) "structurally
+   invalid tree" finding to its exact mechanism via debug-instrumented tracing (temporary, fully
+   reverted): `fan.race([...])`'s CHECKED type is uniformly `Result[T, String]` (the fan thunk
+   convention — even for PLAIN, non-Result thunks like `thunk_a() -> Int`, since v0's FanLowering
+   wraps a non-Result thunk in an Ok adapter). An un-annotated bind (`let r = fan.race([thunk_a,
+   thunk_b])`) gets the frontend's auto-`?` `Try` node over this Result-checked type, which a LATER
+   pass (`desugar_effect_unwrap`) turns into a real `match fan.race(...) { err(e)=>.., ok(r)=>.. }`.
+   The POST-order `fan.race` rule (unconditionally: `*e = bodies.into_iter().next().unwrap()`,
+   substituting the first thunk's INLINED body wherever `fan.race([...])` appears — a Call node,
+   since the frontend eta-expands a bare fn reference into `()=>thunk_a()`) does not distinguish
+   WHERE it fires: when it hits `fan.race(...)` INSIDE the Try node (which happens, since the
+   POST-order rule fires on ANY occurrence, and — per `desugar_heap_branches`'s pipeline position —
+   this runs on the func body BEFORE `desugar_effect_unwrap` has had a chance to build the Ok/Err
+   match), it silently changes the Try's payload from `Result[Int,String]` to `Int` while the Try
+   node itself is untouched. `desugar_effect_unwrap` then unconditionally builds an `Ok`/`Err`
+   match over what is now a bare `Int` value — a structurally invalid tree that falls to the
+   untracked-subject-with-call-bearing-arm wall (a SAFE outcome here — the wall doctrine caught it —
+   but the SAME mismatch, in a shape that instead satisfied SOME tracking heuristic well enough to
+   half-lower, could plausibly produce silently wrong bytes elsewhere; not confirmed to have done so
+   anywhere in the current corpus, but the type contract itself was simply wrong, which is a latent
+   risk independent of whether corpus coverage happens to catch it via a wall today).
+
+   **The fix**: when the POST-order `fan.race` rule substitutes a plain (non-Result) thunk body for
+   an ORIGINAL Result-typed call, wrap the replacement in a genuine `ok(t0)` (`IrExprKind::ResultOk`)
+   at the original type, instead of substituting the raw value — this PRESERVES the Result contract
+   at every consuming position (a Try node, a match subject, a scalar use) uniformly, rather than
+   leaving it correct only by accident of the immediate substitution site. A thunk that is ALREADY
+   Result-typed (a genuinely fallible race — not used in the current corpus but structurally
+   possible) is untouched, since `is_result_ty(&t0.ty)` is already true.
+
+   **Verified**: a minimal repro (`fan.race([thunk_a, thunk_b])`, both plain `-> Int` fns, used via
+   an un-annotated `let r = …` inside `effect fn main`) — wasmtime and v0 native both print `A` then
+   `race=1`, byte-identical (confirms the previously-invalid tree now lowers AND produces the
+   correct value, not just "renders"). A combined `race` + `any` repro (mirroring the corpus file's
+   shape, `any` using genuinely Result-typed thunks) — wasmtime/v0 both print `A`/`race=1`/`C`/`D`/
+   `any=4`, byte-identical (confirms no regression to the pre-existing, working `any` PRE-order
+   path). Five SEQUENTIAL `fan.race` calls (a proxy for repeated-construction correctness — a true
+   10,000-iteration while-loop wrapper around `fan.race` hits a SEPARATE, PRE-EXISTING, unrelated
+   wall — "scalar binding outside the value subset… STRICT value mode" — confirmed via a temporary
+   `git stash` of this fix that the identical wall fires with or without it, so it is not a
+   regression from this change, just an orthogonal frontier this fix does not touch) — wasmtime/v0
+   both print `5`, byte-identical. `cargo test -q -p almide-mir`: 583/583. `classify_corpus`: 16 →
+   16, zero newly-walled (diffed the full 16-name WALLED-REAL list — identical set, including
+   `fan_pure_thunks.almd::main` itself, still walled). `almide test`: 283/283. GATE OK. CORPUS WALL
+   OK.
+
+   **Why `fan_pure_thunks.almd::main` itself stays walled despite this fix**: the SAME file also
+   calls `fan.settle([quiet_a, quiet_b])` (plain thunks) — `rewrite_settle_any`'s settle handling
+   (`desugar_fan.rs`) rewrites `fan.settle([...])` to a literal `List[...]` of the thunk bodies, and
+   THIS list — a `List[Int]` mixed into a context expecting `List[Result[Int,String]]` per the same
+   phantom-Result convention — independently hits "non-empty List[heap] literal with nested-
+   ownership elements… cannot be faithfully materialized" — the SAME already-diagnosed, deep List-
+   [heap]-literal cluster (`compound_repr_interp`/`records`/`recursive`, `generic_chain_unwrap_or`,
+   `generic_fn_in_inferred_lambda`) needing new generic-monomorphization infrastructure, NOT a
+   narrow gate fix. Traced this precisely (not just inferred): the `let r = fan.race(...)` match
+   ITSELF fully succeeds (subject tracked, both arm bodies `Unit`-typed, admission gates satisfied —
+   confirmed via debug tracing) and calls `try_lower_result_match`, which internally lowers BOTH arm
+   bodies before finalizing; the Ok arm's body is the FULL continuation (`println(…); let s =
+   fan.settle(…); println(…)`), and lowering THAT fails on the settle construction — `try_lower_
+   result_match` SWALLOWS this inner failure and returns `false` (a rollback-on-arm-failure design,
+   sound but which produces a MISLEADING top-level error: `main` is reported as "untracked subject"
+   even though the ACTUAL failure is settle's unrelated List[heap] literal gap several layers
+   inside the Ok arm). This is a genuine (minor) error-message-fidelity gap worth noting for anyone
+   debugging a SIMILAR "untracked subject" report in the future — the reported subject may be a red
+   herring if a call-bearing arm's body independently fails to lower. **16, unchanged** (a real
+   correctness fix shipped regardless, matching B112's precedent).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
