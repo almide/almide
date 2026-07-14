@@ -60,8 +60,12 @@ impl LowerCtx {
                 }
                 Some(blk)
             }
+            // A tracked LOCAL heap var, or a MODULE-LEVEL global (`_style: _default` — the
+            // ceangal View ctors): `value_or_global` materializes a global's const/record
+            // initializer as a fresh owned cached copy (dropped at scope end); the Dup here
+            // gives the aggregate its own distinct reference either way.
             IrExprKind::Var { id } => {
-                let src = *self.value_of.get(id)?;
+                let src = self.value_or_global(*id).ok()?;
                 let dup = self.fresh_value();
                 self.ops.push(Op::Dup { dst: dup, src });
                 self.live_heap_handles.push(dup);
@@ -299,6 +303,24 @@ impl LowerCtx {
                     _ => return None,
                 };
                 self.live_heap_handles.push(obj);
+                Some(obj)
+            }
+            // A NESTED SPREAD field (`{ ...v, _style: { ...v._style, width: w } }` — the
+            // ceangal modifier class): build the inner record via the SAME spread machinery
+            // the bind/tail positions use (base slots Dup-copied, overrides moved in), then
+            // route its drop like the nested-record-literal arm above — a heap-nested field
+            // frees via the generated recursive `$__drop_<R>`, a scalar-only spread keeps
+            // the flat mask (sound: no nested heap). The handle joins `live_heap_handles`
+            // so the enclosing aggregate's `Consume` (move-in) + `retain` balances it.
+            IrExprKind::SpreadRecord { .. } => {
+                let obj = self.try_lower_spread_record_construct(expr)?;
+                if let Some(name) = self.record_or_anon_drop_type_name(&expr.ty) {
+                    self.record_masks.remove(&obj);
+                    self.variant_drop_handles.insert(obj, name);
+                }
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
                 Some(obj)
             }
             // A heap-result `if`/`match` ELEMENT (`(if retries == 0 then "pass-1shot" else "pass-retry",

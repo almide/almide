@@ -1160,6 +1160,16 @@ impl LowerCtx {
                 }
                 src
             }
+            // A FIELD base (`{ ...v._style, width: w }` — the ceangal nested-style spread):
+            // BORROW the inner block's handle from the materialized container's slot
+            // (`try_lower_heap_field_borrow` gates on materialization at every level; the
+            // container keeps ownership — the copy loop below Dups each heap slot, so the
+            // borrowed base is read-only and stays valid through construction).
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+                if is_heap_ty(&base.ty) =>
+            {
+                self.try_lower_heap_field_borrow(base)?
+            }
             _ => return None,
         };
         // Per declared slot: the override expr (if the literal supplies it) or `None` (copy

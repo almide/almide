@@ -644,6 +644,32 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_result_scalar_ok_ctor(tail, &tail.ty) {
                         return Ok(Some(dst));
                     }
+                    // A SPREAD-record (`{ ...n, gap_main: v }` — ceangal's with_* rebuilders) or a
+                    // plain RECORD literal RETURNED as the fn tail: the SAME construct machinery the
+                    // heap-result ARM position already uses (base slots copied via Dup — a borrowed
+                    // param base stays valid; overrides moved in), then MOVED OUT exactly per the arm
+                    // precedent (`Consume` + per-frame temp drops; the caller frees the return by its
+                    // type). A non-materialized base / out-of-subset field returns None → the honest
+                    // Opaque wall below.
+                    if matches!(&tail.kind, IrExprKind::SpreadRecord { .. }) {
+                        let mark = self.live_heap_handles.len();
+                        if let Some(dst) = self.try_lower_spread_record_construct(tail) {
+                            self.ops.push(Op::Consume { v: dst });
+                            self.drop_arm_locals(mark);
+                            return Ok(Some(dst));
+                        }
+                    }
+                    if matches!(&tail.kind, IrExprKind::Record { .. }) {
+                        let mark = self.live_heap_handles.len();
+                        if let Some(dst) = self
+                            .try_lower_record_construct(tail)
+                            .or_else(|| self.try_lower_scalar_record_construct(tail))
+                        {
+                            self.ops.push(Op::Consume { v: dst });
+                            self.drop_arm_locals(mark);
+                            return Ok(Some(dst));
+                        }
+                    }
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);
                     // `alloc_init` faithfully materializes a string literal and a scalar-

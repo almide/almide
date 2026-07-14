@@ -423,7 +423,65 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     let pub_exports: String = prog
         .exports
         .iter()
-        .map(|n| format!("  (export {:?} (func ${n}))\n", n))
+        .map(|(export_name, internal, param_floats, ret_float)| {
+            if param_floats.iter().all(|f| !f) && !matches!(ret_float, Some(true)) {
+                // Float-free signature: the internal ABI (i64 scalars, i32 heap
+                // handles) IS the public ABI — v0 exports these fns verbatim too.
+                return format!("  (export {export_name:?} (func ${internal}))\n");
+            }
+            // Float-bearing signature: a thin REINTERPRET wrapper presents real f64s
+            // (the v0 export ABI) while the internal fn keeps the i64-bits convention.
+            // Non-Float params keep the internal wasm valtype (i64 scalar / i32 heap),
+            // so the wrapper must read each param's ACTUAL repr, not assume i64.
+            let f = prog
+                .functions
+                .iter()
+                .find(|f| f.name == *internal)
+                .expect("export names a lowered function (pipeline invariant)");
+            let reprs = value_reprs_wasm(f);
+            let params: String = f
+                .params
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let wat = if param_floats.get(i).copied().unwrap_or(false) {
+                        "f64"
+                    } else {
+                        wasm_ty(p.repr)
+                    };
+                    format!(" (param $p{i} {wat})")
+                })
+                .collect();
+            let internal_ret = f
+                .ret
+                .map(|r| wasm_ty(reprs.get(&r).copied().unwrap_or(SCALAR_REPR)));
+            let result = match (ret_float, internal_ret) {
+                (Some(true), _) => " (result f64)".to_string(),
+                (_, Some(wat)) => format!(" (result {wat})"),
+                (_, None) => String::new(),
+            };
+            let args: String = f
+                .params
+                .iter()
+                .enumerate()
+                .map(|(i, _)| {
+                    if param_floats.get(i).copied().unwrap_or(false) {
+                        format!(" (i64.reinterpret_f64 (local.get $p{i}))")
+                    } else {
+                        format!(" (local.get $p{i})")
+                    }
+                })
+                .collect();
+            let call = format!("(call ${internal}{args})");
+            let body = if matches!(ret_float, Some(true)) {
+                format!("    (f64.reinterpret_i64 {call})\n")
+            } else {
+                format!("    {call}\n")
+            };
+            format!(
+                "  (func $__export_{internal}{params}{result}\n{body}  )\n  (export {export_name:?} (func $__export_{internal}))\n"
+            )
+        })
         .collect();
     format!("{preamble}{data}{closure_table}{funcs}{start}{pub_exports})
 ")

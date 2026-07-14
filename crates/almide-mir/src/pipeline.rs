@@ -722,30 +722,40 @@ pub fn try_render_wasm_source(
     // `(export …)` directive; one that WALLED cannot be exported — decline the WHOLE module
     // so the `--verified` pipeline falls back to v0 (which exports it) rather than shipping
     // an artifact silently missing a public entry point.
-    let mut exports: Vec<String> = Vec::new();
+    let mut exports: Vec<(String, String, Vec<bool>, Option<bool>)> = Vec::new();
+    let is_float_ty = |t: &almide_lang::types::Ty| {
+        matches!(
+            t,
+            almide_lang::types::Ty::Float
+                | almide_lang::types::Ty::Float32
+                | almide_lang::types::Ty::Float64
+        )
+    };
     for func in &ir.functions {
         if !func.is_test
             && func.name.as_str() != "main"
+            && !func.generics.as_ref().map_or(false, |g| !g.is_empty())
             && matches!(func.visibility, almide_ir::IrVisibility::Public)
         {
             let n = func.name.as_str();
-            // EXPORT ABI gate: the wasm-facing signature must present the DECLARED types.
-            // v1's internal value model carries a Float as raw i64 BITS — exporting such a
-            // fn verbatim leaks the bits convention to the host (`wasmtime --invoke route`
-            // printed 4637089135075524608, the f64 bits of 105.0, where v0 presents a real
-            // f64). Until an export-wrapper coercion exists, a Float-bearing public
-            // signature declines the module → v0 fallback (which exports it correctly).
-            let float_in_sig = matches!(func.ret_ty, almide_lang::types::Ty::Float | almide_lang::types::Ty::Float32 | almide_lang::types::Ty::Float64)
-                || func.params.iter().any(|p| {
-                    matches!(p.ty, almide_lang::types::Ty::Float | almide_lang::types::Ty::Float32 | almide_lang::types::Ty::Float64)
-                });
-            if float_in_sig {
-                return Err(LowerError::Unsupported(format!(
-                    "exported `pub fn {n}` carries a Float in its public signature — the v1                      i64-bits Float convention cannot cross the export ABI (v0 fallback                      presents the real f64)"
-                )));
-            }
             if functions.iter().any(|f| f.name == n) {
-                exports.push(n.to_string());
+                // `@export(wasm, "sym")` overrides the export name (v0's criterion,
+                // mod_p3.rs). v1's internal value model carries a Float as raw i64 BITS;
+                // the renderer emits a reinterpret wrapper for Float-bearing signatures
+                // so the public ABI presents real f64s (v0 parity).
+                let export_name = func
+                    .export_attrs
+                    .iter()
+                    .find(|a| a.target.as_str() == "wasm")
+                    .map(|a| a.symbol.to_string())
+                    .unwrap_or_else(|| n.to_string());
+                let param_floats: Vec<bool> =
+                    func.params.iter().map(|p| is_float_ty(&p.ty)).collect();
+                let ret_float = match &func.ret_ty {
+                    almide_lang::types::Ty::Unit => None,
+                    t => Some(is_float_ty(t)),
+                };
+                exports.push((export_name, n.to_string(), param_floats, ret_float));
             } else {
                 return Err(LowerError::Unsupported(format!(
                     "exported `pub fn {n}` is outside the MIR-lowering subset (the wasm module \

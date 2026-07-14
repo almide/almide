@@ -875,13 +875,25 @@ impl LowerCtx {
                 if matches!(init.kind, IrExprKind::Record { .. })
                     && !crate::lower::expr_contains_call(&init)
                 {
-                    if let Some(dst) = self.try_lower_record_construct(&init) {
+                    // A SCALAR-ONLY record global (`let _transparent = { r: 0.0, a: 0.0 }`)
+                    // constructs through the scalar builder (the mixed builder defers it).
+                    if let Some(dst) = self
+                        .try_lower_record_construct(&init)
+                        .or_else(|| self.try_lower_scalar_record_construct(&init))
+                    {
                         if !self.live_heap_handles.contains(&dst) {
                             self.live_heap_handles.push(dst);
                         }
                         // The copy's slots are REAL — register it so member reads and
                         // `{ ...global, override }` spreads take the materialized path.
                         self.materialized_aggregates.insert(dst);
+                        // A heap-nested record copy (`_default`'s `bg: Color` slot) frees
+                        // via its recursive `$__drop_<R>` at scope end — the flat mask
+                        // alone would leak a heap-IN-nested field on deeper shapes.
+                        if let Some(name) = self.record_or_anon_drop_type_name(&ty) {
+                            self.record_masks.remove(&dst);
+                            self.variant_drop_handles.insert(dst, name);
+                        }
                         self.value_of.insert(var, dst);
                         return Ok(dst);
                     }

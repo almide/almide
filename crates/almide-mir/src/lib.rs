@@ -971,10 +971,14 @@ pub struct MirFunction {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct MirProgram {
     pub functions: Vec<MirFunction>,
-    /// `pub fn` names to expose as wasm `(export …)` directives (#457 — module-export
-    /// roots the v0 emitter also exports). Populated by the pipeline from the MAIN
-    /// program's `IrVisibility::Public` non-test functions; empty everywhere else.
-    pub exports: Vec<String>,
+    /// `pub fn` export roots (#457 — the fns the v0 emitter also exports). Each entry:
+    /// (export_name — the `@export(wasm, "sym")` override or the fn name, internal fn
+    /// name, per-param is_float, ret: None = void / Some(is_float)). A Float-bearing
+    /// signature renders through a thin `f64.reinterpret_i64` wrapper so the export
+    /// presents REAL f64s (the v0 ABI) while the internal fn keeps the i64-bits
+    /// convention. Populated by the pipeline from the MAIN program's Public non-test
+    /// non-generic functions; empty everywhere else.
+    pub exports: Vec<(String, String, Vec<bool>, Option<bool>)>,
 }
 
 // ─────────────────────────── Ownership verifier ───────────────────────────
