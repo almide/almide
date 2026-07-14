@@ -4508,6 +4508,61 @@ B117. **Closed the generic-monomorphization gap for `List[<generic variant>]` li
    a variant-payload-shape-mismatch list respectively, neither a bare `List[<generic variant>]`).
    **15 → 13, TWO closed.**
 
+B118. **Closed `generic_chain_unwrap_or` (13 → 12) — the tuple-wrapped-variant sub-shape B117
+   scoped out**: `List[(String, V)]` (`type V = ValInt(Int) | ValStr(String)`, `[("x",
+   ValInt(64)), ("general.alignment", ValInt(16))]` — the actual metadata-pairs literal in
+   `main`) has no `ListElemDrop` case: the existing `StrInt`/`IntStr` cases require the OTHER
+   tuple slot to be scalar (`DropListStrInt`'s render only ever rc_decs slot0, NEVER reading
+   slot1 — sound ONLY when slot1 is truly scalar); `V` is a RICH variant (`ValStr` owns a
+   String), so reusing `DropListStrInt` would silently LEAK every `ValStr` element's String —
+   a genuinely different drop shape was needed, not a gate-widening of an existing one.
+
+   Unlike B117's generic-instantiation gap, `V` here is a plain, NON-generic type — already
+   correctly registered in `VariantLayouts` with a real, already-generated `$__drop_V` (no
+   shadow-type machinery needed at all, much simpler than B117). Added: (1) a new
+   `ListElemDrop::StrVariant(String)` case (binds_p3.rs) gated on `Ty::Tuple([String, T]) where
+   T is heap AND NOT `is_flat_heap_tuple_slot` (i.e. genuinely needs recursive drop) — extracts
+   the variant's bare name via the existing `custom_variant_type_name`; (2) construction reuses
+   the EXISTING general `try_lower_tuple_construct` (already handles arbitrary heap/scalar slot
+   mixes, including a ctor-call heap slot via `lower_owned_heap_field`'s existing dispatch — no
+   new construction path needed, confirmed by extending the SAME dispatch arm `StrInt |
+   IntStr` already used, now `| StrVariant(_)`); (3) a new GENERATED drop function
+   `$__drop_list_str_<V>` (drop_sources.rs, appended to the SAME per-rich-variant loop that
+   already unconditionally generates `$__drop_list_<V>`/`$__drop_res_<V>` for every rich
+   variant — B117 already established this "generate liberally, unused fns are harmless"
+   pattern) that, per element: rc_decs the String slot (flat), then recurses into the variant
+   slot via the variant's own `$__drop_<V>` (mirrors `map_hval.almd`'s `__drop_list_map_hval`,
+   which does the analogous per-element-then-typed-recurse walk for a Map-valued list element —
+   the closest existing Almide-SOURCE-level precedent, as opposed to B117's raw-WAT-emission
+   precedent).
+
+   **Verified**: an ISOLATED repro (list construction + `list.len` only, bypassing the corpus
+   file's OTHER, unrelated function) — wasmtime `3`, v0 native `3`, byte-identical; WAT
+   confirmed `$__drop_list_str_V`/`$__drop_V` are REAL non-dangling generated functions (not
+   the "admission says yes, nothing generated" trap B117 caught once). A 100,000-iteration
+   leak-loop (fresh 3-element list construction every iteration) under a TIGHT 2MB memory cap
+   produced the identical accumulated value (300000) on wasmtime and v0 native — no leak, no
+   OOM. The ACTUAL corpus file (`generic_chain_unwrap_or.almd`, run via `almide run --target
+   wasm --verified` vs plain `almide run`) — both printed `16\n32`, byte-identical — confirming
+   end-to-end correctness on the real file, not just the isolated repro. (Note: the corpus
+   file's OTHER function, `get_alignment`, still independently walls for an UNRELATED,
+   pre-existing reason — "scalar tail outside the value subset… STRICT value mode" from its
+   `list.find |> option.map |> option.unwrap_or` chain — so `render_program` on the whole file
+   still reports an unlinked-call failure; classify_corpus's per-function tracking does not flag
+   this as a NEW walled-real entry since `get_alignment` isn't a tracked test-block/main
+   function, and `--verified`'s whole-program fallback to v0 when v1 can't fully link is
+   exactly the honest, byte-identical-or-fully-deferred behavior this campaign requires — no
+   silent wrong value at any layer, confirmed by the direct comparison above.) `cargo test -q
+   -p almide-mir`: 583/583. `classify_corpus`: 13 → 12, exactly ONE closure
+   (`generic_chain_unwrap_or`), zero newly-walled (diffed the full 12-name WALLED-REAL list).
+   `almide test`: 283/283. GATE OK. CORPUS WALL OK, FORBIDDEN=0. **12, was 13.**
+
+   **Still remaining in this cluster**: `compound_eq.almd`/`map_fold_heap_acc.almd` (tuple
+   wrapping a RECORD/nested-Map — the analogous gap for a Record/Map second slot instead of a
+   variant, same missing-`ListElemDrop`-case family), `compound_repr_interp.almd`/
+   `compound_repr_records_interp.almd` (different triggers — 3-level Map/List nesting and a
+   variant-payload-shape mismatch, neither a bare tuple-wrapped case).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
