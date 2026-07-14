@@ -803,6 +803,28 @@ B121. **Enabler: self-hosted the first heap-accumulator `list.fold` (`list.fold_
    over an Option[heap] param (`some(stack+["("])` / borrowed-bind move-out / nested
    literal-in-some shapes) — delegated as the next brick. **10 unchanged.**
 
+B121. **Closed `is_balanced` (10 → 9) — the heap-accumulator fold, end to end.** Three composed
+   pieces. (1) The fold enabler (parent-built): `stdlib/list_fold_ols.almd` (`(Option[List[
+   String]], String) -> Option[List[String]]` via the (heap,heap)->heap CallIndirect), `fold_ols`
+   routing, match-subject hoist. (2) The Option[heap] VALUE-match opener
+   (`try_lower_option_match_value`, control_p2.rs — the merge-based twin of the Camp-4 Result
+   opener, len@4 tag with Option polarity, Some payload = borrowed @12 handle), wired into
+   tail.rs + heap_result_arm's Match case; plus two new `OptionSome` payload arms
+   (heap-returning Module calls beyond String; ConcatList — both per-arm-bracketed after a
+   caught uninitialized-local rc_dec trap from an arm-escaping concat temp). (3) The drop/co-own
+   layer: `is_opt_list_str_ty` routes an Option[List[String]] bind/closure-result to the nested
+   `DropListListStr` sweep (the flat DropListStr leaked every stack String — probe-confirmed
+   OOM under a 4MB cap), admission gates widened to accept the new set (value + statement
+   positions), and a REAL latent double-free fixed: `list.drop_end` raw-copied String handles
+   un-owned (`__copy_slots`) — sound only while flat drops leaked instead of freeing; under the
+   correct nested drop it double-freed. Added `list_drop_end_str` (`__copy_slots_rc` co-own,
+   the whitelisted producer) + typed routing. A manual-free attempt inside the fold .almd was
+   REVERTED (the lowering already frees each frame's acc at scope end — manual rc_dec
+   double-freed; the leak was the closure-result's FLAT drop, fixed by (3) instead). Verified:
+   11 probes byte-identical wasmtime-vs-v0 (incl. the corpus fn against all 8 original test
+   cases); 100k-iteration leak-loop under 4MB (200000 both targets); mir 583/583; classify
+   10 → 9 zero newly-walled; spec 283/283; GATE OK; CORPUS WALL OK FORBIDDEN=0. **9, was 10.**
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

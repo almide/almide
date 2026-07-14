@@ -900,7 +900,12 @@ impl LowerCtx {
                     let bind = match inner.as_ref() {
                         IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some((*var, false, ty.clone())),
                         IrPattern::Bind { var, ty }
-                            if is_heap_ty(ty) && self.heap_elem_lists.contains(&subj) =>
+                            if is_heap_ty(ty)
+                                && (self.heap_elem_lists.contains(&subj)
+                                    // `Option[List[String]]` (the heap-acc fold value) — routed
+                                    // to the nested DropListListStr set; the payload-borrow
+                                    // discipline is identical.
+                                    || self.list_list_str_lists.contains(&subj)) =>
                         {
                             Some((*var, true, ty.clone()))
                         }

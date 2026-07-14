@@ -1467,6 +1467,18 @@ pub(crate) fn is_list_list_str_ty(ty: &Ty) -> bool {
             Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(b[0], Ty::String)))
 }
 
+/// An `Option[List[String]]` — the heap-accumulator fold's value (is_balanced's paren
+/// stack). PHYSICALLY a 0/1-element `List[List[String]]`, so `DropListListStr`'s nested
+/// sweep (per outer slot: rc_dec each inner cell String + the inner block, then the outer
+/// block) is its exact recursive free — the flat `DropListStr` (`heap_elem_lists`) would
+/// rc_dec only the inner-list HANDLE, leaking every stack String (a fold loop OOMs).
+pub(crate) fn is_opt_list_str_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty,
+        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && matches!(&a[0],
+            Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(b[0], Ty::String)))
+}
+
 /// A `List[(String, String)]` — the `map.entries` / render_attrs shape. Each element is an owned
 /// (String, String) TUPLE; its scope-end drop must be [`Op::DropListStrStr`] (per tuple: rc_dec BOTH
 /// String slots, then the tuple, then the list). The flat `DropListStr` (`heap_elem_lists`) would

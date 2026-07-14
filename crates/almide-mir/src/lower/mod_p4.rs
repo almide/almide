@@ -1123,6 +1123,16 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
     // String → the rc-share pair variant (`DropListIntStr` at the call site frees each
     // pair's key ref); any other heap element routes to an UNREGISTERED name (walls
     // cleanly — a flat pair drop would leak a rich element's children).
+    // `list.drop_end` keys on its SOURCE element: a String element routes to the CO-OWNED
+    // rc-copy variant (`__copy_slots_rc`) — the raw slot copy aliases heap handles un-owned,
+    // which double-frees under the nested Option[List[String]] drop (is_balanced's fold).
+    if module == "list" && func == "drop_end" {
+        if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+            if a.len() == 1 && matches!(a[0], Ty::String) {
+                return "list.drop_end_str".to_string();
+            }
+        }
+    }
     if module == "list" && func == "enumerate" {
         if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
             if a.len() == 1 {

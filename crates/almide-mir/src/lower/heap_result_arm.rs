@@ -188,7 +188,13 @@ impl LowerCtx {
                 // over a BORROWED subject (the recursive-to_string precedent).
                 let obj = match self.try_lower_variant_value_match(subject, arms, result_ty) {
                     Some(v) => v,
-                    _ => self.try_lower_custom_variant_match(subject, arms, result_ty)?,
+                    // An `Option[<heap>]` inner subject (the fold-step nested match over
+                    // `list.last(stack)`) — the merge-based Option twin, then the custom
+                    // tag@slot0 dispatcher.
+                    _ => match self.try_lower_option_match_value(subject, arms, result_ty) {
+                        Some(v) => v,
+                        _ => self.try_lower_custom_variant_match(subject, arms, result_ty)?,
+                    },
                 };
                 self.ops.push(Op::Consume { v: obj });
                 self.drop_arm_locals(arm_mark);
@@ -464,17 +470,36 @@ impl LowerCtx {
                         });
                         p
                     }
-                    // `some(string.slice(s, …))` — a PURE Module call yielding a fresh owned
-                    // String payload (the parse_tag tail-`if` family): the self-host call's
-                    // result moves into the Option (retain-removed — the Option is the sole
-                    // owner); its arg temps free within the arm frame below.
+                    // `some(string.slice(s, …))` / `some(list.drop_end(stack, 1))` — a PURE
+                    // Module call yielding a fresh owned HEAP payload (String, or the fold-step's
+                    // List[String]): the self-host call's result moves into the Option
+                    // (retain-removed — the Option is the sole owner); its arg temps free within
+                    // the arm frame below. The moved-in payload's recursive free is the CALLER's
+                    // (per the option's bind-site drop routing), not this arm's.
                     IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-                        if matches!(expr.ty, Ty::String) =>
+                        if is_heap_ty(&expr.ty) =>
                     {
+                        // Arg temps this call materializes must free WITHIN the arm — a per-arm
+                        // temp left to the FUNCTION epilogue would rc_dec an UNINITIALIZED local
+                        // when the OTHER arm ran (garbage rc_dec → trap; the fold-step `["("]`
+                        // concat temp reproduced exactly this).
+                        let arm_mark = self.live_heap_handles.len();
                         let p = self
                             .lower_pure_module_value_call(module.as_str(), func.as_str(), args, &expr.ty)
                             .ok()?;
                         self.live_heap_handles.retain(|h| *h != p);
+                        self.drop_arm_locals(arm_mark);
+                        p
+                    }
+                    // `some(stack + ["("])` — the fold-step push: a fresh owned concat list
+                    // moves into the Option directly (no Dup — sole owner). The concat's
+                    // materialized RHS-element temp frees WITHIN the arm (same trap avoidance
+                    // as the Module-call case above).
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {
+                        let arm_mark = self.live_heap_handles.len();
+                        let p = self.try_lower_concat_list(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        self.drop_arm_locals(arm_mark);
                         p
                     }
                     _ => return None,

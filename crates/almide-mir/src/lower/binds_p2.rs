@@ -650,6 +650,11 @@ impl LowerCtx {
                     // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
                     // flat DropListStr would leak each element's owned payload slots.
                     self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+                } else if crate::lower::is_opt_list_str_ty(ty) {
+                    // `Option[List[String]]` (the heap-acc fold value) — physically a 0/1-element
+                    // List[List[String]]; the nested DropListListStr sweep is its exact free (the
+                    // flat DropListStr would leak the stack Strings).
+                    self.list_list_str_lists.insert(dst);
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -839,6 +844,11 @@ impl LowerCtx {
                     // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
                     // flat DropListStr would leak each element's owned payload slots.
                     self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+                } else if crate::lower::is_opt_list_str_ty(ty) {
+                    // `Option[List[String]]` (the heap-acc fold value) — physically a 0/1-element
+                    // List[List[String]]; the nested DropListListStr sweep is its exact free (the
+                    // flat DropListStr would leak the stack Strings).
+                    self.list_list_str_lists.insert(dst);
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -882,6 +892,14 @@ impl LowerCtx {
                 // SEED its read-shape — a later `match o { ok/err }` over the bound var then reads its
                 // real tag instead of walling (the higher-order-Result-callback path `fan.map` needs).
                 self.seed_variant_param(dst, ty);
+                // An `Option[List[String]]` closure result (the heap-acc fold's per-iteration
+                // acc): the flat `heap_elem_lists` seed above would free ONE level only,
+                // leaking the inner list's Strings every iteration (a fold loop OOMs) — route
+                // its scope-end drop to the nested `DropListListStr` sweep instead.
+                if crate::lower::is_opt_list_str_ty(ty) {
+                    self.heap_elem_lists.remove(&dst);
+                    self.list_list_str_lists.insert(dst);
+                }
                 Ok(())
             }
             // `var x = obj.method(args)` / `var x = (g)(args)` — an UNRESOLVABLE

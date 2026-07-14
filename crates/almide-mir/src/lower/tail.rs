@@ -810,6 +810,11 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_result_match_value(subject, arms, &tail.ty) {
                         return Ok(Some(dst));
                     }
+                    // An `Option[<heap>]` subject with HEAP-result arms — the Option twin
+                    // (is_balanced's fold step: `match acc { none => none, some(stack) => … }`).
+                    if let Some(dst) = self.try_lower_option_match_value(subject, arms, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
                     // A LIST subject (`match xs { [] => .., ys => .. }`) with HEAP-result
                     // arms — the len-tag twin of the Result opener (a bind-all arm aliases
                     // the owned subject temp; release parity covers an arm move-out).
