@@ -93,9 +93,39 @@ almide run hello.almd
 - **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
 - **Actionable diagnostics** — Every error includes file:line, context, and a concrete fix suggestion
 
+## The Equivalence Claim — Byte-Identical Across Targets
+
+**Every program that compiles for both targets produces byte-identical observable output — stdout, stderr, exit code — whether it runs as a native binary or as WebAssembly.** Native is the oracle; `native == wasm` is a hard invariant, not a "target difference" to be documented around.
+
+"Byte-identical" means the *execution output*, not the compiled artifacts — a native binary and a `.wasm` module are different bytes by construction; what must not differ is anything the program lets you observe.
+
+This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
+
+<!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
+> **Ledger: 132 contracts — 131 active, 1 flagged-for-revision.**
+>
+> **Exceptions (1)** — contracts flagged for revision; the ratchet says this list may only shrink:
+>
+> - [C-006 — fan.timeout is the SOLE documented wall-clock divergence (wasm warns)](docs/contracts/C-006-fan-timeout-divergence.md)
+<!-- claims:generated:end -->
+
+| Evidence layer | What it locks |
+|---|---|
+| [Contract ledger](docs/contracts/) | every promise is a named `C-NNN`; an `active` contract must carry evidence of class ≥ `fixture` |
+| [Cross-target fixture gate](tests/wasm_runtime_test.rs) | every `spec/wasm_cross/*.almd` fixture runs on both targets; outputs byte-compared (`wasm_cross_target_spec`) |
+| [Differential fuzz](tests/regex_fuzz_test.rs) | randomized programs and inputs, native vs wasm outputs compared |
+| Emit-time Σ-probes | wasm Unicode/case tables exhaustively probed against Rust `std` over the full scalar domain at emit time |
+| [Lean 4 belt](crates/almide-perceus-belt/) | RC-insertion correctness machine-checked by the Lean kernel |
+| [Org byte-verify sweep](scripts/org-byte-verify.sh) | every runnable repo in the almide org executed on both targets, stdout + exit byte-compared |
+
 ## Memory Safety — Formally Verified
 
-Almide uses [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/) reference counting for automatic memory management. No GC, no manual free, no pauses.
+You write no ownership annotations, no lifetimes, no `free` — memory management is fully automatic, garbage-collector-free, pause-free. The mechanism is per-target today:
+
+- **WebAssembly** — the compiler inserts [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/) reference counting: precise, compiler-placed RC with no GC. This is the path the Lean proofs below certify.
+- **Native (Rust)** — the compiler emits ownership-idiomatic Rust, inserting borrows and clones for you; every heap value is freed by Rust's own scope-end drops.
+
+Making Perceus the *single* memory model on both targets — native rendered from the same IR discipline, with the Drop-erasure machine-checked — is tracked in [#764](https://github.com/almide/almide/issues/764).
 
 Where Rust gives you *zero-cost* abstraction (paid for in ownership annotations), Almide gives you **zero-annotation** abstraction: you write none, and every heap free is machine-proven — *write none, prove all.*
 
@@ -106,7 +136,7 @@ theorem perceus_all_heap_freed (fb : FnBody) :
     allHeapFreed (perceusTransform fb)
 ```
 
-**For any program, the compiler produces code where every heap allocation is freed on all execution paths.** 22 theorems, 0 sorry — verified by the Lean 4 kernel.
+**For any program, the compiler produces code where every heap allocation is freed on all execution paths** — by Rust's own drop semantics on native, and by the proven Perceus transform on wasm. 22 theorems, 0 sorry — verified by the Lean 4 kernel.
 
 This is connected to the actual compiler (not a separate paper proof):
 
