@@ -857,6 +857,18 @@ B123. **Closed `map_fold_heap_acc` (8 → 7) — the nested-map stack: heap-acc 
    (fan_pure_thunks' closure included — the two shipped together); spec 283/283; GATE OK;
    CORPUS WALL OK FORBIDDEN=0. **7, was 8.**
 
+B124. **Closed `fan_var_thunk_list` (7 → 6)** — the #599 var-bound thunk-list form:
+   `fan_bodies` (desugar_fan.rs) now resolves a `Var` arg through a pre-collected map of
+   LET-BOUND, never-reassigned `List[() -> _]` literals (all elements no-param lambdas),
+   so the SAME race/any/settle inliners run as for the inline form. Sound: VarIds are
+   shadowing-free, reassigned vars are dropped from the map, the list's construction stays
+   in place (lambdas unevaluated at construction — no duplicated effect), and the desugar
+   runs desugar-before-both so the count gate holds. Verified: corpus file byte-identical
+   both targets (race=1/settle=2); settle-over-var 50k leak-loop under 8MB via a helper fn
+   (100000 both, no leak — a race-in-loop leak-loop is structurally walled by the
+   let-`!`-in-while early-return frontier, honest); mir 583/583; classify 7 → 6 zero
+   newly-walled; spec 283/283; GATE OK; CORPUS WALL OK FORBIDDEN=0. **6, was 7.**
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

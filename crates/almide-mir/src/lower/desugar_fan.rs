@@ -10,13 +10,69 @@
 pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     use almide_ir::{CallTarget, IrMatchArm, IrPattern};
+    // A LET-BOUND, never-reassigned thunk-list literal (`let lam: List[() -> R] = [() => …];
+    // fan.race(lam)` — the #599 var-bound form): resolve the Var back to its literal elements
+    // so the SAME inliners run as for the inline form. Sound: VarIds are shadowing-free
+    // (frontend guarantee), the binding is single-assignment (reassigned vars are dropped from
+    // the map), and the list's construction stays in place (its lambdas are never evaluated at
+    // construction, so inlining the fan semantics duplicates no effect). The same desugar runs
+    // on the count-gate side (desugar-before-both), so `mir == ir` accounting is preserved.
+    fn collect_thunk_list_lets(body: &IrExpr) -> std::collections::HashMap<u32, Vec<IrExpr>> {
+        use almide_ir::visit::{walk_stmt, IrVisitor};
+        use almide_lang::types::Ty;
+        #[derive(Default)]
+        struct C {
+            lets: std::collections::HashMap<u32, Vec<IrExpr>>,
+            reassigned: std::collections::HashSet<u32>,
+        }
+        impl IrVisitor for C {
+            fn visit_stmt(&mut self, s: &IrStmt) {
+                match &s.kind {
+                    IrStmtKind::Bind { var, ty, value, .. } => {
+                        if let (
+                            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a),
+                            IrExprKind::List { elements },
+                        ) = (ty, &value.kind)
+                        {
+                            if a.len() == 1
+                                && matches!(a[0], Ty::Fn { .. })
+                                && !elements.is_empty()
+                                && elements.iter().all(|el| matches!(&el.kind,
+                                    IrExprKind::Lambda { params, .. } if params.is_empty()))
+                            {
+                                self.lets.insert(var.0, elements.clone());
+                            }
+                        }
+                    }
+                    IrStmtKind::Assign { var, .. } => {
+                        self.reassigned.insert(var.0);
+                    }
+                    _ => {}
+                }
+                walk_stmt(self, s);
+            }
+        }
+        let mut c = C::default();
+        c.visit_expr(body);
+        for v in &c.reassigned {
+            c.lets.remove(v);
+        }
+        c.lets
+    }
+    let thunk_lets = collect_thunk_list_lets(body);
     struct V {
         changed: bool,
         next_var: u32,
+        thunk_lets: std::collections::HashMap<u32, Vec<IrExpr>>,
     }
-    // Extract the no-param thunk bodies of a `fan.race`/`fan.any` LITERAL-list call, or `None` if the
-    // expr is not such a call (a non-literal thunk list has no inlinable bodies → declines).
-    fn fan_bodies(e: &IrExpr, want: &str) -> Option<Vec<IrExpr>> {
+    // Extract the no-param thunk bodies of a `fan.race`/`fan.any` call over a LITERAL list OR a
+    // let-bound literal Var (resolved via `thunk_lets`), or `None` otherwise (a genuinely
+    // dynamic thunk list has no inlinable bodies → declines to the honest wall).
+    fn fan_bodies(
+        e: &IrExpr,
+        want: &str,
+        thunk_lets: &std::collections::HashMap<u32, Vec<IrExpr>>,
+    ) -> Option<Vec<IrExpr>> {
         let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
         else {
             return None;
@@ -25,8 +81,14 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
             return None;
         }
         let [arg] = &args[..] else { return None };
-        let IrExprKind::List { elements } = &arg.kind else {
-            return None;
+        let resolved;
+        let elements = match &arg.kind {
+            IrExprKind::List { elements } => elements,
+            IrExprKind::Var { id } => {
+                resolved = thunk_lets.get(&id.0)?.clone();
+                &resolved
+            }
+            _ => return None,
         };
         if elements.is_empty() {
             return None;
@@ -83,7 +145,7 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
             // one arm ever executes, so duplicating `okbody` per level is dead-code-safe.
             if let IrExprKind::Match { subject, arms } = &e.kind {
                 if arms.len() == 2 {
-                    if let Some(bodies) = fan_bodies(subject, "any") {
+                    if let Some(bodies) = fan_bodies(subject, "any", &self.thunk_lets) {
                         let ty = e.ty.clone();
                         let ok_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Ok { .. }));
                         let err_arm = arms.iter().find(|a| matches!(a.pattern, IrPattern::Err { .. }));
@@ -176,7 +238,7 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
             // documents. A thunk that is ALREADY Result-typed (a real fallible race — not used in
             // this corpus but structurally possible) is untouched — its own `!`/match handles the
             // real Err path.
-            if let Some(bodies) = fan_bodies(e, "race") {
+            if let Some(bodies) = fan_bodies(e, "race", &self.thunk_lets) {
                 let orig_ty = e.ty.clone();
                 let t0 = bodies.into_iter().next().unwrap();
                 *e = if crate::lower::is_result_ty(&orig_ty) && !crate::lower::is_result_ty(&t0.ty) {
@@ -209,7 +271,7 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
             // non-Result body in a genuine `ok(...)` so the literal's elements match its
             // element type (the B115 `fan.race` contract-preservation fix, settle's turn:
             // without it the raw `List[Int]` bodies hit the List[heap]-literal wall).
-            if let Some(bodies) = fan_bodies(e, "settle") {
+            if let Some(bodies) = fan_bodies(e, "settle", &self.thunk_lets) {
                 use almide_lang::types::constructor::TypeConstructorId;
                 use almide_lang::types::Ty;
                 let elem_ty = match &e.ty {
@@ -242,7 +304,7 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
             // `fan.any([…])` as a bind value / tail — the first-Ok chain VALUE:
             // `match t0 { ok($x) => ok($x), err(_) => <next … err("fan.any: all candidates
             // failed")> }`. The match-subject shape (pre-order) already inlined outer arms.
-            if let Some(bodies) = fan_bodies(e, "any") {
+            if let Some(bodies) = fan_bodies(e, "any", &self.thunk_lets) {
                 use almide_lang::types::constructor::TypeConstructorId;
                 use almide_lang::types::Ty;
                 let ok_ty = match &e.ty {
@@ -307,7 +369,7 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
             }
         }
     }
-    let mut v = V { changed: false, next_var: max_var_id(body) + 1 };
+    let mut v = V { changed: false, next_var: max_var_id(body) + 1, thunk_lets };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     if v.changed {
