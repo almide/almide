@@ -646,6 +646,10 @@ impl LowerCtx {
                 } else if crate::lower::is_map_hval_ty(ty) {
                     // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
                     self.variant_drop_handles.insert(dst, "map_hval".to_string());
+                } else if crate::lower::is_map_msv_ty(ty) {
+                    // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
+                    // last-ref inner map's String slots (a flat rc_dec would leak them).
+                    self.variant_drop_handles.insert(dst, "map_msv".to_string());
                 } else if crate::lower::is_lenlist_list_ty(ty) {
                     // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
                     // flat DropListStr would leak each element's owned payload slots.
@@ -655,6 +659,15 @@ impl LowerCtx {
                     // List[List[String]]; the nested DropListListStr sweep is its exact free (the
                     // flat DropListStr would leak the stack Strings).
                     self.list_list_str_lists.insert(dst);
+                } else if matches!(ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                        if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
+                {
+                    // `Map[String, <scalar>]` (split layout, @4 = n): the DropListStr sweep
+                    // rc_decs exactly the n deep-copied key Strings (scalar value slots
+                    // untouched) — the bare flat rc_dec LEAKED every key copy per bind (a
+                    // latent leak the map.fold heap-acc loop made observable at a 4MB cap).
+                    self.heap_elem_lists.insert(dst);
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -840,6 +853,10 @@ impl LowerCtx {
                 } else if crate::lower::is_map_hval_ty(ty) {
                     // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
                     self.variant_drop_handles.insert(dst, "map_hval".to_string());
+                } else if crate::lower::is_map_msv_ty(ty) {
+                    // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
+                    // last-ref inner map's String slots (a flat rc_dec would leak them).
+                    self.variant_drop_handles.insert(dst, "map_msv".to_string());
                 } else if crate::lower::is_lenlist_list_ty(ty) {
                     // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
                     // flat DropListStr would leak each element's owned payload slots.
@@ -849,6 +866,15 @@ impl LowerCtx {
                     // List[List[String]]; the nested DropListListStr sweep is its exact free (the
                     // flat DropListStr would leak the stack Strings).
                     self.list_list_str_lists.insert(dst);
+                } else if matches!(ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                        if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
+                {
+                    // `Map[String, <scalar>]` (split layout, @4 = n): the DropListStr sweep
+                    // rc_decs exactly the n deep-copied key Strings (scalar value slots
+                    // untouched) — the bare flat rc_dec LEAKED every key copy per bind (a
+                    // latent leak the map.fold heap-acc loop made observable at a 4MB cap).
+                    self.heap_elem_lists.insert(dst);
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -899,6 +925,21 @@ impl LowerCtx {
                 if crate::lower::is_opt_list_str_ty(ty) {
                     self.heap_elem_lists.remove(&dst);
                     self.list_list_str_lists.insert(dst);
+                }
+                // A MAP closure result (the map.fold heap-acc's per-iteration acc — the
+                // `(a, k, v) => ["fresh": v]` fresh-map closure): the bare
+                // `live_heap_handles` default is a FLAT rc_dec, which frees the map block
+                // but LEAKS its key Strings every iteration (the 100k fold loop OOMs at a
+                // 4MB cap). Route the scope-end drop to the DropListStr sweep — exact for
+                // BOTH map layouts: `Map[String, String]` (interleaved, @4 = 2n, every
+                // slot a String handle) and `Map[String, <scalar>]` (split, @4 = n, the
+                // sweep rc_decs exactly the n key slots; the scalar value slots beyond
+                // are untouched).
+                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                    if a.len() == 2 && matches!(a[0], Ty::String)
+                        && (!is_heap_ty(&a[1]) || matches!(a[1], Ty::String)))
+                {
+                    self.heap_elem_lists.insert(dst);
                 }
                 Ok(())
             }

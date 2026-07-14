@@ -43,6 +43,8 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__ivh_set_copy",
     "__hvl_set_copy",
     "__hvl_set_append",
+    "__msv_set_copy",    // map.set_msv — rc_inc the shared value handles (map_hval's exact shape)
+    "__msv_set_append",  // map.set_msv — rc_inc the appended value handle
     "__ivh_drop_vals",
     "__hvl_drop_slots",    // list.filter_rc — rc_inc each KEPT non-String heap element (handle share)
     "__vmerge_fill_a",    // value.merge — rc_inc each kept/overridden key+value

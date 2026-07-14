@@ -529,6 +529,16 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
             {
                 ("list", "to_string_lo")
             }
+            // `${List[Result[Int, String]]}` → `[ok(1), err("bad")]` — fan.settle's
+            // pure-thunk result list, composed from the per-element result display
+            // (stdlib/list_to_string_lr.almd).
+            Ty::Applied(TypeConstructorId::Result, inner)
+                if inner.len() == 2
+                    && matches!(inner[0], Ty::Int)
+                    && matches!(inner[1], Ty::String) =>
+            {
+                ("list", "to_string_lr")
+            }
             // `${List[Map[String, List[Int]]]}` → `[["a": [1, 2]], ["b": [3]]]` — each
             // map through its own interp (stdlib/map_hval.almd's list_to_string_lmh).
             Ty::Applied(TypeConstructorId::Map, kv)
@@ -698,6 +708,8 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
         Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
             match (&args[0], &args[1]) {
                 (Ty::String, Ty::Int) => ("map", "to_string"),
+                // `${Map[String, String]}` — quoted keys AND values (stdlib/map_to_string.almd).
+                (Ty::String, Ty::String) => ("map", "to_string_ss"),
                 // `${Map[Int, String]}` — the ivh display (`[10: "x", 20: "y"]`, raw int
                 // keys + quoted/escaped String values; stdlib/map_ivh.almd).
                 (Ty::Int, Ty::String) => ("map", "to_string_ivh"),
@@ -1116,6 +1128,24 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
             Some(Ty::Applied(TypeConstructorId::List, e)) if e.len() == 1 && matches!(e[0], Ty::String));
         if module == "list" && is_ols_acc && src_is_list_str {
             return "list.fold_ols".to_string();
+        }
+        // The `Map[String, Int]`-accumulator map.fold pair (the map_fold_heap_acc corpus
+        // shape): keyed on the EXACT acc type + subject family — `Map[String, String]`
+        // (fold_str_msi) / `Map[String, Int]` (fold_skv_msi). Other heap accs keep the wall.
+        let is_msi_acc = matches!(result_ty,
+            Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
+                && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
+        if module == "map" && is_msi_acc {
+            if let Some(Ty::Applied(TypeConstructorId::Map, s)) = arg_tys.first() {
+                if s.len() == 2 && matches!(s[0], Ty::String) {
+                    if matches!(s[1], Ty::String) {
+                        return "map.fold_str_msi".to_string();
+                    }
+                    if matches!(s[1], Ty::Int) {
+                        return "map.fold_skv_msi".to_string();
+                    }
+                }
+            }
         }
         return format!("{module}.fold_hacc");
     }
@@ -1675,6 +1705,17 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 // `Map[String, List[Int]]` from_list / display (the map-of-lists literal):
                 // keyed on the RESULT/first-arg map; to_string_hval passes through
                 // verbatim (the B22 suffix guard).
+                // `Map[String, String]` from_list (the String-valued map literal): keyed on
+                // the RESULT type (from_list's first arg is the pairs List, not a Map).
+                (true, true)
+                    if func == "from_list"
+                        && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                            if a.len() == 2
+                                && matches!(a[0], Ty::String)
+                                && matches!(a[1], Ty::String)) =>
+                {
+                    Some("_str")
+                }
                 (true, true)
                     if !val_is_string
                         && func == "from_list"
@@ -1685,6 +1726,30 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                                     if b.len() == 1 && matches!(b[0], Ty::Int))) =>
                 {
                     Some("_hval")
+                }
+                // `Map[String, Map[String, String]]` get_or / from_list — the msv family
+                // (map_fold_heap_acc's nested-map literal + get_or default).
+                (true, true)
+                    if func == "get_or"
+                        && matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::Map, a))
+                            if a.len() == 2 && matches!(a[0], Ty::String)
+                                && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
+                                    if b.len() == 2
+                                        && matches!(b[0], Ty::String)
+                                        && matches!(b[1], Ty::String))) =>
+                {
+                    Some("_msv")
+                }
+                (true, true)
+                    if func == "from_list"
+                        && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                            if a.len() == 2 && matches!(a[0], Ty::String)
+                                && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
+                                    if b.len() == 2
+                                        && matches!(b[0], Ty::String)
+                                        && matches!(b[1], Ty::String))) =>
+                {
+                    Some("_msv")
                 }
                 (true, true) if func == "to_string_hval" => Some(""),
                 (true, true) if !val_is_string => Some("_hval_wall"),

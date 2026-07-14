@@ -1,0 +1,59 @@
+// map_fold_hacc — SELF-HOSTED heap-accumulator `map.fold` variants (a `Map[String, Int]`
+// accumulator — the map_fold_heap_acc corpus shape) over the two String-keyed subject
+// families: `Map[String, String]` (interleaved 16-byte pairs, both loads borrowed) and
+// `Map[String, Int]` (split keys-then-values 8-byte slots, scalar value load). f is the
+// THREE-arity (heap, heap, heap|scalar) -> heap CallIndirect (`map_fold_str`'s proven
+// closure arity, `list_fold_ols`'s proven heap-acc discipline). OWNERSHIP: `acc` MOVES
+// into f each iteration (f consumes it and returns the next acc — the fn never frees it);
+// keys/values are read as BORROWS (the map keeps ownership); the final acc is the owned
+// result. Left fold in entry order, matching v0's fold(m, init, f).
+
+fn __mfh_str_loop(
+  sh: Int,
+  f: (Map[String, Int], String, String) -> Map[String, Int],
+  entries: Int,
+  i: Int,
+  acc: Map[String, Int],
+) -> Map[String, Int] =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 16)
+    let v = prim.load_str(sh + 12 + i * 16 + 8)
+    let nacc = f(acc, k, v)
+    __mfh_str_loop(sh, f, entries, i + 1, nacc)
+  }
+
+fn map_fold_str_msi(
+  m: Map[String, String],
+  init: Map[String, Int],
+  f: (Map[String, Int], String, String) -> Map[String, Int],
+) -> Map[String, Int] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  __mfh_str_loop(sh, f, n / 2, 0, init)
+}
+
+fn __mfh_skv_loop(
+  sh: Int,
+  f: (Map[String, Int], String, Int) -> Map[String, Int],
+  entries: Int,
+  i: Int,
+  acc: Map[String, Int],
+) -> Map[String, Int] =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let v = prim.load64(sh + 12 + (entries + i) * 8)
+    let nacc = f(acc, k, v)
+    __mfh_skv_loop(sh, f, entries, i + 1, nacc)
+  }
+
+fn map_fold_skv_msi(
+  m: Map[String, Int],
+  init: Map[String, Int],
+  f: (Map[String, Int], String, Int) -> Map[String, Int],
+) -> Map[String, Int] = {
+  let sh = prim.handle(m)
+  let entries = prim.load32(sh + 4)
+  __mfh_skv_loop(sh, f, entries, 0, init)
+}

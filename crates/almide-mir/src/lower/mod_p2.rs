@@ -1521,6 +1521,17 @@ pub fn is_map_hval_ty(ty: &Ty) -> bool {
                 Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && !is_heap_ty(&e[0])))
 }
 
+/// `Map[String, Map[String, String]]` — the msv family (String keys, MAP values;
+/// stdlib/map_msv.almd). Its drop must sweep each last-ref inner map's String slots
+/// (`$__drop_map_msv`), so binds route it by type exactly like `is_map_hval_ty`.
+pub fn is_map_msv_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
+        && matches!(a[0], Ty::String)
+        && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
+            if b.len() == 2 && matches!(b[0], Ty::String) && matches!(b[1], Ty::String)))
+}
+
 pub(crate) fn is_list_int_str_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(ty,

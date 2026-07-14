@@ -649,6 +649,7 @@ impl LowerCtx {
             StrInt,
             IntStr,
             StrVariant(String),
+            StrMapStr,
             RecordInt(String),
             ListStr,
             MapHval,
@@ -720,6 +721,18 @@ impl LowerCtx {
             // `list.enumerate` shaped literals): recursive drop via the existing
             // `Op::DropListIntStr` (rc_dec slot1 @20 only — likewise type-agnostic).
             ListElemDrop::IntStr
+        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+            && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
+                if b.len() == 2 && matches!(b[0], Ty::String) && matches!(b[1], Ty::String)))
+        {
+            // A `(String, Map[String, String])` TUPLE element (the map_fold_heap_acc
+            // nested-map literal's pairs list, `["k0": ["k0": "x"]]` desugared to
+            // `map.from_list_msv([("k0", <inner map>)])`): slot1 is a MAP owning its own
+            // String slots — the static `$__drop_list_str_mss` (map_msv.almd) frees
+            // slot0 flat and sweeps the last-ref inner map (a flat rc_dec would leak
+            // every inner key/value String). Checked BEFORE the generic StrVariant arm
+            // (a Map is not a custom variant, so that arm's name lookup would decline).
+            ListElemDrop::StrMapStr
         } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
             && is_heap_ty(&tys[1]) && !self.is_flat_heap_tuple_slot(&tys[1]))
         {
@@ -896,7 +909,7 @@ impl LowerCtx {
                 }
                 return None;
             }
-            if matches!(kind, ListElemDrop::StrInt | ListElemDrop::IntStr | ListElemDrop::StrVariant(_)) {
+            if matches!(kind, ListElemDrop::StrInt | ListElemDrop::IntStr | ListElemDrop::StrVariant(_) | ListElemDrop::StrMapStr) {
                 // A `(String, Int)` / `(Int, String)` / `(String, <rich variant>)` TUPLE LITERAL
                 // element builds through the general masked-tuple builder (String slot fresh
                 // OWNED + moved in, the other slot a scalar store OR — for `StrVariant` — a
@@ -1009,6 +1022,9 @@ impl LowerCtx {
                 // `$__drop_list_<V>`/`$__drop_res_<V>` generation this session's B117 extended).
                 let vname_fn = drop_fn_ident(&vname);
                 self.variant_drop_handles.insert(dst, format!("list_str_{vname_fn}"));
+            }
+            ListElemDrop::StrMapStr => {
+                self.variant_drop_handles.insert(dst, "list_str_mss".to_string());
             }
             ListElemDrop::MapHval => {
                 self.variant_drop_handles.insert(dst, "list_map_hval".to_string());

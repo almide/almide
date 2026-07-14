@@ -1370,6 +1370,19 @@ impl LowerCtx {
                 self.str_str_elem_lists.insert(dst);
             } else if crate::lower::is_lenlist_list_ty(ty) {
                 self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+            } else if crate::lower::is_map_msv_ty(ty) {
+                // `Map[String, Map[String, String]]` arg temp (the inline nested-map literal
+                // fed straight to `map.get_or` — map_fold_heap_acc's r7): `$__drop_map_msv`
+                // sweeps each last-ref inner map; the flat fallback leaked the whole nested
+                // map per iteration (loop OOM).
+                self.variant_drop_handles.insert(dst, "map_msv".to_string());
+            } else if matches!(ty,
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                    if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
+            {
+                // `Map[String, <scalar>]` arg temp — the key-slot sweep (split layout, @4 = n),
+                // mirroring the bind-site fix; the flat fallback leaked every key copy.
+                self.heap_elem_lists.insert(dst);
             } else if crate::lower::is_heap_elem_list_ty(ty) {
                 self.heap_elem_lists.insert(dst);
             }

@@ -204,8 +204,38 @@ pub fn desugar_fan_race_any(body: &IrExpr, _next_var: &mut u32) -> Option<IrExpr
         fn rewrite_settle_any(&mut self, e: &mut IrExpr) {
             use almide_ir::{IrMatchArm, IrPattern};
             // `fan.settle([…])` as a bind value / tail — the results list literal.
+            // A PURE thunk's body is bare `T` while settle's checked type is
+            // `List[Result[T, E]]` (FanLowering's phantom-Result convention) — wrap each
+            // non-Result body in a genuine `ok(...)` so the literal's elements match its
+            // element type (the B115 `fan.race` contract-preservation fix, settle's turn:
+            // without it the raw `List[Int]` bodies hit the List[heap]-literal wall).
             if let Some(bodies) = fan_bodies(e, "settle") {
-                e.kind = IrExprKind::List { elements: bodies };
+                use almide_lang::types::constructor::TypeConstructorId;
+                use almide_lang::types::Ty;
+                let elem_ty = match &e.ty {
+                    Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
+                    _ => Ty::Unknown,
+                };
+                let elem_is_result =
+                    matches!(&elem_ty, Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2);
+                let elements = bodies
+                    .into_iter()
+                    .map(|b| {
+                        if elem_is_result
+                            && !matches!(&b.ty, Ty::Applied(TypeConstructorId::Result, _))
+                        {
+                            IrExpr {
+                                span: b.span.clone(),
+                                def_id: None,
+                                kind: IrExprKind::ResultOk { expr: Box::new(b) },
+                                ty: elem_ty.clone(),
+                            }
+                        } else {
+                            b
+                        }
+                    })
+                    .collect();
+                e.kind = IrExprKind::List { elements };
                 self.changed = true;
                 return;
             }

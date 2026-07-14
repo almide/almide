@@ -825,6 +825,38 @@ B121. **Closed `is_balanced` (10 → 9) — the heap-accumulator fold, end to en
    cases); 100k-iteration leak-loop under 4MB (200000 both targets); mir 583/583; classify
    10 → 9 zero newly-walled; spec 283/283; GATE OK; CORPUS WALL OK FORBIDDEN=0. **9, was 10.**
 
+B122. **Closed `fan_pure_thunks` (9 → 8) — the settle ok-wrap, the race/any sides' B115+B119
+   groundwork already in place.** `rewrite_settle_any` (desugar_fan.rs) inlined a PLAIN thunk's
+   body into the settle result list RAW while the list's checked element type is
+   `Result[Int, String]` — the same phantom-Result contract break B115 fixed on the race side;
+   wrapped each non-Result body in `ResultOk` at the element type. Display needed
+   `list.to_string_lr` (List[Result[Int,String]] — `stdlib/list_to_string_lr.almd`, registered +
+   routed + PURE_MODULES). Verified: corpus file byte-identical wasmtime-vs-v0 (all 6 lines,
+   side-effect print order included); settle-shape 50k leak-loop under 8MB (700000 both);
+   ladder green on the combined tree (see B123's runs). **8, was 9.**
+
+B123. **Closed `map_fold_heap_acc` (8 → 7) — the nested-map stack: heap-acc `map.fold` pair,
+   `map.to_string_ss`, `map.from_list_str`, and the new `map_msv` family.** Six pieces:
+   (1) `stdlib/map_fold_hacc.almd` — `map.fold` with a `Map[String, Int]` acc over both
+   String-keyed subject families (`fold_str_msi`/`fold_skv_msi`, 3-arity (heap,heap,·)->heap
+   CallIndirect, `list.fold_ols`'s acc-moves-through discipline), carved out of the `fold_hacc`
+   wall (mod_p4.rs). (2) `map.to_string_ss` (map_to_string.almd) + the (String,String) display
+   route. (3) `map.from_list_str` (map_str.almd) + a result-keyed routing arm. (4)
+   `stdlib/map_msv.almd` — `Map[String, Map[String, String]]` (new/set/from_list/get_or,
+   hval's rc-share discipline; `__drop_map_msv` sweeps each last-ref inner map) + `ListElemDrop::
+   StrMapStr` for the pairs literal + `is_map_msv_ty` bind/arg routing. (5) THREE leak/trap
+   fixes the 100k-loop discipline caught: map closure results and `Map[String, <scalar>]`
+   binds/arg-temps flat-rc_dec'd their key Strings (a LATENT pre-existing leak class — routed to
+   the DropListStr key sweep at binds_p2/calls_p4); the from_list recursions leaked every
+   intermediate map (rewritten prim-style with owned `let nm` frames); `__drop_msv_inner`
+   double-counted map_str's @4 (already the raw slot count) and swept past the block (an
+   immediate rc_dec trap). (6) rc-whitelist: `__msv_set_copy`/`__msv_set_append` in
+   COOWN_PRODUCERS; drop helpers ride the `__drop_` prefix. Verified: corpus file byte-identical
+   (all 5 lines incl. r7 and the init-survival check); 100k combined leak-loop under 4MB
+   (500000 both targets) + per-shape loops; mir 583/583; classify 9 → 7 zero newly-walled
+   (fan_pure_thunks' closure included — the two shipped together); spec 283/283; GATE OK;
+   CORPUS WALL OK FORBIDDEN=0. **7, was 8.**
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
