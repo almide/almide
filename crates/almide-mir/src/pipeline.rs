@@ -888,8 +888,28 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
         if func.is_test {
             continue;
         }
-        // ALL-OR-NOTHING: any unlowerable fn walls the program (rung 1 has no
-        // per-fn fallback — a partial native binary cannot call into v0).
+        // PRECISION WALL (rung 2): the native renderer types a heap `Repr::Ptr`
+        // param/result as a STRING — only sound when the DECLARED type says so.
+        // Any signature outside {Int, Bool, String, Unit-ret} walls here, where
+        // the Almide-level `Ty` is still visible (`MirParam` carries only reprs).
+        use almide_lang::types::Ty;
+        let sig_ok = |t: &Ty| matches!(t, Ty::Int | Ty::Bool | Ty::String);
+        for p in &func.params {
+            if !sig_ok(&p.ty) {
+                return Err(LowerError::Unsupported(format!(
+                    "native: fn `{}` param `{:?}` type — outside the native rung subset",
+                    func.name, p.ty
+                )));
+            }
+        }
+        if !matches!(func.ret_ty, Ty::Unit) && !sig_ok(&func.ret_ty) {
+            return Err(LowerError::Unsupported(format!(
+                "native: fn `{}` return type {:?} — outside the native rung subset",
+                func.name, func.ret_ty
+            )));
+        }
+        // ALL-OR-NOTHING: any unlowerable fn walls the program (the native rungs
+        // have no per-fn fallback — a partial native binary cannot call into v0).
         let all = crate::lower::lower_function_all(func, &globals).map_err(|e| {
             LowerError::Unsupported(format!("native: fn `{}`: {e:?}", func.name))
         })?;
