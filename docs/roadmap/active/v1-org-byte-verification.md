@@ -314,6 +314,20 @@ native-FFI walls.
   should pin `layout.Node`) — reproduced identically on released v0.28.6.
   Single-file / two-module minimal probes do NOT reproduce; needs ceangal's
   real module graph. Separate checker workstream.
+- **PRE-EXISTING build blocker (ceangal, also on v0.28.6)**: `almide build
+  src/mod.almd --target wasm` fails IR verify — `call to unknown function
+  'cell.get'` (todoapp): the GENERIC module fn (`fn get[T](c: Cell[T])`)
+  called via cross-module UFCS never monomorphizes/links. Frontend (mono +
+  ir_link) workstream.
+- **homullus/almai frontier = the WASI-env runtime brick**: their dominant
+  walls (`memory_path`/`memory_dir`/`sessions_dir`/`require_env` …) are
+  `match env.get(..)` tails — v1 has no `env.get` lowering, AND v0-wasm ICEs
+  outright (`[ICE] emit_wasm: no WASM dispatch for env.get`,
+  calls_env.rs:63 — a PANIC, not a wall, on released binaries too). Opening
+  this class = env via WASI `environ_get` on BOTH engines (+ a C-contract for
+  env observability), then the match-tail machinery applies as-is. The
+  non-env homullus walls (value_to_tool_call/value_to_message Record/Value
+  shapes) are ordinary lowering bricks.
 
 ## Remaining threads
 
