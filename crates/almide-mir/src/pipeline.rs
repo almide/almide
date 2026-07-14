@@ -294,7 +294,7 @@ pub fn try_render_wasm_source(
         generic_variant_type_decl_src,
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
-        crate::lower::generate_variant_repr_sources(&all_type_decls, &crate::lower::collect_interp_anon_records(&ir)),
+        crate::lower::generate_variant_repr_sources(&all_type_decls, &crate::lower::collect_interp_anon_records(&ir), &crate::lower::collect_interp_repr_containers(&ir)),
         closure_drop,
         res_ilsl_drop,
         lenlist_drop,

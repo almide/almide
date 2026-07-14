@@ -49,12 +49,111 @@ pub fn collect_interp_anon_records(
     c.out
 }
 
+/// Collect the RECORD/VARIANT names appearing inside a CONTAINER string-interp part anywhere
+/// in the program — `"${pts}"` over `List[Point]` / `Option[Point]` / `List[Shape]` — the shapes
+/// the generator must emit `__repr_list_rec_<R>` / `__repr_opt_rec_<R>` / `__repr_list_<V>` for
+/// (the bare `${Point{..}}` part either inline-expands or takes `__repr_rec_<R>`, which the
+/// record section already emits unconditionally for every emittable record).
+#[derive(Default)]
+pub struct InterpReprContainers {
+    pub rec_lists: std::collections::BTreeSet<String>,
+    pub rec_opts: std::collections::BTreeSet<String>,
+    pub var_lists: std::collections::BTreeSet<String>,
+    pub rec_maps: std::collections::BTreeSet<String>,
+    pub var_maps: std::collections::BTreeSet<String>,
+}
+pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpReprContainers {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    use almide_lang::types::constructor::TypeConstructorId;
+    struct C {
+        out: InterpReprContainers,
+        rec_names: std::collections::HashSet<String>,
+        var_names: std::collections::HashSet<String>,
+    }
+    impl IrVisitor for C {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if let almide_ir::IrExprKind::StringInterp { parts } = &e.kind {
+                for p in parts {
+                    let almide_ir::IrStringPart::Expr { expr } = p else { continue };
+                    match &expr.ty {
+                        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+                            if let Ty::Named(n, _) = &a[0] {
+                                if self.rec_names.contains(n.as_str()) {
+                                    self.out.rec_lists.insert(n.as_str().to_string());
+                                } else if self.var_names.contains(n.as_str()) {
+                                    self.out.var_lists.insert(n.as_str().to_string());
+                                }
+                            }
+                        }
+                        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
+                            if let Ty::Named(n, _) = &a[0] {
+                                if self.rec_names.contains(n.as_str()) {
+                                    self.out.rec_opts.insert(n.as_str().to_string());
+                                }
+                            }
+                        }
+                        Ty::Applied(TypeConstructorId::Map, a)
+                            if a.len() == 2 && matches!(a[0], Ty::String) =>
+                        {
+                            if let Ty::Named(n, _) = &a[1] {
+                                if self.rec_names.contains(n.as_str()) {
+                                    self.out.rec_maps.insert(n.as_str().to_string());
+                                } else if self.var_names.contains(n.as_str()) {
+                                    self.out.var_maps.insert(n.as_str().to_string());
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    use almide_ir::IrTypeDeclKind;
+    let mut c = C {
+        out: InterpReprContainers::default(),
+        rec_names: program
+            .type_decls
+            .iter()
+            .filter(|d| matches!(&d.kind, IrTypeDeclKind::Record { .. }))
+            .map(|d| d.name.as_str().to_string())
+            .collect(),
+        var_names: program
+            .type_decls
+            .iter()
+            .filter(|d| matches!(&d.kind, IrTypeDeclKind::Variant { .. }))
+            .map(|d| d.name.as_str().to_string())
+            .collect(),
+    };
+    for f in &program.functions {
+        c.visit_expr(&f.body);
+    }
+    c.out
+}
+
 pub fn generate_variant_repr_sources(
     type_decls: &[almide_ir::IrTypeDecl],
     interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
+    interp_containers: &InterpReprContainers,
 ) -> String {
     use almide_ir::{IrTypeDeclKind, IrVariantKind};
     let names = variant_type_names(type_decls);
+    // Records whose every field is Int/Bool/String — admissible as a VARIANT ctor repr field
+    // (`Label { at: Point }`): the record section below emits `__repr_rec_<R>` for them
+    // unconditionally (they trivially pass its fixpoint), so the variant body's call links.
+    // Computed BEFORE the variant fixpoint to break the variant↔record cycle one-directionally.
+    let scalar_rec_names: std::collections::HashSet<String> = type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            IrTypeDeclKind::Record { fields }
+                if fields.iter().all(|f| matches!(f.ty, Ty::Int | Ty::Bool | Ty::String)) =>
+            {
+                Some(d.name.as_str().to_string())
+            }
+            _ => None,
+        })
+        .collect();
     // Fixpoint: which variants are repr-EMITTABLE (every ctor field Int/Bool/String
     // or an emittable variant)?
     let mut emittable: std::collections::HashSet<String> = type_decls
@@ -80,6 +179,12 @@ pub fn generate_variant_repr_sources(
                 };
                 tys.iter().all(|ty| {
                     matches!(ty, Ty::Int | Ty::Bool | Ty::String)
+                        // A Float ctor field renders via the compound Display
+                        // (`float.to_string_compound` — integral drops the `.0`).
+                        || matches!(ty, Ty::Float)
+                        // A SCALAR-record ctor field (`Label { at: Point }`) renders via the
+                        // record section's unconditional `__repr_rec_<R>`.
+                        || matches!(ty, Ty::Named(n, _) if scalar_rec_names.contains(n.as_str()))
                         || variant_field_name(ty, &names)
                             .map(|fv| emittable.contains(&fv))
                             .unwrap_or(false)
@@ -127,6 +232,42 @@ pub fn generate_variant_repr_sources(
            prim.store8(e, 34)\n  \
            out\n}\n",
     );
+    // The FLOAT display helper links the Dragon4 float.to_string module — emit it ONLY
+    // when an emitted variant actually has a Float ctor field (unconditional emission
+    // linked Dragon4 into every program and its internal certs into every cert check).
+    let need_float = type_decls.iter().any(|d| {
+        let IrTypeDeclKind::Variant { cases, .. } = &d.kind else { return false };
+        emittable.contains(d.name.as_str())
+            && cases.iter().any(|case| {
+                let tys: Vec<Ty> = match &case.kind {
+                    IrVariantKind::Unit => vec![],
+                    IrVariantKind::Tuple { fields } => fields.clone(),
+                    IrVariantKind::Record { fields } => {
+                        fields.iter().map(|f| f.ty.clone()).collect()
+                    }
+                };
+                tys.iter().any(|t| matches!(t, Ty::Float))
+            })
+    });
+    if need_float {
+        out.push_str(
+        "fn __repr_float_ends_dot0(src: Int, n: Int) -> Bool =\n  \
+           if n < 2 then false\n  \
+           else if prim.load8(src + n - 2) != 46 then false\n  \
+           else prim.load8(src + n - 1) == 48\n\
+         fn __repr_float_copy(src: Int, dst: Int, n: Int) -> Int =\n  \
+           if n <= 0 then dst\n  \
+           else {\n    prim.store8(dst, prim.load8(src))\n    __repr_float_copy(src + 1, dst + 1, n - 1)\n  }\n\
+         fn __repr_float(x: Float) -> String = {\n  \
+           let s = float.to_string(x)\n  \
+           let sh = prim.handle(s)\n  \
+           let n = prim.load32(sh + 4)\n  \
+           if __repr_float_ends_dot0(sh + 12, n) then {\n    \
+             let out = prim.alloc_str(n - 2)\n    \
+             let e = __repr_float_copy(sh + 12, prim.handle(out) + 12, n - 2)\n    \
+             out\n  } else s\n}\n",
+        );
+    }
     let mut sorted: Vec<&almide_ir::IrTypeDecl> = type_decls
         .iter()
         .filter(|d| {
@@ -196,6 +337,21 @@ pub fn generate_variant_repr_sources(
                     Ty::String => {
                         out.push_str(&format!(
                             "    let f{i} = __repr_quote(prim.load_str(h + {off}))\n"
+                        ));
+                    }
+                    Ty::Float => {
+                        // The slot holds the f64 BIT pattern (the scalar ctor stored raw bits);
+                        // reinterpret then render with the compound Display (drops integral `.0`).
+                        out.push_str(&format!(
+                            "    let f{i} = __repr_float(prim.ffrombits(prim.load64(h + {off})))\n"
+                        ));
+                    }
+                    Ty::Named(rn, _) if scalar_rec_names.contains(rn.as_str()) => {
+                        // A scalar-record ctor field — compose the record's own generated repr.
+                        let rn_s = rn.as_str();
+                        let rn_fn = drop_fn_ident(rn_s);
+                        out.push_str(&format!(
+                            "    let v{i}: {rn_s} = prim.load_handle(h + {off})\n    let f{i} = __repr_rec_{rn_fn}(v{i})\n"
                         ));
                     }
                     _ => {
@@ -300,6 +456,13 @@ pub fn generate_variant_repr_sources(
             }
         }
     }
+    // ...or referenced as a `${List[R]}` INTERP PART anywhere (compound_repr_records'
+    // `points=${pts}` — the container display composes the same element loop).
+    for r in &interp_containers.rec_lists {
+        if rec_emittable.contains(r) {
+            need_list.insert(r.clone());
+        }
+    }
     for (tname, fields) in rec_sorted.iter() {
         let fname = drop_fn_ident(tname);
         out.push_str(&format!("fn __repr_rec_{fname}(e: {tname}) -> String = {{
@@ -377,6 +540,82 @@ pub fn generate_variant_repr_sources(
 }}
 "
         ));
+    }
+    // ── `${Option[<record>]}` interp parts (`opt_rec=${op}`) — `some(<repr>)` / `none` ──
+    for r in &interp_containers.rec_opts {
+        if !rec_emittable.contains(r) {
+            continue;
+        }
+        let r_fn = drop_fn_ident(r);
+        out.push_str(&format!(
+            "fn __repr_opt_rec_{r_fn}(o: Option[{r}]) -> String = {{
+                 let h = prim.handle(o)
+                 if prim.load32(h + 4) == 0 then \"none\"
+                 else {{
+                     let v: {r} = prim.load_handle(h + 12)
+                     \"some(\" + __repr_rec_{r_fn}(v) + \")\"
+  }}
+}}
+"
+        ));
+    }
+    // ── `${List[<variant>]}` interp parts (`shapes=${shapes}`) — the variant element loop ──
+    for v in &interp_containers.var_lists {
+        if !emittable.contains(v) {
+            continue;
+        }
+        let v_fn = drop_fn_ident(v);
+        out.push_str(&format!(
+            "fn __repr_list_{v_fn}_go(h: Int, n: Int, i: Int, acc: String) -> String =
+                 if i >= n then acc + \"]\"
+                 else {{
+                     let e: {v} = prim.load_handle(h + 12 + i * 8)
+                     let s = __repr_{v_fn}(e)
+                     let acc2 = if i == 0 then acc + s else acc + \", \" + s
+                     __repr_list_{v_fn}_go(h, n, i + 1, acc2)
+  }}
+             fn __repr_list_{v_fn}(xs: List[{v}]) -> String = {{
+                 let h = prim.handle(xs)
+                 let n = prim.load32(h + 4)
+                 __repr_list_{v_fn}_go(h, n, 0, \"[\")
+}}
+"
+        ));
+    }
+    // ── `${Map[String, <record>]}` / `${Map[String, <variant>]}` interp parts — the
+    // interleaved [k,v,…] paired-slot map (map_str layout: @4 = 2n slots, key@12+i*8,
+    // value at the next slot); keys render QUOTED (the map_to_string_ss form), values
+    // through the element repr. Empty renders `[:]`.
+    let mut map_repr = |elem: &str, elem_call: &str| {
+        let e_fn = drop_fn_ident(elem);
+        // map_hobj's SPLIT layout: @4 = entry count n; key i @ 12+i*8, value i @ 12+(n+i)*8.
+        out.push_str(&format!(
+            "fn __repr_map_{e_fn}_go(h: Int, n: Int, i: Int, acc: String) -> String =
+                 if i >= n then acc + \"]\"
+                 else {{
+                     let k = prim.load_str(h + 12 + i * 8)
+                     let v: {elem} = prim.load_handle(h + 12 + (n + i) * 8)
+                     let piece = __repr_quote(k) + \": \" + {elem_call}(v)
+                     let acc2 = if i == 0 then acc + piece else acc + \", \" + piece
+                     __repr_map_{e_fn}_go(h, n, i + 1, acc2)
+  }}
+             fn __repr_map_{e_fn}(m: Map[String, {elem}]) -> String = {{
+                 let h = prim.handle(m)
+                 let n = prim.load32(h + 4)
+                 if n == 0 then \"[:]\" else __repr_map_{e_fn}_go(h, n, 0, \"[\")
+}}
+"
+        ));
+    };
+    for r in &interp_containers.rec_maps {
+        if rec_emittable.contains(r) {
+            map_repr(r, &format!("__repr_rec_{}", drop_fn_ident(r)));
+        }
+    }
+    for v in &interp_containers.var_maps {
+        if emittable.contains(v) {
+            map_repr(v, &format!("__repr_{}", drop_fn_ident(v)));
+        }
     }
     // ── ANONYMOUS-record reprs (`__repr_anonrec_<hash>`) ──
     // v0 renders an anon record `{ apple: 2, mango: 3, zebra: 1 }` with fields SORTED BY

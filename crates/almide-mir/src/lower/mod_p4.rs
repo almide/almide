@@ -892,10 +892,72 @@ fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr
                 def_id: None,
             })
         }
+        // A CONTAINER of a named record/variant (`${pts}` over List[Point], `${op}` over
+        // Option[Point], `${shapes}` over List[Shape]) — route to the GENERATED container
+        // repr (`__repr_list_rec_<R>` / `__repr_opt_rec_<R>` / `__repr_list_<V>`, emitted by
+        // `generate_variant_repr_sources` for exactly the container/element pairs collected
+        // from interp parts). An unemitted pair leaves the call unlinked — the honest wall
+        // (same contract as the bare `__repr_rec_<R>` arm above).
+        IrStringPart::Expr { expr }
+            if container_repr_name(&expr.ty, registry).is_some() =>
+        {
+            let name = container_repr_name(&expr.ty, registry).unwrap();
+            Some(IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Named { name: sym(&name) },
+                    args: vec![expr.clone()],
+                    type_args: Vec::new(),
+                },
+                ty: Ty::String,
+                span: None,
+                def_id: None,
+            })
+        }
         IrStringPart::Expr { expr } => {
             let (module, func) = interp_to_string_call(&expr.ty)?;
             Some(to_string_call(module, func, expr.clone()))
         }
+    }
+}
+
+/// The generated container-repr callee for a `${List[<record>]}` / `${Option[<record>]}` /
+/// `${List[<variant>]}` interp part, or `None` for every other type (falls to the
+/// `interp_to_string_call` table). Record-vs-variant discrimination mirrors the bare-part
+/// arms: a `Named` that resolves in the record registry is a record, else a variant.
+fn container_repr_name(ty: &Ty, registry: &RecordLayouts) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let named = |t: &Ty| -> Option<(String, bool)> {
+        let Ty::Named(n, _) = t else { return None };
+        Some((n.as_str().to_string(), resolve_aggregate(t, registry).is_some()))
+    };
+    match ty {
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+            let (n, is_rec) = named(&a[0])?;
+            let n_fn = crate::lower::drop_fn_ident(&n);
+            Some(if is_rec {
+                format!("__repr_list_rec_{n_fn}")
+            } else {
+                format!("__repr_list_{n_fn}")
+            })
+        }
+        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
+            let (n, is_rec) = named(&a[0])?;
+            if !is_rec {
+                return None; // Option[<variant>] keeps its existing table routing
+            }
+            let n_fn = crate::lower::drop_fn_ident(&n);
+            Some(format!("__repr_opt_rec_{n_fn}"))
+        }
+        // `${Map[String, <record/variant>]}` — the paired-slot map repr (quoted keys,
+        // element repr values, `[:]` when empty).
+        Ty::Applied(TypeConstructorId::Map, a)
+            if a.len() == 2 && matches!(a[0], Ty::String) =>
+        {
+            let (n, _is_rec) = named(&a[1])?;
+            let n_fn = crate::lower::drop_fn_ident(&n);
+            Some(format!("__repr_map_{n_fn}"))
+        }
+        _ => None,
     }
 }
 
@@ -1061,6 +1123,9 @@ pub fn interp_synthetic_call_names(parts: &[IrStringPart], registry: &RecordLayo
                 } else {
                     names.push("compound.to_string".to_string());
                 }
+            } else if let Some(n) = container_repr_name(&expr.ty, registry) {
+                // Mirrors `interp_part_leaf`'s container-repr arm: ONE generated call node.
+                names.push(n);
             } else {
                 value_synthetic_names(&expr.ty, registry, &mut names);
             }
@@ -1784,6 +1849,20 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 // leaf) — pass through verbatim (re-suffixing would fabricate
                 // `to_string_mlo_hval_wall`).
                 (true, true) if func == "to_string_mlo" => Some(""),
+                // `map.from_list` over a NAMED-value map (`["o": Point{..}]` / `["a":
+                // Circle(3.0)]` — the desugared map literal): construction is handle-level
+                // (the `_str` family's pair copy + co-own rc_inc works for ANY heap value
+                // slot); the RESULT's type-driven drop routing (`map_named_value_drop`)
+                // decides the correct sweep, and an unadmitted value type walls THERE —
+                // never a leaky flat link here.
+                (true, true)
+                    if func == "from_list"
+                        && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                            if a.len() == 2 && matches!(a[0], Ty::String)
+                                && matches!(a[1], Ty::Named(..))) =>
+                {
+                    Some("_hobj")
+                }
                 (true, true) if !val_is_string => Some("_hval_wall"),
                 (true, true) if key_is_string => matches!(
                     func,

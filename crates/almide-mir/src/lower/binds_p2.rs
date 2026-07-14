@@ -1,4 +1,31 @@
 impl LowerCtx {
+    /// The type-driven scope-end drop handle for a `Map[String, <Named>]` value (the
+    /// desugared map literal's `from_list_hobj` result, split layout): a VARIANT value
+    /// routes to the generated `$__drop_map_<V>` (key rc_dec + flat/recursive value free,
+    /// generated for EVERY variant); a SCALAR-ONLY record to `$__drop_map_rec_<R>`
+    /// (both slots flat rc_dec). A heap-field RECORD value returns `None` — no generated
+    /// sweep exists, so the bind keeps the honest deferral/wall (never a leaky flat link).
+    pub(crate) fn map_named_value_drop(&self, ty: &Ty) -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::Map, a) = ty else { return None };
+        if a.len() != 2 || !matches!(a[0], Ty::String) {
+            return None;
+        }
+        let Ty::Named(n, _) = &a[1] else { return None };
+        let ns = n.as_str();
+        if self.variant_layouts.by_type.contains_key(ns) {
+            return Some(format!("map_{}", crate::lower::drop_fn_ident(ns)));
+        }
+        if crate::lower::canonical_record_key(&self.record_layouts, ns).is_some()
+            && self
+                .aggregate_field_tys(&a[1])
+                .is_some_and(|(_, tys)| tys.iter().all(|t| !is_heap_ty(t)))
+        {
+            return Some(format!("map_rec_{}", crate::lower::drop_fn_ident(ns)));
+        }
+        None
+    }
+
     pub(crate) fn lower_bind(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         // `let r = e!` (Unwrap — effect-fn error propagation) bound to a let/var was a deferred
         // `Const`/`Alloc{Opaque}` = a SILENT MISCOMPILE (`int.parse(s)!` bound 0, `g()!` empty).
@@ -646,6 +673,10 @@ impl LowerCtx {
                 } else if crate::lower::is_map_hval_ty(ty) {
                     // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
                     self.variant_drop_handles.insert(dst, "map_hval".to_string());
+                } else if let Some(hname) = self.map_named_value_drop(ty) {
+                    // `Map[String, <record/variant>]` — the desugared map literal's
+                    // from_list result (type-driven sweep; see `map_named_value_drop`).
+                    self.variant_drop_handles.insert(dst, hname);
                 } else if crate::lower::is_map_msv_ty(ty) {
                     // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
                     // last-ref inner map's String slots (a flat rc_dec would leak them).
@@ -857,6 +888,10 @@ impl LowerCtx {
                 } else if crate::lower::is_map_hval_ty(ty) {
                     // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
                     self.variant_drop_handles.insert(dst, "map_hval".to_string());
+                } else if let Some(hname) = self.map_named_value_drop(ty) {
+                    // `Map[String, <record/variant>]` — the desugared map literal's
+                    // from_list result (type-driven sweep; see `map_named_value_drop`).
+                    self.variant_drop_handles.insert(dst, hname);
                 } else if crate::lower::is_map_msv_ty(ty) {
                     // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
                     // last-ref inner map's String slots (a flat rc_dec would leak them).

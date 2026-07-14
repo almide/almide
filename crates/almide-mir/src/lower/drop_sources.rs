@@ -230,6 +230,71 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                  __drop_list_str_{vn_fn}_loop(h, n, i + 1)\n  \
                }}\n"
         ));
+        // (moved below — the map-value sweep now covers ALL variants, split layout)
+    }
+    // A `Map[String, <variant>]` value (`["a": Circle(3.0)]` — the shape_map class), the
+    // map_hobj SPLIT layout (@4 = n entries; keys 0..n-1, values n..2n-1): the exact free
+    // is `rc_dec` of each deep-copied key + the value free — RECURSIVE `$__drop_<V>` for a
+    // recursive-drop variant, a flat `rc_dec` for a flat one (its block owns no children).
+    // Generated for EVERY variant so the bind-side `map_<V>` admission never outruns
+    // generation. Records with all-scalar fields get the same sweep with a flat value
+    // `rc_dec` (`__drop_map_rec_<R>`).
+    {
+        let mut all_variant_names: Vec<&str> = type_decls
+            .iter()
+            .filter(|d| matches!(&d.kind, IrTypeDeclKind::Variant { .. }))
+            .map(|d| d.name.as_str())
+            .collect();
+        all_variant_names.sort_unstable();
+        for vn in all_variant_names {
+            let vn_fn = drop_fn_ident(vn);
+            let free_v = if rec_variant_names.contains(vn) {
+                format!("let v: {vn} = prim.load_handle(h + 12 + (n + i) * 8)\n    __drop_{vn_fn}(v)")
+            } else {
+                "prim.rc_dec(prim.load64(h + 12 + (n + i) * 8))".to_string()
+            };
+            out.push_str(&format!(
+                "fn __drop_map_{vn_fn}_go(h: Int, n: Int, i: Int) -> Unit =\n  \
+                   if i >= n then ()\n  \
+                   else {{\n    \
+                     prim.rc_dec(prim.load64(h + 12 + i * 8))\n    \
+                     {free_v}\n    \
+                     __drop_map_{vn_fn}_go(h, n, i + 1)\n  \
+                   }}\n\
+                 fn __drop_map_{vn_fn}(m: Map[String, {vn}]) -> Unit = {{\n  \
+                   let h = prim.handle(m)\n  \
+                   if prim.load32(h + 0) == 1 then __drop_map_{vn_fn}_go(h, prim.load32(h + 4), 0) else ()\n  \
+                   prim.rc_dec(h)\n}}\n"
+            ));
+        }
+        let mut scalar_recs: Vec<&str> = type_decls
+            .iter()
+            .filter_map(|d| match &d.kind {
+                IrTypeDeclKind::Record { fields }
+                    if fields.iter().all(|f| !is_heap_ty(&f.ty)) =>
+                {
+                    Some(d.name.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        scalar_recs.sort_unstable();
+        for rn in scalar_recs {
+            let rn_fn = drop_fn_ident(rn);
+            out.push_str(&format!(
+                "fn __drop_map_rec_{rn_fn}_go(h: Int, n: Int, i: Int) -> Unit =\n  \
+                   if i >= n then ()\n  \
+                   else {{\n    \
+                     prim.rc_dec(prim.load64(h + 12 + i * 8))\n    \
+                     prim.rc_dec(prim.load64(h + 12 + (n + i) * 8))\n    \
+                     __drop_map_rec_{rn_fn}_go(h, n, i + 1)\n  \
+                   }}\n\
+                 fn __drop_map_rec_{rn_fn}(m: Map[String, {rn}]) -> Unit = {{\n  \
+                   let h = prim.handle(m)\n  \
+                   if prim.load32(h + 0) == 1 then __drop_map_rec_{rn_fn}_go(h, prim.load32(h + 4), 0) else ()\n  \
+                   prim.rc_dec(h)\n}}\n"
+            ));
+        }
     }
     out
 }

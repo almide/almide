@@ -910,6 +910,61 @@ DIAGNOSIS — `compound_repr_records_interp` decomposes into FOUR independent fa
    exercises bare record/variant displays (`${Point{..}}`, `${Click(10,20)}`) that the repr
    generators already cover — re-probe before assuming any sub-shape still walls.
 
+B126. **Closed `compound_repr_records_interp` — all four diagnosed families, full-file
+   byte parity (25 lines).** (b) container displays: `collect_interp_repr_containers` +
+   generated `__repr_list_rec_<R>` / `__repr_opt_rec_<R>` / `__repr_list_<V>` /
+   `__repr_map_*` (split layout, quoted keys, `[:]` empty) + `container_repr_name`
+   routing with its count-gate mirror; the variant repr generator now admits Float
+   fields (`__repr_float` = float.to_string minus trailing `.0`, gated to
+   Float-field-bearing programs after unconditional emission linked Dragon4's certs
+   into two unit tests) and scalar-record fields (`__repr_rec_<R>` composition). A
+   deferred-empty `some(<scalar-only record>)` bind was materialized
+   (`materialize_opt_str_some`) after the container display turned the silent empty
+   into a visible wrong `none` — construction before display, always. (a) mixed-payload
+   variant lists: `is_rich_variant_ty` now takes the caller's record predicate (its
+   `|_| false` narrowing made admission lag the generator, which already frees record
+   fields). (c)/(d) `Map[String, <record/variant>]`: the desugared literal's
+   `from_list` routes to a new value-agnostic `map.from_list_hobj` (msv's split-layout
+   co-own family over raw handles; `__hobj_set_copy/append` whitelisted); type-driven
+   drops via `map_named_value_drop` → generated `$__drop_map_<V>` (every variant,
+   flat→rc_dec / rich→`$__drop_<V>`) and `$__drop_map_rec_<R>` (scalar-only records).
+   Verified: all-family probes + the FULL corpus file byte-identical; 100k
+   five-shape leak-loop under 4MB (20200000 both targets); every generated fn real
+   AND called in the WAT; mir 583/583; spec 283/283; GATE OK; classify on the
+   mixed tree shows the file off the list, zero newly-walled. **One caution for the
+   record**: reusing `map.from_list_str` for record values was tried first and
+   produced GARBAGE field reads (its String deep-copy reinterprets value handles) —
+   caught by the byte-parity probe before any ladder step; the hobj family exists
+   precisely because construction must be handle-level for opaque values.
+
+B127. **Closed `codegen_loop_guard_test` ("for with guard continue filtering", classify 3 → 2
+   on the combined tree with B126)** — the loop early-exit frontier, first slice. Three pieces:
+   (1) `desugar_loop_break` (desugar_loop.rs, chained into the shared fixpoint): a `break`
+   admitted ONLY as a whole `if`-arm (the `guard c else break` normal form — the iteration's
+   remainder is nested in the opposite arm) becomes `{ __bk = true }`; a ForIn guards its body
+   on `not __bk` (finite iterable), a While injects the flag into its condition. `continue`
+   was already eliminated by desugar_guard's loop rule. (2) `desugar_loop_unwrap` extended to
+   WHILE loops (the original for-only gate): flags are injected into the CONDITION via a
+   branch-free 0/1 `MulInt` product — the short-circuit `and` lowers to nested IfThen merges
+   whose certificate grouping poisons (`flush_branch`'s `{i|}`), and a body-guard alone would
+   spin (the induction update lives in the skipped body). (3) mod_p3's in-loop `ResultOk/Err`
+   slot reassign now dispatches by repr: a SCALAR-Ok Result built len-as-tag
+   (`materialize_result_ok`/`materialize_opt_str_some`) — the cap-tag str builder emitted a
+   scalar payload into a handle slot (probe-confirmed invalid wasm that ESCAPED the wall).
+   Verified: loop_guard's exact corpus list byte-identical; a pure-`!` while
+   (`let d = step(i)!` + err propagation) byte-identical both outcomes; 50k combined
+   leak-loop under 8MB (650000 both targets); mir 583/583; classify zero newly-walled,
+   zero unbacked; spec 283/283; GATE OK; CORPUS WALL OK.
+   **`find_first_even` stays walled BY DESIGN** — a loop VALUE-exit (`guard n % 2 != 0 else
+   ok(n)`) is detected (both raw-Guard and desugared-if forms) and DECLINES the pass: every
+   delivery shape tried ships one of two pre-existing lower-layer gaps — (a) a heap Result
+   slot conditionally reassigned OUTSIDE a loop is silently DROPPED (probe `pick(true)`:
+   v0 `ok:42`, v1 `err:normal` — a LIVE wrong-value class, no wall, newly discovered and
+   recorded here), and (b) a two-level terminal dispatch makes each nested arm re-release
+   the fn-scope `__ev` slot per-path, which the v4 CBranch cannot express (`flush_branch`
+   poison → the corpus-wall unbacked breach). Fixing (a) is the honest prerequisite for
+   both this and the wrap_lists-class work. **2 remaining: find_first_even, wrap_lists.**
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

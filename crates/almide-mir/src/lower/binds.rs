@@ -410,7 +410,9 @@ impl LowerCtx {
         // `rc_dec` (`DropListStr`) would leak each element's nested `List[Instr]`.
         let elem_rich_variant: Option<String> = match &value.ty {
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-                self.variant_layouts.is_rich_variant_ty(&a[0])
+                self.variant_layouts.is_rich_variant_ty(&a[0], &|rn| {
+                    crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+                })
             }
             _ => None,
         };

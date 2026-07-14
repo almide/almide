@@ -363,7 +363,7 @@
             "{}{}{}{}{}{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),
             crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
-            crate::lower::generate_variant_repr_sources(&ir.type_decls, &crate::lower::collect_interp_anon_records(&ir)),
+            crate::lower::generate_variant_repr_sources(&ir.type_decls, &crate::lower::collect_interp_anon_records(&ir), &crate::lower::collect_interp_repr_containers(&ir)),
             closure_drop,
             lenlist_drop,
             list_str_drop,

@@ -765,6 +765,25 @@ impl LowerCtx {
                 let piece = self.try_lower_record_construct(expr)?;
                 Some(self.materialize_opt_aggregate_some(piece, repr, drop_fn))
             }
+            // `some(<SCALAR-ONLY record>)` (`some(Point { x: 7, y: 8 })` — compound_repr's
+            // opt_rec): the record block owns NO children, so the flat 0-or-1 Option drop
+            // (`DropListStr`: rc_dec of the payload handle + the block) frees it EXACTLY —
+            // materialize instead of deferring. (The deferred-empty placeholder was silently
+            // read as `none` once the container-repr display routed over it — the wrong-bytes
+            // class this campaign exists to prevent; construction must be real before display.)
+            IrExprKind::OptionSome { expr }
+                if matches!(expr.kind, IrExprKind::Record { .. })
+                    && matches!(&expr.ty, Ty::Named(..))
+                    && self
+                        .aggregate_field_tys(&expr.ty)
+                        .is_some_and(|(_, tys)| tys.iter().all(|t| !is_heap_ty(t))) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let piece = self
+                    .try_lower_record_construct(expr)
+                    .or_else(|| self.try_lower_scalar_record_construct(expr))?;
+                Some(self.materialize_opt_str_some(piece, repr))
+            }
             IrExprKind::OptionSome { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(ty).ok()?;
                 let piece = match &expr.kind {

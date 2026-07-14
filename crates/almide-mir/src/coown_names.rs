@@ -45,6 +45,8 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__hvl_set_append",
     "__msv_set_copy",    // map.set_msv — rc_inc the shared value handles (map_hval's exact shape)
     "__msv_set_append",  // map.set_msv — rc_inc the appended value handle
+    "__hobj_set_copy",   // map.from_list_hobj — rc_inc the shared value handles (the msv shape, opaque values)
+    "__hobj_set_append", // map.from_list_hobj — rc_inc the appended value handle
     "__mlo_set_copy",    // map.set_mlo — rc_inc the shared value handles (the msv shape, list values)
     "__mlo_set_append",  // map.set_mlo — rc_inc the appended value handle
     "__ivh_drop_vals",

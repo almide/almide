@@ -499,6 +499,12 @@ fn desugar_heap_branches_inner(
             cur = Some(r);
             continue;
         }
+        // `break` inside a `for`/`while` body → the `__bk` flag form (whole-arm breaks only;
+        // see `desugar_loop_break`). Runs in this SHARED desugar (count-invariant flag ops).
+        if let Some(r) = desugar_loop_break(src, next_var) {
+            cur = Some(r);
+            continue;
+        }
         // STATEMENT-CONTROL continuation-lift: a UNIT `if`/`match` STATEMENT carrying a stmt/let `!`
         // followed by a non-empty continuation. Lift `after` into each arm (tail-duplication) so the
         // branch becomes the block TAIL — the tail effect-unwrap then resolves the `!`. Runs in this

@@ -132,7 +132,9 @@ impl LowerCtx {
         // (the new list co-owns each block); the scope-end / teardown `$__drop_list_<V>` frees each
         // element RECURSIVELY via `$__drop_<V>` (a flat `rc_dec` would leak each Instr's nested
         // `List[Instr]`). Routed via `variant_drop_handles="list_<V>"`, like the record case.
-        let rich_variant_elem = self.variant_layouts.is_rich_variant_ty(&elem_ty);
+        let rich_variant_elem = self.variant_layouts.is_rich_variant_ty(&elem_ty, &|rn| {
+            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+        });
         if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && !str_str_elem
             && !int_str_elem && !str_int_elem && !scalar_aggregate_elem && !flat_variant_elem
             && rich_variant_elem.is_none() && record_elem.is_none()

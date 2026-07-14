@@ -1341,18 +1341,22 @@ impl VariantLayouts {
     /// serve two instantiations with DIFFERENT per-slot heap-ness. `None` if the args aren't a
     /// confidently nameable shape (declines / stays walled rather than risk a colliding name) or
     /// this specific instantiation doesn't actually need recursive drop.
-    pub fn is_rich_variant_ty(&self, ty: &Ty) -> Option<String> {
+    pub fn is_rich_variant_ty(&self, ty: &Ty, is_record: &dyn Fn(&str) -> bool) -> Option<String> {
         let (n, args) = Self::variant_name_and_args(ty)?;
         if !self.by_type.contains_key(n) {
             return None;
         }
-        // A `List[<variant>]` ELEMENT check keys on nested-variant fields only (a variant with a
-        // record field is neither flat nor list-rich here → the list materializer walls it cleanly,
-        // never a leak). The record-widening applies to the direct-ctor `needs_rec` (LowerCtx), not
-        // to the list-element admission.
+        // A NON-generic variant element admits the SAME record-field widening the drop
+        // GENERATOR uses (`variant_needs_recursive_drop` counts record fields via
+        // `all_record_names`) — admission ⊆ generation stays intact because both sides now
+        // ask the same question: `$__drop_<V>`/`$__drop_list_<V>` free a record field via
+        // `$__drop_<R>` / a scalar-only record's flat rc_dec (the drop generator's field
+        // loop), so a record-field variant list (`List[Shape]`, `Label { at: Point }`) is
+        // freed exactly. The GENERIC arm below keeps the `|_| false` narrowing (shadow-type
+        // generation covers no record fields).
         if args.is_empty() {
             return self
-                .needs_recursive_drop(n, &|_| false)
+                .needs_recursive_drop(n, is_record)
                 .then(|| n.to_string());
         }
         let inst_name = generic_variant_instantiation_name(n, args)?;
