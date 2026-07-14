@@ -1,6 +1,15 @@
 /// The fixed WAT runtime: WASI import, memory, bump allocator, list ops, integer
 /// formatting, and line printing. Addresses are the named constants above.
+/// The bump allocator starts at [`HEAP_BASE`]; [`preamble_with_bump_base`] shifts
+/// it past the mutable-global slot region.
 pub(crate) fn preamble() -> String {
+    preamble_with_bump_base(HEAP_BASE)
+}
+
+/// [`preamble`] with the bump allocator starting at `bump_base` (`HEAP_BASE +
+/// 8*mutable_global_count`), so the mutable-global slots `[HEAP_BASE, bump_base)`
+/// are never allocated over. With no mutable globals this IS `preamble()`.
+pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     format!(
         r#"(module
   (import "wasi_snapshot_preview1" "fd_write"
@@ -53,7 +62,7 @@ pub(crate) fn preamble() -> String {
   (data (i32.const {MKDIR_ERR_ADDR}) "mkdir failed")
   ;; the fs.remove_all path_remove_directory/path_unlink_file error message — a CONST byte run.
   (data (i32.const {REMOVE_ERR_ADDR}) "remove failed")
-  (global $bump (mut i32) (i32.const {HEAP_BASE}))
+  (global $bump (mut i32) (i32.const {bump_base}))
   ;; __div_trap(msg,len): write the interned abort line to STDERR and proc_exit(1)
   ;; — the render-path twin of v0-wasm's __div_trap (§13 termination convention).
   ;; Uses the fd_write iovec scratch; never returns.

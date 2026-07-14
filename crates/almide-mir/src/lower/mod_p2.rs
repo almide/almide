@@ -31,6 +31,36 @@ thread_local! {
     /// NOT stripped.
     pub(crate) static DECLARED_OPTION_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+
+    /// MUTABLE module-level `var` globals (program + module top_lets, `tl.mutable ==
+    /// true`): VarId → (storage-slot index, declared Ty). Cross-function shared state
+    /// lives in a dedicated linear-memory slot (`crate::mg_slot_addr(index)`): a read
+    /// loads the slot fresh each time (a scalar `Load`, a heap `$__mg_get` owned Dup),
+    /// an assign stores through it (`$__mg_take` + type-routed drop of the old value +
+    /// `Store`+`Consume` of the new). WITHOUT slot routing, a read materialized the
+    /// const initializer and an assign rebound a function-local copy (`var counter = 0;
+    /// bump(); bump()` printed `5 3 0` where native says `5 8 8` — a LIVE miscompile).
+    /// Populated by the pipeline / classify globals collection (the same pre-lowering
+    /// point the maps are built); shapes beyond the slot subset still WALL.
+    pub(crate) static MUTABLE_GLOBAL_VARS: std::cell::RefCell<std::collections::HashMap<u32, (u32, Ty)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Publish the mutable module-level `var` map (VarId.0 → (slot index, declared Ty)) for
+/// [`MUTABLE_GLOBAL_VARS`]. Called wherever the globals maps are collected (pipeline +
+/// classify), BEFORE any per-function lowering.
+pub fn set_mutable_global_vars(vars: std::collections::HashMap<u32, (u32, Ty)>) {
+    MUTABLE_GLOBAL_VARS.with(|s| *s.borrow_mut() = vars);
+}
+
+/// Is `var` a mutable module-level `var` (slot-routed cross-function state)?
+pub(crate) fn is_mutable_global(var: almide_ir::VarId) -> bool {
+    MUTABLE_GLOBAL_VARS.with(|s| s.borrow().contains_key(&var.0))
+}
+
+/// The (slot index, declared Ty) of a mutable module-level `var`, if `var` is one.
+pub(crate) fn mutable_global_info(var: almide_ir::VarId) -> Option<(u32, Ty)> {
+    MUTABLE_GLOBAL_VARS.with(|s| s.borrow().get(&var.0).cloned())
 }
 
 /// A function CAN-ERR (returns `Err` on some input) iff its body has a direct `err(…)` (`ResultErr`) OR

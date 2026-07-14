@@ -271,6 +271,34 @@ float.parse's exact decimal→f64 rounding at the denormal/max boundaries
 (a strtod-class brick), the almide-grammar output divergence, and porta's 2
 native-FFI walls.
 
+## Sixth pass — org wall 101→0 arc, ceangal 77→21 (2026-07-14)
+
+- **Tail spread/record ctors** (`{ ...n, gap_main: v }` / `text()` returned):
+  tail.rs now routes SpreadRecord+Record through the arm-precedent builders;
+  `lower_owned_heap_field` gained the nested-spread arm + a `value_or_global`
+  Var arm (record globals like `_default`, scalar-only fallback included);
+  spread bases may be a Member (`{ ...v._style, … }` borrows via
+  `try_lower_heap_field_borrow`). ceangal 77→42.
+- **Mutable module-level `var` brick** (scroll bucket + a LIVE miscompile):
+  reads/assigns had silently materialized the init / rebound a local
+  (`5 3 0` vs native `5 8 8`, probe-confirmed; `inline_pure_call_globals`
+  also inlined mutable call-inits — writes invisible). Now each `var` gets a
+  linear-memory slot at `MG_SLOT_BASE + 8i` (bump base shifts; N=0 modules
+  byte-identical): read = `LoadHandle`+`Dup` (cert `a` = the render's rc_inc),
+  assign = build-new → `$__mg_take` (CallFn-owned, cert-honest) → type-routed
+  drop → store+Consume; `g[i] = v` = take → MakeUnique(COW) → elem store →
+  store-back; synthesized `__mg_init` runs before `__global_init` (walls the
+  program if an init can't lower). `__mg_take` excluded from the mir≤ir call
+  count (a prim-class injected accessor). ceangal 42→21 (scroll 21→0);
+  module_var_test + wasm_cross_pkg now run v1 (the corpus 0 is now HONEST).
+- **Float export ABI**: `pub fn` exports with Float params/ret render through a
+  `f64.reinterpret_i64` wrapper (`$__export_<fn>`) — the public ABI presents
+  real f64s (v0 parity); non-Float params keep their real reprs (i32 heap).
+- **Known v0-wasm divergence (recorded, unfixed)**: `let snapshot = g` then
+  `g[i] = v` — v0-wasm aliases (snapshot sees the write), native clones
+  (`9 9` vs `9 2.5`). v1's COW matches NATIVE; v0 retirement (Phase 3)
+  obsoletes the divergent path.
+
 ## Remaining threads
 
 - **wall=0 count 21 → 19 (honesty, not regression)**: the linearization guard

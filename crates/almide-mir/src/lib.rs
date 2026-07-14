@@ -980,6 +980,22 @@ pub struct MirProgram {
     /// convention. Populated by the pipeline from the MAIN program's Public non-test
     /// non-generic functions; empty everywhere else.
     pub exports: Vec<(String, String, Vec<bool>, Option<bool>)>,
+    /// The number of MUTABLE module-level `var` storage slots. Slot `i` lives at linear
+    /// address [`mg_slot_addr`]`(i)` — the 8-byte region `[MG_SLOT_BASE, MG_SLOT_BASE +
+    /// 8*count)` carved between the print line buffer (which ends at `MG_SLOT_BASE`) and
+    /// the bump allocator (whose base the renderer shifts to `MG_SLOT_BASE + 8*count`).
+    /// A count of 0 renders byte-identically to a program with no mutable globals.
+    pub mutable_global_count: u32,
+}
+
+/// The base linear-memory address of the mutable-global slot region (== the renderer's
+/// `HEAP_BASE`; with no mutable globals the bump allocator starts exactly here).
+pub const MG_SLOT_BASE: u32 = 8192;
+
+/// The linear-memory address of mutable-global slot `index` (one uniform 8-byte slot per
+/// module-level `var`: a scalar holds its i64 value, a heap global its block handle).
+pub const fn mg_slot_addr(index: u32) -> u32 {
+    MG_SLOT_BASE + 8 * index
 }
 
 // ─────────────────────────── Ownership verifier ───────────────────────────

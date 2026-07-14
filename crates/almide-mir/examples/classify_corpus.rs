@@ -1076,6 +1076,24 @@ fn main() {
             globals.insert(tl.var, tl.ty.clone());
             global_inits.insert(tl.var, tl.value.clone());
         }
+        // MUTABLE module-level `var`s route through their storage slots — publish the
+        // VarId → (slot, Ty) map exactly as the render pipeline does (declaration order
+        // = VarId order), so the gate classifies with the same slot lowering the real
+        // emit performs (and the same walls for shapes beyond the slot subset).
+        let mut mutable_tls: Vec<_> = ir
+            .top_lets
+            .iter()
+            .chain(ir.modules.iter().flat_map(|m| m.top_lets.iter()))
+            .filter(|tl| tl.mutable)
+            .collect();
+        mutable_tls.sort_by_key(|tl| tl.var.0);
+        almide_mir::lower::set_mutable_global_vars(
+            mutable_tls
+                .iter()
+                .enumerate()
+                .map(|(i, tl)| (tl.var.0, (i as u32, tl.ty.clone())))
+                .collect(),
+        );
         // The functions DEFINED in this file (their names). A PROTOCOL METHOD is a
         // user-defined function whose name is dotted (`Type.method`, e.g. `MathExpr.eval`)
         // — it resolves to ITSELF / a sibling method, NOT a stdlib call. The unlinkable-
@@ -1185,7 +1203,7 @@ fn main() {
                                     // sound here: the name is not file-defined, so adding sibling
                                     // functions could not make it resolve (only the registry could,
                                     // which `auto_linkable` already ruled out).
-                                    let probe = MirProgram { functions: vec![mir.clone()], exports: vec![] };
+                                    let probe = MirProgram { functions: vec![mir.clone()], exports: vec![], mutable_global_count: 0 };
                                     if !almide_mir::render_wasm::unlinked_call_names(&probe)
                                         .contains(name)
                                     {
@@ -1242,6 +1260,11 @@ fn main() {
                                 Op::Call { .. } | Op::CallFn { .. } | Op::CallIndirect { .. }
                             )
                         })
+                        // `$__mg_take` is a COMPILER-INJECTED slot accessor (a raw i32.load,
+                        // Stdout-free — the trusted-prim class), not a lowering of any IR
+                        // call node: a mutable-global heap assign injects one with no IR
+                        // counterpart, so counting it would false-breach `mir <= ir`.
+                        .filter(|o| !matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
                         .count();
                     if ir_calls > mir_calls {
                         for mir in &mirs {

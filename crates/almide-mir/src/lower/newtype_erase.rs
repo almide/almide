@@ -428,6 +428,10 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
     ) {
         let qualifying: Vec<(almide_ir::VarId, IrExpr)> = top_lets
             .iter()
+            // A MUTABLE `var` must NEVER inline: substituting its INITIALIZER into a use
+            // site freezes the read at the init value (writes through the global slot
+            // become invisible — `speeds[i]` read `list.repeat(0.0, 4)[i]` = 0.0 forever).
+            .filter(|tl| !tl.mutable)
             .filter(|tl| crate::lower::expr_contains_call(&tl.value))
             .filter(|tl| {
                 let mut visiting = HashSet::new();

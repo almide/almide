@@ -459,6 +459,43 @@ pub fn try_render_wasm_source(
     // the crossmod caller/callee ABI agreement — without the pre-pass rewrites ever
     // touching module bodies.
     crate::lower::populate_abi_registries(&all_fns, &record_layouts);
+    // MUTABLE module-level `var`s (program + modules): assign each a linear-memory
+    // storage slot (declaration order = VarId order, the same ordering `__global_init`
+    // uses) and publish the VarId → (slot, Ty) map — reads/assigns then route through the
+    // slot (`Load`/`$__mg_get`/`$__mg_take`+`Store`). A VarId collision across regions or
+    // an over-cap count WALLS the program (honest, never a mis-routed slot).
+    let mut mutable_tls: Vec<_> = ir
+        .top_lets
+        .iter()
+        .chain(ir.modules.iter().flat_map(|m| m.top_lets.iter()))
+        .filter(|tl| tl.mutable)
+        .collect();
+    mutable_tls.sort_by_key(|tl| tl.var.0);
+    if mutable_tls.len() > 64 {
+        return Err(LowerError::Unsupported(format!(
+            "{} mutable module-level vars exceed the 64-slot global region",
+            mutable_tls.len()
+        )));
+    }
+    {
+        let mut seen = std::collections::HashSet::new();
+        for tl in &mutable_tls {
+            if !seen.insert(tl.var.0) {
+                return Err(LowerError::Unsupported(format!(
+                    "mutable module-level var id collision across regions ({:?})",
+                    tl.var
+                )));
+            }
+        }
+    }
+    let mutable_global_count = mutable_tls.len() as u32;
+    crate::lower::set_mutable_global_vars(
+        mutable_tls
+            .iter()
+            .enumerate()
+            .map(|(i, tl)| (tl.var.0, (i as u32, tl.ty.clone())))
+            .collect(),
+    );
 
     let mut functions = Vec::new();
     let mut walled = Vec::new();
@@ -513,6 +550,62 @@ pub fn try_render_wasm_source(
             functions.extend(mirs);
         }
     }
+
+    // MUTABLE-GLOBAL INITIALIZATION: synthesize `__mg_init` assigning each mutable
+    // top-let its declared initializer (declaration order), lowered through the SAME
+    // slot-routed Assign path user code uses (minus the old-value take/drop — the slots
+    // start zeroed). `_start` calls it before `__global_init`/`main`. A non-lowerable
+    // initializer WALLS the whole program: shipping zeroed globals would be a silent
+    // miscompile, and the v0 fallback initializes them correctly.
+    if !mutable_tls.is_empty() {
+        let stmts: Vec<almide_ir::IrStmt> = mutable_tls
+            .iter()
+            .map(|tl| almide_ir::IrStmt {
+                kind: almide_ir::IrStmtKind::Assign { var: tl.var, value: tl.value.clone() },
+                span: None,
+            })
+            .collect();
+        let body = almide_ir::IrExpr {
+            kind: almide_ir::IrExprKind::Block { stmts, expr: None },
+            ty: almide_lang::types::Ty::Unit,
+            span: Default::default(),
+            def_id: None,
+        };
+        let init_fn = almide_ir::IrFunction {
+            name: almide_lang::intern::sym("__mg_init"),
+            params: vec![],
+            ret_ty: almide_lang::types::Ty::Unit,
+            body,
+            is_effect: false,
+            is_async: false,
+            is_test: false,
+            generics: None,
+            extern_attrs: vec![],
+            export_attrs: vec![],
+            attrs: vec![],
+            visibility: almide_ir::IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
+            def_id: None,
+            module_origin: None,
+            mutated_params: vec![],
+        };
+        match crate::lower::lower_function_all_with_globals(
+            &init_fn,
+            &main_globals,
+            &main_global_inits,
+            &record_layouts,
+            &variant_layouts,
+        ) {
+            Ok(mirs) => functions.extend(mirs),
+            Err(e) => {
+                return Err(LowerError::Unsupported(format!(
+                    "mutable module-level var initializer outside the executable subset: {e:?}"
+                )))
+            }
+        }
+    }
+
 
     // Auto-link the self-hosted stdlib runtime (int.to_string, string.concat, …) when an entry is
     // called but not defined, renaming its impl fn to the call name. A linked impl may call ANOTHER
@@ -767,7 +860,7 @@ pub fn try_render_wasm_source(
 
     // Any UNLINKED stdlib/runtime call would render a dangling `(call $name)` (invalid wasm) — the
     // renderer rejects it cleanly. Returns the WAT on success.
-    try_render_wasm_program(&MirProgram { functions, exports })
+    try_render_wasm_program(&MirProgram { functions, exports, mutable_global_count })
 }
 
 /// NATIVE leg of the trust spine (#764, rung 1): lower `.almd` source through the

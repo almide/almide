@@ -304,6 +304,16 @@ impl LowerCtx {
             // SCALAR reassignment (`i = i + 1`) rebinds to a Copy `Const` with no handle
             // to dangle, so it is admitted unchanged (e.g. a loop counter).
             IrStmtKind::Assign { var, value } => {
+                // ASSIGN to a MUTABLE module-level `var`: write through its STORAGE SLOT
+                // (`lower_bind` below would rebind a function-LOCAL copy and the write
+                // silently vanishes for every other function). The `value_of` gate skips a
+                // CROSS-REGION VarId collision where the target really is a bound local
+                // (a mutable global itself never enters `value_of`: reads are uncached).
+                if !self.value_of.contains_key(var) {
+                    if let Some((index, gty)) = crate::lower::mutable_global_info(*var) {
+                        return self.lower_mutable_global_assign(*var, index, &gty, value);
+                    }
+                }
                 // Inside a scalar-marker loop, a reassignment mutates the var's STABLE
                 // local (the loop-carried state) — `SetLocal`, not a fresh rebind. A heap
                 // reassignment cannot run this way (the accumulator would need real heap
@@ -522,6 +532,95 @@ impl LowerCtx {
             // The written value (and an index expression) are deferred — record any
             // call inside them so the caps fold is not blind to their effects.
             IrStmtKind::IndexAssign { target, index, value } => {
+                // A mutable-GLOBAL place target: `g[i] = v` routes through the slot as
+                // TAKE (the slot's owned ref transfers to us) → `MakeUnique` (COW if a
+                // reader's Dup is still live — the mutation must touch no alias) →
+                // bounds-checked element store → STORE-BACK (+`Consume`) of the possibly-
+                // copied block. Going through `lower_place_mutation` instead would COW the
+                // read-Dup and write the COPY — the global would silently keep the old
+                // value. SCALAR-element lists only this round (the #29 store subset);
+                // heap-element / non-scalar shapes WALL, as does a modeled frame (the
+                // write is an effect the model would elide).
+                if !self.value_of.contains_key(target) {
+                    if let Some((gindex, gty)) = crate::lower::mutable_global_info(*target) {
+                        if self.in_frame > 0
+                            && self.unit_arm_depth == 0
+                            && self.scalar_loop_depth == 0
+                        {
+                            return Err(LowerError::Unsupported(format!(
+                                "index-assign to mutable module-level var {target:?} inside \
+                                 a modeled (non-executable) frame"
+                            )));
+                        }
+                        if is_heap_ty(&value.ty)
+                            || !crate::lower::is_heap_ty(&gty)
+                            || crate::lower::is_heap_elem_list_ty(&gty)
+                        {
+                            return Err(LowerError::Unsupported(format!(
+                                "index-assign to mutable module-level var {target:?} outside \
+                                 the scalar-element subset is not in this brick"
+                            )));
+                        }
+                        let (idx, val) = match (
+                            self.lower_scalar_value(index),
+                            self.lower_scalar_value(value),
+                        ) {
+                            (Some(i), Some(v)) => (i, v),
+                            _ => {
+                                return Err(LowerError::Unsupported(format!(
+                                    "index-assign to mutable module-level var {target:?} with \
+                                     a non-lowerable index/value"
+                                )))
+                            }
+                        };
+                        let repr = repr_of(&gty)?;
+                        let addr = self.fresh_value();
+                        self.ops.push(Op::ConstInt {
+                            dst: addr,
+                            value: crate::mg_slot_addr(gindex) as i64,
+                        });
+                        let taken = self.fresh_value();
+                        self.ops.push(Op::CallFn {
+                            dst: Some(taken),
+                            name: "__mg_take".to_string(),
+                            args: vec![crate::CallArg::Scalar(addr)],
+                            result: Some(repr),
+                        });
+                        self.materialized_call_arg(taken, repr, &gty);
+                        self.ops.push(Op::MakeUnique { v: taken });
+                        let h = self.fresh_value();
+                        self.ops.push(Op::Prim {
+                            kind: crate::PrimKind::Handle,
+                            dst: Some(h),
+                            args: vec![taken],
+                        });
+                        let ea = self.fresh_value();
+                        self.ops.push(Op::Prim {
+                            kind: crate::PrimKind::ElemAddr,
+                            dst: Some(ea),
+                            args: vec![h, idx],
+                        });
+                        self.ops.push(Op::Prim {
+                            kind: crate::PrimKind::Store { width: 8 },
+                            dst: None,
+                            args: vec![ea, val],
+                        });
+                        let h2 = self.fresh_value();
+                        self.ops.push(Op::Prim {
+                            kind: crate::PrimKind::Handle,
+                            dst: Some(h2),
+                            args: vec![taken],
+                        });
+                        self.ops.push(Op::Prim {
+                            kind: crate::PrimKind::Store { width: 8 },
+                            dst: None,
+                            args: vec![addr, h2],
+                        });
+                        self.ops.push(Op::Consume { v: taken });
+                        self.live_heap_handles.retain(|v| *v != taken);
+                        return Ok(());
+                    }
+                }
                 // COW-guard the buffer (rebinds the local to a unique copy if shared), then ACTUALLY
                 // STORE: `xs[i] = v` → `i64.store($elem_addr(handle(xs), i), v)`. WITHOUT the store the
                 // assignment lowered to ONLY the MakeUnique guard (a silent no-op — `xs[1] = 99` never
@@ -563,6 +662,14 @@ impl LowerCtx {
                 Ok(())
             }
             IrStmtKind::FieldAssign { target, value, .. } => {
+                // Mutable-GLOBAL target: same COW-copy silent-miscompile class as the
+                // IndexAssign guard above — WALL.
+                if !self.value_of.contains_key(target) && crate::lower::is_mutable_global(*target) {
+                    return Err(LowerError::Unsupported(format!(
+                        "field-assign to mutable module-level var {target:?} (in-place \
+                         mutation through the global slot) is not in this brick"
+                    )));
+                }
                 self.lower_place_mutation(*target)?;
                 self.record_elided_calls(value);
                 Ok(())
@@ -572,6 +679,14 @@ impl LowerCtx {
             // `MakeUnique`. The key and value are deferred — record their calls so the
             // caps fold is not blind to their effects.
             IrStmtKind::MapInsert { target, key, value } => {
+                // Mutable-GLOBAL target: same COW-copy silent-miscompile class as the
+                // IndexAssign guard above — WALL.
+                if !self.value_of.contains_key(target) && crate::lower::is_mutable_global(*target) {
+                    return Err(LowerError::Unsupported(format!(
+                        "map-insert to mutable module-level var {target:?} (in-place \
+                         mutation through the global slot) is not in this brick"
+                    )));
+                }
                 self.lower_place_mutation(*target)?;
                 self.record_elided_calls(key);
                 self.record_elided_calls(value);
@@ -806,9 +921,131 @@ impl LowerCtx {
     /// memory-safe by construction (alloc once / drop once, the real global untouched)
     /// and its content deferred like every `Opaque`. Referencing a global does NOT
     /// re-run its initializer, so this adds no call/cap obligation.
+    /// ASSIGN through a mutable module-level `var`'s storage slot. A scalar stores the
+    /// value directly; a heap global builds the NEW value FIRST (so a self-referencing
+    /// RHS — `items = items + [n]`, the #501 alias pin — reads the old block via its own
+    /// owned `$__mg_get` Dup while the slot still holds it), then `$__mg_take`s the OLD
+    /// block (the slot's owned reference transfers to us — a fresh-owned CallFn result,
+    /// exactly the certificate's model), drops it by its type route, and stores+Consumes
+    /// the new block (the record-slot move-in pattern). Inside the synthesized
+    /// `__mg_init` the slot is still zero, so take+drop are SKIPPED (dropping handle 0
+    /// would trap). A MODELED frame (the model-one-iteration `while` fallback / a
+    /// non-executable branch arm) must WALL: both eliding and emitting a modeled global
+    /// write diverge from v0 (the write is an EFFECT).
+    fn lower_mutable_global_assign(
+        &mut self,
+        var: VarId,
+        index: u32,
+        gty: &Ty,
+        value: &IrExpr,
+    ) -> Result<(), LowerError> {
+        use crate::PrimKind;
+        if self.in_frame > 0 && self.unit_arm_depth == 0 && self.scalar_loop_depth == 0 {
+            return Err(LowerError::Unsupported(format!(
+                "assignment to mutable module-level var {var:?} inside a modeled (non-\
+                 executable) frame — the global write is an effect the model would elide"
+            )));
+        }
+        let in_mg_init = self.fn_name == "__mg_init";
+        if !is_heap_ty(gty) {
+            let src = self
+                .lower_scalar_value(value)
+                .or_else(|| self.try_lower_scalar_call(value, &value.ty))
+                .ok_or_else(|| {
+                    LowerError::Unsupported(format!(
+                        "non-scalar value assigned to mutable module-level var {var:?} \
+                         outside the executable subset"
+                    ))
+                })?;
+            let addr = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: addr, value: crate::mg_slot_addr(index) as i64 });
+            self.ops.push(Op::Prim {
+                kind: PrimKind::Store { width: 8 },
+                dst: None,
+                args: vec![addr, src],
+            });
+            return Ok(());
+        }
+        // Heap global: NEW value first (RHS may read the global), as a fresh OWNED handle.
+        let new = self.lower_owned_heap_field(value).ok_or_else(|| {
+            LowerError::Unsupported(format!(
+                "heap value assigned to mutable module-level var {var:?} outside the \
+                 executable subset"
+            ))
+        })?;
+        let repr = repr_of(gty)?;
+        let addr = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: addr, value: crate::mg_slot_addr(index) as i64 });
+        if !in_mg_init {
+            let old = self.fresh_value();
+            self.ops.push(Op::CallFn {
+                dst: Some(old),
+                name: "__mg_take".to_string(),
+                args: vec![crate::CallArg::Scalar(addr)],
+                result: Some(repr),
+            });
+            // Route the old block's drop by the global's TYPE (the same classification a
+            // call-arg temp gets), then release it — its holders elsewhere (an in-flight
+            // RHS `__mg_get` Dup) keep their own references, so this frees at last-ref only.
+            self.materialized_call_arg(old, repr, gty);
+            let drop_old = self.drop_op_for(old);
+            self.ops.push(drop_old);
+            self.live_heap_handles.retain(|v| *v != old);
+        }
+        let handle = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![new] });
+        self.ops.push(Op::Prim {
+            kind: PrimKind::Store { width: 8 },
+            dst: None,
+            args: vec![addr, handle],
+        });
+        self.ops.push(Op::Consume { v: new });
+        self.live_heap_handles.retain(|v| *v != new);
+        Ok(())
+    }
+
     pub(crate) fn value_or_global(&mut self, var: VarId) -> Result<ValueId, LowerError> {
         if let Some(&v) = self.value_of.get(&var) {
             return Ok(v);
+        }
+        // A MUTABLE module-level `var`: read its STORAGE SLOT fresh on every reference
+        // (never cached in `value_of` — an intervening write, ours or a callee's, must be
+        // seen; materializing the const INITIALIZER instead was a probe-confirmed silent
+        // miscompile: `5 3 0` vs native `5 8 8`). A scalar is a plain slot `Load`; a heap
+        // global goes through `$__mg_get` (slot load + `rc_inc` — the returned handle is a
+        // REAL owned reference, matching the certificate's fresh-owned CallFn result), is
+        // routed for its type-correct scope-end drop, and its block is materialized-real
+        // by construction (only real constructions are ever stored through `__mg_take`/
+        // `Store`), so member reads and spreads work on it.
+        if let Some((index, ty)) = crate::lower::mutable_global_info(var) {
+            let addr = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: addr, value: crate::mg_slot_addr(index) as i64 });
+            if is_heap_ty(&ty) {
+                let repr = repr_of(&ty)?;
+                // BORROW the slot's handle then `Dup` it — the same borrow-then-Dup the
+                // spread-record copy uses (cert `a`; the render's Dup IS the `rc_inc`),
+                // so the function owns a real reference the slot's later reassignment
+                // cannot invalidate. No call op is injected (the caps count stays exact).
+                let borrowed = self.fresh_value();
+                self.ops.push(Op::Prim {
+                    kind: crate::PrimKind::LoadHandle,
+                    dst: Some(borrowed),
+                    args: vec![addr],
+                });
+                let dst = self.fresh_value();
+                self.ops.push(Op::Dup { dst, src: borrowed });
+                self.materialized_call_arg(dst, repr, &ty);
+                self.materialized_aggregates.insert(dst);
+                self.materialized_lists.insert(dst);
+                return Ok(dst);
+            }
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: crate::PrimKind::Load { width: 8 },
+                dst: Some(dst),
+                args: vec![addr],
+            });
+            return Ok(dst);
         }
         let ty = self
             .globals
@@ -834,6 +1071,15 @@ impl LowerCtx {
                 // machinery), so the count gate stays exact.
                 if let IrExprKind::Var { id: src } = &init.kind {
                     let src = *src;
+                    // `let snapshot = counter` over a MUTABLE source: v0 evaluates the
+                    // alias ONCE at startup; recursing here would read the slot's CURRENT
+                    // value at each use — a divergence, so WALL the alias instead.
+                    if crate::lower::is_mutable_global(src) {
+                        return Err(LowerError::Unsupported(format!(
+                            "global alias-let of a MUTABLE module-level var {src:?} (a \
+                             startup snapshot) is not in this brick"
+                        )));
+                    }
                     if self.globals.contains_key(&src) {
                         let v = self.value_or_global(src)?;
                         self.value_of.insert(var, v);

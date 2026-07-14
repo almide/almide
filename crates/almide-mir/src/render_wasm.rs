@@ -85,7 +85,11 @@ const FS_ERR_NOTDIR_LEN: u32 = 29;
 const FS_ERR_ISDIR_ADDR: u32 = 344; // "Is a directory (os error 21)" — WASI ISDIR(31)
 const FS_ERR_ISDIR_LEN: u32 = 28;
 const SCRATCH_ADDR: u32 = 768; // the line build buffer
-const HEAP_BASE: u32 = 8192; // bump allocator start
+// The bump allocator's DEFAULT start — also the mutable-global slot region's base
+// (`crate::MG_SLOT_BASE`, one authoritative value): a program with N mutable
+// module-level `var`s shifts its allocator base to `HEAP_BASE + 8*N` so the slots
+// are never allocated over (N = 0 keeps every existing module byte-identical).
+const HEAP_BASE: u32 = crate::MG_SLOT_BASE;
 // The Ok/Err tag of a cap-as-tag `Result[String, String]` lives in the HIGH 32 bits of
 // the 1-slot block's element (@16) — the `materialize_result_str` layout `$read_text_file`
 // reproduces so the caller's match/`!`/DropListStr reads it identically.
@@ -207,6 +211,11 @@ fn preamble_func_names() -> BTreeSet<String> {
 fn resolvable_call_names(prog: &MirProgram) -> BTreeSet<String> {
     let mut names: BTreeSet<String> = prog.functions.iter().map(|f| f.name.clone()).collect();
     names.extend(preamble_func_names());
+    // The mutable-global slot take-accessor is emitted iff the program has slots — it
+    // resolves exactly then (a global-free program never names it).
+    if prog.mutable_global_count > 0 {
+        names.insert("__mg_take".to_string());
+    }
     names
 }
 
@@ -377,12 +386,15 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // injected into the preamble's import region — right after the WASI imports,
     // before the first `(memory …)`. Deduped + sorted for host-determinism.
     let extern_imports = render_extern_imports(prog);
+    // The bump allocator starts past the mutable-global slot region (byte-identical
+    // to the plain preamble when the program has no mutable globals).
+    let bump_base = HEAP_BASE + 8 * prog.mutable_global_count;
     let preamble = if extern_imports.is_empty() {
-        preamble()
+        preamble_with_bump_base(bump_base)
     } else {
         // The preamble begins `(module\n  (import "wasi…` — splice the extern imports
         // in right after the opening `(module\n` so they sit in the import block.
-        let pre = preamble();
+        let pre = preamble_with_bump_base(bump_base);
         match pre.split_once('\n') {
             Some((head, rest)) => format!("{head}\n{extern_imports}{rest}"),
             None => pre,
@@ -403,11 +415,21 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // `__global_init` (the abortable top-let initializers — render_program builds
     // it), run it BEFORE `$main` so `let bad = 10 / 0` aborts at startup exactly
     // as native does, even when the global is never used.
-    let ginit = if prog.functions.iter().any(|f| f.name == "__global_init") {
-        "    (call $__global_init)\n"
+    // MUTABLE-GLOBAL init runs FIRST (the slots must hold their declared initializers
+    // before any code — `__global_init`'s abort re-evaluations included — can read them).
+    let mg_init = if prog.functions.iter().any(|f| f.name == "__mg_init") {
+        "    (call $__mg_init)\n"
     } else {
         ""
     };
+    let ginit: String = format!(
+        "{mg_init}{}",
+        if prog.functions.iter().any(|f| f.name == "__global_init") {
+            "    (call $__global_init)\n"
+        } else {
+            ""
+        }
+    );
     let start = if main_returns {
         // main's Result[Unit, String] is LEN-AS-TAG (scalar Ok): len@4 == 0 ⇒ Ok (discard),
         // len 1 ⇒ Err with the String handle in slot 0's low half (@12). The Err path runs
@@ -483,7 +505,19 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
             )
         })
         .collect();
-    format!("{preamble}{data}{closure_table}{funcs}{start}{pub_exports})
+    // The mutable-global slot TAKE accessor (emitted iff the program has slots): loads
+    // the slot's block handle WITHOUT an rc change — the slot's own reference transfers
+    // to the caller (the assign path drops it and stores a replacement), which is
+    // exactly the fresh-owned CallFn result the ownership certificate models. Reads
+    // need no helper: they borrow-then-`Dup` the slot handle inline (`rc_inc`).
+    let mg_helpers = if prog.mutable_global_count > 0 {
+        "  (func $__mg_take (param $a i64) (result i32)\n    \
+         (i32.load (i32.wrap_i64 (local.get $a))))\n"
+            .to_string()
+    } else {
+        String::new()
+    };
+    format!("{preamble}{data}{closure_table}{funcs}{mg_helpers}{start}{pub_exports})
 ")
 }
 
