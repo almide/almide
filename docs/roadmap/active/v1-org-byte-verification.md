@@ -376,6 +376,17 @@ native-FFI walls.
   zip_view_rects heap-result-if (real, now measured resolved). The true org
   frontier ≈ ceangal 8 + porta 2 + singles. org-trust-status.sh should adopt
   the resolved sweep as the headline number.
+  **The 8 decompose into exactly THREE next bricks**: (1) theme 3 = the
+  MODULE→MODULE top-let bridge (`bridge_cross_module_toplets` only maps
+  main-side refs — `ir.var_table` with `module_origin`; a sibling module's
+  refs live in ITS `m.var_table` and never bridge; per-module region maps
+  needed, mind the VarId-collision hazard the shared union tolerates).
+  (2) scroll/layout 3 = the STRICT scalar-binding value subset (what shapes
+  their bindings actually are is the first probe of that brick). (3) render
+  2 = the arm-BLOCK tail-helper lift: zip_view_rects' else arm is a full
+  block (global assigns + for-loops + accumulators) returning a record —
+  the heap-result-if ARM machinery lowers arm VALUES; the 1792e5d7 dense-
+  chain lift must generalize to lift such arm blocks into helper fns.
 
 ## Remaining threads
 
