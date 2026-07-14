@@ -4161,6 +4161,74 @@ B113. **Closed `unannotated_unwraps` (18 → 17) by re-implementing the
    `almide test`: 283/283. GATE OK. CORPUS WALL OK (zero panics, zero
    undetected refusals, all Rocq-kernel-certified). **17, was 18.**
 
+DIAGNOSIS — pinned the EXACT remaining blocker for `option_result_symmetry_
+   test.almd :: "option.collect_map all some"` (the earlier DIAGNOSIS's
+   "unlinked stdlib/runtime call" half) to a concrete, fully-scoped, but
+   NOT-YET-SAFE-TO-SHIP recipe — no code touched, `git status` clean
+   throughout (a parallel investigation; another concurrent work stream owns
+   `crates/almide-mir/src/render_wasm/registry.rs`, so no edit to that file
+   was attempted this pass even experimentally). `unlinked_call_names`
+   (render_wasm.rs) walls any `Op::CallFn` target absent from BOTH the
+   program's own functions AND the preamble — `option.collect_map` is
+   neither, because `self_host_runtime()`'s static registry
+   (`render_wasm/registry.rs`) has NO entry at all for it: grepped the whole
+   file, confirmed `option.collect`/`option.map`/`option.filter`/etc. are
+   all present, `collect_map` is absent. **Confirmed the registry-entry fix
+   is NOT a one-line addition pointing at the existing generic `stdlib/
+   option.almd` source** (which defines `collect_map[T,U]` polymorphically
+   as `option.collect(list.map(xs, f))`): every OTHER self-host registry
+   entry is a hand-written, MONOMORPHIC-to-`Int` low-level implementation
+   using `prim.load64`/`prim.handle`/`prim.alloc_list` directly (confirmed
+   by reading `option_collect.almd`, `option_map.almd`, `list_map.almd` —
+   this v1 self-host mechanism does NOT monomorphize generics; every
+   registered fn is a dedicated specialization). Composing the two EXISTING
+   registered pieces (`option.collect` + `list.map`) as `option.almd`
+   itself does is ALSO not viable: the self-hosted `list_map.almd`'s
+   `list_map` is typed `(Int) -> Int` only (scalar-to-scalar), never
+   `(Int) -> Option[Int]` — it cannot produce the `List[Option[Int]]`
+   intermediate `collect_map`'s definition requires. **However, found the
+   exact template needed already exists and de-risks the missing
+   implementation considerably**: `stdlib/list_filtermap.almd`'s
+   `list_filter_map` is "the first HEAP-RETURNING closure" precedent —
+   `f: (Int) -> Option[Int]` invoked via a heap-result CallIndirect inside a
+   per-element helper (`__fm_step`), where the returned `Option[Int]`'s
+   ownership is handled AUTOMATICALLY by ordinary scope-end drop (no manual
+   `prim.drop`/free call needed — it's a local binding never returned past
+   the helper's own scope), which was the main correctness risk this
+   diagnosis was worried about (a two-pass all/fill fusion calling `f`
+   twice per element, mirroring `option_collect.almd`'s existing
+   `__ocol_all`/`__ocol_fill` two-pass structure but substituting a
+   `f(x)`-via-CallIndirect step for the direct `prim.load64` read) — a
+   fully-templated recipe: `__ocm_all(xh, f, n, i)` (checks `f(x)`'s Option
+   tag, short-circuits to 0 on the first None) + `__ocm_fill(xh, dh, f, n,
+   i)` (re-calls `f(x)`, unwraps the Some payload, stores it) + `option_
+   collect_map(xs, f)` (drives both passes, `Some(lst)`/`None`) — a near
+   copy-paste composition of `option_collect.almd` + `list_filtermap.almd`'s
+   already-proven patterns, calling `f` twice per element (correctness-safe
+   for a pure lambda; a single-pass short-circuit-and-discard variant would
+   be more efficient but is NOT needed for a first correct version).
+   **NOT implemented or shipped this pass**: even with the implementation
+   fully designed, WIRING it requires a new `self_host_runtime()` entry in
+   `render_wasm/registry.rs` — explicitly off-limits this session (another
+   work stream's file, confirmed via `git log` it received 5 self-host
+   registry additions very recently from that stream, e.g. `a25f9237`,
+   `88ee9182`, `d2a116df` — a live area, not safe to touch even
+   temporarily-then-revert given the concurrency risk). **Next session,
+   with that file available**: (1) create `stdlib/option_collect_map.almd`
+   with the four-function recipe above, (2) add ONE registry line
+   `(include_str!("../../../../stdlib/option_collect_map.almd"),
+   &[("option_collect_map", "option.collect_map")])`, (3) re-add
+   `"collect_map"` to `is_self_host_option_module_fn`'s `matches!` list
+   (mod_p4.rs — the OTHER, already-verified-correct half from the earlier
+   DIAGNOSIS, reverted at the time only because the registry half was
+   missing), (4) run the FULL ladder including the mandatory non-match
+   adversarial repro (`let c = option.collect_map(xs, f); println(int.
+   to_string(list.len(c ?? [])))`, both a Some-path and a None-path input,
+   through wasmtime vs `almide run`) AND a 10,000-iteration leak-loop
+   BEFORE trusting classify_corpus's count on this entry (this exact entry
+   burned the campaign once already with a registry-only false green).
+   **Current 17, unchanged this pass** (pure diagnosis, zero files edited).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
