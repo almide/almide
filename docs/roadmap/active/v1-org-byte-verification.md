@@ -335,6 +335,17 @@ native-FFI walls.
   env observability), then the match-tail machinery applies as-is. The
   non-env homullus walls (value_to_tool_call/value_to_message Record/Value
   shapes) are ordinary lowering bricks.
+  **Design (scouted, ready to build)**: (1) v0-wasm `emit_env_call("get")`
+  mirrors `emit_wasi_argv_list` (calls_process.rs:313) — `environ_sizes_get`/
+  `environ_get` have the SAME WASI signatures as the args pair (add both to
+  the rt import struct); scan `KEY=VALUE\0` entries for `key + '='`, build
+  the Option[String]. (2) The RUNNER must forward env to wasmtime (today env
+  vars are NOT passed — without `--env`/inherit, wasm `env.get` is none for
+  everything = a silent cross-target divergence even after the emit lands).
+  (3) rt-oracle-registry entry (oracle `almide_rt_env_get`) + a
+  `spec/wasm_cross` differential fixture that SETS a var through the runner.
+  (4) New `C-NNN` contract for env observability. (5) v1 side: an env.get
+  CallImport lowering or self-host over the same WASI imports.
 
 ## Remaining threads
 
