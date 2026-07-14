@@ -1,7 +1,7 @@
 use std::process::Command;
 use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
 
-pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool, repr_c: bool, cdylib: bool, emit_unverified: bool, verified: bool) {
+pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool, repr_c: bool, cdylib: bool, emit_unverified: bool, verified: bool, native_verified: bool) {
     // The npm/JavaScript target was removed with the TS backend; reject it with a
     // clear pointer instead of emitting a non-functional stub package.
     if matches!(target, Some("npm" | "js" | "ts" | "javascript" | "typescript")) {
@@ -55,6 +55,27 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         cmd_build_wasi_rustc(&rs_code, &output);
         return;
     }
+
+    // NATIVE trust spine (#764, rung 1) — OPT-IN `--verified` (explicit flag, not
+    // the wasm default): try the v1 MIR renderer (same Perceus MIR as the wasm
+    // leg; Drop erased to Rust scope-end, ownership verified pre-render). A WALL
+    // falls back to the v0 source above — honest-wall discipline: a v1-rendered
+    // program is never wrong.
+    let rs_code = if native_verified && !repr_c && !cdylib {
+        let source_text = std::fs::read_to_string(file).unwrap_or_default();
+        match almide_mir::pipeline::try_render_rust_source(&source_text) {
+            Ok(v1_code) => {
+                eprintln!("native: v1 trust-spine render (rung 1)");
+                v1_code
+            }
+            Err(e) => {
+                eprintln!("native: v1 walled ({e:?}) — falling back to v0 codegen");
+                rs_code
+            }
+        }
+    } else {
+        rs_code
+    };
 
     // Load native deps from almide.toml (search in input file's directory, then
     // CWD). BOTH the cdylib and bin paths need them: a cdylib with a `native/*.rs`
