@@ -69,6 +69,23 @@ if [ ! -s "$OUTDIR/ownership.cert" ]; then
   cleanup; exit 1
 fi
 
+# WALLED-REAL RATCHET (ENDGAME baseline, 2026-07-14): the wall=0 metric reached
+# ZERO — every real corpus function lowers, witnesses, and kernel-ACCEPTs
+# (docs/roadmap: v1-wall-histogram-goal, 112 -> 0). It may never regress: a change
+# that re-walls ANY real corpus function must ship its lowering (or move the
+# fixture out of the corpus with justification) in the SAME change.
+WALLED_REAL="$(sed -n 's/^.*walled real (lowering)[[:space:]]*: *\([0-9][0-9]*\).*$/\1/p' "$REPORT" | head -1)"
+if [ -z "$WALLED_REAL" ]; then
+  echo "WALL GATE FAIL: could not read the walled-real count from the classify report (format drift?)." >&2
+  cleanup; exit 1
+fi
+if [ "$WALLED_REAL" -ne 0 ]; then
+  echo "WALLED-REAL RATCHET FAIL: $WALLED_REAL corpus function(s) walled — the ENDGAME baseline is 0." >&2
+  echo "  List them:  WALL_NAMES=1 cargo run -q --release -p almide-mir --example classify_corpus -- --out /tmp/cw spec 2>&1 | grep '^WALLED REAL'" >&2
+  cleanup; exit 1
+fi
+echo "WALLED-REAL RATCHET OK: 0 walled real corpus functions (the ENDGAME floor holds)."
+
 echo
 echo "== build the kernel-proven checker (from the Coq proof) =="
 ./build-checker.sh >/dev/null

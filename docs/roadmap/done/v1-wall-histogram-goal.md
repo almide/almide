@@ -1,5 +1,6 @@
-<!-- description: ENDGAME — v1 walled-real to ZERO (currently 11); stage ledger + open-wall diagnoses -->
-# GOAL — v1 walled-real → 0 (ENDGAME)
+<!-- description: ENDGAME COMPLETE - v1 walled-real 112 to 0 (2026-07-14); stage ledger B1-B129 -->
+<!-- done: 2026-07-14 -->
+# v1 walled-real → 0 (ENDGAME — COMPLETE 2026-07-14, 112 → 0)
 
 > **Read first**: `proofs/corpus-wall.sh`'s Unsupported histogram, the
 > self-host linkage pattern (`stdlib/*.almd` + `render_wasm/registry.rs` +
