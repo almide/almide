@@ -690,10 +690,10 @@ fn dispatch(cli: Cli) {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, target, verified, no_verified, program_args } => {
             let file = resolve_file(file);
-            // 0.29.0: v1-first verified wasm is the DEFAULT; `--no-verified` opts out,
-            // `--verified` stays an accepted no-op (org byte-verify gate: 0 V1-MISMATCH).
-            let _ = verified;
-            cli::cmd_run(&file, &program_args, no_check, release, target.as_deref(), !no_verified);
+            // 0.29.0: v1-first verified wasm is the DEFAULT; `--no-verified` opts out.
+            // On the rust target the explicit `--verified` opts IN to the v1 native
+            // trust-spine renderer (#764 ladder; walls fall back to v0).
+            cli::cmd_run(&file, &program_args, no_check, release, target.as_deref(), !no_verified, verified);
         }
         Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified, no_verified } => {
             let file = resolve_file(file);
