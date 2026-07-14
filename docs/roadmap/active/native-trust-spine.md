@@ -26,9 +26,13 @@
       Gate: `tests/native_v1_differential_test.rs` — corpus byte-compared v1 vs
       v0 (stdout/stderr/exit), wall cases assert `Err`. HONEST WALL everywhere
       else (`__str_concat` was the first observed wall).
-- [ ] Rung 2: dynamic String ops (`__str_concat`, comparisons, `string.len`) as
-      shims; heap params/returns on user fns (borrowed `&str` / owned `String`
-      per the MIR call-mode signature).
+- [x] **Rung 2** (shipped): dynamic String ops as shims (`__str_concat`,
+      `string.eq`, `string.len` — codepoint count); String params/returns on
+      user fns (borrowed `&str` / owned `String` per the MIR call-mode
+      signature); String-valued if-joins (decl patched at first arm yield);
+      PRECISION WALL in the pipeline — a heap `Repr::Ptr` param/result renders
+      as a string only when the DECLARED `Ty` says so, any signature outside
+      {Int, Bool, String, Unit-ret} walls before lowering.
 - [ ] Rung 3: `List[Int]` / `List[String]` (`Vec<i64>` / `Vec<String>`), the
       typed Drop family mapped to scope-end (`DropListStr` etc. erase once the
       element type is a real Rust type — no recursive free needed natively).

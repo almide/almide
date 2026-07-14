@@ -1,33 +1,46 @@
-//! MIR → native Rust renderer — the NATIVE leg of the trust spine (#764, rung 1).
+//! MIR → native Rust renderer — the NATIVE leg of the trust spine (#764).
 //!
 //! Renders the SAME Perceus-disciplined MIR the wasm leg consumes, mapping the
 //! ownership ops onto Rust's own memory management instead of literal RC:
 //!
-//!   Dup        → `let dst = src.clone()` (a new owned handle; the clone IS the +1)
-//!   Drop       → erased — Rust's scope-end drop realizes the free (never earlier
-//!                than the MIR's Drop point observes, never leaks: `verify_ownership`
-//!                certifies the balance on the SAME ops before rendering)
+//!   Dup        → `.clone()` / `.to_string()` (a new owned handle; the clone IS the +1)
+//!   Drop       → erased — Rust's scope-end (or reassignment) drop realizes the free.
+//!                `verify_ownership` certifies the balance on the SAME ops pre-render.
 //!   CallFn     → a user fn call, or a CLOSED runtime-boundary shim (`print_str`,
-//!                `int.to_string`, `__chk_div`, …) mapped to native Rust — mirroring
-//!                v0's runtime/rs floor, never re-implemented inline
+//!                `int.to_string`, `__str_concat`, …) mapped to native Rust —
+//!                mirroring v0's runtime/rs floor, never re-implemented inline
 //!
-//! HONEST WALL: anything outside the rung-1 subset returns `Err(LowerError::
+//! Ownership modes across calls follow the MIR call-mode signature: a heap arg is
+//! BORROWED (`&str` param), a heap result is FRESH OWNED (`String` return).
+//!
+//! HONEST WALL: anything outside the rung subset returns `Err(LowerError::
 //! Unsupported)` — the CLI falls back to v0. A rendered program is never wrong;
 //! an unrenderable one declines loudly. Same discipline as the wasm ladder.
 //!
-//! Rung-1 subset: i64 scalars, String heap values (literal `Init::Str` allocs and
-//! shim results), full scalar control flow (if-as-value, loops), scalar user fns.
+//! Rung-2 subset: i64 scalars; String values (literals, `int.to_string`,
+//! `__str_concat`, `string.eq`, `string.len`); String params/returns on user fns;
+//! full scalar-or-String control flow (if-as-value, loops).
 
 use crate::lower::LowerError;
 use crate::{CallArg, Init, IntOp, MirFunction, MirProgram, Op, Repr, ValueId};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-/// The native type a MIR value renders to in rung 1.
+/// The native type a MIR value renders to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum NTy {
     I64,
+    /// An OWNED `String` local (fresh from a literal alloc, a heap-returning
+    /// call, or a clone).
     Str,
+    /// A BORROWED `&str` — a heap fn param (the MIR call mode borrows heap args).
+    StrRef,
+}
+
+impl NTy {
+    fn is_stringy(self) -> bool {
+        matches!(self, NTy::Str | NTy::StrRef)
+    }
 }
 
 fn wall(msg: impl Into<String>) -> LowerError {
@@ -38,9 +51,20 @@ fn var(v: ValueId) -> String {
     format!("v{}", v.0)
 }
 
-/// The CLOSED runtime-boundary map: self-hosted runtime fn name → (arg NTys,
-/// result NTy, native Rust shim body). Adding a name here is adding to the
-/// trusted floor — keep it tiny; everything else walls.
+/// Borrow a stringy value as `&str` for a call argument.
+fn as_str_arg(code: &str, t: NTy) -> String {
+    match t {
+        NTy::Str => format!("&{code}"),
+        NTy::StrRef => code.to_string(),
+        NTy::I64 => unreachable!("as_str_arg on i64"),
+    }
+}
+
+/// The CLOSED runtime-boundary map: self-hosted runtime fn name → (arg NTys
+/// [stringy args listed as `Str`], result, native Rust shim). Adding a name here
+/// is adding to the trusted floor — keep it tiny; everything else walls. Every
+/// addition needs a differential-corpus row in the same PR
+/// (tests/native_v1_differential_test.rs).
 fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
     match name {
         "int.to_string" => Some((
@@ -52,6 +76,22 @@ fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
             &[NTy::Str],
             None,
             "fn rt_print_str(s: &str) { println!(\"{}\", s); }",
+        )),
+        "__str_concat" => Some((
+            &[NTy::Str, NTy::Str],
+            Some(NTy::Str),
+            "fn rt_str_concat(a: &str, b: &str) -> String { [a, b].concat() }",
+        )),
+        "string.eq" => Some((
+            &[NTy::Str, NTy::Str],
+            Some(NTy::I64),
+            "fn rt_string_eq(a: &str, b: &str) -> i64 { (a == b) as i64 }",
+        )),
+        "string.len" => Some((
+            // Codepoint count, NOT byte length (C-016 discipline).
+            &[NTy::Str],
+            Some(NTy::I64),
+            "fn rt_string_len(s: &str) -> i64 { s.chars().count() as i64 }",
         )),
         "__chk_div" => Some((
             &[NTy::I64, NTy::I64],
@@ -96,7 +136,7 @@ pub fn try_render_native_program(prog: &MirProgram) -> Result<String, LowerError
     }
 
     let mut out = String::from(
-        "// Generated by the Almide v1 trust spine (native leg, rung 1).\n\
+        "// Generated by the Almide v1 trust spine (native leg).\n\
          #![allow(unused_variables, unused_mut, unreachable_code)]\n\n",
     );
     used_shims.sort();
@@ -109,41 +149,32 @@ pub fn try_render_native_program(prog: &MirProgram) -> Result<String, LowerError
     Ok(out)
 }
 
+/// Native param/result NTy for a repr: scalars are i64; a heap repr is a STRING
+/// (the pipeline's precision wall on declared `Ty` guarantees this).
+fn repr_nty(repr: &Repr, borrowed: bool) -> Result<NTy, LowerError> {
+    match repr {
+        Repr::Scalar { .. } => Ok(NTy::I64),
+        Repr::Ptr { .. } | Repr::Boxed { .. } => Ok(if borrowed { NTy::StrRef } else { NTy::Str }),
+    }
+}
+
 fn render_fn(
     func: &MirFunction,
     user_fns: &BTreeMap<&str, &MirFunction>,
     used_shims: &mut Vec<&'static str>,
 ) -> Result<String, LowerError> {
-    // Rung 1: user fns are SCALAR-only (i64 params/result); `main` takes nothing.
     let mut tys: BTreeMap<ValueId, NTy> = BTreeMap::new();
     for p in &func.params {
-        match p.repr {
-            Repr::Scalar { .. } => {
-                tys.insert(p.value, NTy::I64);
-            }
-            _ => {
-                return Err(wall(format!(
-                    "native: fn `{}` has a heap param — outside rung 1",
-                    func.name
-                )))
-            }
-        }
+        // The MIR call mode BORROWS heap args — a heap param is `&str`.
+        tys.insert(p.value, repr_nty(&p.repr, true)?);
     }
 
     let is_main = func.name == "main";
-    let mut sig = if is_main {
-        String::from("fn main()")
-    } else {
-        let params: Vec<String> =
-            func.params.iter().map(|p| format!("{}: i64", var(p.value))).collect();
-        let ret = if func.ret.is_some() { " -> i64" } else { "" };
-        format!("fn {}({}){}", mangle(&func.name), params.join(", "), ret)
-    };
-    sig.push_str(" {\n");
-    let mut out = sig;
+    let mut out = String::new();
     let mut indent = 1usize;
-    // The value each open if-arm yields, so `Else`/`EndIf` markers can assign it.
-    let mut if_stack: Vec<Option<ValueId>> = Vec::new();
+    // Each open if-as-value join: (marker, dst) — the decl is patched in once the
+    // first arm yield reveals the join type.
+    let mut if_stack: Vec<Option<(String, ValueId)>> = Vec::new();
 
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -151,6 +182,10 @@ fn render_fn(
             writeln!(out, $($arg)*).unwrap();
         }};
     }
+    // Patch an if-join marker with its typed declaration.
+    let patch = |out: &mut String, marker: &str, decl: &str| {
+        *out = out.replacen(marker, decl, 1);
+    };
 
     for op in &func.ops {
         match op {
@@ -163,36 +198,52 @@ fn render_fn(
                     tys.insert(*dst, NTy::Str);
                     line!("let mut {}: String = String::from({s:?});", var(*dst));
                 }
-                other => return Err(wall(format!("native: Alloc {other:?} — outside rung 1"))),
+                other => return Err(wall(format!("native: Alloc {other:?} — outside the rung subset"))),
             },
             Op::Dup { dst, src } => {
                 let t = *tys.get(src).ok_or_else(|| wall("native: Dup of untyped value"))?;
-                tys.insert(*dst, t);
-                line!("let mut {} = {}.clone();", var(*dst), var(*src));
+                match t {
+                    NTy::I64 => {
+                        tys.insert(*dst, NTy::I64);
+                        line!("let mut {} = {};", var(*dst), var(*src));
+                    }
+                    NTy::Str => {
+                        tys.insert(*dst, NTy::Str);
+                        line!("let mut {} = {}.clone();", var(*dst), var(*src));
+                    }
+                    NTy::StrRef => {
+                        // Dup of a borrowed param mints a fresh owned handle.
+                        tys.insert(*dst, NTy::Str);
+                        line!("let mut {} = {}.to_string();", var(*dst), var(*src));
+                    }
+                }
             }
-            // Drop is ERASED: Rust frees at scope end. `verify_ownership` above
-            // certified every heap object reaches balance on these same ops.
-            Op::Drop { .. } => line!("// drop: scope-end"),
+            // Drop is ERASED: Rust frees at scope end (or at reassignment for a
+            // loop-carried handle). `verify_ownership` above certified balance.
+            Op::Drop { v } => {
+                if tys.get(v) == Some(&NTy::StrRef) {
+                    return Err(wall("native: Drop of a borrowed param — MIR call-mode violation"));
+                }
+                line!("// drop: scope-end");
+            }
             // Pure ownership bookkeeping — no native code.
             Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. } => {}
             Op::SetLocal { local, src } => {
                 let t = *tys.get(src).ok_or_else(|| wall("native: SetLocal of untyped value"))?;
+                let rhs = match t {
+                    NTy::I64 => var(*src),
+                    NTy::Str => format!("{}.clone()", var(*src)),
+                    NTy::StrRef => format!("{}.to_string()", var(*src)),
+                };
+                let store_t = if t == NTy::StrRef { NTy::Str } else { t };
                 if let Some(prev) = tys.get(local) {
-                    if *prev != t {
+                    if *prev != store_t {
                         return Err(wall("native: SetLocal changes a value's type"));
                     }
-                    if t == NTy::Str {
-                        line!("{} = {}.clone();", var(*local), var(*src));
-                    } else {
-                        line!("{} = {};", var(*local), var(*src));
-                    }
+                    line!("{} = {};", var(*local), rhs);
                 } else {
-                    tys.insert(*local, t);
-                    if t == NTy::Str {
-                        line!("let mut {} = {}.clone();", var(*local), var(*src));
-                    } else {
-                        line!("let mut {} = {};", var(*local), var(*src));
-                    }
+                    tys.insert(*local, store_t);
+                    line!("let mut {} = {};", var(*local), rhs);
                 }
             }
             Op::IntBinOp { dst, op, a, b } => {
@@ -202,31 +253,47 @@ fn render_fn(
             }
             Op::CallFn { dst, name, args, result } => {
                 if let Some(callee) = user_fns.get(name.as_str()) {
-                    if callee.params.iter().any(|p| !matches!(p.repr, Repr::Scalar { .. })) {
-                        return Err(wall(format!(
-                            "native: call to `{name}` with heap signature — outside rung 1"
-                        )));
+                    if args.len() != callee.params.len() {
+                        return Err(wall(format!("native: call to `{name}` arity mismatch")));
                     }
                     let mut rendered_args = Vec::new();
-                    for a in args {
-                        let (code, t) = call_arg(a, &tys)?;
-                        if t != NTy::I64 {
-                            return Err(wall(format!(
-                                "native: heap arg to scalar fn `{name}` — outside rung 1"
-                            )));
+                    for (a, p) in args.iter().zip(&callee.params) {
+                        let want = repr_nty(&p.repr, true)?;
+                        let (code, got) = call_arg(a, &tys)?;
+                        match want {
+                            NTy::I64 => {
+                                if got != NTy::I64 {
+                                    return Err(wall(format!(
+                                        "native: heap arg to scalar param of `{name}`"
+                                    )));
+                                }
+                                rendered_args.push(code);
+                            }
+                            _ => {
+                                if !got.is_stringy() {
+                                    return Err(wall(format!(
+                                        "native: scalar arg to heap param of `{name}`"
+                                    )));
+                                }
+                                rendered_args.push(as_str_arg(&code, got));
+                            }
                         }
-                        rendered_args.push(code);
                     }
-                    if let Some(d) = dst {
-                        tys.insert(*d, NTy::I64);
-                        line!(
-                            "let mut {}: i64 = {}({});",
-                            var(*d),
-                            mangle(name),
-                            rendered_args.join(", ")
-                        );
-                    } else {
-                        line!("{}({});", mangle(name), rendered_args.join(", "));
+                    let call = format!("{}({})", mangle(name), rendered_args.join(", "));
+                    match (dst, result) {
+                        (Some(d), Some(r)) => {
+                            // A heap result is FRESH OWNED (the callee moved it out).
+                            let t = repr_nty(r, false)?;
+                            tys.insert(*d, t);
+                            let ty_name = if t == NTy::Str { "String" } else { "i64" };
+                            line!("let mut {}: {} = {};", var(*d), ty_name, call);
+                        }
+                        (None, _) => line!("{call};"),
+                        (Some(d), None) => {
+                            // Result repr unknown: scalar by convention.
+                            tys.insert(*d, NTy::I64);
+                            line!("let mut {}: i64 = {};", var(*d), call);
+                        }
                     }
                 } else if let Some((param_tys, ret_ty, shim_src)) = shim(name) {
                     if args.len() != param_tys.len() {
@@ -235,11 +302,21 @@ fn render_fn(
                     let mut rendered_args = Vec::new();
                     for (a, want) in args.iter().zip(param_tys) {
                         let (code, got) = call_arg(a, &tys)?;
-                        if got != *want {
-                            return Err(wall(format!("native: shim `{name}` arg type mismatch")));
+                        match want {
+                            NTy::I64 => {
+                                if got != NTy::I64 {
+                                    return Err(wall(format!("native: shim `{name}` arg type mismatch")));
+                                }
+                                rendered_args.push(code);
+                            }
+                            _ => {
+                                if !got.is_stringy() {
+                                    return Err(wall(format!("native: shim `{name}` arg type mismatch")));
+                                }
+                                // Heap args are BORROWED at the MIR level — by reference.
+                                rendered_args.push(as_str_arg(&code, got));
+                            }
                         }
-                        // Heap args are BORROWED at the MIR level — pass by reference.
-                        rendered_args.push(if *want == NTy::Str { format!("&{code}") } else { code });
                     }
                     used_shims.push(shim_src);
                     let call = format!("{}({})", shim_rust_name(name), rendered_args.join(", "));
@@ -258,22 +335,21 @@ fn render_fn(
                 } else {
                     return Err(wall(format!(
                         "native: call to `{name}` — not a lowered user fn and not in the \
-                         rung-1 runtime floor"
+                         native runtime floor"
                     )));
                 }
             }
-            // Witness-level runtime calls (the lower emits `print_str`/`print_int`
-            // through these for `println`).
+            // Witness-level runtime calls (`println` lowers through these).
             Op::Call { dst, func, args, .. } => {
                 use crate::RtFn;
                 match (func, args.as_slice()) {
                     (RtFn::PrintStr, [a]) => {
                         let (code, t) = call_arg(a, &tys)?;
-                        if t != NTy::Str {
+                        if !t.is_stringy() {
                             return Err(wall("native: print_str of a non-String"));
                         }
                         used_shims.push(shim("print_str").unwrap().2);
-                        line!("rt_print_str(&{code});");
+                        line!("rt_print_str({});", as_str_arg(&code, t));
                     }
                     (RtFn::PrintInt, [a]) => {
                         let (code, t) = call_arg(a, &tys)?;
@@ -284,21 +360,21 @@ fn render_fn(
                     }
                     other => {
                         return Err(wall(format!(
-                            "native: runtime call {other:?} — outside rung 1"
+                            "native: runtime call {other:?} — outside the rung subset"
                         )))
                     }
                 }
                 if dst.is_some() {
-                    return Err(wall("native: print with a result — outside rung 1"));
+                    return Err(wall("native: print with a result — outside the rung subset"));
                 }
             }
             Op::IfThen { cond, dst } => {
                 if let Some(d) = dst {
-                    // if-as-value: pre-declare the join; arms assign it. The join
-                    // type is settled by the first arm's yield (see Else below).
-                    if_stack.push(Some(*d));
-                    line!("let mut {}: i64;", var(*d));
-                    tys.insert(*d, NTy::I64);
+                    // if-as-value: the join decl is patched in at the first arm
+                    // yield, when its type is known.
+                    let marker = format!("//__JOIN_{}__", var(*d));
+                    line!("{marker}");
+                    if_stack.push(Some((marker, *d)));
                 } else {
                     if_stack.push(None);
                 }
@@ -306,24 +382,50 @@ fn render_fn(
                 indent += 1;
             }
             Op::Else { val } => {
-                let join = if_stack.last().copied().flatten();
-                if let (Some(d), Some(v)) = (join, val) {
-                    if tys.get(v) != Some(&NTy::I64) {
-                        return Err(wall("native: non-scalar if-value — outside rung 1"));
-                    }
-                    line!("{} = {};", var(d), var(*v));
+                if let Some(Some((marker, d))) = if_stack.last() {
+                    let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
+                    let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
+                    let (decl, join_t, rhs) = match t {
+                        NTy::I64 => (
+                            format!("let mut {}: i64 = 0;", var(*d)),
+                            NTy::I64,
+                            var(v),
+                        ),
+                        NTy::Str => (
+                            format!("let mut {}: String = String::new();", var(*d)),
+                            NTy::Str,
+                            format!("{}.clone()", var(v)),
+                        ),
+                        NTy::StrRef => (
+                            format!("let mut {}: String = String::new();", var(*d)),
+                            NTy::Str,
+                            format!("{}.to_string()", var(v)),
+                        ),
+                    };
+                    patch(&mut out, marker, &decl);
+                    tys.insert(*d, join_t);
+                    line!("{} = {};", var(*d), rhs);
                 }
                 indent -= 1;
                 line!("}} else {{");
                 indent += 1;
             }
             Op::EndIf { val } => {
-                let join = if_stack.pop().flatten();
-                if let (Some(d), Some(v)) = (join, val) {
-                    if tys.get(v) != Some(&NTy::I64) {
-                        return Err(wall("native: non-scalar if-value — outside rung 1"));
+                let top = if_stack.pop().ok_or_else(|| wall("native: EndIf without IfThen"))?;
+                if let Some((_, d)) = top {
+                    let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
+                    let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
+                    let join_t = *tys.get(&d).ok_or_else(|| wall("native: if-value join untyped"))?;
+                    let rhs = match t {
+                        NTy::I64 => var(v),
+                        NTy::Str => format!("{}.clone()", var(v)),
+                        NTy::StrRef => format!("{}.to_string()", var(v)),
+                    };
+                    let arm_t = if t == NTy::StrRef { NTy::Str } else { t };
+                    if arm_t != join_t {
+                        return Err(wall("native: if-value arms disagree on type"));
                     }
-                    line!("{} = {};", var(d), var(*v));
+                    line!("{} = {};", var(d), rhs);
                 }
                 indent -= 1;
                 line!("}}");
@@ -341,23 +443,58 @@ fn render_fn(
             }
             other => {
                 return Err(wall(format!(
-                    "native: op {:?} — outside rung 1",
+                    "native: op {:?} — outside the rung subset",
                     op_name(other)
                 )))
             }
         }
     }
 
-    match (&func.ret, is_main) {
-        (Some(v), false) => line!("{}", var(*v)),
-        (Some(_), true) => return Err(wall("native: main with a return value")),
-        (None, _) => {}
-    }
     if !if_stack.is_empty() {
         return Err(wall("native: unbalanced IfThen/EndIf markers"));
     }
+
+    // Signature: the return type is known only after the body typed `func.ret`.
+    let mut sig = if is_main {
+        if func.ret.is_some() {
+            return Err(wall("native: main with a return value"));
+        }
+        String::from("fn main()")
+    } else {
+        let params: Vec<String> = func
+            .params
+            .iter()
+            .map(|p| {
+                let t = repr_nty(&p.repr, true).expect("param repr checked above");
+                format!("{}: {}", var(p.value), if t == NTy::StrRef { "&str" } else { "i64" })
+            })
+            .collect();
+        let ret = match func.ret {
+            None => String::new(),
+            Some(v) => match tys.get(&v) {
+                Some(NTy::I64) => " -> i64".to_string(),
+                Some(NTy::Str) => " -> String".to_string(),
+                Some(NTy::StrRef) => " -> String".to_string(),
+                None => return Err(wall("native: return value untyped")),
+            },
+        };
+        format!("fn {}({}){}", mangle(&func.name), params.join(", "), ret)
+    };
+    sig.push_str(" {\n");
+
+    // The trailing return expression (moved out — fresh owned for heap).
+    if let Some(v) = func.ret {
+        let t = tys[&v];
+        let expr = match t {
+            NTy::I64 | NTy::Str => var(v),
+            NTy::StrRef => format!("{}.to_string()", var(v)),
+        };
+        out.push_str("    ");
+        out.push_str(&expr);
+        out.push('\n');
+    }
     out.push_str("}\n");
-    Ok(out)
+    Ok(format!("{sig}{out}"))
 }
 
 /// A rendered call argument with the NTy it carries (`Imm` is always i64).
@@ -368,7 +505,7 @@ fn call_arg(a: &CallArg, tys: &BTreeMap<ValueId, NTy>) -> Result<(String, NTy), 
             Ok((var(*v), t))
         }
         CallArg::Imm(n) => Ok((format!("{n}i64"), NTy::I64)),
-        other => Err(wall(format!("native: call arg {other:?} — outside rung 1"))),
+        other => Err(wall(format!("native: call arg {other:?} — outside the rung subset"))),
     }
 }
 
@@ -399,7 +536,7 @@ fn render_int_binop(
         IntOp::Le => format!("({l} <= {r}) as i64"),
         IntOp::Gt => format!("({l} > {r}) as i64"),
         IntOp::Ge => format!("({l} >= {r}) as i64"),
-        other => return Err(wall(format!("native: int op {other:?} — outside rung 1"))),
+        other => return Err(wall(format!("native: int op {other:?} — outside the rung subset"))),
     })
 }
 

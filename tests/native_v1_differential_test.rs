@@ -64,6 +64,13 @@ const CORPUS: &[(&str, &str)] = &[
     ("division", "fn main() -> Unit = {\n  println(int.to_string(97 / 8))\n  println(int.to_string(97 % 8))\n}\n"),
     // Literal + literal is const-folded by the frontend into one literal — in subset.
     ("folded_concat", "fn main() -> Unit = {\n  let s = \"a\" + \"b\"\n  println(s)\n}\n"),
+    // ── Rung 2: dynamic String ops + String signatures ──
+    ("dyn_concat", "fn main() -> Unit = {\n  let s = int.to_string(1) + \"b\"\n  println(s)\n}\n"),
+    ("str_eq_branch", "fn main() -> Unit = {\n  let s = int.to_string(42)\n  if s == \"42\" then println(\"yes\") else println(\"no\")\n  if s == \"43\" then println(\"yes\") else println(\"no\")\n}\n"),
+    ("str_len_unicode", "fn main() -> Unit = {\n  println(int.to_string(string.len(\"héllo\")))\n  println(int.to_string(string.len(int.to_string(12345))))\n}\n"),
+    ("str_param_fn", "fn shout(s: String) -> String = s + \"!\"\nfn twice(s: String) -> String = shout(s) + shout(s)\n\nfn main() -> Unit = {\n  println(twice(\"hey\"))\n}\n"),
+    ("loop_concat", "fn main() -> Unit = {\n  var acc = \"\"\n  var i = 0\n  while i < 5 {\n    acc = acc + int.to_string(i)\n    i = i + 1\n  }\n  println(acc)\n  println(int.to_string(string.len(acc)))\n}\n"),
+    ("str_if_value", "fn label(n: Int) -> String = if n > 40 then int.to_string(n) + \"-big\" else \"small\"\n\nfn main() -> Unit = {\n  println(label(42))\n  println(label(7))\n}\n"),
 ];
 
 #[test]
@@ -111,9 +118,10 @@ fn divzero_abort_matches_v0() {
 #[test]
 fn out_of_subset_walls_honestly() {
     let walls = [
-        ("dynamic_concat", "fn main() -> Unit = {\n  let s = int.to_string(1) + \"b\"\n  println(s)\n}\n"),
         ("list", "fn main() -> Unit = {\n  let xs = [1, 2, 3]\n  println(int.to_string(list.len(xs)))\n}\n"),
         ("float", "fn main() -> Unit = {\n  println(float.to_string(1.5))\n}\n"),
+        ("str_contains", "fn main() -> Unit = {\n  if string.contains(\"abc\", \"b\") then println(\"y\") else println(\"n\")\n}\n"),
+        ("list_param", "fn head(xs: List[Int]) -> Int = xs[0]\n\nfn main() -> Unit = {\n  println(int.to_string(head([9])))\n}\n"),
     ];
     for (name, src) in walls {
         assert!(
