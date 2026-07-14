@@ -328,7 +328,10 @@ pub fn desugar_all(
             cur = r;
             continue;
         }
-        if let Some(r) = desugar_effect_unwrap(&cur, unit_main, layouts) {
+        // `ret_is_result=false`: this debug-dump-only path has no per-fn ABI fact available;
+        // the bare-tail-Option-`!` rewrite it skips is call-count-invariant, so the dump stays
+        // representative for the count-diff use this function serves.
+        if let Some(r) = desugar_effect_unwrap(&cur, unit_main, false, layouts) {
             cur = r;
             continue;
         }

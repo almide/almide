@@ -17,10 +17,11 @@
 pub fn desugar_effect_unwrap(
     body: &IrExpr,
     unit_main: bool,
+    ret_is_result: bool,
     layouts: &crate::lower::VariantLayouts,
 ) -> Option<IrExpr> {
     let mut next_var = max_var_id(body) + 1;
-    desugar_effect_unwrap_inner(body, &mut next_var, unit_main)
+    desugar_effect_unwrap_inner(body, &mut next_var, unit_main, ret_is_result)
 }
 
 /// A tiny read-scan: does the expression tree reference `var`? (The unit-discard
@@ -38,10 +39,24 @@ impl almide_ir::visit::IrVisitor for VarUse<'_> {
     }
 }
 
-fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32, unit_main: bool) -> Option<IrExpr> {
+fn desugar_effect_unwrap_inner(
+    body: &IrExpr,
+    next_var: &mut u32,
+    unit_main: bool,
+    ret_is_result: bool,
+) -> Option<IrExpr> {
     use almide_ir::{IrMatchArm, IrPattern};
     use almide_lang::types::Ty;
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        // An EXPRESSION-FORM body (`effect fn f(..) -> Result[..] = list.get(xs, i)!`) is kept
+        // BARE by the frontend — no Block wrapper — so the tail-position machinery below never
+        // saw it and the bare Option-`!` fell straight to the wrong-repr pass-through (the same
+        // confirmed wrong-value bug the Block-tail case has). The body IS the tail: delegate the
+        // bare-Unwrap case directly. Gated to exactly that shape — any other non-Block body
+        // keeps today's behavior untouched.
+        if matches!(&body.kind, IrExprKind::Unwrap { .. }) {
+            return desugar_tail_effect_unwrap(body, next_var, unit_main, ret_is_result);
+        }
         return None;
     };
     for (i, s) in stmts.iter().enumerate() {
@@ -127,7 +142,8 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32, unit_main: boo
             span: body.span.clone(),
             def_id: body.def_id,
         };
-        let cont = desugar_effect_unwrap_inner(&cont, next_var, unit_main).unwrap_or(cont);
+        let cont =
+            desugar_effect_unwrap_inner(&cont, next_var, unit_main, ret_is_result).unwrap_or(cont);
         let m = build_unwrap_match(inner, ok_pat, cont, body, next_var, unit_main);
         return Some(IrExpr {
             kind: IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(m)) },
@@ -141,20 +157,7 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32, unit_main: boo
     // … }`, signal_instance's nested if-arms). `desugar_tail_effect_unwrap` navigates that control
     // flow and applies the SAME gated stmt-`!` rewrite inside each arm/tail block.
     if let Some(t) = tail.as_deref() {
-        // A raw TAIL-position effect-`!` (`{ let o = r!; o! }` — a CHAINED/nested unwrap, reached
-        // here after the FIRST unwrap's own recursive `desugar_effect_unwrap_inner` call already
-        // rewrote the continuation to `{ o! }`) is DELIBERATELY left unhandled here:
-        // `desugar_tail_effect_unwrap` below only ever matches Block/If/Match, never a BARE
-        // `Unwrap`, so it falls through untouched to `tail.rs`'s raw pass-through — a correct
-        // no-op ONLY for a RESULT operand (same repr the fn already returns); an OPTION operand
-        // has a DIFFERENT repr, so the pass-through would silently return the RAW Option handle
-        // instead of unwrapping it (a confirmed wrong-value bug, not just a wall, caught via
-        // adversarial wasmtime-vs-v0 testing on `nested_unwrap`). Rather than special-case this
-        // shape here, `AUTO_WRAP_ABI_FNS`'s population (mod_p2.rs) excludes any function whose
-        // body has a tail-position unwrap (`body_has_tail_position_unwrap`, mod.rs) — such a
-        // function's ABI is NEVER auto-wrapped, so `body.ty` never becomes `Result[T,String]` for
-        // it, and this fallthrough stays the pre-existing (honestly-walling) behavior.
-        if let Some(nt) = desugar_tail_effect_unwrap(t, next_var, unit_main) {
+        if let Some(nt) = desugar_tail_effect_unwrap(t, next_var, unit_main, ret_is_result) {
             return Some(IrExpr {
                 kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
                 ty: body.ty.clone(),
@@ -437,13 +440,94 @@ fn build_unwrap_match(
 /// `count_ir_calls` stays exact (`f()` once, continuation in one arm, `err(e)` is a ctor). HOLE-1
 /// (admitted Ok-payload reprs only) is enforced inside the block path (`desugar_effect_unwrap_inner`).
 /// Returns `None` if no `!` is reachable in a return position of `tail` (the body keeps its form).
-fn desugar_tail_effect_unwrap(tail: &IrExpr, next_var: &mut u32, unit_main: bool) -> Option<IrExpr> {
+fn desugar_tail_effect_unwrap(
+    tail: &IrExpr,
+    next_var: &mut u32,
+    unit_main: bool,
+    ret_is_result: bool,
+) -> Option<IrExpr> {
+    use almide_ir::{IrMatchArm, IrPattern};
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
     match &tail.kind {
         // A nested block — its own stmts/tail may carry a stmt-`!`.
-        IrExprKind::Block { .. } => desugar_effect_unwrap_inner(tail, next_var, unit_main),
+        IrExprKind::Block { .. } => {
+            desugar_effect_unwrap_inner(tail, next_var, unit_main, ret_is_result)
+        }
+        // A BARE tail-position OPTION-`!` (`{ let o = r!; o! }`'s continuation, or a plainly
+        // declared-Result fn's `{ let o: Option[Int] = some(42); o! }` / `{ …; list.get(xs, i)! }`)
+        // — WITHOUT this desugar it falls through to `tail.rs`'s raw pass-through, which is a
+        // correct no-op ONLY for a RESULT operand (same repr the fn already returns); an OPTION
+        // operand has a DIFFERENT repr, so the pass-through silently returned the RAW Option
+        // handle AS the Result — a CONFIRMED live wrong-value bug (v0 prints the payload, v1
+        // printed `Error: `), reachable with NO auto-wrap involved at all. Desugar it into the
+        // real none/some match (`match o { none => err("none"), some(v) => ok(v) }` — v0's
+        // unwrap-of-none message), typed at the SYNTHESIZED `Result[T, String]` (from the Option's
+        // own payload type — NOT `tail.ty`/`body.ty`, whose values proved unreliable across the
+        // desugar fixpoint's interleaved probe/lowering streams in two prior reverted attempts;
+        // `ret_is_result` is threaded EXPLICITLY from `lower_body_into` exactly like `unit_main`,
+        // so the gate is a per-fn FACT, not a fragile tree-local type). A RESULT operand keeps
+        // the (correct) pass-through; a non-Result-ABI fn (`unwrap_option_some`'s declared `->
+        // Int`, where the raw payload IS the return) keeps its pre-existing path via the gate.
+        IrExprKind::Unwrap { expr }
+            if ret_is_result
+                && matches!(&expr.ty,
+                    Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1) =>
+        {
+            let Ty::Applied(TypeConstructorId::Option, a) = &expr.ty else { unreachable!() };
+            let payload_ty = a[0].clone();
+            let result_ty = Ty::result(payload_ty.clone(), Ty::String);
+            let v = VarId(*next_var);
+            *next_var += 1;
+            let none_arm = IrMatchArm {
+                pattern: IrPattern::None,
+                guard: None,
+                body: IrExpr {
+                    kind: IrExprKind::ResultErr {
+                        expr: Box::new(IrExpr {
+                            kind: IrExprKind::LitStr { value: "none".into() },
+                            ty: Ty::String,
+                            span: tail.span.clone(),
+                            def_id: None,
+                        }),
+                    },
+                    ty: result_ty.clone(),
+                    span: tail.span.clone(),
+                    def_id: None,
+                },
+            };
+            let some_arm = IrMatchArm {
+                pattern: IrPattern::Some {
+                    inner: Box::new(IrPattern::Bind { var: v, ty: payload_ty.clone() }),
+                },
+                guard: None,
+                body: IrExpr {
+                    kind: IrExprKind::ResultOk {
+                        expr: Box::new(IrExpr {
+                            kind: IrExprKind::Var { id: v },
+                            ty: payload_ty,
+                            span: tail.span.clone(),
+                            def_id: None,
+                        }),
+                    },
+                    ty: result_ty.clone(),
+                    span: tail.span.clone(),
+                    def_id: None,
+                },
+            };
+            Some(IrExpr {
+                kind: IrExprKind::Match {
+                    subject: Box::new((**expr).clone()),
+                    arms: vec![none_arm, some_arm],
+                },
+                ty: result_ty,
+                span: tail.span.clone(),
+                def_id: tail.def_id,
+            })
+        }
         IrExprKind::If { cond, then, else_ } => {
-            let nt = desugar_tail_effect_unwrap(then, next_var, unit_main);
-            let ne = desugar_tail_effect_unwrap(else_, next_var, unit_main);
+            let nt = desugar_tail_effect_unwrap(then, next_var, unit_main, ret_is_result);
+            let ne = desugar_tail_effect_unwrap(else_, next_var, unit_main, ret_is_result);
             if nt.is_none() && ne.is_none() {
                 return None;
             }
@@ -462,7 +546,7 @@ fn desugar_tail_effect_unwrap(tail: &IrExpr, next_var: &mut u32, unit_main: bool
             let mut changed = false;
             let new_arms: Vec<almide_ir::IrMatchArm> = arms
                 .iter()
-                .map(|a| match desugar_tail_effect_unwrap(&a.body, next_var, unit_main) {
+                .map(|a| match desugar_tail_effect_unwrap(&a.body, next_var, unit_main, ret_is_result) {
                     Some(nb) => {
                         changed = true;
                         almide_ir::IrMatchArm {

@@ -181,7 +181,9 @@ impl LowerCtx {
         // must reconstruct `err(e)` normally, never the abort-line shape. `decl_ret_is_result`
         // already draws exactly this line (tail.rs's Result[Unit] tail-voiding gate reuses it).
         let unit_main = self.fn_name == "main" && !self.decl_ret_is_result;
-        if let Some(rewritten) = desugar_effect_unwrap(body, unit_main, &self.variant_layouts) {
+        if let Some(rewritten) =
+            desugar_effect_unwrap(body, unit_main, self.ret_is_result_abi, &self.variant_layouts)
+        {
             return self.lower_body_into(&rewritten);
         }
         if unit_main {

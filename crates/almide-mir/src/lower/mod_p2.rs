@@ -629,8 +629,8 @@ pub fn inline_mutual_tail_recursion(
                             | almide_lang::types::constructor::TypeConstructorId::Option,
                         _
                     )
-                ) && body_has_stmt_position_propagating_unwrap(&f.body)
-                    && !body_has_tail_position_unwrap(&f.body)
+                ) && (body_has_stmt_position_propagating_unwrap(&f.body)
+                    || body_has_tail_position_option_unwrap(&f.body))
             })
             .map(|f| f.name.as_str().to_string())
             .collect();
@@ -1037,6 +1037,14 @@ pub(crate) struct LowerCtx {
     /// already declaring Result/Option is NOT lifted — its return is real). Set in
     /// `lower_function_all_impl`; defaults false (the void convention) for the bare entries.
     decl_ret_is_result: bool,
+    /// The fn's REAL compiled ABI returns `Result[T, String]` — either GENUINELY declared
+    /// `-> Result[..]` (STRICTLY Result: an `-> Option[..]` fn is excluded, since a bare tail
+    /// Option-`!` there is a same-repr pass-through, which is already correct), or auto-wrapped
+    /// via [`AUTO_WRAP_ABI_FNS`]. Gates the bare-tail-Option-`!` desugar
+    /// (`desugar_tail_effect_unwrap`): under a Result ABI that pass-through returns the RAW
+    /// Option handle AS the Result — a confirmed silent wrong-value. Threaded as an explicit
+    /// per-fn FACT (the `unit_main` pattern) so the desugar never trusts a tree-local `.ty`.
+    ret_is_result_abi: bool,
 }
 
 /// Type NAME → (generic param names, declaration-ordered fields) — the VALUE-MODEL

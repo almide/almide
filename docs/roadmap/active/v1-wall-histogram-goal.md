@@ -4599,6 +4599,27 @@ DIAGNOSIS — attempted `compound_eq`'s `(<RECURSIVE record>, Int)` tuple case a
    prior diagnosis — `List[(String, <nested Map>)]`) very likely shares this exact blocker,
    not independently re-verified.
 
+B119. **Fixed two confirmed live wrong-bytes bugs in the bare tail-position Option-`!` path and
+   closed `nested_unwrap` (12 → 11).** The pass-through bug B113 scoped out was not confined to
+   auto-wrap: (1) a declared-Result fn with a bare tail Option-`!` (`= { let o = some(42); o! }`)
+   rendered without walling and printed `Error: ` where v0 prints `42` — the pass-through returns
+   the raw Option handle as the "Result" (wrong repr); (2) the scalar-lifted variant
+   (`unwrap_option_some()!` from main) emits invalid wasm today (i64/i32 mismatch,
+   stash-bisect-confirmed pre-existing). Zero corpus exposure — why parity and classify both
+   missed it. Fix: thread an explicit `ret_is_result: bool` through the effect-unwrap desugar
+   (the `unit_main` pattern — tree-local `.ty` gating is untrustworthy mid-fixpoint, which killed
+   two prior attempts); a new `desugar_tail_effect_unwrap` arm rewrites a bare Option-operand
+   `Unwrap` to `match o { none => err("none"), some(v) => ok(v) }` at the synthesized
+   `Result[T, String]` (Result operands keep the correct pass-through); `LowerCtx.
+   ret_is_result_abi` = strictly-Result declared ∨ AUTO_WRAP; B113's tail-unwrap EXCLUSION
+   replaced by an Option-specific INCLUSION (`body_has_tail_position_option_unwrap` — yaml TCO's
+   Result-typed `self()!` untouched); and an expression-form gap (a `= <operand>!` body is BARE,
+   no Block — the Block gate returned None before any tail machinery ran; also the root cause of
+   an `??`-consumer rc_dec trap found during verification). Verified: nine probes byte-identical
+   wasmtime-vs-v0; 50k-iteration 3-shape leak-loop under 8MB (2549999 both, no leak); mir
+   583/583; classify 12 → 11 zero newly-walled; spec 283/283; GATE OK; CORPUS WALL OK
+   (FORBIDDEN=0). **11, was 12.**
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

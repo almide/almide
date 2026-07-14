@@ -774,20 +774,24 @@ fn body_has_stmt_position_propagating_unwrap(body: &IrExpr) -> bool {
 }
 
 /// Does `body`'s TAIL (recursing through Block/If/Match, the same control-flow-transparent
-/// positions `body_has_stmt_position_propagating_unwrap` scans) end in a bare effect-`!`?
-/// A stmt-position propagating unwrap's continuation is a fresh `Block` whose OWN tail is the
-/// rest of the original tail — so `{ let o = r!; o! }`'s continuation-block tail is `o!` itself.
-/// `desugar_tail_effect_unwrap` (desugar_unwrap.rs) only rewrites Block/If/Match tails, never a
-/// BARE `Unwrap`, so a tail unwrap of a HEAP payload (e.g. `o: Option[Int]`) falls through
-/// untouched to the raw heap-handle pass-through (`heap_result_arm.rs`'s `Var{id}` Dup+Consume
-/// arm) — a confirmed silent wrong-value bug (nested_unwrap: wasmtime prints `Error: ` instead of
-/// `42`), not merely a wall. Excluding a tail-unwrap body from `AUTO_WRAP_ABI_FNS` keeps such
-/// functions honestly WALLED (their v0/native execution is untouched) instead of shipping wrong
-/// bytes, while still letting a single stmt-position-only unwrap (`unannotated_unwraps`) auto-wrap.
-fn body_has_tail_position_unwrap(body: &IrExpr) -> bool {
+/// positions `body_has_stmt_position_propagating_unwrap` scans) end in a bare `!` over an
+/// OPTION-typed operand? Such a tail can only compile correctly under a `Result[T, String]`
+/// ABI: the desugar (`desugar_tail_effect_unwrap`'s bare-Unwrap case) turns it into
+/// `match o { none => err("none"), some(v) => ok(v) }`, which constructs a real Result — under
+/// a RAW scalar ABI there is no channel for the none case at all (the old pass-through returned
+/// the raw Option handle, a confirmed silent wrong-value/invalid-wasm bug in BOTH the
+/// declared-Result and the scalar-lifted case). So this is an AUTO_WRAP_ABI_FNS INCLUSION
+/// criterion. Gated to OPTION operands only: a RESULT-typed tail-`!` operand (including a
+/// never-err `self()!`/`f()!` — Result-typed at this pre-strip point) is repr-compatible with
+/// the pass-through in every ABI (same block IS the propagated Result), so wrapping those would
+/// only churn working fns (the yaml TCO cluster's tail self-calls among them).
+fn body_has_tail_position_option_unwrap(body: &IrExpr) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
     fn scan(e: &IrExpr) -> bool {
         match &e.kind {
-            IrExprKind::Unwrap { .. } | IrExprKind::Try { .. } => true,
+            IrExprKind::Unwrap { expr } => {
+                matches!(&expr.ty, Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1)
+            }
             IrExprKind::Block { expr, .. } => expr.as_deref().is_some_and(scan),
             IrExprKind::If { then, else_, .. } => scan(then) || scan(else_),
             IrExprKind::Match { arms, .. } => arms.iter().any(|a| scan(&a.body)),
@@ -829,6 +833,13 @@ fn lower_function_all_impl(
                 _
             )
         ),
+        // STRICTLY-Result declared return (Option excluded — see the field doc) OR an
+        // auto-wrapped scalar ABI: the bare-tail-Option-`!` desugar's gate.
+        ret_is_result_abi: matches!(
+            &func.ret_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)
+        ) || crate::lower::AUTO_WRAP_ABI_FNS
+            .with(|s| s.borrow().contains(func.name.as_str())),
         ..Default::default()
     };
     let params = ctx.bind_params(&func.params)?;
