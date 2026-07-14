@@ -28,46 +28,59 @@ else TO=""; echo "note: no timeout binary — running unwrapped" >&2; fi
 echo "building almide (release)…" >&2
 ( cd "$work_root" && cargo build -q --release --bin almide )
 
-total=0; match=0; mismatch=0; native_fail=0; skipped=0
+total=0; match=0; mismatch=0; native_fail=0; skipped=0; preexisting=0
 declare -a MISMATCHES=()
+declare -a PREEXISTING=()
+
+# Strip run-to-run noise before comparing: the temp module path embeds a fresh hash
+# every run (`.../almide-run-<hash>.wasm`), so an error message containing it would
+# spuriously differ between two otherwise identical failures.
+# Also neutralize WALL-CLOCK tokens (Nms, N.Nµs/call, N.N GFLOPS): two runs of the SAME
+# binary differ there, so they carry zero cross-target signal. The deterministic remainder
+# (acc= sums, shapes, counts) is what must byte-match.
+norm() { sed -E -e 's#[^ `]*almide-run-[0-9a-f]+\.wasm#<tmp>.wasm#g' \
+                -e 's#[0-9]+ms#<ms>#g' \
+                -e 's#[0-9.]+(µs|us)/call#<us>/call#g' \
+                -e 's#[0-9.]+ GFLOPS#<gflops> GFLOPS#g'; }
 
 run_one() { # repo entry
   local repo="$1" entry="$2"
   local dir; dir="$(dirname "$entry")"
-  # A program that needs stdin/args/net is out of scope for a no-args smoke run — a
-  # native failure (non-zero without wasm divergence) SKIPS rather than fails: the gate
-  # is CROSS-TARGET equality, not program health.
-  local n_out n_rc w_out w_rc
-  n_out="$(cd "$dir" && $TO "$ALMIDE" run "$(basename "$entry")" 2>&1)"; n_rc=$?
-  w_out="$(cd "$dir" && $TO "$ALMIDE" run "$(basename "$entry")" --target wasm --verified 2>&1)"; w_rc=$?
-  # Normalize nondeterministic temp paths in error text so two runs of the SAME
-  # failure compare equal (the audio-poc false positive: identical unknown-import
-  # errors differing only in the tmpfile name).
-  n_out="$(printf '%s' "$n_out" | sed 's|/[^ ]*/almide-run-[0-9a-f]*\.wasm|<tmp>.wasm|g')"
-  w_out="$(printf '%s' "$w_out" | sed 's|/[^ ]*/almide-run-[0-9a-f]*\.wasm|<tmp>.wasm|g')"
-  # A browser-host-only program (unknown wasm import — webaudio/dom/…): wasmtime can
-  # never run it regardless of codegen; cross-target equality is out of scope → SKIP.
-  case "$w_out" in *"unknown import"*)
-    echo "  SKIP  $repo/$(basename "$entry") (browser-host import)"; skipped=$((skipped+1)); total=$((total+1)); return;;
-  esac
+  # THREE legs — native (oracle), plain wasm (v0 baseline), wasm --verified (v1-first).
+  # The Release-2 gate is ATTRIBUTION-aware: only `verified != plain-wasm` is a
+  # v1-attributable mismatch (fails the sweep). A native/wasm divergence where BOTH wasm
+  # legs agree is PRE-EXISTING (v0-wasm) — reported for the org ledger, not a v1 blocker.
+  local raw n_out n_rc w0_out w0_rc w1_out w1_rc
+  raw="$(cd "$dir" && $TO "$ALMIDE" run "$(basename "$entry")" 2>&1)"; n_rc=$?
+  n_out="$(printf '%s' "$raw" | norm)"
+  raw="$(cd "$dir" && $TO "$ALMIDE" run "$(basename "$entry")" --target wasm 2>&1)"; w0_rc=$?
+  w0_out="$(printf '%s' "$raw" | norm)"
+  raw="$(cd "$dir" && $TO "$ALMIDE" run "$(basename "$entry")" --target wasm --verified 2>&1)"; w1_rc=$?
+  w1_out="$(printf '%s' "$raw" | norm)"
   total=$((total+1))
-  if [ "$n_rc" = "124" ] || [ "$w_rc" = "124" ]; then
+  if [ "$n_rc" = "124" ] || [ "$w0_rc" = "124" ] || [ "$w1_rc" = "124" ]; then
     echo "  SKIP  $repo/$(basename "$entry") (timeout)"; skipped=$((skipped+1)); return
   fi
-  if [ "$n_out" = "$w_out" ] && [ "$n_rc" = "$w_rc" ]; then
+  if [ "$w1_out" != "$w0_out" ] || [ "$w1_rc" != "$w0_rc" ]; then
+    echo "  x V1-MISMATCH $repo/$(basename "$entry") (verified rc=$w1_rc vs plain-wasm rc=$w0_rc)"
+    MISMATCHES+=("$repo/$entry")
+    mismatch=$((mismatch+1)); return
+  fi
+  if [ "$n_out" = "$w1_out" ] && [ "$n_rc" = "$w1_rc" ]; then
     if [ "$n_rc" != "0" ]; then
       echo "  MATCH $repo/$(basename "$entry") (both exit $n_rc)"
     else
       echo "  MATCH $repo/$(basename "$entry")"
     fi
     match=$((match+1))
-  elif [ "$n_rc" != "0" ] && [ "$w_rc" != "0" ]; then
-    # both failed differently (env-dependent programs) — surface but do not fail the gate
-    echo "  SKIP  $repo/$(basename "$entry") (both-fail, rc $n_rc vs $w_rc)"; skipped=$((skipped+1))
+  elif [ "$n_rc" != "0" ] && [ "$w1_rc" != "0" ]; then
+    echo "  SKIP  $repo/$(basename "$entry") (both-fail, rc $n_rc vs $w1_rc)"; skipped=$((skipped+1))
   else
-    echo "  ✗ MISMATCH $repo/$(basename "$entry") (native rc=$n_rc, wasm rc=$w_rc)"
-    MISMATCHES+=("$repo/$entry")
-    mismatch=$((mismatch+1))
+    # native != wasm but v0wasm == v1wasm: a pre-existing cross-target divergence
+    # (timing output, host imports, the 4MB memory ceiling...) — org-ledger material.
+    echo "  ~ PREEXISTING $repo/$(basename "$entry") (native rc=$n_rc vs wasm rc=$w1_rc, v0==v1)"
+    PREEXISTING+=("$repo/$entry")
+    preexisting=$((preexisting+1))
   fi
 }
 
@@ -84,9 +97,13 @@ for d in "$ORG_DIR"/*/; do
 done
 
 echo
-echo "org byte-verify: $match match / $mismatch MISMATCH / $skipped skipped (of $total)"
+echo "org byte-verify: $match match / $mismatch V1-MISMATCH / $preexisting pre-existing / $skipped skipped (of $total)"
+if [ "$preexisting" -ne 0 ]; then
+  echo "PRE-EXISTING native!=wasm divergences (v0==v1 — NOT Release-2 blockers):"
+  printf '  %s\n' "${PREEXISTING[@]}"
+fi
 if [ "$mismatch" -ne 0 ]; then
-  echo "MISMATCHES:"; printf '  %s\n' "${MISMATCHES[@]}"
+  echo "V1-ATTRIBUTABLE MISMATCHES:"; printf '  %s\n' "${MISMATCHES[@]}"
   exit 1
 fi
-echo "ORG BYTE-VERIFY OK (the Release-② gate holds on runnable entries)"
+echo "ORG BYTE-VERIFY OK (zero v1-attributable mismatches — the Release-2 gate holds)"
