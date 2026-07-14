@@ -351,6 +351,22 @@ native-FFI walls.
   `spec/wasm_cross/env_get.almd` (243 equal). almai 7→0, homullus 9→6,
   RATCHET 0 (the fixture itself lowers through v1).
 
+- **homullus residual 6 = external-type artifacts + the glob path-model gap**:
+  `ok(Resp{...})` tails lower fine single-module (probe-verified) — the walls
+  come from `almai.LLMResponse`/`almai.ToolCall` being an EXTERNAL package's
+  types the per-file classify cannot resolve (the same artifact class as
+  ceangal's cross-module residue). The one REAL gap: `fs.glob` — native
+  matches patterns against ABSOLUTE canonicalized host paths (runtime/rs
+  fs.rs `glob_recursive`), which the wasm preopen path model cannot
+  reproduce byte-identically; v0-wasm ALSO has no glob dispatch (the same
+  latent-ICE class env.get was). Opening it needs a PATH-MODEL contract
+  first — out of the byte-parity subset by design until then.
+- **Measurement is now the org-arc bottleneck**: per-file classify has
+  bottomed on artifacts across ceangal/homullus. The next high-leverage
+  brick is sibling/package-RESOLVED classification (classify with the same
+  import resolution render_program uses), so org numbers count only real
+  lowering gaps.
+
 ## Remaining threads
 
 - **wall=0 count 21 → 19 (honesty, not regression)**: the linearization guard
