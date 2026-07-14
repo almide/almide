@@ -648,6 +648,7 @@ impl LowerCtx {
             StrStr,
             StrInt,
             IntStr,
+            StrVariant(String),
             ListStr,
             MapHval,
             ScalarAggregate,
@@ -718,6 +719,24 @@ impl LowerCtx {
             // `list.enumerate` shaped literals): recursive drop via the existing
             // `Op::DropListIntStr` (rc_dec slot1 @20 only — likewise type-agnostic).
             ListElemDrop::IntStr
+        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+            && is_heap_ty(&tys[1]) && !self.is_flat_heap_tuple_slot(&tys[1]))
+        {
+            // A `(String, <RICH variant>)` TUPLE element (`[("x", ValInt(64)), ("y",
+            // ValStr("s"))]` — generic_chain_unwrap_or's `List[(String, V)]` metadata
+            // pairs, `type V = ValInt(Int) | ValStr(String)`): the MIRROR of `StrInt`,
+            // but slot1 is NOT scalar — it is a variant needing its OWN recursive drop
+            // (a `ValStr` payload owns a String). `DropListStrInt`'s render only ever
+            // rc_decs slot0 and leaves slot1 UNTOUCHED (sound only when slot1 is truly
+            // scalar) — reusing it here would silently LEAK every `ValStr` element's
+            // String, so this is a genuinely new drop shape: a generated
+            // `$__drop_list_str_<V>` (drop_sources.rs) frees slot0 (String, flat
+            // rc_dec) AND recurses into slot1 via the variant's own already-generated
+            // `$__drop_<V>` (V is a real, non-generic type — no shadow-type machinery
+            // needed, unlike B117's generic-instantiation case).
+            let Ty::Tuple(tys) = &elem_ty else { unreachable!() };
+            let Some(vname) = self.custom_variant_type_name(&tys[1]) else { return None };
+            ListElemDrop::StrVariant(vname)
         } else if matches!(&elem_ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
                 if i.len() == 1 && matches!(i[0], Ty::String))
@@ -837,13 +856,16 @@ impl LowerCtx {
                     return None;
                 }
             }
-            if matches!(kind, ListElemDrop::StrInt | ListElemDrop::IntStr) {
-                // A `(String, Int)` / `(Int, String)` TUPLE LITERAL element builds through the
-                // general masked-tuple builder (String slot fresh OWNED + moved in, Int slot a
-                // plain scalar store; `try_lower_tuple_construct` already handles this exact
-                // mix for other callers). The list's OWN drop (registered below via
-                // `variant_drop_handles`) frees each tuple's String slot recursively, so the
-                // tuple's own `record_masks` entry never scope-end-fires — mirrored from the
+            if matches!(kind, ListElemDrop::StrInt | ListElemDrop::IntStr | ListElemDrop::StrVariant(_)) {
+                // A `(String, Int)` / `(Int, String)` / `(String, <rich variant>)` TUPLE LITERAL
+                // element builds through the general masked-tuple builder (String slot fresh
+                // OWNED + moved in, the other slot a scalar store OR — for `StrVariant` — a
+                // fresh OWNED variant ctor block via `lower_owned_heap_field`'s existing
+                // ctor-call dispatch; `try_lower_tuple_construct` already handles arbitrary
+                // heap/scalar slot mixes for other callers, so no new construction path is
+                // needed here). The list's OWN drop (registered below via
+                // `variant_drop_handles`) frees each tuple's slots recursively, so the tuple's
+                // own `record_masks` entry never scope-end-fires — mirrored from the
                 // `(Int, String)` precedent in calls_p2.rs/binds.rs.
                 if let IrExprKind::Tuple { elements: tels } = &e_ref.kind {
                     let tels = tels.clone();
@@ -931,6 +953,14 @@ impl LowerCtx {
             }
             ListElemDrop::IntStr => {
                 self.variant_drop_handles.insert(dst, "list_int_str".to_string());
+            }
+            ListElemDrop::StrVariant(vname) => {
+                // Routes through `Op::DropVariant`'s generic `variant_drop_handles` fallback
+                // (drop_op_for, mod_p3.rs) to `$__drop_<ty>` — `ty` = `list_str_<vname>` names
+                // the GENERATED `$__drop_list_str_<vname>` (drop_sources.rs, mirroring the
+                // `$__drop_list_<V>`/`$__drop_res_<V>` generation this session's B117 extended).
+                let vname_fn = drop_fn_ident(&vname);
+                self.variant_drop_handles.insert(dst, format!("list_str_{vname_fn}"));
             }
             ListElemDrop::MapHval => {
                 self.variant_drop_handles.insert(dst, "list_map_hval".to_string());

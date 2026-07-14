@@ -189,6 +189,35 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                  let q: {vn} = prim.load_handle(h + 12)\n    __drop_{vn_fn}(q)\n  }} else ()\n  \
                prim.rc_dec(h)\n}}\n"
         ));
+        // `List[(String, <rich variant V>)]` — a TUPLE-wrapped rich-variant Err/value
+        // payload (`generic_chain_unwrap_or`'s `List[(String, V)]` metadata pairs,
+        // `type V = ValInt(Int) | ValStr(String)`): each list element is its OWN
+        // separately-refcounted tuple block (`[rc][len][cap][String@12][V-handle@20]`,
+        // the SAME layout `DropListStrInt` walks) — but unlike `DropListStrInt` (whose
+        // render never reads slot1, sound only when slot1 is scalar), slot1 here is a
+        // RICH variant that owns further heap (a `ValStr` payload's String) and must
+        // recurse via the variant's own `$__drop_<V>` — a flat `rc_dec` of the tuple
+        // block alone would LEAK every `ValStr` element's String. Mirrors the
+        // per-element-then-per-slot walk `__drop_list_map_hval` (map_hval.almd) uses
+        // for a Map-valued list element, specialized to a 2-slot tuple's own rc check.
+        out.push_str(&format!(
+            "fn __drop_list_str_{vn_fn}(xs: List[(String, {vn})]) -> Unit = {{\n  \
+               let h = prim.handle(xs)\n  \
+               if prim.load32(h + 0) == 1 then __drop_list_str_{vn_fn}_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}}\n\
+             fn __drop_list_str_{vn_fn}_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else {{\n    \
+                 let th = prim.load64(h + 12 + i * 8)\n    \
+                 if prim.load32(th + 0) == 1 then {{\n      \
+                   prim.rc_dec(prim.load64(th + 12))\n      \
+                   let v: {vn} = prim.load_handle(th + 20)\n      \
+                   __drop_{vn_fn}(v)\n    \
+                 }} else ()\n    \
+                 prim.rc_dec(th)\n    \
+                 __drop_list_str_{vn_fn}_loop(h, n, i + 1)\n  \
+               }}\n"
+        ));
     }
     out
 }
