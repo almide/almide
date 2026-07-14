@@ -248,6 +248,16 @@ fn expr_has_value_exit(e: &IrExpr, vx: Option<(VarId, VarId, &Ty)>) -> bool {
         found: bool,
     }
     impl IrVisitor for S<'_> {
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            // A RAW `guard c else <value>` (pre-desugar_guard — the pre-TCO chain) IS a
+            // value exit; without this the Block fast-path passes it through unchanged.
+            if let IrStmtKind::Guard { else_, .. } = &s.kind {
+                if else_.ty == *self.ret_ty {
+                    self.found = true;
+                }
+            }
+            almide_ir::visit::walk_stmt(self, s);
+        }
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::If { else_, .. } = &e.kind {
                 if else_.ty == *self.ret_ty && e.ty == Ty::Unit {
@@ -282,6 +292,68 @@ fn loop_uw_rewrite(
     }
     match &e.kind {
         IrExprKind::Block { stmts, expr: tail } => {
+            // RAW `guard c else <value>` VALUE-EXIT (vx enabled): this pass runs from the
+            // PRE-TCO `desugar_heap_branches` call — BEFORE `desugar_guard` has restructured
+            // loop-body guards — so the value exit is still a Guard STATEMENT here. Rewrite
+            // it directly to the flag form (`if c then <rest> else { __vres = n; __vf =
+            // true }`) — fusing desugar_guard's continuation-into-then restructuring with
+            // the vx delivery. WITHOUT this the Block fast-path above returns the body
+            // UNCHANGED (a Guard is invisible to `expr_has_value_exit`'s If-only scan), the
+            // machinery still gets emitted, and the later-desugared heterogeneous `else
+            // ok(n)` reaches lowering where the Unit-arm tail dispatch ELIDES it — the
+            // silent empty-else infinite spin the first probe hit.
+            if let Some((vf, vres, ret_ty)) = vx {
+                for (i, s) in stmts.iter().enumerate() {
+                    let IrStmtKind::Guard { cond, else_ } = &s.kind else { continue };
+                    if else_.ty != *ret_ty {
+                        continue;
+                    }
+                    if expr_has_unwrap(cond) || expr_has_unwrap(else_) {
+                        return None;
+                    }
+                    // SCALAR Ok payload only (the `__vn` slot is an i64 local); anything
+                    // else declines → the loop keeps its honest wall.
+                    let payload = match &else_.kind {
+                        IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => (**expr).clone(),
+                        _ => return None,
+                    };
+                    if stmts[..i].iter().any(stmt_has_unwrap) {
+                        return None;
+                    }
+                    let rest = loop_uw_node(
+                        IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
+                        Ty::Unit,
+                    );
+                    let then_b = loop_uw_rewrite(&rest, ef, ev, err_ty, vx, nv)?;
+                    let set_res = IrStmt {
+                        kind: IrStmtKind::Assign { var: vres, value: payload },
+                        span: None,
+                    };
+                    let set_flag = IrStmt {
+                        kind: IrStmtKind::Assign {
+                            var: vf,
+                            value: loop_uw_node(IrExprKind::LitBool { value: true }, Ty::Bool),
+                        },
+                        span: None,
+                    };
+                    let ne = loop_uw_node(
+                        IrExprKind::Block { stmts: vec![set_res, set_flag], expr: None },
+                        Ty::Unit,
+                    );
+                    let g = loop_uw_node(
+                        IrExprKind::If {
+                            cond: Box::new(cond.clone()),
+                            then: Box::new(then_b),
+                            else_: Box::new(ne),
+                        },
+                        Ty::Unit,
+                    );
+                    return Some(loop_uw_node(
+                        IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(g)) },
+                        Ty::Unit,
+                    ));
+                }
+            }
             // First DIRECT `let v=e!` / `Expr(e!)`: push the rest of the block into its ok-arm.
             for (i, s) in stmts.iter().enumerate() {
                 if let Some((ok_pat, inner)) = loop_uw_unwrap_stmt(s, err_ty) {
@@ -506,28 +578,37 @@ pub fn desugar_loop_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> 
         IrExprKind::While { cond, body: lbody } => (None, Some(cond), lbody),
         _ => return None,
     };
-    // A VALUE early-exit alongside the `!`s: rewriting only the `!`s would leave the
-    // heterogeneous exit arm with NO flag — the emitted loop then neither exits nor
-    // advances on that path (a probe-confirmed infinite spin, worse than a wall).
-    // DECLINE the whole pass: the raw `!` keeps the honest early-return wall.
-    if body_has_value_exit(lbody) {
-        return None;
+    // The VALUE-exit pair — allocated ONLY when the body carries one (existing `!`-only
+    // loops keep their exact prior shape, zero churn). ENABLED now that both B127-recorded
+    // lower-layer gaps are closed: (a) the lp5 conditional-heap-reassign silent drop is
+    // fixed by `desugar_unit_if_heap_reassign` (the post-loop `if __vf then { __r1 =
+    // ok(__vn) }` delivery below is EXACTLY that shape — the SSA pass rewrites it to a
+    // let-bound value-`if` the proven heap-result-`if` machinery lowers); (b) the
+    // statement-if fold below already keeps the terminal dispatch ONE level (no nested
+    // per-arm `__ev` release — the CBranch-expressible shape). GATED `tail_foldable`:
+    // the loop must be the block's FINAL statement and the tail CALL-FREE (moving it
+    // into the `__r1` init below is then count- and effect-invariant), the Ok payload
+    // SCALAR (the `__vn` slot is an i64 local). Anything else keeps the honest wall.
+    let has_vx = body_has_value_exit(lbody);
+    if has_vx {
+        let tail_foldable = stmts[loop_idx + 1..].is_empty()
+            && tail.as_deref().is_some_and(|t| !crate::lower::expr_contains_call(t))
+            && !is_heap_ty(&ok_scalar_ty);
+        if !tail_foldable {
+            return None;
+        }
     }
     let ef = VarId(*next_var);
     let ev = VarId(*next_var + 1);
     *next_var += 2;
-    // The VALUE-exit pair — allocated ONLY when the body carries one (existing `!`-only
-    // loops keep their exact prior shape, zero churn).
-    // VALUE-exit delivery is DISABLED (hard `None`): every delivery shape tried ships one of
-    // two pre-existing lower-layer gaps — (a) a heap RESULT slot conditionally reassigned
-    // OUTSIDE a loop is silently DROPPED (probe `pick(true)` → v0 `ok:42`, v1 `err:normal` —
-    // a live wrong-value class, no wall), and (b) a two-level TERMINAL dispatch makes each
-    // nested arm re-release the fn-scope `__ev` slot per-path, which the v4 certificate's
-    // CBranch cannot express — `flush_branch` emits its designed `{i|}` poison and the
-    // corpus-wall backing gate breaches. Until (a) is fixed (the honest prerequisite), a
-    // value-exit loop keeps its wall; `!`-only bodies get the proven err-flag delivery.
-    let (vf, vres): (Option<VarId>, Option<VarId>) = (None, None);
-    let _ = &ok_scalar_ty;
+    let (vf, vres): (Option<VarId>, Option<VarId>) = if has_vx {
+        let f = VarId(*next_var);
+        let r = VarId(*next_var + 1);
+        *next_var += 2;
+        (Some(f), Some(r))
+    } else {
+        (None, None)
+    };
     // Rewrite the loop body's `!`s (declining the whole pass if any cannot be cleanly placed).
     let body_block =
         loop_uw_node(IrExprKind::Block { stmts: lbody.clone(), expr: None }, Ty::Unit);
@@ -706,10 +787,31 @@ pub fn desugar_loop_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> 
             body.ty.clone(),
         )
     };
+    // VALUE-exit variant: the err payload is an OWNED COPY (`__ev ++ ""` — the same
+    // trick `loop_uw_err_arm` uses for the slot assign). The tail-duplicated dispatch
+    // nests `err(__ev)` TWICE (once per `__vf` arm); a raw Var payload made the nested
+    // instance's release-parity sweep double-release `__ev` on the (vf=0, ef=1) path
+    // (probe: rc_dec memory fault on the error string's bytes). A fresh owned payload
+    // removes `__ev` from every arm's parity set — the fn-scope slot is released exactly
+    // once at scope end on every path. Legacy `!`-only loops keep the raw Var (their
+    // one-level dispatch is the proven shipped shape).
+    let err_payload = if has_vx {
+        loop_uw_node(
+            IrExprKind::BinOp {
+                op: almide_ir::BinOp::ConcatStr,
+                left: Box::new(loop_uw_node(IrExprKind::Var { id: ev }, err_ty.clone())),
+                right: Box::new(loop_uw_node(
+                    IrExprKind::LitStr { value: String::new() },
+                    Ty::String,
+                )),
+            },
+            err_ty.clone(),
+        )
+    } else {
+        loop_uw_node(IrExprKind::Var { id: ev }, err_ty.clone())
+    };
     let err_result = loop_uw_node(
-        IrExprKind::ResultErr {
-            expr: Box::new(loop_uw_node(IrExprKind::Var { id: ev }, err_ty.clone())),
-        },
+        IrExprKind::ResultErr { expr: Box::new(err_payload) },
         body.ty.clone(),
     );
     let new_tail = loop_uw_node(

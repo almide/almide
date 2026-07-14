@@ -505,6 +505,12 @@ fn desugar_heap_branches_inner(
             cur = Some(r);
             continue;
         }
+        // A UNIT `if` conditionally reassigning ONE heap var → SSA-ify to a let-bound
+        // value-`if` (the lp5 wrong-value class; see `desugar_unit_if_heap_reassign`).
+        if let Some(r) = desugar_unit_if_heap_reassign(src, next_var) {
+            cur = Some(r);
+            continue;
+        }
         // STATEMENT-CONTROL continuation-lift: a UNIT `if`/`match` STATEMENT carrying a stmt/let `!`
         // followed by a non-empty continuation. Lift `after` into each arm (tail-duplication) so the
         // branch becomes the block TAIL — the tail effect-unwrap then resolves the `!`. Runs in this
@@ -995,3 +1001,216 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
     })
 }
 
+
+/// A UNIT statement-`if` whose arm(s) CONDITIONALLY REASSIGN one heap var declared earlier in
+/// the SAME block (`var r = err(..); if c then { r = ok(42) } else { () }; …r…` — the lp5
+/// shape) is SSA-IFIED into a fresh LET-bound value-`if`
+/// (`let r' = if c then ok(42) else r; …r'…`): each assigning arm's assign becomes the arm's
+/// TAIL value, a non-assigning arm keeps its statements and yields the old `r`, and every
+/// LATER reference to `r` substitutes to `r'`. The let-bound heap `if` then flows through the
+/// EXISTING tail-duplication + heap-result-`if` machinery (per-arm construction + release
+/// parity — the `pick` Var-arm `Dup` precedent), so the conditional value merges BY VALUE
+/// instead of by slot mutation — mod_p3's in-frame heap-assign elision (which silently
+/// DROPPED the reassignment: probe `pick(true)` printed v0 `ok:42` vs v1 `err:normal`, the
+/// B127-recorded lp5 LIVE WRONG-VALUE bug) is never reached for this shape. Guards: exactly
+/// ONE heap var assigned across the two arms; at most one assign per arm, only as the arm's
+/// LAST statement (deep-scanned: no nested assigns to it anywhere in either arm); `r` bound
+/// EARLIER IN THIS BLOCK (an outer-block `r` would leave un-substituted references outside
+/// this block's remainder); no LATER assign to `r` after the `if`. Anything else keeps its
+/// existing path (the honest wall / the loop machinery). Count-invariant: the assign's value
+/// moves to tail position, the substituted reads stay reads — no call added or removed — and
+/// the pass runs inside the SHARED `desugar_heap_branches` fixpoint, so `mir == ir` holds.
+pub fn desugar_unit_if_heap_reassign(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    use almide_ir::{substitute_var_in_expr, substitute_var_in_stmt, Mutability};
+    fn assigns_to(e: &IrExpr, var: VarId) -> bool {
+        use almide_ir::visit::IrVisitor;
+        struct S {
+            var: VarId,
+            found: bool,
+        }
+        impl IrVisitor for S {
+            fn visit_stmt(&mut self, s: &IrStmt) {
+                if matches!(&s.kind, IrStmtKind::Assign { var, .. } if *var == self.var) {
+                    self.found = true;
+                }
+                almide_ir::visit::walk_stmt(self, s);
+            }
+        }
+        let mut s = S { var, found: false };
+        s.visit_expr(e);
+        s.found
+    }
+    fn heap_assigned_vars(e: &IrExpr, out: &mut std::collections::HashSet<VarId>) {
+        use almide_ir::visit::IrVisitor;
+        struct S<'a>(&'a mut std::collections::HashSet<VarId>);
+        impl IrVisitor for S<'_> {
+            fn visit_stmt(&mut self, s: &IrStmt) {
+                if let IrStmtKind::Assign { var, value } = &s.kind {
+                    if is_heap_ty(&value.ty) {
+                        self.0.insert(*var);
+                    }
+                }
+                almide_ir::visit::walk_stmt(self, s);
+            }
+        }
+        S(out).visit_expr(e);
+    }
+    // Split an arm: `Some(Some((prefix_stmts, assigned_value)))` when its LAST stmt is the
+    // arm's single deep assign to `r`; `Some(None)` when the arm never assigns `r` (kept
+    // whole); `None` declines the whole rewrite.
+    fn arm_split(arm: &IrExpr, r: VarId) -> Option<Option<(Vec<IrStmt>, IrExpr)>> {
+        let is_unit_tail = |t: &Option<Box<IrExpr>>| match t.as_deref() {
+            None => true,
+            Some(e) => matches!(&e.kind, IrExprKind::Unit),
+        };
+        let deep_assigns = {
+            let mut set = std::collections::HashSet::new();
+            heap_assigned_vars(arm, &mut set);
+            set.contains(&r)
+        };
+        if !deep_assigns {
+            return Some(None);
+        }
+        let IrExprKind::Block { stmts, expr } = &arm.kind else { return None };
+        if !is_unit_tail(expr) {
+            return None;
+        }
+        let Some((last, pre)) = stmts.split_last() else { return None };
+        let IrStmtKind::Assign { var, value } = &last.kind else { return None };
+        if *var != r {
+            return None;
+        }
+        // The last stmt must be the ONLY assign to r in the arm (deep).
+        for s in pre {
+            let probe = IrExpr {
+                kind: IrExprKind::Block { stmts: vec![s.clone()], expr: Option::None },
+                ty: Ty::Unit,
+                span: Option::None,
+                def_id: Option::None,
+            };
+            if assigns_to(&probe, r) {
+                return None;
+            }
+        }
+        Some(Some((pre.to_vec(), value.clone())))
+    }
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        return None;
+    };
+    for (i, s) in stmts.iter().enumerate() {
+        let IrStmtKind::Expr { expr: ife } = &s.kind else { continue };
+        let IrExprKind::If { cond, then, else_ } = &ife.kind else { continue };
+        let mut assigned = std::collections::HashSet::new();
+        heap_assigned_vars(then, &mut assigned);
+        heap_assigned_vars(else_, &mut assigned);
+        if assigned.len() != 1 {
+            continue;
+        }
+        let r = *assigned.iter().next().unwrap();
+        // `r` must be bound earlier in THIS block.
+        let Some(rty) = stmts[..i].iter().find_map(|b| match &b.kind {
+            IrStmtKind::Bind { var, ty, .. } if *var == r => Some(ty.clone()),
+            _ => Option::None,
+        }) else {
+            continue;
+        };
+        if !is_heap_ty(&rty) {
+            continue;
+        }
+        // The condition is evaluated before the arms — it must not assign r.
+        if assigns_to(cond, r) {
+            continue;
+        }
+        // No LATER assign to r after this if.
+        let later = IrExpr {
+            kind: IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
+            ty: Ty::Unit,
+            span: Option::None,
+            def_id: Option::None,
+        };
+        if assigns_to(&later, r) {
+            continue;
+        }
+        let (Some(then_split), Some(else_split)) = (arm_split(then, r), arm_split(else_, r))
+        else {
+            continue;
+        };
+        let rprime = VarId(*next_var);
+        *next_var += 1;
+        let old_r = IrExpr {
+            kind: IrExprKind::Var { id: r },
+            ty: rty.clone(),
+            span: ife.span.clone(),
+            def_id: Option::None,
+        };
+        let mk_arm = |split: Option<(Vec<IrStmt>, IrExpr)>, orig: &IrExpr| -> IrExpr {
+            match split {
+                Some((pre, val)) => IrExpr {
+                    kind: IrExprKind::Block { stmts: pre, expr: Some(Box::new(val)) },
+                    ty: rty.clone(),
+                    span: orig.span.clone(),
+                    def_id: Option::None,
+                },
+                Option::None => {
+                    // Keep the arm's own statements (its effects run), yield the old r.
+                    let kept = match &orig.kind {
+                        IrExprKind::Block { stmts, .. } => stmts.clone(),
+                        IrExprKind::Unit => vec![],
+                        _ => vec![IrStmt {
+                            kind: IrStmtKind::Expr { expr: orig.clone() },
+                            span: orig.span.clone(),
+                        }],
+                    };
+                    IrExpr {
+                        kind: IrExprKind::Block {
+                            stmts: kept,
+                            expr: Some(Box::new(old_r.clone())),
+                        },
+                        ty: rty.clone(),
+                        span: orig.span.clone(),
+                        def_id: Option::None,
+                    }
+                }
+            }
+        };
+        let new_if = IrExpr {
+            kind: IrExprKind::If {
+                cond: cond.clone(),
+                then: Box::new(mk_arm(then_split, then)),
+                else_: Box::new(mk_arm(else_split, else_)),
+            },
+            ty: rty.clone(),
+            span: ife.span.clone(),
+            def_id: Option::None,
+        };
+        let bind = IrStmt {
+            kind: IrStmtKind::Bind {
+                var: rprime,
+                mutability: Mutability::Let,
+                ty: rty.clone(),
+                value: new_if,
+            },
+            span: s.span.clone(),
+        };
+        let rp_ref = IrExpr {
+            kind: IrExprKind::Var { id: rprime },
+            ty: rty,
+            span: Option::None,
+            def_id: Option::None,
+        };
+        let mut out = stmts[..i].to_vec();
+        out.push(bind);
+        for later_s in &stmts[i + 1..] {
+            out.push(substitute_var_in_stmt(later_s, r, &rp_ref));
+        }
+        let new_tail =
+            tail.as_deref().map(|t| Box::new(substitute_var_in_expr(t, r, &rp_ref)));
+        return Some(IrExpr {
+            kind: IrExprKind::Block { stmts: out, expr: new_tail },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        });
+    }
+    None
+}

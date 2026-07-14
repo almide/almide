@@ -987,6 +987,30 @@ B128. **Closed `wrap_lists` — the "(B) mechanism / loop-slot" frontier (classi
    present — attribution: the concurrent fork's in-progress value-exit work (its own final
    combined ladder gates it).
 
+B128. **Closed `find_first_even` — walled-real (lowering) is ZERO (1 → 0). The ENDGAME
+   condition is met: `classify_corpus` reports `walled real (lowering) : 0`.** Two fixes:
+   (1) the lp5 LIVE WRONG-VALUE bug (B127's prerequisite (a)): mod_p3's in-frame heap-assign
+   elision silently dropped a conditional reassign — `desugar_unit_if_heap_reassign`
+   (desugar_branch.rs, in the shared fixpoint) SSA-ifies a Unit `if` reassigning ONE heap var
+   into a fresh let-bound value-`if` (`let r' = if c then ok(42) else r`) + substitutes later
+   reads, so the value merges through the proven heap-result-`if` machinery (probe `pick`:
+   ok:42/err:normal byte-identical, was err:normal/err:normal). (2) the value-exit delivery
+   (desugar_loop.rs) is ENABLED — B127's designed machinery unchanged — plus two gaps found
+   live: the pre-TCO chain sees RAW `guard c else ok(n)` STATEMENTS (before desugar_guard), so
+   `loop_uw_rewrite` gained a Guard-stmt value-exit arm and `expr_has_value_exit` a Guard scan
+   (the invisible-Guard fast-path pass-through emitted the machinery but left the exit arm to
+   be ELIDED at lowering — an empty-else infinite spin); and the tail-duplicated nested
+   dispatch double-released `__ev` on the (vf=0, ef=1) path (rc_dec fault on the error
+   string's bytes) — the vx err payload is now an OWNED COPY (`__ev ++ ""`, loop_uw_err_arm's
+   trick), removing `__ev` from every arm's parity set. One unit test updated: `branch_arm_
+   heap_reassign_is_deferred_and_safe` asserted the OLD elision (the lp5 bug enshrined) — now
+   `branch_arm_heap_reassign_ssa_merges_by_value` (both allocs real, ownership verified).
+   Verified: all THREE find_first_even outcomes byte-identical (ok:4 / err:no even number
+   found / err:not a number: x); 100k combined leak-loop under 4MB (find_first_even ×3
+   outcomes + pick per iteration — 2950000 both targets, no leak, no trap); mir 583/583;
+   classify `walled real (lowering) : 0`, zero newly-walled; spec 283/283; GATE OK;
+   CORPUS WALL OK, KERNEL OK (286s), FORBIDDEN=0. **0. The wall histogram is closed.**
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

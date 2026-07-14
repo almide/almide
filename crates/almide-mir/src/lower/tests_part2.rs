@@ -504,11 +504,16 @@
     }
 
     #[test]
-    fn branch_arm_heap_reassign_is_deferred_and_safe() {
+    fn branch_arm_heap_reassign_ssa_merges_by_value() {
         // var z = []; if c then { z = [9] } else { }  — the arm reassigns pre-branch z.
-        // A naive rebind would point `value_of[z]` at an arm-local handle the per-arm
-        // teardown drops, so a post-branch read would UAF. The reassign is DEFERRED: `z`
-        // keeps its still-live pre-branch handle. Exactly one Alloc (`[]`), one Drop.
+        // HISTORY: this used to assert the reassign was DEFERRED (elided) — which pinned
+        // `z`'s pre-branch handle (no UAF) but silently DROPPED the new value: a LIVE
+        // wrong-value class (the lp5 probe: v0 `ok:42`, v1 `err:normal`, no wall —
+        // B127/B128). `desugar_unit_if_heap_reassign` now SSA-ifies the shape into a
+        // let-bound value-`if` (`let z' = if c then [9] else z`), so the conditional
+        // value merges BY VALUE through the proven heap-result-`if` machinery: BOTH
+        // allocs are real (the pre-branch `[]` and the arm's `[9]`), every object is
+        // dropped exactly once on each path, and the ownership certificate verifies.
         let then = unit_block(vec![stmt(IrStmtKind::Assign {
             var: VarId(0),
             value: ir_expr(IrExprKind::List { elements: vec![] }, list_int()),
@@ -517,12 +522,14 @@
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             stmt(IrStmtKind::Expr { expr: iff(then, unit_block(vec![]), Ty::Unit) }),
         ]);
-        let mir = lower_body(&b, "main").expect("the arm reassign is deferred, not walled");
+        let mir = lower_body(&b, "main").expect("the arm reassign SSA-merges, not walled");
         let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
-        let drops = mir.ops.iter().filter(|o| matches!(o, Op::Drop { .. })).count();
-        assert_eq!(allocs, 1, "only the pre-branch alloc — the arm reassign is deferred: {:?}", mir.ops);
-        assert_eq!(drops, 1, "z dropped exactly once at scope end: {:?}", mir.ops);
-        assert_eq!(verify_ownership(&mir), Ok(()), "no path-dependent UAF — z stays pinned");
+        assert_eq!(
+            allocs, 2,
+            "both the pre-branch alloc AND the arm's new value are real: {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()), "every path drop-balanced — no UAF, no leak");
     }
 
     #[test]
