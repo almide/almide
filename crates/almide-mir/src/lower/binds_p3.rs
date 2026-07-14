@@ -231,9 +231,14 @@ impl LowerCtx {
         if !is_heap_ty(&a[0]) || matches!(a[0], Ty::String) {
             return true;
         }
+        // A rich (recursive-drop) variant element frees via the generated `$__drop_list_<E>`;
+        // a FLAT variant element (nullary/scalar-only ctors — `Wrapped(List[Policy])`, #484)
+        // frees via the generated `$__drop_<T>`'s `__drop_list_str` per-element sweep (the
+        // List[flat-variant] case, mirroring the record generator's precedent).
         self.variant_layouts
             .field_variant_name(&a[0])
             .is_some_and(|n| self.variant_layouts.needs_recursive_drop(&n, &|_| false))
+            || self.variant_layouts.is_flat_variant_ty(&a[0])
     }
 
     /// Is `ty` a scalar, OR a ONE-LEVEL-EXACT heap type — a value whose ENTIRE free is a
@@ -650,7 +655,9 @@ impl LowerCtx {
             IntStr,
             StrVariant(String),
             StrMapStr,
+            StrListOpt,
             RecordInt(String),
+            MapMlo,
             ListStr,
             MapHval,
             ScalarAggregate,
@@ -734,6 +741,19 @@ impl LowerCtx {
             // (a Map is not a custom variant, so that arm's name lookup would decline).
             ListElemDrop::StrMapStr
         } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+            && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
+                if b.len() == 1
+                    && matches!(&b[0], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, o)
+                        if o.len() == 1 && matches!(o[0], Ty::Int))))
+        {
+            // A `(String, List[Option[Int]])` TUPLE element (compound_repr_interp's `deep`
+            // pairs list, `["k": [some(1), none]]` desugared to `map.from_list_mlo([("k",
+            // <lenlist>)])`): slot1 is a LIST owning its Option-block slots — the static
+            // `$__drop_list_str_mlo` (map_mlo.almd) frees slot0 flat and sweeps the
+            // last-ref inner list (a flat rc_dec would leak every Option block). Same
+            // placement rationale as StrMapStr above.
+            ListElemDrop::StrListOpt
+        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
             && is_heap_ty(&tys[1]) && !self.is_flat_heap_tuple_slot(&tys[1]))
         {
             // A `(String, <RICH variant>)` TUPLE element (`[("x", ValInt(64)), ("y",
@@ -786,6 +806,12 @@ impl LowerCtx {
             // call result, moved in); the list frees per-element via the self-hosted
             // `$__drop_list_map_hval` (each element through `__drop_map_hval`).
             ListElemDrop::MapHval
+        } else if crate::lower::is_map_mlo_ty(&elem_ty) {
+            // A `List[Map[String, List[Option[Int]]]]` literal (compound_repr_interp's
+            // `deep` outer list): each element is an mlo map block (a from_list_mlo call
+            // result, moved in); the list frees per-element via the self-hosted
+            // `$__drop_list_map_mlo` (each element through `__drop_map_mlo`).
+            ListElemDrop::MapMlo
         } else if matches!(&elem_ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
                 if b.len() == 1 && !is_heap_ty(&b[0]))
@@ -909,7 +935,7 @@ impl LowerCtx {
                 }
                 return None;
             }
-            if matches!(kind, ListElemDrop::StrInt | ListElemDrop::IntStr | ListElemDrop::StrVariant(_) | ListElemDrop::StrMapStr) {
+            if matches!(kind, ListElemDrop::StrInt | ListElemDrop::IntStr | ListElemDrop::StrVariant(_) | ListElemDrop::StrMapStr | ListElemDrop::StrListOpt) {
                 // A `(String, Int)` / `(Int, String)` / `(String, <rich variant>)` TUPLE LITERAL
                 // element builds through the general masked-tuple builder (String slot fresh
                 // OWNED + moved in, the other slot a scalar store OR — for `StrVariant` — a
@@ -1025,6 +1051,12 @@ impl LowerCtx {
             }
             ListElemDrop::StrMapStr => {
                 self.variant_drop_handles.insert(dst, "list_str_mss".to_string());
+            }
+            ListElemDrop::StrListOpt => {
+                self.variant_drop_handles.insert(dst, "list_str_mlo".to_string());
+            }
+            ListElemDrop::MapMlo => {
+                self.variant_drop_handles.insert(dst, "list_map_mlo".to_string());
             }
             ListElemDrop::MapHval => {
                 self.variant_drop_handles.insert(dst, "list_map_hval".to_string());

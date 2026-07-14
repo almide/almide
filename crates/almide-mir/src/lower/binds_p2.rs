@@ -650,6 +650,10 @@ impl LowerCtx {
                     // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
                     // last-ref inner map's String slots (a flat rc_dec would leak them).
                     self.variant_drop_handles.insert(dst, "map_msv".to_string());
+                } else if crate::lower::is_map_mlo_ty(ty) {
+                    // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
+                    // last-ref value list's Option slots (a flat rc_dec would leak them).
+                    self.variant_drop_handles.insert(dst, "map_mlo".to_string());
                 } else if crate::lower::is_lenlist_list_ty(ty) {
                     // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
                     // flat DropListStr would leak each element's owned payload slots.
@@ -857,6 +861,10 @@ impl LowerCtx {
                     // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
                     // last-ref inner map's String slots (a flat rc_dec would leak them).
                     self.variant_drop_handles.insert(dst, "map_msv".to_string());
+                } else if crate::lower::is_map_mlo_ty(ty) {
+                    // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
+                    // last-ref value list's Option slots (a flat rc_dec would leak them).
+                    self.variant_drop_handles.insert(dst, "map_mlo".to_string());
                 } else if crate::lower::is_lenlist_list_ty(ty) {
                     // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
                     // flat DropListStr would leak each element's owned payload slots.

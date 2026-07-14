@@ -869,6 +869,47 @@ B124. **Closed `fan_var_thunk_list` (7 → 6)** — the #599 var-bound thunk-lis
    let-`!`-in-while early-return frontier, honest); mir 583/583; classify 7 → 6 zero
    newly-walled; spec 283/283; GATE OK; CORPUS WALL OK FORBIDDEN=0. **6, was 7.**
 
+B124. **Closed `compound_repr_interp` (its `deep` line was the last blocker) — the mlo map
+   family.** `stdlib/map_mlo.almd`: `Map[String, List[Option[Int]]]` (split layout, msv's
+   value-sweep discipline with Option-block list slots instead of inner-map strings) — new/
+   set/from_list + `__drop_map_mlo`/`__drop_list_str_mlo` (pairs literal)/`__drop_list_map_mlo`
+   (outer list) + to_string_mlo / list_to_string_lmlo displays composed over list.to_string_lo.
+   Wiring: `is_map_mlo_ty` (mod_p2), `ListElemDrop::StrListOpt`/`MapMlo` (binds_p3), bind/
+   arg-temp routes (binds_p2 ×2, calls_p4), from_list `_mlo` + two interp cases + a
+   `to_string_mlo` pass-through guard (mod_p4), registry + purity. TRAP FOUND: byte-identical
+   set fns walled ("unresolvable condition") until `__mlo_set_copy`/`__mlo_set_append` joined
+   `COOWN_PRODUCERS` (coown_names.rs) — the name-keyed rc_inc whitelist B123's msv twins are
+   in; bisected by rendering the bundle standalone. Verified: `deep` + full corpus file
+   byte-identical wasmtime-vs-v0; 100k leak-loop under 4MB (2400000 both); every `$__drop_*`
+   confirmed called in WAT; mir 583/583; spec 283/283; GATE OK. Counted with B125 below.
+
+B125. **Closed `crossmod_variant_payload_test` (#484) — ctor `List[<flat variant>]` fields**
+   (parent's closure, landed in this combined commit): the VARIANT drop generator's field
+   loop gained a `List[<flat variant>]` case (the `__drop_list_str` per-element sweep with the
+   List[String] binding-type reinterpretation, mirroring the RECORD generator's precedent),
+   and `ctor_list_field_drop_freeable` (binds_p3) now admits `is_flat_variant_ty` element
+   types — `Wrapped(List[Policy])`-class ctor args construct exactly when the generated drop
+   frees them. Verified (parent): repro byte-identical both targets (`wrap:2`/`tag`);
+   `$__drop_Tag` + sweep confirmed real+called in WAT; 100k leak-loop under 4MB (600000 both);
+   mir 583/583; the corpus file has no per-function walls. Combined counting for B124+B125:
+   6 → 4 by these two closures (`a1c25f0e`'s fan_var_thunk_list closure took 7 → 6 just
+   before); zero newly-walled (final list: codegen_effect_fn_test / codegen_loop_guard_test /
+   compound_repr_records_interp / playground_default — classify-verified exactly). Spec
+   283/283, GATE OK and CORPUS WALL OK (FORBIDDEN=0) all ran on the combined tree.
+
+DIAGNOSIS — `compound_repr_records_interp` decomposes into FOUR independent families (probed
+   standalone on the B124-era tree; no code shipped for it this pass): (a) `List[Shape]` with
+   MIXED ctor payloads incl. a record-payload variant (`[Circle(1.0), Rect(2,3), Label{text,
+   at: Point{..}}]`) — still the List[heap]-literal wall (needs a variant-list ListElemDrop
+   case admitting mixed payload shapes + a record-payload ctor materializer); (b) `List[Point]`
+   CONSTRUCTS but `${pts}` routes to the unlinked `list.to_string_x` (needs a per-record list
+   display — likely a generated or `__repr_rec_<R>`-composed `list.to_string_lrec` family);
+   (c)/(d) `Map[String, Point]` and `Map[String, Shape]` both hit `map.from_list_hval_wall` +
+   display — each needs a map family (the mlo/msv pattern with record/variant value sweeps).
+   Each family is a B-stage-sized piece; (b) is likely smallest (display-only). The file also
+   exercises bare record/variant displays (`${Point{..}}`, `${Click(10,20)}`) that the repr
+   generators already cover — re-probe before assuming any sub-shape still walls.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

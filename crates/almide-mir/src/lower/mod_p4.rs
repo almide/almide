@@ -539,6 +539,17 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
             {
                 ("list", "to_string_lr")
             }
+            // `${List[Map[String, List[Option[Int]]]]}` — compound_repr_interp's `deep`,
+            // composed from the per-element mlo map display (stdlib/map_mlo.almd).
+            Ty::Applied(TypeConstructorId::Map, kv)
+                if kv.len() == 2 && matches!(kv[0], Ty::String)
+                    && matches!(&kv[1], Ty::Applied(TypeConstructorId::List, b)
+                        if b.len() == 1
+                            && matches!(&b[0], Ty::Applied(TypeConstructorId::Option, o)
+                                if o.len() == 1 && matches!(o[0], Ty::Int))) =>
+            {
+                ("list", "to_string_lmlo")
+            }
             // `${List[Map[String, List[Int]]]}` → `[["a": [1, 2]], ["b": [3]]]` — each
             // map through its own interp (stdlib/map_hval.almd's list_to_string_lmh).
             Ty::Applied(TypeConstructorId::Map, kv)
@@ -710,6 +721,15 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
                 (Ty::String, Ty::Int) => ("map", "to_string"),
                 // `${Map[String, String]}` — quoted keys AND values (stdlib/map_to_string.almd).
                 (Ty::String, Ty::String) => ("map", "to_string_ss"),
+                // `${Map[String, List[Option[Int]]]}` — the mlo family display
+                // (stdlib/map_mlo.almd; values via the list.to_string_lo composition).
+                (Ty::String, Ty::Applied(TypeConstructorId::List, b))
+                    if b.len() == 1
+                        && matches!(&b[0], Ty::Applied(TypeConstructorId::Option, o)
+                            if o.len() == 1 && matches!(o[0], Ty::Int)) =>
+                {
+                    ("map", "to_string_mlo")
+                }
                 // `${Map[Int, String]}` — the ivh display (`[10: "x", 20: "y"]`, raw int
                 // keys + quoted/escaped String values; stdlib/map_ivh.almd).
                 (Ty::Int, Ty::String) => ("map", "to_string_ivh"),
@@ -1751,7 +1771,19 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 {
                     Some("_msv")
                 }
+                // `Map[String, List[Option[Int]]]` from_list — the mlo family
+                // (compound_repr_interp's `deep` inner-map literal).
+                (true, true)
+                    if func == "from_list"
+                        && crate::lower::is_map_mlo_ty(result_ty) =>
+                {
+                    Some("_mlo")
+                }
                 (true, true) if func == "to_string_hval" => Some(""),
+                // An ALREADY-SUFFIXED mlo display (`map.to_string_mlo` from the interp
+                // leaf) — pass through verbatim (re-suffixing would fabricate
+                // `to_string_mlo_hval_wall`).
+                (true, true) if func == "to_string_mlo" => Some(""),
                 (true, true) if !val_is_string => Some("_hval_wall"),
                 (true, true) if key_is_string => matches!(
                     func,

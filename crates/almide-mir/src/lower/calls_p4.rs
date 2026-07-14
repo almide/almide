@@ -1376,6 +1376,10 @@ impl LowerCtx {
                 // sweeps each last-ref inner map; the flat fallback leaked the whole nested
                 // map per iteration (loop OOM).
                 self.variant_drop_handles.insert(dst, "map_msv".to_string());
+            } else if crate::lower::is_map_mlo_ty(ty) {
+                // `Map[String, List[Option[Int]]]` arg temp — `$__drop_map_mlo` (the
+                // bind-site route, mirrored; the flat fallback would leak the value lists).
+                self.variant_drop_handles.insert(dst, "map_mlo".to_string());
             } else if matches!(ty,
                 Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
                     if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))

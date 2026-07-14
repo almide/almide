@@ -1,0 +1,199 @@
+// map_mlo — SELF-HOSTED `Map[String, List[Option[Int]]]` (String keys, LIST-OF-OPTIONS
+// values — compound_repr_interp's `deep` literal). Layout mirrors map_msv/map_hval (split:
+// rc@0, n@4, cap@8, n OWNED deep-copied String keys @ slots 0..n-1, n OWNED value handles
+// @ slots n..2n-1 — values rc-shared in on set). The value is NOT a flat block — a
+// `List[Option[Int]]` owns its n Option-block handles — so the map's drop must sweep each
+// last-ref value's option slots before freeing it (a flat rc_dec would leak every Option
+// block; the msv inner-map sweep, with list slots instead of 2m string slots). Also hosts
+// `__drop_list_str_mlo` (the pairs-literal `List[(String, List[Option[Int]])]` drop) and
+// `__drop_list_map_mlo` / `list_to_string_lmlo` (the OUTER `List[Map[...]]` literal's drop
+// and repr display — the map_hval lmh pair for this family).
+
+fn __mlo_eq_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else if prim.load8(pa + i) != prim.load8(pb + i) then false
+  else __mlo_eq_bytes(pa, pb, n, i + 1)
+
+fn __mlo_str_eq(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  if la != lb then false
+  else __mlo_eq_bytes(ha + 12, hb + 12, la, 0)
+}
+
+fn __mlo_find(h: Int, n: Int, k: String, i: Int) -> Int =
+  if i >= n then 0 - 1
+  else {
+    let kk = prim.load_str(h + 12 + i * 8)
+    if __mlo_str_eq(kk, k) then i
+    else __mlo_find(h, n, k, i + 1)
+  }
+
+fn __mlo_store_key(addr: Int, s: String) -> Int = {
+  let copy = string.repeat(s, 1)
+  prim.store_str(addr, copy)
+  0
+}
+
+// Copy every entry from sh to rh: keys deep-copied, values rc-shared; the matched
+// key's value is replaced with an rc-share of `vh` (map_msv's __msv_set_copy shape).
+fn __mlo_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __mlo_store_key(rh + 12 + i * 8, kk)
+    if __mlo_str_eq(kk, k) then {
+      prim.rc_inc(vh)
+      prim.store64(rh + 12 + (rn + i) * 8, vh)
+    }
+    else {
+      let old = prim.load64(sh + 12 + (n + i) * 8)
+      prim.rc_inc(old)
+      prim.store64(rh + 12 + (rn + i) * 8, old)
+    }
+    __mlo_set_copy(sh, rh, n, rn, k, vh, i + 1)
+  }
+
+fn __mlo_set_append(rh: Int, rn: Int, idx: Int, k: String, vh: Int) -> Int =
+  if idx >= 0 then 0
+  else {
+    let _kc = __mlo_store_key(rh + 12 + (rn - 1) * 8, k)
+    prim.rc_inc(vh)
+    prim.store64(rh + 12 + (rn + rn - 1) * 8, vh)
+    0
+  }
+
+fn map_new_mlo() -> Map[String, List[Option[Int]]] = prim.alloc_map_kv(0)
+
+fn map_set_mlo(
+  m: Map[String, List[Option[Int]]],
+  k: String,
+  v: List[Option[Int]],
+) -> Map[String, List[Option[Int]]] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let idx = __mlo_find(sh, n, k, 0)
+  let rn = if idx < 0 then n + 1 else n
+  let r = prim.alloc_map_kv(rn * 2)
+  let rh = prim.handle(r)
+  let vh = prim.handle(v)
+  let _c = __mlo_set_copy(sh, rh, n, rn, k, vh, 0)
+  let _a = __mlo_set_append(rh, rn, idx, k, vh)
+  prim.store32(rh + 4, rn)
+  r
+}
+
+fn __mlo_from_at(
+  ph: Int,
+  n: Int,
+  i: Int,
+  m: Map[String, List[Option[Int]]],
+) -> Map[String, List[Option[Int]]] =
+  if i >= n then m
+  else {
+    let th = prim.load64(ph + 12 + i * 8)
+    let k = prim.load_str(th + 12)
+    let v: List[Option[Int]] = prim.load_handle(th + 20)
+    let nm = map_set_mlo(m, k, v)
+    __mlo_from_at(ph, n, i + 1, nm)
+  }
+
+fn map_from_list_mlo(
+  pairs: List[(String, List[Option[Int]])],
+) -> Map[String, List[Option[Int]]] = {
+  let ph = prim.handle(pairs)
+  let n = prim.load32(ph + 4)
+  __mlo_from_at(ph, n, 0, map_new_mlo())
+}
+
+// Free an INNER `List[Option[Int]]` handle: sweep its n Option-block slots at last ref
+// (each Option's payload is SCALAR, so one rc_dec per slot is its exact free), then the
+// list block (a flat rc_dec alone would leak every Option block). The list's @4 is the
+// element count (each element one 8-byte handle slot).
+fn __drop_mlo_inner_slots(ih: Int, m2: Int, j: Int) -> Unit =
+  if j >= m2 then ()
+  else {
+    prim.rc_dec(prim.load64(ih + 12 + j * 8))
+    __drop_mlo_inner_slots(ih, m2, j + 1)
+  }
+
+fn __drop_mlo_inner(ih: Int) -> Unit = {
+  if prim.load32(ih + 0) == 1 then __drop_mlo_inner_slots(ih, prim.load32(ih + 4), 0) else ()
+  prim.rc_dec(ih)
+}
+
+fn __drop_map_mlo_slots(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    prim.rc_dec(prim.load64(h + 12 + i * 8))
+    __drop_mlo_inner(prim.load64(h + 12 + (n + i) * 8))
+    __drop_map_mlo_slots(h, n, i + 1)
+  }
+
+fn __drop_map_mlo(m: Map[String, List[Option[Int]]]) -> Unit = {
+  let h = prim.handle(m)
+  if prim.load32(h + 0) == 1 then __drop_map_mlo_slots(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+
+// The pairs-literal drop: `List[(String, List[Option[Int]])]` — per element (its own
+// refcounted 2-slot tuple block): free the String slot flat, sweep the last-ref inner list.
+fn __drop_list_str_mlo_loop(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let th = prim.load64(h + 12 + i * 8)
+    if prim.load32(th + 0) == 1 then {
+      prim.rc_dec(prim.load64(th + 12))
+      __drop_mlo_inner(prim.load64(th + 20))
+    } else ()
+    prim.rc_dec(th)
+    __drop_list_str_mlo_loop(h, n, i + 1)
+  }
+
+fn __drop_list_str_mlo(xs: List[(String, List[Option[Int]])]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_str_mlo_loop(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+
+// The OUTER `List[Map[String, List[Option[Int]]]]` literal (the `deep` shape): per-element
+// free via __drop_map_mlo (the map_hval __drop_list_map_hval pair for this family).
+fn __drop_list_map_mlo_at(xs: List[Map[String, List[Option[Int]]]], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let lh = prim.handle(xs)
+    let m: Map[String, List[Option[Int]]] = prim.load_handle(lh + 12 + i * 8)
+    __drop_map_mlo(m)
+    __drop_list_map_mlo_at(xs, i + 1, n)
+  }
+
+fn __drop_list_map_mlo(xs: List[Map[String, List[Option[Int]]]]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_map_mlo_at(xs, 0, prim.load32(h + 4)) else ()
+  prim.rc_dec(h)
+}
+
+// ── Repr display ──
+fn __mlo_quote(k: String) -> String = "\"" + k + "\""
+
+fn __mlo_to_string_at(h: Int, n: Int, i: Int, acc: String) -> String =
+  if i >= n then acc
+  else {
+    let k = prim.load_str(h + 12 + i * 8)
+    let v: List[Option[Int]] = prim.load_handle(h + 12 + (n + i) * 8)
+    let piece = __mlo_quote(k) + ": " + "${v}"
+    let acc2 = if i == 0 then acc + piece else acc + ", " + piece
+    __mlo_to_string_at(h, n, i + 1, acc2)
+  }
+
+fn map_to_string_mlo(m: Map[String, List[Option[Int]]]) -> String = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  if n == 0 then "[:]"
+  else "[" + __mlo_to_string_at(h, n, 0, "") + "]"
+}
+
+fn list_to_string_lmlo(xs: List[Map[String, List[Option[Int]]]]) -> String =
+  "[" + (xs |> list.map((m) => "${m}") |> list.join(", ")) + "]"

@@ -99,6 +99,18 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                         "        let f{idx}: List[String] = prim.load_handle(h + {off})\n        __drop_list_str(f{idx})\n"
                     ));
                     idx += 1;
+                } else if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                    if a.len() == 1 && is_flat_variant_elem(&a[0], &flat_names))
+                {
+                    // A `List[<flat variant>]` ctor field (`Wrapped(List[Policy])` — #484): each
+                    // element is a single owned FLAT block (no inner handles), so `__drop_list_str`'s
+                    // per-element `rc_dec` sweep is its exact free — the record-drop generator's
+                    // List[flat-variant] precedent mirrored (incl. its `List[String]` binding type,
+                    // the handle-level reinterpretation that precedent already uses).
+                    frees.push_str(&format!(
+                        "        let f{idx}: List[String] = prim.load_handle(h + {off})\n        __drop_list_str(f{idx})\n"
+                    ));
+                    idx += 1;
                 } else if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
                     if a.len() == 1 && !is_heap_ty(&a[0]))
                 {

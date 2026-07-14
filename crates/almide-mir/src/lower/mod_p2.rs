@@ -1532,6 +1532,20 @@ pub fn is_map_msv_ty(ty: &Ty) -> bool {
             if b.len() == 2 && matches!(b[0], Ty::String) && matches!(b[1], Ty::String)))
 }
 
+/// `Map[String, List[Option[Int]]]` — the mlo family (String keys, LIST-OF-OPTIONS values;
+/// stdlib/map_mlo.almd — compound_repr_interp's `deep` literal). Its drop must sweep each
+/// last-ref value list's Option-block slots (`$__drop_map_mlo`), exactly the msv discipline
+/// with list slots instead of inner-map string slots.
+pub fn is_map_mlo_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
+        && matches!(a[0], Ty::String)
+        && matches!(&a[1], Ty::Applied(TypeConstructorId::List, b)
+            if b.len() == 1
+                && matches!(&b[0], Ty::Applied(TypeConstructorId::Option, o)
+                    if o.len() == 1 && matches!(o[0], Ty::Int))))
+}
+
 pub(crate) fn is_list_int_str_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(ty,
