@@ -381,8 +381,12 @@ native-FFI walls.
   main-side refs — `ir.var_table` with `module_origin`; a sibling module's
   refs live in ITS `m.var_table` and never bridge; per-module region maps
   needed, mind the VarId-collision hazard the shared union tolerates).
-  (2) scroll/layout 3 = the STRICT scalar-binding value subset (what shapes
-  their bindings actually are is the first probe of that brick). (3) render
+  (2) scroll/layout 3 → SHIPPED same day for the scroll 2: `let id =
+  region_count` — a bind whose RHS is a bare mutable-global Var missed BOTH
+  the alias arm (`value_for` resolves locals only) AND the projection
+  attempt (no Var kind) → strict wall; adding Var to the scalar-value
+  attempt routes it through `value_or_global`'s slot Load. ceangal resolved
+  8→6. layout's resolve_line_flex (a for-in VAR wall) remains. (3) render
   2 = the arm-BLOCK tail-helper lift: zip_view_rects' else arm is a full
   block (global assigns + for-loops + accumulators) returning a record —
   the heap-result-if ARM machinery lowers arm VALUES; the 1792e5d7 dense-

@@ -238,9 +238,15 @@ impl LowerCtx {
             // projection LOADS the real value from the materialized aggregate's layout slot
             // (the VALUE MODEL); `xs[i]` is a bounds-checked `$elem_addr` load. Outside the
             // materialized subset it rolls back to the deferred `Const`.
+            // A `Var` RHS reaches here only when the alias arm above MISSED (`value_for`
+            // resolves locals, not globals): `let id = region_count` — a GLOBAL read. The
+            // scalar-value path routes it through `value_or_global` (a mutable global's
+            // slot Load / an immutable one's const materialization), a fresh dst either
+            // way — no alias to protect, so the mutable-binding `+0` copy is not needed.
             if let IrExprKind::Member { .. }
             | IrExprKind::TupleIndex { .. }
-            | IrExprKind::IndexAccess { .. } = &value.kind
+            | IrExprKind::IndexAccess { .. }
+            | IrExprKind::Var { .. } = &value.kind
             {
                 let mark = self.ops.len();
                 if let Some(dst) = self.lower_scalar_value(value) {

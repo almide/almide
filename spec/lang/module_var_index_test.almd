@@ -29,3 +29,21 @@ test "module var index-assign direct" {
   assert(marks[0] == 42)
   assert(marks[2] == 3)
 }
+
+var region_count = 0
+
+fn create_region(v: Float) -> Int = {
+  let id = region_count
+  region_count = region_count + 1
+  speeds[id] = v
+  id
+}
+
+test "let-bind of a mutable global read" {
+  let a = create_region(4.5)
+  let b = create_region(6.5)
+  assert(a == 0)
+  assert(b == 1)
+  assert(region_count == 2)
+  assert(speeds[1] == 6.5)
+}
