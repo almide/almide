@@ -497,6 +497,86 @@ pub fn try_render_wasm_source(
             .collect(),
     );
 
+    // CROSS-MODULE global refs carry UNKNOWN expr types the frontend never infers
+    // (`v.white` — the ceangal theme class): repair them from the bridged globals
+    // maps BEFORE lowering, or the AllTypesConcrete precondition walls the whole fn.
+    let mut inlined_fns = inlined_fns;
+    for f in inlined_fns.iter_mut() {
+        crate::lower::repair_unknown_global_ref_tys(f, &main_globals);
+    }
+    let mut module_fn_sibs = module_fn_sibs;
+    for f in module_fn_sibs.iter_mut() {
+        crate::lower::repair_unknown_global_ref_tys(f, &globals);
+    }
+
+    // A BRIDGED cross-module ref whose module-side init is a PURE CALL (`v.black` →
+    // view's `let black = rgb(0,0,0)`, the ceangal theme class) cannot materialize in
+    // `value_or_global` (a lowering-time CallFn would break the classify `mir == ir`
+    // count). SUBSTITUTE the init into the fn bodies instead — the call then exists in
+    // the IR itself, so every count and cap sees it (the exact discipline
+    // `inline_pure_call_globals` applies within one region, extended to the refs the
+    // bridge resolves across regions). Purity gate: every call inside the init is a
+    // pure stdlib call or a RESOLVED user fn that is itself call-transitively clean
+    // (effect fns were mangled through the resolver and appear in no pure set).
+    {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct HasImpure<'a> {
+            impure: bool,
+            effectish: &'a std::collections::HashSet<String>,
+        }
+        impl IrVisitor for HasImpure<'_> {
+            fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                match &e.kind {
+                    almide_ir::IrExprKind::RuntimeCall { .. } => self.impure = true,
+                    almide_ir::IrExprKind::Call { target, .. } => match target {
+                        almide_ir::CallTarget::Module { module, func, .. } => {
+                            if !crate::purity::is_pure(module.as_str(), func.as_str()) {
+                                self.impure = true;
+                            }
+                        }
+                        almide_ir::CallTarget::Named { name } => {
+                            if self.effectish.contains(name.as_str()) {
+                                self.impure = true;
+                            }
+                        }
+                        _ => self.impure = true,
+                    },
+                    _ => {}
+                }
+                walk_expr(self, e);
+            }
+        }
+        let effectish: std::collections::HashSet<String> = all_fns
+            .iter()
+            .filter(|f| f.is_effect)
+            .map(|f| f.name.as_str().to_string())
+            .collect();
+        let mut subs: Vec<(almide_ir::VarId, almide_ir::IrExpr)> = Vec::new();
+        for (i, info) in ir.var_table.entries.iter().enumerate() {
+            if info.module_origin.is_none() {
+                continue;
+            }
+            let id = almide_ir::VarId(i as u32);
+            let Some(init) = main_global_inits.get(&id) else { continue };
+            if !crate::lower::expr_contains_call(init) {
+                continue;
+            }
+            let mut h = HasImpure { impure: false, effectish: &effectish };
+            h.visit_expr(init);
+            if !h.impure {
+                subs.push((id, init.clone()));
+            }
+        }
+        for (id, init) in &subs {
+            for f in inlined_fns.iter_mut() {
+                f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
+            }
+            for f in module_fn_sibs.iter_mut() {
+                f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
+            }
+        }
+    }
+
     let mut functions = Vec::new();
     let mut walled = Vec::new();
     for func in &inlined_fns {

@@ -379,7 +379,31 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
                         match target {
                             CallTarget::Module { module, func, .. } => {
                                 if !crate::purity::is_pure(module.as_str(), func.as_str()) {
-                                    self.ok = false;
+                                    // Not a known-pure STDLIB call — but a USER module's
+                                    // fn (`let gray_50 = v.rgb(…)` calling view.rgb, the
+                                    // ceangal theme class) is in the registry under its
+                                    // QUALIFIED name: recurse into its body exactly like
+                                    // a Named callee (the same cycle guard applies). An
+                                    // unknown qualified name stays impure (declines).
+                                    let q = format!("{}.{}", module.as_str(), func.as_str());
+                                    if self.effects.contains(&q) {
+                                        self.ok = false;
+                                    } else if self.visiting.insert(q.clone()) {
+                                        match self.fns.get(&q) {
+                                            Some(body) => {
+                                                let body = body.clone();
+                                                if !expr_is_pure(
+                                                    &body,
+                                                    self.fns,
+                                                    self.effects,
+                                                    self.visiting,
+                                                ) {
+                                                    self.ok = false;
+                                                }
+                                            }
+                                            None => self.ok = false,
+                                        }
+                                    }
                                 }
                             }
                             CallTarget::Named { name } => {

@@ -91,8 +91,9 @@ pub fn lift_heap_branch_binds(program: &mut IrProgram) {
     // against the same VarId namespace.
     {
         let IrProgram { functions, top_lets, var_table, .. } = &mut *program;
+        let globals: HashSet<VarId> = top_lets.iter().map(|tl| tl.var).collect();
         let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0,
-        dense_depth: 0 };
+        dense_depth: 0, globals };
         for func in functions.iter_mut() {
             lifter.visit_expr_mut(&mut func.body);
         }
@@ -108,7 +109,8 @@ pub fn lift_heap_branch_binds(program: &mut IrProgram) {
     // the module's table, not the program's).
     for module in program.modules.iter_mut() {
         let IrModule { functions, top_lets, var_table, .. } = &mut *module;
-        let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0, dense_depth: 0 };
+        let globals: HashSet<VarId> = top_lets.iter().map(|tl| tl.var).collect();
+        let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0, dense_depth: 0, globals };
         for func in functions.iter_mut() {
             lifter.visit_expr_mut(&mut func.body);
         }
@@ -141,6 +143,11 @@ struct BranchLifter<'a> {
     counter: &'a mut u32,
     new_funcs: Vec<IrFunction>,
     loop_depth: u32,
+    /// Module-level top-let ids (immutable AND mutable): NEVER captured as helper
+    /// params — they resolve as globals inside the helper too, and capturing a
+    /// MUTABLE one would shadow it with a snapshot param (its assigns then write
+    /// the param — a lost global write).
+    globals: HashSet<VarId>,
     /// >0 while inside a Block whose heap let-bound `if`/`match` COUNT exceeds the MIR
     /// tail-duplication desugar's bounded-duplication gate (rest > 3 declines there —
     /// the value_deep_eq 5-chain ceiling). In that region an out-of-loop heap `if` is
@@ -269,7 +276,12 @@ impl<'a> BranchLifter<'a> {
         //    cannot appear (it is not yet defined). `bound = ∅`: nothing is already
         //    in scope that we want to exclude from the capture set.
         let bound: HashSet<VarId> = HashSet::new();
-        let params: Vec<VarId> = free_vars(value, &bound); // deterministically sorted by VarId
+        // Deterministically sorted by VarId; module-level top-lets excluded (they
+        // resolve as globals in the helper — capturing a mutable one would shadow it).
+        let params: Vec<VarId> = free_vars(value, &bound)
+            .into_iter()
+            .filter(|v| !self.globals.contains(v))
+            .collect();
 
         // 2. Synthesize the helper name + take the branch expr out as the body.
         let id = *self.counter;

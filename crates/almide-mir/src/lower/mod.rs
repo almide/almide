@@ -495,13 +495,64 @@ pub fn bridge_cross_module_toplets(
     // honestly UNBOUND → the reference site walls → `--verified` falls back to v0.
     let mut by_name: HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool)>> = HashMap::new();
     for m in &ir.modules {
+        // In-module alias chains (`let white = _white`) leave the alias tl's ty
+        // UN-INFERRED — chase to the referent so the bridge carries the REAL
+        // (ty, init) and the reader materializes the record directly (the ceangal
+        // theme `v.white` class). Bounded hops; a non-Var / cross-module init stops.
+        let local: HashMap<u32, (&Ty, &almide_ir::IrExpr)> =
+            m.top_lets.iter().map(|t| (t.var.0, (&t.ty, &t.value))).collect();
         for tl in &m.top_lets {
             let Some(info) = m.var_table.entries.get(tl.var.0 as usize) else { continue };
             let mutable = matches!(info.mutability, almide_ir::Mutability::Var);
+            let (mut ty, mut init) = (&tl.ty, &tl.value);
+            let mut hops = 0;
+            // Chase Var inits REGARDLESS of the alias's own ty — the init expr is
+            // about to cross regions, and any surviving REGION-LOCAL Var id inside
+            // it would capture an unrelated main-side id (a silent wrong-global
+            // read when that id's init is const; probe-confirmed as VarId(7)).
+            while hops < 4 {
+                let almide_ir::IrExprKind::Var { id } = &init.kind else { break };
+                let Some((t2, i2)) = local.get(&id.0) else { break };
+                if matches!(ty, Ty::Unknown) {
+                    ty = t2;
+                }
+                init = i2;
+                hops += 1;
+            }
+            // An UNANNOTATED module top-let leaves tl.ty Unknown even after the
+            // alias chase — the INIT expression's checker-inferred ty is the
+            // referent's real type (`let _white = { r: 1.0, … }` infers the record).
+            if matches!(ty, Ty::Unknown) && !matches!(init.ty, Ty::Unknown) {
+                ty = &init.ty;
+            }
+            // A chased init that STILL references region-local vars (a call init
+            // over a sibling const, a nested alias past the hop bound) must NOT
+            // cross: the ids would misresolve in the main region. Drop the name
+            // (honest unbound wall) rather than ship a capturing expr.
+            fn expr_has_var(e: &almide_ir::IrExpr) -> bool {
+                use almide_ir::visit::{walk_expr, IrVisitor};
+                struct V(bool);
+                impl IrVisitor for V {
+                    fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                        if matches!(e.kind, almide_ir::IrExprKind::Var { .. }) {
+                            self.0 = true;
+                        }
+                        walk_expr(self, e);
+                    }
+                }
+                let mut v = V(false);
+                v.visit_expr(e);
+                v.0
+            }
+            let entry = if expr_has_var(init) {
+                Option::None
+            } else {
+                Some((ty.clone(), init, mutable))
+            };
             by_name
                 .entry(info.name.as_str().to_uppercase())
                 .and_modify(|e| *e = Option::None) // second definition ⇒ ambiguous, drop
-                .or_insert(Some((tl.ty.clone(), &tl.value, mutable)));
+                .or_insert(entry);
         }
     }
     // OVERRIDES an existing (module-raw, possibly colliding) entry — callers order the
@@ -516,7 +567,14 @@ pub fn bridge_cross_module_toplets(
             continue;
         }
         match by_name.get(&info.name.as_str().to_uppercase()) {
-            Some(Some((ty, init, mutable))) if !mutable && *ty == info.ty => {
+            // An UNKNOWN-typed reference entry (the frontend leaves an alias-let's
+            // synthesized ref un-inferred — `let white = _white` read as `v.white`,
+            // the ceangal theme class) takes the MODULE side's type: the name is
+            // unique (the ambiguity arm below dropped collisions), so the module
+            // top-let IS the referent. A concretely-typed ref still must agree.
+            Some(Some((ty, init, mutable)))
+                if !mutable && (*ty == info.ty || matches!(info.ty, Ty::Unknown)) =>
+            {
                 globals.insert(id, ty.clone());
                 global_inits.insert(id, (*init).clone());
             }
@@ -529,6 +587,53 @@ pub fn bridge_cross_module_toplets(
             }
         }
     }
+}
+
+/// Repair UNKNOWN expression types the frontend leaves on CROSS-MODULE global
+/// references (`v.white` — the ref entry's ty is un-inferred, so the whole fn
+/// trips the AllTypesConcrete precondition): a `Var` whose id the bridged
+/// globals map types gets that type, and a member read off a now-typed
+/// STRUCTURAL record object gets its field's type. Types come from the
+/// authoritative top-let declaration — never guessed.
+pub fn repair_unknown_global_ref_tys(
+    func: &mut almide_ir::IrFunction,
+    globals: &std::collections::HashMap<almide_ir::VarId, Ty>,
+) {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    struct R<'a> {
+        globals: &'a std::collections::HashMap<almide_ir::VarId, Ty>,
+    }
+    impl IrMutVisitor for R<'_> {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e); // children first — the object types before the member
+            match &mut e.kind {
+                IrExprKind::Var { id } if matches!(e.ty, Ty::Unknown) => {
+                    if let Some(t) = self.globals.get(id) {
+                        e.ty = t.clone();
+                    }
+                }
+                IrExprKind::Member { object, field } if matches!(e.ty, Ty::Unknown) => {
+                    if let Ty::Record { fields } = &object.ty {
+                        if let Some((_, ft)) =
+                            fields.iter().find(|(n, _)| n.as_str() == field.as_str())
+                        {
+                            e.ty = ft.clone();
+                        }
+                    }
+                }
+                // The PARENT of a repaired member read stays Unknown too — a BinOp is
+                // TYPE-DISPATCHED (AddFloat vs AddInt), so its result type is intrinsic.
+                IrExprKind::BinOp { op, .. } if matches!(e.ty, Ty::Unknown) => {
+                    if let Some(t) = op.result_ty() {
+                        e.ty = t;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut r = R { globals };
+    r.visit_expr_mut(&mut func.body);
 }
 
 pub fn build_variant_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> VariantLayouts {

@@ -305,8 +305,33 @@ impl LowerCtx {
                 // The alias denotes the SAME block: a materialized aggregate/option/
                 // result source keeps those properties through the Dup (`let x =
                 // toplib.CFG; { ...x, name: "y" }` — the #502 rebound spread base).
+                // The LIST registrations propagate too: `mains = mains2` then
+                // `mains[i]` gated on `materialized_lists` declined on the fresh Dup
+                // vid (the whole enclosing loop then rolled back to the strict wall —
+                // the ceangal resolve_line_flex class), and the DROP-ROUTE sets must
+                // follow the alias so the dup'd reference frees its block by the same
+                // recursive route when it happens to be the last one (a flat rc_dec
+                // of a heap-element list's final ref leaks the elements).
                 if self.materialized_aggregates.contains(&src) {
                     self.materialized_aggregates.insert(dst);
+                }
+                if self.materialized_lists.contains(&src) {
+                    self.materialized_lists.insert(dst);
+                }
+                if self.heap_elem_lists.contains(&src) {
+                    self.heap_elem_lists.insert(dst);
+                }
+                if self.str_str_elem_lists.contains(&src) {
+                    self.str_str_elem_lists.insert(dst);
+                }
+                if self.value_handles.contains(&src) {
+                    self.value_handles.insert(dst);
+                }
+                if let Some(mask) = self.record_masks.get(&src).cloned() {
+                    self.record_masks.insert(dst, mask);
+                }
+                if let Some(route) = self.variant_drop_handles.get(&src).cloned() {
+                    self.variant_drop_handles.insert(dst, route);
                 }
                 Ok(())
             }
