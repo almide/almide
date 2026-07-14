@@ -550,8 +550,11 @@
     // the raw 64-byte filestat into the self-host's own scratch — the field reads stay Almide).
     // Each is a host-call boundary with no pure-Almide form, accounted in
     // the closed host-floor set exactly like the read sequences above.
+    // `$env_get` (`PrimKind::EnvGet`, Capability::CliArgs — the Env profile's cap) is the
+    // environ_sizes_get/environ_get lookup + Option[String] build the self-hosted
+    // `env.get` reaches (C-133) — the same host-call-boundary class as `$args_get_list`.
     const WASI_FLOOR_FNS: &[&str] = &[
-        "$args_get_list", "$read_text_file", "$rtf_str", "$rtf_result", "$alloc8",
+        "$args_get_list", "$env_get", "$read_text_file", "$rtf_str", "$rtf_result", "$alloc8",
         "$read_dir", "$str_lt", "$is_dot_entry",
         "$write_text_file", "$make_dir", "$remove_all", "$remove_path", "$read_line",
         "$read_n_bytes", "$path_exists", "$path_filestat_q",

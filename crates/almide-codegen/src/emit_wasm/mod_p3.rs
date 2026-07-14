@@ -255,6 +255,28 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
         type_idx: args_get_type_idx,
     });
 
+    // Import environ_sizes_get: (count_ptr: i32, buf_size_ptr: i32) -> errno
+    let environ_sizes_get_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "environ_sizes_get".to_string(),
+        type_idx: environ_sizes_get_type_idx,
+    });
+
+    // Import environ_get: (environ_ptr: i32, environ_buf_ptr: i32) -> errno
+    let environ_get_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "environ_get".to_string(),
+        type_idx: environ_get_type_idx,
+    });
+
     // Step 1b: @extern(wasm, ...) imports — must be registered before any
     // defined functions so import indices are contiguous at the start.
     // Scan both program.functions and module functions.

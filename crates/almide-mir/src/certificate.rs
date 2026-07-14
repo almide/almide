@@ -197,6 +197,13 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         if let Op::Prim { kind: crate::PrimKind::ArgsGetList | crate::PrimKind::ArgsGetListFull, .. } = op {
             used.push(Capability::CliArgs);
         }
+        // The `env_get` primitive is the ENVIRON floor op — reached by the self-hosted
+        // `env.get`, so a fn using it must declare the Env profile's CliArgs (argv and
+        // environ are the same process-initial-state class; the profile map already
+        // binds `"Env" => CliArgs`). Transitive exactly like ArgsGetList.
+        if let Op::Prim { kind: crate::PrimKind::EnvGet, .. } = op {
+            used.push(Capability::CliArgs);
+        }
         // The `read_text_file` primitive is the FS-READ floor op — reached by the self-hosted
         // `fs.read_text`, so a fn using it must declare FsRead (the same accounting as ArgsGetList →
         // CliArgs). The transitive `reachable_caps` follows the CallFn edge into `fs.read_text`, so a
@@ -1218,6 +1225,14 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             // this the heap result would be an unbacked object the cert never opens — the
             // verify_ownership/cert agreement breaks for the env.args body.
             Op::Prim { kind: PrimKind::ArgsGetList, dst: Some(d), .. } => {
+                s.of.insert(*d, *d);
+                s.event(*d, 'i');
+            }
+            // `env_get` ALLOCATES a fresh owned `Option[String]` (a 0/1-slot block owning
+            // the value String when some) — a +1, like `Alloc`. Its name arg is BORROWED
+            // (no cert event). Balanced by the caller's scope-end `DropListStr` (`d`) or
+            // a heap-return move-out (`m`) — the exact ArgsGetList discipline.
+            Op::Prim { kind: PrimKind::EnvGet, dst: Some(d), .. } => {
                 s.of.insert(*d, *d);
                 s.event(*d, 'i');
             }

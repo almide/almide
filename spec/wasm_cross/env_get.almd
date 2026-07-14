@@ -1,0 +1,15 @@
+// @contract: C-133
+// env.get cross-target: a host-present variable (HOME — set on every dev/CI
+// host) reads the SAME bytes on native and wasm (WASI environ + inherit-env);
+// an absent name is none on both (?? takes the fallback).
+
+import env
+
+effect fn main() -> Unit = {
+  let home = env.get("HOME") ?? ""
+  println("home nonempty ${string.len(home) > 0}")
+  let unset = env.get("ALMIDE_SURELY_UNSET_ENV_VAR_XYZ") ?? "(none)"
+  println("unset: ${unset}")
+  let again = env.get("HOME") ?? ""
+  println(if home == again then "stable" else "unstable")
+}

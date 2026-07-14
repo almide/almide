@@ -1669,3 +1669,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mut_heap_param.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-133"
+spec      = "ALS-R5"
+title     = "env.get observes the host environment identically on native and wasm"
+statement = "`env.get(name)` returns some(value) for a variable present in the host process environment and none for an absent one, with the SAME value bytes on native (std::env::var) and wasm (WASI environ_get; the runner passes the host environment through `wasmtime -S inherit-env=y`). Previously the wasm emitter had NO dispatch for env.get at all — it ICE'd (a panic, not a wall) on every program that called it, and even with a dispatch the guest saw an EMPTY environment because the runner never forwarded it."
+since     = "0.29.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/env_get.almd", class = "fixture" },
+]

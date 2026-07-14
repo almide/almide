@@ -42,9 +42,11 @@ Contracts: C-012。
 ## ALS-R5 プロセス環境
 
 `process.args` / `env.args` は argv[0]（プログラム名）を除いた引数列を
-返し、両ターゲットで一致する。`random.int(a, b)` は WASI entropy 下でも
-常に [a, b] 範囲内。
-Contracts: C-096, C-112, C-118。
+返し、両ターゲットで一致する。`env.get(name)` はホストプロセスの環境変数を
+観測し、存在すれば some(値)、無ければ none を両ターゲットで同一バイトで
+返す（wasm は WASI environ + ランナーの環境継承）。`random.int(a, b)` は
+WASI entropy 下でも常に [a, b] 範囲内。
+Contracts: C-096, C-112, C-118, C-133。
 
 ## ALS-R6 ファイルシステムのパス解決
 

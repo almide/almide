@@ -246,6 +246,12 @@ impl LowerCtx {
             || (module == "process" && func == "args")
             || (module == "random" && matches!(func, "choice" | "shuffle"))
             || (module == "env" && func == "args")
+            // `env.get` READS the process environment — Capability::CliArgs (the Env
+            // profile's canonical cap, argv and environ are the same initial-state
+            // class). Self-hosted to `prim.env_get` (env_get.almd → the WASI environ
+            // $env_get floor), so its prim is in the program map and the transitive
+            // cap_witness counts CliArgs. Returns Option[String] (heap Option block).
+            || (module == "env" && func == "get")
             || (module == "env" && func == "unix_timestamp")
             || (module == "fs" && func == "read_text")
             || (module == "fs" && func == "read_bytes_raw")

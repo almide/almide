@@ -534,6 +534,22 @@ pub enum PrimKind {
     /// `(call $args_get_list (i32.const 0))` (the one parameterized bridge, skip=0);
     /// same fresh OWNED `List[String]` dst, same [`Capability::CliArgs`] accounting.
     ArgsGetListFull,
+    /// The WASI `environ_sizes_get` + `environ_get` lookup, packaged as ONE high-level
+    /// HEAP-RESULT prim — `args = [name]` (a BORROWED `String` handle), dst = a fresh
+    /// OWNED `Option[String]`: a 0-slot block (none) or a 1-slot block whose @12 holds
+    /// the owned value String (some) — the `materialize_opt_str_some` layout, so the
+    /// caller's `match`/`??`/`DropListStr` machinery handles it identically to a
+    /// self-host-built Option. Scans the `KEY=VALUE\0` environ entries for `name`
+    /// followed by `=` (byte-exact, first hit wins) — native `std::env::var(name).ok()`
+    /// is the oracle (C-133; the runner passes the host env through
+    /// `wasmtime -S inherit-env=y`). Reached only by the self-hosted `env.get`.
+    /// Carries [`Capability::CliArgs`] — the Env effect-profile's canonical capability
+    /// (reading the process's initial environment, the same class as argv; the profile
+    /// map `"Env" => CliArgs` already binds them). Its dst is a heap Ptr (like
+    /// [`ArgsGetList`]), so the ownership certificate emits an `i` (alloc) for it,
+    /// balanced by the caller's scope-end drop (the flat `DropListStr` frees the owned
+    /// payload String, if any, then the block) or a heap-return move-out.
+    EnvGet,
     /// The WASI `fd_read`-from-stdin line-read sequence, packaged as ONE high-level HEAP-RESULT
     /// prim — no args, dst = a fresh OWNED canonical `String` of ONE line of standard input.
     /// Reads fd 0 BYTE-BY-BYTE (so it never over-reads past the newline — a later

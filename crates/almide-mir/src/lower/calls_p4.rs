@@ -980,6 +980,27 @@ impl LowerCtx {
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }
+        // `prim.env_get(name)` — the WASI environ lookup floor (env.get). ONE BORROWED
+        // `String` arg (the variable name; the caller still owns it). Its dst is a FRESH
+        // OWNED `Option[String]` in the `materialize_opt_str_some` layout (0-slot none /
+        // 1-slot some owning the value String @12), registered in `heap_elem_lists` so
+        // the scope-end drop is the flat `DropListStr` (frees the payload String, if
+        // any, then the block). Carries Capability::CliArgs — the Env profile's
+        // canonical cap (counted in cap_witness exactly like ArgsGetList).
+        if func == "env_get" && args.len() == 1 {
+            let key = match self.lower_call_args(args)?.into_iter().next() {
+                Some(CallArg::Handle(v)) => v,
+                _ => {
+                    return Err(LowerError::Unsupported(
+                        "prim.env_get needs a borrowed String name".into(),
+                    ))
+                }
+            };
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::EnvGet, dst: Some(dst), args: vec![key] });
+            self.heap_elem_lists.insert(dst);
+            return Ok(Some(dst));
+        }
         // `prim.read_text_file(path)` — the WASI file-read floor (fs.read_text). ONE
         // BORROWED `String` arg (the path; the caller still owns it). Its dst is a FRESH
         // OWNED `Result[String, String]` built by the render in the EXACT

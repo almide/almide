@@ -195,6 +195,17 @@ fn args_get_list() -> List[String] = _
 @intrinsic("almide_rt_prim_args_get_list_full")
 fn args_get_list_full() -> List[String] = _
 
+// The environ_sizes_get + environ_get WASI lookup, packaged as ONE high-level HEAP-RESULT
+// prim — the Env profile's sandbox exit (reaches Capability::CliArgs, the same
+// process-initial-state class as argv). Scans the `KEY=VALUE` environ entries for `name`
+// followed by '=' (byte-exact, first hit wins; std::env::var is the oracle — C-133) and
+// returns a fresh OWNED `Option[String]` (the value String owned when some). Reached only
+// by the self-hosted `env.get` (env_get.almd) in the v1 trust-spine wasm backend; the
+// render emits the $env_get preamble routine. No native runtime impl — the native target
+// uses env.get's own @intrinsic.
+@intrinsic("almide_rt_prim_env_get")
+fn env_get(name: String) -> Option[String] = _
+
 // The path_open + fd_read WASI host calls, packaged as ONE high-level HEAP-RESULT prim —
 // the FS-READ sandbox exit (reaches Capability::FsRead). Opens the file at `path` (relative
 // to the first preopened dir, leading '/' stripped — the same absolute-path fallback native

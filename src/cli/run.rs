@@ -263,10 +263,15 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool) -> i32 {
     }
 
     // `--dir=/` preopens the host root so WASI fs ops resolve the same absolute
-    // paths native sees — matches `compile_and_run_wasm_test`. Program args go
-    // after the module path; wasmtime forwards them to the guest as argv.
+    // paths native sees — matches `compile_and_run_wasm_test`. `-S inherit-env=y`
+    // passes the host environment through WASI so `env.get` observes the SAME
+    // variables native `std::env::var` does (without it every guest lookup is
+    // none — a silent cross-target divergence). Program args go after the module
+    // path; wasmtime forwards them to the guest as argv.
     let status = Command::new("wasmtime")
         .arg("--dir=/")
+        .arg("-S")
+        .arg("inherit-env=y")
         .arg(&wasm_path)
         .args(program_args)
         .status();

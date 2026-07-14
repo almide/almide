@@ -64,6 +64,8 @@ fn run_wasm(source: &str) -> String {
     // Run with wasmtime (preferred) or Node.js WASI (fallback)
     let output = Command::new("wasmtime")
         .arg("--dir=/")
+        .arg("-S")
+        .arg("inherit-env=y")
         .arg(wasm_path.to_str().unwrap())
         .output();
 

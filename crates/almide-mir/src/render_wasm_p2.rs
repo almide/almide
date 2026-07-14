@@ -697,6 +697,13 @@ fn render_op(
                 // (no i64 extend) — exactly like a LoadHandle.
                 PrimKind::ArgsGetList => "(call $args_get_list (i32.const 1))".to_string(),
                 PrimKind::ArgsGetListFull => "(call $args_get_list (i32.const 0))".to_string(),
+                // env_get(name) — the WASI environ lookup floor; scans KEY=VALUE entries
+                // for `name` + '=' and builds a fresh owned `Option[String]` in the
+                // preamble helper. Same heap-Ptr name arg + heap-Ptr dst conventions as
+                // ReadTextFile (the i32 handle passes DIRECTLY, no wrap).
+                PrimKind::EnvGet => {
+                    format!("(call $env_get (local.get {}))", local(args[0]))
+                }
                 // read_text_file(path) — the WASI file-read floor; opens + reads the file at
                 // `path` and builds a fresh owned `Result[String, String]` in the preamble helper.
                 // The path arg is a heap Ptr local (i32 handle, like a $list ptr), passed DIRECTLY

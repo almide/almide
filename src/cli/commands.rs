@@ -302,8 +302,12 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         return skip(format!("write: {}", e));
     }
 
+    // `-S inherit-env=y` mirrors `cmd_run_wasm`: `env.get` in a test observes the
+    // same host variables native does (the env cross-target contract).
     let output = std::process::Command::new("wasmtime")
         .arg("--dir=/")
+        .arg("-S")
+        .arg("inherit-env=y")
         .arg(wasm_path.to_str().unwrap())
         .output();
     match output {
