@@ -251,6 +251,21 @@ impl LowerCtx {
                 // bounded by the input exactly as v0's is. Gated by the full test (the 2M-deep TCO
                 // acceptance fixture is TCO'd, not executed here — if it regresses, this is reverted).
                 let _ = name;
+                // A VARIANT-CTOR arm (`else Para(line)` / `then Blank` — the parse_line
+                // if-chain): the "call" is a CONSTRUCTOR, not a function — emitting a
+                // `CallFn $Para` dangles (caught at render as unlinked, walling the whole
+                // file). Build the tagged block (`try_lower_variant_ctor`, the binds_p2
+                // guard's exact twin) and MOVE it out — the same per-arm `"im"` balance;
+                // field temps the ctor materializes are moved into the block, and any
+                // stray arm temp is freed by `drop_arm_locals`.
+                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) {
+                    let arm_mark = self.live_heap_handles.len();
+                    let obj = self.try_lower_variant_ctor(arm)?;
+                    self.live_heap_handles.retain(|x| *x != obj);
+                    self.ops.push(Op::Consume { v: obj });
+                    self.drop_arm_locals(arm_mark);
+                    return Some(obj);
+                }
                 let repr = repr_of(result_ty).ok()?;
                 let arm_mark = self.live_heap_handles.len();
                 let lowered = self.lower_call_args(args).ok()?;
@@ -891,7 +906,15 @@ impl LowerCtx {
             // count then outruns the source count-gate (a caps WALL BREACH). Defer the local-container
             // case (`None`) so it keeps its existing wall — the loop-slot work owns it. The param case
             // is exactly the documented borrow-then-`Dup` `dup_borrowed_slot` is built for.
-            IrExprKind::Member { object, field } if self.is_borrowed_param_container(object) => {
+            // (B)-mechanism widening: a MATERIALIZED LOCAL container (`else result.out` over a
+            // record-literal/self-host-fold bind — the playground `wrap_lists`) is now ALSO
+            // admitted via `is_materialized_local_container` — the old defunc elided-call-count
+            // objection applied to the DEFUNC fold path; a self-host fold is a REAL CallFn, so
+            // the caps count is unaffected (re-verified by the corpus caps gate on this change).
+            IrExprKind::Member { object, field }
+                if self.is_borrowed_param_container(object)
+                    || self.is_materialized_local_container(object) =>
+            {
                 let offset = self.aggregate_field_offset_any(&object.ty, field.as_str())?;
                 let arm_mark = self.live_heap_handles.len();
                 let h = self.resolve_aggregate_container_handle(object)?;
@@ -901,7 +924,10 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(owned)
             }
-            IrExprKind::TupleIndex { object, index } if self.is_borrowed_param_container(object) => {
+            IrExprKind::TupleIndex { object, index }
+                if self.is_borrowed_param_container(object)
+                    || self.is_materialized_local_container(object) =>
+            {
                 let offset = self.aggregate_index_offset_any(&object.ty, *index)?;
                 let arm_mark = self.live_heap_handles.len();
                 let h = self.resolve_aggregate_container_handle(object)?;

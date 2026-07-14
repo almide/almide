@@ -103,6 +103,24 @@ impl LowerCtx {
                 return Some(dst);
             }
             self.rollback_scalar_loop(tup_mark, tup_lhh, tup_lifted, tup_vo);
+            // The RECORD-accumulator sibling (`{ out: List[String], in_ul: Bool }` — the
+            // playground `wrap_lists` (B)-mechanism shape). Same strict-gate + full-rollback
+            // discipline; see `try_lower_defunc_record_acc_fold`.
+            let rec_mark = self.ops.len();
+            let rec_lhh = self.live_heap_handles.len();
+            let rec_lifted = self.lifted.len();
+            let rec_vo = self.value_of.clone();
+            if let Some(dst) = self.try_lower_defunc_record_acc_fold(
+                xs,
+                params,
+                body,
+                &args[init_idx.unwrap()],
+                result_ty,
+            ) {
+                self.last_call_had_unlifted_closure = false;
+                return Some(dst);
+            }
+            self.rollback_scalar_loop(rec_mark, rec_lhh, rec_lifted, rec_vo);
         }
         // enumerate+map FUSION: `list.map(list.enumerate(real), (entry) => { let (i,key)=entry; <tail> })`
         // → a map-with-index over `real`, binding i=loop-index + key=element, AVOIDING the (Int,String)

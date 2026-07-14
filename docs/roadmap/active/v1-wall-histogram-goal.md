@@ -965,6 +965,28 @@ B127. **Closed `codegen_loop_guard_test` ("for with guard continue filtering", c
    poison → the corpus-wall unbacked breach). Fixing (a) is the honest prerequisite for
    both this and the wrap_lists-class work. **2 remaining: find_first_even, wrap_lists.**
 
+B128. **Closed `wrap_lists` — the "(B) mechanism / loop-slot" frontier (classify: 1 remaining,
+   `find_first_even` only).** Four pieces: (1) `try_lower_defunc_record_acc_fold` (defunc_fold.rs)
+   — the RECORD-accumulator sibling of the tuple-acc fold: `{ out: List[String], in_ul: Bool }`
+   acc, state read via MEMBER projections substituted to slot vars (`substitute_state_members` —
+   any other state use declines), interior heap-`if` lets (`opened`) tracked
+   materialized+recursive-drop, bare-Record lambda bodies admitted. (2) The old caps objection
+   is MOOT on this path — the lambda is C1-inlined (real ops, no elided calls); corpus caps gate
+   green. (3) `is_materialized_local_container` widens the heap-result Member/TupleIndex arms to
+   MATERIALIZED locals (the borrowed-param Dup discipline, owner = this frame). (4) Variant-CTOR
+   arms (`else Para(line)`) now build blocks via `try_lower_variant_ctor` instead of emitting a
+   dangling `CallFn $Para`. **A leak the 100k/4MB loop caught before ship**: the result block's
+   flat masked drop rc_dec'd the list slot only — element Strings leaked whenever the field was
+   BORROWED post-fold (the tuple path's fixture always moved out, hiding it); fixed by routing
+   the block's drop through the GENERATED anon/named record drop (last-ref-gated `__drop_list_str`
+   sweep, so a moved-out copy stays alive). Verified: playground_default FULL FILE byte-identical;
+   6 leak probes 100k×4MB all matching v0; mir 583/583 (a `branch_arm_heap_reassign` failure
+   bisected via selective stash to the CONCURRENT loop-fork's WIP, not this work); classify
+   1 remaining, zero newly-walled; spec 283/283; GATE OK; FORBIDDEN=0. corpus-wall's UNBACKED
+   breach on `find_first_even` reproduces on HEAD+loop-fork-WIP with ZERO of this entry's files
+   present — attribution: the concurrent fork's in-progress value-exit work (its own final
+   combined ladder gates it).
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

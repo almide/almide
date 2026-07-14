@@ -14,6 +14,23 @@ impl LowerCtx {
         }
     }
 
+    /// A LOCAL aggregate container whose block is genuinely MATERIALIZED (a record/tuple
+    /// literal bind, a self-host call result tracked as an aggregate) — the (B)/loop-slot
+    /// widening of [`Self::is_borrowed_param_container`]: projecting a field out of it via
+    /// `dup_borrowed_slot` reads a REAL slot (never a deferred Opaque's garbage), and the
+    /// moved-out ref is an independent `Dup` (the local drops its own ref once at scope
+    /// end — the same no-double-free argument as the borrowed-param case, with the owner
+    /// being this frame instead of the caller).
+    pub(crate) fn is_materialized_local_container(&self, container: &IrExpr) -> bool {
+        match &container.kind {
+            IrExprKind::Var { id } => self
+                .value_for(*id)
+                .map(|v| self.materialized_aggregates.contains(&v))
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+
     /// `Some(piece)` for `Option[String]` = a 1-element `DynListStr`: store `piece`'s handle into
     /// slot 0 + CONSUME it (moves in), track as nested-ownership list + materialized Option.
     /// Reuses the proven Machinery-2 `store_str` op sequence — no new cert.
