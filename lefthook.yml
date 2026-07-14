@@ -7,8 +7,8 @@ pre-commit:
       glob: "{crates/almide-codegen/src/emit_wasm/*.rs,crates/almide-codegen/rt-oracle-registry.toml,scripts/check-rt-oracle-registry.sh,scripts/lib/contract-classes.txt}"
       run: scripts/check-rt-oracle-registry.sh
     contracts:
-      glob: "{docs/contracts/contracts.toml,docs/contracts/*.md,spec/wasm_cross/*.almd,crates/almide-codegen/rt-oracle-registry.toml,scripts/check-contracts.sh,scripts/lib/contract-classes.txt}"
-      run: scripts/check-contracts.sh && bash docs/contracts/generate-readme.sh > docs/contracts/README.md && git add docs/contracts/README.md
+      glob: "{docs/contracts/contracts.toml,docs/contracts/*.md,spec/wasm_cross/*.almd,crates/almide-codegen/rt-oracle-registry.toml,scripts/check-contracts.sh,scripts/lib/contract-classes.txt,scripts/gen-claims.sh,README.md}"
+      run: bash scripts/gen-claims.sh && git add README.md && scripts/check-contracts.sh && bash docs/contracts/generate-readme.sh > docs/contracts/README.md && git add docs/contracts/README.md
     ratchet-separation:
       run: scripts/check-ratchet-separation.sh
     semantics-manifest:
