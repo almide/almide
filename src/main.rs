@@ -101,7 +101,9 @@ enum Commands {
         /// since 0.29.0 (v1-first, v0 fallback where v1 walls). A v1-produced
         /// module ships VERBATIM (wasm-opt skipped — post-processing would
         /// replace the verified bytes); a v0-fallback build still gets wasm-opt.
-        /// `--verified` is kept as an accepted no-op for compatibility.
+        /// (rust target) OPT-IN: try the v1 native trust-spine renderer (#764
+        /// rung 1 — same Perceus MIR, Drop erased to Rust scope-end drop,
+        /// ownership verified pre-render); walls fall back to v0 codegen.
         #[arg(long)]
         verified: bool,
         /// (wasm target) Opt out of the v1-first verified renderer and use the
@@ -695,8 +697,7 @@ fn dispatch(cli: Cli) {
         }
         Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified, no_verified } => {
             let file = resolve_file(file);
-            let _ = verified;
-            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, !no_verified);
+            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, !no_verified, verified);
         }
         Commands::Test { file, run, no_check, json, target } => {
             let file_str = file.as_deref().unwrap_or("");

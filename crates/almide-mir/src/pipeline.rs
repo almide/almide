@@ -769,3 +769,46 @@ pub fn try_render_wasm_source(
     // renderer rejects it cleanly. Returns the WAT on success.
     try_render_wasm_program(&MirProgram { functions, exports })
 }
+
+/// NATIVE leg of the trust spine (#764, rung 1): lower `.almd` source through the
+/// SAME Perceus MIR the wasm leg uses and render it to native Rust — `Dup` as
+/// `.clone()`, `Drop` erased to Rust's scope-end drop, the runtime boundary mapped
+/// to a closed native shim floor. `verify_ownership` certifies the Perceus balance
+/// on the same ops before the erasure. WALLS (`Err`) on anything outside the
+/// rung-1 subset — the CLI falls back to v0, so a rendered program is never wrong.
+pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
+    crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
+    let ir = source_to_ir_with(source, &[])?;
+    if !ir.modules.is_empty() {
+        return Err(LowerError::Unsupported(
+            "native: multi-module program — outside rung 1".into(),
+        ));
+    }
+    if !ir.top_lets.is_empty() {
+        return Err(LowerError::Unsupported(
+            "native: top-level lets — outside rung 1".into(),
+        ));
+    }
+    let globals = std::collections::HashMap::new();
+    let mut functions = Vec::new();
+    for func in &ir.functions {
+        if func.is_test {
+            continue;
+        }
+        // ALL-OR-NOTHING: any unlowerable fn walls the program (rung 1 has no
+        // per-fn fallback — a partial native binary cannot call into v0).
+        let all = crate::lower::lower_function_all(func, &globals).map_err(|e| {
+            LowerError::Unsupported(format!("native: fn `{}`: {e:?}", func.name))
+        })?;
+        functions.extend(all);
+    }
+    if !functions.iter().any(|f| f.name == "main") {
+        return Err(LowerError::Unsupported(
+            "native: main is outside the MIR-lowering subset".into(),
+        ));
+    }
+    crate::render_native::try_render_native_program(&MirProgram {
+        functions,
+        exports: Vec::new(),
+    })
+}
