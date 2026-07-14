@@ -58,11 +58,23 @@ impl LowerCtx {
                         // subject (json_path_edges' `p_set`) falls through to the untracked-
                         // subject both-arms-linearization wall even though the twin would
                         // admit it.
+                        // A RICH-VARIANT Err payload needing a recursive drop (`Result[Int,
+                        // MathError]`, `err(Overflow(msg))` — bidirectional_type_test's structured
+                        // error): `try_lower_result_err_variant_ctor` tracks such a subject via
+                        // `variant_drop_handles = "res_<V>"` (a GENERATED `$__drop_res_<V>`,
+                        // drop_sources.rs), NOT `heap_elem_lists` (explicitly removed there once
+                        // `needs_rec` is true) — so this Bind guard, unlike its value-position twin
+                        // (`try_lower_variant_value_match`'s `heap_or_scalar_bind`, which already
+                        // admits `resrec:`/`optrec:`), had no matching case at all.
                         IrPattern::Bind { var, ty }
                             if is_heap_ty(ty)
                                 && (self.heap_elem_lists.contains(&subj)
                                     || self.value_result_lists.contains(&subj)
-                                    || self.value_result_results.contains(&subj)) =>
+                                    || self.value_result_results.contains(&subj)
+                                    || self
+                                        .variant_drop_handles
+                                        .get(&subj)
+                                        .is_some_and(|h| h.starts_with("res_"))) =>
                         {
                             Some((*var, true))
                         }
@@ -491,7 +503,17 @@ impl LowerCtx {
                             // arms — the same resrec discipline.
                             || s.variant_drop_handles
                                 .get(&subj)
-                                .is_some_and(|h| h.starts_with("resrec:") || h.starts_with("optrec:"))) =>
+                                .is_some_and(|h| {
+                                    h.starts_with("resrec:")
+                                        || h.starts_with("optrec:")
+                                        // A rich-variant Err payload needing recursive drop
+                                        // (`res_<V>`, `try_lower_result_err_variant_ctor`) — the
+                                        // Err bind is a BORROW of the @12 variant handle, freed
+                                        // by the subject's own `$__drop_res_<V>` at scope end
+                                        // (mirrors the statement-position twin, `try_lower_
+                                        // result_match`).
+                                        || h.starts_with("res_")
+                                })) =>
                 {
                     Ok(Some((*var, true, ty.clone())))
                 }

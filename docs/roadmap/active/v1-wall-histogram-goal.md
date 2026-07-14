@@ -4229,6 +4229,64 @@ DIAGNOSIS — pinned the EXACT remaining blocker for `option_result_symmetry_
    burned the campaign once already with a registry-only false green).
    **Current 17, unchanged this pass** (pure diagnosis, zero files edited).
 
+B114. **Closed `bidirectional_type_test`'s "structured error - overflow
+   variant" wall (17 → 16)** — the OTHER half B112 deliberately left open
+   (B112 fixed the tracking-set half; the remaining half was assumed to be
+   "`try_lower_result_match` needs new nested-ctor-arm pattern support", a
+   real new-feature-sized task). That assumption was WRONG: the existing
+   general-purpose match REGROUP pass (`desugar_match.rs`'s ctor-column
+   regroup, already covering `Ok_`/`Err_`/`Some_`/`None_`/`User` columns via
+   `scalar_col`/`parse`) ALREADY turns the test's literal 3-arm match
+   (`ok(_)`, `err(Overflow(msg))`, `err(_)`) into a plain 2-arm outer match
+   (`ok(_)`/`err(q)`) with a NESTED payload sub-match inside the Err arm —
+   confirmed by reading `parse`'s `Ok_`/`Err_` cases (control_p2.rs's twin
+   file, desugar_match.rs): `IrPattern::Err{inner} if scalar_col(inner)`
+   admits inner being a full `Constructor{args}` pattern (`Overflow(msg)`)
+   whenever its OWN args are plain binds — no new regroup logic needed at
+   all. The REAL blocker was one layer down: the resulting 2-arm outer
+   match's Err bind (`q: MathError`, a heap-typed RICH VARIANT payload) was
+   never ADMITTED by either match consumer's heap-bind gate.
+   `try_lower_result_err_variant_ctor` (result_ctors.rs, the fn that
+   constructs a literal `err(<variant ctor>)` Result value) tracks a
+   needs-recursive-drop payload via `variant_drop_handles = "res_<V>"`
+   (routing the subject's OWN scope-end drop to a GENERATED
+   `$__drop_res_<V>`, drop_sources.rs's `rec_variant_names` loop — already
+   fully wired and correct) — but NEITHER `try_lower_result_match`
+   (control_p2.rs, statement position — no `variant_drop_handles` check at
+   all) NOR `try_lower_variant_value_match`'s `heap_or_scalar_bind`
+   (control_p2.rs, value position — only recognized `resrec:`/`optrec:`
+   prefixes) recognized the `res_` prefix as an admissible heap-bind source.
+   Extended both gates' existing OR-conditions with one line each:
+   `try_lower_result_match`'s Err-bind guard gained
+   `|| self.variant_drop_handles.get(&subj).is_some_and(|h|
+   h.starts_with("res_"))`; `heap_or_scalar_bind`'s equivalent OR gained the
+   same check alongside its existing `resrec:`/`optrec:` checks. No new
+   infrastructure, no regroup changes, no drop-routing changes — purely
+   widening two existing admission gates to recognize an already-correctly-
+   tracked-and-drop-routed subject shape they'd simply never been taught
+   about.
+
+   **Verified**: a hand-reduced repro matching the EXACT corpus shape
+   (`type MathError = DivideByZero | Overflow(String) | NegativeInput(Int)`;
+   `let e: Result[Int, MathError] = err(Overflow("too big")); match e {
+   ok(_)=>.., err(Overflow(msg))=>println(msg), err(_)=>.. }`) — wasmtime
+   `too big`, v0 native `too big`, byte-identical (exercises the STATEMENT-
+   position fix). A second repro exercising all 4 possible arms through a
+   VALUE-position match (`fn classify(e) -> String = match e {ok(n)=>..,
+   err(Overflow(msg))=>.., err(_)=>..}`, called with `ok(42)`,
+   `err(Overflow("too big"))`, `err(DivideByZero)`, `err(NegativeInput(-5))`)
+   — wasmtime and v0 native produced the identical 4-line output
+   (`ok:42`/`overflow:too big`/`other-err`/`other-err`), exercising the
+   VALUE-position fix. A 10,000-iteration leak-loop (fresh `err(Overflow(
+   "too big " + int.to_string(i)))` construction + match every iteration,
+   accumulating `string.len` of the extracted message) produced the
+   identical accumulated value (118890) on wasmtime under a 16MB memory cap
+   and on v0 native — no leak. `cargo test -q -p almide-mir`: 583/583.
+   `classify_corpus`: 17 → 16, exactly ONE closure
+   (`bidirectional_type_test`), zero newly-walled (diffed the full 16-name
+   WALLED-REAL list against the prior baseline). `almide test`: 283/283.
+   GATE OK. CORPUS WALL OK. **16, was 17.**
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
