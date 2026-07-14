@@ -71,6 +71,10 @@ const CORPUS: &[(&str, &str)] = &[
     ("str_param_fn", "fn shout(s: String) -> String = s + \"!\"\nfn twice(s: String) -> String = shout(s) + shout(s)\n\nfn main() -> Unit = {\n  println(twice(\"hey\"))\n}\n"),
     ("loop_concat", "fn main() -> Unit = {\n  var acc = \"\"\n  var i = 0\n  while i < 5 {\n    acc = acc + int.to_string(i)\n    i = i + 1\n  }\n  println(acc)\n  println(int.to_string(string.len(acc)))\n}\n"),
     ("str_if_value", "fn label(n: Int) -> String = if n > 40 then int.to_string(n) + \"-big\" else \"small\"\n\nfn main() -> Unit = {\n  println(label(42))\n  println(label(7))\n}\n"),
+    // ── Rung 3: broadened String floor (each shim = the v0 oracle expression) ──
+    ("str_predicates", "fn main() -> Unit = {\n  let s = \"pre-\" + int.to_string(42) + \"-post\"\n  if string.contains(s, \"42\") then println(\"c1\") else println(\"c0\")\n  if string.starts_with(s, \"pre\") then println(\"s1\") else println(\"s0\")\n  if string.ends_with(s, \"post\") then println(\"e1\") else println(\"e0\")\n  if string.contains(s, \"x\") then println(\"c1\") else println(\"c0\")\n}\n"),
+    ("str_transforms", "fn main() -> Unit = {\n  let s = \"héllo ßtraße \" + int.to_string(7)\n  println(string.to_upper(s))\n  println(string.to_lower(string.to_upper(s)))\n  println(string.trim(\"  padded  \" + int.to_string(1)))\n  println(string.repeat(\"ab\", 3))\n}\n"),
+    ("str_ordering", "fn main() -> Unit = {\n  let a = int.to_string(41)\n  let b = int.to_string(42)\n  if a < b then println(\"lt\") else println(\"ge\")\n  if b < a then println(\"lt\") else println(\"ge\")\n  if a != b then println(\"ne\") else println(\"eq\")\n}\n"),
 ];
 
 #[test]
@@ -120,7 +124,7 @@ fn out_of_subset_walls_honestly() {
     let walls = [
         ("list", "fn main() -> Unit = {\n  let xs = [1, 2, 3]\n  println(int.to_string(list.len(xs)))\n}\n"),
         ("float", "fn main() -> Unit = {\n  println(float.to_string(1.5))\n}\n"),
-        ("str_contains", "fn main() -> Unit = {\n  if string.contains(\"abc\", \"b\") then println(\"y\") else println(\"n\")\n}\n"),
+        ("str_split", "fn main() -> Unit = {\n  let parts = string.split(\"a,b\", \",\")\n  println(parts[0])\n}\n"),
         ("list_param", "fn head(xs: List[Int]) -> Int = xs[0]\n\nfn main() -> Unit = {\n  println(int.to_string(head([9])))\n}\n"),
     ];
     for (name, src) in walls {

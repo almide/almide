@@ -57,7 +57,30 @@ impl BuildDirLock {
 /// Compile an .almd file to a native binary, returning the path to the executable.
 /// Uses incremental caching: if the generated Rust code hasn't changed, skips cargo build.
 pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>) -> Result<std::path::PathBuf, String> {
+    compile_to_binary_with(file, no_check, test_mode, release, project_dir_override, false)
+}
+
+/// `compile_to_binary` with the NATIVE trust-spine opt-in (#764): when
+/// `native_verified`, try the v1 MIR renderer first (same Perceus MIR as the
+/// wasm leg; Drop erased to Rust scope-end, ownership verified pre-render) and
+/// fall back to the v0 source on a WALL — a v1-rendered program is never wrong.
+pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>, native_verified: bool) -> Result<std::path::PathBuf, String> {
     let rs_code = try_compile(file, no_check).map_err(|_| "compile failed".to_string())?;
+    let rs_code = if native_verified && !test_mode {
+        let source_text = std::fs::read_to_string(file).unwrap_or_default();
+        match almide_mir::pipeline::try_render_rust_source(&source_text) {
+            Ok(v1_code) => {
+                eprintln!("native: v1 trust-spine render");
+                v1_code
+            }
+            Err(e) => {
+                eprintln!("native: v1 walled ({e:?}) — falling back to v0 codegen");
+                rs_code
+            }
+        }
+    } else {
+        rs_code
+    };
 
     // Scratch dir. A per-call `project_dir_override` (one dir per test file)
     // gives each parallel worker its own `src/main.rs`, so cold rustc builds
@@ -204,8 +227,8 @@ pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
     1
 }
 
-pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool, release: bool) -> i32 {
-    match compile_to_binary(file, no_check, test_mode, release, None) {
+pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool, release: bool, native_verified: bool) -> i32 {
+    match compile_to_binary_with(file, no_check, test_mode, release, None, native_verified) {
         Ok(bin) => run_binary(&bin, program_args),
         Err(e) => {
             eprintln!("Compile error:\n{}", e);
@@ -214,10 +237,10 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_m
     }
 }
 
-pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: bool, target: Option<&str>, verified: bool) {
+pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: bool, target: Option<&str>, verified: bool, native_verified: bool) {
     let code = match target {
         // Default and explicit native target: the cargo/rustc path.
-        None | Some("rust") | Some("native") => cmd_run_inner(file, program_args, no_check, false, release),
+        None | Some("rust") | Some("native") => cmd_run_inner(file, program_args, no_check, false, release, native_verified),
         // WASM target: build the same module `almide build --target wasm`
         // emits, then execute it on the `wasmtime` CLI. Both targets must
         // produce byte-identical stdout/stderr/exit — the cross-target gate.

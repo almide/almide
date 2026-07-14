@@ -93,6 +93,51 @@ fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
             Some(NTy::I64),
             "fn rt_string_len(s: &str) -> i64 { s.chars().count() as i64 }",
         )),
+        // String predicates/transforms: each shim is the EXACT v0 native oracle
+        // expression (runtime/rs/src/string.rs delegates to Rust std the same way),
+        // so the differential gate pins byte-equality, and C-016/C-019/C-020's
+        // full-Unicode discipline carries over unchanged.
+        "string.contains" => Some((
+            &[NTy::Str, NTy::Str],
+            Some(NTy::I64),
+            "fn rt_string_contains(s: &str, sub: &str) -> i64 { s.contains(sub) as i64 }",
+        )),
+        "string.starts_with" => Some((
+            &[NTy::Str, NTy::Str],
+            Some(NTy::I64),
+            "fn rt_string_starts_with(s: &str, p: &str) -> i64 { s.starts_with(p) as i64 }",
+        )),
+        "string.ends_with" => Some((
+            &[NTy::Str, NTy::Str],
+            Some(NTy::I64),
+            "fn rt_string_ends_with(s: &str, p: &str) -> i64 { s.ends_with(p) as i64 }",
+        )),
+        "string.to_upper" => Some((
+            &[NTy::Str],
+            Some(NTy::Str),
+            "fn rt_string_to_upper(s: &str) -> String { s.to_uppercase() }",
+        )),
+        "string.to_lower" => Some((
+            &[NTy::Str],
+            Some(NTy::Str),
+            "fn rt_string_to_lower(s: &str) -> String { s.to_lowercase() }",
+        )),
+        "string.trim" => Some((
+            &[NTy::Str],
+            Some(NTy::Str),
+            "fn rt_string_trim(s: &str) -> String { s.trim().to_string() }",
+        )),
+        "string.repeat" => Some((
+            &[NTy::Str, NTy::I64],
+            Some(NTy::Str),
+            "fn rt_string_repeat(s: &str, n: i64) -> String { s.repeat(n as usize) }",
+        )),
+        "string.cmp" => Some((
+            // Byte-wise lexicographic, -1/0/1 (C-019: rt_string_extra cmp = native oracle).
+            &[NTy::Str, NTy::Str],
+            Some(NTy::I64),
+            "fn rt_string_cmp(a: &str, b: &str) -> i64 {\n    match a.cmp(b) { std::cmp::Ordering::Less => -1, std::cmp::Ordering::Equal => 0, std::cmp::Ordering::Greater => 1 }\n}",
+        )),
         "__chk_div" => Some((
             &[NTy::I64, NTy::I64],
             Some(NTy::I64),

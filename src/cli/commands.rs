@@ -789,7 +789,7 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
     }
 
     for test_file in &test_files {
-        let code = super::cmd_run_inner(test_file, &program_args, false, true, false);
+        let code = super::cmd_run_inner(test_file, &program_args, false, true, false, false);
         // Emit JSON per file
         let status = if code == 0 { "pass" } else { "fail" };
         println!(

@@ -33,13 +33,26 @@
       PRECISION WALL in the pipeline — a heap `Repr::Ptr` param/result renders
       as a string only when the DECLARED `Ty` says so, any signature outside
       {Int, Bool, String, Unit-ret} walls before lowering.
-- [ ] Rung 3: `List[Int]` / `List[String]` (`Vec<i64>` / `Vec<String>`), the
-      typed Drop family mapped to scope-end (`DropListStr` etc. erase once the
-      element type is a real Rust type — no recursive free needed natively).
-- [ ] Rung 4: records/variants (native structs/enums), Float (real `f64` — no
+- [x] **Rung 3** (shipped): the String floor broadened to the full boundary
+      surface reachable today — `string.contains` / `starts_with` / `ends_with`
+      / `to_upper` / `to_lower` / `trim` / `repeat` / `cmp` (each shim is the
+      EXACT v0 oracle expression, so C-016/C-019/C-020 discipline carries over)
+      — plus `almide run --verified` native wiring (`compile_to_binary_with`).
+- [ ] **Rung 4 — LISTS (needs a shared-MIR design, coordinate before building)**:
+      the v1 lower materializes list literals as `Alloc{DynList}` + inline
+      `Prim` stores and admits direct `xs[i]` prim loads over materialized
+      lists — the list world is BELOW the prim floor by design, so no
+      boundary-name mapping can reach it natively. Pattern-matching prim idioms
+      in the native renderer is rejected (guessing, not op fidelity). The path:
+      target-neutral list ops (e.g. `Op::ListLit`/`ListGet`/`ListLen`/`ListSet`)
+      that render_wasm lowers to EXACTLY today's prim sequences (byte-identity
+      guarded by the existing gates) and the native leg maps to `Vec` ops. This
+      touches the same `lower/binds*` bricks the ceangal/module-var workstream
+      is actively editing — do it WITH that workstream, not alongside it.
+- [ ] Rung 5: records/variants (native structs/enums), Float (real `f64` — no
       i64-bits convention on native), closures.
-- [ ] Rung 5: `almide run --verified` wiring; org byte-verify sweep column for
-      the native leg; multi-module + top-lets.
+- [ ] Rung 6: org byte-verify sweep column for the native leg; multi-module +
+      top-lets.
 - [ ] Default flip: v1-first native (`--no-verified` opt-out), README memory
       claim updated to the unified statement — closes #764.
 
