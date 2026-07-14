@@ -206,29 +206,25 @@ impl Checker {
                         return Some(Ty::list(inner_result));
                     }
                     "timeout" => {
-                        // fan.timeout(ms, thunk) -> T
-                        if arg_tys.len() != 2 {
-                            self.emit(super::err(
-                                format!("fan.timeout() expects 2 arguments but got {}", arg_tys.len()),
-                                "Usage: fan.timeout(5000, () => expr)",
-                                "call to fan.timeout()".to_string()));
-                            return Some(Ty::Unknown);
-                        }
-                        self.constrain(Ty::Int, arg_tys[0].clone(), "fan.timeout ms");
-                        let fn_ty = resolve_ty(&arg_tys[1], &self.uf);
-                        let result_ty = match &fn_ty {
-                            Ty::Fn { ret, .. } => match ret.as_ref() {
-                                Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
-                                other => other.clone(),
-                            },
-                            _ => Ty::Unknown,
-                        };
-                        return Some(Ty::result(result_ty, Ty::String));
+                        // Tombstone (contract C-006): `fan.timeout` was REMOVED in 0.29.0.
+                        // A wall-clock timeout has no portable cross-target meaning (wasm
+                        // has no clock, scheduler, or threads), and it was the sole stdlib
+                        // surface whose result was not a function of the program + its
+                        // inputs. Deadlines belong at the host boundary that invokes the
+                        // program. The dedicated arm (instead of the unknown-member arm
+                        // below) keeps the migration actionable.
+                        self.emit(super::err(
+                            "fan.timeout was removed: a wall-clock timeout has no portable cross-target meaning",
+                            "Enforce deadlines at the host boundary that invokes the program \
+                             (e.g. `timeout 5 ./app`). Inside Almide every fan combinator is \
+                             deterministic by list order: fan.map, fan.race, fan.any, fan.settle.",
+                            "call to fan.timeout()".to_string()).with_code("E027"));
+                        return Some(Ty::Unknown);
                     }
                     _ => {
                         self.emit(super::err(
                             format!("unknown function 'fan.{}'", field),
-                            "Available: fan.map, fan.race, fan.any, fan.settle, fan.timeout",
+                            "Available: fan.map, fan.race, fan.any, fan.settle",
                             format!("call to fan.{}()", field)));
                         return Some(Ty::Unknown);
                     }

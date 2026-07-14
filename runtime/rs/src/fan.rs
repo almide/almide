@@ -5,7 +5,7 @@
 // value is an `Rc<dyn Fn>`, which is neither `Send` nor `Sync`, so it could not
 // be moved across the `thread::scope` boundary the parallel version required.
 // Results are identical to a parallel map (input order preserved); only the
-// (unobservable) parallelism is dropped. race/settle/timeout keep their
+// (unobservable) parallelism is dropped. race/settle keep their
 // thread::scope and receive `Box<dyn Fn + Send[+ Sync]>` thunks (the box pass
 // boxes them), which still satisfy the existing `impl Fn + Send + Sync` bounds.
 //
@@ -68,19 +68,3 @@ pub fn almide_rt_fan_settle<T: Send + 'static>(
     })
 }
 
-pub fn almide_rt_fan_timeout<T: Send + 'static>(
-    ms: i64,
-    thunk: impl Fn() -> Result<T, String> + Send,
-) -> Result<T, String> {
-    use std::sync::mpsc;
-    use std::time::Duration;
-    let (tx, rx) = mpsc::channel();
-    std::thread::scope(|s| {
-        s.spawn(move || {
-            let result = thunk();
-            let _ = tx.send(result);
-        });
-        rx.recv_timeout(Duration::from_millis(ms as u64))
-            .unwrap_or_else(|_| Err("timeout".to_string()))
-    })
-}

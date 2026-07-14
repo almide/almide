@@ -347,17 +347,6 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         return Err(());
     }
 
-    // fan.timeout is a wall-clock effect; the WASM target has no clock, so the
-    // thunk always runs to completion and the timeout never elapses. Warn loudly
-    // at build time rather than diverging silently from native.
-    if almide::codegen::program_uses_fan_timeout(&ir_program) {
-        eprintln!(
-            "warning: fan.timeout uses a wall clock, which the WASM target has none of — \
-             on WASM the thunk runs to completion and the timeout never elapses, so its result \
-             can differ from native. fan.timeout is excluded from the cross-target equivalence guarantee."
-        );
-    }
-
     // Native-only matrix ops (e.g. qwen3_block_q1_0_kv: a packed-GGUF block with
     // no primitive decomposition) have no WASM lowering. Reject at build time with
     // a clear message rather than letting the emitter ICE deep in codegen.
@@ -370,8 +359,8 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         return Err(());
     }
 
-    // v1 OPT-IN verified codegen: after every v0 gate above (type-check, IR-verify, fan.timeout /
-    // native-matrix guards) has passed, TRY the PCC-verified trust-spine renderer. It is byte-
+    // v1 OPT-IN verified codegen: after every v0 gate above (type-check, IR-verify, native-matrix
+    // guard) has passed, TRY the PCC-verified trust-spine renderer. It is byte-
     // identical to v0 where it lowers and WALLS (`Err`) otherwise — on a wall we fall through to
     // v0 codegen below. Honest-wall: a v1 module is never wrong; a walled program builds via v0
     // exactly as without `--verified`.

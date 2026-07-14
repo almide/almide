@@ -102,11 +102,10 @@ almide run hello.almd
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 132 contracts — 131 active, 1 flagged-for-revision.**
+> **Ledger: 132 contracts — 132 active, 0 flagged-for-revision.**
 >
-> **Exceptions (1)** — contracts flagged for revision; the ratchet says this list may only shrink:
->
-> - [C-006 — fan.timeout is the SOLE documented wall-clock divergence (wasm warns)](docs/contracts/C-006-fan-timeout-divergence.md)
+> **Exceptions: none.** Every contract in the ledger is `active`, carrying
+> executable evidence of class ≥ `fixture`.
 <!-- claims:generated:end -->
 
 | Evidence layer | What it locks |

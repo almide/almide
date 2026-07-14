@@ -11,6 +11,18 @@ care about.
 
 ## [Unreleased]
 
+### Removed — language
+
+- **`fan.timeout` is gone** (C-006, #765): a wall-clock timeout has no portable
+  cross-target meaning (wasm has no clock, scheduler, or threads), and it was
+  the sole stdlib surface whose result was not a function of the program + its
+  inputs — whether the deadline fired depended on machine load even between two
+  native runs. Referencing it is now a check-time tombstone error (**E027**)
+  with a migration hint; deadlines belong at the host boundary that invokes the
+  program (`timeout 5 ./app`). An org-wide sweep found zero consumers. This
+  retired the ledger's last `flagged-for-revision` contract — the flagged
+  ratchet is 0 and the README equivalence claim now reads "Exceptions: none."
+
 ### Fixed — WASM codegen
 
 - **Perceus RC: `guard`-`else` heap temporaries** (#755): a heap local bound

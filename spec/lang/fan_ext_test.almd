@@ -1,5 +1,5 @@
 
-// fan.any, fan.settle, fan.timeout.
+// fan.any, fan.settle.
 // fan.any is now DETERMINISTIC: it tries thunks in LIST ORDER and returns the
 // FIRST Ok as Result[T, String]; if all fail it returns a defined Err. In a test
 // block (no auto-unwrap) the binding is the full Result, asserted on `ok(v)`.
@@ -42,8 +42,3 @@ test "fan.settle collects all" {
   assert_eq(list.len(results), 3)
 }
 
-// ── fan.timeout — deadline ──
-test "fan.timeout succeeds within time" {
-  let result: Result[Int, String] = fan.timeout(5000, () => succeed(42));
-  assert_eq(result, ok(42))
-}

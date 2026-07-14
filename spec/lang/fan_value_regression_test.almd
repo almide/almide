@@ -1,7 +1,7 @@
 // Value-asserting regression tests for the fan.* cross-target bugs.
 // The original fan specs only checked lengths / race winners, so corrupt
-// settled payloads, dropped/invalid fan.any results, and mis-typed
-// fan.timeout Results all slipped through. These lock in the actual values.
+// settled payloads and dropped/invalid fan.any results all slipped
+// through. These lock in the actual values.
 
 effect fn succeed(x: Int) -> Result[Int, String] = ok(x)
 effect fn fail_with(msg: String) -> Result[Int, String] = err(msg)
@@ -36,9 +36,9 @@ test "fan.any returns the String winner" {
   assert_eq(w, ok("alpha"))
 }
 
-// ── fan.timeout Result bound to a Result let — ?? and == must type-check ──
-test "fan.timeout result supports ?? and ==" {
-  let r: Result[Int, String] = fan.timeout(5000, () => succeed(42));
+// ── fan.race Result bound to a Result let — ?? and == must type-check ──
+test "fan.race result supports ?? and ==" {
+  let r: Result[Int, String] = fan.race([() => succeed(42)]);
   assert_eq(r ?? -1, 42)
   assert(r == ok(42))
 }

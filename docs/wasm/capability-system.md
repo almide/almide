@@ -294,7 +294,6 @@ Note: Pure datetime functions (`datetime.format`, `datetime.year`, `datetime.add
 | `fan.race(fns)` | Run all, return first result |
 | `fan.any(fns)` | Run all, return first success |
 | `fan.settle(fns)` | Run all, collect all results |
-| `fan.timeout(duration, fn)` | Run with timeout |
 
 **WASI imports:**
 
