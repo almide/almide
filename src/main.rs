@@ -48,11 +48,16 @@ enum Commands {
         /// behavior — the cross-target equivalence guarantee.
         #[arg(long)]
         target: Option<String>,
-        /// (wasm target) Try the v1 PCC-verified trust-spine renderer first,
-        /// falling back to v0 codegen where v1 walls. The v1 module is
-        /// byte-identical to v0 where it lowers and never wrong (honest-wall).
+        /// (wasm target) The v1 PCC-verified trust-spine renderer is the DEFAULT
+        /// since 0.29.0 (v1-first, v0 fallback where v1 walls; byte-identical
+        /// where it lowers and never wrong — honest-wall). `--verified` is kept
+        /// as an accepted no-op for compatibility.
         #[arg(long)]
         verified: bool,
+        /// (wasm target) Opt out of the v1-first verified renderer and use the
+        /// legacy v0 codegen path directly.
+        #[arg(long)]
+        no_verified: bool,
         /// Arguments passed to the program. Almide's own flags (`--target`,
         /// `--no-check`, `--release`) are consumed before these; anything
         /// after a `--` separator is forwarded verbatim to the program.
@@ -92,11 +97,17 @@ enum Commands {
         /// verification failure is a hard error.
         #[arg(long)]
         emit_unverified: bool,
-        /// (wasm target) Try the v1 PCC-verified trust-spine renderer first,
-        /// falling back to v0 codegen where v1 walls. The v1 module is
-        /// byte-identical to v0 where it lowers and never wrong (honest-wall).
+        /// (wasm target) The v1 PCC-verified trust-spine renderer is the DEFAULT
+        /// since 0.29.0 (v1-first, v0 fallback where v1 walls). A v1-produced
+        /// module ships VERBATIM (wasm-opt skipped — post-processing would
+        /// replace the verified bytes); a v0-fallback build still gets wasm-opt.
+        /// `--verified` is kept as an accepted no-op for compatibility.
         #[arg(long)]
         verified: bool,
+        /// (wasm target) Opt out of the v1-first verified renderer and use the
+        /// legacy v0 codegen path directly (its module gets wasm-opt).
+        #[arg(long)]
+        no_verified: bool,
     },
     /// Run tests
     Test {
@@ -675,13 +686,17 @@ fn dispatch(cli: Cli) {
     };
     match command {
         Commands::Init => cli::cmd_init(),
-        Commands::Run { file, no_check, release, target, verified, program_args } => {
+        Commands::Run { file, no_check, release, target, verified, no_verified, program_args } => {
             let file = resolve_file(file);
-            cli::cmd_run(&file, &program_args, no_check, release, target.as_deref(), verified);
+            // 0.29.0: v1-first verified wasm is the DEFAULT; `--no-verified` opts out,
+            // `--verified` stays an accepted no-op (org byte-verify gate: 0 V1-MISMATCH).
+            let _ = verified;
+            cli::cmd_run(&file, &program_args, no_check, release, target.as_deref(), !no_verified);
         }
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified, no_verified } => {
             let file = resolve_file(file);
-            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified);
+            let _ = verified;
+            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, !no_verified);
         }
         Commands::Test { file, run, no_check, json, target } => {
             let file_str = file.as_deref().unwrap_or("");
