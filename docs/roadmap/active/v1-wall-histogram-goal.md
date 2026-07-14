@@ -4091,6 +4091,76 @@ DIAGNOSIS — built the registry (`AUTO_WRAP_ABI_FNS`, mirroring `NEVER_ERR_
    18, unchanged** (fully reverted, zero diff, confirmed via independent
    classify re-run).
 
+B113. **Closed `unannotated_unwraps` (18 → 17) by re-implementing the
+   `AUTO_WRAP_ABI_FNS` registry from the previous DIAGNOSIS's design, PLUS a
+   NEW scoping gate that excludes the double-unwrap shape instead of trying
+   to also fix it** — the previous entry's revert was because `nested_unwrap`
+   (a DIFFERENT corpus entry, closed as a side effect of the same registry)
+   produced a wrong value; this entry deliberately narrows the registry so
+   it NEVER touches that shape, closing the one entry that's actually safe
+   and leaving the other honestly walled.
+
+   **Root-caused the double-unwrap wrong-value bug precisely** (traced via
+   entry/exit debug instrumentation on `desugar_effect_unwrap_inner`, since
+   `desugar_all`'s fixed-point loop re-invokes it repeatedly on
+   progressively-desugared trees, which initially made the call sequence
+   look confusing until an unconditional entry-point print — body.kind
+   discriminant + stmts.len() + each stmt's discriminant — cut through it):
+   `{ let o = r!; o! }`'s stmt-position `let o = r!` desugars first (the
+   existing loop, unchanged), producing a continuation block whose tail is
+   the bare `o!`. `desugar_tail_effect_unwrap` only ever rewrites Block/If/
+   Match tails — never a BARE `Unwrap` — so this tail falls through
+   untouched all the way to `tail.rs`'s raw pass-through. That pass-through
+   is a correct no-op ONLY when the tail unwrap's operand has the SAME repr
+   as the function's (now Result-wrapped) return — true for a Result
+   operand, FALSE for an Option operand (`o: Option[Int]`), whose heap
+   handle gets returned raw instead of being unwrapped to its Int payload —
+   exactly the observed `Error: ` instead of `42`.
+
+   **Attempted a targeted fix first** (add a new case in
+   `desugar_effect_unwrap_inner`'s tail branch matching a bare
+   `Unwrap{Var}` of an Option operand, gated on `body.ty` already being
+   `Result[T,String]` — using `body.ty`, not `tail.ty`, learning from the
+   EARLIER-session attempt in `desugar_tail_effect_unwrap` that used the
+   wrong local type and regressed `unwrap_option_some`). This built cleanly
+   but did NOT fire — the debug trace showed the new branch's `t.kind` was
+   never `Unwrap` at the point body.ty was already `Result[Int,String]`
+   (the fixed-point loop's re-entrant calls made the actual call graph
+   deeper and differently-shaped than assumed). Given the debugging cost
+   already sunk on this exact shape across THREE separate sessions/attempts,
+   pivoted to a narrower, provably-safe fix instead of continuing to chase
+   the speculative desugar-site fix.
+
+   **The shipped fix**: a new `body_has_tail_position_unwrap` (mod.rs) —
+   scans a body's tail (through the same Block/If/Match transparent
+   positions `body_has_stmt_position_propagating_unwrap` scans) for a bare
+   `Unwrap`/`Try` — added as an EXTRA exclusion in `AUTO_WRAP_ABI_FNS`'s
+   population (mod_p2.rs): `body_has_stmt_position_propagating_unwrap(&f.
+   body) && !body_has_tail_position_unwrap(&f.body)`. This structurally
+   excludes `nested_unwrap` (tail is `o!`) while keeping `unannotated_
+   unwraps` included (tail is a bare `Var`, not an unwrap). All other
+   pieces (the `Var{id}` heap_result_arm.rs guarded arm, the `body.ty`
+   override in `lower_function_all_impl`, the three `NEVER_ERR_LIFTED_FNS`
+   consumer exclusions) are unchanged from the prior DIAGNOSIS's design —
+   only reachable now for bodies that pass the new, narrower gate.
+
+   **Verified**: `unannotated_unwraps` — v0 native `7`, `--target wasm
+   --verified` `7`, `render_program` direct WAT via `wasmtime run` `7`
+   (byte-identical, full v0/v1 parity); a dedicated 10,000-iteration
+   leak-loop (`declared_result()` called in a loop, accumulated) produced
+   `70000` identically on v0, `--verified`, and direct wasmtime under a
+   16MB memory cap — no leak. `nested_unwrap` — confirmed it correctly
+   STAYS walled (`render_program` reports `Unsupported` on the SAME
+   "variant match in tail position" message as before this session, never
+   reaching the wrong-value path) and `--target wasm --verified` correctly
+   falls back to v0 codegen, producing the correct `42` (the v0 fallback
+   path, not v1). `cargo test -q -p almide-mir`: 583/583. `classify_corpus`:
+   18 → 17, exactly ONE closure (`unannotated_unwraps`), zero newly-walled
+   (diffed the full WALLED-REAL name list against the prior 18-entry
+   baseline — every remaining name matches, `nested_unwrap` still present).
+   `almide test`: 283/283. GATE OK. CORPUS WALL OK (zero panics, zero
+   undetected refusals, all Rocq-kernel-certified). **17, was 18.**
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

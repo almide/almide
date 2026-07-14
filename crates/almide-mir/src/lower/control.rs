@@ -208,7 +208,9 @@ impl LowerCtx {
                     // WALL it cleanly — never a trap. (The common `ok(x)` shape is already rewritten away
                     // and never reaches here.)
                     if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &subject.kind {
-                        if crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str())) {
+                        if crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str()))
+                            && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()))
+                        {
                             return Err(LowerError::Unsupported(
                                 "match over a never-err effect-fn call with a non-`ok(x)` Ok pattern \
                                  (ok(_)/structured/guarded) not in this brick — the effect-fn returns a \

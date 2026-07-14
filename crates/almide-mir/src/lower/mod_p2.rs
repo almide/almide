@@ -10,6 +10,17 @@ thread_local! {
     /// residue. Thread-local because lowering runs single-threaded per program right after the pre-pass.
     pub(crate) static NEVER_ERR_LIFTED_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+
+    /// The names of AUTO-WRAP ABI functions — an `effect fn` declared with a bare scalar return
+    /// (`-> Int`, not `-> Result[Int, String]`) whose body contains a STATEMENT-position
+    /// propagating `!`/auto-`?` (`body_has_stmt_position_propagating_unwrap`, mod.rs), so its
+    /// TRUE compiled ABI is `Result[<declared>, String]` even though `func.ret_ty` stays the bare
+    /// sugar type. Populated by `inline_mutual_tail_recursion` (the SAME program-wide pre-pass
+    /// `NEVER_ERR_LIFTED_FNS` uses, run once before any per-function lowering, so it is fully
+    /// populated before ANY caller's own lowering — including a caller that is itself never-err
+    /// lifted and processed before this callee). EXCLUDES `main` — see the population site.
+    pub(crate) static AUTO_WRAP_ABI_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
 }
 
 /// A function CAN-ERR (returns `Err` on some input) iff its body has a direct `err(…)` (`ResultErr`) OR
@@ -147,7 +158,8 @@ pub fn strip_never_err_unwraps(
                 IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }
                 if matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
                     if !self.can_err.contains(name.as_str())
-                        && (self.lifted.contains(name.as_str()) || name.as_str() == self.self_name)));
+                        && (self.lifted.contains(name.as_str()) || name.as_str() == self.self_name)
+                        && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()))));
             if strip {
                 if let IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner } =
                     &expr.kind
@@ -298,7 +310,10 @@ pub fn unwrap_never_err_call_types(
             if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind {
                 // Unwrap ONLY a call to a LIFTED user effect fn that is also NEVER-err. (Pure Result
                 // fns are excluded — not in `lifted_effect_fns` — the list_iter_tco regression fix.)
-                if self.1.contains(name.as_str()) && !self.0.contains(name.as_str()) {
+                if self.1.contains(name.as_str())
+                    && !self.0.contains(name.as_str())
+                    && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()))
+                {
                     if let Ty::Applied(TypeConstructorId::Result, a) = &expr.ty {
                         if a.len() == 2 && matches!(a[1], Ty::String) {
                             expr.ty = a[0].clone();
@@ -601,6 +616,24 @@ pub fn inline_mutual_tail_recursion(
     NEVER_ERR_LIFTED_FNS.with(|s| {
         *s.borrow_mut() =
             lifted_effect_fns.iter().filter(|n| !can_err.contains(*n)).cloned().collect();
+    });
+    AUTO_WRAP_ABI_FNS.with(|s| {
+        *s.borrow_mut() = fns
+            .iter()
+            .filter(|f| f.name.as_str() != "main")
+            .filter(|f| {
+                !matches!(
+                    &f.ret_ty,
+                    Ty::Applied(
+                        almide_lang::types::constructor::TypeConstructorId::Result
+                            | almide_lang::types::constructor::TypeConstructorId::Option,
+                        _
+                    )
+                ) && body_has_stmt_position_propagating_unwrap(&f.body)
+                    && !body_has_tail_position_unwrap(&f.body)
+            })
+            .map(|f| f.name.as_str().to_string())
+            .collect();
     });
     let stripped: Vec<IrFunction> = fns
         .iter()

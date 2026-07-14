@@ -141,6 +141,19 @@ fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32, unit_main: boo
     // … }`, signal_instance's nested if-arms). `desugar_tail_effect_unwrap` navigates that control
     // flow and applies the SAME gated stmt-`!` rewrite inside each arm/tail block.
     if let Some(t) = tail.as_deref() {
+        // A raw TAIL-position effect-`!` (`{ let o = r!; o! }` — a CHAINED/nested unwrap, reached
+        // here after the FIRST unwrap's own recursive `desugar_effect_unwrap_inner` call already
+        // rewrote the continuation to `{ o! }`) is DELIBERATELY left unhandled here:
+        // `desugar_tail_effect_unwrap` below only ever matches Block/If/Match, never a BARE
+        // `Unwrap`, so it falls through untouched to `tail.rs`'s raw pass-through — a correct
+        // no-op ONLY for a RESULT operand (same repr the fn already returns); an OPTION operand
+        // has a DIFFERENT repr, so the pass-through would silently return the RAW Option handle
+        // instead of unwrapping it (a confirmed wrong-value bug, not just a wall, caught via
+        // adversarial wasmtime-vs-v0 testing on `nested_unwrap`). Rather than special-case this
+        // shape here, `AUTO_WRAP_ABI_FNS`'s population (mod_p2.rs) excludes any function whose
+        // body has a tail-position unwrap (`body_has_tail_position_unwrap`, mod.rs) — such a
+        // function's ABI is NEVER auto-wrapped, so `body.ty` never becomes `Result[T,String]` for
+        // it, and this fallthrough stays the pre-existing (honestly-walling) behavior.
         if let Some(nt) = desugar_tail_effect_unwrap(t, next_var, unit_main) {
             return Some(IrExpr {
                 kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
@@ -906,6 +919,7 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
         Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2)
         && never_err_callee.is_some_and(|name| {
             crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str()))
+                && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()))
         });
     if is_never_err_lifted_call {
         let short_var = match &ok_arm.pattern {

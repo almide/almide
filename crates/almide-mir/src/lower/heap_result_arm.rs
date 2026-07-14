@@ -39,6 +39,18 @@ impl LowerCtx {
             // exactly once at its own scope end). Sound for BOTH a param (the proven
             // auto-acquire from the tail-Var path) and a tracked local. `value_for` walls
             // an unbound/global var → the caller keeps the Opaque fallback.
+            IrExprKind::Var { id }
+                if !is_heap_ty(&arm.ty)
+                    && matches!(result_ty,
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                            if a.len() == 2 && a[0] == arm.ty) =>
+            {
+                let payload = self.value_for(*id).ok()?;
+                let repr = repr_of(result_ty).ok()?;
+                let obj = self.materialize_result_ok(payload, repr);
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
+            }
             IrExprKind::Var { id } => {
                 let src = self.value_for(*id).ok()?;
                 let dst = self.fresh_value();

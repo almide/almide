@@ -747,6 +747,56 @@ pub fn lower_function_all_with_layouts(
     lower_function_all_impl(func, globals, &HashMap::new(), record_layouts, variant_layouts)
 }
 
+fn body_has_stmt_position_propagating_unwrap(body: &IrExpr) -> bool {
+    fn stmt_is_propagating(kind: &IrStmtKind) -> bool {
+        match kind {
+            IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
+                matches!(&value.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. })
+            }
+            IrStmtKind::Expr { expr } => {
+                matches!(&expr.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. })
+            }
+            _ => false,
+        }
+    }
+    fn scan(e: &IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::Block { stmts, expr } => {
+                stmts.iter().any(|s| stmt_is_propagating(&s.kind))
+                    || expr.as_deref().is_some_and(scan)
+            }
+            IrExprKind::If { then, else_, .. } => scan(then) || scan(else_),
+            IrExprKind::Match { arms, .. } => arms.iter().any(|a| scan(&a.body)),
+            _ => false,
+        }
+    }
+    scan(body)
+}
+
+/// Does `body`'s TAIL (recursing through Block/If/Match, the same control-flow-transparent
+/// positions `body_has_stmt_position_propagating_unwrap` scans) end in a bare effect-`!`?
+/// A stmt-position propagating unwrap's continuation is a fresh `Block` whose OWN tail is the
+/// rest of the original tail — so `{ let o = r!; o! }`'s continuation-block tail is `o!` itself.
+/// `desugar_tail_effect_unwrap` (desugar_unwrap.rs) only rewrites Block/If/Match tails, never a
+/// BARE `Unwrap`, so a tail unwrap of a HEAP payload (e.g. `o: Option[Int]`) falls through
+/// untouched to the raw heap-handle pass-through (`heap_result_arm.rs`'s `Var{id}` Dup+Consume
+/// arm) — a confirmed silent wrong-value bug (nested_unwrap: wasmtime prints `Error: ` instead of
+/// `42`), not merely a wall. Excluding a tail-unwrap body from `AUTO_WRAP_ABI_FNS` keeps such
+/// functions honestly WALLED (their v0/native execution is untouched) instead of shipping wrong
+/// bytes, while still letting a single stmt-position-only unwrap (`unannotated_unwraps`) auto-wrap.
+fn body_has_tail_position_unwrap(body: &IrExpr) -> bool {
+    fn scan(e: &IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::Unwrap { .. } | IrExprKind::Try { .. } => true,
+            IrExprKind::Block { expr, .. } => expr.as_deref().is_some_and(scan),
+            IrExprKind::If { then, else_, .. } => scan(then) || scan(else_),
+            IrExprKind::Match { arms, .. } => arms.iter().any(|a| scan(&a.body)),
+            _ => false,
+        }
+    }
+    scan(body)
+}
+
 fn lower_function_all_impl(
     func: &IrFunction,
     globals: &HashMap<VarId, Ty>,
@@ -794,9 +844,18 @@ fn lower_function_all_impl(
     // `lower_body_into` desugars again (idempotent) for the non-TCO path; the caps gate counts the
     // SAME desugared tree (desugar-before-both), so mir == ir. Unblocks base64 encode/decode_chunks +
     // toml read_basic/parse_val (the let-bound-heap-`if`-in-a-loop frontier).
-    crate::lower::dump_desugared_ir(func.name.as_str(), &func.body, variant_layouts, record_layouts);
-    let pre_tco = desugar_heap_branches(&func.body, variant_layouts);
-    let body_ref: &IrExpr = pre_tco.as_ref().unwrap_or(&func.body);
+    let owned_body;
+    let func_body: &IrExpr = if crate::lower::AUTO_WRAP_ABI_FNS
+        .with(|s| s.borrow().contains(func.name.as_str()))
+    {
+        owned_body = IrExpr { ty: Ty::result(func.ret_ty.clone(), Ty::String), ..func.body.clone() };
+        &owned_body
+    } else {
+        &func.body
+    };
+    crate::lower::dump_desugared_ir(func.name.as_str(), func_body, variant_layouts, record_layouts);
+    let pre_tco = desugar_heap_branches(func_body, variant_layouts);
+    let body_ref: &IrExpr = pre_tco.as_ref().unwrap_or(func_body);
     let tco_body = try_tco_rewrite(&ctx.fn_name, &func.params, body_ref);
     let ret = ctx.lower_body_into(tco_body.as_ref().unwrap_or(body_ref))?;
     // The function's EFFECT SIGNATURE → its declared capability bound. The v1 model
