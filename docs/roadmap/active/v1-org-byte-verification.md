@@ -366,6 +366,16 @@ native-FFI walls.
   brick is sibling/package-RESOLVED classification (classify with the same
   import resolution render_program uses), so org numbers count only real
   lowering gaps.
+- **RESOLVED-strict measurement (same day, via render_program — it already
+  runs the canonical driver discovery)**: **homullus = 0 walls. ceangal = 8**
+  (vs 14 per-file): theme 3 — `let gray_50 = v.rgb(…)` MODULE→MODULE global
+  refs still UNBOUND even resolved (the cross-module top-let bridge misses
+  call-init globals referenced from a SIBLING module — a real pipeline gap);
+  scroll 2 + layout 1 — STRICT-mode scalar-binding/for-in-var value-subset
+  walls (permissive classify hid them); render 2 — view_to_node/
+  zip_view_rects heap-result-if (real, now measured resolved). The true org
+  frontier ≈ ceangal 8 + porta 2 + singles. org-trust-status.sh should adopt
+  the resolved sweep as the headline number.
 
 ## Remaining threads
 
