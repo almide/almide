@@ -305,9 +305,16 @@ native-FFI walls.
   opened the whole Yoga layout core (compute_size / do_layout / resolve_line_
   flex / layout_line / diff_tree) — ceangal 21→14. Fixtures:
   `spec/lang/member_index_borrow_test.almd`.
-- **ceangal residual 14**: ~5 are per-file classify artifacts (cross-module
-  `lay.*`/`v.*` refs the real pipeline resolves); real gaps = both-arms-if 2,
-  cell-API method-call assign 1, arg materialization class, heap-result-if 1.
+- **ceangal residual 14 — ALL cross-module-blocked (the per-file classify
+  floor)**: read each wall's actual code — every one depends on cross-module
+  state the per-file classify cannot resolve (`lay.MARGIN_AUTO` record-field
+  globals, `render.list_frame_height` cross-module mutable globals in the
+  both-arms-if conditions, `td.todos.get()` through the generic Cell API,
+  `v.*`/`lay.*` sibling calls in view_to_node/theme). The per-file wall
+  metric for ceangal has BOTTOMED at the cross-module boundary; further
+  ceangal progress routes through (a) sibling-resolved classification
+  tooling, (b) the generic-module-fn mono/link fix, (c) cross-module mutable
+  global bridging in the v1 pipeline (the slot map is same-region today).
 - **PRE-EXISTING checker bug (blocks ceangal's own suite, NOT this arc's
   regression)**: `almide test` on ceangal fails the #433 name-pinning
   postcondition (`Node` in build_lines/resolve_line_flex/layout_line/do_layout
