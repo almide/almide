@@ -649,6 +649,7 @@ impl LowerCtx {
             StrInt,
             IntStr,
             StrVariant(String),
+            RecordInt(String),
             ListStr,
             MapHval,
             ScalarAggregate,
@@ -737,6 +738,21 @@ impl LowerCtx {
             let Ty::Tuple(tys) = &elem_ty else { unreachable!() };
             let Some(vname) = self.custom_variant_type_name(&tys[1]) else { return None };
             ListElemDrop::StrVariant(vname)
+        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2
+            && !is_heap_ty(&tys[1])
+            && self.record_or_anon_drop_type_name(&tys[0]).is_some())
+        {
+            // A `(<RECURSIVE-DROP record>, <scalar>)` TUPLE element (`[({name: "alice", age:
+            // 30}, 1), …]` — compound_eq's `Map[P, Int]` from_list pairs): the RECORD mirror
+            // of `StrVariant`. `DropListStrInt` only rc_decs slot0 one level — P owns a String
+            // field, so a flat rc_dec LEAKS it; slot0 must recurse via `$__drop_<R>`. The
+            // element's record slot is FORCED to this declared/classified type at construction
+            // (below), so classification name, construction layout, and the generated
+            // `$__drop_list_<R>_int` teardown all key on ONE name — the mismatch that produced
+            // the earlier attempt's dangling `$__drop_list_anonrec_<hash>_int`.
+            let Ty::Tuple(tys) = &elem_ty else { unreachable!() };
+            let Some(rname) = self.record_or_anon_drop_type_name(&tys[0]) else { return None };
+            ListElemDrop::RecordInt(rname)
         } else if matches!(&elem_ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
                 if i.len() == 1 && matches!(i[0], Ty::String))
@@ -856,6 +872,30 @@ impl LowerCtx {
                     return None;
                 }
             }
+            if matches!(kind, ListElemDrop::RecordInt(_)) {
+                // The tuple's record slot is a STRUCTURAL literal (`({name: …, age: …}, 1)`) —
+                // FORCE it to the classified type (the forced_elem precedent, extended into the
+                // tuple slot) so `lower_owned_heap_field`'s recursive-record arm constructs the
+                // SAME layout the registered `$__drop_list_<R>_int` tears down. A non-literal
+                // slot must already carry the exact classified type; anything else declines.
+                if let IrExprKind::Tuple { elements: tels } = &e_ref.kind {
+                    let Ty::Tuple(tys) = &elem_ty else { return None };
+                    let mut tels = tels.clone();
+                    if matches!(tels[0].kind, IrExprKind::Record { .. }) {
+                        tels[0].ty = tys[0].clone();
+                    } else if tels[0].ty != tys[0] {
+                        return None;
+                    }
+                    if let Some(obj) = self.try_lower_tuple_construct(&tels) {
+                        if !self.live_heap_handles.contains(&obj) {
+                            self.live_heap_handles.push(obj);
+                        }
+                        objs.push(obj);
+                        continue;
+                    }
+                }
+                return None;
+            }
             if matches!(kind, ListElemDrop::StrInt | ListElemDrop::IntStr | ListElemDrop::StrVariant(_)) {
                 // A `(String, Int)` / `(Int, String)` / `(String, <rich variant>)` TUPLE LITERAL
                 // element builds through the general masked-tuple builder (String slot fresh
@@ -953,6 +993,14 @@ impl LowerCtx {
             }
             ListElemDrop::IntStr => {
                 self.variant_drop_handles.insert(dst, "list_int_str".to_string());
+            }
+            ListElemDrop::RecordInt(rname) => {
+                // → the GENERATED `$__drop_list_<R>_int` (drop_sources.rs — the same
+                // unconditional per-recursive-record / per-anon-record loops that already emit
+                // `$__drop_list_<R>`): per element, recurse into slot0 via `$__drop_<R>`, then
+                // free the tuple block; slot1 is scalar (nothing to free).
+                let rname_fn = drop_fn_ident(&rname);
+                self.variant_drop_handles.insert(dst, format!("list_{rname_fn}_int"));
             }
             ListElemDrop::StrVariant(vname) => {
                 // Routes through `Op::DropVariant`'s generic `variant_drop_handles` fallback

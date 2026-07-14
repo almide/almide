@@ -1294,6 +1294,23 @@ pub fn generate_record_drop_sources(
          __drop_list_{name}_loop(h, n, i + 1) }}
 "
             ));
+            // The `(<anon record>, <scalar>)` tuple-list twin — same shape as the named
+            // `$__drop_list_<R>_int` (see the rec_names loop below).
+            out.push_str(&format!(
+                "fn __drop_list_{name}_int(xs: List[({param_ty}, Int)]) -> Unit = {{
+                     let h = prim.handle(xs)
+                     if prim.load32(h + 0) == 1 then __drop_list_{name}_int_loop(h, prim.load32(h + 4), 0) else ()
+                     prim.rc_dec(h)
+}}
+                 fn __drop_list_{name}_int_loop(h: Int, n: Int, i: Int) -> Unit =
+                     if i >= n then ()
+                     else {{ let th = prim.load64(h + 12 + i * 8)
+         if prim.load32(th + 0) == 1 then {{ let r: {param_ty} = prim.load_handle(th + 12)
+             __drop_{name}(r) }} else ()
+         prim.rc_dec(th)
+         __drop_list_{name}_int_loop(h, n, i + 1) }}
+"
+            ));
         }
     }
     // A per-element-recursive `$__drop_list_<R>` for EVERY recursive-drop record R (not just the
@@ -1314,6 +1331,29 @@ pub fn generate_record_drop_sources(
              fn __drop_list_{rn_fn}_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
                if i >= n then ()\n  \
                else {{ let e: {rn} = prim.load_handle(h + 12 + i * 8)\n         __drop_{rn_fn}(e)\n         __drop_list_{rn_fn}_loop(h, n, i + 1) }}\n"
+        ));
+        // The `(<R>, <scalar>)` TUPLE-list twin (`$__drop_list_<R>_int` — compound_eq's
+        // `Map[P, Int]` from_list pairs, ListElemDrop::RecordInt): per element, the tuple's
+        // slot0 record recurses via `$__drop_<R>`, slot1 is scalar (nothing to free), then the
+        // tuple block frees. Mirrors `__drop_list_str_<V>`'s walk with the recursive slot
+        // swapped. Scalar-slot-type-agnostic (the drop never reads slot1), so the `Int`
+        // annotation covers Bool/Float instances too.
+        out.push_str(&format!(
+            "fn __drop_list_{rn_fn}_int(xs: List[({rn}, Int)]) -> Unit = {{\n  \
+               let h = prim.handle(xs)\n  \
+               if prim.load32(h + 0) == 1 then __drop_list_{rn_fn}_int_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}}\n\
+             fn __drop_list_{rn_fn}_int_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else {{\n    \
+                 let th = prim.load64(h + 12 + i * 8)\n    \
+                 if prim.load32(th + 0) == 1 then {{\n      \
+                   let r: {rn} = prim.load_handle(th + 12)\n      \
+                   __drop_{rn_fn}(r)\n    \
+                 }} else ()\n    \
+                 prim.rc_dec(th)\n    \
+                 __drop_list_{rn_fn}_int_loop(h, n, i + 1)\n  \
+               }}\n"
         ));
     }
     if need_map_ss {

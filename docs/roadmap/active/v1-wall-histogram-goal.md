@@ -764,6 +764,31 @@ B119. **Fixed two confirmed live wrong-bytes bugs in the bare tail-position Opti
    583/583; classify 12 → 11 zero newly-walled; spec 283/283; GATE OK; CORPUS WALL OK
    (FORBIDDEN=0). **11, was 12.**
 
+B120. **Shipped the `(record, scalar)` tuple-list piece (`ListElemDrop::RecordInt`) — classify
+   11 → 10 (`compound_eq` off the lowering-wall list), but NOT a true v1 closure: the file still
+   fails to LINK (see below), `--verified` falls back to v0 (md5-verified identical).** The
+   B118-DIAGNOSIS blocker resolved by keying all three stages on ONE name: classification via
+   `record_or_anon_drop_type_name` of the list's elem `tys[0]`, construction FORCING a structural
+   record slot to that same classified type (the `forced_elem` precedent extended into the tuple
+   slot), and unconditional `$__drop_list_<R>_int` twins generated in BOTH the named-record and
+   anon-record loops (drop_sources.rs) — per element: recurse slot0 via `$__drop_<R>`, slot1
+   scalar, free the tuple. Verified: repro byte-identical (2/1), generated
+   `$__drop_list_anonrec_<hash>_int` REAL in WAT (the dangling-call trap explicitly checked),
+   100k-iteration leak-loop under a 2MB cap (200000 both targets), mir 583/583, classify 11 → 10
+   zero newly-walled, spec 283/283, GATE OK, CORPUS WALL OK FORBIDDEN=0.
+
+   **Why neither directive entry truly closes**: `compound_eq::main` now LOWERS (hence off
+   classify's list — a metric/reality divergence to keep honest: the collect_map precedent
+   refused to count exactly this state) but rendering still walls on NINE missing self-hosts —
+   the record-key deep-eq map/set family (`map.from_list/get/len/contains_key_wall`,
+   `map.insert`, `map.from_list_hval_wall`, `set.from_list/insert/contains_x`) — record keys
+   with a String field need generated per-record deep eq + a keyed map/set family (real new
+   infrastructure, the "Map key family" item). `map_fold_heap_acc` still walls at List-arg:
+   `List[(String, Map[String,String])]` needs BOTH a StrMapSS drop arm AND — probed standalone —
+   `map.from_list` for `Map[String,String]` is itself not self-hosted (`from_list_hval_wall`),
+   plus `get_or`/`fold` over the `_str` family; its whole map-literal stack is the missing
+   piece, not the tuple case alone. **10 by classify, was 11; v1-true count unchanged.**
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
