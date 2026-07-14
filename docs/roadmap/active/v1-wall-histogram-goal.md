@@ -4563,6 +4563,42 @@ B118. **Closed `generic_chain_unwrap_or` (13 → 12) — the tuple-wrapped-varia
    `compound_repr_records_interp.almd` (different triggers — 3-level Map/List nesting and a
    variant-payload-shape mismatch, neither a bare tuple-wrapped case).
 
+DIAGNOSIS — attempted `compound_eq`'s `(<RECURSIVE record>, Int)` tuple case as the RecordInt
+   mirror of B118's `StrVariant`, REVERTED (`git checkout --`, zero diff): built the exact
+   analogous machinery — a new `ListElemDrop::RecordInt(String)` case (binds_p3.rs, gated on
+   `Ty::Tuple([R, scalar])` where `record_or_anon_drop_type_name(R).is_some()`), reusing
+   `try_lower_tuple_construct` for construction, and a new generated `$__drop_list_<R>_int`
+   (drop_sources.rs, appended to the SAME per-record loop that already generates the bare
+   `$__drop_list_<R>`). Built clean. The isolated repro matching `compound_eq`'s ACTUAL literal
+   shape (`[({name:"alice",age:30}, 1), …]` — a STRUCTURAL record literal, not `P{name:…,
+   age:…}` constructor syntax, even under an explicit `let pairs: List[(P,Int)] = [...]`
+   annotation) reproduced EXACTLY the "admission says yes, nothing generated" dangling-call
+   trap B117 caught once already this session: `wasmtime: unknown func: $__drop_list_
+   anonrec_9fdb9233ebbcebd3_int`. Root cause: the classification gate's `record_or_anon_drop_
+   type_name(&tys[0])` call DOES correctly return a name — but for the STRUCTURAL literal's
+   own ANONYMOUS record type (an `anonrec_<hash>` synthetic name), not the NAMED type `P` the
+   list's declared type carries — `elem_ty` (from `value.ty`) says `Named("P",...)`, matching
+   what the drop-registration path used, but the ACTUAL heap value `try_lower_tuple_construct`
+   builds for slot0 (via `lower_owned_heap_field` on the bare `{name:…,age:…}` AST literal,
+   which the type checker leaves structural per the established "structural record literal"
+   precedent — see B108/entry116) is the DIFFERENT anonymous-record-shaped block. My generator
+   loop only iterates DECLARED (`rec_names`) record types, never anonymous ones, so
+   `$__drop_list_anonrec_<hash>_int` was never emitted. Fixing this needs EITHER (a) a
+   B117-style "shadow type" step — synthesize the anon record's fields into a form the `_int`
+   generator can ALSO iterate (the existing `collect_recursive_anon_records`/`anon_record_drop_
+   name` machinery already generates the BASE `$__drop_anonrec_<hash>`, so extending the SAME
+   discovery pass to also emit the `_int`-tuple-wrapped variant is plausible but not attempted),
+   or (b) forcing the tuple's record slot to construct AS the named type `P` (mirroring the
+   existing `forced_elem` mechanism the bare-record-list case already uses at binds_p3.rs:778-
+   789 — but that mechanism currently only threads through a DIRECT record-typed list element,
+   not a tuple's inner slot; extending it into `try_lower_tuple_construct` is itself new
+   plumbing). Neither was attempted (this fork's remaining budget favored a clean, documented
+   stop over a rushed second attempt at a shape that already once required real new
+   infrastructure). **`git status` clean, zero diff, 12 unchanged.** `map_fold_heap_acc.almd`
+   (structurally the SAME gap — a Map value is internally a paired-slot List, per entry106's
+   prior diagnosis — `List[(String, <nested Map>)]`) very likely shares this exact blocker,
+   not independently re-verified.
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
