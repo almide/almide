@@ -671,8 +671,15 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
         almide_ir::IrExprKind::LitInt { .. } | almide_ir::IrExprKind::LitFloat { .. } |
         almide_ir::IrExprKind::LitBool { .. }
     );
+    // TEST mode re-inits globals before EVERY test (native thread_local
+    // isolation parity — see compile_test_runner), so a test module with ANY
+    // top-let needs the init fn even when all initializers are constants: a
+    // constant-init `var` mutated by one test must reset for the next.
+    let has_any_top_let = !program.top_lets.is_empty()
+        || program.modules.iter().any(|m| !m.top_lets.is_empty());
     let needs_init = program.top_lets.iter().any(is_dyn)
-        || program.modules.iter().any(|m| m.top_lets.iter().any(is_dyn));
+        || program.modules.iter().any(|m| m.top_lets.iter().any(is_dyn))
+        || (!has_main && !test_func_indices.is_empty() && has_any_top_let);
     let init_globals_idx: Option<u32> = if needs_init {
         let void_ty = emitter.register_type(vec![], vec![]);
         let idx = emitter.register_func("__init_globals", void_ty);
