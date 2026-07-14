@@ -188,7 +188,10 @@ pub(crate) fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
 pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     match module {
         "list" => {
-            matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min" | "find" | "find_int_str" | "find_index" | "reduce" | "get_str" | "first_str" | "last_str")
+            // `fold` is here for the ONE Option-returning variant (`list.fold_ols`,
+            // Option[List[String]] acc) — a scalar-acc fold subject never reaches the
+            // variant-tracking sites (they gate on a heap/variant subject type first).
+            matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min" | "find" | "find_int_str" | "find_index" | "reduce" | "fold" | "get_str" | "first_str" | "last_str")
         }
         "string" => matches!(func, "index_of" | "last_index_of" | "codepoint" | "first" | "last" | "get" | "strip_prefix" | "strip_suffix"),
         "bytes" => matches!(func, "get" | "index_of"),
@@ -1101,6 +1104,19 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
     // it cleanly (a controlled reject) rather than emitting a repr-mismatched module. (Soundness-
     // preserving: a wall is never a miscompile.)
     if func == "fold" && matches!(module, "list" | "map" | "set") && is_heap_ty(result_ty) {
+        // The ONE self-hosted heap-accumulator variant: `Option[List[String]]` acc over
+        // `List[String]` elements (is_balanced's paren-stack fold) — `list.fold_ols`, the
+        // (heap, heap) -> heap 2-arity CallIndirect (`list_reduce_str`'s proven closure
+        // shape). Every other heap-acc fold keeps the unregistered `fold_hacc` wall.
+        let is_ols_acc = matches!(result_ty,
+            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1
+                && matches!(&a[0], Ty::Applied(TypeConstructorId::List, b)
+                    if b.len() == 1 && matches!(b[0], Ty::String)));
+        let src_is_list_str = matches!(arg_tys.first(),
+            Some(Ty::Applied(TypeConstructorId::List, e)) if e.len() == 1 && matches!(e[0], Ty::String));
+        if module == "list" && is_ols_acc && src_is_list_str {
+            return "list.fold_ols".to_string();
+        }
         return format!("{module}.fold_hacc");
     }
     // `list.enumerate` keys on its SOURCE element: scalar → the flat-pair self-host;

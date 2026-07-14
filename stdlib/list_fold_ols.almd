@@ -1,0 +1,32 @@
+// list_fold_ols — SELF-HOSTED heap-accumulator `list.fold` for the Option[List[String]]
+// accumulator over List[String] elements (is_balanced's paren-stack fold — the shape
+// mod_p4.rs's `fold_hacc` wall names as "no heap-accumulator fold variant self-hosted yet").
+// f : (Option[List[String]], String) -> Option[List[String]] via the (heap, heap) -> heap
+// 2-arity CallIndirect (`list_reduce_str`'s proven closure shape). OWNERSHIP: `acc` MOVES
+// into f each iteration (f consumes it and returns the next acc — the fn never frees it);
+// each element is read as a BORROW (`prim.load_str`, the list keeps ownership); the final
+// acc is the owned result. Left fold in element order, matching v0's fold(xs, init, f).
+
+fn __fold_ols_loop(
+  h: Int,
+  f: (Option[List[String]], String) -> Option[List[String]],
+  n: Int,
+  i: Int,
+  acc: Option[List[String]],
+) -> Option[List[String]] =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __fold_ols_loop(h, f, n, i + 1, nacc)
+  }
+
+fn list_fold_ols(
+  xs: List[String],
+  init: Option[List[String]],
+  f: (Option[List[String]], String) -> Option[List[String]],
+) -> Option[List[String]] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  __fold_ols_loop(h, f, n, 0, init)
+}

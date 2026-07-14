@@ -60,6 +60,17 @@ fn desugar_match_subject_hoist(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             // `match $t { some/none }` lowers (the regex-corpus match shape).
             IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. }
                 if module.as_str() == "regex" && (func.as_str() == "find" || func.as_str() == "captures")
+        ) || matches!(
+            &subject.kind,
+            // A HEAP-accumulator `list.fold` (the Option-returning `list.fold_ols` route) as a
+            // match subject — a HOF call with a closure arg cannot materialize inline through
+            // the variant path; hoist so the BIND's self-host HOF linkage + seeded
+            // materialized-Option read-shape make `match $t { some/none }` lower
+            // (is_balanced's paren-stack fold).
+            IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. }
+                if module.as_str() == "list"
+                    && func.as_str() == "fold"
+                    && matches!(&subject.ty, Ty::Applied(TC::Option, _))
         );
         if (has_literal_arm
             && !is_pure_match_subject(subject)

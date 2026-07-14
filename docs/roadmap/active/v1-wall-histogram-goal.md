@@ -789,6 +789,20 @@ B120. **Shipped the `(record, scalar)` tuple-list piece (`ListElemDrop::RecordIn
    plus `get_or`/`fold` over the `_str` family; its whole map-literal stack is the missing
    piece, not the tuple case alone. **10 by classify, was 11; v1-true count unchanged.**
 
+B121. **Enabler: self-hosted the first heap-accumulator `list.fold` (`list.fold_ols`,
+   Option[List[String]] acc over List[String]) — is_balanced's fold now links; 10 held.**
+   `stdlib/list_fold_ols.almd` ((heap,heap)->heap CallIndirect, `list_reduce_str`'s closure
+   shape; acc MOVES through f, elements borrowed) + typed routing carved out of the
+   `fold_hacc` wall (mod_p4.rs), `"fold"` added to `is_self_host_option_module_fn` (scalar
+   folds never reach the variant-gated tracking sites), and a `list.fold`-as-match-subject
+   hoist (desugar_match_subject.rs, the fan.map/regex.find precedent — a HOF subject can't
+   materialize inline). Verified: identity-lambda fold byte-identical both targets; 50k
+   leak-loop under 8MB (fresh Some + fold per iteration) 50000 both, no leak; mir 583/583;
+   classify 10 held zero newly-walled; spec 283/283; GATE OK; CORPUS WALL OK FORBIDDEN=0.
+   **is_balanced itself remains walled** on its fold LAMBDA's body — a heap-result match
+   over an Option[heap] param (`some(stack+["("])` / borrowed-bind move-out / nested
+   literal-in-some shapes) — delegated as the next brick. **10 unchanged.**
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
