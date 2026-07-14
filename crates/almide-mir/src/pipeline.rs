@@ -215,6 +215,25 @@ pub fn try_render_wasm_source(
     for m in &ir.modules {
         all_type_decls.extend(m.type_decls.iter().cloned());
     }
+    // A GENERIC user variant instantiated with concrete args as a `List[<...>]` LITERAL element
+    // type (`List[Either[Int,String]]`) needs a SHADOW `type <inst>` + `$__drop_<inst>`/
+    // `$__drop_list_<inst>` generated for THIS SPECIFIC instantiation — the raw declaration
+    // (`Either[L,R]`) carries unresolved type-parameter placeholders the drop generator can't
+    // classify (see `is_rich_variant_ty`'s doc comment, mod_p2.rs). Built from a PRE-relower
+    // `VariantLayouts` (this program's OWN declared generics/cases, before the drops text is
+    // appended) so discovery sees the ORIGINAL `Left(1)`/`Right("y")` list literal. The shadow
+    // type declaration text is prepended to `drops` below; the shadow `IrTypeDecl` is spliced
+    // into `all_type_decls` so the SAME `generate_variant_drop_sources` call already below
+    // covers it too (no separate/duplicate drop-generation call).
+    let pre_relower_variant_layouts = crate::lower::build_variant_layouts(&all_type_decls);
+    let generic_variant_list_insts =
+        crate::lower::discover_generic_variant_list_instantiations(&ir, &pre_relower_variant_layouts);
+    let (generic_variant_type_decl_src, generic_variant_synthetic_decls) =
+        crate::lower::generate_generic_variant_instantiation_type_decls(
+            &generic_variant_list_insts,
+            &pre_relower_variant_layouts,
+        );
+    all_type_decls.extend(generic_variant_synthetic_decls);
     let uses_result_opt_str = crate::lower::program_uses_result_option_str(&ir);
     // First-class function values need the UNIFORM closure-block release
     // (`$__drop_closure` — self-describing recursive drop, DropVariant "closure").
@@ -271,7 +290,8 @@ pub fn try_render_wasm_source(
         ""
     };
     let drops = format!(
-        "{}{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}{}",
+        generic_variant_type_decl_src,
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
         crate::lower::generate_variant_repr_sources(&all_type_decls, &crate::lower::collect_interp_anon_records(&ir)),

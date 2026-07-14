@@ -4391,6 +4391,123 @@ B116. **Closed `option.collect_map` (16 → 15) — the registry.rs lock had cle
    GATE OK. CORPUS WALL OK (stdlib purity gate now passes — `option_collect_map` classified pure,
    FORBIDDEN=0). **15, was 16.**
 
+B117. **Closed the generic-monomorphization gap for `List[<generic variant>]` literals (15 → 13,
+   TWO closures from one fix) — implemented the "generate a per-instantiation shadow type + drop
+   function" design the prior DIAGNOSIS (search this file for "type substitution" / "VariantLayouts.
+   by_type") scoped out as "genuinely new infrastructure, needs its own session"**: confirmed the
+   root cause precisely (debug-traced): a generic variant's DECLARED field types (`type Either[L,R]
+   = Left(L) | Right(R)`) store `L`/`R` VERBATIM as `Ty::Named("L",[])`/`Ty::Named("R",[])` in
+   `VariantLayouts.by_type` (confirmed NOT `Ty::TypeVar` — every consumer (`is_flat_variant_ty`,
+   `is_rich_variant_ty`, `needs_recursive_drop`) reads this UNSUBSTITUTED registry entry regardless
+   of any specific use site's concrete instantiation (`Either[Int,String]`'s `Ty::Named("Either",
+   [Int,String])`, confirmed via debug trace — the args ARE present at the use site, just discarded
+   by every consumer's `let n = match ty {...}` extraction). This makes EVERY generic variant look
+   entirely scalar/flat (`is_heap_ty` on a bare unresolved typevar ref is never true), so
+   `is_flat_variant_ty`/`is_rich_variant_ty` both return the "no admitted category" verdict for
+   `List[Either[Int,String]]`'s element type — the list-literal builder's initial gate
+   (`!elem_flat_variant && elem_rich_variant.is_none() && ...`) then declines the WHOLE construction.
+
+   **Investigated whether `almide-optimize::mono` (CLAUDE.md: "Mono runs before codegen") already
+   provides monomorphized per-instantiation type info to key off, per the parent directive's
+   suggestion — it does NOT**: `mono::monomorphize` (crates/almide-optimize/src/mono/mod.rs)
+   ONLY specializes FUNCTIONS with STRUCTURAL BOUNDS (`T: { name: String, .. }`), never touches
+   `program.type_decls` at all — a generic ADT used directly in a value literal (no structurally-
+   bounded function involved) is completely untouched by mono. No monomorphized-instantiation
+   registry exists anywhere in the pipeline to key off; a real fix needs its own substitution.
+
+   **Design (scattered substitution + PER-INSTANTIATION shadow generation — not a centralized
+   pre-pass, since none existed to extend)**:
+   1. `substitute_generic_ty(ty, subst)` (mod_p2.rs) — recursive `Ty::Named(sym,[]) → concrete`
+      substitution, given a `{generic-sym → concrete-Ty}` map.
+   2. `VariantLayouts::instantiated_cases(name, args)` — zips `layout.generics` against `args`,
+      substitutes every case's field types; a NO-OP passthrough (`layout.cases.clone()`) when
+      `layout.generics.is_empty()` — a non-generic variant is byte-for-byte unaffected, zero risk
+      of regression on the entire existing non-generic corpus.
+   3. `cases_need_recursive_drop` — the EXISTING `needs_recursive_drop`'s core loop, factored out
+      so it can run against EITHER the raw registry cases (existing callers, unchanged) OR
+      instantiated (substituted) cases (`instantiated_needs_recursive_drop`, new).
+   4. `is_flat_variant_ty`/`is_rich_variant_ty` (mod_p2.rs) — now extract `(name, args)` via a
+      shared `variant_name_and_args` helper (`Ty::Named(n,args)` — confirmed this IS how a
+      concrete instantiation arrives, not `Ty::Applied`) and substitute BEFORE classifying, when
+      `args` is non-empty. `is_rich_variant_ty` returns an INSTANTIATION-SPECIFIC name
+      (`generic_variant_instantiation_name`, e.g. `"Either_Int_String"` — a WASM-identifier-safe
+      mangling of concrete scalar arg names) instead of the bare generic name, since a SINGLE
+      shared drop function could not correctly serve two DIFFERENT instantiations with different
+      per-slot heap-ness (Box[Int] all-scalar vs Box[String] one heap field — both appear in the
+      SAME program in `generic_fn_in_inferred_lambda.almd`, a real stress case this design had to
+      handle, not a hypothetical). **Critical consistency gate**: before returning `Some(inst_
+      name)`, ALSO verifies every substituted field type is in the supported-renderable set
+      (a scalar, or an already-declared non-generic variant referenced by its real name) — WITHOUT
+      this, admission could say "yes, rich" for a field shape the GENERATOR can't actually emit
+      source for, reproducing the exact "admission gate says yes, nothing was generated → dangling
+      call → invalid WASM" trap this campaign caught once already this session (entry123/B113's
+      near-miss on a DIFFERENT wall). Verified this consistency gate is load-bearing by testing:
+      WITHOUT it, the first end-to-end test (`List[Either[Int,String]]`) produced exactly that —
+      `wasmtime: unknown func: failed to find name '$__drop_list_Either_Int_String'` — caught
+      BEFORE shipping, by design (the whole reason step 6 exists), not by luck.
+   5. `discover_generic_variant_list_instantiations(ir, variant_layouts)` (drop_sources.rs) — an
+      `IrVisitor` scan over EVERY function body + top-let in the program (main + modules) for a
+      `List{..}` literal expression whose `.ty` is `List[<generic variant with concrete args>]`;
+      returns deduped `(base_name, inst_name, args)` triples via a `BTreeMap` (host-deterministic
+      iteration order — the established `MonoKey`/`BTreeMap` precedent this codebase already uses
+      for the SAME reason in `almide-optimize::mono`). DELIBERATELY scoped to List-literal element
+      position ONLY (matching the actual corpus shapes), not a general instantiation scan — a bare
+      `Left(1): Either[Int,String]` construction OUTSIDE a list stays on the EXISTING (already-
+      correct-for-a-leaf-heap-field-only instantiation, verified by reading `try_lower_variant_
+      ctor`'s field loop: it uses the OPERAND's OWN concrete `arg.ty`, never the generic
+      registry's declared type, for its heap/scalar per-field decision — construction was NEVER
+      broken by this bug, only the LIST-ELEMENT ADMISSION gate was) `needs_rec`/`record_masks`
+      fallback path.
+   6. `generate_generic_variant_instantiation_type_decls(instantiations, variant_layouts)`
+      (drop_sources.rs) — for each instantiation, builds a SHADOW `IrTypeDecl` (Rust struct,
+      `generics: None`, UNIQUE synthetic ctor names `__<inst_name>_c<tag>` so it never collides
+      with the real type's own ctors — `Left`/`Right` stay registered to `Either`, not the shadow;
+      the v1 runtime repr is driven purely by TAG NUMBER + FIELD ORDER, never ctor NAME, so a
+      value built by the REAL `Either[Int,String]` construction and one built against the shadow
+      are byte-identical) PLUS its Almide SOURCE TEXT `type <inst_name> = ...` declaration.
+      Returns `(source_text, Vec<IrTypeDecl>)` rather than calling `generate_variant_drop_sources`
+      itself — the FIRST implementation attempt called it internally and would have DOUBLE-
+      DEFINED every regular variant's drop function (a compile error), caught immediately on the
+      first build and fixed before proceeding; the shadow decls are instead spliced into
+      `all_type_decls` ONCE in pipeline.rs, so the EXISTING single `generate_variant_drop_sources
+      (&all_type_decls)` call covers the shadow too.
+   7. `pipeline.rs` wiring: builds a PRE-relower `VariantLayouts` from `all_type_decls` (before the
+      drops-append), runs discovery + shadow generation, splices the shadow `IrTypeDecl`s into
+      `all_type_decls` and prepends the shadow `type` declaration text to `drops` (so the
+      two-pass re-lower's `source_to_ir_with(&format!("{source}\n{drops}"), ..)` sees a real,
+      type-checkable name for `$__drop_<inst_name>`'s parameter type to reference).
+
+   **Verified**: `Either[Int,String]` (the exact `compound_repr_recursive_interp.almd` shape) —
+   wasmtime `2` (list length), v0 native `2`, byte-identical; WAT confirmed `$__drop_Either_Int_
+   String`/`$__drop_list_Either_Int_String` are REAL (non-dangling) generated functions. A
+   200,000-iteration leak-loop (fresh `[Left(1),Right("y"),Left(2)]` construction every iteration)
+   under a TIGHT 2MB memory cap (not the usual 16MB — a looser cap wasn't sensitive enough to
+   guarantee catching a per-iteration String leak at this element size) produced the identical
+   accumulated value (600000) on wasmtime and v0 native — no leak, no OOM. The `generic_fn_in_
+   inferred_lambda.almd` shape (`Box[T]=B(T)`, used as BOTH `List[Box[Int]]` all-scalar AND
+   `List[Box[String]]` one-heap-field in the SAME program — a genuine dual-instantiation stress
+   case, not synthesized) — hand-written repro wasmtime `"3 a,b"`, v0 native `"3 a,b"`,
+   byte-identical; a 200,000-iteration leak-loop under the same 2MB cap produced the identical
+   accumulated value (1000000) on both — no leak, confirming the two DIFFERENT instantiations'
+   distinct shadow drop functions (`Box_Int` all-scalar, needing no drop at all; `Box_String`
+   needing the recursive path) never collide or interfere. `cargo test -q -p almide-mir`: 583/583.
+   `classify_corpus`: 15 → 13, TWO closures (`compound_repr_recursive_interp.almd`,
+   `generic_fn_in_inferred_lambda.almd`), zero newly-walled (diffed the full 13-name WALLED-REAL
+   list against the prior 15-entry baseline). `almide test`: 283/283, 0 failed. GATE OK. CORPUS
+   WALL OK (30820 heap objects, 5133 name witnesses, 4185 caps witnesses, 269 caps-transitive,
+   Rocq kernel-certified in 266s, FORBIDDEN=0).
+
+   **What remains in the List[heap]-literal cluster (NOT closed by this fix — different
+   sub-shapes, per the earlier consolidated map)**: `generic_chain_unwrap_or.almd` (a TUPLE
+   wrapping a variant ctor — `List[(String, V)]` — `try_lower_record_list_literal_as`'s
+   `ListElemDrop` enum has no case for a tuple whose heap slot is a variant, a DIFFERENT gap
+   than the bare-list-of-variant-ctors this fix closes), `compound_eq.almd`/`map_fold_heap_acc.
+   almd` (a tuple wrapping a RECORD/nested-Map — same missing-`ListElemDrop`-case family, not a
+   generics issue at all), `compound_repr_interp.almd`/`compound_repr_records_interp.almd`
+   (different triggers per the earlier bisection — a 3-level `List→Map→List[Option]` nesting and
+   a variant-payload-shape-mismatch list respectively, neither a bare `List[<generic variant>]`).
+   **15 → 13, TWO closed.**
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).

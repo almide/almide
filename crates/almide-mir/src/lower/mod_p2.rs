@@ -1079,6 +1079,75 @@ impl VariantLayout {
     }
 }
 
+/// Recursively replace a bare generic-parameter reference (`Ty::Named(p, [])` where `p` is a
+/// key of `subst`) with its concrete binding — the DECLARATION-time field type of a generic
+/// variant (`type Either[L,R] = Left(L) | Right(R)`) stores `L`/`R` verbatim as `Named("L",[])`/
+/// `Named("R",[])` (confirmed via debug trace, NOT `Ty::TypeVar`), so heap/flat classification
+/// over the RAW registry entry is blind to any concrete instantiation. Recurses into `Named`'s
+/// own args and `Applied`'s args (a generic parameter could itself appear nested, e.g.
+/// `List[L]`) so a partially-generic composite field also resolves correctly.
+fn substitute_generic_ty(ty: &Ty, subst: &HashMap<almide_lang::intern::Sym, Ty>) -> Ty {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::Named(n, args) if args.is_empty() => {
+            subst.get(n).cloned().unwrap_or_else(|| ty.clone())
+        }
+        Ty::Named(n, args) => {
+            Ty::Named(*n, args.iter().map(|a| substitute_generic_ty(a, subst)).collect())
+        }
+        Ty::Applied(TypeConstructorId::UserDefined(n), args) => Ty::Applied(
+            TypeConstructorId::UserDefined(n.clone()),
+            args.iter().map(|a| substitute_generic_ty(a, subst)).collect(),
+        ),
+        Ty::Applied(c, args) => {
+            Ty::Applied(c.clone(), args.iter().map(|a| substitute_generic_ty(a, subst)).collect())
+        }
+        _ => ty.clone(),
+    }
+}
+
+/// A WASM-identifier-safe, unique suffix for a generic variant instantiation (`Either` +
+/// `[Int, String]` → `"Either_Int_String"`) — the name of the PER-INSTANTIATION drop function
+/// (`$__drop_<this>`/`$__drop_list_<this>`) generated for it, distinct from the bare generic
+/// name so two different instantiations of the same type (were the corpus ever to use both)
+/// never collide on one ambiguous function. `None` for an arg shape not confidently nameable
+/// here (a nested generic instantiation, a tuple, …) — the caller declines (stays walled)
+/// rather than guess a name that could collide or misrender.
+/// The bare Almide SOURCE spelling of a scalar `Ty` — the set both the instantiation-name
+/// mangler and the shadow-type-declaration renderer (`generate_generic_variant_instantiation_
+/// sources`, drop_sources.rs) treat as safely nameable/renderable. Kept as ONE shared list so
+/// the two never drift apart (a type nameable-but-not-renderable, or vice versa, would break the
+/// admission⟹generation invariant `is_rich_variant_ty` depends on).
+pub fn generic_variant_instantiation_scalar_name(ty: &Ty) -> Option<&'static str> {
+    match ty {
+        Ty::Int => Some("Int"),
+        Ty::Float => Some("Float"),
+        Ty::Bool => Some("Bool"),
+        Ty::String => Some("String"),
+        Ty::Int8 => Some("Int8"),
+        Ty::Int16 => Some("Int16"),
+        Ty::Int32 => Some("Int32"),
+        Ty::Int64 => Some("Int64"),
+        Ty::UInt8 => Some("UInt8"),
+        Ty::UInt16 => Some("UInt16"),
+        Ty::UInt32 => Some("UInt32"),
+        Ty::UInt64 => Some("UInt64"),
+        Ty::Float32 => Some("Float32"),
+        Ty::Float64 => Some("Float64"),
+        _ => None,
+    }
+}
+
+pub fn generic_variant_instantiation_name(base: &str, args: &[Ty]) -> Option<String> {
+    let mut out = base.to_string();
+    for a in args {
+        let piece = generic_variant_instantiation_scalar_name(a)?;
+        out.push('_');
+        out.push_str(piece);
+    }
+    Some(out)
+}
+
 /// The variant-type sibling of [`RecordLayouts`]: type NAME → its [`VariantLayout`], plus a
 /// constructor-name → owning-type reverse index (a `Lit(7)` constructor expression carries
 /// its ctor name; this resolves the variant type the way v0's `find_variant_tag_by_ctor`
@@ -1105,14 +1174,16 @@ impl VariantLayouts {
         Some((ty.as_str(), layout, case))
     }
 
-    /// Does the variant type `type_name` need the RECURSIVE [`Op::DropVariant`] (the generated
-    /// `$__drop_<ty>`) — i.e. does some ctor field hold another user variant whose flat free would
-    /// leak its children? A String-only-field variant uses the masked `DropListStr` instead (ADT
-    /// brick 5a/5c). This is the lowering-side mirror of
-    /// [`crate::lower::variant_needs_recursive_drop`], computed from the registry's field Tys.
-    pub fn needs_recursive_drop(&self, type_name: &str, is_record: &dyn Fn(&str) -> bool) -> bool {
+    /// The CORE of [`Self::needs_recursive_drop`], factored out so an INSTANTIATED (generic-
+    /// substituted) case list can share the exact same classification as the raw registry entry
+    /// — the two must never disagree (a false "doesn't need recursion" verdict on a heap field
+    /// is a silent leak, not a wall).
+    fn cases_need_recursive_drop(
+        &self,
+        cases: &[VariantCaseLayout],
+        is_record: &dyn Fn(&str) -> bool,
+    ) -> bool {
         use almide_lang::types::constructor::TypeConstructorId;
-        let Some(layout) = self.by_type.get(type_name) else { return false };
         // Mirrors the generator's `variant_needs_recursive_drop`: a nested-variant field (the
         // original rule) OR heap fields the generated drop can ALL free (String / List[scalar] /
         // List[variant] / List[String] (per-element via `__drop_list_str`) / a RECORD — via
@@ -1133,7 +1204,7 @@ impl VariantLayouts {
         let mut any_heap = false;
         let mut all_supported = true;
         let mut has_variant_field = false;
-        for c in &layout.cases {
+        for c in cases {
             for (_, ty) in &c.fields {
                 if self.field_is_variant(ty) {
                     has_variant_field = true;
@@ -1149,25 +1220,100 @@ impl VariantLayouts {
         has_variant_field || (any_heap && all_supported)
     }
 
+    /// Does the variant type `type_name` need the RECURSIVE [`Op::DropVariant`] (the generated
+    /// `$__drop_<ty>`) — i.e. does some ctor field hold another user variant whose flat free would
+    /// leak its children? A String-only-field variant uses the masked `DropListStr` instead (ADT
+    /// brick 5a/5c). This is the lowering-side mirror of
+    /// [`crate::lower::variant_needs_recursive_drop`], computed from the registry's field Tys.
+    /// UNSUBSTITUTED: for a GENERIC variant this reads the raw declaration (type-parameter
+    /// placeholders, never a concrete instantiation) — see [`Self::instantiated_needs_recursive_
+    /// drop`] for the instantiation-aware sibling a `List[<generic variant>]` element check needs.
+    pub fn needs_recursive_drop(&self, type_name: &str, is_record: &dyn Fn(&str) -> bool) -> bool {
+        let Some(layout) = self.by_type.get(type_name) else { return false };
+        self.cases_need_recursive_drop(&layout.cases, is_record)
+    }
+
+    /// Substitute a generic variant's DECLARED field types (`Left(L) | Right(R)` → `L`/`R` as
+    /// bare `Ty::Named(sym,[])` placeholders, confirmed via debug trace — never `Ty::TypeVar`)
+    /// with the CONCRETE type args at one instantiation site (`Either[Int,String]`'s `[Int,
+    /// String]`, zipped positionally against `layout.generics`). A NON-generic variant (`layout.
+    /// generics.is_empty()`) returns its cases UNCHANGED (zero-cost passthrough, no behavior
+    /// change for the entire existing non-generic corpus). `None` on an arity mismatch (the
+    /// checker guarantees this never happens for a well-typed program, but a mismatched
+    /// registry/call-site pairing declines rather than substituting garbage).
+    fn instantiated_cases(&self, type_name: &str, args: &[Ty]) -> Option<Vec<VariantCaseLayout>> {
+        let layout = self.by_type.get(type_name)?;
+        if layout.generics.is_empty() {
+            return Some(layout.cases.clone());
+        }
+        if layout.generics.len() != args.len() {
+            return None;
+        }
+        let subst: HashMap<almide_lang::intern::Sym, Ty> =
+            layout.generics.iter().copied().zip(args.iter().cloned()).collect();
+        Some(
+            layout
+                .cases
+                .iter()
+                .map(|c| VariantCaseLayout {
+                    ctor: c.ctor,
+                    tag: c.tag,
+                    fields: c
+                        .fields
+                        .iter()
+                        .map(|(n, t)| (*n, substitute_generic_ty(t, &subst)))
+                        .collect(),
+                })
+                .collect(),
+        )
+    }
+
+    /// The instantiation-aware sibling of [`Self::needs_recursive_drop`] — substitutes generic
+    /// field types with `args` BEFORE classifying, so `Either[Int,String]`'s `Right(String)` case
+    /// is correctly seen as heap (unlike the raw registry's unresolved `Right(R)`). Identical to
+    /// `needs_recursive_drop` for a non-generic type (args ignored via `instantiated_cases`'s
+    /// passthrough).
+    pub fn instantiated_needs_recursive_drop(
+        &self,
+        type_name: &str,
+        args: &[Ty],
+        is_record: &dyn Fn(&str) -> bool,
+    ) -> bool {
+        match self.instantiated_cases(type_name, args) {
+            Some(cases) => self.cases_need_recursive_drop(&cases, is_record),
+            None => false,
+        }
+    }
+
+    /// Extract `(bare type name, concrete type args)` from a variant-type reference — the
+    /// SHARED match arms `is_flat_variant_ty`/`is_rich_variant_ty`/`field_variant_name` each
+    /// duplicated (discarding the args); factored out so the instantiation-aware paths can see
+    /// both halves. `Ty::Named(n, args)` carries a GENERIC variant's concrete instantiation args
+    /// at a USE site (`Either[Int,String]` → `Named("Either", [Int, String])`, confirmed via
+    /// debug trace) — `args` is empty for a non-generic reference or an unresolved bare mention.
+    fn variant_name_and_args(ty: &Ty) -> Option<(&str, &[Ty])> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        match ty {
+            Ty::Named(n, args) => Some((n.as_str(), args.as_slice())),
+            Ty::Variant { name, .. } => Some((name.as_str(), &[])),
+            Ty::Applied(TypeConstructorId::UserDefined(n), args) => Some((n.as_str(), args.as_slice())),
+            _ => None,
+        }
+    }
+
     /// Is `ty` a registry variant ALL of whose constructors have ONLY scalar fields — i.e. a FLAT
     /// tag-block with NO heap slot (a nullary enum like `Capability`, or a scalar-payload variant)?
     /// Such a block is a single allocation freed by one `prim.rc_dec`, so a `List[flat-variant]`
     /// drops correctly via the per-element-`rc_dec` `__drop_list_str` (each element + the list block),
     /// the SAME flat shape as a `List[String]`. A variant carrying a `String`/nested/`List` field is
     /// NOT flat (its block owns an inner handle a flat `rc_dec` would leak) → `false` (stays walled).
+    /// Substitutes generic field types against `ty`'s own instantiation args first (a no-op for a
+    /// non-generic variant), so a generic instantiated with an all-scalar arg set (`Pair[Int,Int]`)
+    /// is correctly flat while one with a heap arg (`Either[Int,String]`) correctly is not.
     pub fn is_flat_variant_ty(&self, ty: &Ty) -> bool {
-        use almide_lang::types::constructor::TypeConstructorId;
-        let n = match ty {
-            Ty::Named(n, _) => n.as_str(),
-            Ty::Variant { name, .. } => name.as_str(),
-            Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.as_str(),
-            _ => return false,
-        };
-        match self.by_type.get(n) {
-            Some(layout) => layout
-                .cases
-                .iter()
-                .all(|c| c.fields.iter().all(|(_, fty)| !is_heap_ty(fty))),
+        let Some((n, args)) = Self::variant_name_and_args(ty) else { return false };
+        match self.instantiated_cases(n, args) {
+            Some(cases) => cases.iter().all(|c| c.fields.iter().all(|(_, fty)| !is_heap_ty(fty))),
             None => false,
         }
     }
@@ -1178,13 +1324,51 @@ impl VariantLayouts {
     /// element (the wasm `Instr` accumulator) — its drop routes to `$__drop_list_<V>` via
     /// `variant_drop_handles`. Mirrors [`crate::lower::variant_needs_recursive_drop`] (the generator's
     /// gate) so the two never disagree: a variant admitted here ALWAYS has a generated `$__drop_list_<V>`.
+    ///
+    /// For a GENERIC variant instantiated with concrete args (`Either[Int,String]`), the returned
+    /// name is the INSTANTIATION-SPECIFIC one (`generic_variant_instantiation_name`, e.g.
+    /// `"Either_Int_String"`) rather than the bare generic name — a distinct `$__drop_list_<this>`
+    /// is generated per instantiation actually used (see `discover_generic_variant_list_
+    /// instantiations` in drop_sources.rs), since a single shared function could not correctly
+    /// serve two instantiations with DIFFERENT per-slot heap-ness. `None` if the args aren't a
+    /// confidently nameable shape (declines / stays walled rather than risk a colliding name) or
+    /// this specific instantiation doesn't actually need recursive drop.
     pub fn is_rich_variant_ty(&self, ty: &Ty) -> Option<String> {
-        let name = self.field_variant_name(ty)?;
+        let (n, args) = Self::variant_name_and_args(ty)?;
+        if !self.by_type.contains_key(n) {
+            return None;
+        }
         // A `List[<variant>]` ELEMENT check keys on nested-variant fields only (a variant with a
         // record field is neither flat nor list-rich here → the list materializer walls it cleanly,
         // never a leak). The record-widening applies to the direct-ctor `needs_rec` (LowerCtx), not
         // to the list-element admission.
-        self.needs_recursive_drop(&name, &|_| false).then_some(name)
+        if args.is_empty() {
+            return self
+                .needs_recursive_drop(n, &|_| false)
+                .then(|| n.to_string());
+        }
+        let inst_name = generic_variant_instantiation_name(n, args)?;
+        // ADMISSION must never outrun GENERATION: the shadow `type <inst_name> = ...` +
+        // `$__drop_<inst_name>` source text (`generate_generic_variant_instantiation_sources`,
+        // drop_sources.rs) can only render a field whose SUBSTITUTED type is one of the scalars
+        // `generic_variant_instantiation_name` itself already supports, or another ALREADY-
+        // DECLARED (non-generic) user variant referenced by its real bare name. A field type
+        // outside that set (e.g. a generic field like `Left(List[L])` — Either's OWN fields
+        // happen to be bare type params, so this never fires for it, but a future generic
+        // variant might declare a composite field) declines the WHOLE instantiation here, so a
+        // "yes" from this method is ALWAYS backed by real generated source — never a dangling
+        // `$__drop_list_<inst_name>` call (the exact class of bug this campaign nearly shipped
+        // once already, this session, on a different wall).
+        let cases = self.instantiated_cases(n, args)?;
+        if !cases.iter().all(|c| {
+            c.fields.iter().all(|(_, fty)| {
+                generic_variant_instantiation_scalar_name(fty).is_some() || self.field_is_variant(fty)
+            })
+        }) {
+            return None;
+        }
+        self.instantiated_needs_recursive_drop(n, args, &|_| false)
+            .then_some(inst_name)
     }
 
     /// Is `ty` one of the variant types in this registry (a nested-variant ctor field)?

@@ -193,6 +193,171 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
     out
 }
 
+/// Discover every `List[<generic user variant instantiated with concrete args>]` LITERAL
+/// element type used anywhere in the program (`Either[Int,String]` in `compound_repr_recursive_
+/// interp.almd`'s `List[Either[Int,String]] = [Left(1), Right("y")]`) — the set of instantiations
+/// [`generate_generic_variant_instantiation_sources`] needs a shadow `type` + `$__drop_<inst>`/
+/// `$__drop_list_<inst>` for. DELIBERATELY scoped to List-literal element position only — not a
+/// general generic-instantiation scan — matching the actual corpus shape this closes; a bare
+/// `Left(1): Either[Int,String]` construction outside a list, a function parameter, a record
+/// field, … are untouched (their existing `try_lower_variant_ctor` construction path is ALREADY
+/// correct for a leaf-heap-field-only instantiation via its masked flat-drop fallback — see the
+/// `is_rich_variant_ty` doc comment; only the LIST case lacked a category at all). Deduped by
+/// instantiation name (a `BTreeMap`, so the output order is a pure function of the program — no
+/// HashMap-iteration-order divergence across native/wasm hosts).
+pub fn discover_generic_variant_list_instantiations(
+    ir: &almide_ir::IrProgram,
+    variant_layouts: &crate::lower::VariantLayouts,
+) -> Vec<(String, String, Vec<Ty>)> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    use almide_ir::{IrExpr, IrExprKind};
+    use almide_lang::types::constructor::TypeConstructorId;
+
+    struct Scan<'a> {
+        variant_layouts: &'a crate::lower::VariantLayouts,
+        found: std::collections::BTreeMap<String, (String, Vec<Ty>)>,
+    }
+    impl IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(&e.kind, IrExprKind::List { .. }) {
+                if let Ty::Applied(TypeConstructorId::List, a) = &e.ty {
+                    if a.len() == 1 {
+                        if let Some((name, args)) = crate::lower::VariantLayouts::variant_name_and_args(&a[0]) {
+                            if !args.is_empty() {
+                                if let Some(layout) = self.variant_layouts.by_type.get(name) {
+                                    if !layout.generics.is_empty() {
+                                        if let Some(inst) =
+                                            crate::lower::generic_variant_instantiation_name(name, args)
+                                        {
+                                            self.found
+                                                .entry(inst.clone())
+                                                .or_insert_with(|| (name.to_string(), args.to_vec()));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut scan = Scan { variant_layouts, found: Default::default() };
+    for f in &ir.functions {
+        scan.visit_expr(&f.body);
+    }
+    for tl in &ir.top_lets {
+        scan.visit_expr(&tl.value);
+    }
+    for m in &ir.modules {
+        for f in &m.functions {
+            scan.visit_expr(&f.body);
+        }
+        for tl in &m.top_lets {
+            scan.visit_expr(&tl.value);
+        }
+    }
+    scan.found.into_iter().map(|(inst, (base, args))| (base, inst, args)).collect()
+}
+
+/// A SHADOW `type <inst_name> = ...` declaration — one Rust `IrTypeDecl` (to splice into the
+/// caller's OWN `type_decls` list, once, BEFORE its single `generate_variant_drop_sources` call —
+/// so the caller's existing drop-function generation covers the shadow automatically, with no
+/// separate/duplicate `generate_variant_drop_sources` invocation here) PLUS its Almide SOURCE
+/// TEXT `type` line (the caller must prepend this to whatever it re-lowers, so the shadow name is
+/// actually declared when the drop-function source referencing it gets type-checked) — one pair
+/// per instantiation `discover_generic_variant_list_instantiations` found. The shadow type
+/// mirrors the REAL generic variant's case/field SHAPE with type-parameters SUBSTITUTED to this
+/// instantiation's concrete args, under UNIQUE synthetic ctor names (`__<inst_name>_c<tag>`) so
+/// it never collides with the real type's own ctors (`Left`/`Right` stay registered to `Either`,
+/// not to this shadow) — the runtime v1 variant repr (tag + uniform i64 slots) is driven purely
+/// by TAG NUMBER and FIELD ORDER, never by ctor NAME, so a value built by the REAL
+/// `Either[Int,String]` construction and one built against this shadow type are BYTE-IDENTICAL;
+/// the shadow exists SOLELY so the two-pass re-lower (`pipeline.rs`'s
+/// `source_to_ir_with(&format!("{source}\n{drops}"), ..)`) has a real, type-checkable name to
+/// hang `$__drop_<inst_name>`'s parameter type on. An instantiation whose ctor field types (after
+/// substitution) aren't in the supported-renderable set (`generic_variant_instantiation_scalar_
+/// name` / an already-declared non-generic variant) is silently skipped — `is_rich_variant_ty`
+/// (mod_p2.rs) gates on the SAME set before ever admitting an instantiation, so this should never
+/// actually skip a name that reached here, but the check is re-verified rather than assumed.
+pub fn generate_generic_variant_instantiation_type_decls(
+    instantiations: &[(String, String, Vec<Ty>)],
+    variant_layouts: &crate::lower::VariantLayouts,
+) -> (String, Vec<almide_ir::IrTypeDecl>) {
+    use almide_lang::intern::sym;
+
+    let mut type_decl_src = String::new();
+    let mut synthetic_decls: Vec<almide_ir::IrTypeDecl> = Vec::new();
+    for (base, inst_name, args) in instantiations {
+        let Some(layout) = variant_layouts.by_type.get(base) else { continue };
+        let subst: std::collections::HashMap<almide_lang::intern::Sym, Ty> =
+            layout.generics.iter().copied().zip(args.iter().cloned()).collect();
+        let mut cases: Vec<almide_ir::IrVariantDecl> = Vec::with_capacity(layout.cases.len());
+        let mut case_src_parts: Vec<String> = Vec::with_capacity(layout.cases.len());
+        let mut ok = true;
+        for c in &layout.cases {
+            let mut field_tys: Vec<Ty> = Vec::with_capacity(c.fields.len());
+            let mut field_src_parts: Vec<String> = Vec::with_capacity(c.fields.len());
+            for (_, fty) in &c.fields {
+                let sub = substitute_generic_ty(fty, &subst);
+                let rendered = crate::lower::generic_variant_instantiation_scalar_name(&sub)
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        // An already-declared NON-GENERIC user variant field — reference it by
+                        // its own real name (it needs no shadow, it isn't generic).
+                        variant_layouts.field_is_variant(&sub).then(|| match &sub {
+                            Ty::Named(n, _) => n.as_str().to_string(),
+                            _ => String::new(),
+                        })
+                    });
+                let Some(rendered) = rendered.filter(|s| !s.is_empty()) else {
+                    ok = false;
+                    break;
+                };
+                field_src_parts.push(rendered);
+                field_tys.push(sub);
+            }
+            if !ok {
+                break;
+            }
+            let ctor_name = format!("__{inst_name}_c{}", c.tag);
+            case_src_parts.push(if field_src_parts.is_empty() {
+                ctor_name.clone()
+            } else {
+                format!("{ctor_name}({})", field_src_parts.join(", "))
+            });
+            cases.push(almide_ir::IrVariantDecl {
+                name: sym(&ctor_name),
+                kind: if field_tys.is_empty() {
+                    almide_ir::IrVariantKind::Unit
+                } else {
+                    almide_ir::IrVariantKind::Tuple { fields: field_tys }
+                },
+            });
+        }
+        if !ok || cases.is_empty() {
+            continue;
+        }
+        type_decl_src.push_str(&format!("type {inst_name} = {}\n", case_src_parts.join(" | ")));
+        synthetic_decls.push(almide_ir::IrTypeDecl {
+            name: sym(inst_name),
+            kind: almide_ir::IrTypeDeclKind::Variant {
+                cases,
+                is_generic: false,
+                boxed_args: Default::default(),
+                boxed_record_fields: Default::default(),
+            },
+            deriving: None,
+            generics: None,
+            visibility: almide_ir::IrVisibility::Private,
+            doc: None,
+            blank_lines_before: 0,
+        });
+    }
+    (type_decl_src, synthetic_decls)
+}
+
 /// Does a record carrying a field of type `ty` need a generated recursive `$__drop_<R>` (rather than
 /// a flat one-level `rc_dec` of its block)? ANY heap field does: a flat `rc_dec` of the record block
 /// frees only the block, leaking every owned heap SLOT (a `String` handle, a `List`/`Map`/`Value`
