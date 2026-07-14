@@ -145,6 +145,15 @@ impl LowerCtx {
                     }
                     v
                 }
+                // `node.children[i]` — the list is ITSELF a heap FIELD of a materialized
+                // aggregate (the ceangal layout class): recurse through this same borrow
+                // (gated on materialization at each level; the result is a borrowed real
+                // block in `param_values`, exactly what the `$elem_addr` read needs).
+                IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+                    if is_heap_ty(&object.ty) =>
+                {
+                    self.try_lower_heap_field_borrow(object)?
+                }
                 _ => return None,
             };
             let idx = self.lower_scalar_value(index)?;
