@@ -29,3 +29,18 @@ test "member-container index borrow direct" {
   let n = { children: [{ grow: 5.0, shrink: 0.0 }], gap: 0.0 }
   assert(n.children[0].grow == 5.0)
 }
+
+fn pass2(node: Node, line: Line, n: Int) -> Float = {
+  var t = 0.0
+  for ii in 0..n {
+    let child = node.children[line.items[ii].idx]
+    t = t + child.grow * line.items[ii].basis
+  }
+  t
+}
+
+test "chained index-member scalar reads" {
+  let nd = { children: [{ grow: 2.0, shrink: 0.0 }, { grow: 5.0, shrink: 0.0 }], gap: 0.0 }
+  let ln = { items: [{ idx: 1, basis: 3.0 }, { idx: 0, basis: 4.0 }], used: 0.0 }
+  assert(pass2(nd, ln, 2) == 23.0)
+}

@@ -461,6 +461,13 @@ impl LowerCtx {
             {
                 self.try_lower_heap_field_borrow(container)?
             }
+            // A list-ELEMENT aggregate (`line.items[ii].idx` — the chained scalar read off
+            // an indexed record): borrow the element block via the same bounds-checked
+            // `$elem_addr` LoadHandle the for-in element borrow uses (gated on a tracked/
+            // field-borrowable list container at each level).
+            IrExprKind::IndexAccess { .. } if is_heap_ty(&container.ty) => {
+                self.try_lower_heap_field_borrow(container)?
+            }
             _ => return None,
         };
         let h = self.fresh_value();
