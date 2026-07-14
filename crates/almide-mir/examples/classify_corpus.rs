@@ -1185,7 +1185,7 @@ fn main() {
                                     // sound here: the name is not file-defined, so adding sibling
                                     // functions could not make it resolve (only the registry could,
                                     // which `auto_linkable` already ruled out).
-                                    let probe = MirProgram { functions: vec![mir.clone()] };
+                                    let probe = MirProgram { functions: vec![mir.clone()], exports: vec![] };
                                     if !almide_mir::render_wasm::unlinked_call_names(&probe)
                                         .contains(name)
                                     {

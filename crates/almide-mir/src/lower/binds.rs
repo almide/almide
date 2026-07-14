@@ -64,6 +64,43 @@ impl LowerCtx {
         }
         let mut cc = CapCollect { free: &free, out: Vec::new() };
         almide_ir::visit::IrVisitor::visit_expr(&mut cc, body);
+        // HONEST-WALL GATE — a MUTATED capture (`(x) => { calls = calls + 1; x }`,
+        // indexassign/fieldassign through a capture): env slots are VALUE COPIES /
+        // co-owns, so writing the copy silently LOSES the mutation (sort_by_call_count
+        // printed calls=0; the closure-mutation wasm_runtime cells printed stale
+        // values — all bisect-confirmed PRE-EXISTING under `--verified`). Decline the
+        // lift: the call site then walls (strict mode) and `--verified` falls back to
+        // v0. Shapes the DEFUNC inliner takes (list/fan HOFs with inline lambdas)
+        // never reach this lift — inlined mutation is direct and correct.
+        {
+            struct MutScan<'a> {
+                free: &'a [VarId],
+                hit: bool,
+            }
+            impl almide_ir::visit::IrVisitor for MutScan<'_> {
+                fn visit_stmt(&mut self, s: &almide_ir::IrStmt) {
+                    match &s.kind {
+                        IrStmtKind::Assign { var, .. } if self.free.contains(var) => {
+                            self.hit = true;
+                        }
+                        IrStmtKind::IndexAssign { target, .. }
+                        | IrStmtKind::FieldAssign { target, .. }
+                        | IrStmtKind::MapInsert { target, .. } => {
+                            if self.free.contains(target) {
+                                self.hit = true;
+                            }
+                        }
+                        _ => {}
+                    }
+                    almide_ir::visit::walk_stmt(self, s);
+                }
+            }
+            let mut ms = MutScan { free: &free, hit: false };
+            almide_ir::visit::IrVisitor::visit_expr(&mut ms, body);
+            if ms.hit {
+                return None;
+            }
+        }
         // Partition the captures by DROP CLASS — the env layout is self-describing so the
         // uniform `$__drop_closure` runtime can free ANY closure block without lowering-time
         // mask knowledge (a call-result closure's captures are unknowable at the drop site):
@@ -131,9 +168,17 @@ impl LowerCtx {
         // Lower the body in a FRESH sub-context sharing only the globals (its own value
         // space + params). A failure (a body outside the subset) aborts the lift cleanly —
         // nothing is emitted into `self`, so the caller's deferred fallback stays sound.
+        // The lifted fn's NAME is precomputed and seeded as the sub-context's fn_name:
+        // a NESTED lift inside this body then names itself `__lambda_<THIS lambda>_<k>`
+        // — unique. Inheriting the parent fn_name made the inner lambda collide with the
+        // parent's own `__lambda_<fn>_0` (sub.lifted starts empty), and the by-NAME
+        // FuncRef resolution dispatched the WRONG lambda (hof_closure_string_tail's
+        // nested bench ran the alpha body). `self.lifted` is untouched while `sub`
+        // lowers (nested lifts land in `sub.lifted`), so the index is stable here.
+        let name = format!("__lambda_{}_{}", self.fn_name, self.lifted.len());
         let mut sub = LowerCtx {
             globals: self.globals.clone(),
-            fn_name: self.fn_name.clone(),
+            fn_name: name.clone(),
             // The lifted body may access a record/tuple field (`(p) => p.x`), so it needs
             // the VALUE-MODEL field registry too.
             record_layouts: self.record_layouts.clone(),
@@ -219,7 +264,6 @@ impl LowerCtx {
             sub.value_of.insert(*v, val);
         }
         let ret = sub.lower_body_into(body).ok()?;
-        let name = format!("__lambda_{}_{}", self.fn_name, self.lifted.len());
         let mut nested = std::mem::take(&mut sub.lifted);
         // A lifted lambda is pure-by-default (declared ∅): an effectful one is NOT silently
         // accepted — its own caps witness (Stdout used ⊄ ∅ declared) faults the subset

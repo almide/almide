@@ -1,0 +1,52 @@
+// list_sort_by_keys — SELF-HOSTED stable sort of a List[Int] by a PARALLEL key array
+// (the v0 `sort_by_cached_key` shape: keys are computed ONCE per element, before the
+// sort — the `list.sort_by` desugar builds `keys = list.map(xs, f)` and calls this,
+// so an EFFECTFUL key fn observes exactly n calls on both targets, C-055). Stable
+// insertion sort over paired (key, value) slots; both lists borrowed, result owned.
+
+fn __sbk_shift(vh: Int, kh: Int, j: Int, kv: Int, vv: Int) -> Int =
+  if j <= 0 then {
+    prim.store64(kh + 12, kv)
+    prim.store64(vh + 12, vv)
+    0
+  } else {
+    let pk = prim.load64(kh + 12 + (j - 1) * 8)
+    if pk > kv then {
+      prim.store64(kh + 12 + j * 8, pk)
+      prim.store64(vh + 12 + j * 8, prim.load64(vh + 12 + (j - 1) * 8))
+      __sbk_shift(vh, kh, j - 1, kv, vv)
+    } else {
+      prim.store64(kh + 12 + j * 8, kv)
+      prim.store64(vh + 12 + j * 8, vv)
+      0
+    }
+  }
+
+fn __sbk_loop(vh: Int, kh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let kv = prim.load64(kh + 12 + i * 8)
+    let vv = prim.load64(vh + 12 + i * 8)
+    let _s = __sbk_shift(vh, kh, i, kv, vv)
+    __sbk_loop(vh, kh, n, i + 1)
+  }
+
+fn __sbk_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.store64(dst + i * 8, prim.load64(src + i * 8))
+    __sbk_copy(dst, src, n, i + 1)
+  }
+
+fn list_sort_by_keys(xs: List[Int], keys: List[Int]) -> List[Int] = {
+  let sh = prim.handle(xs)
+  let n = prim.load32(sh + 4)
+  let out = prim.alloc_list(n)
+  let oh = prim.handle(out)
+  let _c = __sbk_copy(oh + 12, sh + 12, n, 0)
+  let kcopy = prim.alloc_list(n)
+  let kch = prim.handle(kcopy)
+  let _k = __sbk_copy(kch + 12, prim.handle(keys) + 12, n, 0)
+  let _s = __sbk_loop(oh, kch, n, 0)
+  out
+}

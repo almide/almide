@@ -294,7 +294,7 @@ mod tests {
             ret: None,
             ..Default::default()
         };
-        MirProgram { functions: vec![add, main] }
+        MirProgram { functions: vec![add, main], exports: vec![] }
     }
 
     #[test]

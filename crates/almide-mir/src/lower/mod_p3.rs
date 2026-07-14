@@ -191,6 +191,9 @@ impl LowerCtx {
                 return self.lower_body_into(&rewritten);
             }
         }
+        if let Some(rewritten) = crate::lower::desugar_sort_by_cached_keys(body) {
+            return self.lower_body_into(&rewritten);
+        }
         if let Some(rewritten) = crate::lower::desugar_to_option_calls(body) {
             return self.lower_body_into(&rewritten);
         }

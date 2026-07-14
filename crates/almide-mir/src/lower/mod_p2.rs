@@ -21,6 +21,16 @@ thread_local! {
     /// lifted and processed before this callee). EXCLUDES `main` — see the population site.
     pub(crate) static AUTO_WRAP_ABI_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+
+    /// Effect fns whose DECLARED return is `Option[..]` — in the v1 model they are NOT
+    /// lifted (the Option IS the real return; there is no err channel), so a caller's
+    /// frontend auto-`?` (`Try`) over such a call is a NO-OP and must be STRIPPED: left
+    /// in place, the effect-unwrap desugar built an err/ok match over the raw OPTION
+    /// block (read with Result polarity/offsets — r5's `hit=999` silent wrong value +
+    /// rc_dec trap). A SPELLED `!` is different (unwrap-the-Option, die on none) and is
+    /// NOT stripped.
+    pub(crate) static DECLARED_OPTION_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
 }
 
 /// A function CAN-ERR (returns `Err` on some input) iff its body has a direct `err(…)` (`ResultErr`) OR
@@ -60,7 +70,7 @@ fn has_result_err(body: &IrExpr) -> bool {
             // classified never-err, its callers' `!` got stripped, and the caller
             // read the REAL Result block as the raw payload (record fields off a
             // Result handle — the read_message `method=` garbage, 2026-07-03).
-            if let IrExprKind::Unwrap { expr: inner } = &e.kind {
+            if let IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner } = &e.kind {
                 if matches!(&inner.kind,
                     IrExprKind::Call { target: CallTarget::Module { .. }, .. }
                         | IrExprKind::RuntimeCall { .. })
@@ -81,7 +91,13 @@ fn unwrap_named_callees(body: &IrExpr) -> std::collections::HashSet<String> {
     struct V(std::collections::HashSet<String>);
     impl IrVisitor for V {
         fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Unwrap { expr } = &e.kind {
+            // `Try` is the frontend's auto-`?` — the SAME monadic err-propagation as a
+            // spelled-out `!` (the effect-unwrap desugar treats them identically), so the
+            // can-err fixpoint must see through BOTH. Missing `Try` classified `checked`
+            // (whose only propagation is an auto-?'d `fail(..)` arm) as NEVER-ERR: its ABI
+            // stripped to raw i64 while the Try arm produced fail's i32 Result — the
+            // effect_tco invalid-wasm divergence (i64/i32 at wasm load).
+            if let IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } = &e.kind {
                 if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind {
                     self.0.insert(name.as_str().to_string());
                 }
@@ -126,6 +142,31 @@ pub fn compute_can_err(fns: &[IrFunction]) -> std::collections::HashSet<String> 
 /// returns `Ok`, so the `!` is a no-op; a CAN-ERR callee's `!` is LEFT untouched (it still walls in
 /// `lower_destructure`/`lower_bind`), so its error is never silently dropped (the blanket strip that did
 /// drop it byte-mismatched safe_div_chain & co. — see the roadmap note).
+/// Strip the frontend's auto-`?` (`Try`) over a call to a DECLARED-OPTION effect fn
+/// (see [`DECLARED_OPTION_FNS`]): in the v1 model that callee returns the raw Option —
+/// there is no err channel to propagate, so the Try is the identity. A spelled `!`
+/// (Unwrap) keeps its unwrap-the-Option semantics and is untouched.
+pub fn strip_declared_option_trys(body: &mut IrExpr) {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    struct S;
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            let strip = matches!(&expr.kind,
+                IrExprKind::Try { expr: inner }
+                if matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if DECLARED_OPTION_FNS.with(|s| s.borrow().contains(name.as_str()))));
+            if strip {
+                if let IrExprKind::Try { expr: inner } = &expr.kind {
+                    let mut inner = (**inner).clone();
+                    std::mem::swap(expr, &mut inner);
+                }
+            }
+        }
+    }
+    S.visit_expr_mut(body);
+}
+
 pub fn strip_never_err_unwraps(
     body: &mut IrExpr,
     can_err: &std::collections::HashSet<String>,
@@ -581,6 +622,50 @@ pub fn lifted_effect_fn_names(fns: &[IrFunction]) -> std::collections::HashSet<S
 /// is NEVER touched (inlining could make it self-recursive and push it into a TCO path that walls). The
 /// guard lowers F and inlined-F with the program's `globals`/`record_layouts`, exactly as the real
 /// lowering will, so its verdict matches.
+/// Populate the name-keyed ABI registries (never-err lifted / auto-wrap / declared-Option)
+/// from `fns` — extracted from [`inline_mutual_tail_recursion`] so the pipeline can WIDEN the
+/// registries over the WHOLE program (main + mangled module siblings) without feeding module
+/// bodies through the main pre-pass rewrites (which regressed the intra-module tail-call shape).
+pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayouts) {
+    let can_err = compute_can_err(fns);
+    let lifted_effect_fns = lifted_effect_fn_names(fns);
+    // Publish the never-err lifted set (lifted ∖ can-err) for the match-subject wall (the rare residue
+    // `rewrite_never_err_effect_match` cannot turn into a `let`-block — `ok(_)`/structured/guarded Ok).
+    NEVER_ERR_LIFTED_FNS.with(|s| {
+        *s.borrow_mut() =
+            lifted_effect_fns.iter().filter(|n| !can_err.contains(*n)).cloned().collect();
+    });
+    AUTO_WRAP_ABI_FNS.with(|s| {
+        *s.borrow_mut() = fns
+            .iter()
+            .filter(|f| f.name.as_str() != "main")
+            .filter(|f| {
+                !matches!(
+                    &f.ret_ty,
+                    Ty::Applied(
+                        almide_lang::types::constructor::TypeConstructorId::Result
+                            | almide_lang::types::constructor::TypeConstructorId::Option,
+                        _
+                    )
+                ) && (body_has_stmt_position_propagating_unwrap(&f.body)
+                    || body_has_tail_position_option_unwrap(&f.body)
+                    || body_has_tail_position_canerr_try(&f.body, &can_err))
+            })
+            .map(|f| f.name.as_str().to_string())
+            .collect();
+    });
+    DECLARED_OPTION_FNS.with(|s| {
+        *s.borrow_mut() = fns
+            .iter()
+            .filter(|f| {
+                matches!(&f.ret_ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _))
+            })
+            .map(|f| f.name.as_str().to_string())
+            .collect();
+    });
+}
+
 pub fn inline_mutual_tail_recursion(
     fns: &[IrFunction],
     globals: &HashMap<VarId, Ty>,
@@ -609,36 +694,14 @@ pub fn inline_mutual_tail_recursion(
     // `f()!` self-call → bare `f()` (which `tco_collect` then recognizes). This is what lets the yaml
     // parser cluster (entirely never-err) TCO; `safe_div` & co. (can-err) keep their `!` and stay walled.
     // Done HERE, before the inline guard's try-lower, so inlined-F sees the stripped body and lowers.
+    populate_abi_registries(fns, record_layouts);
     let can_err = compute_can_err(fns);
     let lifted_effect_fns = lifted_effect_fn_names(fns);
-    // Publish the never-err lifted set (lifted ∖ can-err) for the match-subject wall (the rare residue
-    // `rewrite_never_err_effect_match` cannot turn into a `let`-block — `ok(_)`/structured/guarded Ok).
-    NEVER_ERR_LIFTED_FNS.with(|s| {
-        *s.borrow_mut() =
-            lifted_effect_fns.iter().filter(|n| !can_err.contains(*n)).cloned().collect();
-    });
-    AUTO_WRAP_ABI_FNS.with(|s| {
-        *s.borrow_mut() = fns
-            .iter()
-            .filter(|f| f.name.as_str() != "main")
-            .filter(|f| {
-                !matches!(
-                    &f.ret_ty,
-                    Ty::Applied(
-                        almide_lang::types::constructor::TypeConstructorId::Result
-                            | almide_lang::types::constructor::TypeConstructorId::Option,
-                        _
-                    )
-                ) && (body_has_stmt_position_propagating_unwrap(&f.body)
-                    || body_has_tail_position_option_unwrap(&f.body))
-            })
-            .map(|f| f.name.as_str().to_string())
-            .collect();
-    });
     let stripped: Vec<IrFunction> = fns
         .iter()
         .map(|f| {
             let mut nf = f.clone();
+            strip_declared_option_trys(&mut nf.body);
             strip_never_err_unwraps(&mut nf.body, &can_err, &lifted_effect_fns, f.name.as_str());
             rewrite_fan_map_pure(&mut nf.body);
             crate::lower::desugar_option_str_literal_match(&mut nf.body);

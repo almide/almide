@@ -32,6 +32,10 @@ fn __chunk_outer(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> 
   }
 
 fn list_chunk(xs: List[Int], n: Int) -> List[List[Int]] = {
+  // C-129 / ALS-T6: n == 0 is a DOMAIN ERROR aborting with v0's exact line + exit 1
+  // (native: "Error: chunk size must be positive"; the old self-host fell into a raw
+  // division-by-zero — a different message = a cross-target divergence).
+  if n == 0 then prim.die(prim.handle("Error: chunk size must be positive\n")) else ()
   let sh = prim.handle(xs)
   let total = prim.load32(sh + 4)
   // v0 is `xs.chunks(n as usize)`: a NEGATIVE n reinterprets as a huge usize —
@@ -56,6 +60,9 @@ fn __win_outer(oh: Int, sh: Int, n: Int, num: Int, wi: Int) -> Int =
   }
 
 fn __do_windows(xs: List[Int], n: Int) -> List[List[Int]] = {
+  // C-129 / ALS-T6: windows(xs, 0) aborts (v0 line + exit 1) — the old self-host
+  // silently returned len+1 EMPTY windows (the exact divergence C-129 closed in v0).
+  if n == 0 then prim.die(prim.handle("Error: window size must be positive\n")) else ()
   let sh = prim.handle(xs)
   let total = prim.load32(sh + 4)
   // v0 is `xs.windows(n as usize)`: a NEGATIVE n is a huge usize — n > len → [].
@@ -100,6 +107,7 @@ fn __chunk_outer_str(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int)
   }
 
 fn list_chunk_str(xs: List[String], n: Int) -> List[List[String]] = {
+  if n == 0 then prim.die(prim.handle("Error: chunk size must be positive\n")) else ()
   let sh = prim.handle(xs)
   let total = prim.load32(sh + 4)
   let num = (total + n - 1) / n
@@ -117,6 +125,7 @@ fn __win_outer_str(oh: Int, sh: Int, n: Int, num: Int, wi: Int) -> Int =
   }
 
 fn __do_windows_str(xs: List[String], n: Int) -> List[List[String]] = {
+  if n == 0 then prim.die(prim.handle("Error: window size must be positive\n")) else ()
   let sh = prim.handle(xs)
   let total = prim.load32(sh + 4)
   let num = if n > total then 0 else total - n + 1

@@ -39,7 +39,7 @@
             ret: None,
             ..Default::default()
         };
-        MirProgram { functions: vec![add, main] }
+        MirProgram { functions: vec![add, main], exports: vec![] }
     }
 
     #[test]
@@ -89,7 +89,7 @@
             ..Default::default()
         };
         // main at slot 0, add1 at slot 1 — FuncRef("add1") must resolve to 1.
-        let prog = MirProgram { functions: vec![main, add1] };
+        let prog = MirProgram { functions: vec![main, add1], exports: vec![] };
         if let Some(out) = build_and_run("func_ref", &render_wasm_program(&prog)) {
             assert_eq!(out, "6");
         }
@@ -133,7 +133,7 @@
             ret: None,
             ..Default::default()
         };
-        let prog = MirProgram { functions: vec![add1, main] };
+        let prog = MirProgram { functions: vec![add1, main], exports: vec![] };
         if let Some(out) = build_and_run("call_indirect", &render_wasm_program(&prog)) {
             assert_eq!(out, "6");
         }
@@ -168,7 +168,7 @@
             ret: None,
             ..Default::default()
         };
-        MirProgram { functions: vec![mk, main] }
+        MirProgram { functions: vec![mk, main], exports: vec![] }
     }
 
     #[test]
@@ -483,7 +483,7 @@
                 }
             }
         }
-        MirProgram { functions }
+        MirProgram { functions, exports: vec![] }
     }
 
     /// Does any function CALL `name` (a `CallFn` to it)? Drives conditional auto-linking.
@@ -648,7 +648,7 @@
             ret: None,
             ..Default::default()
         };
-        let prog = MirProgram { functions: vec![print_str, main] };
+        let prog = MirProgram { functions: vec![print_str, main], exports: vec![] };
         // The prim ops render to valid wasm and print "hi\n" (trimmed to "hi").
         if let Some(out) = build_and_run("prim_print_str", &render_wasm_program(&prog)) {
             assert_eq!(out, "hi");

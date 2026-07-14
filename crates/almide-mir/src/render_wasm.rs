@@ -324,13 +324,22 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // value (`(Int) -> Option[Int]` for filter_map, `-> List[Int]` for flat_map) is a wasm
     // i32 result (`$closure_fnN_h`), a scalar result is i64 (`$closure_fnN`). The CallIndirect
     // render picks the matching type by its arg count + result repr.
-    let sigs: std::collections::BTreeSet<(usize, bool)> = prog
+    // Signature class per CallIndirect: 0 = VOID (a `() -> Unit` closure — the lifted
+    // lambda renders with NO result, so the dispatch type must be resultless too: typing
+    // it `(result i64)` trapped with "indirect call type mismatch" on the simplest
+    // `bench(name, f: () -> Unit)` shape), 1 = scalar i64, 2 = heap i32.
+    let sigs: std::collections::BTreeSet<(usize, u8)> = prog
         .functions
         .iter()
         .flat_map(|f| f.ops.iter())
         .filter_map(|op| match op {
             Op::CallIndirect { args, result, .. } => {
-                Some((args.len(), result.map(|r| r.is_heap()).unwrap_or(false)))
+                let class = match result {
+                    None => 0u8,
+                    Some(r) if r.is_heap() => 2,
+                    Some(_) => 1,
+                };
+                Some((args.len(), class))
             }
             _ => None,
         })
@@ -345,14 +354,17 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
             .join(" ");
         let types = sigs
             .iter()
-            .map(|(a, heap)| {
+            .map(|(a, class)| {
                 let params = if *a == 0 {
                     String::new()
                 } else {
                     format!(" (param {})", vec!["i64"; *a].join(" "))
                 };
-                let (suffix, res) = if *heap { ("_h", "i32") } else { ("", "i64") };
-                format!("  (type $closure_fn{a}{suffix} (func{params} (result {res})))\n")
+                match class {
+                    0 => format!("  (type $closure_fn{a}_v (func{params}))\n"),
+                    2 => format!("  (type $closure_fn{a}_h (func{params} (result i32)))\n"),
+                    _ => format!("  (type $closure_fn{a} (func{params} (result i64)))\n"),
+                }
             })
             .collect::<String>();
         format!("{types}  (table {n} funcref)\n  (elem (i32.const 0) func {names})\n")
@@ -408,7 +420,12 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     } else {
         format!("  (func (export \"_start\")\n{ginit}    (call $main))\n")
     };
-    format!("{preamble}{data}{closure_table}{funcs}{start})
+    let pub_exports: String = prog
+        .exports
+        .iter()
+        .map(|n| format!("  (export {:?} (func ${n}))\n", n))
+        .collect();
+    format!("{preamble}{data}{closure_table}{funcs}{start}{pub_exports})
 ")
 }
 

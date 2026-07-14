@@ -8,7 +8,11 @@ impl LowerCtx {
             // An `e!` arm (`if c then parse_sequence(..)! else ..`) — effect-fn error
             // propagation: `e!` returns e's Result unchanged (Ok→Ok, Err→Err), so strip the
             // `!` and lower `e` as the arm (the same identity the tail-position `e!` uses).
-            IrExprKind::Unwrap { expr } => self.lower_heap_result_arm(expr, result_ty),
+            // `Try` is the frontend auto-`?` — in a Result-typed arm both it and a spelled
+            // `!` propagate the inner call's same-repr Result verbatim (the pass-through).
+            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
+                self.lower_heap_result_arm(expr, result_ty)
+            }
             // A `??` arm (`(h) => value.as_string(value.get(row,h) ?? …) ?? ""` — the defunc-map cell
             // projection): the unwrap's fresh owned result (a self-hosted unwrap helper / option_str
             // call, cert `i`) + the arm's `Consume` (`m`) = the per-arm `"im"` balance; the operand
@@ -936,6 +940,22 @@ impl LowerCtx {
                 self.live_heap_handles.retain(|x| *x != owned);
                 self.drop_arm_locals(arm_mark);
                 Some(owned)
+            }
+            // The GENERAL scalar arm of a Result-typed dispatch (`if n < 0 then fail(..)
+            // else 0` in an AUTO-WRAP/declared-Result fn — effect_tco's `checked` base
+            // case): any scalar-subset expression whose type is the Result's Ok payload
+            // wraps via the SAME `materialize_result_ok` the Var arm above uses. Bounded
+            // by `lower_scalar_value`'s own subset (a miss keeps the wall).
+            _ if !is_heap_ty(&arm.ty)
+                && matches!(result_ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                        if a.len() == 2 && a[0] == arm.ty && matches!(a[1], Ty::String)) =>
+            {
+                let payload = self.lower_scalar_value(arm)?;
+                let repr = repr_of(result_ty).ok()?;
+                let obj = self.materialize_result_ok(payload, repr);
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
             }
             _ => None,
         }

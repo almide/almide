@@ -205,16 +205,23 @@ fn render_op(
                 .collect::<Vec<_>>()
                 .join(" ");
             let arity = args.len();
-            // Pick the closure type of this arity AND result repr (`_h` = heap/i32 result).
-            let suffix = if result.map(|r| r.is_heap()).unwrap_or(false) { "_h" } else { "" };
+            // Pick the closure type by arity AND result class: `_v` = void (a `() -> Unit`
+            // closure — the lifted lambda has NO wasm result, so the dispatch type must be
+            // resultless and the call must NOT be dropped), `_h` = heap/i32, else scalar i64.
+            let suffix = match result {
+                None => "_v",
+                Some(r) if r.is_heap() => "_h",
+                Some(_) => "",
+            };
             // The table index is a wasm i32; the MIR value is the uniform i64, so wrap it.
             let call = format!(
                 "(call_indirect (type $closure_fn{arity}{suffix}) {argstr} (i32.wrap_i64 (local.get {})))",
                 local(*table_idx)
             );
-            match dst {
-                Some(d) => format!("    (local.set {} {call})\n", local(*d)),
-                None => format!("    (drop {call})\n"),
+            match (dst, result) {
+                (Some(d), _) => format!("    (local.set {} {call})\n", local(*d)),
+                (None, None) => format!("    {call}\n"),
+                (None, Some(_)) => format!("    (drop {call})\n"),
             }
         }
         Op::CallFn { dst, name, args, result } => {

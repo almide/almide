@@ -971,6 +971,10 @@ pub struct MirFunction {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct MirProgram {
     pub functions: Vec<MirFunction>,
+    /// `pub fn` names to expose as wasm `(export …)` directives (#457 — module-export
+    /// roots the v0 emitter also exports). Populated by the pipeline from the MAIN
+    /// program's `IrVisibility::Public` non-test functions; empty everywhere else.
+    pub exports: Vec<String>,
 }
 
 // ─────────────────────────── Ownership verifier ───────────────────────────

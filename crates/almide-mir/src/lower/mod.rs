@@ -481,14 +481,27 @@ pub fn bridge_cross_module_toplets(
     global_inits: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
 ) {
     use std::collections::HashMap;
-    let mut by_name: HashMap<&str, Option<(Ty, &almide_ir::IrExpr)>> = HashMap::new();
+    // The main-side reference entry is SYNTHESIZED by the frontend with an UPPERCASED
+    // name (`m.count` → a main var named "COUNT", `module_origin` set — the v0 Rust-const
+    // naming convention, expressions.rs's cross-module top-let path). So the bridge keys
+    // BOTH maps by the UPPERCASED module-side name: an all-caps `let SYSTEM` matched
+    // before by accident; a lowercase `let title`/`var count` silently MISSED the bridge
+    // and fell through to the raw numeric-id collision below (reading an UNRELATED
+    // top-let's init — a confirmed silent wrong value, `let N = 7; var count = 0` printed
+    // 7 for `m.count`; a heap-typed collider surfaced as invalid i64/i32 wasm instead).
+    // MUTABILITY: only immutable `let`s are bridged — aliasing a `var` reference to its
+    // INIT would const-fold reads across mutations (read-after-`bump()` returning 0).
+    // A `var` reference instead has its collided raw entry REMOVED below, so it is
+    // honestly UNBOUND → the reference site walls → `--verified` falls back to v0.
+    let mut by_name: HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool)>> = HashMap::new();
     for m in &ir.modules {
         for tl in &m.top_lets {
             let Some(info) = m.var_table.entries.get(tl.var.0 as usize) else { continue };
+            let mutable = matches!(info.mutability, almide_ir::Mutability::Var);
             by_name
-                .entry(info.name.as_str())
+                .entry(info.name.as_str().to_uppercase())
                 .and_modify(|e| *e = Option::None) // second definition ⇒ ambiguous, drop
-                .or_insert(Some((tl.ty.clone(), &tl.value)));
+                .or_insert(Some((tl.ty.clone(), &tl.value, mutable)));
         }
     }
     // OVERRIDES an existing (module-raw, possibly colliding) entry — callers order the
@@ -496,10 +509,23 @@ pub fn bridge_cross_module_toplets(
     // precedence is main > bridged-name > raw module id.
     for (i, info) in ir.var_table.entries.iter().enumerate() {
         let id = almide_ir::VarId(i as u32);
-        if let Some(Some((ty, init))) = by_name.get(info.name.as_str()) {
-            if *ty == info.ty {
+        // Only the frontend-synthesized cross-module reference entries participate
+        // (module_origin set) — a main-local name that happens to match a module
+        // top-let must not be rebound.
+        if info.module_origin.is_none() {
+            continue;
+        }
+        match by_name.get(&info.name.as_str().to_uppercase()) {
+            Some(Some((ty, init, mutable))) if !mutable && *ty == info.ty => {
                 globals.insert(id, ty.clone());
                 global_inits.insert(id, (*init).clone());
+            }
+            _ => {
+                // Unmatched or MUTABLE cross-module reference: purge any raw
+                // module-id numeric collision so the reference is honestly
+                // unbound (wall → v0 fallback), never an unrelated init.
+                globals.remove(&id);
+                global_inits.remove(&id);
             }
         }
     }
@@ -785,6 +811,38 @@ fn body_has_stmt_position_propagating_unwrap(body: &IrExpr) -> bool {
 /// never-err `self()!`/`f()!` — Result-typed at this pre-strip point) is repr-compatible with
 /// the pass-through in every ABI (same block IS the propagated Result), so wrapping those would
 /// only churn working fns (the yaml TCO cluster's tail self-calls among them).
+/// Does `body` carry a TAIL/arm-position `Try`/`Unwrap` over a CAN-ERR Named callee
+/// (`if n < 0 then fail("negative") else ... checked(n-1)` — every branch either
+/// propagates the callee's Result verbatim or yields a raw scalar)? Such a fn's REAL
+/// ABI must be Result (the err channel propagates), so it joins `AUTO_WRAP_ABI_FNS`:
+/// the `body.ty` override then makes the SCALAR arms wrap (`0` → `ok(0)` via the
+/// heap-result arm machinery) while the Try arms pass the callee's same-repr Result
+/// through. Without this, `checked` classified can-err (post the Try fixpoint fix)
+/// but its base arm still produced a raw i64 against the i32 Result ABI — the
+/// effect_tco invalid-wasm divergence, second layer.
+fn body_has_tail_position_canerr_try(
+    body: &IrExpr,
+    can_err: &std::collections::HashSet<String>,
+) -> bool {
+    fn scan(e: &IrExpr, can_err: &std::collections::HashSet<String>) -> bool {
+        match &e.kind {
+            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => match &expr.kind {
+                IrExprKind::Call { target: CallTarget::Named { name }, .. } => {
+                    can_err.contains(name.as_str())
+                }
+                IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                | IrExprKind::RuntimeCall { .. } => true,
+                _ => false,
+            },
+            IrExprKind::Block { expr, .. } => expr.as_deref().is_some_and(|t| scan(t, can_err)),
+            IrExprKind::If { then, else_, .. } => scan(then, can_err) || scan(else_, can_err),
+            IrExprKind::Match { arms, .. } => arms.iter().any(|a| scan(&a.body, can_err)),
+            _ => false,
+        }
+    }
+    scan(body, can_err)
+}
+
 fn body_has_tail_position_option_unwrap(body: &IrExpr) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     fn scan(e: &IrExpr) -> bool {

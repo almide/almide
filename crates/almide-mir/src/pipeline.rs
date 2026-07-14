@@ -389,8 +389,76 @@ pub fn try_render_wasm_source(
     }
 
     // PROGRAM pre-pass: inline mutual-recursive tail siblings (semantics-preserving TCO exposure).
+    // The input is the WHOLE program — main's functions PLUS every linked user-module sibling
+    // under its MANGLED `almide_rt_<m>_<f>` name (bodies already reference siblings by that
+    // name, post-`resolve_user_module_calls`). Without the siblings, the never-err/auto-wrap
+    // ABI registries were populated from MAIN's functions only: a cross-module effect callee
+    // (`m.estep`) was UNCLASSIFIED, so the caller kept its auto-`?` Try (expecting a heap
+    // Result handle) while the separately-lowered callee returned its raw scalar — the
+    // crossmod_shape_matrix i64/i32 invalid-wasm class. One combined classification makes
+    // caller and callee agree by construction; the returned rewritten bodies are then split
+    // back into the main / module lowering regions (each keeps its own globals union).
+    let module_fn_sibs: Vec<almide_ir::IrFunction> = ir
+        .modules
+        .iter()
+        .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
+        .flat_map(|m| {
+            let mname = m.name.as_str().to_string();
+            // INTRA-MODULE bare sibling calls resolve MODULE-LOCALLY (the #692 rule:
+            // current-module qualified > bare > any-module) — a clone body left with a
+            // bare `route(x, 100)` linked MAIN's same-named 0-arg `route` and shipped
+            // invalid wasm as "v1-verified" (values remaining on stack at the callee's
+            // arity mismatch — wasm_same_name_crossmod_test).
+            let sibs: std::collections::HashSet<String> =
+                m.functions.iter().map(|f| f.name.as_str().to_string()).collect();
+            m.functions.iter().filter(|f| !f.is_test).map(move |f| {
+                let mut nf = f.clone();
+                nf.name = almide_lang::intern::sym(&user_module_fn_name(&mname, f.name.as_str()));
+                struct Rw<'a> {
+                    mname: &'a str,
+                    sibs: &'a std::collections::HashSet<String>,
+                }
+                impl almide_ir::IrMutVisitor for Rw<'_> {
+                    fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+                        almide_ir::walk_expr_mut(self, e);
+                        if let almide_ir::IrExprKind::Call { target, .. } = &mut e.kind {
+                            if let almide_ir::CallTarget::Named { name } = target {
+                                let f = name.as_str();
+                                if !f.starts_with("almide_rt_") && self.sibs.contains(f) {
+                                    *target = almide_ir::CallTarget::Named {
+                                        name: almide_lang::intern::sym(&user_module_fn_name(
+                                            self.mname, f,
+                                        )),
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+                let mut rw = Rw { mname: &mname, sibs: &sibs };
+                almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut nf.body);
+                nf
+            })
+        })
+        .collect();
+    let mut all_fns: Vec<almide_ir::IrFunction> = ir.functions.clone();
+    all_fns.extend(module_fn_sibs.iter().cloned());
+    // The combined run POPULATES the name-keyed ABI registries over the WHOLE program
+    // (that is the crossmod fix — caller and callee classify identically); only MAIN's
+    // rewritten bodies are kept. The module siblings lower below from their ORIGINAL
+    // bodies: feeding the pre-pass's REWRITTEN module bodies through the module loop
+    // regressed the intra-module tail-call shape (`route(x, 100)` left values on the
+    // wasm stack — wasm_same_name_crossmod_test), and the registries alone are what the
+    // module-side lowering consults by MANGLED name.
     let inlined_fns =
         crate::lower::inline_mutual_tail_recursion(&ir.functions, &main_globals, &record_layouts);
+    // WIDEN the ABI registries over the whole program AFTER the main pre-pass (whose own
+    // population is main-only, the pre-batch behavior its rewrites were verified under):
+    // every LOWERING-time keyed lookup (never-err strip exclusions, AUTO_WRAP body.ty
+    // override, `ret_is_result_abi`) then sees module callees by their mangled names —
+    // the crossmod caller/callee ABI agreement — without the pre-pass rewrites ever
+    // touching module bodies.
+    crate::lower::populate_abi_registries(&all_fns, &record_layouts);
 
     let mut functions = Vec::new();
     let mut walled = Vec::new();
@@ -428,33 +496,21 @@ pub fn try_render_wasm_source(
     // unlinked-call render wall if it truly needed it). Stdlib modules stay out (self-host below).
     let already: std::collections::HashSet<String> =
         functions.iter().map(|f| f.name.clone()).collect();
-    for m in &ir.modules {
-        if almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()) {
+    for func in &module_fn_sibs {
+        // ORIGINAL bodies under the mangled name — every keyed lookup (never-err strip,
+        // AUTO_WRAP ABI, `ret_is_result_abi`) sees the SAME name callers use via the
+        // combined registry population above.
+        if already.contains(func.name.as_str()) {
             continue;
         }
-        let mname = m.name.as_str().to_string();
-        for func in &m.functions {
-            if func.is_test {
-                continue;
-            }
-            let mangled = user_module_fn_name(&mname, func.name.as_str());
-            if already.contains(&mangled) {
-                continue;
-            }
-            if let Ok(mirs) = crate::lower::lower_function_all_with_globals(
-                func,
-                &globals,
-                &global_inits,
-                &record_layouts,
-                &variant_layouts,
-            ) {
-                for (i, mut mir) in mirs.into_iter().enumerate() {
-                    if i == 0 {
-                        mir.name = mangled.clone();
-                    }
-                    functions.push(mir);
-                }
-            }
+        if let Ok(mirs) = crate::lower::lower_function_all_with_globals(
+            func,
+            &globals,
+            &global_inits,
+            &record_layouts,
+            &variant_layouts,
+        ) {
+            functions.extend(mirs);
         }
     }
 
@@ -661,7 +717,45 @@ pub fn try_render_wasm_source(
         ));
     }
 
+    // `pub fn` EXPORT roots (#457): a Public non-test MAIN-program fn must be a named wasm
+    // export (host-invocable, the v0 emitter's export contract). One that LOWERED gets an
+    // `(export …)` directive; one that WALLED cannot be exported — decline the WHOLE module
+    // so the `--verified` pipeline falls back to v0 (which exports it) rather than shipping
+    // an artifact silently missing a public entry point.
+    let mut exports: Vec<String> = Vec::new();
+    for func in &ir.functions {
+        if !func.is_test
+            && func.name.as_str() != "main"
+            && matches!(func.visibility, almide_ir::IrVisibility::Public)
+        {
+            let n = func.name.as_str();
+            // EXPORT ABI gate: the wasm-facing signature must present the DECLARED types.
+            // v1's internal value model carries a Float as raw i64 BITS — exporting such a
+            // fn verbatim leaks the bits convention to the host (`wasmtime --invoke route`
+            // printed 4637089135075524608, the f64 bits of 105.0, where v0 presents a real
+            // f64). Until an export-wrapper coercion exists, a Float-bearing public
+            // signature declines the module → v0 fallback (which exports it correctly).
+            let float_in_sig = matches!(func.ret_ty, almide_lang::types::Ty::Float | almide_lang::types::Ty::Float32 | almide_lang::types::Ty::Float64)
+                || func.params.iter().any(|p| {
+                    matches!(p.ty, almide_lang::types::Ty::Float | almide_lang::types::Ty::Float32 | almide_lang::types::Ty::Float64)
+                });
+            if float_in_sig {
+                return Err(LowerError::Unsupported(format!(
+                    "exported `pub fn {n}` carries a Float in its public signature — the v1                      i64-bits Float convention cannot cross the export ABI (v0 fallback                      presents the real f64)"
+                )));
+            }
+            if functions.iter().any(|f| f.name == n) {
+                exports.push(n.to_string());
+            } else {
+                return Err(LowerError::Unsupported(format!(
+                    "exported `pub fn {n}` is outside the MIR-lowering subset (the wasm module \
+                     must carry its export)"
+                )));
+            }
+        }
+    }
+
     // Any UNLINKED stdlib/runtime call would render a dangling `(call $name)` (invalid wasm) — the
     // renderer rejects it cleanly. Returns the WAT on success.
-    try_render_wasm_program(&MirProgram { functions })
+    try_render_wasm_program(&MirProgram { functions, exports })
 }

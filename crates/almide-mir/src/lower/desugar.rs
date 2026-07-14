@@ -304,6 +304,69 @@ pub fn desugar_method_calls(
     }
 }
 
+/// `list.sort_by(xs, (x) => key)` → `list.sort_by_keys(xs, list.map(xs, (x) => key))` —
+/// v0's `sort_by_cached_key` semantics made structural (C-055: the key fn runs ONCE PER
+/// ELEMENT, n calls, on BOTH targets). The map leg then takes the DEFUNC inline path, so
+/// a side-effectful key (`(x) => { calls = calls + 1; x }` — sort_by_call_count) mutates
+/// its capture DIRECTLY and correctly; the sort itself is the closure-free
+/// `list.sort_by_keys` self-host. Gated to a Var/literal source (no double evaluation),
+/// an INLINE single-param lambda, and Int elements/keys (the self-host's domain).
+pub fn desugar_sort_by_cached_keys(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::intern::sym;
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    struct V {
+        changed: bool,
+    }
+    impl IrMutVisitor for V {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let hit = matches!(&e.kind,
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                if module.as_str() == "list" && func.as_str() == "sort_by" && args.len() == 2
+                    && matches!(&args[0].kind, IrExprKind::Var { .. } | IrExprKind::List { .. })
+                    && matches!(&args[0].ty, Ty::Applied(TypeConstructorId::List, a)
+                        if a.len() == 1 && matches!(a[0], Ty::Int))
+                    && matches!(&args[1].kind, IrExprKind::Lambda { params, .. } if params.len() == 1));
+            if !hit {
+                return;
+            }
+            let IrExprKind::Call { args, .. } = &e.kind else { unreachable!() };
+            let xs = args[0].clone();
+            let lam = args[1].clone();
+            let keys = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module { module: sym("list"), func: sym("map"), def_id: None },
+                    args: vec![xs.clone(), lam],
+                    type_args: vec![],
+                },
+                ty: xs.ty.clone(),
+                span: e.span.clone(),
+                def_id: None,
+            };
+            e.kind = IrExprKind::Call {
+                target: CallTarget::Module {
+                    module: sym("list"),
+                    func: sym("sort_by_keys"),
+                    def_id: None,
+                },
+                args: vec![xs, keys],
+                type_args: vec![],
+            };
+            self.changed = true;
+        }
+    }
+    let mut v = V { changed: false };
+    let mut out = body.clone();
+    v.visit_expr_mut(&mut out);
+    if v.changed {
+        Some(out)
+    } else {
+        None
+    }
+}
+
 pub fn desugar_all(
     body: &IrExpr,
     unit_main: bool,
@@ -340,6 +403,10 @@ pub fn desugar_all(
                 cur = r;
                 continue;
             }
+        }
+        if let Some(r) = desugar_sort_by_cached_keys(&cur) {
+            cur = r;
+            continue;
         }
         if let Some(r) = desugar_to_option_calls(&cur) {
             cur = r;

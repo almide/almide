@@ -234,7 +234,10 @@
             println(int.to_string(list.get_or(ys, 1, 0)))\n  \
             println(int.to_string(list.sum(ys))) }\n";
         let prog = lower_source(src);
-        assert!(prog.functions.iter().any(|f| f.name == "list.sort_by"));
+        // The cached-keys desugar (C-055) rewrites `list.sort_by(xs, f)` into
+        // `list.sort_by_keys(xs, list.map(xs, f))` — the closure-free sort self-host
+        // links instead of the old HOF `list.sort_by` body.
+        assert!(prog.functions.iter().any(|f| f.name == "list.sort_by_keys"));
         if let Some(out) = build_and_run("self_hosted_list_sort_by", &render_wasm_program(&prog)) {
             // [4,3,1,1,5]: len5 ys[0]=4 ys[1]=3 sum14
             assert_eq!(out, "5\n4\n3\n14");

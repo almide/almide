@@ -526,6 +526,20 @@ fn tco_collect<'a>(
             Some(())
         }
         IrExprKind::Block { expr: Some(tail), .. } => tco_collect(tail, fn_name, calls, bases),
+        // The frontend's auto-`?` wraps a tail self-call as `Try{Call self}` (and a spelled
+        // `!` as `Unwrap{Call self}`) — #557's "TCO must see THROUGH" requirement: the
+        // propagation is the identity on the self-call's own same-repr Result, so the
+        // wrapped call is STILL a tail self-call. Without this, `checked(n-1)` under the
+        // auto-wrap ABI recursed O(n) and blew the call stack at 2e6 depth (effect_tco).
+        IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }
+            if matches!(&expr.kind,
+                IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if name.as_str() == fn_name) =>
+        {
+            let IrExprKind::Call { args, .. } = &expr.kind else { unreachable!() };
+            calls.push(args);
+            Some(())
+        }
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
             if name.as_str() == fn_name =>
         {

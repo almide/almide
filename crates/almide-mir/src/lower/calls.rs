@@ -590,6 +590,20 @@ impl LowerCtx {
                     self.ops.truncate(mark);
                     self.live_heap_handles.truncate(lhh);
                 }
+                // STRICT value mode (the real render path — pipeline.rs sets it): eliding a
+                // dynamic closure INVOCATION drops its side effects entirely (`run3(() => {
+                // p = p + 10 })` printed p=0 — a silent wrong value, worse than the honest
+                // caps taint the elision was designed around). REFUSE instead: the function
+                // walls and `--verified` falls back to v0. The permissive caps-counting
+                // classifier path keeps the elision (its only consumer is call accounting).
+                if crate::lower::strict_values() {
+                    return Err(LowerError::Unsupported(
+                        "computed closure call outside the liftable subset cannot be \
+                         faithfully executed (eliding it would drop the invocation's \
+                         effects — a silently wrong value) not in this brick"
+                            .into(),
+                    ));
+                }
                 self.record_elided_calls(call);
                 if is_heap_ty(&call.ty) {
                     let dst = self.fresh_value();
