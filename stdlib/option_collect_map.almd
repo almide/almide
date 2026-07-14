@@ -1,0 +1,53 @@
+// option_collect_map — SELF-HOSTED `option.collect_map`: List[Int] → (Int) -> Option[Int] →
+// Option[List[Int]]. Maps `f` over `xs` and collects into Some([all mapped values]) when EVERY
+// `f(x)` is Some, else None (first None short-circuits). A heap-returning closure CallIndirect
+// (list_filtermap.almd's precedent): each `f(x)` is a FRESH OWNED Option, dropped at the calling
+// helper's own scope end (O(1) Option memory, not O(n) live-at-once) — the SAME reasoning applies
+// twice here since the all-Some check and the fill pass each call `f` independently per element
+// (`f` is pure, so calling it twice per element is correctness-safe, matching option_collect.almd's
+// existing two-pass all/fill structure). `xs` borrowed; the result List[Int] is freshly owned.
+
+fn __ocm_check(xh: Int, f: (Int) -> Option[Int], i: Int) -> Int = {
+  let x = prim.load64(xh + 12 + i * 8)
+  let o = f(x)
+  let oh = prim.handle(o)
+  prim.load32(oh + 4)
+}
+
+fn __ocm_all(xh: Int, f: (Int) -> Option[Int], n: Int, i: Int) -> Int =
+  if i >= n then 1
+  else {
+    let tag = __ocm_check(xh, f, i)
+    if tag == 0 then 0
+    else __ocm_all(xh, f, n, i + 1)
+  }
+
+fn __ocm_fill_step(dh: Int, xh: Int, f: (Int) -> Option[Int], i: Int) -> Int = {
+  let x = prim.load64(xh + 12 + i * 8)
+  let o = f(x)
+  let oh = prim.handle(o)
+  let v = prim.load64(oh + 12)
+  prim.store64(dh + 12 + i * 8, v)
+  0
+}
+
+fn __ocm_fill(dh: Int, xh: Int, f: (Int) -> Option[Int], n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let _s = __ocm_fill_step(dh, xh, f, i)
+    __ocm_fill(dh, xh, f, n, i + 1)
+  }
+
+fn __ocm_some(xh: Int, f: (Int) -> Option[Int], n: Int) -> Option[List[Int]] = {
+  let lst = prim.alloc_list(n)
+  let dh = prim.handle(lst)
+  let _fl = __ocm_fill(dh, xh, f, n, 0)
+  Some(lst)
+}
+
+fn option_collect_map(xs: List[Int], f: (Int) -> Option[Int]) -> Option[List[Int]] = {
+  let xh = prim.handle(xs)
+  let n = prim.load32(xh + 4)
+  let all = __ocm_all(xh, f, n, 0)
+  if all == 0 then None else __ocm_some(xh, f, n)
+}

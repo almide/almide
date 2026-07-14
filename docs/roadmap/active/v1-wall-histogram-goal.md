@@ -4357,6 +4357,40 @@ B115. **Fixed a real (previously undiscovered) silent-wrong-value RISK in `desug
    herring if a call-bearing arm's body independently fails to lower. **16, unchanged** (a real
    correctness fix shipped regardless, matching B112's precedent).
 
+B116. **Closed `option.collect_map` (16 → 15) — the registry.rs lock had cleared; implemented the
+   fully-designed recipe from the earlier DIAGNOSIS verbatim**: the prior DIAGNOSIS pass (this
+   session, forked) found `render_wasm/registry.rs` — the ONLY missing piece — off-limits (another
+   concurrent work stream owned it, evidenced by 5 recent commits at the time). By the time this
+   entry started, `git log` showed no further registry.rs activity for ~9 hours and `git status`
+   was clean, so proceeded with a small, strictly-ADDITIVE change (one new stdlib file, one new
+   registry line, one `matches!` arm) rather than touching any existing entry — the lowest-risk
+   possible edit to a shared file. Implemented `stdlib/option_collect_map.almd`: a near copy-paste
+   fusion of `option_collect.almd`'s two-pass all/fill structure with `list_filtermap.almd`'s
+   heap-returning-closure CallIndirect precedent (`f: (Int) -> Option[Int]`, called once per
+   element in EACH pass — correctness-safe since `f` is pure, matching `option_collect`'s existing
+   double-call precedent) — `__ocm_all`/`__ocm_fill_step`/`__ocm_fill`/`__ocm_some`/
+   `option_collect_map`, exactly the four-function shape the DIAGNOSIS specified. Wired: (1)
+   `render_wasm/registry.rs` — one new tuple entry, (2) `mod_p4.rs`'s
+   `is_self_host_option_module_fn` — added `"collect_map"` to the `"option"` module's `matches!`
+   list (undoing exactly what an EARLIER-session revert had removed, per that DIAGNOSIS). A THIRD,
+   previously-unknown piece was needed: `crates/almide-mir/src/purity.rs`'s `PURE_MODULES` const
+   — `proofs/corpus-wall.sh`'s stdlib purity drift gate FAILED on the first run
+   ("stdlib module 'option_collect_map' is UNCLASSIFIED") until `"option_collect_map"` was added
+   (sorted, next to `"option_collect"`) — every self-hosted module must be explicitly classified
+   pure/impure or the gate refuses to admit its capability witness as complete.
+
+   **Verified**: hand-written repro matching BOTH corpus test shapes ("all some" —
+   `option.collect_map([1,2,3], (x)=>some(x*2))` → `Some(len 3)`; "short-circuits on none" —
+   `option.collect_map([1,2,3], (x)=>if x==2 then none else some(x))` → `None`) — wasmtime and v0
+   native produced identical output (`3`/`none`) for both. A 10,000-iteration leak-loop (both
+   shapes constructed and matched every iteration, accumulating `list.len`/a sentinel) produced the
+   identical accumulated value (40000) on wasmtime under a 16MB memory cap and on v0 native — no
+   leak. `cargo test -q -p almide-mir`: 583/583 (both before and after the purity.rs fix).
+   `classify_corpus`: 16 → 15, exactly ONE closure (`option.collect_map`), zero newly-walled
+   (diffed the full 15-name WALLED-REAL list against the prior baseline). `almide test`: 283/283.
+   GATE OK. CORPUS WALL OK (stdlib purity gate now passes — `option_collect_map` classified pure,
+   FORBIDDEN=0). **15, was 16.**
+
 ## What NOT to do
 
 - No WAT/Rust regex port into the v1 renderer (invariant 2).
