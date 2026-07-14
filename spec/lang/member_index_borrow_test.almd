@@ -44,3 +44,16 @@ test "chained index-member scalar reads" {
   let ln = { items: [{ idx: 1, basis: 3.0 }, { idx: 0, basis: 4.0 }], used: 0.0 }
   assert(pass2(nd, ln, 2) == 23.0)
 }
+
+fn sum_items(line: Line, n: Int) -> Float = {
+  var t = 0.0
+  for ii in 0..n {
+    t = t + line.items[ii].basis
+  }
+  t
+}
+
+test "scalar index through a member-field list" {
+  let ln = { items: [{ idx: 0, basis: 1.5 }, { idx: 1, basis: 2.5 }], used: 0.0 }
+  assert(sum_items(ln, 2) == 4.0)
+}

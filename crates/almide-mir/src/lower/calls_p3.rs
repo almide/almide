@@ -551,6 +551,16 @@ impl LowerCtx {
                 }
                 v
             }
+            // `line.items[ii]` — the scalar-element list is ITSELF a heap field/element
+            // of a materialized aggregate (the ceangal resolve_line_flex class): borrow
+            // the list block through the same gated field-borrow chain the heap-element
+            // read uses (materialization checked at every level).
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+            | IrExprKind::IndexAccess { .. }
+                if is_heap_ty(&object.ty) =>
+            {
+                self.try_lower_heap_field_borrow(object)?
+            }
             _ => return None,
         };
         let idx = self.lower_scalar_value(index)?;
