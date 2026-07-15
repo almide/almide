@@ -22,7 +22,7 @@
 ## 戦略級（次の大玉）
 
 - [ ] [#782](https://github.com/almide/almide/issues/782) **Phase 3: v0 wasm emitter 退役** — 前提を大幅前進: frontend バグ #783/#784/#785 済、**wasm:skip stale sweep 完了**（23→15 markers、8個は wasm 経路が既に追いついていた: fn_ref/再帰generics/closure-capture/borrow_hoist/mut params×2/random(C-112)/url_decode）。残る本物: [#786](https://github.com/almide/almide/issues/786) cross-module Unit effect fn の不正 wasm 生成、構造的 native 7 markers、oracle 後継決定
-- [ ] [#764](https://github.com/almide/almide/issues/764) native trust-spine 残り rung（records/variants/closures/Float）→ default flip でツイート100点化完結
+- [~] [#764](https://github.com/almide/almide/issues/764) native trust-spine — **Float slab 出荷**（実 f64、3点 byte 一致、differential 4 rows）。残り records（DynList 発見で設計激縮小 — ListLit 再利用 + FieldGetScalar 1 op、台帳に emit サイト6箇所固定済み）/variants/closures → rung 6 → default flip
 - [ ] [#617](https://github.com/almide/almide/issues/617) Matrix/Bytes の RcCow 化（値セマンティクス維持でディープクローン税を消す）
 
 ## 品質基盤（コツコツ級）
@@ -34,8 +34,8 @@
 
 - [x] cross-module UFCS が qualified 型名で解決不能（`count.get()` E001）— checker/lowering 両方の defining-module 導出が bare 名前提の suffix スキャンだった。qualified 名は `rsplit_once('.')` で直接導出
 - [x] 匿名 record の field 順序で E005 — `Ty::compatible` の Record×Record が位置 zip 比較（solver は by-name で非対称だった）。by-name セット比較に統一。`mix({ g: .., r: .. })` の単一ファイル穴も同時に解消
-- [~] [#787](https://github.com/almide/almide/issues/787) ScratchAllocator overflow — minimal tier 4/2/2 → 8/4/4（zero-cost margin、ledger 済みの「正確な修正 = two-pass hwm emit」は据え置き）。ceangal scroll の overflow panic 消滅を実測確認。ゲート通過待ち
-- [~] [#788](https://github.com/almide/almide/issues/788) 真因確定+修正: mono の `specialize_function` が body の**自由変数（module global）まで alpha-rename** → storage annotation（top-let VarId キー）から外れ bare 名 render → E0425。globals 集合を除外に（top-level/module 両ドライバ）。native レッグで再現→修正確認、crossmod_matrix に回帰 cell 追加。ゲート通過待ち
+- [x] [#787](https://github.com/almide/almide/issues/787) ScratchAllocator overflow — minimal tier 8/4/4 化で解消（two-pass hwm emit は endgame として据え置き）
+- [x] [#788](https://github.com/almide/almide/issues/788) mono の2層バグ修正 — ①自由変数（module global）の alpha-rename ②qualified/bare Named の unify 失敗（`cell.get` 未特殊化 — 記録されていた #433 系 cell.get クラスの正体）。`ALMIDE_MONO_DEBUG` 計装 in-tree、回帰 cell 追加。**ceangal 4/6**（朝の 0/6 から）
 - diff_bench の `view.box` E002 は ceangal 側の stale bench（view API 改名に未追従）— コンパイラバグではない
 
 ## 発信（ユーザー手番）
