@@ -370,6 +370,31 @@ pub fn generate_variant_repr_sources(
         }
         out.push_str("  else \"\"\n}\n");
     }
+    // Decomposed (#781, cog 137): the NAMED-RECORD repr generation is a verbatim
+    // text move into `generate_record_repr_sources_into`.
+    generate_record_repr_sources_into(
+        &mut out,
+        type_decls,
+        interp_anon_recs,
+        interp_containers,
+        &names,
+        &emittable,
+    );
+
+    out
+}
+
+/// The NAMED-RECORD half of [`generate_variant_repr_sources`]: `__repr_rec_<R>` +
+/// the `__repr_list_rec_<R>` element loops, appended to `out`. Verbatim text move.
+fn generate_record_repr_sources_into(
+    out: &mut String,
+    type_decls: &[almide_ir::IrTypeDecl],
+    interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
+    interp_containers: &InterpReprContainers,
+    names: &std::collections::HashSet<String>,
+    emittable: &std::collections::HashSet<String>,
+) {
+    use almide_ir::IrTypeDeclKind;
     // ── NAMED-RECORD reprs (`__repr_rec_<R>` + the `__repr_list_rec_<R>` element loop) ──
     // The record sibling: `Node {{ val: 1, kids: [Node {{ … }}] }}` (v0's brace Display,
     // declared field order). The record fixpoint admits Int/Bool/String fields, an emittable
@@ -662,8 +687,6 @@ pub fn generate_variant_repr_sources(
         concat.push_str(" + \" }\"");
         out.push_str(&format!("  {concat}\n}}\n"));
     }
-
-    out
 }
 
 /// Does the program reference the `Result[Option[String], String]` shape anywhere (a function
