@@ -6,9 +6,9 @@
 
 ## すぐ直す（顔の修繕・衛生）
 
-- [ ] [#778](https://github.com/almide/almide/issues/778) README Project Status 表の陳腐化＋自己矛盾（Tests 240/232→285、MSR 23/25 vs 30/30、verified-default 未記載）
-- [ ] [#779](https://github.com/almide/almide/issues/779) `almide.lock` の裁定（commit or gitignore、org 横断で統一）
-- [ ] [#780](https://github.com/almide/almide/issues/780) org-trust-status の headline を resolved-strict sweep へ切替
+- [x] [#778](https://github.com/almide/almide/issues/778) README Project Status 表の陳腐化＋自己矛盾（Tests 240/232→285、MSR 23/25 vs 30/30、verified-default 未記載）
+- [x] [#779](https://github.com/almide/almide/issues/779) `almide.lock` の裁定（commit or gitignore、org 横断で統一）
+- [x] [#780](https://github.com/almide/almide/issues/780) org-trust-status の headline を resolved-strict sweep へ切替 — 正直な初回計測: 13/28 repos clean、24 modules wall、11 frontend-rejected（#783 クラス）。porta/almai/toml の新規 real wall が次の lowering ターゲット
 - [ ] [#741](https://github.com/almide/almide/issues/741) `math.tanh` / `math.atan` 追加（`tanh`→`tan` の誤誘導 did-you-mean も是正）
 
 ## 正しさ（native 側の非対称を塞ぐ）
