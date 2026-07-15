@@ -54,6 +54,10 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // ── Rung 5 variants slab: flat variants are tag+payload slot blocks ──
+    ("variant_match", "type Shape = | Circle(Int) | Square(Int)\n\nfn area2(s: Shape) -> Int =\n  match s {\n    Circle(r) => 3 * r * r,\n    Square(w) => w * w,\n  }\n\nfn main() -> Unit = {\n  println(int.to_string(area2(Circle(2))))\n  println(int.to_string(area2(Square(3))))\n}\n"),
+    ("variant_nullary", "type Light = | Red | Green | Yellow\n\nfn advice(l: Light) -> Int =\n  match l {\n    Red => 0,\n    Green => 1,\n    Yellow => 2,\n  }\n\nfn main() -> Unit = {\n  println(int.to_string(advice(Red)))\n  println(int.to_string(advice(Yellow)))\n}\n"),
+    ("variant_multi_payload", "type Op = | Add(Int, Int) | Neg(Int)\n\nfn eval(o: Op) -> Int =\n  match o {\n    Add(a, b) => a + b,\n    Neg(x) => 0 - x,\n  }\n\nfn main() -> Unit = {\n  println(int.to_string(eval(Add(4, 5))))\n  println(int.to_string(eval(Neg(7))))\n}\n"),
     // ── Rung 5 records slab: all-scalar records are DynList slot blocks ──
     ("record_field", "type Point = { x: Int, y: Int }\n\nfn dist2(p: Point) -> Int = p.x * p.x + p.y * p.y\n\nfn main() -> Unit = {\n  let p = Point { x: 3, y: 4 }\n  println(int.to_string(dist2(p)))\n}\n"),
     ("record_out_of_order", "type Cfg = { a: Int, b: Int, c: Int }\n\nfn main() -> Unit = {\n  let v = Cfg { c: 30, a: 10, b: 20 }\n  println(int.to_string(v.a))\n  println(int.to_string(v.b))\n  println(int.to_string(v.c))\n}\n"),

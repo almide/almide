@@ -67,6 +67,24 @@
       touches the same `lower/binds*` bricks the ceangal/module-var workstream
       is actively editing — do it WITH that workstream, not alongside it.
 - [ ] Rung 5: records/variants (native structs/enums), closures.
+      **Records slab SHIPPED (2026-07-15 late)**: scalar-record literals lower
+      through `Op::ListLit` (declaration-ordered slots, zero-filled defaults —
+      `try_lower_scalar_record_construct` keeps `materialized_aggregates`);
+      scalar field reads through `Op::ListGetScalar` with the静的 slot index
+      (`lower_scalar_field_access`, tuple path included; the pre-Handle block
+      resolver split out as `resolve_aggregate_container_block`). Pipeline
+      threads record/variant layouts through `try_render_rust_source` and
+      admits all-scalar `Named` records as `NativeSigKind::ListI64`. Native
+      renders the record block as `Vec<i64>`/`&[i64]`; the mask-driven
+      `DropListStr` record drop erases to scope-end (all-scalar ⇒ empty mask).
+      3-way byte-identical; differential rows record_field / record_out_of_order
+      / record_return / record_float_field; classify wall-list byte-identical.
+      **Variants next (same recipe, probed)**: the ctor block is the SAME
+      DynList (slot0 = tag, slots1+ = payload — `try_lower_variant_ctor`'s
+      Alloc+stores → ListLit with a leading tag const); match destructure = tag
+      Load(slot 0) + Eq dispatch + payload loads (binds_p4:451/538 destructure
+      sites → ListGetScalar); sig admission = scalar-payload variants → ListI64;
+      drop = `DropVariant` erase arm on native (scalar payload ⇒ block free).
       **Records/variants scouting (2026-07-15, probe_native --mir over the REAL
       lower path — layouts threaded)**: a scalar record lowers to the SAME
       DynList block as a list (12-byte header + 8-byte slots; `Init::DynList`),

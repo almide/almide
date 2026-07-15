@@ -293,8 +293,66 @@ fn render_fn(
         *out = out.replacen(marker, decl, 1);
     };
 
+    // Dead pure-Handle elision (rung-5 variants slab): the variant-match lower
+    // still threads a `Prim{Handle}` for the heap-payload arms, but a
+    // scalar-only match reads every slot through ListGetScalar and leaves the
+    // handle dead. Handle is PURE (address materialization, no ownership, no
+    // side effect), so skipping an unused one is sound — and it keeps the
+    // subset honest: a USED Handle still walls below.
+    let used: std::collections::BTreeSet<ValueId> = {
+        let mut u = std::collections::BTreeSet::new();
+        for op in &func.ops {
+            match op {
+                Op::IntBinOp { a, b, .. } => {
+                    u.insert(*a);
+                    u.insert(*b);
+                }
+                Op::Prim { args, .. } => {
+                    u.extend(args.iter().copied());
+                }
+                Op::Call { args, .. } | Op::CallFn { args, .. } => {
+                    for a in args {
+                        if let CallArg::Handle(v) | CallArg::Scalar(v) = a {
+                            u.insert(*v);
+                        }
+                    }
+                }
+                Op::ListGetScalar { list, idx, .. } => {
+                    u.insert(*list);
+                    u.insert(*idx);
+                }
+                Op::ListSetScalar { list, idx, val } => {
+                    u.insert(*list);
+                    u.insert(*idx);
+                    u.insert(*val);
+                }
+                Op::SetLocal { src, .. } => {
+                    u.insert(*src);
+                }
+                Op::Dup { src, .. } => {
+                    u.insert(*src);
+                }
+                Op::IfThen { cond, .. } => {
+                    u.insert(*cond);
+                }
+                Op::Else { val } | Op::EndIf { val } => {
+                    if let Some(v) = val {
+                        u.insert(*v);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(r) = func.ret {
+            u.insert(r);
+        }
+        u
+    };
     for op in &func.ops {
         match op {
+            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), .. } if !used.contains(d) => {
+                line!("// dead handle elided");
+            }
             Op::ConstInt { dst, value } => {
                 tys.insert(*dst, NTy::I64);
                 line!("let mut {}: i64 = {}i64;", var(*dst), value);

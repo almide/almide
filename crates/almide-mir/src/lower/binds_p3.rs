@@ -404,6 +404,33 @@ impl LowerCtx {
                 field_vals.push((v, false));
             }
         }
+        // Rung-5 variants slab: an ALL-SCALAR ctor block is a plain slot list
+        // (tag@slot0, fields@1+, zero-filled to the type's uniform width), so
+        // the TARGET-NEUTRAL `Op::ListLit` builds it on both legs — same cert
+        // `i`, same block bytes. Heap-field ctors keep the prim path below.
+        if field_vals.iter().all(|(_, is_heap)| !is_heap) {
+            let tagv = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: tagv, value: tag });
+            let mut slot_vals: Vec<ValueId> = Vec::with_capacity(slot_count);
+            slot_vals.push(tagv);
+            for (v, _) in &field_vals {
+                slot_vals.push(*v);
+            }
+            while slot_vals.len() < slot_count {
+                let z = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: z, value: 0 });
+                slot_vals.push(z);
+            }
+            let dst = self.fresh_value();
+            self.ops.push(Op::ListLit { dst, elems: slot_vals });
+            // EXACT tracking mirror of the prim path below (heap_slots is empty
+            // here, so only the needs_rec branch and the aggregate mark apply).
+            if needs_rec {
+                self.variant_drop_handles.insert(dst, type_name);
+            }
+            self.materialized_aggregates.insert(dst);
+            return Some(dst);
+        }
         // Allocate the `slot_count`-wide block.
         let len = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: len, value: slot_count as i64 });

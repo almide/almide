@@ -1396,7 +1396,19 @@ impl LowerCtx {
         } else {
             h
         };
-        let tag = self.load_at_offset(h, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 });
+        // Rung-5 variants slab: the tag is slot 0 of the subject block — the
+        // TARGET-NEUTRAL `ListGetScalar` reads it on both legs. The depth-2
+        // unwrap (`h` re-pointed at the payload block) keeps the raw load: its
+        // container is the borrowed payload, not `subj`.
+        let tag = if unwrap_single {
+            self.load_at_offset(h, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 })
+        } else {
+            let idx = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: idx, value: 0 });
+            let t = self.fresh_value();
+            self.ops.push(Op::ListGetScalar { dst: t, list: subj, idx });
+            t
+        };
         let emitted = if sole_ctor_heap {
             let (kind, body) = &plans[0];
             self.emit_single_ctor_heap_arm(h, tag, kind, body, result_ty, subj)
@@ -1572,8 +1584,13 @@ impl LowerCtx {
                     }
                     self.value_of.insert(*var, p);
                 } else {
-                    let payload =
-                        self.load_at_offset(h, off, crate::PrimKind::Load { width: 8 });
+                    // Rung-5 variants slab: a SCALAR payload is a plain slot of the
+                    // subject block — target-neutral ListGetScalar (native `subj[slot]`).
+                    let _ = off;
+                    let idx = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: idx, value: *slot as i64 });
+                    let payload = self.fresh_value();
+                    self.ops.push(Op::ListGetScalar { dst: payload, list: subj, idx });
                     self.value_of.insert(*var, payload);
                 }
             }
@@ -1625,7 +1642,11 @@ impl LowerCtx {
         };
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
-        let tag = self.load_at_offset(h, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 });
+        // Rung-5 variants slab: slot-0 tag via the target-neutral ListGetScalar.
+        let idx = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: idx, value: 0 });
+        let tag = self.fresh_value();
+        self.ops.push(Op::ListGetScalar { dst: tag, list: subj, idx });
         self.emit_variant_unit_chain(h, tag, &plans, subj)
     }
 

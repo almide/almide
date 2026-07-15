@@ -1025,10 +1025,20 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 .get(n.as_str())
                 .is_some_and(|(_, ftys)| ftys.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft)))
         };
+        // A FLAT variant (every ctor scalar-only) is likewise one slot block
+        // (tag@0, payload@1+) — same `&[i64]` convention (rung-5 variants slab).
+        let is_flat_variant = |t: &Ty| -> bool {
+            let Ty::Named(n, args) = t else { return false };
+            if !args.is_empty() { return false; }
+            variant_layouts.by_type.get(n.as_str()).is_some_and(|layout| {
+                layout.cases.iter().all(|c| c.fields.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft)))
+            })
+        };
         let sig_ok = |t: &Ty| {
             matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
                 || is_scalar_list(t)
                 || is_scalar_record(t)
+                || is_flat_variant(t)
         };
         for p in &func.params {
             if !sig_ok(&p.ty) {
@@ -1087,6 +1097,15 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                         && record_layouts
                             .get(n.as_str())
                             .is_some_and(|(_, ftys)| ftys.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft))) =>
+                {
+                    Some(NativeSigKind::ListI64)
+                }
+                // A flat variant travels as its tag+payload slot block.
+                Ty::Named(n, args)
+                    if args.is_empty()
+                        && variant_layouts.by_type.get(n.as_str()).is_some_and(|layout| {
+                            layout.cases.iter().all(|c| c.fields.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft)))
+                        }) =>
                 {
                     Some(NativeSigKind::ListI64)
                 }
