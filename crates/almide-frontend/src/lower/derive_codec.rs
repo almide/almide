@@ -639,3 +639,422 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
         mutated_params: vec![], module_origin: None,
     }
 }
+
+// ── Container-codec helpers (#790 piece 1) ──────────────────────
+
+/// The four container helpers every Codec type carries in its DECLARING region —
+/// `__encode_list_T` / `__decode_list_T` / `__encode_option_T` / `__decode_option_T`
+/// (plus two recursion workers named `T.__list_enc_go` / `T.__list_dec_go`, DOTTED so
+/// they ride the same module-method rails as `T.encode` and stay clear of every
+/// `__`-prefix rewrite in v0's `BuiltinLoweringPass`).
+///
+/// On v0 the pass still reroutes every helper CALL to the generic runtime + FnRef,
+/// so these bodies go unused there (wasm DCE removes them; the Rust emit sits under
+/// the crate-level `allow(dead_code)`) — ZERO shipped-leg behavior change. On the v1
+/// leg they are the REAL linkable bodies the pipeline name bridge resolves, replacing
+/// the unlinked-`__encode_list_<m>.T` wall (#790).
+///
+/// Byte parity with the v0 generic runtime:
+///   - encode_list = `Value::Array(items.map(T.encode))` (order-preserving append);
+///   - decode_list: a non-Array is `value.as_array`'s Err — the SAME "expected Array"
+///     bytes `almide_rt_value_decode_list` emits — and an element failure
+///     short-circuits on the FIRST error (the worker's `?` returns it immediately);
+///   - encode_option = Some → T.encode, None → Value::Null;
+///   - decode_option(v, key) = missing field OR Null → ok(none), present →
+///     `T.decode(val)` mapped into some — exactly `almide_rt_value_decode_option`.
+pub(super) fn derive_container_helpers(
+    vt: &mut VarTable,
+    type_name: &str,
+    type_ty: &Ty,
+) -> Vec<IrFunction> {
+    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let t = type_ty.clone();
+    let list_t = Ty::list(t.clone());
+    let list_v = Ty::list(value_ty.clone());
+    let opt_t = Ty::Applied(TypeConstructorId::Option, vec![t.clone()]);
+    let res_list_t = Ty::result(list_t.clone(), Ty::String);
+    let res_opt_t = Ty::result(opt_t.clone(), Ty::String);
+
+    fn e(kind: IrExprKind, ty: Ty) -> IrExpr {
+        IrExpr { kind, ty, span: None, def_id: None }
+    }
+    fn evar(id: VarId, ty: &Ty) -> IrExpr {
+        e(IrExprKind::Var { id }, ty.clone())
+    }
+    fn call_named(name: &str, args: Vec<IrExpr>, ty: Ty) -> IrExpr {
+        e(IrExprKind::Call { target: CallTarget::Named { name: sym(name) }, args, type_args: vec![] }, ty)
+    }
+    fn call_mod(m: &str, f: &str, args: Vec<IrExpr>, ty: Ty) -> IrExpr {
+        e(
+            IrExprKind::Call {
+                target: CallTarget::Module { module: sym(m), func: sym(f), def_id: None },
+                args,
+                type_args: vec![],
+            },
+            ty,
+        )
+    }
+    fn lit_int(n: i64) -> IrExpr {
+        e(IrExprKind::LitInt { value: n }, Ty::Int)
+    }
+    fn empty_list(ty: &Ty) -> IrExpr {
+        e(IrExprKind::List { elements: vec![] }, ty.clone())
+    }
+    fn mk_fn(name: &str, params: Vec<(VarId, &str, Ty)>, ret_ty: Ty, body: IrExpr) -> IrFunction {
+        IrFunction {
+            name: sym(name),
+            params: params
+                .into_iter()
+                .map(|(var, n, ty)| IrParam {
+                    var,
+                    ty,
+                    name: sym(n),
+                    borrow: ParamBorrow::Own,
+                    is_mut: false,
+                    open_record: None,
+                    default: None,
+                    attrs: vec![],
+                })
+                .collect(),
+            ret_ty,
+            body,
+            is_effect: false,
+            is_async: false,
+            is_test: false,
+            generics: None,
+            extern_attrs: vec![],
+            export_attrs: vec![],
+            attrs: vec![],
+            visibility: IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
+            def_id: None,
+            mutated_params: vec![],
+            module_origin: None,
+        }
+    }
+
+    let encode_name = format!("{}.encode", type_name);
+    let decode_name = format!("{}.decode", type_name);
+    let enc_go_name = format!("{}.__list_enc_go", type_name);
+    let dec_go_name = format!("{}.__list_dec_go", type_name);
+
+    // __encode_list_T(xs) = T.__list_enc_go(xs, 0, [])
+    let xs_a = vt.alloc(sym("_xs"), list_t.clone(), Mutability::Let, None);
+    let f_enc_list = mk_fn(
+        &format!("__encode_list_{}", type_name),
+        vec![(xs_a, "_xs", list_t.clone())],
+        value_ty.clone(),
+        call_named(
+            &enc_go_name,
+            vec![evar(xs_a, &list_t), lit_int(0), empty_list(&list_v)],
+            value_ty.clone(),
+        ),
+    );
+
+    // T.__list_enc_go(xs, i, acc) =
+    //   if i < list.len(xs) then T.__list_enc_go(xs, i+1, acc + [T.encode(xs[i])])
+    //   else value.array(acc)
+    let xs_b = vt.alloc(sym("_xs"), list_t.clone(), Mutability::Let, None);
+    let i_b = vt.alloc(sym("_i"), Ty::Int, Mutability::Let, None);
+    let acc_b = vt.alloc(sym("_acc"), list_v.clone(), Mutability::Let, None);
+    let elem_b = e(
+        IrExprKind::IndexAccess {
+            object: Box::new(evar(xs_b, &list_t)),
+            index: Box::new(evar(i_b, &Ty::Int)),
+        },
+        t.clone(),
+    );
+    let enc_elem = call_named(&encode_name, vec![elem_b], value_ty.clone());
+    let appended = e(
+        IrExprKind::BinOp {
+            op: BinOp::ConcatList,
+            left: Box::new(evar(acc_b, &list_v)),
+            right: Box::new(e(IrExprKind::List { elements: vec![enc_elem] }, list_v.clone())),
+        },
+        list_v.clone(),
+    );
+    let cond_b = e(
+        IrExprKind::BinOp {
+            op: BinOp::Lt,
+            left: Box::new(evar(i_b, &Ty::Int)),
+            right: Box::new(call_mod("list", "len", vec![evar(xs_b, &list_t)], Ty::Int)),
+        },
+        Ty::Bool,
+    );
+    let next_i_b = e(
+        IrExprKind::BinOp {
+            op: BinOp::AddInt,
+            left: Box::new(evar(i_b, &Ty::Int)),
+            right: Box::new(lit_int(1)),
+        },
+        Ty::Int,
+    );
+    let f_enc_go = mk_fn(
+        &enc_go_name,
+        vec![(xs_b, "_xs", list_t.clone()), (i_b, "_i", Ty::Int), (acc_b, "_acc", list_v.clone())],
+        value_ty.clone(),
+        e(
+            IrExprKind::If {
+                cond: Box::new(cond_b),
+                then: Box::new(call_named(
+                    &enc_go_name,
+                    vec![evar(xs_b, &list_t), next_i_b, appended],
+                    value_ty.clone(),
+                )),
+                else_: Box::new(call_mod("value", "array", vec![evar(acc_b, &list_v)], value_ty.clone())),
+            },
+            value_ty.clone(),
+        ),
+    );
+
+    // __decode_list_T(v) = { let arr = value.as_array(v)?; T.__list_dec_go(arr, 0, []) }
+    let v_c = vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
+    let arr_c = vt.alloc(sym("_arr"), list_v.clone(), Mutability::Let, None);
+    let bind_arr = IrStmt {
+        kind: IrStmtKind::Bind {
+            var: arr_c,
+            mutability: Mutability::Let,
+            ty: list_v.clone(),
+            value: e(
+                IrExprKind::Try {
+                    expr: Box::new(call_mod(
+                        "value",
+                        "as_array",
+                        vec![evar(v_c, &value_ty)],
+                        Ty::result(list_v.clone(), Ty::String),
+                    )),
+                },
+                list_v.clone(),
+            ),
+        },
+        span: None,
+    };
+    let f_dec_list = mk_fn(
+        &format!("__decode_list_{}", type_name),
+        vec![(v_c, "_v", value_ty.clone())],
+        res_list_t.clone(),
+        e(
+            IrExprKind::Block {
+                stmts: vec![bind_arr],
+                expr: Some(Box::new(call_named(
+                    &dec_go_name,
+                    vec![evar(arr_c, &list_v), lit_int(0), empty_list(&list_t)],
+                    res_list_t.clone(),
+                ))),
+            },
+            res_list_t.clone(),
+        ),
+    );
+
+    // T.__list_dec_go(arr, i, acc) =
+    //   if i < list.len(arr) then { let x = T.decode(arr[i])?; T.__list_dec_go(arr, i+1, acc + [x]) }
+    //   else ok(acc)
+    let arr_d = vt.alloc(sym("_arr"), list_v.clone(), Mutability::Let, None);
+    let i_d = vt.alloc(sym("_i"), Ty::Int, Mutability::Let, None);
+    let acc_d = vt.alloc(sym("_acc"), list_t.clone(), Mutability::Let, None);
+    let x_d = vt.alloc(sym("_x"), t.clone(), Mutability::Let, None);
+    let elem_d = e(
+        IrExprKind::IndexAccess {
+            object: Box::new(evar(arr_d, &list_v)),
+            index: Box::new(evar(i_d, &Ty::Int)),
+        },
+        value_ty.clone(),
+    );
+    let bind_x = IrStmt {
+        kind: IrStmtKind::Bind {
+            var: x_d,
+            mutability: Mutability::Let,
+            ty: t.clone(),
+            value: e(
+                IrExprKind::Try {
+                    expr: Box::new(call_named(
+                        &decode_name,
+                        vec![elem_d],
+                        Ty::result(t.clone(), Ty::String),
+                    )),
+                },
+                t.clone(),
+            ),
+        },
+        span: None,
+    };
+    let appended_d = e(
+        IrExprKind::BinOp {
+            op: BinOp::ConcatList,
+            left: Box::new(evar(acc_d, &list_t)),
+            right: Box::new(e(IrExprKind::List { elements: vec![evar(x_d, &t)] }, list_t.clone())),
+        },
+        list_t.clone(),
+    );
+    let next_i_d = e(
+        IrExprKind::BinOp {
+            op: BinOp::AddInt,
+            left: Box::new(evar(i_d, &Ty::Int)),
+            right: Box::new(lit_int(1)),
+        },
+        Ty::Int,
+    );
+    let cond_d = e(
+        IrExprKind::BinOp {
+            op: BinOp::Lt,
+            left: Box::new(evar(i_d, &Ty::Int)),
+            right: Box::new(call_mod("list", "len", vec![evar(arr_d, &list_v)], Ty::Int)),
+        },
+        Ty::Bool,
+    );
+    let f_dec_go = mk_fn(
+        &dec_go_name,
+        vec![(arr_d, "_arr", list_v.clone()), (i_d, "_i", Ty::Int), (acc_d, "_acc", list_t.clone())],
+        res_list_t.clone(),
+        e(
+            IrExprKind::If {
+                cond: Box::new(cond_d),
+                then: Box::new(e(
+                    IrExprKind::Block {
+                        stmts: vec![bind_x],
+                        expr: Some(Box::new(call_named(
+                            &dec_go_name,
+                            vec![evar(arr_d, &list_v), next_i_d, appended_d],
+                            res_list_t.clone(),
+                        ))),
+                    },
+                    res_list_t.clone(),
+                )),
+                else_: Box::new(e(
+                    IrExprKind::ResultOk { expr: Box::new(evar(acc_d, &list_t)) },
+                    res_list_t.clone(),
+                )),
+            },
+            res_list_t.clone(),
+        ),
+    );
+
+    // __encode_option_T(o) = match o { some(x) => T.encode(x), none => value.null() }
+    let o_e = vt.alloc(sym("_o"), opt_t.clone(), Mutability::Let, None);
+    let x_e = vt.alloc(sym("_x"), t.clone(), Mutability::Let, None);
+    let f_enc_opt = mk_fn(
+        &format!("__encode_option_{}", type_name),
+        vec![(o_e, "_o", opt_t.clone())],
+        value_ty.clone(),
+        e(
+            IrExprKind::Match {
+                subject: Box::new(evar(o_e, &opt_t)),
+                arms: vec![
+                    IrMatchArm {
+                        pattern: IrPattern::Some {
+                            inner: Box::new(IrPattern::Bind { var: x_e, ty: t.clone() }),
+                        },
+                        guard: None,
+                        body: call_named(&encode_name, vec![evar(x_e, &t)], value_ty.clone()),
+                    },
+                    IrMatchArm {
+                        pattern: IrPattern::None,
+                        guard: None,
+                        body: call_mod("value", "null", vec![], value_ty.clone()),
+                    },
+                ],
+            },
+            value_ty.clone(),
+        ),
+    );
+
+    // __decode_option_T(v, key) = match value.field(v, key) {
+    //   err(_) => ok(none),
+    //   ok(fv) => if fv == value.null() then ok(none)
+    //             else { let x = T.decode(fv)?; ok(some(x)) }
+    // }
+    let v_f = vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
+    let key_f = vt.alloc(sym("_key"), Ty::String, Mutability::Let, None);
+    let fv_f = vt.alloc(sym("_fv"), value_ty.clone(), Mutability::Let, None);
+    let x_f = vt.alloc(sym("_x"), t.clone(), Mutability::Let, None);
+    let ok_none = || {
+        e(
+            IrExprKind::ResultOk {
+                expr: Box::new(e(IrExprKind::OptionNone, opt_t.clone())),
+            },
+            res_opt_t.clone(),
+        )
+    };
+    let bind_x_f = IrStmt {
+        kind: IrStmtKind::Bind {
+            var: x_f,
+            mutability: Mutability::Let,
+            ty: t.clone(),
+            value: e(
+                IrExprKind::Try {
+                    expr: Box::new(call_named(
+                        &decode_name,
+                        vec![evar(fv_f, &value_ty)],
+                        Ty::result(t.clone(), Ty::String),
+                    )),
+                },
+                t.clone(),
+            ),
+        },
+        span: None,
+    };
+    let is_null = e(
+        IrExprKind::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(evar(fv_f, &value_ty)),
+            right: Box::new(call_mod("value", "null", vec![], value_ty.clone())),
+        },
+        Ty::Bool,
+    );
+    let f_dec_opt = mk_fn(
+        &format!("__decode_option_{}", type_name),
+        vec![(v_f, "_v", value_ty.clone()), (key_f, "_key", Ty::String)],
+        res_opt_t.clone(),
+        e(
+            IrExprKind::Match {
+                subject: Box::new(call_mod(
+                    "value",
+                    "field",
+                    vec![evar(v_f, &value_ty), evar(key_f, &Ty::String)],
+                    Ty::result(value_ty.clone(), Ty::String),
+                )),
+                arms: vec![
+                    IrMatchArm {
+                        pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
+                        guard: None,
+                        body: ok_none(),
+                    },
+                    IrMatchArm {
+                        pattern: IrPattern::Ok {
+                            inner: Box::new(IrPattern::Bind { var: fv_f, ty: value_ty.clone() }),
+                        },
+                        guard: None,
+                        body: e(
+                            IrExprKind::If {
+                                cond: Box::new(is_null),
+                                then: Box::new(ok_none()),
+                                else_: Box::new(e(
+                                    IrExprKind::Block {
+                                        stmts: vec![bind_x_f],
+                                        expr: Some(Box::new(e(
+                                            IrExprKind::ResultOk {
+                                                expr: Box::new(e(
+                                                    IrExprKind::OptionSome {
+                                                        expr: Box::new(evar(x_f, &t)),
+                                                    },
+                                                    opt_t.clone(),
+                                                )),
+                                            },
+                                            res_opt_t.clone(),
+                                        ))),
+                                    },
+                                    res_opt_t.clone(),
+                                )),
+                            },
+                            res_opt_t.clone(),
+                        ),
+                    },
+                ],
+            },
+            res_opt_t.clone(),
+        ),
+    );
+
+    vec![f_enc_list, f_enc_go, f_dec_list, f_dec_go, f_enc_opt, f_dec_opt]
+}
