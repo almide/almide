@@ -49,221 +49,238 @@ impl LowerCtx {
             }
             return self.lower_bind(var, ty, tail);
         }
+        // Decomposed (#781, cog 272): the SCALAR path and the HEAP path are
+        // verbatim text moves into `lower_bind_scalar` / `lower_bind_heap` —
+        // behavior proven by the classify wall-list byte-identity ladder.
         if !is_heap_ty(ty) {
-            // Scalar binding: a Copy value, no ownership accounting. A RESOLVABLE
-            // scalar call (`let n = add(2, 3)`, `let m = string.len(s)`) is lowered to
-            // a real executable `CallFn` (args materialized, the scalar result bound)
-            // so it RUNS. Any other scalar value — arithmetic, a literal, an
-            // unresolvable Method/Computed call — keeps the deferred `Const` + elided-
-            // caps marker: its CONTENT is carried by a later brick, its calls still
-            // folded for capabilities (`var n = obj.m()` elided ⇒ honest caps taint).
-            if let Some(dst) = self.try_lower_scalar_call(value, ty) {
+            return self.lower_bind_scalar(var, ty, value);
+        }
+        self.lower_bind_heap(var, ty, value)
+    }
+
+    /// The SCALAR half of [`Self::lower_bind`] (`!is_heap_ty(ty)`): Copy values,
+    /// no ownership accounting — executable scalar calls / literals / arithmetic /
+    /// if- and match-values / `??` / var copies, else the deferred `Const`
+    /// (strict mode walls it). Verbatim text move.
+    fn lower_bind_scalar(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+        // Scalar binding: a Copy value, no ownership accounting. A RESOLVABLE
+        // scalar call (`let n = add(2, 3)`, `let m = string.len(s)`) is lowered to
+        // a real executable `CallFn` (args materialized, the scalar result bound)
+        // so it RUNS. Any other scalar value — arithmetic, a literal, an
+        // unresolvable Method/Computed call — keeps the deferred `Const` + elided-
+        // caps marker: its CONTENT is carried by a later brick, its calls still
+        // folded for capabilities (`var n = obj.m()` elided ⇒ honest caps taint).
+        if let Some(dst) = self.try_lower_scalar_call(value, ty) {
+            self.value_of.insert(var, dst);
+            return Ok(());
+        }
+        // An INT literal carries its real value (`ConstInt` → `(i64.const v)`),
+        // the scalar-value foundation; other scalars stay the deferred `Const`. A FLOAT
+        // literal carries its f64 BITS the same way (the float-floor render reinterprets).
+        // A BOOL literal materializes to ConstInt 0/1 (else `var b=true` stays a deferred
+        // Const 0, and `if b` / `match b { true=>.. }` always takes the false arm).
+        if let IrExprKind::LitInt { .. }
+        | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitBool { .. } = &value.kind
+        {
+            if let Some(dst) = self.lower_scalar_value(value) {
                 self.value_of.insert(var, dst);
                 return Ok(());
             }
-            // An INT literal carries its real value (`ConstInt` → `(i64.const v)`),
-            // the scalar-value foundation; other scalars stay the deferred `Const`. A FLOAT
-            // literal carries its f64 BITS the same way (the float-floor render reinterprets).
-            // A BOOL literal materializes to ConstInt 0/1 (else `var b=true` stays a deferred
-            // Const 0, and `if b` / `match b { true=>.. }` always takes the false arm).
-            if let IrExprKind::LitInt { .. }
-            | IrExprKind::LitFloat { .. }
-            | IrExprKind::LitBool { .. } = &value.kind
-            {
-                if let Some(dst) = self.lower_scalar_value(value) {
-                    self.value_of.insert(var, dst);
-                    return Ok(());
-                }
+        }
+        // A scalar Int Add/Sub/Mul computes its real value (IntBinOp), and a
+        // scalar prim-floor call (`let n = prim.load32(a)`) becomes an Op::Prim —
+        // both via lower_scalar_value; outside the subset it rolls back to `Const`.
+        // A UnOp (`let hc = not list.is_empty(xs)`, `let m = -n`) goes the SAME way —
+        // without it, `not <call>` fell to the deferred `Const` below (the operand call
+        // unemitted, the var silently 0 → the `not list.is_empty` render_el miscompile).
+        if let IrExprKind::BinOp { .. }
+        | IrExprKind::UnOp { .. }
+        | IrExprKind::RuntimeCall { .. } = &value.kind
+        {
+            let mark = self.ops.len();
+            if let Some(dst) = self.lower_scalar_value(value) {
+                self.value_of.insert(var, dst);
+                return Ok(());
             }
-            // A scalar Int Add/Sub/Mul computes its real value (IntBinOp), and a
-            // scalar prim-floor call (`let n = prim.load32(a)`) becomes an Op::Prim —
-            // both via lower_scalar_value; outside the subset it rolls back to `Const`.
-            // A UnOp (`let hc = not list.is_empty(xs)`, `let m = -n`) goes the SAME way —
-            // without it, `not <call>` fell to the deferred `Const` below (the operand call
-            // unemitted, the var silently 0 → the `not list.is_empty` render_el miscompile).
-            if let IrExprKind::BinOp { .. }
-            | IrExprKind::UnOp { .. }
-            | IrExprKind::RuntimeCall { .. } = &value.kind
-            {
-                let mark = self.ops.len();
-                if let Some(dst) = self.lower_scalar_value(value) {
-                    self.value_of.insert(var, dst);
-                    return Ok(());
-                }
-                self.ops.truncate(mark);
+            self.ops.truncate(mark);
+        }
+        // A scalar `if`/`match` VALUE (`let step = if c then 0 else 1`) EXECUTES — only
+        // the taken arm runs — via the if-marker machinery; a non-literal `match` or a
+        // non-scalar subject falls through to the deferred `Const`.
+        if let IrExprKind::If { cond, then, else_ } = &value.kind {
+            if let Some(dst) = self.try_lower_scalar_if(cond, then, else_, ty) {
+                self.value_of.insert(var, dst);
+                return Ok(());
             }
-            // A scalar `if`/`match` VALUE (`let step = if c then 0 else 1`) EXECUTES — only
-            // the taken arm runs — via the if-marker machinery; a non-literal `match` or a
-            // non-scalar subject falls through to the deferred `Const`.
-            if let IrExprKind::If { cond, then, else_ } = &value.kind {
-                if let Some(dst) = self.try_lower_scalar_if(cond, then, else_, ty) {
-                    self.value_of.insert(var, dst);
-                    return Ok(());
-                }
-            }
-            if let IrExprKind::Match { subject, arms } = &value.kind {
-                // A single-arm tuple-destructure `let n = match pair { (_, n) => n }` extracting a
-                // SCALAR component — semantically `let n = pair.<i>` (the non-tail tuple-accumulator
-                // `fold` cursor extraction). Load the real scalar slot value (a Copy — no ownership).
-                if let Some((idx, elem_ty)) = self.tuple_extract_match_index(subject, arms) {
-                    if !is_heap_ty(&elem_ty) {
-                        let synth = Self::synth_tuple_index(subject, idx, elem_ty);
-                        let mark = self.ops.len();
-                        if let Some(dst) = self.lower_scalar_value(&synth) {
-                            self.value_of.insert(var, dst);
-                            return Ok(());
-                        }
-                        self.ops.truncate(mark);
-                    }
-                }
-                // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
-                // `let v = match t { Num(n) => n, … }`. Without this the ctor-pattern match
-                // fell through to a deferred Const 0 (a silent miscompile).
-                if let Some(dst) = self.try_lower_custom_variant_match(subject, arms, ty) {
-                    self.value_of.insert(var, dst);
-                    return Ok(());
-                }
-                // A VARIANT (Option/Result) subject — execute the tag-read value-match
-                // (only the taken arm runs, the scalar payload bound). A ctor pattern is not
-                // `subj == lit`, so it can't reach `desugar_match_to_if`; without this the
-                // result stayed an unset deferred Const (a silent 0).
-                if is_variant_ty(&subject.ty) {
-                    if let Some(dst) = self.try_lower_variant_value_match(subject, arms, ty) {
+        }
+        if let IrExprKind::Match { subject, arms } = &value.kind {
+            // A single-arm tuple-destructure `let n = match pair { (_, n) => n }` extracting a
+            // SCALAR component — semantically `let n = pair.<i>` (the non-tail tuple-accumulator
+            // `fold` cursor extraction). Load the real scalar slot value (a Copy — no ownership).
+            if let Some((idx, elem_ty)) = self.tuple_extract_match_index(subject, arms) {
+                if !is_heap_ty(&elem_ty) {
+                    let synth = Self::synth_tuple_index(subject, idx, elem_ty);
+                    let mark = self.ops.len();
+                    if let Some(dst) = self.lower_scalar_value(&synth) {
                         self.value_of.insert(var, dst);
                         return Ok(());
                     }
-                    // Outside the executable subset a Const-0 would silently pick a wrong
-                    // arm — WALL (the discipline: an unfaithful variant match rejects, never
-                    // emits a deferred 0).
-                    return Err(LowerError::Unsupported(
-                        "variant (Option/Result) match bound to a let/var outside the \
-                         executable subset cannot be faithfully computed (a Const-0 would \
-                         silently pick a wrong arm) not in this brick"
-                            .into(),
-                    ));
+                    self.ops.truncate(mark);
                 }
-                // A single-arm tuple-destructure `let r = match t { (a, b) => <body> }` binding
-                // MULTIPLE components (not the single-extract case above): bind each component from its
-                // tuple SLOT (the layout-aware loader), then lower the arm body as the bound value.
-                // WITHOUT this the multi-bind tuple match fell to the deferred `Const 0` below (a, b
-                // read 0). SCALAR result only (a heap arm value needs the merged-result path); rolls
-                // back to the Const on a miss.
-                if matches!(subject.ty, Ty::Tuple(_))
-                    && arms.len() == 1
-                    && arms[0].guard.is_none()
-                    && matches!(&arms[0].pattern, almide_ir::IrPattern::Tuple { .. })
-                    && !is_heap_ty(ty)
-                {
-                    if let almide_ir::IrPattern::Tuple { elements } = &arms[0].pattern {
-                        let mark = self.ops.len();
-                        let lhh = self.live_heap_handles.len();
-                        // Materialize the tuple subject as a borrowed handle (its slots are real).
-                        if let Ok(Some(CallArg::Handle(subj))) = self
-                            .lower_call_args(std::slice::from_ref(subject))
-                            .map(|v| v.into_iter().next())
-                        {
-                            if self.try_lower_tuple_destructure(elements, subj) {
-                                if let Some(dst) = self.lower_scalar_value(&arms[0].body) {
-                                    self.value_of.insert(var, dst);
-                                    return Ok(());
-                                }
-                            }
-                        }
-                        self.ops.truncate(mark);
-                        self.live_heap_handles.truncate(lhh);
-                    }
+            }
+            // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
+            // `let v = match t { Num(n) => n, … }`. Without this the ctor-pattern match
+            // fell through to a deferred Const 0 (a silent miscompile).
+            if let Some(dst) = self.try_lower_custom_variant_match(subject, arms, ty) {
+                self.value_of.insert(var, dst);
+                return Ok(());
+            }
+            // A VARIANT (Option/Result) subject — execute the tag-read value-match
+            // (only the taken arm runs, the scalar payload bound). A ctor pattern is not
+            // `subj == lit`, so it can't reach `desugar_match_to_if`; without this the
+            // result stayed an unset deferred Const (a silent 0).
+            if is_variant_ty(&subject.ty) {
+                if let Some(dst) = self.try_lower_variant_value_match(subject, arms, ty) {
+                    self.value_of.insert(var, dst);
+                    return Ok(());
                 }
-                if let Some(if_expr) = self.desugar_match_to_if(subject, arms, ty) {
-                    // `If` (literal arms) OR `Block` (`{ let x = subj; if … }` for a
-                    // binder/guarded arm) — `lower_scalar_arm` runs both; roll back on a miss.
+                // Outside the executable subset a Const-0 would silently pick a wrong
+                // arm — WALL (the discipline: an unfaithful variant match rejects, never
+                // emits a deferred 0).
+                return Err(LowerError::Unsupported(
+                    "variant (Option/Result) match bound to a let/var outside the \
+                     executable subset cannot be faithfully computed (a Const-0 would \
+                     silently pick a wrong arm) not in this brick"
+                        .into(),
+                ));
+            }
+            // A single-arm tuple-destructure `let r = match t { (a, b) => <body> }` binding
+            // MULTIPLE components (not the single-extract case above): bind each component from its
+            // tuple SLOT (the layout-aware loader), then lower the arm body as the bound value.
+            // WITHOUT this the multi-bind tuple match fell to the deferred `Const 0` below (a, b
+            // read 0). SCALAR result only (a heap arm value needs the merged-result path); rolls
+            // back to the Const on a miss.
+            if matches!(subject.ty, Ty::Tuple(_))
+                && arms.len() == 1
+                && arms[0].guard.is_none()
+                && matches!(&arms[0].pattern, almide_ir::IrPattern::Tuple { .. })
+                && !is_heap_ty(ty)
+            {
+                if let almide_ir::IrPattern::Tuple { elements } = &arms[0].pattern {
                     let mark = self.ops.len();
                     let lhh = self.live_heap_handles.len();
-                    if let Some(dst) = self.lower_scalar_arm(&if_expr) {
-                        self.value_of.insert(var, dst);
-                        return Ok(());
+                    // Materialize the tuple subject as a borrowed handle (its slots are real).
+                    if let Ok(Some(CallArg::Handle(subj))) = self
+                        .lower_call_args(std::slice::from_ref(subject))
+                        .map(|v| v.into_iter().next())
+                    {
+                        if self.try_lower_tuple_destructure(elements, subj) {
+                            if let Some(dst) = self.lower_scalar_value(&arms[0].body) {
+                                self.value_of.insert(var, dst);
+                                return Ok(());
+                            }
+                        }
                     }
                     self.ops.truncate(mark);
                     self.live_heap_handles.truncate(lhh);
                 }
             }
-            // `let idx = string.index_of(s, x) ?? -1` — a `??` over a materialized Option
-            // EXECUTES to a scalar (tag read + payload/fallback), unwrapping the self-host
-            // Option[Int] fns; outside the subset a `??` over a VARIANT operand can't read
-            // the tag (e.g. a USER-function Option/Result result not yet tracked as
-            // materialized) — a Const-0 would be a wrong value, so WALL (never silently 0).
-            if let IrExprKind::UnwrapOr { expr, fallback } = &value.kind {
-                if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, true) {
-                    self.value_of.insert(var, dst);
-                    return Ok(());
-                }
-                if is_variant_ty(&expr.ty) {
-                    return Err(LowerError::Unsupported(
-                        "?? over an Option/Result operand outside the executable subset (e.g. a \
-                         user-function result not tracked as materialized) cannot be faithfully \
-                         computed (a Const-0 would be a wrong value) not in this brick"
-                            .into(),
-                    ));
-                }
-            }
-            // `let v = w` aliasing a SCALAR var — v denotes the SAME value (a scalar is freely
-            // duplicable: no copy, no ownership). Without this, a bare-Var scalar RHS fell to the
-            // deferred `Const` below and silently became 0 (the param-alias zeroing trap).
-            //
-            // BUT a MUTABLE `var v = w` must get its OWN local: if it aliased w's local, a later
-            // `v = …` reassignment would `SetLocal` w's slot and SILENTLY CORRUPT w (the sha1
-            // `var a = h0; … a = temp` trap that clobbered h0). Seed a fresh scalar local with a
-            // type-agnostic i64 copy (`v = w + 0` — integer-add of 0 is identity on the i64-uniform
-            // bits of Int/Float/Bool), so reassigning `v` never touches `w`. An immutable `let v = w`
-            // is never reassigned, so the cheaper alias stays.
-            if let IrExprKind::Var { id } = &value.kind {
-                if let Ok(src) = self.value_for(*id) {
-                    if self.binding_is_mutable && !is_heap_ty(&value.ty) {
-                        let zero = self.fresh_value();
-                        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
-                        let dst = self.fresh_value();
-                        self.ops.push(Op::IntBinOp {
-                            dst,
-                            op: crate::IntOp::Add,
-                            a: src,
-                            b: zero,
-                        });
-                        self.value_of.insert(var, dst);
-                    } else {
-                        self.value_of.insert(var, src);
-                    }
-                    return Ok(());
-                }
-            }
-            // `let d = r.x` / `let d = t.0` / `let d = xs[i]` — a SCALAR field / element
-            // projection LOADS the real value from the materialized aggregate's layout slot
-            // (the VALUE MODEL); `xs[i]` is a bounds-checked `$elem_addr` load. Outside the
-            // materialized subset it rolls back to the deferred `Const`.
-            // A `Var` RHS reaches here only when the alias arm above MISSED (`value_for`
-            // resolves locals, not globals): `let id = region_count` — a GLOBAL read. The
-            // scalar-value path routes it through `value_or_global` (a mutable global's
-            // slot Load / an immutable one's const materialization), a fresh dst either
-            // way — no alias to protect, so the mutable-binding `+0` copy is not needed.
-            if let IrExprKind::Member { .. }
-            | IrExprKind::TupleIndex { .. }
-            | IrExprKind::IndexAccess { .. }
-            | IrExprKind::Var { .. } = &value.kind
-            {
+            if let Some(if_expr) = self.desugar_match_to_if(subject, arms, ty) {
+                // `If` (literal arms) OR `Block` (`{ let x = subj; if … }` for a
+                // binder/guarded arm) — `lower_scalar_arm` runs both; roll back on a miss.
                 let mark = self.ops.len();
-                if let Some(dst) = self.lower_scalar_value(value) {
+                let lhh = self.live_heap_handles.len();
+                if let Some(dst) = self.lower_scalar_arm(&if_expr) {
                     self.value_of.insert(var, dst);
                     return Ok(());
                 }
                 self.ops.truncate(mark);
+                self.live_heap_handles.truncate(lhh);
             }
-            let dst = self.fresh_value();
-            self.value_of.insert(var, dst);
-            if crate::lower::strict_values() {
-                return Err(crate::lower::strict_const_wall("binding"));
-            }
-            self.ops.push(Op::Const { dst });
-            self.record_elided_calls(value);
-            return Ok(());
         }
+        // `let idx = string.index_of(s, x) ?? -1` — a `??` over a materialized Option
+        // EXECUTES to a scalar (tag read + payload/fallback), unwrapping the self-host
+        // Option[Int] fns; outside the subset a `??` over a VARIANT operand can't read
+        // the tag (e.g. a USER-function Option/Result result not yet tracked as
+        // materialized) — a Const-0 would be a wrong value, so WALL (never silently 0).
+        if let IrExprKind::UnwrapOr { expr, fallback } = &value.kind {
+            if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, true) {
+                self.value_of.insert(var, dst);
+                return Ok(());
+            }
+            if is_variant_ty(&expr.ty) {
+                return Err(LowerError::Unsupported(
+                    "?? over an Option/Result operand outside the executable subset (e.g. a \
+                     user-function result not tracked as materialized) cannot be faithfully \
+                     computed (a Const-0 would be a wrong value) not in this brick"
+                        .into(),
+                ));
+            }
+        }
+        // `let v = w` aliasing a SCALAR var — v denotes the SAME value (a scalar is freely
+        // duplicable: no copy, no ownership). Without this, a bare-Var scalar RHS fell to the
+        // deferred `Const` below and silently became 0 (the param-alias zeroing trap).
+        //
+        // BUT a MUTABLE `var v = w` must get its OWN local: if it aliased w's local, a later
+        // `v = …` reassignment would `SetLocal` w's slot and SILENTLY CORRUPT w (the sha1
+        // `var a = h0; … a = temp` trap that clobbered h0). Seed a fresh scalar local with a
+        // type-agnostic i64 copy (`v = w + 0` — integer-add of 0 is identity on the i64-uniform
+        // bits of Int/Float/Bool), so reassigning `v` never touches `w`. An immutable `let v = w`
+        // is never reassigned, so the cheaper alias stays.
+        if let IrExprKind::Var { id } = &value.kind {
+            if let Ok(src) = self.value_for(*id) {
+                if self.binding_is_mutable && !is_heap_ty(&value.ty) {
+                    let zero = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::IntBinOp {
+                        dst,
+                        op: crate::IntOp::Add,
+                        a: src,
+                        b: zero,
+                    });
+                    self.value_of.insert(var, dst);
+                } else {
+                    self.value_of.insert(var, src);
+                }
+                return Ok(());
+            }
+        }
+        // `let d = r.x` / `let d = t.0` / `let d = xs[i]` — a SCALAR field / element
+        // projection LOADS the real value from the materialized aggregate's layout slot
+        // (the VALUE MODEL); `xs[i]` is a bounds-checked `$elem_addr` load. Outside the
+        // materialized subset it rolls back to the deferred `Const`.
+        // A `Var` RHS reaches here only when the alias arm above MISSED (`value_for`
+        // resolves locals, not globals): `let id = region_count` — a GLOBAL read. The
+        // scalar-value path routes it through `value_or_global` (a mutable global's
+        // slot Load / an immutable one's const materialization), a fresh dst either
+        // way — no alias to protect, so the mutable-binding `+0` copy is not needed.
+        if let IrExprKind::Member { .. }
+        | IrExprKind::TupleIndex { .. }
+        | IrExprKind::IndexAccess { .. }
+        | IrExprKind::Var { .. } = &value.kind
+        {
+            let mark = self.ops.len();
+            if let Some(dst) = self.lower_scalar_value(value) {
+                self.value_of.insert(var, dst);
+                return Ok(());
+            }
+            self.ops.truncate(mark);
+        }
+        let dst = self.fresh_value();
+        self.value_of.insert(var, dst);
+        if crate::lower::strict_values() {
+            return Err(crate::lower::strict_const_wall("binding"));
+        }
+        self.ops.push(Op::Const { dst });
+        self.record_elided_calls(value);
+        return Ok(());
+    }
+
+    /// The HEAP half of [`Self::lower_bind`]: the heap-`??` executable subset,
+    /// then the fresh-vs-alias match over every heap producer. Verbatim text move.
+    fn lower_bind_heap(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         // `let s = opt ?? "default"` — a HEAP-String `??` over a materialized Option[String]
         // EXECUTES via the self-host `option.unwrap_or_str` CALL (try_lower_option_unwrap_or's heap
         // branch): a fresh owned String, bound + dropped like any heap value. This CLOSES the
