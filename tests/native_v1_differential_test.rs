@@ -29,6 +29,7 @@ fn run_v0(name: &str, src: &str) -> (String, i32) {
     // oracle side must stay the LEGACY v0 pipeline or the diff is tautological.
     let out = Command::new(almide())
         .args(["run", "--no-verified", file.to_str().unwrap()])
+        .env("ALMIDE_NO_VERIFIED_OK", "1")
         .output()
         .expect("almide run");
     (String::from_utf8_lossy(&out.stdout).into_owned(), out.status.code().unwrap_or(-1))
@@ -122,7 +123,7 @@ fn divzero_abort_matches_v0() {
     let dir = scratch("divzero_v0");
     let file = dir.join("prog.almd");
     std::fs::write(&file, src).unwrap();
-    let v0 = Command::new(almide()).args(["run", "--no-verified", file.to_str().unwrap()]).output().unwrap();
+    let v0 = Command::new(almide()).args(["run", "--no-verified", file.to_str().unwrap()]).env("ALMIDE_NO_VERIFIED_OK", "1").output().unwrap();
     // v1
     let rust = almide_mir::pipeline::try_render_rust_source(src).expect("in subset");
     let rs = dir.join("prog.rs");

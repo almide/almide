@@ -548,6 +548,22 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
 }
 
 
+/// #782 retirement step 1: `--no-verified` (the legacy v0 escape hatch) is DEPRECATED —
+/// one release of this notice, then the flag hard-errors and the v0 emitters become
+/// build-only CI parity oracles. `ALMIDE_NO_VERIFIED_OK=1` suppresses the notice for
+/// the sanctioned oracle harnesses (org-byte-verify / frees-churn / the differential
+/// tests), whose v0 invocations are the parity gate itself, not user escapes.
+fn warn_no_verified_deprecated(no_verified: bool) {
+    if no_verified && std::env::var_os("ALMIDE_NO_VERIFIED_OK").is_none() {
+        eprintln!(
+            "warning: --no-verified (the legacy v0 codegen path) is deprecated and will be \
+             removed in a future release; the verified renderer is byte-identical where it \
+             lowers and falls back to v0 automatically. If a program NEEDS this flag, please \
+             file an issue: https://github.com/almide/almide/issues"
+        );
+    }
+}
+
 fn resolve_file(file: Option<String>) -> String {
     file.unwrap_or_else(|| {
         if std::path::Path::new("almide.toml").exists() {
@@ -700,10 +716,12 @@ fn dispatch(cli: Cli) {
             // differential rows + the 18/18 wasm_cross native byte sweep — and an
             // honest wall falls back to v0). `--no-verified` opts out of BOTH legs;
             // `--verified` is kept as a no-op for compatibility.
+            warn_no_verified_deprecated(no_verified);
             cli::cmd_run(&file, &program_args, no_check, release, target.as_deref(), !no_verified, !no_verified);
         }
         Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified } => {
             let file = resolve_file(file);
+            warn_no_verified_deprecated(no_verified);
             cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, !no_verified, !no_verified);
         }
         Commands::Test { file, run, no_check, json, target } => {
