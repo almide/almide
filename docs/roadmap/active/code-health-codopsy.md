@@ -62,6 +62,12 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
 - 2026-07-16 `lower_call_args`（cog 184）→ per-arg dispatch を
   `lower_call_arg_into(&mut Vec)` に抽出（multi-push arm の early-`continue`
   → early-`return Ok(())`、8 箇所）。検証: certs 3 本 byte 一致 + フルゲート。
+- 2026-07-16 `generate_variant_repr_sources`（cog 137）→ NAMED-RECORD 節
+  （292 行）を `generate_record_repr_sources_into(&mut String)` に抽出。
+  検証: certs 3 本 byte 一致（生成テキスト byte 保存の証明）+ フルゲート。
+- 注記: `verify_ownership`（cog 140）は 6+ の &mut 状態（object_of/rc/dead/
+  borrowed/branches/violations）が match を貫通しており text-move の域を
+  超える — OwnershipState struct 化が必要（別種の設計作業として保留）。
 
 ## 残り: cog>100 関数（分解対象、ワースト順）
 
@@ -69,7 +75,6 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
 |---|---|---|---|
 | main (classify) | 199 | 96 | examples/classify_corpus.rs |
 | verify_ownership | 140 | 92 | lib.rs |
-| generate_variant_repr_sources | 137 | 92 | lower/repr_sources.rs |
 | check_named_call_with_type_args | 137 | 114 | frontend check/calls.rs |
 | check_call_with_type_args | 129 | 83 | frontend check/calls.rs |
 | ownership_certificate | 123 | 101 | certificate.rs |
