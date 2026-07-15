@@ -98,6 +98,29 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
   分解なので決定的）+ フルゲート。**#781 は 12/14 — 残 2 =
   try_lower_variant_value_match(121) + 台帳外 1 本の再計測。**
 
+## 再計測（2026-07-16、codopsy 全 workspace — 「台帳外 1 本」の解）
+
+cog>100 は workspace 全体で **47 本**。内訳とスコープ判定:
+
+1. **v0 emitter（退役予定 — #782 完了で消滅、分解しない）**: emit_call(424)、
+   emit_match_arms(395)、render_expr(306)、check_needs_ownership(285)、
+   transform_expr(245)、emit(230)、emit_stmt(221)、render_stmt(218) ほか
+   codegen/ の大半。
+2. **分解 halves の第二ラウンド候補**（親の分解で 100 切り、half が残存）:
+   lower_bind_heap(202)、lower_call_arg_into(161)、lower_tail_heap(109)、
+   lower_scalar_binop(114)、classify_file(118)、
+   generate_record_repr_sources_into(101)。
+3. **アクティブ系の未着手**: lower_stmt(253)、try_render_wasm_source_impl(250)、
+   frontend lower_expr(206)、list_call_name(197)、infer_expr_inner(188)+_g2(171)、
+   lower_call_target/lower_call(150×2)、try_lower_variant_value_match(129)、
+   lower_branch(128) ほか。
+
+判定: 元の「14 本」テーブルは mir/frontend の初回スナップショットで、完遂の
+定義は「アクティブ系の cog>100 = 0」に更新する（v0 退役分は #782 に従属）。
+確立済みレシピ: 純テキスト移動（python 機械導出）→ certs byte 比較、
+State-struct 束ね（OwnershipScan / CertScan 前例）→ ownership.cert 一致が
+決定的証明。
+
 ## 残り 8 本の分解性分類（2026-07-16 精査）
 
 - **text-move 可（レシピ適用可能）**: `main`（classify_corpus 199 — example、
