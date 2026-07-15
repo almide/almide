@@ -878,7 +878,12 @@ fn loop_carried_slots(
     }
     for op in &func.ops {
         match op {
-            Op::Alloc { dst, .. } => {
+            // ListLit joins Alloc as an alloc-class introducer (rung 4/5: scalar
+            // list AND record literals) — without it a record reassign's SetLocal
+            // feeder goes unrecognized and the slot reads flat `idd` + `i` (the
+            // exact false double-free/leak the kernel checker rejected when the
+            // records slab first landed).
+            Op::Alloc { dst, .. } | Op::ListLit { dst, .. } => {
                 heap_objs.insert(*dst);
             }
             Op::Call { dst: Some(d), result: Some(r), .. }
