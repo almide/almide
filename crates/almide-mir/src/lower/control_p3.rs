@@ -1270,7 +1270,24 @@ impl LowerCtx {
     fn materialize_eq_operand(&mut self, expr: &IrExpr, ty: &Ty) -> Option<ValueId> {
         if let IrExprKind::Var { id } = &expr.kind {
             // A tracked heap Var (a param or let-local) — borrow its block, no new ownership.
-            return self.value_for(*id).ok();
+            let v = self.value_for(*id).ok()?;
+            // The eq READS the block through the operand type's layout, so an Option/
+            // Result var must be a genuinely MATERIALIZED block (ctor-built, or a
+            // param seeded by `seed_variant_param`). A DEFERRED Opaque — e.g. an
+            // optional-chain result outside the executable subset — has len 0, which
+            // the len-as-tag read MISREADS as `none`/`Ok` (`assert_eq(p?.name,
+            // some("Alice"))` compared false while native compared true — a silent
+            // wrong verdict, the #790 optional-chain row). Decline instead: the eq
+            // walls and v0 emits the correct bytes.
+            use almide_lang::types::constructor::TypeConstructorId as TC;
+            if matches!(ty, Ty::Applied(TC::Option | TC::Result, _))
+                && !self.materialized_options.contains(&v)
+                && !self.materialized_results.contains(&v)
+                && !self.materialized_results_str.contains(&v)
+            {
+                return None;
+            }
+            return Some(v);
         }
         // An Option/Result CTOR (`some("")`, `none`, `ok(v)`, `err(m)`) — `try_lower_option_ctor`
         // (which handles BOTH Option and Result ctors) builds the DynListStr/OptSome block +
