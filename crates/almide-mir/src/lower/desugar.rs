@@ -398,6 +398,17 @@ pub fn desugar_all(
             cur = r;
             continue;
         }
+        // `m[k]` → `map.get(m, k)` — same desugar-before-both contract as the assert
+        // rewrite above (the counted Call node matches the lowering's one CallFn).
+        if let Some(r) = desugar_map_access_calls(&cur) {
+            cur = r;
+            continue;
+        }
+        // `buf[i]` over Bytes → `bytes.index(buf, i)` — same contract.
+        if let Some(r) = desugar_bytes_index_calls(&cur) {
+            cur = r;
+            continue;
+        }
         if let Some(r) = desugar_guard(&cur) {
             cur = r;
             continue;

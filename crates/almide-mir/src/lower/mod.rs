@@ -225,6 +225,42 @@ fn extern_wasm_abi(ty: &Ty) -> Option<crate::WasmAbi> {
     }
 }
 
+/// A sized-int WIDENING conversion call (`int8.to_int64(x)`, `uint32.to_int64(x)`, …)
+/// whose runtime is the IDENTITY on the canonical-i64 slot value: every integer width
+/// lives sign-/zero-extended in one i64 (the `Ty` docs + `extern_wasm_abi` pin this),
+/// and the Rust runtime is `n as i64` over that already-canonical value (`u64 as i64`
+/// is the same bit-reinterpret the slot already holds). Returns the operand expr when
+/// the shape applies — the lowering forwards the operand's value with NO call, and
+/// `count_ir_calls` skips the node by the SAME predicate (mir == ir by construction).
+pub fn identity_int_widening_call(e: &IrExpr) -> Option<&IrExpr> {
+    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
+    else {
+        return None;
+    };
+    if args.len() != 1 || func.as_str() != "to_int64" {
+        return None;
+    }
+    if !matches!(
+        module.as_str(),
+        "int" | "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64"
+    ) {
+        return None;
+    }
+    let arg_int = matches!(
+        args[0].ty,
+        Ty::Int
+            | Ty::Int8
+            | Ty::Int16
+            | Ty::Int32
+            | Ty::Int64
+            | Ty::UInt8
+            | Ty::UInt16
+            | Ty::UInt32
+            | Ty::UInt64
+    );
+    arg_int.then(|| &args[0])
+}
+
 /// The `@extern(wasm, module, name)` attribute on a function, iff present (the
 /// browser-import case — a `rust`/`rs` target keeps walling: there is no wasm host
 /// for it, so emitting an import would be a hollow lie). Returns `(module, name)`.
@@ -1086,6 +1122,88 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
     s.changed.then_some(out)
 }
 
+/// `m[k]` over a `Map` (the frontend emits `MapAccess` ONLY for `obj.ty.is_map()`) →
+/// `map.get(m, k)` — the ordinary self-host map lookup call (`Option[V]` result), which
+/// the repr dispatch suffixes (`get_skv`/`get_str`/…) like every other map call site.
+/// Applied desugar-before-both (same slot as `desugar_assert_calls`): the counted tree
+/// and the lowering see the SAME Call node, so `mir == ir` holds for the one CallFn.
+fn desugar_map_access_calls(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::intern::sym;
+    struct S {
+        changed: bool,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::MapAccess { object, key } = &e.kind else {
+                return;
+            };
+            *e = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: sym("map"),
+                        func: sym("get"),
+                        def_id: None,
+                    },
+                    args: vec![(**object).clone(), (**key).clone()],
+                    type_args: Vec::new(),
+                },
+                ty: e.ty.clone(),
+                span: e.span.clone(),
+                def_id: e.def_id,
+            };
+            self.changed = true;
+        }
+    }
+    let mut s = S { changed: false };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}
+
+/// `buf[i]` over `Bytes` (a scalar `Int` element read) → `bytes.index(buf, i)` — the
+/// CHECKED self-host byte read (aborts `Error: index out of bounds` + exit 1 exactly
+/// like v0's `b[i]`; `bytes.read_u8`'s 0-for-OOB convention is a DIFFERENT api).
+/// Same desugar-before-both slot as `desugar_map_access_calls`.
+fn desugar_bytes_index_calls(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::intern::sym;
+    struct S {
+        changed: bool,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::IndexAccess { object, index } = &e.kind else {
+                return;
+            };
+            if !matches!(object.ty, Ty::Bytes) || !matches!(e.ty, Ty::Int) {
+                return;
+            }
+            *e = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: sym("bytes"),
+                        func: sym("index"),
+                        def_id: None,
+                    },
+                    args: vec![(**object).clone(), (**index).clone()],
+                    type_args: Vec::new(),
+                },
+                ty: e.ty.clone(),
+                span: e.span.clone(),
+                def_id: e.def_id,
+            };
+            self.changed = true;
+        }
+    }
+    let mut s = S { changed: false };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}
+
 /// The `Result[Unit, E]` this fn's ABI promises when its body's effective TAIL is Unit-typed
 /// (descending Block chains; an absent tail is Unit) — `None` when the tail carries a real
 /// value or the fn is not Result-ABI. Declared `Result[Unit, E]` keeps its own `E`; a
@@ -1243,6 +1361,23 @@ fn lower_function_all_impl(
     let func_body: &IrExpr = if let Some(rewritten) = desugar_assert_calls(func_body) {
         assert_body = rewritten;
         &assert_body
+    } else {
+        func_body
+    };
+    // `m[k]` → `map.get(m, k)` (see `desugar_map_access_calls`) — same
+    // desugar-before-both slot.
+    let map_access_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_map_access_calls(func_body) {
+        map_access_body = rewritten;
+        &map_access_body
+    } else {
+        func_body
+    };
+    // `buf[i]` over Bytes → `bytes.index(buf, i)` (see `desugar_bytes_index_calls`).
+    let bytes_index_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_bytes_index_calls(func_body) {
+        bytes_index_body = rewritten;
+        &bytes_index_body
     } else {
         func_body
     };

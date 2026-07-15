@@ -1110,6 +1110,18 @@ impl LowerCtx {
                     Some("list.eq_bool")
                 } else if crate::lower::is_value_ty(&es[0]) {
                     Some("list.eq_value")
+                } else if let Ty::Applied(TC::List, inner) = &es[0] {
+                    // Nested lists — the element-wise recursion into the flat list eq
+                    // (value_core `list_eq_list_*`).
+                    if inner.len() == 1 && matches!(inner[0], Ty::Int) {
+                        Some("list.eq_list_int")
+                    } else if inner.len() == 1 && matches!(inner[0], Ty::Float) {
+                        Some("list.eq_list_float")
+                    } else if inner.len() == 1 && matches!(inner[0], Ty::String) {
+                        Some("list.eq_list_str")
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }

@@ -100,10 +100,14 @@ fn count_eq_calls_depth(
         return 1;
     }
     if let Ty::Applied(TC::List, es) = ty {
+        let nested_list = matches!(&es[..],
+            [Ty::Applied(TC::List, inner)]
+                if matches!(inner[..], [Ty::Int | Ty::Float | Ty::String]));
         return usize::from(
             es.len() == 1
                 && (matches!(es[0], Ty::Int | Ty::String | Ty::Float | Ty::Bool)
-                    || almide_mir::lower::is_value_ty(&es[0])),
+                    || almide_mir::lower::is_value_ty(&es[0])
+                    || nested_list),
         );
     }
     // Map/Set `==` — the implemented repr variants lower to ONE synthetic eq CallFn
@@ -200,7 +204,13 @@ fn count_ir_calls(
             // to eta-expand bare function-values to `Lambda` (which keeps them absent from
             // MIR input today). Without this, a FnRef over-count could cancel a Computed/
             // Method elision under-count, hiding a taint and falsely caps-verifying a fn.
-            if matches!(e.kind, Call { .. } | RuntimeCall { .. } | TailCall { .. } | FnRef { .. } | ClosureCreate { .. }) {
+            if matches!(e.kind, Call { .. } | RuntimeCall { .. } | TailCall { .. } | FnRef { .. } | ClosureCreate { .. })
+                // A sized-int WIDENING conversion (`int8.to_int64(x)`) lowers to the
+                // IDENTITY (no call op) — skip it by the SAME predicate the lowering
+                // uses, so `mir == ir` holds by construction (its operand's own calls
+                // are counted by the descent as usual).
+                && almide_mir::lower::identity_int_widening_call(e).is_none()
+            {
                 self.n += 1;
             }
             // A string concat `a + b` (BinOp::ConcatStr) lowers to ONE synthetic `__str_concat`
