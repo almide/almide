@@ -115,6 +115,15 @@ cog>100 は workspace 全体で **47 本**。内訳とスコープ判定:
    lower_call_target/lower_call(150×2)、try_lower_variant_value_match(129)、
    lower_branch(128) ほか。
 
+- `try_lower_variant_value_match`（129）の着手前解析（2026-07-16）: 34 top-level
+  locals / 537 行 / 5 フェーズ（subject 解決 297-464 → 分類フラグ 465-527 →
+  arm slot 収集 528-608 → tag 読み+dispatch 609-657 → arm lowering+merge
+  658-733）。**`lower_arm` が &mut self 捕捉の local closure、then/else_slot が
+  lifetime 付き &IrExpr** のため OwnershipScan/CertScan の struct パターンは
+  直接適用不可 — フェーズを LowerCtx メソッド化し出力を明示 return する
+  dataflow 写像が必要。mt2 miscompile class の震源関数なので、専用ウィンドウ
+  + certs/pins フルラダーで着手すること。
+
 判定: 元の「14 本」テーブルは mir/frontend の初回スナップショットで、完遂の
 定義は「アクティブ系の cog>100 = 0」に更新する（v0 退役分は #782 に従属）。
 確立済みレシピ: 純テキスト移動（python 機械導出）→ certs byte 比較、
