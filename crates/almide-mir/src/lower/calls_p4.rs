@@ -372,346 +372,10 @@ impl LowerCtx {
                 self.ops.push(Op::ConstInt { dst, value: value.to_bits() as i64 });
                 Some(dst)
             }
+            // Decomposed (#781): the 340-line operator dispatch is a verbatim
+            // text move into `lower_scalar_binop`.
             IrExprKind::BinOp { op, left, right } => {
-                // The `**` OPERATOR has no single hardware instruction — it desugars to a CALL into
-                // the self-hosted pow stdlib, exactly as if the user wrote `math.fpow(a, b)` /
-                // `math.pow(a, b)`. `PowFloat` → `math.fpow` (the bit-exact libm transcription),
-                // `PowInt` → `math.pow` (exponentiation-by-squaring). Both callees live in a
-                // PURE_MODULES module, so the synthesized `Op::CallFn` carries an EMPTY capability
-                // witness (sound), and the corpus `count_ir_calls` credits the operator node 1:1 so
-                // `mir_calls <= ir_calls` holds BY CONSTRUCTION (no elision-masking over-count).
-                let pow_callee = match op {
-                    BinOp::PowFloat => Some("math.fpow"),
-                    BinOp::PowInt => Some("math.pow"),
-                    _ => None,
-                };
-                if let Some(callee) = pow_callee {
-                    let a = self.lower_scalar_value(left)?;
-                    let b = self.lower_scalar_value(right)?;
-                    let repr = repr_of(&expr.ty).ok()?;
-                    let dst = self.fresh_value();
-                    self.ops.push(Op::CallFn {
-                        dst: Some(dst),
-                        name: callee.to_string(),
-                        args: vec![CallArg::Scalar(a), CallArg::Scalar(b)],
-                        result: Some(repr),
-                    });
-                    return Some(dst);
-                }
-                // FLOAT arithmetic + comparison operators → the prim float floor (Op::Prim). The
-                // operands are Float (the i64-uniform f64 bits); the prim reinterprets around the
-                // wasm f64 op. Pure scalar — no ownership (cert untouched). This makes float-heavy
-                // self-host (libm / dtoa) write `a * b` instead of `prim.fmul(a, b)`.
-                let fkind = match op {
-                    BinOp::AddFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Add)),
-                    BinOp::SubFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Sub)),
-                    BinOp::MulFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Mul)),
-                    BinOp::DivFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Div)),
-                    BinOp::Lt if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Lt)),
-                    BinOp::Lte if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Le)),
-                    BinOp::Gt if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Gt)),
-                    BinOp::Gte if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Ge)),
-                    BinOp::Eq if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Eq)),
-                    BinOp::Neq if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Ne)),
-                    _ => None,
-                };
-                if let Some(kind) = fkind {
-                    let a = self.lower_scalar_value(left)?;
-                    let b = self.lower_scalar_value(right)?;
-                    let dst = self.fresh_value();
-                    self.ops.push(Op::Prim { kind, dst: Some(dst), args: vec![a, b] });
-                    return Some(dst);
-                }
-                // STRING equality (`c == ":"` / `a != b` over String) → the self-host
-                // `string.eq` byte-compare call (→ scalar Bool). Both operands are BORROWED
-                // heap String handles (the call reads + copies; no ownership event). `!=` is
-                // `1 - eq`. This is the dominant real-parser condition; without it the cond
-                // silently lowered to 0 (false) — the yaml/char-scan miscompile.
-                if matches!(op, BinOp::Eq | BinOp::Neq) && matches!(left.ty, Ty::String) {
-                    let args = [(**left).clone(), (**right).clone()];
-                    let eq = self
-                        .lower_pure_module_value_call("string", "eq", &args, &Ty::Bool)
-                        .ok()?;
-                    if matches!(op, BinOp::Eq) {
-                        return Some(eq);
-                    }
-                    let one = self.fresh_value();
-                    self.ops.push(Op::ConstInt { dst: one, value: 1 });
-                    let dst = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
-                    return Some(dst);
-                }
-                // `value.eq` deep-structural call (→ scalar Bool) for a `Value == Value` / `!=`. Without
-                // this the heap `==` did not lower to a scalar cond, so an `if value==value …` fell to the
-                // both-arms linearization and ran BOTH arms (silent miscompile). Both operands BORROWED
-                // (value_eq only reads). `!=` is `1 - eq`. The recursive value_eq byte-matches v0's Value
-                // PartialEq.
-                if matches!(op, BinOp::Eq | BinOp::Neq) && crate::lower::is_value_ty(&left.ty) {
-                    let args = [(**left).clone(), (**right).clone()];
-                    let eq = self
-                        .lower_pure_module_value_call("value", "eq", &args, &Ty::Bool)
-                        .ok()?;
-                    if matches!(op, BinOp::Eq) {
-                        return Some(eq);
-                    }
-                    let one = self.fresh_value();
-                    self.ops.push(Op::ConstInt { dst: one, value: 1 });
-                    let dst = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
-                    return Some(dst);
-                }
-                // `list_a == list_b` over a List[Int|String|Value]: a deep element-wise compare call
-                // (→ scalar Bool). Same both-arms-linearization fix as Value/String ==. element type
-                // picks the variant; other element types stay unhandled (the if then walls, loud).
-                if matches!(op, BinOp::Eq | BinOp::Neq) {
-                    if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, es) =
-                        &left.ty
-                    {
-                        let variant = if es.len() != 1 {
-                            None
-                        } else if matches!(es[0], Ty::Int) {
-                            Some("eq_int")
-                        } else if matches!(es[0], Ty::String) {
-                            Some("eq_str")
-                        } else if crate::lower::is_value_ty(&es[0]) {
-                            Some("eq_value")
-                        } else if matches!(es[0], Ty::Float) {
-                            Some("eq_float")
-                        } else if matches!(es[0], Ty::Bool) {
-                            Some("eq_bool")
-                        } else {
-                            None
-                        };
-                        if let Some(v) = variant {
-                            let args = [(**left).clone(), (**right).clone()];
-                            let eq = self
-                                .lower_pure_module_value_call("list", v, &args, &Ty::Bool)
-                                .ok()?;
-                            if matches!(op, BinOp::Eq) {
-                                return Some(eq);
-                            }
-                            let one = self.fresh_value();
-                            self.ops.push(Op::ConstInt { dst: one, value: 1 });
-                            let dst = self.fresh_value();
-                            self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
-                            return Some(dst);
-                        }
-                    }
-                }
-                // `map_a == map_b` over the two implemented map reprs — a deep
-                // order-independent compare call (→ scalar Bool), same shape as list ==.
-                if matches!(op, BinOp::Eq | BinOp::Neq) {
-                    let is_set_str = matches!(&left.ty,
-                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Set, a)
-                            if a.len() == 1 && matches!(a[0], Ty::String));
-                    let is_map_skv = matches!(&left.ty,
-                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
-                            if a.len() == 2 && matches!(a[0], Ty::String) && !crate::lower::is_heap_ty(&a[1]));
-                    let admitted = crate::lower::is_map_ivh_ty(&left.ty)
-                        || crate::lower::is_map_hval_ty(&left.ty)
-                        || is_map_skv
-                        || is_set_str;
-                    if admitted {
-                        let module = if is_set_str { "set" } else { "map" };
-                        // Pass the BARE "eq" — `list_heap_call_name` attaches the repr
-                        // suffix (`map.eq_ivh` / `map.eq_hval`) from the subject type,
-                        // exactly like every other map call site.
-                        let args = [(**left).clone(), (**right).clone()];
-                        let eq = self
-                            .lower_pure_module_value_call(module, "eq", &args, &Ty::Bool)
-                            .ok()?;
-                        if matches!(op, BinOp::Eq) {
-                            return Some(eq);
-                        }
-                        let one = self.fresh_value();
-                        self.ops.push(Op::ConstInt { dst: one, value: 1 });
-                        let dst = self.fresh_value();
-                        self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
-                        return Some(dst);
-                    }
-                }
-                // String ordering `< <= > >=` → `string.cmp(a,b)` (lexicographic, -1/0/1) compared with
-                // 0. WITHOUT this the comparison fell through to the i64-handle path → arbitrary order
-                // (silent), or the if linearized both arms. Both operands BORROWED (cmp only reads).
-                if matches!(op, BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte)
-                    && matches!(left.ty, Ty::String)
-                {
-                    let args = [(**left).clone(), (**right).clone()];
-                    let cmp = self
-                        .lower_pure_module_value_call("string", "cmp", &args, &Ty::Int)
-                        .ok()?;
-                    let zero = self.fresh_value();
-                    self.ops.push(Op::ConstInt { dst: zero, value: 0 });
-                    let iop = match op {
-                        BinOp::Lt => crate::IntOp::Lt,
-                        BinOp::Lte => crate::IntOp::Le,
-                        BinOp::Gt => crate::IntOp::Gt,
-                        _ => crate::IntOp::Ge,
-                    };
-                    let dst = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst, op: iop, a: cmp, b: zero });
-                    return Some(dst);
-                }
-                // Option / Result `==` / `!=` (lower_eq_typed): Option[scalar] is a branchless masked
-                // compare, Option[heap] / Result[scalar,String] a conditional one. Was both-arms-
-                // linearized (silent). Fires for a materialized subject in the handled layout;
-                // otherwise None → the if walls (loud, safe).
-                if matches!(op, BinOp::Eq | BinOp::Neq)
-                    && matches!(
-                        &left.ty,
-                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _)
-                            | Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)
-                    )
-                {
-                    if let Some(eq) = self.lower_eq_typed(left, right, &left.ty) {
-                        if matches!(op, BinOp::Eq) {
-                            return Some(eq);
-                        }
-                        let one = self.fresh_value();
-                        self.ops.push(Op::ConstInt { dst: one, value: 1 });
-                        let dst = self.fresh_value();
-                        self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
-                        return Some(dst);
-                    }
-                }
-                // Tuple / record `==` / `!=`: field-wise deep equality (the AND of each field's own
-                // typed eq, recursing into nested tuples/records/heap fields). Was both-arms-
-                // linearized (silent). Only fires for a MATERIALIZED aggregate whose every field eq
-                // lowers; otherwise lower_eq_typed returns None and the `if` walls (loud, safe).
-                if matches!(op, BinOp::Eq | BinOp::Neq) && self.aggregate_field_tys(&left.ty).is_some()
-                {
-                    if let Some(eq) = self.lower_eq_typed(left, right, &left.ty) {
-                        if matches!(op, BinOp::Eq) {
-                            return Some(eq);
-                        }
-                        let one = self.fresh_value();
-                        self.ops.push(Op::ConstInt { dst: one, value: 1 });
-                        let dst = self.fresh_value();
-                        self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
-                        return Some(dst);
-                    }
-                }
-                // SHORT-CIRCUIT `and`/`or` — native AND the interp oracle evaluate the RHS LAZILY
-                // (only when the LHS does not already decide the result). The prior EAGER `IntOp::And`/
-                // `Or` (materializing BOTH operands) made a RHS with a trap/side effect (`a != 0 and
-                // (10 / a) > 0`, `len > 5 and xs[5] == 0`) execute unconditionally → a divide-by-zero /
-                // OOB-`elem_addr` trap native never reaches. Lower to control flow so the RHS ops are
-                // emitted INSIDE the taken branch only:
-                //   `a and b` → `if a then b else false`   (RHS only when a is true)
-                //   `a or  b` → `if a then true else b`    (RHS only when a is false)
-                // Uses the same IfThen/Else/EndIf scalar markers as `try_lower_scalar_if`; the LHS is a
-                // pure Bool scalar, so no per-arm heap frame is needed. A non-lowerable operand rolls
-                // back (truncate) and falls through to the deferred path — never both-arms, never wrong.
-                if matches!(op, BinOp::And | BinOp::Or) && matches!(left.ty, Ty::Bool) {
-                    let ops_mark = self.ops.len();
-                    let lhh_mark = self.live_heap_handles.len();
-                    // The RHS is evaluated INSIDE the taken IfThen/Else branch, so use
-                    // `lower_scalar_operand` — it wraps the operand in a per-branch frame that frees any
-                    // transient heap temp it allocates (a `contains(y, "@")` materializes its String
-                    // arg) WITHIN the branch, keeping it `i…d`-balanced. (The eager path used
-                    // `lower_scalar_operand` too; using bare `lower_scalar_value` walled those heap-temp
-                    // operands → a coverage regression.) The LHS (a pure Bool) is likewise framed.
-                    if let Some(lhs) = self.lower_scalar_operand(left) {
-                        let dst = self.fresh_value();
-                        self.ops.push(Op::IfThen { cond: lhs, dst: Some(dst) });
-                        // THEN branch: `and` evaluates RHS here; `or` yields the constant `true`.
-                        let then_val = if matches!(op, BinOp::And) {
-                            self.lower_scalar_operand(right)
-                        } else {
-                            let t = self.fresh_value();
-                            self.ops.push(Op::ConstInt { dst: t, value: 1 });
-                            Some(t)
-                        };
-                        if let Some(tv) = then_val {
-                            self.ops.push(Op::Else { val: Some(tv) });
-                            // ELSE branch: `and` yields the constant `false`; `or` evaluates RHS here.
-                            let else_val = if matches!(op, BinOp::And) {
-                                let f = self.fresh_value();
-                                self.ops.push(Op::ConstInt { dst: f, value: 0 });
-                                Some(f)
-                            } else {
-                                self.lower_scalar_operand(right)
-                            };
-                            if let Some(ev) = else_val {
-                                self.ops.push(Op::EndIf { val: Some(ev) });
-                                return Some(dst);
-                            }
-                        }
-                    }
-                    self.ops.truncate(ops_mark);
-                    self.live_heap_handles.truncate(lhh_mark);
-                    return None;
-                }
-                let iop = match op {
-                    BinOp::AddInt => crate::IntOp::Add,
-                    BinOp::SubInt => crate::IntOp::Sub,
-                    BinOp::MulInt => crate::IntOp::Mul,
-                    BinOp::DivInt => crate::IntOp::Div,
-                    BinOp::ModInt => crate::IntOp::Mod,
-                    // Ordering comparisons (the `if` condition) — INT or BOOL operands (Bool is an i64
-                    // 0/1, and v0's bool Ord is false < true = 0 < 1, so the i64 compare is bit-exact).
-                    // A Float compare uses the prim float floor above; String ordering is the cmp-call
-                    // above. Gate on the operand type.
-                    BinOp::Lt if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Lt,
-                    BinOp::Lte if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Le,
-                    BinOp::Gt if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Gt,
-                    BinOp::Gte if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Ge,
-                    // Equality — INT or BOOL operands. A `Bool` is an i64 0/1 (a Var loads
-                    // its 0/1, a `LitBool` materializes `ConstInt 0/1` above), so the SAME
-                    // `IntOp::Eq`/`Ne` render is bit-exact for `b == false` / `b1 != b2` as
-                    // for `n == 0`. (Ordering on Bool is undefined in v0, so it is NOT
-                    // admitted; a Float/String/compound `==` still needs a distinct op.)
-                    BinOp::Eq if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Eq,
-                    BinOp::Neq if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Ne,
-                    // (Logical `and`/`or` are SHORT-CIRCUITED via control flow above — they never
-                    // reach this eager `IntBinOp` path. Native + interp evaluate the RHS lazily.)
-                    // Pow, Float, concat, non-Int/Bool compares: defer.
-                    _ => return None,
-                };
-                let a = self.lower_scalar_value(left)?;
-                let b = self.lower_scalar_value(right)?;
-                // NARROW signed division overflow (`Int8` MIN ÷ -1 — int8_div_overflow):
-                // the operands live in the i64 model, so the preamble's checked helper
-                // only catches i64::MIN ÷ -1; the narrow MIN wraps silently (v0 aborts
-                // "Error: integer overflow" + exit 1). Inject the width guard as MIR ops:
-                // if (a == MIN_w) & (b == -1) → prim.die with the SAME message bytes.
-                if matches!(iop, crate::IntOp::Div | crate::IntOp::Mod) {
-                    let min_w = match &left.ty {
-                        Ty::Int8 => Some(-128i64),
-                        Ty::Int16 => Some(-32768i64),
-                        Ty::Int32 => Some(-2147483648i64),
-                        _ => None,
-                    };
-                    if let Some(mw) = min_w {
-                        let minc = self.fresh_value();
-                        self.ops.push(Op::ConstInt { dst: minc, value: mw });
-                        let negc = self.fresh_value();
-                        self.ops.push(Op::ConstInt { dst: negc, value: -1 });
-                        let c1 = self.fresh_value();
-                        self.ops.push(Op::IntBinOp { dst: c1, op: crate::IntOp::Eq, a, b: minc });
-                        let c2 = self.fresh_value();
-                        self.ops.push(Op::IntBinOp { dst: c2, op: crate::IntOp::Eq, a: b, b: negc });
-                        let both = self.fresh_value();
-                        self.ops.push(Op::IntBinOp { dst: both, op: crate::IntOp::And, a: c1, b: c2 });
-                        let msg = self.fresh_value();
-                        self.ops.push(Op::Alloc {
-                            dst: msg,
-                            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
-                            init: crate::Init::Str("Error: integer overflow\n".into()),
-                        });
-                        let mh = self.fresh_value();
-                        self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(mh), args: vec![msg] });
-                        self.ops.push(Op::IfThen { cond: both, dst: None });
-                        self.ops.push(Op::Prim { kind: crate::PrimKind::Die, dst: None, args: vec![mh] });
-                        self.ops.push(Op::Else { val: None });
-                        self.ops.push(Op::EndIf { val: None });
-                        // the message block is dead on the non-abort path — release it
-                        self.ops.push(Op::Drop { v: msg });
-                    }
-                }
-                let dst = self.fresh_value();
-                self.ops.push(Op::IntBinOp { dst, op: iop, a, b });
-                Some(dst)
+                self.lower_scalar_binop(expr, op, left, right)
             }
             // A scalar-result PRIMITIVE-FLOOR call (`prim.handle`/`prim.load32`/
             // `prim.fd_write`) — `@intrinsic` lowers it to a `RuntimeCall`; we map the
@@ -869,6 +533,358 @@ impl LowerCtx {
             }
             _ => None,
         }
+    }
+
+    /// The scalar `BinOp` dispatch of [`Self::lower_scalar_value_inner`] —
+    /// arithmetic / comparison / logic / concat over executable scalar operands.
+    /// Verbatim text move (#781, the cog-198 driver arm).
+    fn lower_scalar_binop(
+        &mut self,
+        expr: &IrExpr,
+        op: &almide_ir::BinOp,
+        left: &IrExpr,
+        right: &IrExpr,
+    ) -> Option<ValueId> {
+        use almide_ir::BinOp;
+        // The `**` OPERATOR has no single hardware instruction — it desugars to a CALL into
+        // the self-hosted pow stdlib, exactly as if the user wrote `math.fpow(a, b)` /
+        // `math.pow(a, b)`. `PowFloat` → `math.fpow` (the bit-exact libm transcription),
+        // `PowInt` → `math.pow` (exponentiation-by-squaring). Both callees live in a
+        // PURE_MODULES module, so the synthesized `Op::CallFn` carries an EMPTY capability
+        // witness (sound), and the corpus `count_ir_calls` credits the operator node 1:1 so
+        // `mir_calls <= ir_calls` holds BY CONSTRUCTION (no elision-masking over-count).
+        let pow_callee = match op {
+            BinOp::PowFloat => Some("math.fpow"),
+            BinOp::PowInt => Some("math.pow"),
+            _ => None,
+        };
+        if let Some(callee) = pow_callee {
+            let a = self.lower_scalar_value(left)?;
+            let b = self.lower_scalar_value(right)?;
+            let repr = repr_of(&expr.ty).ok()?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::CallFn {
+                dst: Some(dst),
+                name: callee.to_string(),
+                args: vec![CallArg::Scalar(a), CallArg::Scalar(b)],
+                result: Some(repr),
+            });
+            return Some(dst);
+        }
+        // FLOAT arithmetic + comparison operators → the prim float floor (Op::Prim). The
+        // operands are Float (the i64-uniform f64 bits); the prim reinterprets around the
+        // wasm f64 op. Pure scalar — no ownership (cert untouched). This makes float-heavy
+        // self-host (libm / dtoa) write `a * b` instead of `prim.fmul(a, b)`.
+        let fkind = match op {
+            BinOp::AddFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Add)),
+            BinOp::SubFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Sub)),
+            BinOp::MulFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Mul)),
+            BinOp::DivFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Div)),
+            BinOp::Lt if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Lt)),
+            BinOp::Lte if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Le)),
+            BinOp::Gt if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Gt)),
+            BinOp::Gte if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Ge)),
+            BinOp::Eq if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Eq)),
+            BinOp::Neq if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Ne)),
+            _ => None,
+        };
+        if let Some(kind) = fkind {
+            let a = self.lower_scalar_value(left)?;
+            let b = self.lower_scalar_value(right)?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim { kind, dst: Some(dst), args: vec![a, b] });
+            return Some(dst);
+        }
+        // STRING equality (`c == ":"` / `a != b` over String) → the self-host
+        // `string.eq` byte-compare call (→ scalar Bool). Both operands are BORROWED
+        // heap String handles (the call reads + copies; no ownership event). `!=` is
+        // `1 - eq`. This is the dominant real-parser condition; without it the cond
+        // silently lowered to 0 (false) — the yaml/char-scan miscompile.
+        if matches!(op, BinOp::Eq | BinOp::Neq) && matches!(left.ty, Ty::String) {
+            let args = [left.clone(), right.clone()];
+            let eq = self
+                .lower_pure_module_value_call("string", "eq", &args, &Ty::Bool)
+                .ok()?;
+            if matches!(op, BinOp::Eq) {
+                return Some(eq);
+            }
+            let one = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: one, value: 1 });
+            let dst = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+            return Some(dst);
+        }
+        // `value.eq` deep-structural call (→ scalar Bool) for a `Value == Value` / `!=`. Without
+        // this the heap `==` did not lower to a scalar cond, so an `if value==value …` fell to the
+        // both-arms linearization and ran BOTH arms (silent miscompile). Both operands BORROWED
+        // (value_eq only reads). `!=` is `1 - eq`. The recursive value_eq byte-matches v0's Value
+        // PartialEq.
+        if matches!(op, BinOp::Eq | BinOp::Neq) && crate::lower::is_value_ty(&left.ty) {
+            let args = [left.clone(), right.clone()];
+            let eq = self
+                .lower_pure_module_value_call("value", "eq", &args, &Ty::Bool)
+                .ok()?;
+            if matches!(op, BinOp::Eq) {
+                return Some(eq);
+            }
+            let one = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: one, value: 1 });
+            let dst = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+            return Some(dst);
+        }
+        // `list_a == list_b` over a List[Int|String|Value]: a deep element-wise compare call
+        // (→ scalar Bool). Same both-arms-linearization fix as Value/String ==. element type
+        // picks the variant; other element types stay unhandled (the if then walls, loud).
+        if matches!(op, BinOp::Eq | BinOp::Neq) {
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, es) =
+                &left.ty
+            {
+                let variant = if es.len() != 1 {
+                    None
+                } else if matches!(es[0], Ty::Int) {
+                    Some("eq_int")
+                } else if matches!(es[0], Ty::String) {
+                    Some("eq_str")
+                } else if crate::lower::is_value_ty(&es[0]) {
+                    Some("eq_value")
+                } else if matches!(es[0], Ty::Float) {
+                    Some("eq_float")
+                } else if matches!(es[0], Ty::Bool) {
+                    Some("eq_bool")
+                } else {
+                    None
+                };
+                if let Some(v) = variant {
+                    let args = [left.clone(), right.clone()];
+                    let eq = self
+                        .lower_pure_module_value_call("list", v, &args, &Ty::Bool)
+                        .ok()?;
+                    if matches!(op, BinOp::Eq) {
+                        return Some(eq);
+                    }
+                    let one = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+                    return Some(dst);
+                }
+            }
+        }
+        // `map_a == map_b` over the two implemented map reprs — a deep
+        // order-independent compare call (→ scalar Bool), same shape as list ==.
+        if matches!(op, BinOp::Eq | BinOp::Neq) {
+            let is_set_str = matches!(&left.ty,
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Set, a)
+                    if a.len() == 1 && matches!(a[0], Ty::String));
+            let is_map_skv = matches!(&left.ty,
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                    if a.len() == 2 && matches!(a[0], Ty::String) && !crate::lower::is_heap_ty(&a[1]));
+            let admitted = crate::lower::is_map_ivh_ty(&left.ty)
+                || crate::lower::is_map_hval_ty(&left.ty)
+                || is_map_skv
+                || is_set_str;
+            if admitted {
+                let module = if is_set_str { "set" } else { "map" };
+                // Pass the BARE "eq" — `list_heap_call_name` attaches the repr
+                // suffix (`map.eq_ivh` / `map.eq_hval`) from the subject type,
+                // exactly like every other map call site.
+                let args = [left.clone(), right.clone()];
+                let eq = self
+                    .lower_pure_module_value_call(module, "eq", &args, &Ty::Bool)
+                    .ok()?;
+                if matches!(op, BinOp::Eq) {
+                    return Some(eq);
+                }
+                let one = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                let dst = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+                return Some(dst);
+            }
+        }
+        // String ordering `< <= > >=` → `string.cmp(a,b)` (lexicographic, -1/0/1) compared with
+        // 0. WITHOUT this the comparison fell through to the i64-handle path → arbitrary order
+        // (silent), or the if linearized both arms. Both operands BORROWED (cmp only reads).
+        if matches!(op, BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte)
+            && matches!(left.ty, Ty::String)
+        {
+            let args = [left.clone(), right.clone()];
+            let cmp = self
+                .lower_pure_module_value_call("string", "cmp", &args, &Ty::Int)
+                .ok()?;
+            let zero = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+            let iop = match op {
+                BinOp::Lt => crate::IntOp::Lt,
+                BinOp::Lte => crate::IntOp::Le,
+                BinOp::Gt => crate::IntOp::Gt,
+                _ => crate::IntOp::Ge,
+            };
+            let dst = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst, op: iop, a: cmp, b: zero });
+            return Some(dst);
+        }
+        // Option / Result `==` / `!=` (lower_eq_typed): Option[scalar] is a branchless masked
+        // compare, Option[heap] / Result[scalar,String] a conditional one. Was both-arms-
+        // linearized (silent). Fires for a materialized subject in the handled layout;
+        // otherwise None → the if walls (loud, safe).
+        if matches!(op, BinOp::Eq | BinOp::Neq)
+            && matches!(
+                &left.ty,
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _)
+                    | Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)
+            )
+        {
+            if let Some(eq) = self.lower_eq_typed(left, right, &left.ty) {
+                if matches!(op, BinOp::Eq) {
+                    return Some(eq);
+                }
+                let one = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                let dst = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+                return Some(dst);
+            }
+        }
+        // Tuple / record `==` / `!=`: field-wise deep equality (the AND of each field's own
+        // typed eq, recursing into nested tuples/records/heap fields). Was both-arms-
+        // linearized (silent). Only fires for a MATERIALIZED aggregate whose every field eq
+        // lowers; otherwise lower_eq_typed returns None and the `if` walls (loud, safe).
+        if matches!(op, BinOp::Eq | BinOp::Neq) && self.aggregate_field_tys(&left.ty).is_some()
+        {
+            if let Some(eq) = self.lower_eq_typed(left, right, &left.ty) {
+                if matches!(op, BinOp::Eq) {
+                    return Some(eq);
+                }
+                let one = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                let dst = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+                return Some(dst);
+            }
+        }
+        // SHORT-CIRCUIT `and`/`or` — native AND the interp oracle evaluate the RHS LAZILY
+        // (only when the LHS does not already decide the result). The prior EAGER `IntOp::And`/
+        // `Or` (materializing BOTH operands) made a RHS with a trap/side effect (`a != 0 and
+        // (10 / a) > 0`, `len > 5 and xs[5] == 0`) execute unconditionally → a divide-by-zero /
+        // OOB-`elem_addr` trap native never reaches. Lower to control flow so the RHS ops are
+        // emitted INSIDE the taken branch only:
+        //   `a and b` → `if a then b else false`   (RHS only when a is true)
+        //   `a or  b` → `if a then true else b`    (RHS only when a is false)
+        // Uses the same IfThen/Else/EndIf scalar markers as `try_lower_scalar_if`; the LHS is a
+        // pure Bool scalar, so no per-arm heap frame is needed. A non-lowerable operand rolls
+        // back (truncate) and falls through to the deferred path — never both-arms, never wrong.
+        if matches!(op, BinOp::And | BinOp::Or) && matches!(left.ty, Ty::Bool) {
+            let ops_mark = self.ops.len();
+            let lhh_mark = self.live_heap_handles.len();
+            // The RHS is evaluated INSIDE the taken IfThen/Else branch, so use
+            // `lower_scalar_operand` — it wraps the operand in a per-branch frame that frees any
+            // transient heap temp it allocates (a `contains(y, "@")` materializes its String
+            // arg) WITHIN the branch, keeping it `i…d`-balanced. (The eager path used
+            // `lower_scalar_operand` too; using bare `lower_scalar_value` walled those heap-temp
+            // operands → a coverage regression.) The LHS (a pure Bool) is likewise framed.
+            if let Some(lhs) = self.lower_scalar_operand(left) {
+                let dst = self.fresh_value();
+                self.ops.push(Op::IfThen { cond: lhs, dst: Some(dst) });
+                // THEN branch: `and` evaluates RHS here; `or` yields the constant `true`.
+                let then_val = if matches!(op, BinOp::And) {
+                    self.lower_scalar_operand(right)
+                } else {
+                    let t = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: t, value: 1 });
+                    Some(t)
+                };
+                if let Some(tv) = then_val {
+                    self.ops.push(Op::Else { val: Some(tv) });
+                    // ELSE branch: `and` yields the constant `false`; `or` evaluates RHS here.
+                    let else_val = if matches!(op, BinOp::And) {
+                        let f = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: f, value: 0 });
+                        Some(f)
+                    } else {
+                        self.lower_scalar_operand(right)
+                    };
+                    if let Some(ev) = else_val {
+                        self.ops.push(Op::EndIf { val: Some(ev) });
+                        return Some(dst);
+                    }
+                }
+            }
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return None;
+        }
+        let iop = match op {
+            BinOp::AddInt => crate::IntOp::Add,
+            BinOp::SubInt => crate::IntOp::Sub,
+            BinOp::MulInt => crate::IntOp::Mul,
+            BinOp::DivInt => crate::IntOp::Div,
+            BinOp::ModInt => crate::IntOp::Mod,
+            // Ordering comparisons (the `if` condition) — INT or BOOL operands (Bool is an i64
+            // 0/1, and v0's bool Ord is false < true = 0 < 1, so the i64 compare is bit-exact).
+            // A Float compare uses the prim float floor above; String ordering is the cmp-call
+            // above. Gate on the operand type.
+            BinOp::Lt if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Lt,
+            BinOp::Lte if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Le,
+            BinOp::Gt if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Gt,
+            BinOp::Gte if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Ge,
+            // Equality — INT or BOOL operands. A `Bool` is an i64 0/1 (a Var loads
+            // its 0/1, a `LitBool` materializes `ConstInt 0/1` above), so the SAME
+            // `IntOp::Eq`/`Ne` render is bit-exact for `b == false` / `b1 != b2` as
+            // for `n == 0`. (Ordering on Bool is undefined in v0, so it is NOT
+            // admitted; a Float/String/compound `==` still needs a distinct op.)
+            BinOp::Eq if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Eq,
+            BinOp::Neq if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Ne,
+            // (Logical `and`/`or` are SHORT-CIRCUITED via control flow above — they never
+            // reach this eager `IntBinOp` path. Native + interp evaluate the RHS lazily.)
+            // Pow, Float, concat, non-Int/Bool compares: defer.
+            _ => return None,
+        };
+        let a = self.lower_scalar_value(left)?;
+        let b = self.lower_scalar_value(right)?;
+        // NARROW signed division overflow (`Int8` MIN ÷ -1 — int8_div_overflow):
+        // the operands live in the i64 model, so the preamble's checked helper
+        // only catches i64::MIN ÷ -1; the narrow MIN wraps silently (v0 aborts
+        // "Error: integer overflow" + exit 1). Inject the width guard as MIR ops:
+        // if (a == MIN_w) & (b == -1) → prim.die with the SAME message bytes.
+        if matches!(iop, crate::IntOp::Div | crate::IntOp::Mod) {
+            let min_w = match &left.ty {
+                Ty::Int8 => Some(-128i64),
+                Ty::Int16 => Some(-32768i64),
+                Ty::Int32 => Some(-2147483648i64),
+                _ => None,
+            };
+            if let Some(mw) = min_w {
+                let minc = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: minc, value: mw });
+                let negc = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: negc, value: -1 });
+                let c1 = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: c1, op: crate::IntOp::Eq, a, b: minc });
+                let c2 = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: c2, op: crate::IntOp::Eq, a: b, b: negc });
+                let both = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: both, op: crate::IntOp::And, a: c1, b: c2 });
+                let msg = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: msg,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::Str("Error: integer overflow\n".into()),
+                });
+                let mh = self.fresh_value();
+                self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(mh), args: vec![msg] });
+                self.ops.push(Op::IfThen { cond: both, dst: None });
+                self.ops.push(Op::Prim { kind: crate::PrimKind::Die, dst: None, args: vec![mh] });
+                self.ops.push(Op::Else { val: None });
+                self.ops.push(Op::EndIf { val: None });
+                // the message block is dead on the non-abort path — release it
+                self.ops.push(Op::Drop { v: msg });
+            }
+        }
+        let dst = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst, op: iop, a, b });
+        Some(dst)
     }
 
     /// Lower a `prim.*` PRIMITIVE-FLOOR call to an [`Op::Prim`] — the v1 self-host
