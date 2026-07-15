@@ -123,8 +123,13 @@ fn compile_function_inner(
     let (scratch_i32_cap, scratch_i64_cap, scratch_f64_cap, scratch_v128_cap) = if needs_full_scratch {
         (64usize, 48usize, 48usize, 8usize)
     } else {
-        // Minimal: enough for basic match/if temporaries
-        (4usize, 2usize, 2usize, 0usize)
+        // Minimal: enough for basic match/if temporaries. 8/4/4 (was 4/2/2):
+        // a "simple" body can still nest enough match/if temporaries to hold
+        // 3+ simultaneous i64 slots (#787, ceangal's scroll ticker — need 3,
+        // had 2 → ScratchAllocator overflow panic). Unused slots are zero-cost
+        // declarations, so the wider margin is free; the exact fix remains the
+        // two-pass hwm-sized emit noted above.
+        (8usize, 4usize, 4usize, 0usize)
     };
     let scratch_i32_base = param_count + local_decls.len() as u32;
     for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
