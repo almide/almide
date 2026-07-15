@@ -949,6 +949,32 @@ pub fn try_render_wasm_source(
 /// to a closed native shim floor. `verify_ownership` certifies the Perceus balance
 /// on the same ops before the erasure. WALLS (`Err`) on anything outside the
 /// rung-1 subset — the CLI falls back to v0, so a rendered program is never wrong.
+/// Debug probe: dump the lowered MIR ops of every non-test fn (walls listed
+/// per fn). Used by examples/probe_native.rs during rung development.
+pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
+    crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
+    let ir = source_to_ir_with(source, &[])?;
+    let globals = std::collections::HashMap::new();
+    let mut out = String::new();
+    for func in &ir.functions {
+        if func.is_test {
+            continue;
+        }
+        match crate::lower::lower_function_all(func, &globals) {
+            Ok(all) => {
+                for f in all {
+                    out.push_str(&format!("== fn {} ==\n", f.name));
+                    for op in &f.ops {
+                        out.push_str(&format!("  {op:?}\n"));
+                    }
+                }
+            }
+            Err(e) => out.push_str(&format!("== fn {} LOWER-WALL: {e:?}\n", func.name)),
+        }
+    }
+    Ok(out)
+}
+
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
     let ir = source_to_ir_with(source, &[])?;
@@ -979,7 +1005,7 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool))
         };
         let sig_ok =
-            |t: &Ty| matches!(t, Ty::Int | Ty::Bool | Ty::String) || is_scalar_list(t);
+            |t: &Ty| matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String) || is_scalar_list(t);
         for p in &func.params {
             if !sig_ok(&p.ty) {
                 return Err(LowerError::Unsupported(format!(
@@ -1017,6 +1043,7 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
         let kind = |t: &Ty| -> Option<NativeSigKind> {
             match t {
                 Ty::Int | Ty::Bool => Some(NativeSigKind::I64),
+                Ty::Float => Some(NativeSigKind::F64),
                 Ty::String => Some(NativeSigKind::Str),
                 Ty::Applied(TypeConstructorId::List, a)
                     if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>

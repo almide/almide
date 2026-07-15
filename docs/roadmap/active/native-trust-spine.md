@@ -66,9 +66,18 @@
       guarded by the existing gates) and the native leg maps to `Vec` ops. This
       touches the same `lower/binds*` bricks the ceangal/module-var workstream
       is actively editing — do it WITH that workstream, not alongside it.
-- [ ] Rung 5: records/variants (native structs/enums), Float (real `f64` — no
-      i64-bits convention on native), closures.
-      **Float slab design (2026-07-15 scouting)**: MIR carries Float as i64
+- [ ] Rung 5: records/variants (native structs/enums), closures.
+      **Float slab SHIPPED (2026-07-15)**: `NTy::F64`/`NativeSigKind::F64`;
+      float literals stay bits-typed `i64` locals and convert at each float-op
+      boundary (`f64::from_bits`, bit-exact); FloatBin Add/Sub/Mul/Div,
+      FloatUn Neg/Abs/Sqrt/Floor/Ceil, FloatCmp (all IEEE-hardware-identical
+      cross-target); Min/Max/CopySign wall (Rust vs wasm NaN semantics — only
+      reachable from self-host bodies, which never render natively).
+      `float.to_string` shims to the exact v0 oracle expression. Differential
+      rows: float_print / float_arith / float_branch / float_fn_param, plus a
+      3-way probe (v0-native == v1-native == wasm). `debug_dump_mir` +
+      examples/probe_native.rs added as rung-development tooling.
+      **Original design note (kept for the record)**: MIR carries Float as i64
       locals holding f64 BITS (`PrimKind::FloatUn/FloatBin` reinterpret around
       each op — render_wasm_p2 831-851). Native "real f64" needs: (1)
       `NTy::F64` + `NativeSigKind::F64` (the sig table already disambiguates

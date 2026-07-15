@@ -39,6 +39,10 @@ enum NTy {
     Vec,
     /// A BORROWED `&[i64]` — a scalar-list fn param (the same borrow call mode).
     VecRef,
+    /// A real `f64` local (rung 5 — no i64-bits convention on native). MIR
+    /// carries Float as i64 BITS; the boundary into a float op converts via
+    /// `f64::from_bits` (bit-exact), and every float-op result stays `f64`.
+    F64,
 }
 
 impl NTy {
@@ -58,6 +62,7 @@ pub enum NativeSigKind {
     I64,
     Str,
     ListI64,
+    F64,
 }
 
 /// fn name → (param kinds, return kind; None = Unit). Built by the pipeline where
@@ -84,7 +89,18 @@ fn as_str_arg(code: &str, t: NTy) -> String {
         NTy::Str => format!("&{code}"),
         NTy::StrRef => code.to_string(),
         NTy::Vec | NTy::VecRef => unreachable!("as_str_arg on vec"),
-        NTy::I64 => unreachable!("as_str_arg on i64"),
+        NTy::I64 | NTy::F64 => unreachable!("as_str_arg on scalar"),
+    }
+}
+
+/// Read a MIR scalar as a real `f64`: an I64 local holds the f64 BITS (the MIR
+/// Float convention — every float literal is a `ConstInt` of the bits), an F64
+/// local IS the value. Bit-exact either way.
+fn as_f64_arg(code: &str, t: NTy) -> Result<String, LowerError> {
+    match t {
+        NTy::F64 => Ok(code.to_string()),
+        NTy::I64 => Ok(format!("f64::from_bits({code} as u64)")),
+        _ => Err(wall("native: float op on a heap value")),
     }
 }
 
@@ -166,6 +182,13 @@ fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
             Some(NTy::I64),
             "fn rt_string_cmp(a: &str, b: &str) -> i64 {\n    match a.cmp(b) { std::cmp::Ordering::Less => -1, std::cmp::Ordering::Equal => 0, std::cmp::Ordering::Greater => 1 }\n}",
         )),
+        "float.to_string" => Some((
+            // The EXACT v0 native oracle (runtime/rs/src/float.rs::almide_rt_float_to_string):
+            // shortest round-trip Display, integral values forced to a `.0` tail.
+            &[NTy::F64],
+            Some(NTy::Str),
+            "fn rt_float_to_string(n: f64) -> String {\n    let s = format!(\"{}\", n);\n    if n.fract() == 0.0 && !s.contains('.') && !s.contains(\"inf\") && !s.contains(\"NaN\") {\n        format!(\"{}.0\", s)\n    } else {\n        s\n    }\n}",
+        )),
         "__chk_div" => Some((
             &[NTy::I64, NTy::I64],
             Some(NTy::I64),
@@ -246,6 +269,7 @@ fn render_fn(
             Some(NativeSigKind::ListI64) => NTy::VecRef,
             Some(NativeSigKind::Str) => NTy::StrRef,
             Some(NativeSigKind::I64) => NTy::I64,
+            Some(NativeSigKind::F64) => NTy::F64,
             None => repr_nty(&p.repr, true)?,
         };
         tys.insert(p.value, nty);
@@ -307,6 +331,10 @@ fn render_fn(
                         tys.insert(*dst, NTy::Vec);
                         line!("let mut {} = {}.to_vec();", var(*dst), var(*src));
                     }
+                    NTy::F64 => {
+                        tys.insert(*dst, NTy::F64);
+                        line!("let mut {} = {};", var(*dst), var(*src));
+                    }
                 }
             }
             // Rung-4 scalar-list literal: the natural Vec spelling. Elements are raw
@@ -363,7 +391,7 @@ fn render_fn(
             Op::SetLocal { local, src } => {
                 let t = *tys.get(src).ok_or_else(|| wall("native: SetLocal of untyped value"))?;
                 let rhs = match t {
-                    NTy::I64 => var(*src),
+                    NTy::I64 | NTy::F64 => var(*src),
                     NTy::Str => format!("{}.clone()", var(*src)),
                     NTy::StrRef => format!("{}.to_string()", var(*src)),
                     NTy::Vec => format!("{}.clone()", var(*src)),
@@ -404,10 +432,14 @@ fn render_fn(
                             Some(NativeSigKind::I64) => NTy::I64,
                             Some(NativeSigKind::Str) => NTy::StrRef,
                             Some(NativeSigKind::ListI64) => NTy::VecRef,
+                            Some(NativeSigKind::F64) => NTy::F64,
                             None => repr_nty(&p.repr, true)?,
                         };
                         let (code, got) = call_arg(a, &tys)?;
                         match want {
+                            NTy::F64 => {
+                                rendered_args.push(as_f64_arg(&code, got)?);
+                            }
                             NTy::I64 => {
                                 if got != NTy::I64 {
                                     return Err(wall(format!(
@@ -446,12 +478,14 @@ fn render_fn(
                                 Some(NativeSigKind::ListI64) => NTy::Vec,
                                 Some(NativeSigKind::Str) => NTy::Str,
                                 Some(NativeSigKind::I64) => NTy::I64,
+                                Some(NativeSigKind::F64) => NTy::F64,
                                 None => repr_nty(r, false)?,
                             };
                             tys.insert(*d, t);
                             let ty_name = match t {
                                 NTy::Str => "String",
                                 NTy::Vec => "Vec<i64>",
+                                NTy::F64 => "f64",
                                 _ => "i64",
                             };
                             line!("let mut {}: {} = {};", var(*d), ty_name, call);
@@ -471,6 +505,9 @@ fn render_fn(
                     for (a, want) in args.iter().zip(param_tys) {
                         let (code, got) = call_arg(a, &tys)?;
                         match want {
+                            NTy::F64 => {
+                                rendered_args.push(as_f64_arg(&code, got)?);
+                            }
                             NTy::I64 => {
                                 if got != NTy::I64 {
                                     return Err(wall(format!("native: shim `{name}` arg type mismatch")));
@@ -506,6 +543,58 @@ fn render_fn(
                          native runtime floor"
                     )));
                 }
+            }
+            // Rung-5 float floor: MIR floats are i64 BITS; native computes in real
+            // f64. Every op below is IEEE-754-exact on both targets (hardware ops,
+            // identical bit results), so byte-identity holds through
+            // `float.to_string`. Min/Max/CopySign are excluded: Rust's `f64::min`
+            // NaN semantics differ from wasm `f64.min` (they only occur inside
+            // self-host bodies, which never render natively).
+            Op::Prim { kind: crate::PrimKind::FloatBin(op), dst: Some(d), args } if args.len() == 2 => {
+                use crate::FBinOp;
+                let sym = match op {
+                    FBinOp::Add => "+",
+                    FBinOp::Sub => "-",
+                    FBinOp::Mul => "*",
+                    FBinOp::Div => "/",
+                    FBinOp::Min | FBinOp::Max | FBinOp::CopySign => {
+                        return Err(wall(format!(
+                            "native: float op {op:?} — outside the rung subset (NaN semantics)"
+                        )))
+                    }
+                };
+                let a = as_f64_arg(&var(args[0]), *tys.get(&args[0]).ok_or_else(|| wall("native: float arg untyped"))?)?;
+                let b = as_f64_arg(&var(args[1]), *tys.get(&args[1]).ok_or_else(|| wall("native: float arg untyped"))?)?;
+                tys.insert(*d, NTy::F64);
+                line!("let mut {}: f64 = {a} {sym} {b};", var(*d));
+            }
+            Op::Prim { kind: crate::PrimKind::FloatUn(op), dst: Some(d), args } if args.len() == 1 => {
+                use crate::FUnOp;
+                let a = as_f64_arg(&var(args[0]), *tys.get(&args[0]).ok_or_else(|| wall("native: float arg untyped"))?)?;
+                let expr = match op {
+                    FUnOp::Neg => format!("-({a})"),
+                    FUnOp::Abs => format!("({a}).abs()"),
+                    FUnOp::Sqrt => format!("({a}).sqrt()"),
+                    FUnOp::Floor => format!("({a}).floor()"),
+                    FUnOp::Ceil => format!("({a}).ceil()"),
+                };
+                tys.insert(*d, NTy::F64);
+                line!("let mut {}: f64 = {expr};", var(*d));
+            }
+            Op::Prim { kind: crate::PrimKind::FloatCmp(op), dst: Some(d), args } if args.len() == 2 => {
+                use crate::FCmpOp;
+                let sym = match op {
+                    FCmpOp::Lt => "<",
+                    FCmpOp::Le => "<=",
+                    FCmpOp::Gt => ">",
+                    FCmpOp::Ge => ">=",
+                    FCmpOp::Eq => "==",
+                    FCmpOp::Ne => "!=",
+                };
+                let a = as_f64_arg(&var(args[0]), *tys.get(&args[0]).ok_or_else(|| wall("native: float arg untyped"))?)?;
+                let b = as_f64_arg(&var(args[1]), *tys.get(&args[1]).ok_or_else(|| wall("native: float arg untyped"))?)?;
+                tys.insert(*d, NTy::I64);
+                line!("let mut {}: i64 = ({a} {sym} {b}) as i64;", var(*d));
             }
             // Witness-level runtime calls (`println` lowers through these).
             Op::Call { dst, func, args, .. } => {
@@ -579,6 +668,11 @@ fn render_fn(
                             NTy::Vec,
                             format!("{}.to_vec()", var(v)),
                         ),
+                        NTy::F64 => (
+                            format!("let mut {}: f64 = 0.0;", var(*d)),
+                            NTy::F64,
+                            var(v),
+                        ),
                     };
                     patch(&mut out, marker, &decl);
                     tys.insert(*d, join_t);
@@ -595,7 +689,7 @@ fn render_fn(
                     let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
                     let join_t = *tys.get(&d).ok_or_else(|| wall("native: if-value join untyped"))?;
                     let rhs = match t {
-                        NTy::I64 => var(v),
+                        NTy::I64 | NTy::F64 => var(v),
                         NTy::Str => format!("{}.clone()", var(v)),
                         NTy::StrRef => format!("{}.to_string()", var(v)),
                         NTy::Vec => format!("{}.clone()", var(v)),
@@ -656,6 +750,7 @@ fn render_fn(
                     NTy::StrRef | NTy::Str => "&str",
                     NTy::VecRef | NTy::Vec => "&[i64]",
                     NTy::I64 => "i64",
+                    NTy::F64 => "f64",
                 };
                 format!("{}: {}", var(p.value), spelled)
             })
@@ -668,6 +763,7 @@ fn render_fn(
                 Some(NTy::StrRef) => " -> String".to_string(),
                 Some(NTy::Vec) => " -> Vec<i64>".to_string(),
                 Some(NTy::VecRef) => " -> Vec<i64>".to_string(),
+                Some(NTy::F64) => " -> f64".to_string(),
                 None => return Err(wall("native: return value untyped")),
             },
         };
@@ -679,7 +775,7 @@ fn render_fn(
     if let Some(v) = func.ret {
         let t = tys[&v];
         let expr = match t {
-            NTy::I64 | NTy::Str | NTy::Vec => var(v),
+            NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec => var(v),
             NTy::StrRef => format!("{}.to_string()", var(v)),
             NTy::VecRef => format!("{}.to_vec()", var(v)),
         };
