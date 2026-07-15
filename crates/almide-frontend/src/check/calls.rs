@@ -161,94 +161,11 @@ impl Checker {
                 self.validate_mut_args(&name, &arg_refs);
                 ret
             }
+            // Decomposed (#781, cog 129): the constructor-call arm is a verbatim
+            // text move into `check_type_name_call`.
             ExprKind::TypeName { name, .. } => {
-                // #631: pin the constructed value's `.ty` to the OWNER-qualified
-                // type name (`mod.Type`) via the module-aware lookup, exactly as
-                // the bare-value ctor path (infer.rs) and `lookup_ctor_in` for
-                // record ctors already do. A bare `lookup_ctor` here left the call
-                // expression's type bare `Type` even when the only declaration is
-                // `mod.Type`, so a producer fn INSIDE its owning submodule that
-                // constructs the variant tripped the #433 name-pinning guard at
-                // codegen (both targets aborted after `check` said clean).
-                if let Some((type_name, case)) =
-                    self.env.lookup_ctor_in(&sym(name), self.current_module_prefix.as_deref())
-                {
-                    self.report_ambiguous_ctor(name);
-                    self.check_constructor_args(name, &case, &arg_tys);
-                    // Instantiate parent type's generics with fresh inference vars
-                    let generic_args = self.instantiate_type_generics(type_name.as_str());
-                    // Unify each constructor arg with its payload type. For a GENERIC
-                    // variant this resolves the parent's vars (Leaf(1) → T=Int); for
-                    // ANY variant it also propagates a CONCRETE payload type — e.g. a
-                    // function payload `Tick((Unit) -> Int)` — into a lambda arg's
-                    // otherwise-unconstrained params. Without it a closure payload's
-                    // unused param stays unresolved and the WASM closure signature
-                    // mismatched the call site (an indirect-call trap). Was gated on
-                    // `!generic_args.is_empty()`, so non-generic variants were skipped.
-                    let subst: std::collections::HashMap<almide_base::intern::Sym, Ty> = if !generic_args.is_empty() {
-                        self.env.types.get(&sym(type_name.as_str())).cloned().map(|ty_def| {
-                            let mut type_var_names = Vec::new();
-                            crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
-                            type_var_names.iter().zip(generic_args.iter())
-                                .map(|(tv, fresh)| (*tv, fresh.clone()))
-                                .collect()
-                        }).unwrap_or_default()
-                    } else {
-                        std::collections::HashMap::new()
-                    };
-                    if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
-                        for (aty, ety) in arg_tys.iter().zip(expected.iter()) {
-                            let substituted = subst_ty(ety, &subst);
-                            self.unify_infer(aty, &substituted);
-                        }
-                    }
-                    Ty::Named(type_name, generic_args)
-                } else if let Some(target_ty) = self.env.opaque_alias_targets.get(&sym(name)).cloned() {
-                    // Opaque alias constructor: SafeHtml("hello")
-                    let vis = self.env.opaque_alias_visibility.get(&sym(name)).copied()
-                        .unwrap_or(ast::Visibility::Public);
-                    if !matches!(vis, ast::Visibility::Public) {
-                        // Check if we're in the defining module
-                        let defining_module = self.env.opaque_alias_module.get(&sym(name))
-                            .cloned().flatten();
-                        let current_module = self.env.self_module_name
-                            .or(self.current_module_prefix.as_ref().map(|p| sym(p)));
-                        let allowed = match (&defining_module, &current_module) {
-                            (None, None) => true,       // defined in main, used in main
-                            (Some(def), Some(cur)) => def == cur, // same module
-                            _ => false,                 // cross-module
-                        };
-                        if !allowed {
-                            self.emit(super::err(
-                                format!("cannot construct opaque type '{}' outside its defining module", name),
-                                format!("Use the module's public API to create '{}' values", name),
-                                format!("constructor {}()", name),
-                            ).with_code("E008"));
-                        }
-                    }
-                    if arg_tys.len() != 1 {
-                        self.emit(super::err(
-                            format!("{}() takes exactly 1 argument but got {}", name, arg_tys.len()),
-                            "Opaque type constructor wraps a single value",
-                            format!("constructor {}()", name),
-                        ).with_code("E004"));
-                    } else {
-                        self.constrain(target_ty, arg_tys[0].clone(), format!("constructor {}()", name));
-                    }
-                    Ty::Named(sym(name), vec![])
-                } else {
-                    // #488: nothing claimed this TypeName call — not a variant
-                    // ctor, not an opaque alias, and the record paths were
-                    // intercepted before infer_call. Letting it through here is
-                    // how unvalidated constructions reached rustc/wasm; make
-                    // the unknown name a checker error instead.
-                    self.emit(super::err(
-                        format!("unknown type or constructor '{}' in call position", name),
-                        format!("No type, variant constructor, or opaque alias named '{}' is in scope. Check the spelling or add the missing import.", name),
-                        format!("call to {}()", name),
-                    ).with_code("E003"));
-                    Ty::Named(sym(name), vec![])
-                }
+                let name = name.clone();
+                self.check_type_name_call(name.as_str(), &arg_tys)
             }
             // Module call: string.trim(s), list.map(xs, f), etc.
             ExprKind::Member { object, field, .. } => {
@@ -424,6 +341,98 @@ impl Checker {
                 self.constrain(ct, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "function call");
                 ret
             }
+        }
+    }
+
+    /// The `TypeName(..)` callee arm of [`Self::check_call_with_type_args`] —
+    /// record/variant constructor calls. Verbatim text move (#781).
+    fn check_type_name_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {
+        // #631: pin the constructed value's `.ty` to the OWNER-qualified
+        // type name (`mod.Type`) via the module-aware lookup, exactly as
+        // the bare-value ctor path (infer.rs) and `lookup_ctor_in` for
+        // record ctors already do. A bare `lookup_ctor` here left the call
+        // expression's type bare `Type` even when the only declaration is
+        // `mod.Type`, so a producer fn INSIDE its owning submodule that
+        // constructs the variant tripped the #433 name-pinning guard at
+        // codegen (both targets aborted after `check` said clean).
+        if let Some((type_name, case)) =
+            self.env.lookup_ctor_in(&sym(name), self.current_module_prefix.as_deref())
+        {
+            self.report_ambiguous_ctor(name);
+            self.check_constructor_args(name, &case, &arg_tys);
+            // Instantiate parent type's generics with fresh inference vars
+            let generic_args = self.instantiate_type_generics(type_name.as_str());
+            // Unify each constructor arg with its payload type. For a GENERIC
+            // variant this resolves the parent's vars (Leaf(1) → T=Int); for
+            // ANY variant it also propagates a CONCRETE payload type — e.g. a
+            // function payload `Tick((Unit) -> Int)` — into a lambda arg's
+            // otherwise-unconstrained params. Without it a closure payload's
+            // unused param stays unresolved and the WASM closure signature
+            // mismatched the call site (an indirect-call trap). Was gated on
+            // `!generic_args.is_empty()`, so non-generic variants were skipped.
+            let subst: std::collections::HashMap<almide_base::intern::Sym, Ty> = if !generic_args.is_empty() {
+                self.env.types.get(&sym(type_name.as_str())).cloned().map(|ty_def| {
+                    let mut type_var_names = Vec::new();
+                    crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
+                    type_var_names.iter().zip(generic_args.iter())
+                        .map(|(tv, fresh)| (*tv, fresh.clone()))
+                        .collect()
+                }).unwrap_or_default()
+            } else {
+                std::collections::HashMap::new()
+            };
+            if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
+                for (aty, ety) in arg_tys.iter().zip(expected.iter()) {
+                    let substituted = subst_ty(ety, &subst);
+                    self.unify_infer(aty, &substituted);
+                }
+            }
+            Ty::Named(type_name, generic_args)
+        } else if let Some(target_ty) = self.env.opaque_alias_targets.get(&sym(name)).cloned() {
+            // Opaque alias constructor: SafeHtml("hello")
+            let vis = self.env.opaque_alias_visibility.get(&sym(name)).copied()
+                .unwrap_or(ast::Visibility::Public);
+            if !matches!(vis, ast::Visibility::Public) {
+                // Check if we're in the defining module
+                let defining_module = self.env.opaque_alias_module.get(&sym(name))
+                    .cloned().flatten();
+                let current_module = self.env.self_module_name
+                    .or(self.current_module_prefix.as_ref().map(|p| sym(p)));
+                let allowed = match (&defining_module, &current_module) {
+                    (None, None) => true,       // defined in main, used in main
+                    (Some(def), Some(cur)) => def == cur, // same module
+                    _ => false,                 // cross-module
+                };
+                if !allowed {
+                    self.emit(super::err(
+                        format!("cannot construct opaque type '{}' outside its defining module", name),
+                        format!("Use the module's public API to create '{}' values", name),
+                        format!("constructor {}()", name),
+                    ).with_code("E008"));
+                }
+            }
+            if arg_tys.len() != 1 {
+                self.emit(super::err(
+                    format!("{}() takes exactly 1 argument but got {}", name, arg_tys.len()),
+                    "Opaque type constructor wraps a single value",
+                    format!("constructor {}()", name),
+                ).with_code("E004"));
+            } else {
+                self.constrain(target_ty, arg_tys[0].clone(), format!("constructor {}()", name));
+            }
+            Ty::Named(sym(name), vec![])
+        } else {
+            // #488: nothing claimed this TypeName call — not a variant
+            // ctor, not an opaque alias, and the record paths were
+            // intercepted before infer_call. Letting it through here is
+            // how unvalidated constructions reached rustc/wasm; make
+            // the unknown name a checker error instead.
+            self.emit(super::err(
+                format!("unknown type or constructor '{}' in call position", name),
+                format!("No type, variant constructor, or opaque alias named '{}' is in scope. Check the spelling or add the missing import.", name),
+                format!("call to {}()", name),
+            ).with_code("E003"));
+            Ty::Named(sym(name), vec![])
         }
     }
 
