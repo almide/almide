@@ -72,6 +72,19 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
   routing arm を `interp_{list,option,result}_to_string` に抽出（pure table
   fn、状態なし）。検証: certs 3 本 byte 一致 + フルゲート。
 
+## 残り 8 本の分解性分類（2026-07-16 精査）
+
+- **text-move 可（レシピ適用可能）**: `main`（classify_corpus 199 — example、
+  cert 出力生成側なので出力 byte 比較で証明）、`check_named_call_with_type_args`
+  (137) / `check_call_with_type_args` (129)（frontend — resolved_name /
+  qualified_via_direct が節を跨ぐため粗い境界選定が必要、証明は full suite）
+- **State struct 化が必要（text-move 不可）**: `verify_ownership` (140、
+  object_of/rc/dead/borrowed/branches/violations が match を貫通)、
+  `ownership_certificate` (123、同族)、`try_lower_variant_value_match` (121、
+  then/else slot + consumed 集合 + heap_res フラグ群が 5 フェーズを貫通)
+  — 各々 `OwnershipState` / `VariantMatchPlan` 的な struct に束ねてから
+  フェーズをメソッド化する設計作業。cert byte 比較が安全網になるのは同じ。
+
 ## 残り: cog>100 関数（分解対象、ワースト順）
 
 | fn | cog | cyc | file |
