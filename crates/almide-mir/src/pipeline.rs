@@ -193,6 +193,129 @@ fn source_to_ir(source: &str) -> Result<almide_ir::IrProgram, LowerError> {
 /// Render a `.almd` **source** program to a COMPLETE wasm module (WAT text) via the v1 MIR renderer.
 ///
 /// `self_modules` are the caller-resolved `import self.<submodule>` siblings (empty ⇒ single file).
+/// Promote a NO-`main` test file's `test` fns to ordinary effect fns and synthesize the
+/// runner `main` (v0 `__test_runner` protocol). See [`try_render_wasm_source_tests`].
+fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), LowerError> {
+    use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind};
+    use almide_lang::intern::sym;
+    use almide_lang::types::Ty;
+    if ir.functions.iter().any(|f| !f.is_test && f.name.as_str() == "main") {
+        // main-mode: both legs run main only (v0's `__main_runner` protocol); the
+        // test fns stay `is_test` and the render loop skips them as before.
+        return Ok(());
+    }
+    if ir.functions.iter().all(|f| !f.is_test) {
+        return Err(LowerError::Unsupported(
+            "test mode: no `main` and no test blocks — nothing to run".into(),
+        ));
+    }
+    // v0's `__test_runner` re-initializes module globals before EVERY test (native
+    // thread-isolation parity). The v1 `_start` runs `__global_init`/`__mg_init` ONCE —
+    // equivalent only when there is no top-let state to leak between tests.
+    if !ir.top_lets.is_empty() || ir.modules.iter().any(|m| !m.top_lets.is_empty()) {
+        return Err(LowerError::Unsupported(
+            "test mode: top-let globals need per-test re-init (the v0 runner's isolation \
+             semantics) not in this brick"
+                .into(),
+        ));
+    }
+    let unit_expr =
+        || IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
+    let println_stmt = |text: String| IrStmt {
+        kind: IrStmtKind::Expr {
+            expr: IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Named { name: sym("println") },
+                    args: vec![IrExpr {
+                        kind: IrExprKind::LitStr { value: text },
+                        ty: Ty::String,
+                        span: None,
+                        def_id: None,
+                    }],
+                    type_args: Vec::new(),
+                },
+                ty: Ty::Unit,
+                span: None,
+                def_id: None,
+            },
+        },
+        span: None,
+    };
+    let mut stmts: Vec<IrStmt> = Vec::new();
+    let mut idx = 0usize;
+    for f in ir.functions.iter_mut() {
+        if !f.is_test {
+            continue;
+        }
+        let display = f
+            .name
+            .as_str()
+            .strip_prefix(almide_ir::TEST_NAME_PREFIX)
+            .unwrap_or(f.name.as_str())
+            .to_string();
+        // Raw test names carry spaces/parens/unicode no WAT identifier admits — rename
+        // to a mechanical id and drop `is_test` so the render loop lowers it like any
+        // other effect fn (nothing else references a test fn by name).
+        let mangled = format!("__almd_test_{idx}");
+        idx += 1;
+        f.name = sym(&mangled);
+        f.is_test = false;
+        stmts.push(println_stmt(format!("test: {display} ... ")));
+        // The stmt-position effect call, in the SAME shape the frontend gives user
+        // code: `Try { call }` with the LIFTED `Result[Unit, String]` call type — the
+        // never-err strips / can-err propagation then classify it exactly like any
+        // other caller (the C-135 def/callsite agreement).
+        let call = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Named { name: sym(&mangled) },
+                args: Vec::new(),
+                type_args: Vec::new(),
+            },
+            ty: Ty::result(Ty::Unit, Ty::String),
+            span: None,
+            def_id: None,
+        };
+        stmts.push(IrStmt {
+            kind: IrStmtKind::Expr {
+                expr: IrExpr {
+                    kind: IrExprKind::Try { expr: Box::new(call) },
+                    ty: Ty::Unit,
+                    span: None,
+                    def_id: None,
+                },
+            },
+            span: None,
+        });
+        stmts.push(println_stmt("ok".to_string()));
+    }
+    let body = IrExpr {
+        kind: IrExprKind::Block { stmts, expr: Some(Box::new(unit_expr())) },
+        ty: Ty::Unit,
+        span: None,
+        def_id: None,
+    };
+    ir.functions.push(almide_ir::IrFunction {
+        name: sym("main"),
+        params: vec![],
+        ret_ty: Ty::Unit,
+        body,
+        is_effect: true,
+        is_async: false,
+        is_test: false,
+        generics: None,
+        extern_attrs: vec![],
+        export_attrs: vec![],
+        attrs: vec![],
+        visibility: almide_ir::IrVisibility::Public,
+        doc: None,
+        blank_lines_before: 0,
+        def_id: None,
+        mutated_params: vec![],
+        module_origin: None,
+    });
+    Ok(())
+}
+
 /// `verbose` gates the honest per-function "outside the lowering subset" diagnostics to stderr.
 ///
 /// Returns `Ok(wat)` when the WHOLE program lowers (every function in-subset, `main` present, no
@@ -202,6 +325,32 @@ pub fn try_render_wasm_source(
     source: &str,
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     verbose: bool,
+) -> Result<String, LowerError> {
+    try_render_wasm_source_impl(source, self_modules, verbose, false)
+}
+
+/// TEST-mode variant for the `almide test` wasm harness: when the file has NO `main`,
+/// its `test "…"` fns are promoted to ordinary effect fns (renamed `__almd_test_<i>` —
+/// the raw names carry spaces/unicode no WAT identifier admits) and a runner `main` is
+/// synthesized with v0's `__test_runner` protocol (`test: <name> ... ` / `ok` per test,
+/// assert failure = controlled halt with a non-zero exit). A file WITH `main` renders
+/// exactly like [`try_render_wasm_source`] — both legs run main only, the v0 protocol.
+/// Programs with top-let globals WALL in test mode (v0 re-inits globals before EVERY
+/// test; the v1 `_start` inits once — shipping that silently would leak one test's
+/// mutations into the next).
+pub fn try_render_wasm_source_tests(
+    source: &str,
+    self_modules: &[(String, almide_lang::ast::Program, bool)],
+    verbose: bool,
+) -> Result<String, LowerError> {
+    try_render_wasm_source_impl(source, self_modules, verbose, true)
+}
+
+fn try_render_wasm_source_impl(
+    source: &str,
+    self_modules: &[(String, almide_lang::ast::Program, bool)],
+    verbose: bool,
+    test_mode: bool,
 ) -> Result<String, LowerError> {
     // STRICT VALUE MODE: this is an OUTPUT path — a deferred Const-0 must never be executable
     // (flight-evidence-gaps F2, the prim.handle literal address-0 class).
@@ -310,11 +459,14 @@ pub fn try_render_wasm_source(
     } else {
         ""
     };
-    let ir = if drops.trim().is_empty() {
+    let mut ir = if drops.trim().is_empty() {
         ir
     } else {
         source_to_ir_with(&format!("{source}\n{value_core_src}\n{drops}"), self_modules)?
     };
+    if test_mode {
+        synthesize_test_runner_main(&mut ir)?;
+    }
 
     // Top-level `let` globals (VarId -> Ty) + their INITIALIZER exprs, union of program + modules.
     let mut globals: HashMap<almide_ir::VarId, almide_lang::types::Ty> = HashMap::new();

@@ -224,6 +224,14 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
     };
     if prof { marks.push(("resolve", std::time::Instant::now())); }
 
+    // v1 verified leg (the DEFAULT build/run wasm path since 0.29.0): capture the FRESH
+    // (un-inferred) cross-module siblings now — the infer loop below mutates them in
+    // place, and the v1 pipeline re-runs its own canonicalize/infer/lower from raw
+    // programs (exactly `compile_to_wasm_bytes`'s capture). Tried after the v0 gates
+    // below; a wall falls through to the v0 emit — same honest-wall contract as build.
+    let v1_self_modules: Vec<(String, almide_lang::ast::Program, bool)> =
+        resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect();
+
     let canon = canonicalize::canonicalize_program(
         &program,
         resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
@@ -283,15 +291,71 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
     if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(&ir_program) {
         return skip(format!("matrix.{op} is native-only — no WASM lowering"));
     }
-    let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::Wasm) {
-            almide::codegen::CodegenOutput::Binary(b) => b,
-            almide::codegen::CodegenOutput::Source(_) => unreachable!(),
+    // v1 verified leg FIRST (mirrors `compile_to_wasm_bytes`): byte-identical to v0
+    // where it lowers, honest wall (fall through to the v0 emit) otherwise. This is
+    // what `almide build`/`run --target wasm` already default to; without it the test
+    // harness exercised ONLY the v0 emitter — a main+tests file whose shapes v1 ships
+    // but v0's closure-env traps on (closure_capturing_fn_wasm) could never pass here.
+    // The `_tests` variant keeps the SAME per-file protocol as v0: a file with `main`
+    // runs main only (`__main_runner`); a test-only file gets a synthesized runner
+    // (`__test_runner`'s `test: <name> ... ` / `ok` lines the pass-counter reads).
+    // `wat` ASSEMBLES without full stack-shape validation, so a structurally invalid v1
+    // module (a def/callsite ABI residue) would only surface at wasmtime load — a FAIL
+    // that routes to the slow native fallback. VALIDATE here instead: invalid → treat
+    // as a wall and fall through to the v0 emit (honest, and the file stays on wasm).
+    let v1_bytes: Option<Vec<u8>> = almide_mir::pipeline::try_render_wasm_source_tests(
+        &source_text,
+        &v1_self_modules,
+        false,
+    )
+    .ok()
+    .and_then(|wat_text| wat::parse_str(&wat_text).ok())
+    .filter(|bytes| wasmparser::validate(bytes).is_ok());
+    let v0_bytes = |ir_program: &mut almide_ir::IrProgram| -> Result<Vec<u8>, ()> {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            match almide::codegen::codegen(ir_program, almide::codegen::pass::Target::Wasm) {
+                almide::codegen::CodegenOutput::Binary(b) => b,
+                almide::codegen::CodegenOutput::Source(_) => unreachable!(),
+            }
+        }))
+        .map_err(|_| ())
+    };
+    // Write the module and run it under wasmtime. `-S inherit-env=y` mirrors
+    // `cmd_run_wasm`: `env.get` in a test observes the same host variables native
+    // does (the env cross-target contract).
+    let run_module = |bytes: &[u8]| -> WasmTestOutcome {
+        if let Err(e) = std::fs::write(&wasm_path, bytes) {
+            return skip(format!("write: {}", e));
         }
-    }));
-    let bytes = match bytes {
-        Ok(b) => b,
-        Err(_) => return skip("WASM codegen panic".to_string()),
+        let output = std::process::Command::new("wasmtime")
+            .arg("--dir=/")
+            .arg("-S")
+            .arg("inherit-env=y")
+            .arg(wasm_path.to_str().unwrap())
+            .output();
+        match output {
+            Ok(result) => {
+                let stdout = String::from_utf8_lossy(&result.stdout);
+                let stderr = String::from_utf8_lossy(&result.stderr);
+                if result.status.success() {
+                    WasmTestOutcome::Pass {
+                        file: test_file.to_string(),
+                        count: stdout.matches("ok\n").count(),
+                        bytes: bytes.len(),
+                    }
+                } else {
+                    let mut last_test = String::new();
+                    for line in stdout.lines() {
+                        if line.starts_with("test: ") { last_test = line.to_string(); }
+                    }
+                    let mut detail = String::new();
+                    if !last_test.is_empty() { detail.push_str(&format!("  trapped at: {}\n", last_test)); }
+                    for line in stderr.lines().take(2) { detail.push_str(&format!("  {}\n", line)); }
+                    WasmTestOutcome::Fail { file: test_file.to_string(), detail }
+                }
+            }
+            Err(e) => skip(format!("wasmtime: {}", e)),
+        }
     };
     if prof {
         marks.push(("codegen", std::time::Instant::now()));
@@ -302,36 +366,20 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         }
         eprintln!("{}", line);
     }
-    if let Err(e) = std::fs::write(&wasm_path, &bytes) {
-        return skip(format!("write: {}", e));
-    }
-
-    // `-S inherit-env=y` mirrors `cmd_run_wasm`: `env.get` in a test observes the
-    // same host variables native does (the env cross-target contract).
-    let output = std::process::Command::new("wasmtime")
-        .arg("--dir=/")
-        .arg("-S")
-        .arg("inherit-env=y")
-        .arg(wasm_path.to_str().unwrap())
-        .output();
-    match output {
-        Ok(result) => {
-            let stdout = String::from_utf8_lossy(&result.stdout);
-            let stderr = String::from_utf8_lossy(&result.stderr);
-            if result.status.success() {
-                WasmTestOutcome::Pass { file: test_file.to_string(), count: stdout.matches("ok\n").count(), bytes: bytes.len() }
-            } else {
-                let mut last_test = String::new();
-                for line in stdout.lines() {
-                    if line.starts_with("test: ") { last_test = line.to_string(); }
-                }
-                let mut detail = String::new();
-                if !last_test.is_empty() { detail.push_str(&format!("  trapped at: {}\n", last_test)); }
-                for line in stderr.lines().take(2) { detail.push_str(&format!("  {}\n", line)); }
-                WasmTestOutcome::Fail { file: test_file.to_string(), detail }
-            }
+    // v1 first; a RUN failure of the v1 module retries on the v0 emit before any
+    // verdict — a v1 runtime defect (a trap where v0 runs — the #790 vein) must
+    // surface as a v1 bug report, not as a false test failure, and the v0 retry
+    // keeps the file on the fast wasm leg instead of the rustc native fallback.
+    // A REAL failing test simply fails twice (rare; the native fallback then
+    // renders the authoritative diagnostics).
+    if let Some(b) = v1_bytes {
+        if let WasmTestOutcome::Pass { file, count, bytes } = run_module(&b) {
+            return WasmTestOutcome::Pass { file, count, bytes };
         }
-        Err(e) => skip(format!("wasmtime: {}", e)),
+    }
+    match v0_bytes(&mut ir_program) {
+        Ok(b) => run_module(&b),
+        Err(()) => skip("WASM codegen panic".to_string()),
     }
 }
 

@@ -980,6 +980,112 @@ fn body_has_tail_position_option_unwrap(body: &IrExpr) -> bool {
     scan(body)
 }
 
+/// Desugar `assert(cond)` / `assert_eq(a, b)` / `assert_ne(a, b)` (Unit-typed builtin
+/// calls — the test-block floor, also legal in a main body) to the §13 controlled-halt
+/// shape the SELF-HOST stdlib already proves out (math.pow's negative-exponent guard):
+/// `if <cond> then () else prim.die(prim.handle("assertion failed…"))`. Everything
+/// downstream is EXISTING machinery — the stmt-position Unit-`if` executes via
+/// `try_lower_unit_if`, `==`/`!=` dispatch through the ordinary BinOp lowering (whatever
+/// operand types that subset admits; the rest walls honestly), and `prim.die` is the
+/// proven Die prim. Failure = message on stderr + exit 1 — the harness keys on the
+/// non-zero exit, exactly like v0's trap. Applied desugar-before-both (same slot as
+/// `desugar_heap_branches`), so every driver counts and lowers the SAME tree.
+fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::intern::sym;
+    fn die_expr(msg: &str) -> IrExpr {
+        let lit = IrExpr {
+            kind: IrExprKind::LitStr { value: msg.to_string() },
+            ty: Ty::String,
+            span: None,
+            def_id: None,
+        };
+        let handle = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Module { module: sym("prim"), func: sym("handle"), def_id: None },
+                args: vec![lit],
+                type_args: Vec::new(),
+            },
+            ty: Ty::Int,
+            span: None,
+            def_id: None,
+        };
+        IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Module { module: sym("prim"), func: sym("die"), def_id: None },
+                args: vec![handle],
+                type_args: Vec::new(),
+            },
+            ty: Ty::Unit,
+            span: None,
+            def_id: None,
+        }
+    }
+    struct S {
+        changed: bool,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            if !matches!(e.ty, Ty::Unit) {
+                return;
+            }
+            let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind
+            else {
+                return;
+            };
+            let (cond, msg) = match (name.as_str(), args.as_slice()) {
+                ("assert", [c]) if matches!(c.ty, Ty::Bool) => {
+                    (c.clone(), "assertion failed: assert(false)")
+                }
+                ("assert_eq", [a, b]) => (
+                    IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: almide_ir::BinOp::Eq,
+                            left: Box::new(a.clone()),
+                            right: Box::new(b.clone()),
+                        },
+                        ty: Ty::Bool,
+                        span: None,
+                        def_id: None,
+                    },
+                    "assertion failed: left == right",
+                ),
+                ("assert_ne", [a, b]) => (
+                    IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: almide_ir::BinOp::Neq,
+                            left: Box::new(a.clone()),
+                            right: Box::new(b.clone()),
+                        },
+                        ty: Ty::Bool,
+                        span: None,
+                        def_id: None,
+                    },
+                    "assertion failed: left != right",
+                ),
+                _ => return,
+            };
+            let unit = IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
+            *e = IrExpr {
+                kind: IrExprKind::If {
+                    cond: Box::new(cond),
+                    then: Box::new(unit),
+                    else_: Box::new(die_expr(msg)),
+                },
+                ty: Ty::Unit,
+                span: e.span.clone(),
+                def_id: e.def_id,
+            };
+            self.changed = true;
+        }
+    }
+    let mut s = S { changed: false };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}
+
 /// The `Result[Unit, E]` this fn's ABI promises when its body's effective TAIL is Unit-typed
 /// (descending Block chains; an absent tail is Unit) — `None` when the tail carries a real
 /// value or the fn is not Result-ABI. Declared `Result[Unit, E]` keeps its own `E`; a
@@ -999,9 +1105,20 @@ fn unit_tail_result_abi_ty(func: &IrFunction, body: &IrExpr) -> Option<Ty> {
         Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(a[0], Ty::Unit) => {
             func.ret_ty.clone()
         }
+        // A LIFTED (declared-Unit effect) fn whose CALLERS keep the Result expectation:
+        // the AUTO_WRAP set, or any CAN-ERR lifted fn (∉ NEVER_ERR — e.g. an argument-
+        // position `!` errs without tripping the stmt/tail AUTO_WRAP heuristics, so the
+        // caller's `Try` is never stripped and it `local.set`s the promised handle).
+        // The def must return that handle: same registry, same verdict, by construction.
+        // `main` keeps the exit-code void convention (its caller is `_start`, not a
+        // registry-classified call site).
         Ty::Unit
-            if crate::lower::AUTO_WRAP_ABI_FNS
-                .with(|s| s.borrow().contains(func.name.as_str())) =>
+            if func.is_effect
+                && func.name.as_str() != "main"
+                && (crate::lower::AUTO_WRAP_ABI_FNS
+                    .with(|s| s.borrow().contains(func.name.as_str()))
+                    || !crate::lower::NEVER_ERR_LIFTED_FNS
+                        .with(|s| s.borrow().contains(func.name.as_str()))) =>
         {
             Ty::result(Ty::Unit, Ty::String)
         }
@@ -1105,6 +1222,16 @@ fn lower_function_all_impl(
         &owned_body
     } else {
         &func.body
+    };
+    // assert/assert_eq/assert_ne → the controlled-halt `if`/die shape (see
+    // `desugar_assert_calls`). Desugar-before-both: every downstream consumer
+    // (counting, TCO, lowering) sees the same tree.
+    let assert_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_assert_calls(func_body) {
+        assert_body = rewritten;
+        &assert_body
+    } else {
+        func_body
     };
     // A RESULT-ABI fn (declared `Result[Unit, E]`, or a declared-Unit AUTO_WRAP lift) whose
     // effective TAIL is Unit-typed produces NO value on the unit path — the never-err strips

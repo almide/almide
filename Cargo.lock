@@ -47,6 +47,7 @@ dependencies = [
  "tempfile",
  "toml",
  "wasm-encoder 0.253.0",
+ "wasmparser 0.253.0",
  "wat",
 ]
 
