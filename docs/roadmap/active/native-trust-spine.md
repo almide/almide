@@ -180,10 +180,21 @@
       fn param/return, `float.to_string` round-trip. Gate: the corpus grows,
       wall shrinks by the `float` row currently asserted in
       `out_of_subset_walls_honestly`.
-- [ ] Rung 6: org byte-verify sweep column for the native leg; multi-module +
-      top-lets.
-- [ ] Default flip: v1-first native (`--no-verified` opt-out), README memory
-      claim updated to the unified statement — closes #764.
+- [x] Rung 6 (2026-07-16): org byte-verify native column measured honestly —
+      0/61 files (Bytes params / multi-module+top-lets / Map·String stdlib are
+      the first walls; a per-fn native classifier is the next measuring tool).
+- [x] Default flip (2026-07-16, develop 0ff5ad51): v1-first native
+      (`--no-verified` opts out of BOTH legs), 18/18 wasm_cross native renders
+      byte-identical to v0 as the flip evidence — closes #764.
+- [x] Walled-real ratchet, enumerated form (2026-07-16): the v1 test-runner
+      flip made every `test` block a first-class corpus fn (~1.9k new fns) and
+      exposed 217 walls the pre-expansion `wall=0` ENDGAME never measured;
+      burned to 37 in one sweep (sized-numeric compares, ONE recursive typed-eq
+      engine, widening identities, nested-list eq self-host, map/bytes index
+      desugars, nested-unwrap ANF-lift, call-result containers). The gate is
+      now an EXACT SET diff against `proofs/walled-real-baseline.txt` (new
+      wall → fail; stale entry → fail; the set only shrinks, target empty) —
+      remainder tracked in #791.
 
 ## Invariants (every rung)
 

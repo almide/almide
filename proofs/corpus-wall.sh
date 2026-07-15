@@ -49,7 +49,9 @@ echo "== sweep the v0 corpus: $CORPUS =="
 OUTDIR="$(mktemp -d)"; REPORT="$(mktemp)"
 cleanup() { rm -rf "$OUTDIR" "$REPORT"; }
 set +e
-(cd "$ROOT" && cargo run -q -p almide-mir --example classify_corpus -- --out "$OUTDIR" "$CORPUS") \
+# WALL_NAMES=1: the enumerated walled-real ratchet below diffs the exact
+# (file :: fn) set against the checked-in baseline, not just a count.
+(cd "$ROOT" && WALL_NAMES=1 cargo run -q -p almide-mir --example classify_corpus -- --out "$OUTDIR" "$CORPUS") \
   2>"$REPORT"
 WALL_RC=$?
 set -e
@@ -69,22 +71,49 @@ if [ ! -s "$OUTDIR/ownership.cert" ]; then
   cleanup; exit 1
 fi
 
-# WALLED-REAL RATCHET (ENDGAME baseline, 2026-07-14): the wall=0 metric reached
-# ZERO — every real corpus function lowers, witnesses, and kernel-ACCEPTs
-# (docs/roadmap: v1-wall-histogram-goal, 112 -> 0). It may never regress: a change
-# that re-walls ANY real corpus function must ship its lowering (or move the
-# fixture out of the corpus with justification) in the SAME change.
+# WALLED-REAL RATCHET (enumerated, ratchet-down). History: the wall=0 ENDGAME
+# was reached 2026-07-14 over the then-measured corpus (112 -> 0, docs/roadmap:
+# v1-wall-histogram-goal). The v1 test-runner flip (2026-07-16) then made every
+# `test` block a first-class corpus function — a METRIC-SURFACE EXPANSION of
+# ~1.9k fns that exposed 217 walls, burned down to the enumerated remainder in
+# proofs/walled-real-baseline.txt (each a named feature-frontier class — see the
+# baseline header). The gate is now an EXACT SET diff, strictly stronger than
+# the old count in one direction and honest in the other:
+#   - a walled fn NOT in the baseline FAILS (no new wall can ever slip in —
+#     ship the lowering in the same change, count-swaps impossible);
+#   - a baseline entry that no longer walls FAILS (prune it — the set may only
+#     SHRINK; the target is the empty file = the ENDGAME wall=0 claim restored).
+# The enumerated ratchet is only meaningful over the canonical full corpus; a
+# subset invocation (corpus-wall.sh <dir>) skips it (totality + PCC still run).
 WALLED_REAL="$(sed -n 's/^.*walled real (lowering)[[:space:]]*: *\([0-9][0-9]*\).*$/\1/p' "$REPORT" | head -1)"
 if [ -z "$WALLED_REAL" ]; then
   echo "WALL GATE FAIL: could not read the walled-real count from the classify report (format drift?)." >&2
   cleanup; exit 1
 fi
-if [ "$WALLED_REAL" -ne 0 ]; then
-  echo "WALLED-REAL RATCHET FAIL: $WALLED_REAL corpus function(s) walled — the ENDGAME baseline is 0." >&2
-  echo "  List them:  WALL_NAMES=1 cargo run -q --release -p almide-mir --example classify_corpus -- --out /tmp/cw spec 2>&1 | grep '^WALLED REAL'" >&2
-  cleanup; exit 1
+BASELINE="$ROOT/proofs/walled-real-baseline.txt"
+if [ "$CORPUS" = "$ROOT/spec" ] || [ "$CORPUS" = "spec" ]; then
+  ACTUAL="$(mktemp)"; EXPECTED="$(mktemp)"
+  grep '^WALLED REAL ' "$REPORT" | sed "s|^WALLED REAL ||; s|^$ROOT/||" \
+    | awk -F' :: ' '{print $1" :: "$2}' | LC_ALL=C sort -u > "$ACTUAL"
+  grep -v '^#' "$BASELINE" | grep -v '^[[:space:]]*$' | LC_ALL=C sort -u > "$EXPECTED"
+  NEW_WALLS="$(LC_ALL=C comm -23 "$ACTUAL" "$EXPECTED")"
+  STALE="$(LC_ALL=C comm -13 "$ACTUAL" "$EXPECTED")"
+  if [ -n "$NEW_WALLS" ]; then
+    echo "WALLED-REAL RATCHET FAIL: function(s) walled that are NOT in proofs/walled-real-baseline.txt —" >&2
+    echo "ship the lowering in the same change (adding entries is a reviewed regression, not a fix):" >&2
+    echo "$NEW_WALLS" | sed 's/^/  + /' >&2
+    rm -f "$ACTUAL" "$EXPECTED"; cleanup; exit 1
+  fi
+  if [ -n "$STALE" ]; then
+    echo "WALLED-REAL RATCHET FAIL: baseline entries that no longer wall — prune them (the set only shrinks):" >&2
+    echo "$STALE" | sed 's/^/  - /' >&2
+    rm -f "$ACTUAL" "$EXPECTED"; cleanup; exit 1
+  fi
+  rm -f "$ACTUAL" "$EXPECTED"
+  echo "WALLED-REAL RATCHET OK: $WALLED_REAL walled fn(s), all enumerated in the baseline (target: 0/empty)."
+else
+  echo "WALLED-REAL RATCHET SKIPPED: subset corpus ($CORPUS) — the enumerated baseline covers the full spec/ only."
 fi
-echo "WALLED-REAL RATCHET OK: 0 walled real corpus functions (the ENDGAME floor holds)."
 
 echo
 echo "== build the kernel-proven checker (from the Coq proof) =="
