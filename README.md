@@ -99,6 +99,12 @@ almide run hello.almd
 
 "Byte-identical" means the *execution output*, not the compiled artifacts — a native binary and a `.wasm` module are different bytes by construction; what must not differ is anything the program lets you observe.
 
+The guarantee is **continuous, with an explicit scope** — held by gates that re-run on every change, not a one-time snapshot:
+
+- **In scope**: everything the program lets you observe — stdout, stderr, exit code — on every program that compiles for both targets.
+- **Inherently nondeterministic sources** are ledger-managed, not waved away: their contracts certify the *deterministic invariant* (e.g. every `random.int(lo, hi)` draw stays in range — C-112) instead of exact bytes, and the sole wall-clock stdlib surface was removed outright (C-006) rather than documented around.
+- **APIs not yet implemented on wasm** are compile- or run-time *refusals*: the program never runs far enough to emit wrong bytes — an honest wall, not a silent divergence.
+
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
@@ -119,12 +125,12 @@ This claim is not prose. Every observable promise is a named contract in the [be
 
 ## Memory Safety — Formally Verified
 
-You write no ownership annotations, no lifetimes, no `free` — memory management is fully automatic, garbage-collector-free, pause-free. The mechanism is per-target today:
+You write no ownership annotations, no lifetimes, no `free` — memory management is decided by [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/)-style ownership inference in the compiler: garbage-collector-free, pause-free. The inference computes where every heap value is introduced, duplicated, and consumed; what differs per target is only the *execution mechanism* for those decisions:
 
-- **WebAssembly** — the compiler inserts [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/) reference counting: precise, compiler-placed RC with no GC. This is the path the Lean proofs below certify.
-- **Native (Rust)** — the compiler emits ownership-idiomatic Rust, inserting borrows and clones for you; every heap value is freed by Rust's own scope-end drops.
+- **WebAssembly** — the decisions execute as reference counting: precise, compiler-placed RC with no GC. This is the path the Lean proofs below certify.
+- **Native (Rust)** — the same decisions are realized by Rust's own ownership machinery: the compiler emits ownership-idiomatic Rust, inserting borrows and clones for you; every heap value is freed by Rust's scope-end drops.
 
-Making Perceus the *single* memory model on both targets — native rendered from the same IR discipline, with the Drop-erasure machine-checked — is tracked in [#764](https://github.com/almide/almide/issues/764).
+Sharing one mechanically-checked Perceus MIR across both renderers — so the decisions are literally the same certified artifact on both legs — is the [native trust-spine ladder](docs/roadmap/active/native-trust-spine.md) ([#764](https://github.com/almide/almide/issues/764)); shared scalar and list ops already render on both targets from the same MIR.
 
 Where Rust gives you *zero-cost* abstraction (paid for in ownership annotations), Almide gives you **zero-annotation** abstraction: you write none, and every heap free is machine-proven — *write none, prove all.*
 

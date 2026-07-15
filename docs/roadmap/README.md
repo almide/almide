@@ -6,7 +6,7 @@
 
 ## Active
 
-65 items
+64 items
 
 | Item | Description |
 |------|-------------|
@@ -16,7 +16,6 @@
 | [Certificate Format v1 — design](active/certificate-format-v1.md) |  |
 | [Certification-Grade Hardening — 認証級への硬化](active/certification-grade.md) | Certification-grade hardening — adopt the mechanisms of DO-178C / ISO 26262 / IEC 61508 (spec, traceability, coverage, tool qualification, dossier) for the machine-written-software trust layer |
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
-| [Claim wording: Perceus phrasing and the byte-identity guarantee scope](active/claim-wording-perceus-byte-identity.md) | Two claim-wording fixes so the public pitch is 100% backed by measurement |
 | [Closure Architecture v2](active/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
 | [Closure cross-target completeness](active/closure-cross-target-completeness.md) |  |
 | [Code Health: Codopsy-Driven File Splits and Function Decomposition](active/code-health-codopsy.md) | Codopsy-driven code health: split 1000+ line files, decompose cog>100 fns |
@@ -115,13 +114,14 @@
 
 ## Done
 
-257 items
+258 items
 
 <details>
-<summary>Show all 257 completed items</summary>
+<summary>Show all 258 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-07-15 | [Claim wording: Perceus phrasing and the byte-identity guarantee scope](done/claim-wording-perceus-byte-identity.md) | Two claim-wording fixes so the public pitch is 100% backed by measurement |
 | 2026-07-14 | [v1 walled-real → 0 (ENDGAME — COMPLETE 2026-07-14, 112 → 0)](done/v1-wall-histogram-goal.md) | ENDGAME COMPLETE - v1 walled-real 112 to 0 (2026-07-14); stage ledger B1-B129 |
 | 2026-07-10 | [GOAL PROMPT — closure env full mode: heap, Float and Fn captures](done/closure-env-heap-captures-goal.md) | GOAL PROMPT — closure env full mode: heap/Float/Fn captures with masked recursive drop |
 | 2026-07-09 | [GOAL PROMPT — cert format brick 6: retire the extraction trust (kernel oracle + verified extraction)](done/cert-format-brick6-goal.md) | GOAL PROMPT — cert format brick 6: retire extraction trust (kernel-as-oracle gate + verified extraction) |
