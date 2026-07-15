@@ -79,6 +79,11 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
   fallback（~110 行、name+arg_tys+self のみ参照のクリーン片）を
   `check_unresolved_named_call` に抽出。検証: full suite（frontend の挙動
   証明は suite）+ corpus-wall。
+- 2026-07-16 `check_call_with_type_args`（cog 129、frontend）→ TypeName
+  ctor-call arm（~88 行、name+arg_tys のみ）を `check_type_name_call` に
+  抽出。検証: full suite + corpus-wall。**#781 は 10/14 — 残 4 は全て
+  State-struct 設計組（verify_ownership / ownership_certificate /
+  try_lower_variant_value_match + 台帳外 1 本の再計測が次アクション）。**
 
 ## 残り 8 本の分解性分類（2026-07-16 精査）
 
@@ -98,7 +103,6 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
 | fn | cog | cyc | file |
 |---|---|---|---|
 | verify_ownership | 140 | 92 | lib.rs |
-| check_call_with_type_args | 129 | 83 | frontend check/calls.rs |
 | ownership_certificate | 123 | 101 | certificate.rs |
 | try_lower_variant_value_match | 121 | 148 | lower/control_p2.rs |
 | try_lower_defunc_tuple_acc_fold | 95 | 103 | lower/defunc_fold.rs |
