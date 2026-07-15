@@ -115,6 +115,15 @@ cog>100 は workspace 全体で **47 本**。内訳とスコープ判定:
    lower_call_target/lower_call(150×2)、try_lower_variant_value_match(129)、
    lower_branch(128) ほか。
 
+- 2026-07-16 `try_lower_variant_value_match`（cog 129）→ SUBJECT フェーズ
+  （~185 行: effect-result/self-host/user-call/member/var の materialize +
+  Option/Result 分類）を `variant_match_subject(subject, ops_mark, lhh_mark)
+  -> Option<(subj, is_option, is_result_str, is_result)>` に抽出。preflight
+  の懸念（rollback closure）は marks 上の非捕捉 closure と判明し、method 内
+  再構築で解決。`heap_or_scalar_bind` closure と lower_arm（&mut self 捕捉）
+  は後半フェーズに残置 — 後半の追加分割は closure のメソッド化が前提。
+  検証: 583 pins + 4 certs byte 一致 + フルゲート。**元の 14 本テーブルは
+  全消化**（残るのはアクティブ系 cog>100=0 への後続リスト）。
 - `try_lower_variant_value_match`（129）の着手前解析（2026-07-16）: 34 top-level
   locals / 537 行 / 5 フェーズ（subject 解決 297-464 → 分類フラグ 465-527 →
   arm slot 収集 528-608 → tag 読み+dispatch 609-657 → arm lowering+merge
