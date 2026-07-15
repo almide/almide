@@ -54,6 +54,11 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // ── Rung 5 records slab: all-scalar records are DynList slot blocks ──
+    ("record_field", "type Point = { x: Int, y: Int }\n\nfn dist2(p: Point) -> Int = p.x * p.x + p.y * p.y\n\nfn main() -> Unit = {\n  let p = Point { x: 3, y: 4 }\n  println(int.to_string(dist2(p)))\n}\n"),
+    ("record_out_of_order", "type Cfg = { a: Int, b: Int, c: Int }\n\nfn main() -> Unit = {\n  let v = Cfg { c: 30, a: 10, b: 20 }\n  println(int.to_string(v.a))\n  println(int.to_string(v.b))\n  println(int.to_string(v.c))\n}\n"),
+    ("record_return", "type Pair = { lo: Int, hi: Int }\n\nfn mk(a: Int, b: Int) -> Pair = if a < b then Pair { lo: a, hi: b } else Pair { lo: b, hi: a }\n\nfn main() -> Unit = {\n  let p = mk(9, 2)\n  println(int.to_string(p.lo))\n  println(int.to_string(p.hi))\n}\n"),
+    ("record_float_field", "type V2 = { x: Float, y: Float }\n\nfn main() -> Unit = {\n  let v = V2 { x: 1.5, y: 2.5 }\n  println(float.to_string(v.x + v.y))\n}\n"),
     // ── Rung 5 Float slab: real f64 on native (MIR carries bits in i64) ──
     ("float_print", "fn main() -> Unit = {\n  println(float.to_string(1.5))\n  println(float.to_string(2.0))\n  println(float.to_string(-0.25))\n}\n"),
     ("float_arith", "fn main() -> Unit = {\n  let x = 1.5\n  let y = x * 2.0 + 0.25\n  let z = y / 4.0 - 0.5\n  println(float.to_string(z))\n}\n"),

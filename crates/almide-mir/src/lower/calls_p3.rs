@@ -451,6 +451,15 @@ impl LowerCtx {
     /// `None` for a non-resolvable container (`f().x`, a non-materialized var) → the caller defers.
     pub(crate) fn resolve_aggregate_container_handle(&mut self, container: &IrExpr) -> Option<ValueId> {
         use crate::PrimKind;
+        let block = self.resolve_aggregate_container_block(container)?;
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![block] });
+        Some(h)
+    }
+
+    /// The container's BLOCK value (pre-`Handle`) — the form the target-neutral
+    /// list/record ops take (`Op::ListGetScalar` resolves its own address).
+    pub(crate) fn resolve_aggregate_container_block(&mut self, container: &IrExpr) -> Option<ValueId> {
         let block = match &container.kind {
             IrExprKind::Var { id } if is_heap_ty(&container.ty) => self.value_or_global(*id).ok()?,
             // A nested aggregate field — borrow its loaded inner-block handle. Gated on the
@@ -470,9 +479,7 @@ impl LowerCtx {
             }
             _ => return None,
         };
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![block] });
-        Some(h)
+        Some(block)
     }
 
     pub(crate) fn lower_scalar_field_access(&mut self, expr: &IrExpr) -> Option<ValueId> {
@@ -500,19 +507,17 @@ impl LowerCtx {
         // Resolve the container to a block handle: a TRACKED heap var (a `try_lower_*_construct`
         // block or a param-bound aggregate), OR a NESTED aggregate field (`o.p` of `o.p.x`) whose
         // borrowed handle points to the inner block. A non-resolvable container (`f().x`) → defer.
-        let h = self.resolve_aggregate_container_handle(container)?;
-        let off = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: off, value: offset as i64 });
-        let addr = self.fresh_value();
-        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+        let block = self.resolve_aggregate_container_block(container)?;
+        // Rung-5 records slab: the aggregate block IS a scalar list, so the slot read
+        // is the TARGET-NEUTRAL `Op::ListGetScalar` with the DECLARATION-order slot
+        // index (byte offset 12 + 8*slot ⇒ slot) — wasm renders the bounds-checked
+        // element load (always in range: len = field count), native `rec[slot]`.
+        // The stored scalar (any width) round-trips losslessly through the i64 slot.
+        let slot = (offset - crate::lower::layout::BLOCK_HEADER) / crate::lower::layout::SLOT_SIZE;
+        let idx = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: idx, value: slot as i64 });
         let dst = self.fresh_value();
-        // Uniform i64 slot — `Load { width: 8 }`. The stored scalar (any width) round-
-        // trips losslessly: a narrow Int8 stored as the full i64 value reads back exact.
-        self.ops.push(Op::Prim {
-            kind: PrimKind::Load { width: 8 },
-            dst: Some(dst),
-            args: vec![addr],
-        });
+        self.ops.push(Op::ListGetScalar { dst, list: block, idx });
         Some(dst)
     }
 

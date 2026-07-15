@@ -386,6 +386,24 @@ fn render_fn(
                 }
                 line!("// drop: scope-end");
             }
+            // A RECORD result's drop routes as the mask-driven `DropListStr` (the
+            // record block IS a list block; the mask lists its heap slots). The
+            // native rung-5 subset admits ALL-SCALAR records only — the mask is
+            // empty, the free is the block itself → scope-end, same as `Drop`.
+            // Anything non-Vec here would carry heap slots → wall.
+            Op::DropListStr { v } => {
+                match tys.get(v) {
+                    Some(NTy::Vec) => line!("// drop(record/list block): scope-end"),
+                    Some(NTy::VecRef) => {
+                        return Err(wall("native: DropListStr of a borrowed param — MIR call-mode violation"))
+                    }
+                    other => {
+                        return Err(wall(format!(
+                            "native: DropListStr of a non-list value ({other:?}) — outside the rung subset"
+                        )))
+                    }
+                }
+            }
             // Pure ownership bookkeeping — no native code.
             Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. } => {}
             Op::SetLocal { local, src } => {
@@ -842,6 +860,7 @@ fn op_name(op: &Op) -> &'static str {
         Op::ConstInt { .. } => "ConstInt",
         Op::Dup { .. } => "Dup",
         Op::Drop { .. } => "Drop",
+        Op::DropListStr { .. } => "DropListStr",
         Op::Consume { .. } => "Consume",
         Op::Borrow { .. } => "Borrow",
         Op::MakeUnique { .. } => "MakeUnique",

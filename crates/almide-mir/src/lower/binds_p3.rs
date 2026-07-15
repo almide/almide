@@ -176,27 +176,25 @@ impl LowerCtx {
             let v = self.lower_scalar_value(expr)?;
             field_vals.push((idx, v));
         }
-        let len = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: len, value: n as i64 });
-        let dst = self.fresh_value();
-        self.ops.push(Op::Alloc {
-            dst,
-            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
-            init: crate::Init::DynList { len },
-        });
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
-        for (idx, v) in field_vals {
-            let off = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(idx) as i64 });
-            let addr = self.fresh_value();
-            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
-            self.ops.push(Op::Prim {
-                kind: PrimKind::Store { width: 8 },
-                dst: None,
-                args: vec![addr, v],
-            });
+        // Rung-5 records slab: the block IS a scalar list (identical [rc][len][cap]
+        // header + i64 slots), so the TARGET-NEUTRAL `Op::ListLit` builds it on both
+        // legs — wasm renders the same alloc+stores as before (cert `i`, unchanged
+        // stream), native renders `vec![…]`. Slots follow DECLARATION order; an
+        // omitted (defaulted) field materializes the zero its slot previously kept.
+        let _ = IntOp::Add; // (kept import shape; the prim sequence is gone)
+        let _ = PrimKind::Handle;
+        let mut slot_vals: Vec<ValueId> = Vec::with_capacity(n);
+        for idx in 0..n {
+            if let Some((_, v)) = field_vals.iter().find(|(i, _)| *i == idx) {
+                slot_vals.push(*v);
+            } else {
+                let z = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: z, value: 0 });
+                slot_vals.push(z);
+            }
         }
+        let dst = self.fresh_value();
+        self.ops.push(Op::ListLit { dst, elems: slot_vals });
         // Built with the uniform slot layout, so a `${record}` Display (and a heap-field
         // borrow, were a later field heap) may read its real slots. A scalar-only record has
         // no heap slots, so this only enables the SAFE field reads — never a garbage deref.

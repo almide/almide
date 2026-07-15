@@ -984,6 +984,11 @@ pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
     let ir = source_to_ir_with(source, &[])?;
+    // Rung-5 records slab: the layout registries the wasm leg threads — without
+    // them a record literal lowers as an Opaque skeleton and every field read
+    // strict-walls (the probe_native trap recorded in the trust-spine ledger).
+    let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
+    let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
     if !ir.modules.is_empty() {
         return Err(LowerError::Unsupported(
             "native: multi-module program — outside rung 1".into(),
@@ -1010,8 +1015,21 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             matches!(t, Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool))
         };
-        let sig_ok =
-            |t: &Ty| matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String) || is_scalar_list(t);
+        // Rung-5 records slab: an ALL-SCALAR record is layout-identical to a
+        // scalar list (the DynList block), so its params/returns ride the same
+        // `&[i64]`/`Vec<i64>` convention on native.
+        let is_scalar_record = |t: &Ty| -> bool {
+            let Ty::Named(n, args) = t else { return false };
+            if !args.is_empty() { return false; }
+            record_layouts
+                .get(n.as_str())
+                .is_some_and(|(_, ftys)| ftys.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft)))
+        };
+        let sig_ok = |t: &Ty| {
+            matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
+                || is_scalar_list(t)
+                || is_scalar_record(t)
+        };
         for p in &func.params {
             if !sig_ok(&p.ty) {
                 return Err(LowerError::Unsupported(format!(
@@ -1028,7 +1046,14 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
         }
         // ALL-OR-NOTHING: any unlowerable fn walls the program (the native rungs
         // have no per-fn fallback — a partial native binary cannot call into v0).
-        let all = crate::lower::lower_function_all(func, &globals).map_err(|e| {
+        let all = crate::lower::lower_function_all_with_globals(
+            func,
+            &globals,
+            &std::collections::HashMap::new(),
+            &record_layouts,
+            &variant_layouts,
+        )
+        .map_err(|e| {
             LowerError::Unsupported(format!("native: fn `{}`: {e:?}", func.name))
         })?;
         functions.extend(all);
@@ -1053,6 +1078,15 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 Ty::String => Some(NativeSigKind::Str),
                 Ty::Applied(TypeConstructorId::List, a)
                     if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
+                {
+                    Some(NativeSigKind::ListI64)
+                }
+                // An all-scalar record travels as its slot block (see sig_ok).
+                Ty::Named(n, args)
+                    if args.is_empty()
+                        && record_layouts
+                            .get(n.as_str())
+                            .is_some_and(|(_, ftys)| ftys.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft))) =>
                 {
                     Some(NativeSigKind::ListI64)
                 }
