@@ -219,10 +219,11 @@ Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.m
 |----------|--------|
 | Compiler | Pure Rust, single binary, 0 ICE |
 | Targets | Rust (native), WASM (direct emit) |
-| Codegen | v3 — Nanopass + TOML templates, fully target-agnostic walker |
+| Verified codegen | The v1 PCC pipeline is the **default** wasm path since 0.29.0 — certificates re-verified on every build (`--no-verified` opts out) |
+| Codegen | v0 Rust: Nanopass + TOML templates; wasm: certified MIR → direct emit |
 | Stdlib | 834 functions across 39 modules |
-| Tests | 240 test files pass (Rust), 232 pass (WASM) |
-| MSR | 23/25 exercises pass (Sonnet 4.6, WASM, max 3 attempts) |
+| Tests | 285 test files pass (271 via WASM, 14 native) + 133-contract cross-target ledger |
+| MSR | 100% (30/30 tasks, Sonnet 4.6) — see the [scorecard](#msr-scorecard) above, measured by [almide-dojo](https://github.com/almide/almide-dojo) |
 | MiniGit Bench | 41/41 tests pass, 100% success rate ([ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench)) |
 | Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — compiler runs as WASM in browser |
