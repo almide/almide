@@ -72,8 +72,30 @@ const KNOWN_STDOUT_FREE_BUILTINS: &[&str] = &[
 /// `lower_eq_typed`): String/Value/List → 1, a scalar → 0, a tuple/record → the SUM over its
 /// fields (recursing). So `(String,Int)` `==` credits 1 (the string.eq), `(Int,Int)` credits 0 —
 /// keeping `mir_calls <= ir_calls` exact for the field-wise compound eq.
-fn count_eq_calls(ty: &almide_lang::types::Ty, registry: &almide_mir::lower::RecordLayouts) -> usize {
+fn count_eq_calls(
+    ty: &almide_lang::types::Ty,
+    registry: &almide_mir::lower::RecordLayouts,
+    variant_layouts: &almide_mir::lower::VariantLayouts,
+) -> usize {
+    count_eq_calls_depth(ty, registry, variant_layouts, 0)
+}
+
+/// The STATIC synthetic-CallFn count `typed_slot_eq` emits for an `==` over `ty` — the
+/// caps-gate credit for the operator node. Mirrors the engine EXACTLY (same recursion,
+/// same MAX_EQ_DEPTH cap: a capped/unsupported shape emits nothing — its eq declines
+/// and rolls back, so crediting 0 keeps `mir_calls <= ir_calls` by construction).
+fn count_eq_calls_depth(
+    ty: &almide_lang::types::Ty,
+    registry: &almide_mir::lower::RecordLayouts,
+    variant_layouts: &almide_mir::lower::VariantLayouts,
+    depth: u32,
+) -> usize {
     use almide_lang::types::{constructor::TypeConstructorId as TC, Ty};
+    // Mirrors `typed_slot_eq`'s MAX_EQ_DEPTH (a recursive variant type would otherwise
+    // recurse forever HERE too).
+    if depth > 8 {
+        return 0;
+    }
     if matches!(ty, Ty::String) || almide_mir::lower::is_value_ty(ty) {
         return 1;
     }
@@ -103,26 +125,55 @@ fn count_eq_calls(ty: &almide_lang::types::Ty, registry: &almide_mir::lower::Rec
             return 1;
         }
     }
+    // A custom VARIANT `==` — the tag-dispatched chain statically emits every fielded
+    // case's per-field eq calls (only ONE case runs, but the caps witness is static).
+    // Mirror `custom_variant_type_name`'s three type spellings.
+    let variant_name: Option<String> = match ty {
+        Ty::Named(n, _) => Some(n.as_str().to_string()),
+        Ty::Variant { name, .. } => Some(name.as_str().to_string()),
+        Ty::Applied(TC::UserDefined(n), _) => Some(n.clone()),
+        _ => None,
+    };
+    if let Some(layout) = variant_name.and_then(|n| variant_layouts.by_type.get(&n)) {
+        return layout
+            .cases
+            .iter()
+            .flat_map(|c| c.fields.iter())
+            .map(|(_, t)| count_eq_calls_depth(t, registry, variant_layouts, depth + 1))
+            .sum();
+    }
     match ty {
-        Ty::Tuple(elems) => elems.iter().map(|t| count_eq_calls(t, registry)).sum(),
-        Ty::Record { fields } => fields.iter().map(|(_, t)| count_eq_calls(t, registry)).sum(),
+        Ty::Tuple(elems) => elems
+            .iter()
+            .map(|t| count_eq_calls_depth(t, registry, variant_layouts, depth + 1))
+            .sum(),
+        Ty::Record { fields } => fields
+            .iter()
+            .map(|(_, t)| count_eq_calls_depth(t, registry, variant_layouts, depth + 1))
+            .sum(),
         Ty::Named(name, _args) => registry
             .get(name.as_str())
-            .map(|(_, decl)| decl.iter().map(|(_, t)| count_eq_calls(t, registry)).sum())
+            .map(|(_, decl)| {
+                decl.iter()
+                    .map(|(_, t)| count_eq_calls_depth(t, registry, variant_layouts, depth + 1))
+                    .sum()
+            })
             .unwrap_or(0),
-        // Option[heap] == lowers to ONE payload-eq CallFn (string.eq/value.eq/list.eq) in the
-        // both-Some branch; Option[scalar] == is branchless prims (0 calls).
+        // Option[heap] == recurses the payload's typed eq in the both-Some branch;
+        // Option[scalar] == is branchless prims (0 calls).
         Ty::Applied(TC::Option, oa) if oa.len() == 1 => {
-            usize::from(count_eq_calls(&oa[0], registry) >= 1)
+            count_eq_calls_depth(&oa[0], registry, variant_layouts, depth + 1)
         }
-        // Result[scalar, String] == lowers to ONE string.eq CallFn (the Err-String compare in the
-        // both-Err branch); the Ok scalar compare is prims.
-        Ty::Applied(TC::Result, ra)
-            if ra.len() == 2
-                && !almide_mir::lower::is_heap_ty(&ra[0])
-                && matches!(ra[1], Ty::String) =>
-        {
-            1
+        // Result[scalar, String] == is the masked core: ONE string.eq (the Err compare).
+        // Every other payload pair is the general core: BOTH gated payload compares are
+        // statically present (ok-eq + err-eq), so credit their sum.
+        Ty::Applied(TC::Result, ra) if ra.len() == 2 => {
+            if !almide_mir::lower::is_heap_ty(&ra[0]) && matches!(ra[1], Ty::String) {
+                1
+            } else {
+                count_eq_calls_depth(&ra[0], registry, variant_layouts, depth + 1)
+                    + count_eq_calls_depth(&ra[1], registry, variant_layouts, depth + 1)
+            }
         }
         _ => 0,
     }
@@ -178,9 +229,10 @@ fn count_ir_calls(
                 ..
             } = &e.kind
             {
-                // String/Value/List → 1 call; a tuple/record → the SUM of its fields' eq calls
-                // (recursing); a scalar → 0. Matches lower_eq_typed's per-field call emission.
-                self.n += count_eq_calls(&left.ty, self.registry);
+                // String/Value/List → 1 call; a tuple/record/variant → the SUM of its
+                // fields' eq calls (recursing); Result general → ok+err; a scalar → 0.
+                // Matches `typed_slot_eq`'s static per-field call emission exactly.
+                self.n += count_eq_calls(&left.ty, self.registry, self.variant_layouts);
             }
             // A String ordering `< <= > >=` lowers to ONE `string.cmp` CallFn (then an Int compare
             // with 0, a prim). Credit the operator node so `mir_calls <= ir_calls` holds. string.cmp

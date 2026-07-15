@@ -389,6 +389,15 @@ pub fn desugar_all(
             cur = r;
             continue;
         }
+        // assert/assert_eq/assert_ne → the controlled-halt `if`/die shape — the SAME
+        // rewrite `lower_function_all_impl` applies before lowering. Without it here the
+        // COUNTED tree kept the bare `assert_eq(a, b)` Call while the lowering emitted the
+        // desugared eq's synthetic calls → a false `mir > ir` caps breach on every test fn
+        // whose assert condition now lowers (desugar-before-both must mean BOTH).
+        if let Some(r) = desugar_assert_calls(&cur) {
+            cur = r;
+            continue;
+        }
         if let Some(r) = desugar_guard(&cur) {
             cur = r;
             continue;

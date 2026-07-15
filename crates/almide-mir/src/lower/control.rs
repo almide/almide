@@ -80,12 +80,45 @@ impl LowerCtx {
                 // the merged Opaque result carries the content.)
                 if crate::lower::expr_contains_call(then) || crate::lower::expr_contains_call(else_)
                 {
-                    return Err(LowerError::Unsupported(
-                        "if over an unresolvable condition with a call-bearing arm cannot \
-                         take the both-arms linearization (it would run the untaken arm's \
-                         effects) not in this brick"
-                            .into(),
-                    ));
+                    // Name WHICH cond shape declined — the burn-down histogram (and any
+                    // user staring at the wall) needs the operator + operand type, not
+                    // just "unresolvable".
+                    fn operand_desc(e: &IrExpr) -> String {
+                        match &e.kind {
+                            IrExprKind::Call { target, .. } => {
+                                let callee = match target {
+                                    almide_ir::CallTarget::Named { name, .. } => {
+                                        name.as_str().to_string()
+                                    }
+                                    almide_ir::CallTarget::Module { module, func, .. } => {
+                                        format!("{}.{}", module.as_str(), func.as_str())
+                                    }
+                                    almide_ir::CallTarget::Method { method, .. } => {
+                                        format!(".{}", method.as_str())
+                                    }
+                                    almide_ir::CallTarget::Computed { .. } => "<computed>".into(),
+                                };
+                                format!("Call[{callee}]")
+                            }
+                            other => kind_name(other).to_string(),
+                        }
+                    }
+                    let cond_desc = match &cond.kind {
+                        IrExprKind::BinOp { op, left, right } => {
+                            format!(
+                                "{op:?} over {:?}; {} vs {}",
+                                left.ty,
+                                operand_desc(left),
+                                operand_desc(right)
+                            )
+                        }
+                        other => format!("{} of {:?}", kind_name(other), cond.ty),
+                    };
+                    return Err(LowerError::Unsupported(format!(
+                        "if over an unresolvable condition ({cond_desc}) with a call-bearing \
+                         arm cannot take the both-arms linearization (it would run the \
+                         untaken arm's effects) not in this brick"
+                    )));
                 }
                 self.record_elided_calls(cond);
                 self.lower_branch_arm(None, then)?;
