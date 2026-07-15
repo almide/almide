@@ -493,7 +493,14 @@ pub fn bridge_cross_module_toplets(
     // INIT would const-fold reads across mutations (read-after-`bump()` returning 0).
     // A `var` reference instead has its collided raw entry REMOVED below, so it is
     // honestly UNBOUND → the reference site walls → `--verified` falls back to v0.
-    let mut by_name: HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool)>> = HashMap::new();
+    // Keyed by (SOURCE MODULE, UPPERCASED NAME): the ref entry's `module_origin`
+    // names which module it points at, so a name defined in TWO modules (view.ROW
+    // and layout.ROW — the ceangal zip class) resolves per-module instead of
+    // dropping as ambiguous. A bare-name fallback map keeps the pre-existing
+    // behavior for refs whose module_origin the frontend left unset.
+    let mut by_name: HashMap<(String, String), Option<(Ty, &almide_ir::IrExpr, bool)>> =
+        HashMap::new();
+    let mut by_bare: HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool)>> = HashMap::new();
     for m in &ir.modules {
         // In-module alias chains (`let white = _white`) leave the alias tl's ty
         // UN-INFERRED — chase to the referent so the bridge carries the REAL
@@ -550,8 +557,12 @@ pub fn bridge_cross_module_toplets(
                 Some((ty.clone(), init, mutable))
             };
             by_name
-                .entry(info.name.as_str().to_uppercase())
+                .entry((m.name.as_str().to_string(), info.name.as_str().to_uppercase()))
                 .and_modify(|e| *e = Option::None) // second definition ⇒ ambiguous, drop
+                .or_insert(entry.clone());
+            by_bare
+                .entry(info.name.as_str().to_uppercase())
+                .and_modify(|e| *e = Option::None) // cross-module name collision ⇒ ambiguous
                 .or_insert(entry);
         }
     }
@@ -566,7 +577,12 @@ pub fn bridge_cross_module_toplets(
         if info.module_origin.is_none() {
             continue;
         }
-        match by_name.get(&info.name.as_str().to_uppercase()) {
+        let looked_up = info
+            .module_origin
+            .as_ref()
+            .and_then(|mo| by_name.get(&(mo.clone(), info.name.as_str().to_uppercase())))
+            .or_else(|| by_bare.get(&info.name.as_str().to_uppercase()));
+        match looked_up {
             // An UNKNOWN-typed reference entry (the frontend leaves an alias-let's
             // synthesized ref un-inferred — `let white = _white` read as `v.white`,
             // the ceangal theme class) takes the MODULE side's type: the name is

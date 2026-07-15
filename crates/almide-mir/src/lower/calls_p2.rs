@@ -85,8 +85,11 @@ impl LowerCtx {
                 if a.len() == 1 && matches!(a[0], Ty::String));
         // A RECORD element (`parent.children + [child]` — the svg `add_child` shape): `__list_concat_rc`
         // rc-incs each record handle (the new list co-owns each), freed recursively by the generated
-        // `$__drop_list_<R>` (each element → `$__drop_<R>`). Gated to a recursive-drop record so that fn exists.
-        let record_elem = self.record_drop_type_name(&elem_ty);
+        // `$__drop_list_<R>` (each element → `$__drop_<R>`). Gated to a recursive-drop record so that fn
+        // exists. An ANONYMOUS structural record element (`items + [{ x: …, content: nm, … }]` — the
+        // ceangal zip_view_rects append; the checker leaves the element structural) routes to its
+        // synthesized `$__drop_list_anonrec_<hash>` wrapper via the same registry.
+        let record_elem = self.record_or_anon_drop_type_name(&elem_ty);
         // A `(String, String)` TUPLE element (the `map.entries` shape) — `__list_concat_rc` rc-owns each
         // tuple, freed recursively by `Op::DropListStrStr` (per tuple: rc_dec BOTH String slots). The
         // (String,String) counterpart of `str_value_elem`.

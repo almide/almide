@@ -392,6 +392,30 @@ native-FFI walls.
   the heap-result-if ARM machinery lowers arm VALUES; the 1792e5d7 dense-
   chain lift must generalize to lift such arm blocks into helper fns.
 
+## Seventh pass — CEANGAL 0 (2026-07-15)
+
+The last two render walls (view_to_node / zip_view_rects) decomposed through
+instrumented bisecting into THREE small gaps, each probe-verified + parity-run:
+
+- **Anon-record concat admission**: `items + [{ x: …, content: nm, … }]` — the
+  checker leaves the 19-field element STRUCTURAL, and the concat's admission
+  used the Named-only `record_drop_type_name`. Widened to
+  `record_or_anon_drop_type_name` (the `$__drop_list_anonrec_<hash>` wrapper
+  generation already existed).
+- **Module-keyed top-let bridge**: `kind: v.ROW` — view.ROW and layout.ROW
+  collide by NAME, and the bridge's ambiguity rule purged both (unbound →
+  the whole loop → arm → tail chain walled). The bridge now keys by
+  (module_origin, NAME) with the bare-name map as fallback — the collision
+  class is gone, not just dodged.
+- (Sixth-pass fixes carried the rest: alias-chase/ty-repair/pure-call subst,
+  rebind list-registration propagation, member-container borrows.)
+
+**ceangal resolved-strict: 0 walls, all 15 src modules.** zip-shape fixture:
+`spec/wasm_cross/zip_view_shape.almd`; 60k-call leak-loop parity green.
+The org frontier is now porta 2 (native-FFI, structurally excluded) + the
+external-package classify artifacts — the lowering side of the org arc is
+DONE pending the porta class decision.
+
 ## Remaining threads
 
 - **wall=0 count 21 → 19 (honesty, not regression)**: the linearization guard
