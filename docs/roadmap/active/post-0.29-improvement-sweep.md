@@ -16,7 +16,8 @@
 - [x] [#757](https://github.com/almide/almide/issues/757) nested variant-tag panic — 根治: #610 box 書き換えの `matches!` guard が非 boxed の inner tag/リテラルを `_` に消していた。guard_shape 再帰で全 refutable 制約を保持。C-070 拡張 + `nested_variant_tag_box.almd`（全量ゲート実行中）
 - [x] [#753](https://github.com/almide/almide/issues/753) debug-profile ANF trap — 現 develop で再現せず（0.29 サイクルの lowering 修正で解消）。両 fixture を debug バイナリで検証しクローズ。debug-only の postcondition 実行は設計どおり（pass.rs に文書化済み）
 - [x] [#783](https://github.com/almide/almide/issues/783) name-pinning 再発 — 根治: repair が `map_children` ベースで ForIn/While body（`Vec<IrStmt>`）内の Bind ty を素通ししていた。canonical `IrMutVisitor` に書き換えて checker と同じ走査族に統一（enumeration drift クラスごと解消）。gate の where_ に位置粒度も追加
-- [ ] [#784](https://github.com/almide/almide/issues/784) 匿名 record フィールドがエイリアス import 定数で Unknown のまま — #783 解消で露出した ceangal の次ブロッカー（pre-existing）
+- [x] [#784](https://github.com/almide/almide/issues/784) 匿名 record フィールドの Unknown — 真因は**無注釈の負リテラル module 定数**のシードが Unknown（`infer_literal_type` に Unary 枝が無い）。修正で ceangal suite がコンパイル通過（残りは #433 系 cell と個別テスト失敗）。回帰: cross_module_let_test に2本追加
+- [ ] [#785](https://github.com/almide/almide/issues/785) 呼び出し初期化の module 定数も Unknown leak — refresh 経路（check_decl の top_lets 再登録）が読者を救えていない。ここが本丸の契約
 
 ## 戦略級（次の大玉）
 

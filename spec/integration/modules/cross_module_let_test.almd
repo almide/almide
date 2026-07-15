@@ -32,3 +32,15 @@ test "cross-module let in expressions" {
   assert(half_pi > 1.57)
   assert(half_pi < 1.58)
 }
+
+test "unannotated negative constant in an anon record field via pipe" {
+  // #784: { left: letlib.MARGIN_AUTO } previously carried left: Unknown.
+  let v = 10.0 |> letlib.box_left({ top: 0.0, left: letlib.MARGIN_AUTO })
+  assert_eq(v, 8.0)
+}
+
+test "unannotated negative constant through a bare let bind" {
+  let k = letlib.MARGIN_AUTO
+  let v = 10.0 |> letlib.box_left({ top: 0.0, left: k })
+  assert_eq(v, 8.0)
+}
