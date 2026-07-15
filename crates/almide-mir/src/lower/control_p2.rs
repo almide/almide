@@ -291,190 +291,11 @@ impl LowerCtx {
             s.live_heap_handles.truncate(lhh_mark);
             None
         };
-        // EFFECT-RESULT SUBJECT (#76): a ctor-`match` over a CAN-ERR EFFECT call returning a Result
-        // — an `@intrinsic`/impure stdlib `Module` effect (`process.kill`/`process.spawn`) or a bare
-        // effect `RuntimeCall`. `lower_call_args` REFUSES such a heap-result effect call in argument
-        // position (it would defer to an empty Opaque), so the match over it walled. Materialize it
-        // HERE as a real OWNED Result handle so the tag-read below executes. HOLE-1: gated on
-        // `effect_unwrap_admitted` (Result whose Ok payload has a real recursive drop — scalar /
-        // String / Value / List[Value] / tuple-Ok); a RECORD-Ok effect result is REFUSED here and
-        // falls through to the ordinary path (which walls), NEVER routed through a leaky flat cert.
-        let used_effect_subj = self.is_effect_result_subject(subject);
-        // Materialize/borrow + track the subject exactly as the statement Match entry does:
-        // an owned ctor temp (`Some(5)`) is dropped at scope end; a tracked Var (`let o =
-        // Some(5)`) is borrowed; a self-host Option/Result-returning call is tracked here.
-        let subj = if used_effect_subj {
-            match self.try_materialize_effect_result_subject(subject) {
-                Some(v) => v,
-                None => return rollback(self),
-            }
-        } else {
-            match self
-            .lower_call_args(std::slice::from_ref(subject))
-            .ok()
-            .and_then(|a| a.into_iter().next())
-        {
-            Some(CallArg::Handle(v)) => v,
-            _ => return rollback(self),
-        }
-        };
-        // A USER-FN `Named` call returning Option/Result is tracked the SAME as a self-host call: every
-        // Option/Result value uses the one DynListStr len-as-tag repr (brick #51), so `match find_colon(t)
-        // { none => …, some(cp) => … }` over `fn find_colon(..) -> Option[Int]` reads the tag @4 + binds the
-        // scalar payload @12 identically. `subj` is the OWNED call result (live, dropped-before for a scalar
-        // payload), and the tracking is per-subject. A HEAP-Ok user Result still self-gates (heap_or_scalar_
-        // bind requires a str-result), so only scalar payloads lower — never a silently-wrong heap move-out.
-        let is_named_call =
-            matches!(&subject.kind, IrExprKind::Call { target: CallTarget::Named { .. }, .. });
-        if is_self_host_option_call(subject)
-            || (is_named_call
-                && crate::lower::is_variant_ty(&subject.ty)
-                && !crate::lower::is_result_ty(&subject.ty))
-        {
-            self.materialized_options.insert(subj);
-            // An `Option[heap]` (`list.first(path): Option[String]` — toml set_nested's
-            // `match list.first(path)`) OWNS its payload: track it as a nested-ownership list so the
-            // Some-payload bind reads the borrowed element handle AND the scope-end drop is the
-            // recursive DropListStr (mirrors control.rs:100 for the statement-match path).
-            if crate::lower::is_heap_elem_list_ty(&subject.ty) {
-                self.heap_elem_lists.insert(subj);
-            }
-        }
-        if is_self_host_result_call(subject)
-            || (is_named_call
-                && crate::lower::is_result_ty(&subject.ty)
-                && !Self::is_heap_ok_result(&subject.ty))
-            // An EFFECT-result subject (process.kill / RuntimeCall) with a SCALAR-Ok / heap-Err
-            // Result is tracked the SAME as a scalar self-host/Named result: len-as-tag @4, Err arm
-            // binds slot-0 String, subject drops via DropListStr (the case-A heap_elem_lists below).
-            || (used_effect_subj && !Self::is_heap_ok_result(&subject.ty))
-        {
-            self.materialized_results.insert(subj);
-            // Camp-4 sub-case 1 — a SCALAR-Ok / HEAP-Err `Result[Int, String]` (char_to_val; the
-            // unwrap-`!`-desugar's `err($x) => err($x)` re-wrap). The len-as-tag read stays @4
-            // (materialized_results, NOT _str), but ALSO track heap_elem_lists so (a) the Err arm's
-            // String payload bind is ADMITTED (heap_or_scalar_bind) and (b) the subject drops via
-            // `DropListStr` — EXACTLY right for this layout: Ok=len0 frees nothing (the int is scalar),
-            // Err=len1 frees slot-0's String. Gated to scalar-Ok + heap-Err so a heap-Ok Result (a
-            // different layout) is untouched. The Err arm move-out auto-`Dup`s in lower_heap_result_arm,
-            // so drop-subject-after frees slot-0 once (no double-free — gate-checked).
-            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) = &subject.ty {
-                if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
-                    self.heap_elem_lists.insert(subj);
-                }
-            }
-        }
-        // A self-host HEAP-Ok Result (`value.as_string`/`value.as_array`/`result.zip` — cap-as-tag
-        // DynListStr) is tracked as a str-result (the match reads tag @16 + binds the @12 payload
-        // handle). The DROP differs by Ok-arm type: a `List[Value]` Ok (`value.as_array`) frees
-        // RECURSIVELY (`value_result_lists` → `DropResultListValue`), else a String Ok frees flat
-        // (`heap_elem_lists` → `DropListStr`). Type-driven so it is sound at every tracking site.
-        // Camp-4 sub-case 2 — a USER heap-Ok `Result[heap, String]` (decode_chunks's
-        // `Result[List[Int], String]`). Its CONSTRUCTION goes through `materialize_result_str`
-        // (cap-as-tag @16, slot-0 @12 = the heap payload), so the MATCH must read cap-tag @16 too —
-        // route it through the SAME str-result tracking (materialized_results_str + the by-type drop
-        // below: List[Value]→value_result_lists, Value→value_result_results, else flat→heap_elem_lists
-        // = DropListStr, exact for a List[Int]/String Ok). WITHOUT this the match read the len-as-tag
-        // @4 over a cap-tag block — a SILENT MISCOMPILE (Ok payload + tag both misread).
-        // *** HOLE-1 (the gate-INVISIBLE leak, now CLOSED by a real recursive drop) *** A record-Ok
-        // subject (`Result[<recursive-drop record>, String]` — resolve_run_caps' `Result[Manifest,
-        // String]`, load_manifest's nested record-Ok) is now ADMITTED: it carries the SAME cap-as-tag
-        // DynListStr repr as every other str-result (slot-0 @12 = the Ok record / Err String, tag @16),
-        // so the match reads tag @16 + binds the @12 payload identically. The ONE thing that made it a
-        // leak — the flat `else => heap_elem_lists` (DropListStr) freeing only the @12 record HANDLE and
-        // LEAKING the record's nested heap fields — is replaced below by routing the subject's scope-end
-        // drop through `variant_drop_handles="resrec:<R>"` → `Op::DropWrapperRec { is_result: true }`:
-        // at the wrapper's last ref it recurses into the @12 record via the generated `$__drop_<R>` (Ok
-        // tag) / `rc_dec`s the @12 Err String, then frees the wrapper — freeing every nested heap field
-        // exactly once (the 6625a5d3 / f75eecae machinery, the SAME `resrec:` the record-Ok CONSTRUCTION
-        // side already uses via `try_lower_result_record_ctor`). Gated on `result_ok_record_drop_fn`
-        // (the record HAS a generated `$__drop_<R>`); a record without one keeps the sound flat path.
-        if is_self_host_result_str_call(subject)
-            || (is_named_call && Self::is_heap_ok_result(&subject.ty))
-            // An EFFECT-result subject with a HEAP-Ok Result (String/Value/List[Value]/tuple-Ok —
-            // `effect_unwrap_admitted` already excluded RECORD-Ok; the by-type dispatch below is exact).
-            || (used_effect_subj && Self::is_heap_ok_result(&subject.ty))
-        {
-            self.materialized_results_str.insert(subj);
-            if let Some(drop_fn) = self.result_ok_record_drop_fn(&subject.ty) {
-                // RECORD-Ok `Result[<record>, String]`: route the subject's scope-end drop through the
-                // recursive `Op::DropWrapperRec` (resrec:) — NOT the flat `heap_elem_lists` DropListStr
-                // that leaks the record's nested heap (HOLE-1). `drop_op_for` checks `variant_drop_handles`
-                // FIRST, so this wins over the `else` below; the Ok/Err arm binds the @12 handle as a
-                // BORROW and the subject drops once AFTER the arms (`str_heap_bind`).
-                self.variant_drop_handles.insert(subj, format!("resrec:{drop_fn}"));
-            } else if crate::lower::is_result_listval_ty(&subject.ty) {
-                self.value_result_lists.insert(subj);
-            } else if crate::lower::is_value_result_ty(&subject.ty) {
-                // `Result[Value, String]` (value.get): the Ok payload is a single dynamic Value —
-                // its drop is the RECURSIVE `Op::DropResultValue` (Ok → `$__drop_value`), distinct
-                // from a String-Ok's flat DropListStr.
-                self.value_result_results.insert(subj);
-            } else if crate::lower::is_str_int_result_ty(&subject.ty) {
-                // `Result[(String, Int), String]` (toml parse_key_part): the Ok payload is a
-                // (String, Int) tuple — its drop is the RECURSIVE `Op::DropResultStrInt` (frees the
-                // tuple's String + tuple block), distinct from a flat DropListStr which would leak
-                // the tuple's String (it would rc_dec the @12 tuple HANDLE only).
-                self.str_int_result_results.insert(subj);
-            } else if crate::lower::is_value_int_result_ty(&subject.ty) {
-                // `Result[(Value, Int), String]` (toml parse_val): the Ok tuple's Value slot is freed
-                // recursively via `Op::DropResultValueInt` (`$__drop_value_tuple`).
-                self.value_int_result_results.insert(subj);
-            } else if crate::lower::is_list_str_int_result_ty(&subject.ty) {
-                // `Result[(List[String], Int), String]` (toml parse_key): the Ok tuple's List slot is
-                // freed recursively via `Op::DropResultListStrInt`.
-                self.list_str_int_result_results.insert(subj);
-            } else if crate::lower::is_list_value_int_result_ty(&subject.ty) {
-                // `Result[(List[Value], Int), String]` (toml collect_array_items): recursive
-                // `Op::DropResultListValueInt` (`$__drop_list_value_tuple`).
-                self.list_value_int_result_results.insert(subj);
-            } else {
-                self.heap_elem_lists.insert(subj);
-            }
-        }
-        // Dispatch on the tracking set. An Option reads len-as-tag (Some=len≠0); a scalar
-        // Result reads len-as-tag INVERSE (Err=len≠0, Ok=len0). The if-skeleton is uniform
-        // (then = tag≠0, else = tag==0): Option → then=Some/else=None; Result → then=Err/else=Ok.
-        // A BORROWED Option[heap] / Result[heap] FIELD subject (`match u.email { some(e) => …,
-        // none => … }` where `email: Option[String]` is a field of the param `u`). `lower_call_args`
-        // borrowed the field's variant handle — a nested-ownership block `u` still OWNS (freed by
-        // `u`'s drop; NOT in `live_heap_handles`, so no owned-subject-drop conflict). Track it so the
-        // tag-read + heap-payload BORROW bind below execute (the some-arm `e` is a second borrow of
-        // the Option's @12 slot; the result String is moved out fresh). Same len-as-tag layout as a
-        // self-host Option/Result value — only the SOURCE (a field borrow, not a call) differs.
-        if matches!(&subject.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) {
-            use almide_lang::types::constructor::TypeConstructorId;
-            match &subject.ty {
-                Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
-                    self.materialized_options.insert(subj);
-                    if is_heap_ty(&a[0]) {
-                        self.heap_elem_lists.insert(subj);
-                    }
-                }
-                Ty::Applied(TypeConstructorId::Result, a)
-                    if a.len() == 2 && !Self::is_heap_ok_result(&subject.ty) =>
-                {
-                    self.materialized_results.insert(subj);
-                    if is_heap_ty(&a[1]) {
-                        self.heap_elem_lists.insert(subj);
-                    }
-                }
-                _ => {}
-            }
-        }
-        let is_option = self.materialized_options.contains(&subj);
-        // A scalar Result reads len-as-tag (@4); a HEAP-Ok `Result[String,String]` (value.as_string,
-        // the cap-as-tag DynListStr) reads the tag at the slot-0 HIGH 32 bits (@16). Both arrange
-        // Err=then(tag≠0)/Ok=else(tag0); only the tag OFFSET differs. A str-result match here is
-        // ADMITTED for WILDCARD/scalar binds (`match value.as_string(v) { ok(_) => …, err(_) => … }`
-        // — is_scalar_type); a heap-payload bind over a str-result (`ok(s: String)`) is the Camp-4
-        // borrowed-slot case → gated out below (heap_or_scalar_bind already requires heap_elem_lists,
-        // and the heap-RESULT branch defers it).
-        let is_result_str = self.materialized_results_str.contains(&subj);
-        let is_result = self.materialized_results.contains(&subj) || is_result_str;
-        if !is_option && !is_result {
-            return rollback(self);
-        }
+        // Decomposed (#781, cog 129 → phases): the SUBJECT resolution + tracking
+        // classification (~185 lines) is a verbatim text move into
+        // `variant_match_subject` — its `None` performs the same mark rollback.
+        let (subj, is_option, is_result_str, is_result) =
+            self.variant_match_subject(subject, ops_mark, lhh_mark)?;
         // Parse the two arms into (then_body, then_bind, else_body, else_bind) where a bind is
         // an optional SCALAR payload var (`Some(x)` / `Ok(x)` / a scalar `Err(c)`). A heap bind
         // (`Err(msg: String)`) is allowed only when the arm body never needs it as an owner —
@@ -731,6 +552,209 @@ impl LowerCtx {
             }
         }
         Some(dst)
+    }
+
+    /// The SUBJECT phase of [`Self::try_lower_variant_value_match`]: materialize/
+    /// borrow + track the match subject (effect-result, self-host call, user call,
+    /// member, tracked var …) and classify its Option/Result repr. Returns `None`
+    /// AFTER rolling back to the given marks (the caller's rollback discipline).
+    /// Verbatim text move (#781).
+    fn variant_match_subject(
+        &mut self,
+        subject: &IrExpr,
+        ops_mark: usize,
+        lhh_mark: usize,
+    ) -> Option<(ValueId, bool, bool, bool)> {
+        let rollback = |s: &mut Self| {
+            s.ops.truncate(ops_mark);
+            s.live_heap_handles.truncate(lhh_mark);
+            None
+        };
+        // EFFECT-RESULT SUBJECT (#76): a ctor-`match` over a CAN-ERR EFFECT call returning a Result
+        // — an `@intrinsic`/impure stdlib `Module` effect (`process.kill`/`process.spawn`) or a bare
+        // effect `RuntimeCall`. `lower_call_args` REFUSES such a heap-result effect call in argument
+        // position (it would defer to an empty Opaque), so the match over it walled. Materialize it
+        // HERE as a real OWNED Result handle so the tag-read below executes. HOLE-1: gated on
+        // `effect_unwrap_admitted` (Result whose Ok payload has a real recursive drop — scalar /
+        // String / Value / List[Value] / tuple-Ok); a RECORD-Ok effect result is REFUSED here and
+        // falls through to the ordinary path (which walls), NEVER routed through a leaky flat cert.
+        let used_effect_subj = self.is_effect_result_subject(subject);
+        // Materialize/borrow + track the subject exactly as the statement Match entry does:
+        // an owned ctor temp (`Some(5)`) is dropped at scope end; a tracked Var (`let o =
+        // Some(5)`) is borrowed; a self-host Option/Result-returning call is tracked here.
+        let subj = if used_effect_subj {
+            match self.try_materialize_effect_result_subject(subject) {
+                Some(v) => v,
+                None => return rollback(self),
+            }
+        } else {
+            match self
+            .lower_call_args(std::slice::from_ref(subject))
+            .ok()
+            .and_then(|a| a.into_iter().next())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => return rollback(self),
+        }
+        };
+        // A USER-FN `Named` call returning Option/Result is tracked the SAME as a self-host call: every
+        // Option/Result value uses the one DynListStr len-as-tag repr (brick #51), so `match find_colon(t)
+        // { none => …, some(cp) => … }` over `fn find_colon(..) -> Option[Int]` reads the tag @4 + binds the
+        // scalar payload @12 identically. `subj` is the OWNED call result (live, dropped-before for a scalar
+        // payload), and the tracking is per-subject. A HEAP-Ok user Result still self-gates (heap_or_scalar_
+        // bind requires a str-result), so only scalar payloads lower — never a silently-wrong heap move-out.
+        let is_named_call =
+            matches!(&subject.kind, IrExprKind::Call { target: CallTarget::Named { .. }, .. });
+        if is_self_host_option_call(subject)
+            || (is_named_call
+                && crate::lower::is_variant_ty(&subject.ty)
+                && !crate::lower::is_result_ty(&subject.ty))
+        {
+            self.materialized_options.insert(subj);
+            // An `Option[heap]` (`list.first(path): Option[String]` — toml set_nested's
+            // `match list.first(path)`) OWNS its payload: track it as a nested-ownership list so the
+            // Some-payload bind reads the borrowed element handle AND the scope-end drop is the
+            // recursive DropListStr (mirrors control.rs:100 for the statement-match path).
+            if crate::lower::is_heap_elem_list_ty(&subject.ty) {
+                self.heap_elem_lists.insert(subj);
+            }
+        }
+        if is_self_host_result_call(subject)
+            || (is_named_call
+                && crate::lower::is_result_ty(&subject.ty)
+                && !Self::is_heap_ok_result(&subject.ty))
+            // An EFFECT-result subject (process.kill / RuntimeCall) with a SCALAR-Ok / heap-Err
+            // Result is tracked the SAME as a scalar self-host/Named result: len-as-tag @4, Err arm
+            // binds slot-0 String, subject drops via DropListStr (the case-A heap_elem_lists below).
+            || (used_effect_subj && !Self::is_heap_ok_result(&subject.ty))
+        {
+            self.materialized_results.insert(subj);
+            // Camp-4 sub-case 1 — a SCALAR-Ok / HEAP-Err `Result[Int, String]` (char_to_val; the
+            // unwrap-`!`-desugar's `err($x) => err($x)` re-wrap). The len-as-tag read stays @4
+            // (materialized_results, NOT _str), but ALSO track heap_elem_lists so (a) the Err arm's
+            // String payload bind is ADMITTED (heap_or_scalar_bind) and (b) the subject drops via
+            // `DropListStr` — EXACTLY right for this layout: Ok=len0 frees nothing (the int is scalar),
+            // Err=len1 frees slot-0's String. Gated to scalar-Ok + heap-Err so a heap-Ok Result (a
+            // different layout) is untouched. The Err arm move-out auto-`Dup`s in lower_heap_result_arm,
+            // so drop-subject-after frees slot-0 once (no double-free — gate-checked).
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) = &subject.ty {
+                if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
+                    self.heap_elem_lists.insert(subj);
+                }
+            }
+        }
+        // A self-host HEAP-Ok Result (`value.as_string`/`value.as_array`/`result.zip` — cap-as-tag
+        // DynListStr) is tracked as a str-result (the match reads tag @16 + binds the @12 payload
+        // handle). The DROP differs by Ok-arm type: a `List[Value]` Ok (`value.as_array`) frees
+        // RECURSIVELY (`value_result_lists` → `DropResultListValue`), else a String Ok frees flat
+        // (`heap_elem_lists` → `DropListStr`). Type-driven so it is sound at every tracking site.
+        // Camp-4 sub-case 2 — a USER heap-Ok `Result[heap, String]` (decode_chunks's
+        // `Result[List[Int], String]`). Its CONSTRUCTION goes through `materialize_result_str`
+        // (cap-as-tag @16, slot-0 @12 = the heap payload), so the MATCH must read cap-tag @16 too —
+        // route it through the SAME str-result tracking (materialized_results_str + the by-type drop
+        // below: List[Value]→value_result_lists, Value→value_result_results, else flat→heap_elem_lists
+        // = DropListStr, exact for a List[Int]/String Ok). WITHOUT this the match read the len-as-tag
+        // @4 over a cap-tag block — a SILENT MISCOMPILE (Ok payload + tag both misread).
+        // *** HOLE-1 (the gate-INVISIBLE leak, now CLOSED by a real recursive drop) *** A record-Ok
+        // subject (`Result[<recursive-drop record>, String]` — resolve_run_caps' `Result[Manifest,
+        // String]`, load_manifest's nested record-Ok) is now ADMITTED: it carries the SAME cap-as-tag
+        // DynListStr repr as every other str-result (slot-0 @12 = the Ok record / Err String, tag @16),
+        // so the match reads tag @16 + binds the @12 payload identically. The ONE thing that made it a
+        // leak — the flat `else => heap_elem_lists` (DropListStr) freeing only the @12 record HANDLE and
+        // LEAKING the record's nested heap fields — is replaced below by routing the subject's scope-end
+        // drop through `variant_drop_handles="resrec:<R>"` → `Op::DropWrapperRec { is_result: true }`:
+        // at the wrapper's last ref it recurses into the @12 record via the generated `$__drop_<R>` (Ok
+        // tag) / `rc_dec`s the @12 Err String, then frees the wrapper — freeing every nested heap field
+        // exactly once (the 6625a5d3 / f75eecae machinery, the SAME `resrec:` the record-Ok CONSTRUCTION
+        // side already uses via `try_lower_result_record_ctor`). Gated on `result_ok_record_drop_fn`
+        // (the record HAS a generated `$__drop_<R>`); a record without one keeps the sound flat path.
+        if is_self_host_result_str_call(subject)
+            || (is_named_call && Self::is_heap_ok_result(&subject.ty))
+            // An EFFECT-result subject with a HEAP-Ok Result (String/Value/List[Value]/tuple-Ok —
+            // `effect_unwrap_admitted` already excluded RECORD-Ok; the by-type dispatch below is exact).
+            || (used_effect_subj && Self::is_heap_ok_result(&subject.ty))
+        {
+            self.materialized_results_str.insert(subj);
+            if let Some(drop_fn) = self.result_ok_record_drop_fn(&subject.ty) {
+                // RECORD-Ok `Result[<record>, String]`: route the subject's scope-end drop through the
+                // recursive `Op::DropWrapperRec` (resrec:) — NOT the flat `heap_elem_lists` DropListStr
+                // that leaks the record's nested heap (HOLE-1). `drop_op_for` checks `variant_drop_handles`
+                // FIRST, so this wins over the `else` below; the Ok/Err arm binds the @12 handle as a
+                // BORROW and the subject drops once AFTER the arms (`str_heap_bind`).
+                self.variant_drop_handles.insert(subj, format!("resrec:{drop_fn}"));
+            } else if crate::lower::is_result_listval_ty(&subject.ty) {
+                self.value_result_lists.insert(subj);
+            } else if crate::lower::is_value_result_ty(&subject.ty) {
+                // `Result[Value, String]` (value.get): the Ok payload is a single dynamic Value —
+                // its drop is the RECURSIVE `Op::DropResultValue` (Ok → `$__drop_value`), distinct
+                // from a String-Ok's flat DropListStr.
+                self.value_result_results.insert(subj);
+            } else if crate::lower::is_str_int_result_ty(&subject.ty) {
+                // `Result[(String, Int), String]` (toml parse_key_part): the Ok payload is a
+                // (String, Int) tuple — its drop is the RECURSIVE `Op::DropResultStrInt` (frees the
+                // tuple's String + tuple block), distinct from a flat DropListStr which would leak
+                // the tuple's String (it would rc_dec the @12 tuple HANDLE only).
+                self.str_int_result_results.insert(subj);
+            } else if crate::lower::is_value_int_result_ty(&subject.ty) {
+                // `Result[(Value, Int), String]` (toml parse_val): the Ok tuple's Value slot is freed
+                // recursively via `Op::DropResultValueInt` (`$__drop_value_tuple`).
+                self.value_int_result_results.insert(subj);
+            } else if crate::lower::is_list_str_int_result_ty(&subject.ty) {
+                // `Result[(List[String], Int), String]` (toml parse_key): the Ok tuple's List slot is
+                // freed recursively via `Op::DropResultListStrInt`.
+                self.list_str_int_result_results.insert(subj);
+            } else if crate::lower::is_list_value_int_result_ty(&subject.ty) {
+                // `Result[(List[Value], Int), String]` (toml collect_array_items): recursive
+                // `Op::DropResultListValueInt` (`$__drop_list_value_tuple`).
+                self.list_value_int_result_results.insert(subj);
+            } else {
+                self.heap_elem_lists.insert(subj);
+            }
+        }
+        // Dispatch on the tracking set. An Option reads len-as-tag (Some=len≠0); a scalar
+        // Result reads len-as-tag INVERSE (Err=len≠0, Ok=len0). The if-skeleton is uniform
+        // (then = tag≠0, else = tag==0): Option → then=Some/else=None; Result → then=Err/else=Ok.
+        // A BORROWED Option[heap] / Result[heap] FIELD subject (`match u.email { some(e) => …,
+        // none => … }` where `email: Option[String]` is a field of the param `u`). `lower_call_args`
+        // borrowed the field's variant handle — a nested-ownership block `u` still OWNS (freed by
+        // `u`'s drop; NOT in `live_heap_handles`, so no owned-subject-drop conflict). Track it so the
+        // tag-read + heap-payload BORROW bind below execute (the some-arm `e` is a second borrow of
+        // the Option's @12 slot; the result String is moved out fresh). Same len-as-tag layout as a
+        // self-host Option/Result value — only the SOURCE (a field borrow, not a call) differs.
+        if matches!(&subject.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) {
+            use almide_lang::types::constructor::TypeConstructorId;
+            match &subject.ty {
+                Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
+                    self.materialized_options.insert(subj);
+                    if is_heap_ty(&a[0]) {
+                        self.heap_elem_lists.insert(subj);
+                    }
+                }
+                Ty::Applied(TypeConstructorId::Result, a)
+                    if a.len() == 2 && !Self::is_heap_ok_result(&subject.ty) =>
+                {
+                    self.materialized_results.insert(subj);
+                    if is_heap_ty(&a[1]) {
+                        self.heap_elem_lists.insert(subj);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let is_option = self.materialized_options.contains(&subj);
+        // A scalar Result reads len-as-tag (@4); a HEAP-Ok `Result[String,String]` (value.as_string,
+        // the cap-as-tag DynListStr) reads the tag at the slot-0 HIGH 32 bits (@16). Both arrange
+        // Err=then(tag≠0)/Ok=else(tag0); only the tag OFFSET differs. A str-result match here is
+        // ADMITTED for WILDCARD/scalar binds (`match value.as_string(v) { ok(_) => …, err(_) => … }`
+        // — is_scalar_type); a heap-payload bind over a str-result (`ok(s: String)`) is the Camp-4
+        // borrowed-slot case → gated out below (heap_or_scalar_bind already requires heap_elem_lists,
+        // and the heap-RESULT branch defers it).
+        let is_result_str = self.materialized_results_str.contains(&subj);
+        let is_result = self.materialized_results.contains(&subj) || is_result_str;
+        if !is_option && !is_result {
+            return rollback(self);
+        }
+        Some((subj, is_option, is_result_str, is_result))
     }
 
     /// If `ty` is a CUSTOM variant (a user ADT) with a registered [`VariantLayout`], return its
