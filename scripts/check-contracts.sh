@@ -29,7 +29,9 @@
 #   (e) a schema violation (bad id / duplicate id / bad status / bad class /
 #       fuzz without n / missing doc file);
 #   (f) a coverage gap (C-001..C-NNN must be contiguous) or the flagged-contract
-#       ratchet ceiling is exceeded.
+#       ratchet ceiling is exceeded;
+#   (g) the README claims block (equivalence-claim numbers + exceptions clause)
+#       is stale relative to the ledger (scripts/gen-claims.sh --check, #766).
 set -uo pipefail
 cd "$(dirname "$0")/.." || { echo "::error::cannot cd to repo root"; exit 2; }
 
@@ -235,10 +237,10 @@ while [ "$i" -le "$maxnum" ]; do
 done
 
 # ── (f) RATCHET: flagged contracts may only shrink ──────────────────────────
-# Current floor: the documented divergences that cannot yet be made equivalent —
-# C-006 (fan.timeout wall clock) and C-033 (aliased-mutable COW). LOWER this in
-# the same PR that converges one; never raise it.
-MAX_FLAGGED=1
+# Current floor: ZERO. C-033 (aliased-mutable COW) converged first; C-006
+# (fan.timeout wall clock) was retired by REMOVING fan.timeout in 0.29.0.
+# Every contract in the ledger is active. LOWER only; never raise.
+MAX_FLAGGED=0
 n_flagged="$(printf '%s\n' "$META" | awk -F'\t' '$3=="flagged-for-revision"' | grep -c . || true)"
 n_active=$((n_contracts - n_flagged))
 if [ "$n_flagged" -gt "$MAX_FLAGGED" ]; then
@@ -307,6 +309,12 @@ if [ -d "$ALS_DIR" ]; then
   [ "$n_orphan" -eq 0 ] && echo "spec-coverage: every normative ALS section is cited by >=1 contract."
 fi
 
+# ── (g) README claims block (#766) ───────────────────────────────────────────
+# The equivalence-claim numbers and the exceptions clause quoted in README.md
+# are DERIVED from this ledger by scripts/gen-claims.sh. A stale or hand-edited
+# block is a public claim drifting from what the gates verify — red.
+bash scripts/gen-claims.sh --check || fail=1
+
 if [ "$fail" -ne 0 ]; then
   echo "::error::contract-ledger gate FAILED — see messages above."
   exit 1
@@ -319,5 +327,6 @@ echo "  fixtures: $n_with_header/$n_fixtures carry a // @contract: header; bidir
 #   (2) remove a `// @contract:` line from a fixture       -> (c) "no header".
 #   (3) downgrade an active contract's only evidence to by-construction -> (b).
 #   (4) typo a class                                       -> (e) bad-class.
-#   (5) flag a 3rd contract                                -> (f) ratchet.
+#   (5) flag any contract                                  -> (f) ratchet.
 #   (6) renumber a contract to leave a gap                 -> (f) coverage.
+#   (7) hand-edit a number inside README's claims markers  -> (g) stale-claims.

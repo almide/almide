@@ -145,6 +145,15 @@ impl LowerCtx {
                     }
                     v
                 }
+                // `node.children[i]` — the list is ITSELF a heap FIELD of a materialized
+                // aggregate (the ceangal layout class): recurse through this same borrow
+                // (gated on materialization at each level; the result is a borrowed real
+                // block in `param_values`, exactly what the `$elem_addr` read needs).
+                IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+                    if is_heap_ty(&object.ty) =>
+                {
+                    self.try_lower_heap_field_borrow(object)?
+                }
                 _ => return None,
             };
             let idx = self.lower_scalar_value(index)?;
@@ -429,17 +438,20 @@ impl LowerCtx {
                 // tail (return its Result directly). This unblocks the `parse_mapping =
                 // collect_map(..)!` shape (a tail call result propagated).
                 IrExprKind::Unwrap { expr } => return self.lower_tail(Some(expr)),
-                // A NON-CAPTURING lambda RETURNED (`fn mk() -> (Int) -> Int = (x) => x + 1`) — LIFT it
-                // to a table slot (`Op::FuncRef`, a scalar i64) and move THAT out as the return. The
-                // caller tracks the bound result as a funcref (binds_p2) so a later `f(args)` dispatches
-                // through it via `Op::CallIndirect`. A CAPTURING lambda has no liftable slot (a real
-                // closure environment is a later brick) → wall cleanly, never an empty deferred value.
+                // A lambda RETURNED (`fn mk() -> (Int) -> Int = (x) => x + 1`, `fn adder(n)
+                // = (x) => x + n`) — LIFT it to a CLOSURE BLOCK (fnidx + captured scalars)
+                // and MOVE the block out as the return (a fresh owned heap value — removed
+                // from the scope-end set; cert `im`). The caller tracks the bound result in
+                // `closure_values` (binds_p2) so a later `f(args)` dispatches through it.
                 IrExprKind::Lambda { params, body, .. } => {
                     return match self.lift_lambda(params, body) {
-                        Some(slot) => Ok(Some(slot)),
+                        Some(blk) => {
+                            self.live_heap_handles.retain(|h| *h != blk);
+                            Ok(Some(blk))
+                        }
                         None => Err(LowerError::Unsupported(
-                            "capturing closure returned cannot be faithfully materialized in this \
-                             brick (a real closure environment is a later brick)"
+                            "lambda outside the liftable subset returned (heap/Float captures \
+                             are a later ratchet) — cannot be faithfully materialized"
                                 .into(),
                         )),
                     };
@@ -566,6 +578,14 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_result_variant_ctor(tail, &tail.ty) {
                         return Ok(Some(dst));
                     }
+                    // `err(Overflow(msg))` RETURNED for `Result[T_scalar, <user variant>]`
+                    // (the structured-error class): the len-as-tag Err wrapper, moved out.
+                    if self.is_scalar_ok_variant_err_result(&tail.ty) {
+                        if let Some(dst) = self.try_lower_result_err_variant_ctor(tail, &tail.ty) {
+                            self.live_heap_handles.retain(|h| *h != dst);
+                            return Ok(Some(dst));
+                        }
+                    }
                     if let Some(dst) = self.try_lower_option_ctor(tail, &tail.ty) {
                         return Ok(Some(dst));
                     }
@@ -633,6 +653,32 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_result_scalar_ok_ctor(tail, &tail.ty) {
                         return Ok(Some(dst));
                     }
+                    // A SPREAD-record (`{ ...n, gap_main: v }` — ceangal's with_* rebuilders) or a
+                    // plain RECORD literal RETURNED as the fn tail: the SAME construct machinery the
+                    // heap-result ARM position already uses (base slots copied via Dup — a borrowed
+                    // param base stays valid; overrides moved in), then MOVED OUT exactly per the arm
+                    // precedent (`Consume` + per-frame temp drops; the caller frees the return by its
+                    // type). A non-materialized base / out-of-subset field returns None → the honest
+                    // Opaque wall below.
+                    if matches!(&tail.kind, IrExprKind::SpreadRecord { .. }) {
+                        let mark = self.live_heap_handles.len();
+                        if let Some(dst) = self.try_lower_spread_record_construct(tail) {
+                            self.ops.push(Op::Consume { v: dst });
+                            self.drop_arm_locals(mark);
+                            return Ok(Some(dst));
+                        }
+                    }
+                    if matches!(&tail.kind, IrExprKind::Record { .. }) {
+                        let mark = self.live_heap_handles.len();
+                        if let Some(dst) = self
+                            .try_lower_record_construct(tail)
+                            .or_else(|| self.try_lower_scalar_record_construct(tail))
+                        {
+                            self.ops.push(Op::Consume { v: dst });
+                            self.drop_arm_locals(mark);
+                            return Ok(Some(dst));
+                        }
+                    }
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);
                     // `alloc_init` faithfully materializes a string literal and a scalar-
@@ -652,6 +698,30 @@ impl LowerCtx {
                     self.ops.push(Op::Alloc { dst, repr, init });
                     self.record_elided_calls(tail);
                     Ok(Some(dst))
+                }
+                // A VARIANT CONSTRUCTOR call returned DIRECTLY (`fn make(x) -> Boxed =
+                // Wrap(x)` — a bare ctor with no enclosing `let`/match; also reached via
+                // `lift_lambda`'s body-lowering for a synthesized `(x) => Wrap(x)` wrapper,
+                // the `list.map(Wrap)` desugar's exact shape). A constructor is NOT a real
+                // top-level wasm function — it has no `Op::FuncRef` target, `try_lower_
+                // variant_ctor` inlines its block construction at each call site — so the
+                // GENERIC Named-call arm below (a plain `Op::CallFn` by name) would reference
+                // a symbol that is NEVER linked (an "unlinked call" render wall). Checked
+                // BEFORE the generic arm. `try_lower_variant_ctor` does not itself track its
+                // result in `live_heap_handles` (the caller decides) — returning it directly
+                // IS the move-out tail position needs, no extra bookkeeping.
+                IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                {
+                    match self.try_lower_variant_ctor(tail) {
+                        Some(dst) => Ok(Some(dst)),
+                        None => Err(LowerError::Unsupported(
+                            "variant constructor returned directly cannot be faithfully \
+                             materialized in this brick (a heap/recursive field outside the \
+                             executable subset)"
+                                .into(),
+                        )),
+                    }
                 }
                 // A function-call result returned directly (`fn f() = g(xs)`): the
                 // callee's heap result is a FRESH OWNED value (its return-mode
@@ -769,14 +839,47 @@ impl LowerCtx {
                             return Ok(Some(dst));
                         }
                     }
-                    if let Some(if_expr) = self.desugar_match_to_if(subject, arms, &tail.ty) {
-                        if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
-                            if let Some(dst) =
-                                self.try_lower_heap_result_if(cond, then, else_, &tail.ty)
-                            {
-                                return Ok(Some(dst));
-                            }
+                    // A len-as-tag RESULT subject with HEAP-result arms — the merge-based
+                    // value match (the Camp-4 `compute` opener; borrowed payload binds, the
+                    // subject temp freed by the scope epilogue after the merge move-out).
+                    if let Some(dst) = self.try_lower_result_match_value(subject, arms, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
+                    // An `Option[<heap>]` subject with HEAP-result arms — the Option twin
+                    // (is_balanced's fold step: `match acc { none => none, some(stack) => … }`).
+                    if let Some(dst) = self.try_lower_option_match_value(subject, arms, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
+                    // A LIST subject (`match xs { [] => .., ys => .. }`) with HEAP-result
+                    // arms — the len-tag twin of the Result opener (a bind-all arm aliases
+                    // the owned subject temp; release parity covers an arm move-out).
+                    if let Some(dst) = self.try_lower_list_match_value(subject, arms, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
+                    // `desugar_match_to_if` wraps its OUTPUT in a `Block` (hoisted `let`s
+                    // preceding the `If`) whenever the subject isn't one of `subject_pure`'s
+                    // freely-substitutable kinds (`Var`/`LitInt`/`LitBool`/`LitFloat` —
+                    // notably missing `LitStr`: a single-use `let s = "hello world"` subject
+                    // gets constant-propagated to a bare `LitStr` upstream, same gap B52
+                    // fixed for the call-argument consumer in `calls_p2.rs`). Unwrap it
+                    // generically here too — lower the hoisted `let`s via `self.lower_stmt`,
+                    // then extract the inner `If` — rather than widening `subject_pure`
+                    // itself (a general fix, not LitStr-specific: ANY subject needing the
+                    // hoist now works in this tail position too).
+                    let lifted = self.desugar_match_to_if(subject, arms, &tail.ty).and_then(|e| {
+                        let (stmts, if_expr) = match e.kind {
+                            IrExprKind::If { .. } => (Vec::new(), e),
+                            IrExprKind::Block { stmts, expr: Some(t) } => (stmts, *t),
+                            _ => return None,
+                        };
+                        let IrExprKind::If { cond, then, else_ } = &if_expr.kind else { return None };
+                        for s in &stmts {
+                            self.lower_stmt(s).ok()?;
                         }
+                        self.try_lower_heap_result_if(cond, then, else_, &tail.ty)
+                    });
+                    if let Some(dst) = lifted {
+                        return Ok(Some(dst));
                     }
                     // Outside the executable heap-result-match subset, the RETURN value would
                     // be one deferred Opaque EMPTY heap object the caller observes = a SILENT
@@ -794,19 +897,14 @@ impl LowerCtx {
                 // This opens higher-order functions RETURNING a heap value (Result/List/String) — the
                 // foundation for a self-hosted `fan.map` / traverse. An UNKNOWN callee stays walled.
                 IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
-                    if self.funcref_value_of(callee).is_some() =>
+                    if self.closure_value_of(callee).is_some() =>
                 {
                     let mark = self.live_heap_handles.len();
-                    let table_idx = self.funcref_value_of(callee).unwrap();
+                    let blk = self.closure_value_of(callee).unwrap();
                     let lowered = self.lower_call_args(args)?;
                     let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;
-                    self.ops.push(Op::CallIndirect {
-                        dst: Some(dst),
-                        table_idx,
-                        args: lowered,
-                        result: Some(repr),
-                    });
+                    self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
                     self.drop_arm_locals(mark);
                     Ok(Some(dst))
                 }

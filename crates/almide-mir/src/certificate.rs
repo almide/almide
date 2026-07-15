@@ -136,6 +136,22 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
             // A function reference DEFINES its scalar slot value; it uses no MIR value
             // (the referenced function name is resolved structurally by the render).
             Op::FuncRef { dst, .. } => defined.push(*dst),
+            // The rung-4 list ops: a literal DEFINES its fresh list and USES the
+            // element values; get/set USE the (borrowed) list handle + operands.
+            Op::ListLit { dst, elems } => {
+                defined.push(*dst);
+                used.extend(elems.iter().copied());
+            }
+            Op::ListGetScalar { dst, list, idx } => {
+                defined.push(*dst);
+                used.push(*list);
+                used.push(*idx);
+            }
+            Op::ListSetScalar { list, idx, val } => {
+                used.push(*list);
+                used.push(*idx);
+                used.push(*val);
+            }
         }
     }
     if let Some(r) = func.ret {
@@ -194,7 +210,14 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         // `env.args`, so a fn using it must declare CliArgs (the same accounting as RandomGet →
         // Entropy). The transitive `reachable_caps` follows the CallFn edge into `env.args`, so a
         // caller inherits this CliArgs and is caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::ArgsGetList, .. } = op {
+        if let Op::Prim { kind: crate::PrimKind::ArgsGetList | crate::PrimKind::ArgsGetListFull, .. } = op {
+            used.push(Capability::CliArgs);
+        }
+        // The `env_get` primitive is the ENVIRON floor op — reached by the self-hosted
+        // `env.get`, so a fn using it must declare the Env profile's CliArgs (argv and
+        // environ are the same process-initial-state class; the profile map already
+        // binds `"Env" => CliArgs`). Transitive exactly like ArgsGetList.
+        if let Op::Prim { kind: crate::PrimKind::EnvGet, .. } = op {
             used.push(Capability::CliArgs);
         }
         // The `read_text_file` primitive is the FS-READ floor op — reached by the self-hosted
@@ -218,6 +241,13 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         // `reachable_caps` follows the CallFn edge into `fs.exists`, so a caller inherits this
         // FsRead and is caps-verified against its declared bound.
         if let Op::Prim { kind: crate::PrimKind::PathExists, .. } = op {
+            used.push(Capability::FsRead);
+        }
+        // The `path_filestat` primitive is the FULL-stat FS-READ floor op — reached by the
+        // self-hosted `fs.stat`. A stat IS a filesystem read, so it REUSES Capability::FsRead
+        // (the SAME accounting as PathExists); counted transitively through the CallFn edge
+        // into `fs.stat`, so a caller is caps-verified against its declared bound.
+        if let Op::Prim { kind: crate::PrimKind::PathFilestat, .. } = op {
             used.push(Capability::FsRead);
         }
         // The `write_text_file` primitive is the FS-WRITE floor op — reached by the self-hosted
@@ -981,7 +1011,11 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
 
     for op in &func.ops {
         match op {
-            Op::Alloc { dst, .. } => {
+            // A rung-4 scalar-list LITERAL is alloc-class — the IDENTICAL `i` (and
+            // loop-slot feeder routing) the `Alloc{DynList}` it replaced emitted.
+            // The element load/store ops are ownership-NEUTRAL (a borrowed handle
+            // read/write), so they need no event arm — the catch-all below skips them.
+            Op::Alloc { dst, .. } | Op::ListLit { dst, .. } => {
                 // An Alloc that FEEDS a loop-carried slot routes its `i` into the slot
                 // stream (folded inside the loop delimiters); otherwise its own stream.
                 if let Some(&slot) = feeder_to_slot.get(dst) {
@@ -1211,6 +1245,14 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             // this the heap result would be an unbacked object the cert never opens — the
             // verify_ownership/cert agreement breaks for the env.args body.
             Op::Prim { kind: PrimKind::ArgsGetList, dst: Some(d), .. } => {
+                s.of.insert(*d, *d);
+                s.event(*d, 'i');
+            }
+            // `env_get` ALLOCATES a fresh owned `Option[String]` (a 0/1-slot block owning
+            // the value String when some) — a +1, like `Alloc`. Its name arg is BORROWED
+            // (no cert event). Balanced by the caller's scope-end `DropListStr` (`d`) or
+            // a heap-return move-out (`m`) — the exact ArgsGetList discipline.
+            Op::Prim { kind: PrimKind::EnvGet, dst: Some(d), .. } => {
                 s.of.insert(*d, *d);
                 s.event(*d, 'i');
             }
@@ -1491,32 +1533,61 @@ mod tests {
     // Otherwise the PCC chain certifies the wrong thing. We pin it over many
     // random WELL-FORMED ownership sequences.
 
-    /// Re-run the proven checker's decision in Rust (mirrors the Coq `check_all`):
-    /// every line's i/d stream must never dec-below-zero and must end at 0.
+    /// Re-run the proven checker's decision in Rust (mirrors the Coq `check_bc`):
+    /// every line's stream must never dec-below-zero and must end at 0, with the
+    /// format-v4 branch rule — `{then|else}` arms both execute from the current
+    /// count, must not fault, and must AGREE on the leaving count.
     fn cert_all_balanced(cert: &str) -> bool {
-        cert.lines().all(|line| {
-            let mut rc: i64 = 0;
-            for c in line.chars() {
+        // The flat fold (format v1 alphabet + the 5b `b` guard); None = fault.
+        fn fold(seg: &str, mut rc: i64) -> Option<i64> {
+            for c in seg.chars() {
                 match c {
-                    // format v1: i/a = +1 (fresh/alias), d/m = −1 (release/move-out).
+                    // i/a = +1 (fresh/alias), d/m = −1 (release/move-out).
                     'i' | 'a' => rc += 1,
                     'd' | 'm' => {
                         if rc == 0 {
-                            return false; // double-free / use-after-move
+                            return None; // double-free / use-after-move
                         }
                         rc -= 1;
                     }
-                    // format v4 (brick 5b): b = +0 live use — faults on a dead object
-                    // (use-after-free), exactly the Coq `Borrow` guard.
+                    // b = +0 live use — faults on a dead object (use-after-free),
+                    // exactly the Coq `Borrow` guard.
                     'b' => {
                         if rc == 0 {
-                            return false;
+                            return None;
                         }
                     }
                     _ => {}
                 }
             }
-            rc == 0 // leak iff != 0
+            Some(rc)
+        }
+        cert.lines().all(|line| {
+            let mut rc: i64 = 0;
+            let mut rest = line;
+            while let Some(open) = rest.find('{') {
+                rc = match fold(&rest[..open], rc) {
+                    Some(r) => r,
+                    None => return false,
+                };
+                let close = match rest[open..].find('}') {
+                    Some(c) => open + c,
+                    None => return false, // unterminated branch — malformed
+                };
+                let (t, e) = match rest[open + 1..close].split_once('|') {
+                    Some(p) => p,
+                    None => return false,
+                };
+                match (fold(t, rc), fold(e, rc)) {
+                    (Some(rt), Some(re)) if rt == re => rc = rt, // arms AGREE
+                    _ => return false, // an arm faults or the arms disagree
+                }
+                rest = &rest[close + 1..];
+            }
+            match fold(rest, rc) {
+                Some(r) => r == 0, // leak iff != 0
+                None => false,
+            }
         })
     }
 
@@ -1526,9 +1597,14 @@ mod tests {
         *state
     }
 
-    /// Build a random WELL-FORMED ownership op sequence (only dup/drop LIVE
-    /// handles). Leftover-undropped handles make it a leak; dropping all makes it
-    /// balanced — so the corpus spans accept and reject.
+    /// Build a random ownership op sequence over LIVE handles, now including
+    /// BRANCH regions (format v4): agreeing arms (both alias the same object —
+    /// grouped `{a|a}`, net +1), per-arm self-balancing arms (flat flush), and
+    /// occasionally DISAGREEING arms (`{a|}` — both the grouped cert and
+    /// verify_ownership's branch join must reject). Leftover-undropped handles
+    /// make it a leak — so the corpus spans accept and reject across the flat,
+    /// borrow and branch machinery, and the test pins that the cert verdict
+    /// EQUALS verify_ownership's on every seed.
     fn gen_wellformed(seed: u64) -> MirFunction {
         let mut st = seed.wrapping_add(1);
         let mut live: Vec<ValueId> = Vec::new();
@@ -1536,7 +1612,7 @@ mod tests {
         let mut ops: Vec<Op> = Vec::new();
         let steps = 3 + (next_rand(&mut st) % 9) as usize;
         for _ in 0..steps {
-            let choice = next_rand(&mut st) % 4;
+            let choice = next_rand(&mut st) % 6;
             match choice {
                 0 => {
                     // Alloc a fresh object.
@@ -1559,10 +1635,41 @@ mod tests {
                     let v = live.remove(i);
                     ops.push(Op::Drop { v });
                 }
-                _ if !live.is_empty() => {
-                    // Borrow (no refcount change — must be skipped by the cert).
+                3 if !live.is_empty() => {
+                    // Borrow (a `b` event on the owned stream — liveness-guarded).
                     let v = live[(next_rand(&mut st) as usize) % live.len()];
                     ops.push(Op::Borrow { v });
+                }
+                4 if !live.is_empty() => {
+                    // An AGREEING branch: each arm acquires one alias of the same
+                    // live object (net +1 both ways — the heap-result-branch
+                    // class, grouped `{a|a}`). The runtime holds ONE new alias
+                    // whichever arm ran; hand `y` to the pool (`z` is the other
+                    // path's handle — same object, never used again).
+                    let x = live[(next_rand(&mut st) as usize) % live.len()];
+                    let (c, y, z) = (ValueId(next), ValueId(next + 1), ValueId(next + 2));
+                    next += 3;
+                    ops.push(Op::Const { dst: c });
+                    ops.push(Op::IfThen { cond: c, dst: None });
+                    ops.push(Op::Dup { dst: y, src: x });
+                    ops.push(Op::Else { val: None });
+                    ops.push(Op::Dup { dst: z, src: x });
+                    ops.push(Op::EndIf { val: None });
+                    live.push(y);
+                }
+                5 if !live.is_empty() && next_rand(&mut st) % 3 == 0 => {
+                    // A DISAGREEING branch (one arm aliases, the other does not —
+                    // a path-dependent count): the grouped cert `{a|}` and the
+                    // branch join must BOTH reject, and both are sticky, so the
+                    // verdicts stay equal however generation continues.
+                    let x = live[(next_rand(&mut st) as usize) % live.len()];
+                    let (c, y) = (ValueId(next), ValueId(next + 1));
+                    next += 2;
+                    ops.push(Op::Const { dst: c });
+                    ops.push(Op::IfThen { cond: c, dst: None });
+                    ops.push(Op::Dup { dst: y, src: x });
+                    ops.push(Op::Else { val: None });
+                    ops.push(Op::EndIf { val: None });
                 }
                 _ => {}
             }

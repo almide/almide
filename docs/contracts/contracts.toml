@@ -131,13 +131,14 @@ evidence  = [
 [[contract]]
 id        = "C-006"
 spec      = "ALS-R3"
-title     = "fan.timeout is the SOLE documented wall-clock divergence (wasm warns)"
-statement = "`fan.timeout` is the single documented cross-target divergence (N=1): a wall-clock effect with no portable meaning. Native uses a real thread + `recv_timeout`; wasm has no clock/scheduler/threads, so the thunk runs to completion and the timeout never elapses. The CLI MUST emit a build-time warning when emitting wasm for a program using `fan.timeout`, so the divergence is loud, not silent. It deliberately has NO spec/wasm_cross fixture — it is the exemption, not an equivalence promise."
-since     = "0.24.0"
-status    = "flagged-for-revision"
-doc       = "C-006-fan-timeout-divergence.md"
+title     = "fan.timeout does not exist — wall-clock deadlines live at the host boundary"
+statement = "`fan.timeout` was removed in 0.29.0: a wall-clock timeout has no portable cross-target meaning (wasm has no clock, scheduler, or threads), and it was the sole stdlib surface whose result was not a function of the program + its inputs — the deadline firing depended on machine load, even native-to-native. Referencing it is a check-time tombstone error (E027) with a host-boundary migration hint, identical on both targets since type check precedes the target split. This retired the ledger's LAST flagged-for-revision entry — the equivalence claim carries no exceptions clause."
+since     = "0.29.0"
+status    = "active"
+doc       = "C-006-fan-timeout-removed.md"
 evidence  = [
-  { path = "crates/almide-codegen/src/lib.rs", name = "program_uses_fan_timeout", class = "by-construction" },
+  { path = "tests/diagnostics/e027-fan-timeout-removed/broken.almd", class = "fixture" },
+  { path = "tests/diagnostic_harness_test.rs", name = "broken_files_produce_expected_diagnostics", class = "fixture" },
 ]
 
 # ── EAGER ABORTABLE TOP-LETS (Cluster-H) ─────────────────────────────
@@ -483,6 +484,7 @@ doc       = "C-033-cow-truth-table.md"
 evidence  = [
   { path = "spec/wasm_cross/alias_cow.almd", class = "fixture" },
   { path = "spec/lang/alias_cow_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/module_var_alias_cow.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
@@ -1542,6 +1544,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_passthrough_share.almd", class = "fixture" },
+  { path = "spec/wasm_cross/zip_view_shape.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1667,4 +1670,15 @@ since     = "0.28.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mut_heap_param.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-133"
+spec      = "ALS-R5"
+title     = "env.get observes the host environment identically on native and wasm"
+statement = "`env.get(name)` returns some(value) for a variable present in the host process environment and none for an absent one, with the SAME value bytes on native (std::env::var) and wasm (WASI environ_get; the runner passes the host environment through `wasmtime -S inherit-env=y`). Previously the wasm emitter had NO dispatch for env.get at all — it ICE'd (a panic, not a wall) on every program that called it, and even with a dispatch the guest saw an EMPTY environment because the runner never forwarded it."
+since     = "0.29.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/env_get.almd", class = "fixture" },
 ]

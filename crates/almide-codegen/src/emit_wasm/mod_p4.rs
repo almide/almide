@@ -395,12 +395,17 @@ fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_
     let void_type = emitter.register_type(vec![], vec![]);
     let mut f = TrackedFunction::new([]);
 
-    // Initialize globals if needed
-    if let Some(init_idx) = init_globals {
-        f.instruction(&wasm_encoder::Instruction::Call(init_idx));
-    }
-
     for (func_idx, test_name) in tests {
+        // Re-initialize module globals before EVERY test: the native harness
+        // stores module `var`s in `thread_local!`s and libtest runs each test
+        // on its own thread, so each native test sees PRISTINE module state.
+        // A single shared init here would leak one test's global mutations
+        // into the next — an isolation (and order-sensitivity) divergence
+        // from native (module_var_index_test's cross-test corruption class).
+        if let Some(init_idx) = init_globals {
+            f.instruction(&wasm_encoder::Instruction::Call(init_idx));
+        }
+
         // Print test name
         let name_str = emitter.intern_string(&format!("test: {} ... ", test_name));
         f.instruction(&wasm_encoder::Instruction::I32Const(name_str as i32));

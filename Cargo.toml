@@ -5,7 +5,7 @@ exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare"
 
 [package]
 name = "almide"
-version = "0.28.6"
+version = "0.29.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -30,9 +30,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = "1"
 toml = "1.1"
-wasm-encoder = "0.252"
+wasm-encoder = "0.253"
 lasso = { version = "0.7", features = ["multi-threaded"] }
-lsp-server = "0.7"
+lsp-server = "0.9"
 lsp-types = "0.97"
 
 # Cross-platform advisory file lock (flock / LockFileEx) for the shared build

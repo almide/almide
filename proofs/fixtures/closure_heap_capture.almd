@@ -1,0 +1,12 @@
+// A REAL heap-capture closure through the actual frontend: `greeter("Hi")`
+// co-owns the captured String in its closure block (the capture is a Dup +
+// move-in — cert `a` + `m` on the caller's object, the block itself `im`), and
+// the dispatch passes TWO heap args (env + the String argument) whose modes the
+// proven per-site agreement re-verifies against the lifted lambda's signature.
+fn greeter(name: String) -> (String) -> String = (x) => name + x
+
+fn main() -> Int = {
+  let hi = greeter("Hi ")
+  let s = hi("there")
+  string.len(s)
+}

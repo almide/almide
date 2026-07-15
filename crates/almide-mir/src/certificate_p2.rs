@@ -489,7 +489,11 @@
             let cert = ownership_certificate(f);
             let i = cert.chars().filter(|c| *c == 'i').count();
             let a = cert.chars().filter(|c| *c == 'a').count();
-            let allocs = f.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
+            let allocs = f
+                .ops
+                .iter()
+                .filter(|o| matches!(o, Op::Alloc { .. } | Op::ListLit { .. }))
+                .count();
             let heap_results = f
                 .ops
                 .iter()

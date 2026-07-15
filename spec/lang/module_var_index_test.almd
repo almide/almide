@@ -1,0 +1,49 @@
+// Mutable module-level `var` INDEX-ASSIGN (the ceangal scroll state class):
+// writes through the global slot must be visible to every function, and a
+// call-bearing initializer (`list.repeat`) must run at startup.
+
+var speeds: List[Float] = list.repeat(0.0, 4)
+var marks: List[Int] = [1, 2, 3]
+
+fn set_speed(i: Int, v: Float) -> Unit = {
+  speeds[i] = v
+}
+
+fn get_speed(i: Int) -> Float = speeds[i]
+
+test "module var list.repeat init" {
+  assert(get_speed(0) == 0.0)
+  assert(get_speed(3) == 0.0)
+}
+
+test "module var index-assign through fn" {
+  set_speed(1, 2.5)
+  set_speed(3, 7.25)
+  assert(get_speed(1) == 2.5)
+  assert(get_speed(3) == 7.25)
+  assert(get_speed(0) == 0.0)
+}
+
+test "module var index-assign direct" {
+  marks[0] = 42
+  assert(marks[0] == 42)
+  assert(marks[2] == 3)
+}
+
+var region_count = 0
+
+fn create_region(v: Float) -> Int = {
+  let id = region_count
+  region_count = region_count + 1
+  speeds[id] = v
+  id
+}
+
+test "let-bind of a mutable global read" {
+  let a = create_region(4.5)
+  let b = create_region(6.5)
+  assert(a == 0)
+  assert(b == 1)
+  assert(region_count == 2)
+  assert(speeds[1] == 6.5)
+}

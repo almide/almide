@@ -1,0 +1,25 @@
+// wasm:skip — v0's WASM target traps on a closure CAPTURING another closure (the
+// compose shape): a pre-existing v0 emit_wasm closure-env gap, exposed 2026-07-10
+// when the v1 trust spine shipped Fn captures. This fixture verifies against v0
+// NATIVE; the v1 wasm path is pinned by the render test
+// (`heap_and_fn_captures_execute_and_free_via_drop_closure`) and the
+// closure_heap_capture.almd gate rows.
+// Locks in Fn CAPTURES (closure env full mode, part 2): `compose(f, g)` returns a
+// closure whose block co-owns TWO other closure blocks; the uniform generated
+// `$__drop_closure` frees them by SELF-RECURSION.
+
+fn adder(n: Int) -> (Int) -> Int = (x) => x + n
+
+fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int = (x) => g(f(x))
+
+effect fn main() -> Unit = {
+  let h = compose(adder(3), adder(100))
+  println(int.to_string(h(5)))
+  println(int.to_string(h(1)))
+}
+
+test "closures capturing closures compose" {
+  let h = compose(adder(3), adder(100))
+  assert_eq(h(5), 108)
+  assert_eq(h(1), 104)
+}

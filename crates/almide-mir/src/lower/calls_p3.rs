@@ -14,19 +14,83 @@ impl LowerCtx {
     /// caps fold are preserved: a real `CallFn` replaces the elided marker 1:1 (same
     /// callee NAME, so `reachable_caps` is unchanged; same op count, so the
     /// `mir_calls <= ir_calls` gate cannot falsely de-taint).
-    /// If `callee` names a local bound to a LIFTED lambda (an `Op::FuncRef` value recorded
-    /// in `funcref_values`), return that value — the table slot a `CallIndirect` dispatches
-    /// through. Returns `None` for any other computed callee (a dynamic closure param, an
-    /// unanalyzable value), so the caller keeps the sound deferred model for those.
-    pub(crate) fn funcref_value_of(&self, callee: &IrExpr) -> Option<ValueId> {
+    /// If `callee` names a local bound to a CLOSURE BLOCK (a lifted lambda, a
+    /// function-typed param, or a function-valued call result — recorded in
+    /// `closure_values`), return that block value — what a `CallIndirect` dispatches
+    /// through. Returns `None` for any other computed callee (an unanalyzable value),
+    /// so the caller keeps the sound deferred model for those.
+    pub(crate) fn closure_value_of(&self, callee: &IrExpr) -> Option<ValueId> {
         if let IrExprKind::Var { id } = &callee.kind {
             if let Some(v) = self.value_of.get(id) {
-                if self.funcref_values.contains(v) {
+                if self.closure_values.contains(v) {
                     return Some(*v);
                 }
             }
         }
         None
+    }
+
+    /// The MUTABLE widening of [`Self::closure_value_of`]: additionally loads a
+    /// RECORD-SLOT closure (`(h.run)(...)` — the record_fn_field class, B8's
+    /// `Computed(Member)` desugar) as a BORROW of the slot handle. The record keeps
+    /// ownership (its generated `__drop_<R>` frees the block via `__drop_closure`);
+    /// the borrow joins `param_values` (never dropped here) + `closure_values` (the
+    /// dispatch tracking). Emits the LoadHandle, so `&mut self`.
+    /// PURE guard twin of [`Self::closure_block_of_mut`]'s Member arm — usable in
+    /// match-arm guards (no emission): is the callee a Fn-typed record-slot Member?
+    pub(crate) fn is_fn_member_callee(callee: &IrExpr) -> bool {
+        matches!(&callee.kind, IrExprKind::Member { .. })
+            && matches!(callee.ty, almide_lang::types::Ty::Fn { .. })
+    }
+
+    pub(crate) fn closure_block_of_mut(&mut self, callee: &IrExpr) -> Option<ValueId> {
+        if let Some(v) = self.closure_value_of(callee) {
+            return Some(v);
+        }
+        if let IrExprKind::Member { object, field } = &callee.kind {
+            if matches!(callee.ty, almide_lang::types::Ty::Fn { .. }) {
+                let offset = self.aggregate_field_offset_any(&object.ty, field.as_str())?;
+                let h = self.resolve_aggregate_container_handle(object)?;
+                let p = self.load_at_offset(h, offset as i64, crate::PrimKind::LoadHandle);
+                self.param_values.insert(p);
+                self.closure_values.insert(p);
+                return Some(p);
+            }
+        }
+        None
+    }
+
+    /// Load a closure block's table index (slot 0) — the scalar a `call_indirect`
+    /// wraps to its i32 table offset. A Prim read through the block handle: no
+    /// ownership event (the block is live — the caller holds it).
+    pub(crate) fn emit_closure_fnidx(&mut self, blk: ValueId) -> ValueId {
+        use crate::{IntOp, PrimKind};
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![blk] });
+        let off = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(0) as i64 });
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+        let idx = self.fresh_value();
+        self.ops
+            .push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(idx), args: vec![addr] });
+        idx
+    }
+
+    /// Emit a `CallIndirect` THROUGH a closure block: fnidx from slot 0, the block
+    /// itself as the leading BORROWED env argument (the lifted lambda's prologue
+    /// reads its captures back out of it), then the user args.
+    pub(crate) fn emit_closure_call(
+        &mut self,
+        blk: ValueId,
+        dst: Option<ValueId>,
+        user_args: Vec<CallArg>,
+        result: Option<crate::Repr>,
+    ) {
+        let table_idx = self.emit_closure_fnidx(blk);
+        let mut args = vec![CallArg::Handle(blk)];
+        args.extend(user_args);
+        self.ops.push(Op::CallIndirect { dst, table_idx, args, result });
     }
 
     pub(crate) fn try_lower_scalar_call(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
@@ -56,17 +120,12 @@ impl LowerCtx {
                     self.ops.truncate(ops_mark);
                     self.live_heap_handles.truncate(lhh_mark);
                 }
-                let table_idx = self.funcref_value_of(callee)?;
+                let blk = self.closure_value_of(callee)?;
                 let repr = repr_of(ty).ok()?;
                 match self.lower_call_args(args) {
                     Ok(lowered) => {
                         let dst = self.fresh_value();
-                        self.ops.push(Op::CallIndirect {
-                            dst: Some(dst),
-                            table_idx,
-                            args: lowered,
-                            result: Some(repr),
-                        });
+                        self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
                         Some(dst)
                     }
                     Err(_) => {
@@ -402,6 +461,13 @@ impl LowerCtx {
             {
                 self.try_lower_heap_field_borrow(container)?
             }
+            // A list-ELEMENT aggregate (`line.items[ii].idx` — the chained scalar read off
+            // an indexed record): borrow the element block via the same bounds-checked
+            // `$elem_addr` LoadHandle the for-in element borrow uses (gated on a tracked/
+            // field-borrowable list container at each level).
+            IrExprKind::IndexAccess { .. } if is_heap_ty(&container.ty) => {
+                self.try_lower_heap_field_borrow(container)?
+            }
             _ => return None,
         };
         let h = self.fresh_value();
@@ -485,16 +551,24 @@ impl LowerCtx {
                 }
                 v
             }
+            // `line.items[ii]` — the scalar-element list is ITSELF a heap field/element
+            // of a materialized aggregate (the ceangal resolve_line_flex class): borrow
+            // the list block through the same gated field-borrow chain the heap-element
+            // read uses (materialization checked at every level).
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+            | IrExprKind::IndexAccess { .. }
+                if is_heap_ty(&object.ty) =>
+            {
+                self.try_lower_heap_field_borrow(object)?
+            }
             _ => return None,
         };
         let idx = self.lower_scalar_value(index)?;
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list] });
-        // $elem_addr(list, idx) — bounds-checked i64 slot address (traps OOB).
-        let addr = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::ElemAddr, dst: Some(addr), args: vec![h, idx] });
+        // ONE target-neutral bounds-checked element load (rung 4): the wasm render
+        // expands to the exact `$elem_addr_chk` + `i64.load` the inline
+        // Handle/ElemAddr/Load sequence produced; the native leg maps to `v[i]`.
         let dst = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(dst), args: vec![addr] });
+        self.ops.push(Op::ListGetScalar { dst, list, idx });
         Some(dst)
     }
 

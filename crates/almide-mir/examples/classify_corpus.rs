@@ -310,14 +310,18 @@ fn count_ir_calls(
                     // option.liststr_unwrap_or CALL (pure value_core helpers, no Stdout) — count +1 so
                     // mir == ir, mirroring the Option[Value] case.
                     || almide_mir::lower::is_option_listvalue_ty(&expr.ty)
-                    || almide_mir::lower::is_option_liststr_ty(&expr.ty);
-                // value/list-Ok Result + Option[Value] Vars route (the handle Var-case admits them);
-                // a str-str Var keeps its original path, so only a DIRECT str-result CALL lowers there.
-                // An Option[Value] operand is a self-host option CALL (list.get) or a Var.
+                    || almide_mir::lower::is_option_liststr_ty(&expr.ty)
+                    // An Option[List[<scalar>]] `??` (`map.get(groups, k) ?? []` — B19's
+                    // group_by class) routes to ONE synthetic option.listint_unwrap_or CALL —
+                    // count +1 so mir == ir (the missing credit was the B19-ship breach the
+                    // corpus gate caught: mir 2 > ir 1 on every listint `??` site).
+                    || almide_mir::lower::is_option_listscalar_ty(&expr.ty);
+                // value/list-Ok Result + Option[Value] Vars route (the handle Var-case admits
+                // them) — INCLUDING a str-str Var, which now routes to `result.str_unwrap_or`
+                // (the materialized_results_str Var-gate admission). An Option[Value] operand
+                // is a self-host option CALL (list.get) or a Var.
                 let value_operand_lowers = match &expr.kind {
-                    almide_ir::IrExprKind::Var { .. } => {
-                        !almide_mir::lower::is_result_str_str_ty(&expr.ty)
-                    }
+                    almide_ir::IrExprKind::Var { .. } => true,
                     almide_ir::IrExprKind::Call {
                         target: almide_ir::CallTarget::Module { module, func, .. },
                         ..
@@ -327,7 +331,8 @@ fn count_ir_calls(
                             func.as_str(),
                         ) || ((almide_mir::lower::is_option_value_ty(&expr.ty)
                             || almide_mir::lower::is_option_listvalue_ty(&expr.ty)
-                            || almide_mir::lower::is_option_liststr_ty(&expr.ty))
+                            || almide_mir::lower::is_option_liststr_ty(&expr.ty)
+                            || almide_mir::lower::is_option_listscalar_ty(&expr.ty))
                             && almide_mir::lower::is_self_host_option_module_fn(
                                 module.as_str(),
                                 func.as_str(),
@@ -388,7 +393,13 @@ fn plus_one_events_backed(mir: &MirFunction) -> bool {
     let cert = ownership_certificate(mir);
     let i = cert.chars().filter(|c| *c == 'i').count();
     let a = cert.chars().filter(|c| *c == 'a').count();
-    let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
+    // A rung-4 `ListLit` is alloc-class (the `Alloc{DynList}` it replaced) — it
+    // backs its `i` exactly like an Alloc.
+    let allocs = mir
+        .ops
+        .iter()
+        .filter(|o| matches!(o, Op::Alloc { .. } | Op::ListLit { .. }))
+        .count();
     let heap_results = mir
         .ops
         .iter()
@@ -544,10 +555,12 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
             nodes.push((user_module_fn_name(m.name.as_str(), f.name.as_str()), f));
         }
     }
-    // Root-(a): an `@extern` decl whose target is `rust`/`rs` (NOT `wasm`/`ts` — those lower to a
-    // WASI/browser import via `extern_wasm_target` and never wall; this exclusion is the precedent).
+    // Root-(a): an `@extern` decl whose target is `rust`/`rs`/`c` (NOT `wasm`/`ts` — those lower
+    // to a WASI/browser import via `extern_wasm_target` and never wall; this exclusion is the
+    // precedent). `c` is a C-library link (`@extern(c, "m", "sqrt")` — extern_c_test, whose header
+    // says "wasm:skip — @extern(c) not available in WASM"): structurally native, same as rust/rs.
     let is_native_extern = |f: &almide_ir::IrFunction| {
-        f.extern_attrs.iter().any(|a| matches!(a.target.as_str(), "rust" | "rs"))
+        f.extern_attrs.iter().any(|a| matches!(a.target.as_str(), "rust" | "rs" | "c"))
     };
     // Per-body collector: forward `Named` call edges + whether the body DIRECTLY calls an
     // enumerated permanently-no-wasm stdlib effect (root-(b)). A remaining `CallTarget::Module`
@@ -569,11 +582,37 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                     CallTarget::Named { name } => self.edges.push(name.as_str().to_string()),
                     CallTarget::Module { module, func, .. } => {
                         let (m, fname) = (module.as_str(), func.as_str());
-                        // net.* (any func) / process.exec|exit|run / http.request — the tight,
-                        // enumerated no-wasm set. process.args is EXCLUDED (WASI args_get exists).
+                        // net.* (any func) / the no-wasm process fns / http.request / zlib.* —
+                        // the tight, enumerated no-wasm set. process.args is EXCLUDED (WASI
+                        // args_get exists AND v0's emit_wasm implements it — calls_process.rs
+                        // handles exactly exit/stdin_lines/args). spawn/kill/is_alive/
+                        // exec_status/env have NO v0 wasm form (the fixture headers declare
+                        // them native-only: "wasm:skip — process.env/spawn/kill are
+                        // native-only" / "process.exec_status is native-only"), and WASI
+                        // preview1 has no child-process API — structural, not a v1 gap.
+                        // zlib has NO v0 wasm runtime at all ("wasm:skip — OS/native-only").
+                        // http.serve is a TCP LISTENER ("wasm:skip — http.serve is native-only",
+                        // effect_intrinsic_tail_test) — the same no-wasm class as net.*.
+                        // random is deliberately NOT here: v0's emit_wasm implements it over
+                        // WASI random_get (calls_random.rs) — a REAL v1 gap.
+                        // testing.assert_throws needs `std::panic::catch_unwind` (runtime/rs/src/
+                        // testing.rs) — WASM's `unreachable` trap is NOT catchable (no unwind
+                        // mechanism in the WASI MVP ABI v0 targets). v0's OWN emit_wasm has no
+                        // wasm form either (calls_p2.rs's `assert_throws` arm is native-only) —
+                        // the fixture header says so verbatim ("wasm:skip — WASM cannot catch
+                        // panics"), matching CHANGELOG.md and wasm_dispatch_coverage_test.rs's
+                        // independent documentation of the same limitation. Structural, not a v1
+                        // lowering gap — the E3/E4/E5 native-root precedent.
                         if m == "net"
-                            || (m == "process" && matches!(fname, "exec" | "exit" | "run"))
-                            || (m == "http" && fname == "request")
+                            || m == "zlib"
+                            || (m == "process"
+                                && matches!(
+                                    fname,
+                                    "exec" | "exit" | "run" | "spawn" | "kill" | "is_alive"
+                                        | "exec_status" | "env"
+                                ))
+                            || (m == "http" && matches!(fname, "request" | "serve"))
+                            || (m == "testing" && fname == "assert_throws")
                         {
                             self.native_call = true;
                         }
@@ -746,6 +785,10 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         optimize::optimize_program(&mut ir);
         mono::monomorphize(&mut ir);
         ir_link::ir_link(&mut ir);
+        // Transparent-newtype erasure LAST (post-link, pre-lowering) — the SAME pass the
+        // pipeline runs, so the caps mir == ir count sees the erased tree on both sides.
+        almide_mir::lower::erase_transparent_newtypes(&mut ir);
+        almide_mir::lower::inline_pure_call_globals(&mut ir);
         Ok(ir)
     }));
     match result {
@@ -1029,12 +1072,34 @@ fn main() {
             globals.insert(tl.var, tl.ty.clone());
             global_inits.insert(tl.var, tl.value.clone());
         }
-        for m in &ir.modules {
-            for tl in &m.top_lets {
-                globals.insert(tl.var, tl.ty.clone());
-                global_inits.insert(tl.var, tl.value.clone());
-            }
+        // MAIN-REGION precedence (this loop lowers the MAIN program's fns only): the raw
+        // module union above stays as the FALLBACK (a shared-allocator id matches it — the
+        // init_order shapes), the cross-module NAME bridge OVERRIDES a colliding module-raw
+        // key (the byvalue shapes), and main's own top-lets (re-inserted last) win where the
+        // name bridge would misfire — composition order: module union → bridge → main.
+        almide_mir::lower::bridge_cross_module_toplets(&ir, &mut globals, &mut global_inits);
+        for tl in &ir.top_lets {
+            globals.insert(tl.var, tl.ty.clone());
+            global_inits.insert(tl.var, tl.value.clone());
         }
+        // MUTABLE module-level `var`s route through their storage slots — publish the
+        // VarId → (slot, Ty) map exactly as the render pipeline does (declaration order
+        // = VarId order), so the gate classifies with the same slot lowering the real
+        // emit performs (and the same walls for shapes beyond the slot subset).
+        let mut mutable_tls: Vec<_> = ir
+            .top_lets
+            .iter()
+            .chain(ir.modules.iter().flat_map(|m| m.top_lets.iter()))
+            .filter(|tl| tl.mutable)
+            .collect();
+        mutable_tls.sort_by_key(|tl| tl.var.0);
+        almide_mir::lower::set_mutable_global_vars(
+            mutable_tls
+                .iter()
+                .enumerate()
+                .map(|(i, tl)| (tl.var.0, (i as u32, tl.ty.clone())))
+                .collect(),
+        );
         // The functions DEFINED in this file (their names). A PROTOCOL METHOD is a
         // user-defined function whose name is dotted (`Type.method`, e.g. `MathExpr.eval`)
         // — it resolves to ITSELF / a sibling method, NOT a stdlib call. The unlinkable-
@@ -1056,6 +1121,7 @@ fn main() {
             let m_vl = almide_mir::lower::build_variant_layouts(&m.type_decls);
             variant_layouts.by_type.extend(m_vl.by_type);
             variant_layouts.ctor_to_type.extend(m_vl.ctor_to_type);
+            variant_layouts.ctor_field_defaults.extend(m_vl.ctor_field_defaults);
         }
         // PROGRAM pre-pass: inline mutual-recursive tail siblings → direct self-recursion (exposed to
         // the append-accumulator TCO). Guarded: only where it makes a walled fn lower (no regression).
@@ -1096,7 +1162,12 @@ fn main() {
                     // BOTH the MIR and this counted IR — `mir == ir` by construction. A subset
                     // (only guard + heap-branches) missed `desugar_tuple_unwrap_or`, so a
                     // `let r = opt.unwrap_or((tuple)); f(r.0)` mir>ir-breached.
-                    let eff_body = almide_mir::lower::desugar_all(&func.body);
+                    let eff_body = almide_mir::lower::desugar_all(
+                        &func.body,
+                        func.name.as_str() == "main",
+                        &variant_layouts,
+                        &record_layouts,
+                    );
                     // INTERP COVERAGE (a): this function LOWERED, so its FULLY-LINKABLE
                     // interps (Lit/String/Int/Bool parts) fold to a registered __str_concat /
                     // int.to_string / bool.to_string chain (proven byte-match v0 by the
@@ -1138,7 +1209,7 @@ fn main() {
                                     // sound here: the name is not file-defined, so adding sibling
                                     // functions could not make it resolve (only the registry could,
                                     // which `auto_linkable` already ruled out).
-                                    let probe = MirProgram { functions: vec![mir.clone()] };
+                                    let probe = MirProgram { functions: vec![mir.clone()], exports: vec![], mutable_global_count: 0 };
                                     if !almide_mir::render_wasm::unlinked_call_names(&probe)
                                         .contains(name)
                                     {
@@ -1195,6 +1266,11 @@ fn main() {
                                 Op::Call { .. } | Op::CallFn { .. } | Op::CallIndirect { .. }
                             )
                         })
+                        // `$__mg_take` is a COMPILER-INJECTED slot accessor (a raw i32.load,
+                        // Stdout-free — the trusted-prim class), not a lowering of any IR
+                        // call node: a mutable-global heap assign injects one with no IR
+                        // counterpart, so counting it would false-breach `mir <= ir`.
+                        .filter(|o| !matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
                         .count();
                     if ir_calls > mir_calls {
                         for mir in &mirs {

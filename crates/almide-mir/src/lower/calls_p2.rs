@@ -85,18 +85,30 @@ impl LowerCtx {
                 if a.len() == 1 && matches!(a[0], Ty::String));
         // A RECORD element (`parent.children + [child]` — the svg `add_child` shape): `__list_concat_rc`
         // rc-incs each record handle (the new list co-owns each), freed recursively by the generated
-        // `$__drop_list_<R>` (each element → `$__drop_<R>`). Gated to a recursive-drop record so that fn exists.
-        let record_elem = self.record_drop_type_name(&elem_ty);
+        // `$__drop_list_<R>` (each element → `$__drop_<R>`). Gated to a recursive-drop record so that fn
+        // exists. An ANONYMOUS structural record element (`items + [{ x: …, content: nm, … }]` — the
+        // ceangal zip_view_rects append; the checker leaves the element structural) routes to its
+        // synthesized `$__drop_list_anonrec_<hash>` wrapper via the same registry.
+        let record_elem = self.record_or_anon_drop_type_name(&elem_ty);
         // A `(String, String)` TUPLE element (the `map.entries` shape) — `__list_concat_rc` rc-owns each
         // tuple, freed recursively by `Op::DropListStrStr` (per tuple: rc_dec BOTH String slots). The
         // (String,String) counterpart of `str_value_elem`.
+        // Widened to (String, <flat block>) — String OR List[scalar] second slot (the
+        // hval map literal's `("xs", [1, 2, 3])` pairs): DropListStrStr's two per-slot
+        // rc_decs are each a FULL free for any flat block (`is_list_str_str_ty`'s
+        // documented physics).
+        let flat_snd = |t: &Ty| {
+            matches!(t, Ty::String)
+                || matches!(t, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
+                    if b.len() == 1 && !is_heap_ty(&b[0]))
+        };
         let str_str_elem = matches!(&elem_ty,
-            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String));
+            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && flat_snd(&tys[1]));
         // An `(Int, String)` TUPLE element (the `list.enumerate` shape) — `__list_concat_rc` rc-owns each
         // tuple, freed recursively by `$__drop_list_int_str` (per tuple: rc_dec the String slot @20 only,
         // the Int @12 is scalar). Routed via variant_drop_handles (a DropVariant, like the record case).
         let int_str_elem = matches!(&elem_ty,
-            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String));
+            Ty::Tuple(tys) if tys.len() == 2 && !is_heap_ty(&tys[0]) && matches!(tys[1], Ty::String));
         // A `(String, Int)` TUPLE element (the gguf `entries + [(key, pos)]` metadata
         // accumulator) — the MIRROR of `int_str_elem`: rc-own each tuple, recursive drop via
         // `DropListStrInt` (rc_dec the String slot @12 only; the Int @20 is scalar).
@@ -123,7 +135,9 @@ impl LowerCtx {
         // (the new list co-owns each block); the scope-end / teardown `$__drop_list_<V>` frees each
         // element RECURSIVELY via `$__drop_<V>` (a flat `rc_dec` would leak each Instr's nested
         // `List[Instr]`). Routed via `variant_drop_handles="list_<V>"`, like the record case.
-        let rich_variant_elem = self.variant_layouts.is_rich_variant_ty(&elem_ty);
+        let rich_variant_elem = self.variant_layouts.is_rich_variant_ty(&elem_ty, &|rn| {
+            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+        });
         if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && !str_str_elem
             && !int_str_elem && !str_int_elem && !scalar_aggregate_elem && !flat_variant_elem
             && rich_variant_elem.is_none() && record_elem.is_none()
@@ -321,22 +335,23 @@ impl LowerCtx {
                 IrExprKind::Var { id } if is_heap_ty(&a.ty) => CallArg::Handle(self.value_or_global(*id)?),
                 IrExprKind::Var { id } => CallArg::Scalar(self.value_or_global(*id)?),
                 IrExprKind::LitInt { value } => CallArg::Imm(*value),
-                // A NON-CAPTURING lambda ARGUMENT (`list.map(xs, (x) => x + 1)`): LIFT it to
-                // a fresh `__lambda_*` function and pass its `FuncRef` table slot BY VALUE
-                // (a scalar i64) — the callee invokes it via `Op::CallIndirect` through its
-                // function-typed param. This is the call-site half of higher-order self-host
-                // (`list.map`/`filter`/`fold`). A CAPTURING lambda has no liftable form, so
-                // it falls through to the deferred Opaque arm below (unchanged).
+                // A lambda ARGUMENT (`list.map(xs, (x) => x + n)`): LIFT it to a fresh
+                // `__lambda_*` function and pass its CLOSURE BLOCK (a borrowed heap
+                // handle — fnidx in slot 0, captures in slots 1…) — the callee invokes
+                // it via `Op::CallIndirect` through its function-typed param. This is
+                // the call-site half of higher-order self-host (`list.map`/`filter`/
+                // `fold`), capturing lambdas included (scalar captures).
                 IrExprKind::Lambda { params, body, .. } => {
                     match self.lift_lambda(params, body) {
-                        Some(slot) => CallArg::Scalar(slot),
-                        // A CAPTURING lambda has no liftable form, so it would materialize a
-                        // deferred `Init::Opaque` (an EMPTY closure env) and pass it to the
-                        // callee, which would invoke garbage = a SILENT MISCOMPILE. Reject.
+                        Some(blk) => CallArg::Handle(blk),
+                        // A lambda OUTSIDE the liftable subset would materialize a
+                        // deferred `Init::Opaque` (an EMPTY closure env) and pass it to
+                        // the callee, which would invoke garbage = a SILENT MISCOMPILE.
+                        // Reject.
                         None => {
                             return Err(LowerError::Unsupported(
-                                "capturing lambda in a call-argument position cannot be lifted \
-                                 (would pass an empty deferred closure env)"
+                                "lambda outside the liftable subset in a call-argument \
+                                 position (would pass an empty deferred closure env)"
                                     .into(),
                             ))
                         }
@@ -477,11 +492,85 @@ impl LowerCtx {
                 // (porta `format_tool_log`) + any call/concat with a heap-result-`if` arg.
                 IrExprKind::If { cond, then, else_ } if is_heap_ty(&a.ty) => {
                     match self.try_lower_heap_result_if(cond, then, else_, &a.ty) {
-                        Some(dst) => CallArg::Handle(dst),
+                        // Route through `materialized_call_arg` (the sibling `Match` arm's own
+                        // B52 fix) rather than a bare `CallArg::Handle`: it tracks `dst` in
+                        // `live_heap_handles` AND, for a Tuple/Record `a.ty`, seeds the
+                        // precise-destructure masks `lower_destructure` (binds_p2.rs) needs —
+                        // without it, `let (a,b) = if c then (..) else (..)` materialized the
+                        // tuple fine but its scalar-component destructure fell to the generic
+                        // container-grain fallback (STRICT mode's `Const-0` wall). Verified
+                        // SAFE for the pre-existing plain-value case too (`println(if c then
+                        // "x" else "y")` in a 10,000× loop, 4MB cap, no leak/double-free before
+                        // OR after this change — `live_heap_handles` is the SAME scope-end-drop
+                        // list either path already respects, so adding the tracking here closes
+                        // a genuine latent gap rather than introducing a double-free).
+                        Some(dst) => {
+                            let repr = repr_of(&a.ty)?;
+                            self.materialized_call_arg(dst, repr, &a.ty)
+                        }
                         None => {
                             return Err(LowerError::Unsupported(
                                 "heap-result `if` in a call-argument position outside the executable \
                                  subset"
+                                    .into(),
+                            ))
+                        }
+                    }
+                }
+                // A heap-result `match` operand (`let (label, len) = match x { s if .. => (..), s
+                // => (..) }` — a tuple-pattern-let desugar that routes the match's VALUE through a
+                // call argument): desugar the match to an equivalent `if`/`else if` chain via the
+                // EXISTING, PROVEN `desugar_match_to_if` (the same transform tail/bind positions
+                // already use), then lower it through the EXISTING, PROVEN heap-result-`if`
+                // call-arg path directly above — no new lowering machinery, just wiring Match into
+                // the If arm's already-working call-arg handling. Without this, EVERY heap-result
+                // match operand fell straight to the generic wall below.
+                IrExprKind::Match { subject, arms } if is_heap_ty(&a.ty) => {
+                    // `desugar_match_to_if` wraps its result in a `Block` (hoisted `let`
+                    // bindings PRECEDING the `If`) whenever the subject isn't one of the
+                    // freely-substitutable KINDS `build_match_chain`'s `subject_pure` admits
+                    // (`Var`/`LitInt`/`LitBool`/`LitFloat` — a `LitStr` subject, e.g. a
+                    // single-use `let x = "hello"; match x {...}` after an EARLIER inlining
+                    // pass propagates `x`'s literal value into the subject position, is NOT
+                    // in that list, so it takes the conservative `bind_subject` path instead
+                    // of inline substitution). This site only ever pattern-matched a BARE
+                    // `If`, declining outright on the Block-wrapped form — closing the ENTIRE
+                    // "match value in a call-argument position" class for any subject shape
+                    // needing the hoist, not just the LitStr case (`match arms returning
+                    // tuples`'s `let (label, len) = match x {s if .. => (..), s => (..)}`).
+                    // Lower the hoisted `let`s first (their own scope-end drops apply
+                    // normally), THEN unwrap to the inner `If` and proceed exactly as before.
+                    let lifted = self.desugar_match_to_if(subject, arms, &a.ty).and_then(|e| {
+                        let (stmts, if_expr) = match e.kind {
+                            IrExprKind::If { .. } => (Vec::new(), e),
+                            IrExprKind::Block { stmts, expr: Some(tail) } => (stmts, *tail),
+                            _ => return None,
+                        };
+                        let IrExprKind::If { cond, then, else_ } = &if_expr.kind else { return None };
+                        for s in &stmts {
+                            self.lower_stmt(s).ok()?;
+                        }
+                        self.try_lower_heap_result_if(cond, then, else_, &a.ty)
+                    });
+                    match lifted {
+                        // Route through `materialized_call_arg` (not a bare `CallArg::Handle`):
+                        // it tracks `dst` in `live_heap_handles` AND, for a Tuple/Record `a.ty`,
+                        // seeds `record_masks`/`variant_drop_handles` from `aggregate_field_tys`
+                        // — the SAME seeding `lower_destructure`'s OWN precise-tuple-extraction
+                        // path (binds_p2.rs) needs to find already done (it only seeds when
+                        // `live_heap_handles.contains(&subj)`, which a bare `CallArg::Handle`
+                        // never satisfies). WITHOUT this, `let (label, len) = match x {...}`
+                        // materialized the tuple fine but its DESTRUCTURE fell to the generic
+                        // container-grain `bind_pattern` fallback, which WALLS a scalar
+                        // component in STRICT mode (a Const-0 would silently corrupt `len`).
+                        Some(dst) => {
+                            let repr = repr_of(&a.ty)?;
+                            self.materialized_call_arg(dst, repr, &a.ty)
+                        }
+                        None => {
+                            return Err(LowerError::Unsupported(
+                                "heap-result `match` in a call-argument position outside the \
+                                 executable subset"
                                     .into(),
                             ))
                         }
@@ -513,6 +602,18 @@ impl LowerCtx {
                     // no heap, so the scope-end drop is a flat `Drop`). Both yield a REAL populated
                     // block, vs the `alloc_init` `Init::Opaque` that an all-literal-only path leaves
                     // (rejected below). Closes `f([pos])` / the `acc + [pos]` append-accumulator element.
+                    // An EMPTY-map arg (`fold(xs, [:], …)` seed, `takes([:])` with ascription):
+                    // the SAME layout-agnostic 0-length block an empty-map BIND builds (a v1
+                    // Map is a paired-slot List; len 0 ⇒ the drop frees only the block) —
+                    // REAL (never Opaque), borrowed into the call + dropped at scope end.
+                    if matches!(&a.kind, IrExprKind::EmptyMap)
+                        || matches!(&a.kind, IrExprKind::MapLiteral { entries } if entries.is_empty())
+                    {
+                        if let Some(dst) = self.try_lower_scalar_list_slots(&[]) {
+                            out.push(self.materialized_call_arg(dst, repr, &a.ty));
+                            continue;
+                        }
+                    }
                     if matches!(&a.kind, IrExprKind::List { .. }) {
                         // A List[Record] literal arg (`group([rect(…), …])`): the record-list builder
                         // already pushes it to live_heap_handles + routes its drop to $__drop_list_<R>,
@@ -833,6 +934,50 @@ impl LowerCtx {
                             Some(v) => CallArg::Scalar(v),
                             None => {
                                 self.ops.truncate(mark);
+                                // ANF-LIFT `f().x` (a scalar field on a call result — the
+                                // paren-defaults `mk_defaults().port` shape): bind the call
+                                // to a SYNTHETIC temp exactly like `let tmp = f(); tmp.x`
+                                // (the tail.rs heap-extraction discipline — the bind tracks
+                                // + seeds the record's read shape), then the field-slot load
+                                // resolves over the tracked temp.
+                                let lifted = if let IrExprKind::Member { object, field } = &a.kind
+                                {
+                                    if matches!(object.kind, IrExprKind::Call { .. })
+                                        && is_heap_ty(&object.ty)
+                                    {
+                                        let tmp = self.fresh_synth_var();
+                                        let field = *field;
+                                        let obj_ty = object.ty.clone();
+                                        self.lower_bind(tmp, &obj_ty, object).ok().and_then(
+                                            |_| {
+                                                let synth = IrExpr {
+                                                    kind: IrExprKind::Member {
+                                                        object: Box::new(IrExpr {
+                                                            kind: IrExprKind::Var { id: tmp },
+                                                            ty: obj_ty,
+                                                            span: object.span.clone(),
+                                                            def_id: None,
+                                                        }),
+                                                        field,
+                                                    },
+                                                    ty: a.ty.clone(),
+                                                    span: a.span.clone(),
+                                                    def_id: None,
+                                                };
+                                                self.lower_scalar_value(&synth)
+                                            },
+                                        )
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+                                if let Some(v) = lifted {
+                                    out.push(CallArg::Scalar(v));
+                                    continue;
+                                }
+                                self.ops.truncate(mark);
                                 // A scalar field access on a COMPUTED CALL result (`mk(5).x`)
                                 // — the call result is not a tracked aggregate, so a Const-0
                                 // reads a WRONG value (and the record-returning callee now
@@ -960,6 +1105,24 @@ impl LowerCtx {
                             }
                             self.ops.truncate(mark);
                             self.live_heap_handles.truncate(lhh);
+                            // A heap-result call THROUGH a KNOWN CLOSURE value
+                            // (`println(hi("world"))` where `hi` bound a closure block):
+                            // EXECUTE it via the closure dispatch — a fresh OWNED value
+                            // (cert `i`, scope-end drop), borrowed into the outer call.
+                            // Mirrors the bind-position closure call (binds_p2).
+                            if let Some(blk) = self.closure_block_of_mut(callee) {
+                                if let (Ok(crepr), Ok(lowered)) =
+                                    (repr_of(&a.ty), self.lower_call_args(inner))
+                                {
+                                    let dst = self.fresh_value();
+                                    self.emit_closure_call(blk, Some(dst), lowered, Some(crepr));
+                                    self.live_heap_handles.push(dst);
+                                    out.push(CallArg::Handle(dst));
+                                    continue;
+                                }
+                                self.ops.truncate(mark);
+                                self.live_heap_handles.truncate(lhh);
+                            }
                         }
                         // An unresolvable `Method`/`Computed` call with a HEAP result as a
                         // call ARGUMENT (`f(obj.m())`, `f((g)())`) would borrow an empty

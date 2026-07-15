@@ -144,3 +144,52 @@ fn map_to_string(m: Map[String, Int]) -> String = {
     buf
   }
 }
+
+// `${Map[String, String]}` — the _ss display: both key AND value render as quoted/escaped
+// strings (`["a": "x"]`; empty → `[:]`). Reuses the same escape/measure/fill helpers.
+fn __mts_body_len_ss(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let velem = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __mts_key_width(kelem) + 2 + __mts_key_width(velem)
+    __mts_body_len_ss(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
+
+fn __mts_fill_body_ss(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __mts_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)
+    prim.store8(pos2 + 1, 32)
+    let velem = prim.load64(vaddr + i * 8)
+    let pos3 = __mts_fill_key(velem, pos2 + 2)
+    __mts_fill_body_ss(kaddr, vaddr, count, i + 1, pos3)
+  }
+
+fn map_to_string_ss(m: Map[String, String]) -> String = {
+  let ks = map.keys(m)
+  let vs = map.values(m)
+  let hk = prim.handle(ks)
+  let hv = prim.handle(vs)
+  let count = prim.load32(hk + 4)
+  if count == 0 then "[:]"
+  else {
+    let kaddr = hk + 12
+    let vaddr = hv + 12
+    let body = __mts_body_len_ss(kaddr, vaddr, count, 0, 0)
+    let buf = prim.alloc_str(body + 2)
+    let base = prim.handle(buf) + 12
+    prim.store8(base, 91)
+    let after = __mts_fill_body_ss(kaddr, vaddr, count, 0, base + 1)
+    prim.store8(after, 93)
+    buf
+  }
+}

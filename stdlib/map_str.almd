@@ -349,3 +349,23 @@ fn map_fold_str(m: Map[String, String], init: Int, f: (Int, String, String) -> I
   let entries = n / 2
   __mfold_loop(sh, f, entries, 0, init)
 }
+
+// v0's `map.from_list` over (String, String) pairs — duplicate key keeps FIRST
+// position with LAST value (map_set_str's replace-in-place), mirroring
+// map_from_list_hval's recursion (each step's map is a fresh block; the previous
+// drops by scope).
+fn __msf_at(ph: Int, n: Int, i: Int, m: Map[String, String]) -> Map[String, String] =
+  if i >= n then m
+  else {
+    let th = prim.load64(ph + 12 + i * 8)
+    let k = prim.load_str(th + 12)
+    let v = prim.load_str(th + 20)
+    let nm = map_set_str(m, k, v)
+    __msf_at(ph, n, i + 1, nm)
+  }
+
+fn map_from_list_str(pairs: List[(String, String)]) -> Map[String, String] = {
+  let ph = prim.handle(pairs)
+  let n = prim.load32(ph + 4)
+  __msf_at(ph, n, 0, map_new_str())
+}

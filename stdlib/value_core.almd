@@ -575,6 +575,20 @@ fn option_value_unwrap_or(o: Option[Value], d: Value) -> Value = {
   }
 }
 
+// `?? d` over an Option[List[<scalar>]] (`map.get(groups, "0") ?? []` — the group_by class): the
+// SAME len-as-tag prim shape as option_liststr_unwrap_or, with a FLAT scalar-element list payload —
+// the Some arm loads the @12 inner-list handle and the bare-Var tail auto-acquires (Dup, freed by
+// the flat rc_dec — scalar elements own nothing), the None arm returns the fallback.
+fn option_listint_unwrap_or(o: Option[List[Int]], d: List[Int]) -> List[Int] = {
+  let h = prim.handle(o)
+  let tag = prim.load32(h + 4)
+  if tag == 0 then d
+  else {
+    let v: List[Int] = prim.load_handle(h + 12)
+    v
+  }
+}
+
 // `?? d` over an Option[List[String]] (`list.get_liststr(rows, i) ?? []`): the SAME len-as-tag prim
 // shape as option_value_unwrap_or, with a List[String] payload — the Some arm loads the @12 inner-list
 // handle and the bare-Var tail auto-acquires (Dup), the None arm returns the fallback.

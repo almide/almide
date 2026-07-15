@@ -1,0 +1,27 @@
+// fs_stat — SELF-HOSTED `fs.stat(path)` over the WASI full-stat floor
+// (prim.path_filestat), the v1 trust-spine realization of the effectful `fs.stat`.
+// The prim writes the raw 64-byte WASI filestat into THIS function's own scratch
+// Bytes (caller-owned buffer, dropped at scope end) and returns the errno; the
+// fields are read back in ordinary Almide: filetype@16 (3 = directory, 4 = regular
+// file), size@32, mtim@48 (nanoseconds → seconds, matching native
+// `metadata.modified()` Unix seconds). The Ok payload is the STRUCTURAL record
+// with the SAME field order as stdlib/fs.almd's `FileStat` (size, is_dir, is_file,
+// modified) — identical uniform-slot layout, so the call site's nominal member
+// reads land on the right slots. Because this body reaches prim.path_filestat, its
+// cap_witness carries Capability::FsRead (a stat IS a filesystem read — the SAME
+// capability as fs.exists/fs.read_text).
+effect fn fs_stat(path: String) -> Result[{size: Int, is_dir: Bool, is_file: Bool, modified: Int}, String] = {
+  let buf = prim.alloc_bytes(64)
+  let p = prim.handle(buf) + 12
+  let errno = prim.path_filestat(p, path)
+  if errno != 0 then err("stat failed: " + path)
+  else {
+    let ftype = prim.load8(p + 16)
+    ok({
+      size: prim.load64(p + 32),
+      is_dir: ftype == 3,
+      is_file: ftype == 4,
+      modified: prim.load64(p + 48) / 1000000000,
+    })
+  }
+}

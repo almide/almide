@@ -7,6 +7,7 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             | ("float", "parse")
             | ("int", "from_hex")
             | ("option", "to_result")
+            | ("result", "collect")
             | ("result", "map")
             | ("result", "flat_map")
             | ("result", "map_err")
@@ -56,6 +57,11 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // So a `match`/`!` over it must read tag @16 + bind the @12 payload list handle, exactly
             // like fs.read_text (only the Ok payload type differs: a List[String], not a String).
             | ("fs", "list_dir")
+            // `fs.stat` returns the cap-as-tag `Result[FileStat, String]` (the self-host builds
+            // it with the ordinary ok()/err() ctors — payload @12, tag @16). The Ok payload is a
+            // SCALAR-ONLY record block (size/is_dir/is_file/modified — no heap fields), so the
+            // flat DropListStr @12 free is exact on both arms (record block on Ok, msg on Err).
+            | ("fs", "stat")
             // `fs.write` returns the cap-as-tag `Result[Unit, String]` ($write_text_file builds it in
             // the same layout — Ok with len@4=0 + @12=0 + tag@16=0, Err with len@4=1 + @12=msg +
             // tag@16=1). So a `match`/`!` over it must read tag @16 (NOT len-as-tag @4 — that would
@@ -129,6 +135,16 @@ pub fn is_option_liststr_ty(ty: &Ty) -> bool {
     matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
         if a.len() == 1 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
             if e.len() == 1 && matches!(e[0], Ty::String)))
+}
+
+/// Is `ty` an `Option[List[<scalar>]]` (the `map.get(groups, k) ?? []` group_by shape)? Its `??`
+/// routes to `option.listint_unwrap_or`, the FLAT scalar-element analogue of
+/// `option.liststr_unwrap_or` (the payload list owns nothing — a flat rc drop is exact).
+pub fn is_option_listscalar_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
+        if a.len() == 1 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+            if e.len() == 1 && !is_heap_ty(&e[0])))
 }
 
 /// Is `ty` an `Option[List[Value]]` (the `json.as_array(v)` shape)? Its `??` routes to
@@ -510,6 +526,20 @@ fn tco_collect<'a>(
             Some(())
         }
         IrExprKind::Block { expr: Some(tail), .. } => tco_collect(tail, fn_name, calls, bases),
+        // The frontend's auto-`?` wraps a tail self-call as `Try{Call self}` (and a spelled
+        // `!` as `Unwrap{Call self}`) — #557's "TCO must see THROUGH" requirement: the
+        // propagation is the identity on the self-call's own same-repr Result, so the
+        // wrapped call is STILL a tail self-call. Without this, `checked(n-1)` under the
+        // auto-wrap ABI recursed O(n) and blew the call stack at 2e6 depth (effect_tco).
+        IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }
+            if matches!(&expr.kind,
+                IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if name.as_str() == fn_name) =>
+        {
+            let IrExprKind::Call { args, .. } = &expr.kind else { unreachable!() };
+            calls.push(args);
+            Some(())
+        }
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
             if name.as_str() == fn_name =>
         {

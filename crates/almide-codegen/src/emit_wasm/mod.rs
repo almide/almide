@@ -388,6 +388,11 @@ pub struct RuntimeFuncs {
     pub args_sizes_get: u32,
     /// args_get(argv_ptr, argv_buf_ptr) -> errno — fills the pointer array + NUL-terminated arg strings.
     pub args_get: u32,
+    /// environ_sizes_get(count_ptr, buf_size_ptr) -> errno — WASI environ discovery (env.get).
+    pub environ_sizes_get: u32,
+    /// environ_get(environ_ptr, environ_buf_ptr) -> errno — fills the pointer array +
+    /// NUL-terminated `KEY=VALUE` strings.
+    pub environ_get: u32,
     /// __resolve_path(path_ptr, path_len) → (fd, rel_path_ptr, rel_path_len)
     /// Resolves absolute/relative paths against preopened directories.
     pub resolve_path: u32,

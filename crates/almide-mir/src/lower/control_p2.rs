@@ -46,8 +46,35 @@ impl LowerCtx {
                 }
                 IrPattern::Err { inner } => {
                     let bind = match inner.as_ref() {
+                        // `heap_elem_lists` covers the flat-drop str-results (`value.as_string`);
+                        // `value_result_lists`/`value_result_results` are the RECURSIVE-drop
+                        // twins (`Result[List[Value],String]` / `Result[Value,String]` —
+                        // `seed_variant_param` routes these there instead, since their Ok
+                        // payload needs `DropResultListValue`/`DropResultValue`, not the flat
+                        // `DropListStr` a String-Ok gets). Mirrors `try_lower_variant_value_
+                        // match`'s `heap_or_scalar_bind` (~line 463-479), the value-position
+                        // twin of this statement-position match — WITHOUT this the Err-bind
+                        // here is strictly narrower than its twin, so a `Result[Value,String]`
+                        // subject (json_path_edges' `p_set`) falls through to the untracked-
+                        // subject both-arms-linearization wall even though the twin would
+                        // admit it.
+                        // A RICH-VARIANT Err payload needing a recursive drop (`Result[Int,
+                        // MathError]`, `err(Overflow(msg))` — bidirectional_type_test's structured
+                        // error): `try_lower_result_err_variant_ctor` tracks such a subject via
+                        // `variant_drop_handles = "res_<V>"` (a GENERATED `$__drop_res_<V>`,
+                        // drop_sources.rs), NOT `heap_elem_lists` (explicitly removed there once
+                        // `needs_rec` is true) — so this Bind guard, unlike its value-position twin
+                        // (`try_lower_variant_value_match`'s `heap_or_scalar_bind`, which already
+                        // admits `resrec:`/`optrec:`), had no matching case at all.
                         IrPattern::Bind { var, ty }
-                            if is_heap_ty(ty) && self.heap_elem_lists.contains(&subj) =>
+                            if is_heap_ty(ty)
+                                && (self.heap_elem_lists.contains(&subj)
+                                    || self.value_result_lists.contains(&subj)
+                                    || self.value_result_results.contains(&subj)
+                                    || self
+                                        .variant_drop_handles
+                                        .get(&subj)
+                                        .is_some_and(|h| h.starts_with("res_"))) =>
                         {
                             Some((*var, true))
                         }
@@ -58,6 +85,15 @@ impl LowerCtx {
                         return false;
                     }
                     err = Some((&arm.body, bind));
+                }
+                // A TOP-LEVEL `_` catch-all as the non-Ok arm (`match r { ok($q) => …, _ => … }`
+                // — the regrouped codec-roundtrip shape): tag != 0 ⇒ not-Ok ⇒ the wildcard body,
+                // binding nothing. Positionally identical to `err(_)` once Ok holds the other arm.
+                IrPattern::Wildcard => {
+                    if err.is_some() {
+                        return false;
+                    }
+                    err = Some((&arm.body, Option::None));
                 }
                 _ => return false,
             }
@@ -107,12 +143,16 @@ impl LowerCtx {
                 use almide_lang::types::constructor::TypeConstructorId;
                 if matches!(&bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
                     self.materialized_options.insert(payload);
-                    if crate::lower::is_heap_elem_list_ty(&bind_ty) {
+                    if crate::lower::is_lenlist_list_ty(&bind_ty) {
+                        self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+                    } else if crate::lower::is_heap_elem_list_ty(&bind_ty) {
                         self.heap_elem_lists.insert(payload);
                     }
                 } else if crate::lower::is_result_ty(&bind_ty) {
                     self.materialized_results.insert(payload);
-                    if crate::lower::is_heap_elem_list_ty(&bind_ty) {
+                    if crate::lower::is_lenlist_list_ty(&bind_ty) {
+                        self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+                    } else if crate::lower::is_heap_elem_list_ty(&bind_ty) {
                         self.heap_elem_lists.insert(payload);
                     }
                 }
@@ -450,6 +490,10 @@ impl LowerCtx {
                 IrPattern::Bind { var, ty }
                     if is_heap_ty(ty)
                         && (s.heap_elem_lists.contains(&subj)
+                            // `Option[List[String]]` (the heap-acc fold value) — routed to the
+                            // nested DropListListStr set; the payload bind discipline is identical
+                            // (a borrowed @12 handle, the subject's own recursive drop frees it).
+                            || s.list_list_str_lists.contains(&subj)
                             || s.value_result_lists.contains(&subj)
                             || s.value_result_results.contains(&subj)
                             // A record-Ok `Result[<record>, String]` subject (`resrec:<R>` drop
@@ -457,9 +501,23 @@ impl LowerCtx {
                             // binds the @12 handle as a BORROW; the subject's recursive
                             // `DropWrapperRec` frees the live block (record or Err String) once
                             // after the arms. A bare-Var move-out arm auto-`Dup`s, so no double-free.
+                            // An option-of-variant subject (`optrec:<T>`, `some(Number(7))`):
+                            // the Some-arm payload binds the @12 variant handle as a BORROW;
+                            // the subject's recursive drop frees the payload once after the
+                            // arms — the same resrec discipline.
                             || s.variant_drop_handles
                                 .get(&subj)
-                                .is_some_and(|h| h.starts_with("resrec:"))) =>
+                                .is_some_and(|h| {
+                                    h.starts_with("resrec:")
+                                        || h.starts_with("optrec:")
+                                        // A rich-variant Err payload needing recursive drop
+                                        // (`res_<V>`, `try_lower_result_err_variant_ctor`) — the
+                                        // Err bind is a BORROW of the @12 variant handle, freed
+                                        // by the subject's own `$__drop_res_<V>` at scope end
+                                        // (mirrors the statement-position twin, `try_lower_
+                                        // result_match`).
+                                        || h.starts_with("res_")
+                                })) =>
                 {
                     Ok(Some((*var, true, ty.clone())))
                 }
@@ -479,7 +537,12 @@ impl LowerCtx {
                 IrPattern::Some { inner } if is_option => {
                     heap_or_scalar_bind(self, inner).map(|b| (true, b))
                 }
-                IrPattern::None | IrPattern::Wildcard if is_option => Ok((false, None)),
+                IrPattern::None if is_option => Ok((false, None)),
+                // A Wildcard takes the Option else-side ONLY when the subject is not ALSO
+                // result-tracked: a Result Err CTOR bind reuses the Some(string) machinery
+                // (materialize_opt_str_some inserts materialized_options), so both flags are
+                // true — Result semantics must win (the flexible-side arm below).
+                IrPattern::Wildcard if is_option && !is_result => Ok((false, None)),
                 // Result Err (then) / Ok (else). BOTH use `heap_or_scalar_bind`: a scalar Result
                 // binds a scalar payload, a str-result (`value.as_string`) binds its slot-0 String
                 // as a BORROW (gated on `heap_elem_lists` — only a nested-ownership subject, so a
@@ -490,6 +553,15 @@ impl LowerCtx {
                 }
                 IrPattern::Ok { inner } if is_result => {
                     heap_or_scalar_bind(self, inner).map(|b| (false, b))
+                }
+                // A WILDCARD arm over a RESULT subject (`if let v = x { A } else { B }` —
+                // the frontend's if-let desugar emits `Ok(v) => A, _ => B`): it takes
+                // whichever side the ctor arm did NOT (then=Err when Ok is filled, else=Ok
+                // when Err is filled). A wildcard BEFORE any ctor arm is ambiguous → reject.
+                IrPattern::Wildcard
+                    if is_result && (then_slot.is_some() != else_slot.is_some()) =>
+                {
+                    Ok((then_slot.is_none(), None))
                 }
                 _ => Err(()),
             };
@@ -605,15 +677,45 @@ impl LowerCtx {
             Some(v) => v,
             None => return rollback(self),
         };
+        // RELEASE PARITY (mirrors lower_heap_result_if_inner): which OUTER
+        // handles did the then arm MOVE out (e.g. `err(msg)` over an outer
+        // let-bound String)? The snapshot restore below makes them live again
+        // for the else arm's lowering — but the move happens only on the THEN
+        // path, so without a compensating sibling-arm release the else path
+        // leaks it AND the post-join scope-end drop double-frees the then path.
+        let consumed_by_then: Vec<ValueId> = lhh_snapshot
+            .iter()
+            .copied()
+            .filter(|h| !self.live_heap_handles.contains(h))
+            .collect();
+        let else_marker_at = self.ops.len();
         self.ops.push(Op::Else { val: Some(then_val) });
         self.param_values = pv_snapshot;
-        self.live_heap_handles = lhh_snapshot;
+        self.live_heap_handles = lhh_snapshot.clone();
         self.materialized_aggregates = ma_snapshot;
         // ELSE (tag == 0): the None branch / the scalar Ok payload.
         let else_val = match lower_arm(self, else_body) {
             Some(v) => v,
             None => return rollback(self),
         };
+        let consumed_by_else: Vec<ValueId> = lhh_snapshot
+            .iter()
+            .copied()
+            .filter(|h| !self.live_heap_handles.contains(h))
+            .collect();
+        for h in &consumed_by_then {
+            if !consumed_by_else.contains(h) {
+                let op = self.drop_op_for(*h);
+                self.ops.push(op); // the ELSE arm releases what THEN moved out …
+                self.live_heap_handles.retain(|x| x != h); // … and scope-end must not re-release
+            }
+        }
+        for h in &consumed_by_else {
+            if !consumed_by_then.contains(h) {
+                let op = self.drop_op_for(*h);
+                self.ops.insert(else_marker_at, op); // the THEN arm releases what ELSE moved out
+            }
+        }
         self.ops.push(Op::EndIf { val: Some(else_val) });
         // SUBJECT-DROP-AFTER-ARMS (the str-result heap-bind path): the payload borrowed slot-0, so
         // the subject stayed live through both arms — drop the OWNED subject ONCE here, after the
@@ -650,7 +752,7 @@ impl LowerCtx {
     ///      through `lower_pure_module_value_call` (the SAME emitted CallFn name as every other call
     ///      site — `list_heap_call_name`, never a raw dotted name) so the match reads a real block.
     pub(crate) fn is_effect_result_subject(&self, subject: &IrExpr) -> bool {
-        if !effect_unwrap_admitted(&subject.ty)
+        if !effect_unwrap_admitted(&subject.ty, &self.variant_layouts)
             && self.result_ok_record_drop_fn(&subject.ty).is_none()
         {
             return false;
@@ -759,6 +861,421 @@ impl LowerCtx {
     /// with NO heap ownership event beyond the arm's own move-out — exactly the per-arm
     /// linearization the cert proves, wrapped so one arm runs. The LAST arm is the unconditional
     /// `else` (the frontend guarantees the match is exhaustive).
+    /// TAIL-VALUE match over an `Option[<heap>]` subject with HEAP-result arms — the
+    /// Option twin of [`Self::try_lower_result_match_value`] (the shape its scalar-payload
+    /// self-gate called "the true Camp-4 frontier"):
+    ///   `match acc { none => none, some(stack) => <heap arm> }`  (is_balanced's fold step)
+    /// Same merge discipline as the Result opener: subject via `lower_call_args` (a borrowed
+    /// param stays caller-owned; an owned temp joins the scope epilogue), tag = len@4 with
+    /// OPTION polarity (THEN tag≠0 = Some, ELSE = None), the Some payload bound as a
+    /// slot-0 HANDLE BORROW (`param_values`, not a second owner — `lower_heap_result_arm`
+    /// Dups any borrowed payload it re-wraps), arms via `lower_heap_result_arm` with the
+    /// release-parity sweep.
+    pub(crate) fn try_lower_option_match_value(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        use almide_lang::types::constructor::TypeConstructorId;
+        if !is_heap_ty(result_ty) || arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
+            return None;
+        }
+        // HEAP payloads only — a scalar payload already executes via
+        // `try_lower_variant_value_match` (tried before this in every caller).
+        match &subject.ty {
+            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && is_heap_ty(&a[0]) => {}
+            _ => return None,
+        }
+        let mut some_arm: Option<(&IrExpr, Option<VarId>)> = None;
+        let mut none_arm: Option<&IrExpr> = None;
+        for arm in arms {
+            match &arm.pattern {
+                IrPattern::Some { inner } => {
+                    let bind = match inner.as_ref() {
+                        IrPattern::Bind { var, .. } => Some(*var),
+                        IrPattern::Wildcard => None,
+                        _ => return None,
+                    };
+                    if some_arm.is_some() {
+                        return None;
+                    }
+                    some_arm = Some((&arm.body, bind));
+                }
+                IrPattern::None => {
+                    if none_arm.is_some() {
+                        return None;
+                    }
+                    none_arm = Some(&arm.body);
+                }
+                IrPattern::Wildcard => {
+                    if none_arm.is_some() {
+                        return None;
+                    }
+                    none_arm = Some(&arm.body);
+                }
+                _ => return None,
+            }
+        }
+        let ((some_body, some_bind), none_body) = match (some_arm, none_arm) {
+            (Some(s), Some(n)) => (s, n),
+            _ => return None,
+        };
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let subj = match self
+            .lower_call_args(std::slice::from_ref(subject))
+            .ok()
+            .and_then(|a| a.into_iter().next())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        if self.deferred_opaque_binds.contains(&subj) {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return None;
+        }
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: tag, dst: Some(dst) });
+        // THEN (tag != 0 = Some): payload = the slot-0 HANDLE, a BORROW of the subject's slot.
+        if let Some(var) = some_bind {
+            let payload = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+            self.param_values.insert(payload);
+            self.value_of.insert(var, payload);
+        }
+        let outer: Vec<ValueId> = self.live_heap_handles.clone();
+        let some_obj = match self.lower_heap_result_arm(some_body, result_ty) {
+            Some(v) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let consumed_by_some: Vec<ValueId> =
+            outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
+        let else_marker_at = self.ops.len();
+        self.ops.push(Op::Else { val: Some(some_obj) });
+        // ELSE (tag == 0 = None).
+        let live_after_some: Vec<ValueId> = self.live_heap_handles.clone();
+        let none_obj = match self.lower_heap_result_arm(none_body, result_ty) {
+            Some(v) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let consumed_by_none: Vec<ValueId> = live_after_some
+            .iter()
+            .copied()
+            .filter(|x| !self.live_heap_handles.contains(x))
+            .collect();
+        // Release parity across the arms (the lower_heap_result_if_inner discipline).
+        for x in &consumed_by_some {
+            if !consumed_by_none.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.push(op);
+            }
+        }
+        for x in &consumed_by_none {
+            if !consumed_by_some.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.insert(else_marker_at, op);
+            }
+        }
+        self.ops.push(Op::EndIf { val: Some(none_obj) });
+        Some(dst)
+    }
+
+    /// TAIL-VALUE Result match over a len-as-tag subject with HEAP-result arms — the
+    /// Camp-4 opener for the `compute` class:
+    ///   `match safe_div(a, b) { ok(v) => ok(int.to_string(v)), err(e) => <heap arm> }`
+    /// The SUBJECT is materialized as an OWNED tracked temp (a call result / Dup'd var —
+    /// dropped at scope end, AFTER the arms: each arm binds its payload as a BORROW (a
+    /// scalar copy for Ok @12; the slot-0 HANDLE for a heap Err — `param_values`, not a
+    /// second owner) and constructs its own FRESH result via `lower_heap_result_arm`
+    /// (which Dups any borrowed payload it re-wraps), so nothing outlives the subject.
+    /// The IfThen/Else/EndIf merge carries the arm value out — the released-merge cert
+    /// shape `lower_heap_result_if_inner` already proves, incl. the release-parity sweep.
+    pub(crate) fn try_lower_result_match_value(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        use almide_lang::types::constructor::TypeConstructorId;
+        if !is_heap_ty(result_ty) || arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
+            return None;
+        }
+        // len-as-tag subjects only: a SCALAR Ok payload (Err payload scalar or heap).
+        let (ok_pay_ty, err_pay_ty) = match &subject.ty {
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && !is_heap_ty(&a[0]) => {
+                (a[0].clone(), a[1].clone())
+            }
+            _ => return None,
+        };
+        let mut ok_arm: Option<(&IrExpr, Option<VarId>)> = None;
+        let mut err_arm: Option<(&IrExpr, Option<VarId>)> = None;
+        for arm in arms {
+            match &arm.pattern {
+                IrPattern::Ok { inner } => {
+                    let bind = match inner.as_ref() {
+                        IrPattern::Bind { var, .. } => Some(*var),
+                        IrPattern::Wildcard => None,
+                        _ => return None,
+                    };
+                    if ok_arm.is_some() {
+                        return None;
+                    }
+                    ok_arm = Some((&arm.body, bind));
+                }
+                IrPattern::Err { inner } => {
+                    let bind = match inner.as_ref() {
+                        IrPattern::Bind { var, .. } => Some(*var),
+                        IrPattern::Wildcard => None,
+                        _ => return None,
+                    };
+                    if err_arm.is_some() {
+                        return None;
+                    }
+                    err_arm = Some((&arm.body, bind));
+                }
+                IrPattern::Wildcard => {
+                    if err_arm.is_some() {
+                        return None;
+                    }
+                    err_arm = Some((&arm.body, None));
+                }
+                _ => return None,
+            }
+        }
+        let ((ok_body, ok_bind), (err_body, err_bind)) = match (ok_arm, err_arm) {
+            (Some(o), Some(e)) => (o, e),
+            _ => return None,
+        };
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        // Materialize the subject to an OWNED tracked temp (a call result is fresh-owned; a
+        // Var is borrowed — Dup it so the scope-end drop discipline is uniform). The temp is
+        // in live_heap_handles → freed by the epilogue AFTER the merge move-out.
+        let subj = match self
+            .lower_call_args(std::slice::from_ref(subject))
+            .ok()
+            .and_then(|a| a.into_iter().next())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        if self.deferred_opaque_binds.contains(&subj) {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return None;
+        }
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: tag, dst: Some(dst) });
+        // THEN (tag != 0 = Err): payload = slot 0 (borrowed).
+        if let Some(var) = err_bind {
+            let payload = if is_heap_ty(&err_pay_ty) {
+                let p = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                self.param_values.insert(p);
+                p
+            } else {
+                self.load_at_offset(h, 12, PrimKind::Load { width: 8 })
+            };
+            self.value_of.insert(var, payload);
+        }
+        let outer: Vec<ValueId> = self.live_heap_handles.clone();
+        let err_obj = match self.lower_heap_result_arm(err_body, result_ty) {
+            Some(v) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let consumed_by_err: Vec<ValueId> =
+            outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
+        let else_marker_at = self.ops.len();
+        self.ops.push(Op::Else { val: Some(err_obj) });
+        // ELSE (tag == 0 = Ok): scalar payload copy.
+        if let Some(var) = ok_bind {
+            let _ = &ok_pay_ty;
+            let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+            self.value_of.insert(var, payload);
+        }
+        let live_after_err: Vec<ValueId> = self.live_heap_handles.clone();
+        let ok_obj = match self.lower_heap_result_arm(ok_body, result_ty) {
+            Some(v) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let consumed_by_ok: Vec<ValueId> = live_after_err
+            .iter()
+            .copied()
+            .filter(|x| !self.live_heap_handles.contains(x))
+            .collect();
+        // Release parity across the arms (the lower_heap_result_if_inner discipline).
+        for x in &consumed_by_err {
+            if !consumed_by_ok.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.push(op);
+            }
+        }
+        for x in &consumed_by_ok {
+            if !consumed_by_err.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.insert(else_marker_at, op);
+            }
+        }
+        self.ops.push(Op::EndIf { val: Some(ok_obj) });
+        Some(dst)
+    }
+
+    /// TAIL-VALUE match over a LIST subject with exactly one `[]` arm and one catch-all
+    /// (`_` or a bind-all `ys`) — the len-tag twin of [`Self::try_lower_result_match_value`]:
+    ///   `match list.filter(xs, f) { [] => None, ys => list.get(ys, 0) }`
+    /// The subject is an OWNED tracked temp (a call result is fresh-owned; a Var is Dup'd).
+    /// tag = len@4: THEN (len != 0) = the non-empty arm — a bind-all var ALIASES the subject
+    /// temp itself (arm calls borrow it; if the arm MOVES it out, the release-parity sweep
+    /// compensates with a drop on the empty side). ELSE (len == 0) = the `[]` arm. Same
+    /// IfThen/Else/EndIf merge + release-parity discipline as the Result opener.
+    pub(crate) fn try_lower_list_match_value(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        use almide_lang::types::constructor::TypeConstructorId;
+        if !is_heap_ty(result_ty) || arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
+            return None;
+        }
+        if !matches!(&subject.ty, Ty::Applied(TypeConstructorId::List, a) if a.len() == 1) {
+            return None;
+        }
+        let mut empty_arm: Option<&IrExpr> = None;
+        let mut rest_arm: Option<(&IrExpr, Option<VarId>)> = None;
+        for arm in arms {
+            match &arm.pattern {
+                IrPattern::List { elements } if elements.is_empty() => {
+                    if empty_arm.is_some() {
+                        return None;
+                    }
+                    empty_arm = Some(&arm.body);
+                }
+                IrPattern::Bind { var, .. } => {
+                    if rest_arm.is_some() {
+                        return None;
+                    }
+                    rest_arm = Some((&arm.body, Some(*var)));
+                }
+                IrPattern::Wildcard => {
+                    if rest_arm.is_some() {
+                        return None;
+                    }
+                    rest_arm = Some((&arm.body, None));
+                }
+                _ => return None,
+            }
+        }
+        let (empty_body, (rest_body, rest_bind)) = match (empty_arm, rest_arm) {
+            (Some(e), Some(r)) => (e, r),
+            _ => return None,
+        };
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let subj = match self
+            .lower_call_args(std::slice::from_ref(subject))
+            .ok()
+            .and_then(|a| a.into_iter().next())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        if self.deferred_opaque_binds.contains(&subj) {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return None;
+        }
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: tag, dst: Some(dst) });
+        // THEN (len != 0): the non-empty arm; the bind-all aliases the subject temp.
+        if let Some(var) = rest_bind {
+            self.value_of.insert(var, subj);
+        }
+        let outer: Vec<ValueId> = self.live_heap_handles.clone();
+        let rest_obj = match self.lower_heap_result_arm(rest_body, result_ty) {
+            Some(v) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let consumed_by_rest: Vec<ValueId> =
+            outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
+        let else_marker_at = self.ops.len();
+        self.ops.push(Op::Else { val: Some(rest_obj) });
+        // ELSE (len == 0): the `[]` arm.
+        let live_after_rest: Vec<ValueId> = self.live_heap_handles.clone();
+        let empty_obj = match self.lower_heap_result_arm(empty_body, result_ty) {
+            Some(v) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let consumed_by_empty: Vec<ValueId> = live_after_rest
+            .iter()
+            .copied()
+            .filter(|x| !self.live_heap_handles.contains(x))
+            .collect();
+        // Release parity across the arms (the lower_heap_result_if_inner discipline).
+        for x in &consumed_by_rest {
+            if !consumed_by_empty.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.push(op);
+            }
+        }
+        for x in &consumed_by_empty {
+            if !consumed_by_rest.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.insert(else_marker_at, op);
+            }
+        }
+        self.ops.push(Op::EndIf { val: Some(empty_obj) });
+        Some(dst)
+    }
+
     pub(crate) fn try_lower_custom_variant_match(
         &mut self,
         subject: &IrExpr,
@@ -772,6 +1289,49 @@ impl LowerCtx {
         // The subject must be a registered custom variant; clone its layout out of the borrow.
         let type_name = self.custom_variant_type_name(&subject.ty)?;
         let layout = self.variant_layouts.by_type.get(&type_name)?.clone();
+        // DEPTH-2 patterns over a SINGLE-CTOR outer (`match o { Wrap(A(n)) => …, Wrap(B(m))
+        // => … }` — the `pick` shape): the one outer ctor ALWAYS matches, so the match IS the
+        // inner dispatch over the payload. STRIP the outer layer (arms' patterns become the
+        // inner patterns; the inner layout comes from the payload field's variant type) and
+        // remember to UNWRAP one level: the dispatch handle becomes the payload's slot-1
+        // handle (a BORROW — the subject keeps owning it; loaded only after the subject
+        // materializes, so no wrong-ctor garbage read is possible: there IS no other ctor).
+        let mut layout = layout;
+        let mut stripped: Vec<IrMatchArm>;
+        let mut arms: &[IrMatchArm] = arms;
+        let mut unwrap_single = false;
+        if layout.cases.len() == 1 {
+            let case = &layout.cases[0];
+            if case.fields.len() == 1 {
+                let all_nested = arms.iter().all(|a| matches!(&a.pattern,
+                    IrPattern::Constructor { name, args }
+                        if *name == case.ctor && args.len() == 1
+                            && matches!(args[0], IrPattern::Constructor { .. })));
+                let inner_ty = case.fields[0].1.clone();
+                if all_nested {
+                    if let Some(inner_name) = self.custom_variant_type_name(&inner_ty) {
+                        if let Some(inner_layout) =
+                            self.variant_layouts.by_type.get(&inner_name).cloned()
+                        {
+                            stripped = Vec::with_capacity(arms.len());
+                            for a in arms {
+                                let IrPattern::Constructor { args, .. } = &a.pattern else {
+                                    unreachable!("gated above")
+                                };
+                                stripped.push(IrMatchArm {
+                                    pattern: args[0].clone(),
+                                    guard: a.guard.clone(),
+                                    body: a.body.clone(),
+                                });
+                            }
+                            layout = inner_layout;
+                            arms = &stripped;
+                            unwrap_single = true;
+                        }
+                    }
+                }
+            }
+        }
         let plans = self.parse_variant_arms(&layout, arms)?;
         // A SINGLE-arm HEAP-result match (a 1-ctor newtype `unbox`, `match b { B(x) => x }`) that
         // returned the arm value DIRECTLY to `func.ret` would double-move (the arm's move-out
@@ -820,12 +1380,28 @@ impl LowerCtx {
         // Read the tag from slot 0, then emit the per-arm if-chain.
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        // The depth-2 single-outer unwrap: the dispatch handle becomes the payload's
+        // slot-1 handle (BORROWED — the subject owns it; freed by the subject's own
+        // recursive drop, so param_values keeps it un-dropped here).
+        let h = if unwrap_single {
+            let payload = self.load_at_offset(
+                h,
+                layout::slot_offset(1) as i64,
+                PrimKind::LoadHandle,
+            );
+            self.param_values.insert(payload);
+            let ph = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ph), args: vec![payload] });
+            ph
+        } else {
+            h
+        };
         let tag = self.load_at_offset(h, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 });
         let emitted = if sole_ctor_heap {
             let (kind, body) = &plans[0];
-            self.emit_single_ctor_heap_arm(h, tag, kind, body, result_ty)
+            self.emit_single_ctor_heap_arm(h, tag, kind, body, result_ty, subj)
         } else {
-            self.emit_variant_arm_chain(h, tag, &plans, result_ty)
+            self.emit_variant_arm_chain(h, tag, &plans, result_ty, subj)
         };
         match emitted {
             Some(dst) => Some(dst),
@@ -849,10 +1425,11 @@ impl LowerCtx {
         kind: &VariantArmKind,
         body: &IrExpr,
         result_ty: &Ty,
+        subj: ValueId,
     ) -> Option<ValueId> {
         let arm_tag = match kind {
             VariantArmKind::Ctor { tag, .. } => *tag,
-            VariantArmKind::Wildcard => return None,
+            VariantArmKind::Wildcard | VariantArmKind::BindAll { .. } => return None,
         };
         let dst = self.fresh_value();
         let tc = self.fresh_value();
@@ -860,7 +1437,7 @@ impl LowerCtx {
         let cond = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
         self.ops.push(Op::IfThen { cond, dst: Some(dst) });
-        let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, true)?;
+        let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, true, subj)?;
         self.ops.push(Op::Else { val: Some(then_v) });
         // The dead `else`: a fresh owned empty-string block (a heap i32 handle, repr-compatible with
         // any heap result). `Consume` moves it into `dst` exactly as a real arm value would.
@@ -900,7 +1477,7 @@ impl LowerCtx {
                             IrPattern::Wildcard => {}
                             // slot 1+i (slot 0 is the tag). A SCALAR field binds by value copy.
                             IrPattern::Bind { var, ty } if !is_heap_ty(ty) => {
-                                binds.push((1 + i, *var, false))
+                                binds.push((1 + i, *var, false, ty.clone()))
                             }
                             // ANY heap field (`String`, a nested VARIANT, a `List[…]` —
                             // `ArrV(xs) => for x in xs`, the gguf ValArray consumer — Bytes,
@@ -909,7 +1486,7 @@ impl LowerCtx {
                             // type-agnostic (a slot-handle load); what the ARM does with it is
                             // gated by the arm-body lowering as usual.
                             IrPattern::Bind { var, ty } if is_heap_ty(ty) => {
-                                binds.push((1 + i, *var, true))
+                                binds.push((1 + i, *var, true, ty.clone()))
                             }
                             // a nested ctor pattern — a later brick.
                             _ => return None,
@@ -933,10 +1510,10 @@ impl LowerCtx {
                         match &f.pattern {
                             None | Some(IrPattern::Wildcard) => {}
                             Some(IrPattern::Bind { var, ty }) if !is_heap_ty(ty) => {
-                                binds.push((1 + idx, *var, false))
+                                binds.push((1 + idx, *var, false, ty.clone()))
                             }
                             Some(IrPattern::Bind { var, ty }) if is_heap_ty(ty) => {
-                                binds.push((1 + idx, *var, true))
+                                binds.push((1 + idx, *var, true, ty.clone()))
                             }
                             _ => return None,
                         }
@@ -944,7 +1521,10 @@ impl LowerCtx {
                     VariantArmKind::Ctor { tag: case.tag as i64, binds }
                 }
                 IrPattern::Wildcard => VariantArmKind::Wildcard,
-                // a binder catch-all `x => …` over a variant — walled for now (later brick)
+                // A BINDER catch-all (`e => …`): binds the whole subject (borrow), any tag.
+                IrPattern::Bind { var, ty } if is_heap_ty(ty) => {
+                    VariantArmKind::BindAll { var: *var }
+                }
                 _ => return None,
             };
             plans.push((kind, &arm.body));
@@ -959,15 +1539,37 @@ impl LowerCtx {
     /// before this call). The OWNED copy — not a borrow — is what the proven checker needs: a
     /// consuming re-use moves an owned ref, a read-only use drops it, a move-out hands it off,
     /// all rc-balanced; a BORROW would `Consume`/`m` at rc 0 on a re-use (the rejected double-free).
-    fn bind_variant_arm(&mut self, kind: &VariantArmKind, h: ValueId) {
+    fn bind_variant_arm(&mut self, kind: &VariantArmKind, h: ValueId, subj: ValueId) {
+        if let VariantArmKind::BindAll { var } = kind {
+            // The whole-subject borrow: the subject's owner (an outer temp / param) keeps
+            // the reference; a consuming re-use in the arm (`err(e)`) Dups it.
+            self.value_of.insert(*var, subj);
+            self.param_values.insert(subj);
+            return;
+        }
         if let VariantArmKind::Ctor { binds, .. } = kind {
-            for (slot, var, is_heap) in binds {
+            for (slot, var, is_heap, fty) in binds {
                 let off = layout::slot_offset(*slot) as i64;
                 if *is_heap {
                     // BORROW the slot handle: the subject owns the String; a move-out auto-Dups
                     // in `lower_heap_result_arm`, a consuming re-use Dups in `lower_owned_heap_field`.
                     let p = self.load_at_offset(h, off, crate::PrimKind::LoadHandle);
                     self.param_values.insert(p);
+                    // An Option/Result PAYLOAD field (`Box(Option[Int])` — the depth-2
+                    // single-outer + builtin-inner class): seed the borrowed handle's
+                    // READ-shape so the inner `match $f { Some(n)/None }` executes (reads the
+                    // len/cap tag) instead of walling on a scalar destructure. Gated to
+                    // Option/Result exactly (the canonical seeder's variant arms) — a
+                    // String/List/nested-variant bind keeps today's borrow-only discipline.
+                    if matches!(fty,
+                        Ty::Applied(
+                            almide_lang::types::constructor::TypeConstructorId::Option
+                                | almide_lang::types::constructor::TypeConstructorId::Result,
+                            _
+                        ))
+                    {
+                        self.seed_variant_param(p, fty);
+                    }
                     self.value_of.insert(*var, p);
                 } else {
                     let payload =
@@ -1024,7 +1626,7 @@ impl LowerCtx {
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
         let tag = self.load_at_offset(h, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 });
-        self.emit_variant_unit_chain(h, tag, &plans)
+        self.emit_variant_unit_chain(h, tag, &plans, subj)
     }
 
     /// Emit the right-nested `if tag == t0 { arm0 } else if … else { last }` chain for a
@@ -1037,25 +1639,28 @@ impl LowerCtx {
         h: ValueId,
         tag: ValueId,
         plans: &[(VariantArmKind, &IrExpr)],
+        subj: ValueId,
     ) -> Result<(), LowerError> {
         let Some(((kind, body), rest)) = plans.split_first() else {
             return Ok(());
         };
-        if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard) {
-            return self.lower_variant_unit_arm(kind, body, h);
+        if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard | VariantArmKind::BindAll { .. }) {
+            return self.lower_variant_unit_arm(kind, body, h, subj);
         }
         let arm_tag = match kind {
             VariantArmKind::Ctor { tag, .. } => *tag,
-            VariantArmKind::Wildcard => unreachable!("handled above"),
+            VariantArmKind::Wildcard | VariantArmKind::BindAll { .. } => {
+                unreachable!("handled above")
+            }
         };
         let tc = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: tc, value: arm_tag });
         let cond = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
         self.ops.push(Op::IfThen { cond, dst: None });
-        self.lower_variant_unit_arm(kind, body, h)?;
+        self.lower_variant_unit_arm(kind, body, h, subj)?;
         self.ops.push(Op::Else { val: None });
-        self.emit_variant_unit_chain(h, tag, rest)?;
+        self.emit_variant_unit_chain(h, tag, rest, subj)?;
         self.ops.push(Op::EndIf { val: None });
         Ok(())
     }
@@ -1069,9 +1674,10 @@ impl LowerCtx {
         kind: &VariantArmKind,
         body: &IrExpr,
         h: ValueId,
+        subj: ValueId,
     ) -> Result<(), LowerError> {
         let mark = self.live_heap_handles.len();
-        self.bind_variant_arm(kind, h);
+        self.bind_variant_arm(kind, h, subj);
         self.lower_branch_arm(None, body)?;
         self.drop_arm_locals(mark);
         Ok(())
@@ -1090,16 +1696,19 @@ impl LowerCtx {
         tag: ValueId,
         plans: &[(VariantArmKind, &IrExpr)],
         result_ty: &Ty,
+        subj: ValueId,
     ) -> Option<ValueId> {
         let heap = is_heap_ty(result_ty);
         let ((kind, body), rest) = plans.split_first()?;
         // The last arm, or any Wildcard, is the unconditional else (no tag test).
-        if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard) {
-            return self.lower_variant_arm_value(kind, body, h, result_ty, heap);
+        if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard | VariantArmKind::BindAll { .. }) {
+            return self.lower_variant_arm_value(kind, body, h, result_ty, heap, subj);
         }
         let arm_tag = match kind {
             VariantArmKind::Ctor { tag, .. } => *tag,
-            VariantArmKind::Wildcard => unreachable!("handled above"),
+            VariantArmKind::Wildcard | VariantArmKind::BindAll { .. } => {
+                unreachable!("handled above")
+            }
         };
         let dst = self.fresh_value();
         let tc = self.fresh_value();
@@ -1107,9 +1716,35 @@ impl LowerCtx {
         let cond = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
         self.ops.push(Op::IfThen { cond, dst: Some(dst) });
-        let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, heap)?;
+        // RELEASE PARITY (mirrors lower_heap_result_if_inner): an OUTER handle
+        // this arm moves out must be released by the rest of the chain, and vice
+        // versa — otherwise the accounting is path-dependent (the branch-grouped
+        // cert `{m|}` rejects it; this keeps the lowering ahead of the checker).
+        let outer: Vec<ValueId> = self.live_heap_handles.clone();
+        let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, heap, subj)?;
+        let consumed_by_then: Vec<ValueId> =
+            outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
+        let else_marker_at = self.ops.len();
         self.ops.push(Op::Else { val: Some(then_v) });
-        let else_v = self.emit_variant_arm_chain(h, tag, rest, result_ty)?;
+        let live_after_then: Vec<ValueId> = self.live_heap_handles.clone();
+        let else_v = self.emit_variant_arm_chain(h, tag, rest, result_ty, subj)?;
+        let consumed_by_else: Vec<ValueId> = live_after_then
+            .iter()
+            .copied()
+            .filter(|x| !self.live_heap_handles.contains(x))
+            .collect();
+        for x in &consumed_by_then {
+            if !consumed_by_else.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.push(op); // the rest of the chain releases what this arm moved out
+            }
+        }
+        for x in &consumed_by_else {
+            if !consumed_by_then.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.insert(else_marker_at, op); // this arm releases what the chain moved out
+            }
+        }
         self.ops.push(Op::EndIf { val: Some(else_v) });
         Some(dst)
     }
@@ -1128,9 +1763,10 @@ impl LowerCtx {
         h: ValueId,
         result_ty: &Ty,
         heap: bool,
+        subj: ValueId,
     ) -> Option<ValueId> {
         let mark = self.live_heap_handles.len();
-        self.bind_variant_arm(kind, h);
+        self.bind_variant_arm(kind, h, subj);
         let v = if heap {
             self.lower_heap_result_arm(body, result_ty)
         } else {

@@ -1,4 +1,31 @@
 impl LowerCtx {
+    /// The type-driven scope-end drop handle for a `Map[String, <Named>]` value (the
+    /// desugared map literal's `from_list_hobj` result, split layout): a VARIANT value
+    /// routes to the generated `$__drop_map_<V>` (key rc_dec + flat/recursive value free,
+    /// generated for EVERY variant); a SCALAR-ONLY record to `$__drop_map_rec_<R>`
+    /// (both slots flat rc_dec). A heap-field RECORD value returns `None` — no generated
+    /// sweep exists, so the bind keeps the honest deferral/wall (never a leaky flat link).
+    pub(crate) fn map_named_value_drop(&self, ty: &Ty) -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::Map, a) = ty else { return None };
+        if a.len() != 2 || !matches!(a[0], Ty::String) {
+            return None;
+        }
+        let Ty::Named(n, _) = &a[1] else { return None };
+        let ns = n.as_str();
+        if self.variant_layouts.by_type.contains_key(ns) {
+            return Some(format!("map_{}", crate::lower::drop_fn_ident(ns)));
+        }
+        if crate::lower::canonical_record_key(&self.record_layouts, ns).is_some()
+            && self
+                .aggregate_field_tys(&a[1])
+                .is_some_and(|(_, tys)| tys.iter().all(|t| !is_heap_ty(t)))
+        {
+            return Some(format!("map_rec_{}", crate::lower::drop_fn_ident(ns)));
+        }
+        None
+    }
+
     pub(crate) fn lower_bind(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         // `let r = e!` (Unwrap — effect-fn error propagation) bound to a let/var was a deferred
         // `Const`/`Alloc{Opaque}` = a SILENT MISCOMPILE (`int.parse(s)!` bound 0, `g()!` empty).
@@ -211,9 +238,15 @@ impl LowerCtx {
             // projection LOADS the real value from the materialized aggregate's layout slot
             // (the VALUE MODEL); `xs[i]` is a bounds-checked `$elem_addr` load. Outside the
             // materialized subset it rolls back to the deferred `Const`.
+            // A `Var` RHS reaches here only when the alias arm above MISSED (`value_for`
+            // resolves locals, not globals): `let id = region_count` — a GLOBAL read. The
+            // scalar-value path routes it through `value_or_global` (a mutable global's
+            // slot Load / an immutable one's const materialization), a fresh dst either
+            // way — no alias to protect, so the mutable-binding `+0` copy is not needed.
             if let IrExprKind::Member { .. }
             | IrExprKind::TupleIndex { .. }
-            | IrExprKind::IndexAccess { .. } = &value.kind
+            | IrExprKind::IndexAccess { .. }
+            | IrExprKind::Var { .. } = &value.kind
             {
                 let mark = self.ops.len();
                 if let Some(dst) = self.lower_scalar_value(value) {
@@ -259,13 +292,47 @@ impl LowerCtx {
         match &value.kind {
             // Alias: `var b = a` — b is a NEW handle denoting the SAME heap
             // object as a, acquiring its own owned reference (the single
-            // fresh-vs-alias decision).
+            // fresh-vs-alias decision). `value_or_global` (not `value_for`):
+            // `let x = toplib.SYSTEM` aliases a MODULE-LEVEL global — the global
+            // materializes its cached fresh owned copy (const-init only, zero
+            // calls injected), and the Dup below co-owns it (#486 bind shape).
             IrExprKind::Var { id } => {
-                let src = self.value_for(*id)?;
+                let src = self.value_or_global(*id)?;
                 let dst = self.fresh_value();
                 self.value_of.insert(var, dst);
                 self.ops.push(Op::Dup { dst, src });
                 self.live_heap_handles.push(dst);
+                // The alias denotes the SAME block: a materialized aggregate/option/
+                // result source keeps those properties through the Dup (`let x =
+                // toplib.CFG; { ...x, name: "y" }` — the #502 rebound spread base).
+                // The LIST registrations propagate too: `mains = mains2` then
+                // `mains[i]` gated on `materialized_lists` declined on the fresh Dup
+                // vid (the whole enclosing loop then rolled back to the strict wall —
+                // the ceangal resolve_line_flex class), and the DROP-ROUTE sets must
+                // follow the alias so the dup'd reference frees its block by the same
+                // recursive route when it happens to be the last one (a flat rc_dec
+                // of a heap-element list's final ref leaks the elements).
+                if self.materialized_aggregates.contains(&src) {
+                    self.materialized_aggregates.insert(dst);
+                }
+                if self.materialized_lists.contains(&src) {
+                    self.materialized_lists.insert(dst);
+                }
+                if self.heap_elem_lists.contains(&src) {
+                    self.heap_elem_lists.insert(dst);
+                }
+                if self.str_str_elem_lists.contains(&src) {
+                    self.str_str_elem_lists.insert(dst);
+                }
+                if self.value_handles.contains(&src) {
+                    self.value_handles.insert(dst);
+                }
+                if let Some(mask) = self.record_masks.get(&src).cloned() {
+                    self.record_masks.insert(dst, mask);
+                }
+                if let Some(route) = self.variant_drop_handles.get(&src).cloned() {
+                    self.variant_drop_handles.insert(dst, route);
+                }
                 Ok(())
             }
             // A fresh heap value (literal container / string / Option·Result
@@ -564,6 +631,13 @@ impl LowerCtx {
             | IrExprKind::TupleIndex { .. } => {
                 let dst = self.lower_heap_extraction(value)?;
                 self.value_of.insert(var, dst);
+                // A Fn-typed field extraction (`let f = h.run` — the record_fn_field
+                // "field access then call" shape): the borrowed slot handle IS a closure
+                // block — track it so a later `f("world")` dispatches via the closure
+                // machinery (closure_value_of) instead of walling as unresolvable.
+                if matches!(ty, Ty::Fn { .. }) {
+                    self.closure_values.insert(dst);
+                }
                 // A precise heap-field BORROW (a `LoadHandle` of a slot in a still-owning
                 // container) is in `param_values` — it is NOT a second owner, so it must NOT
                 // join the scope-end drop set (the container's masked drop frees the field).
@@ -595,15 +669,11 @@ impl LowerCtx {
                 }
                 let lowered = self.lower_call_args(args)?;
                 let dst = self.fresh_value();
-                // A function-VALUED result (`let f = mk()` where `mk` returns a lifted lambda) is a
-                // scalar FUNCREF (an i64 table slot), NOT the i32 heap Ptr `repr_of(Ty::Fn)` gives — so
-                // the bound local is typed i64 to match the callee's i64 return (the `CallIndirect`
-                // wraps it to the i32 table index).
-                let repr = if matches!(ty, Ty::Fn { .. }) {
-                    crate::Repr::Scalar { width: crate::ScalarWidth::Double }
-                } else {
-                    repr_of(ty)?
-                };
+                // A function-VALUED result (`let f = mk()`) is a CLOSURE BLOCK — the uniform
+                // heap representation (`repr_of(Ty::Fn)` = Ptr), owned + dropped at scope end
+                // like any heap result; `closure_values` (below) makes a later `f(args)`
+                // dispatch through it.
+                let repr = repr_of(ty)?;
                 self.value_of.insert(var, dst);
                 self.ops.push(Op::CallFn {
                     dst: Some(dst),
@@ -612,7 +682,13 @@ impl LowerCtx {
                     result: Some(repr),
                 });
                 self.live_heap_handles.push(dst);
-                if crate::lower::is_list_list_str_ty(ty) {
+                if crate::lower::is_res_intlist_strlist_ty(ty) {
+                    // `result.collect` — Result[List[Int], List[String]]: the TAG-AWARE
+                    // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;
+                    // either flat class would leak or double-free one side).
+                    self.variant_drop_handles.insert(dst, "res_ilsl".to_string());
+                    self.materialized_results_str.insert(dst);
+                } else if crate::lower::is_list_list_str_ty(ty) {
                     self.list_list_str_lists.insert(dst);
                 } else if crate::lower::is_list_str_str_ty(ty) {
                     // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
@@ -628,6 +704,36 @@ impl LowerCtx {
                 } else if crate::lower::is_map_hval_ty(ty) {
                     // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
                     self.variant_drop_handles.insert(dst, "map_hval".to_string());
+                } else if let Some(hname) = self.map_named_value_drop(ty) {
+                    // `Map[String, <record/variant>]` — the desugared map literal's
+                    // from_list result (type-driven sweep; see `map_named_value_drop`).
+                    self.variant_drop_handles.insert(dst, hname);
+                } else if crate::lower::is_map_msv_ty(ty) {
+                    // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
+                    // last-ref inner map's String slots (a flat rc_dec would leak them).
+                    self.variant_drop_handles.insert(dst, "map_msv".to_string());
+                } else if crate::lower::is_map_mlo_ty(ty) {
+                    // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
+                    // last-ref value list's Option slots (a flat rc_dec would leak them).
+                    self.variant_drop_handles.insert(dst, "map_mlo".to_string());
+                } else if crate::lower::is_lenlist_list_ty(ty) {
+                    // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
+                    // flat DropListStr would leak each element's owned payload slots.
+                    self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+                } else if crate::lower::is_opt_list_str_ty(ty) {
+                    // `Option[List[String]]` (the heap-acc fold value) — physically a 0/1-element
+                    // List[List[String]]; the nested DropListListStr sweep is its exact free (the
+                    // flat DropListStr would leak the stack Strings).
+                    self.list_list_str_lists.insert(dst);
+                } else if matches!(ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                        if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
+                {
+                    // `Map[String, <scalar>]` (split layout, @4 = n): the DropListStr sweep
+                    // rc_decs exactly the n deep-copied key Strings (scalar value slots
+                    // untouched) — the bare flat rc_dec LEAKED every key copy per bind (a
+                    // latent leak the map.fold heap-acc loop made observable at a 4MB cap).
+                    self.heap_elem_lists.insert(dst);
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -637,13 +743,12 @@ impl LowerCtx {
                 if crate::lower::is_value_ty(ty) {
                     self.value_handles.insert(dst);
                 }
-                // A user fn RETURNING a function value (`let f = mk()` where `mk() -> (Int) -> Int`
-                // returns a lifted non-capturing lambda) yields a FUNCREF (a scalar table slot, NOT a
-                // heap block): track it so a later `f(args)` dispatches through `Op::CallIndirect`, and
-                // drop it from the scope-end set (a funcref is not an allocation to free).
+                // A user fn RETURNING a function value (`let f = mk()` / `let f = adder(3)`)
+                // yields a CLOSURE BLOCK — a fresh owned heap value (already in the scope-end
+                // set like any heap result): track it so a later `f(args)` dispatches through
+                // `Op::CallIndirect` via `emit_closure_call`.
                 if matches!(ty, Ty::Fn { .. }) {
-                    self.live_heap_handles.retain(|h| *h != dst);
-                    self.funcref_values.insert(dst);
+                    self.closure_values.insert(dst);
                 }
                 // A user function returning Option/Result yields a REAL same-layout variant block
                 // (the v1 calling convention — `seed_variant_param`'s contract). SEED its READ-shape
@@ -689,11 +794,17 @@ impl LowerCtx {
                 // POPULATED block — admit a direct `xs[i]` — ONLY when the call is FAITHFULLY executable:
                 //  (1) every closure arg LIFTED (an unlifted `list.map(fns, (f) => f(10))` runs the
                 //      combinator with a missing slot → empty/garbage), AND
-                //  (2) no DATA argument carries a function type (`list.map(fns, …)` over `fns:
-                //      List[(Int)->Int]` — a list of closures the v1 model cannot represent →
-                //      empty/garbage). The combinator's OWN closure arg (a `Lambda`/`FnRef`, function-
-                //      typed by construction) is EXCLUDED — it is handled by (1), and `(p) => p.x` over
-                //      `points: List[Point]` is the faithful case that must stay tracked.
+                //  (2) no DATA argument carries an UN-REPRESENTABLE function type (this comment
+                //      historically said "list.map(fns, …) over fns: List[(Int)->Int] — a list of
+                //      closures the v1 model cannot represent" — no longer true: B36 shipped
+                //      `List[<Fn>]` literal construction + a generated per-element `$__drop_
+                //      list_closure`, so a `List[Fn]` DATA arg is now a REAL, populated,
+                //      correctly-freed block — excluded below). A Fn buried in some OTHER shape
+                //      (a record/tuple field, a nested nested-List[List[Fn]]) is still unrepresented
+                //      and stays walled. The combinator's OWN closure arg (a `Lambda`/`FnRef`,
+                //      function-typed by construction) is EXCLUDED too — it is handled by (1), and
+                //      `(p) => p.x` over `points: List[Point]` is the faithful case that must stay
+                //      tracked.
                 // Otherwise the result is unmaterialized and a `xs[i]` over it would TRAP on cap 0, so
                 // it is left deferring to `Const 0` (mis-valued, never a new runtime crash).
                 let data_arg_has_fn = args.iter().any(|a| {
@@ -708,7 +819,11 @@ impl LowerCtx {
                         &a.kind,
                         IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::ClosureCreate { .. }
                     ) || matches!(&a.kind, IrExprKind::Var { id } if self.lambda_bindings.contains_key(id));
-                    !is_closure_arg && crate::lower::ty_contains_fn(&a.ty)
+                    // `List[<Fn>]` is B36's representable shape — excluded from the wall.
+                    let is_representable_closure_list = matches!(&a.ty,
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e)
+                            if e.len() == 1 && matches!(e[0], Ty::Fn { .. }));
+                    !is_closure_arg && !is_representable_closure_list && crate::lower::ty_contains_fn(&a.ty)
                 });
                 let faithful = !self.last_call_had_unlifted_closure && !data_arg_has_fn;
                 // WALL the UNFAITHFUL higher-order combinator instead of silently
@@ -782,7 +897,13 @@ impl LowerCtx {
                 }
                 // A `List[String]` result (string.split / a List[String] combinator) is a
                 // nested-ownership list — its scope-end drop must recursively free elements.
-                if crate::lower::is_list_list_str_ty(ty) {
+                if crate::lower::is_res_intlist_strlist_ty(ty) {
+                    // `result.collect` — Result[List[Int], List[String]]: the TAG-AWARE
+                    // generated `$__drop_res_ilsl` (Err → recursive string free, Ok → flat;
+                    // either flat class would leak or double-free one side).
+                    self.variant_drop_handles.insert(dst, "res_ilsl".to_string());
+                    self.materialized_results_str.insert(dst);
+                } else if crate::lower::is_list_list_str_ty(ty) {
                     self.list_list_str_lists.insert(dst);
                 } else if crate::lower::is_list_str_str_ty(ty) {
                     // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
@@ -798,6 +919,36 @@ impl LowerCtx {
                 } else if crate::lower::is_map_hval_ty(ty) {
                     // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
                     self.variant_drop_handles.insert(dst, "map_hval".to_string());
+                } else if let Some(hname) = self.map_named_value_drop(ty) {
+                    // `Map[String, <record/variant>]` — the desugared map literal's
+                    // from_list result (type-driven sweep; see `map_named_value_drop`).
+                    self.variant_drop_handles.insert(dst, hname);
+                } else if crate::lower::is_map_msv_ty(ty) {
+                    // `Map[String, Map[String, String]]` — `$__drop_map_msv` sweeps each
+                    // last-ref inner map's String slots (a flat rc_dec would leak them).
+                    self.variant_drop_handles.insert(dst, "map_msv".to_string());
+                } else if crate::lower::is_map_mlo_ty(ty) {
+                    // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
+                    // last-ref value list's Option slots (a flat rc_dec would leak them).
+                    self.variant_drop_handles.insert(dst, "map_mlo".to_string());
+                } else if crate::lower::is_lenlist_list_ty(ty) {
+                    // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
+                    // flat DropListStr would leak each element's owned payload slots.
+                    self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+                } else if crate::lower::is_opt_list_str_ty(ty) {
+                    // `Option[List[String]]` (the heap-acc fold value) — physically a 0/1-element
+                    // List[List[String]]; the nested DropListListStr sweep is its exact free (the
+                    // flat DropListStr would leak the stack Strings).
+                    self.list_list_str_lists.insert(dst);
+                } else if matches!(ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                        if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
+                {
+                    // `Map[String, <scalar>]` (split layout, @4 = n): the DropListStr sweep
+                    // rc_decs exactly the n deep-copied key Strings (scalar value slots
+                    // untouched) — the bare flat rc_dec LEAKED every key copy per bind (a
+                    // latent leak the map.fold heap-acc loop made observable at a 4MB cap).
+                    self.heap_elem_lists.insert(dst);
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -815,18 +966,25 @@ impl LowerCtx {
             // flat_map). A Computed callee that is NOT a known funcref falls through to the
             // deferred Opaque below.
             IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
-                if self.funcref_value_of(callee).is_some() =>
+                if self.closure_value_of(callee).is_some()
+                    || Self::is_fn_member_callee(callee) =>
             {
-                let table_idx = self.funcref_value_of(callee).unwrap();
+                // A tracked closure VAR — or a RECORD-SLOT closure (`h.run("hello")` —
+                // B8's Computed(Member); `closure_block_of_mut` loads the slot borrow).
+                let blk = match self.closure_block_of_mut(callee) {
+                    Some(b) => b,
+                    None => {
+                        return Err(LowerError::Unsupported(
+                            "heap-result record-slot closure call over an unresolvable \
+                             container not in this brick"
+                                .into(),
+                        ))
+                    }
+                };
                 let repr = repr_of(ty)?;
                 let lowered = self.lower_call_args(args)?;
                 let dst = self.fresh_value();
-                self.ops.push(Op::CallIndirect {
-                    dst: Some(dst),
-                    table_idx,
-                    args: lowered,
-                    result: Some(repr),
-                });
+                self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
                 // The funcref returns its Result/Option in the SAME materialized layout an `ok()`/
@@ -834,6 +992,29 @@ impl LowerCtx {
                 // SEED its read-shape — a later `match o { ok/err }` over the bound var then reads its
                 // real tag instead of walling (the higher-order-Result-callback path `fan.map` needs).
                 self.seed_variant_param(dst, ty);
+                // An `Option[List[String]]` closure result (the heap-acc fold's per-iteration
+                // acc): the flat `heap_elem_lists` seed above would free ONE level only,
+                // leaking the inner list's Strings every iteration (a fold loop OOMs) — route
+                // its scope-end drop to the nested `DropListListStr` sweep instead.
+                if crate::lower::is_opt_list_str_ty(ty) {
+                    self.heap_elem_lists.remove(&dst);
+                    self.list_list_str_lists.insert(dst);
+                }
+                // A MAP closure result (the map.fold heap-acc's per-iteration acc — the
+                // `(a, k, v) => ["fresh": v]` fresh-map closure): the bare
+                // `live_heap_handles` default is a FLAT rc_dec, which frees the map block
+                // but LEAKS its key Strings every iteration (the 100k fold loop OOMs at a
+                // 4MB cap). Route the scope-end drop to the DropListStr sweep — exact for
+                // BOTH map layouts: `Map[String, String]` (interleaved, @4 = 2n, every
+                // slot a String handle) and `Map[String, <scalar>]` (split, @4 = n, the
+                // sweep rc_decs exactly the n key slots; the scalar value slots beyond
+                // are untouched).
+                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                    if a.len() == 2 && matches!(a[0], Ty::String)
+                        && (!is_heap_ty(&a[1]) || matches!(a[1], Ty::String)))
+                {
+                    self.heap_elem_lists.insert(dst);
+                }
                 Ok(())
             }
             // `var x = obj.method(args)` / `var x = (g)(args)` — an UNRESOLVABLE

@@ -30,6 +30,7 @@ pub mod coown_names;
 pub mod lower;
 pub mod pipeline;
 pub mod purity;
+pub mod render_native;
 pub mod render_rust;
 pub mod render_wasm;
 pub mod translation_validation;
@@ -421,6 +422,28 @@ pub enum Op {
     /// ownership (a scalar constant); no capability (the dispatch site taints, not this).
     FuncRef { dst: ValueId, name: String },
 
+    /// A SCALAR-element list LITERAL materialized as ONE target-neutral op (rung 4 of
+    /// the native trust-spine ladder — the shared-MIR list design): `dst` = a fresh
+    /// OWNED `List[<scalar>]` block whose slots hold `elems` (raw i64 slot values,
+    /// `len == cap == elems.len()`). render_wasm expands it to EXACTLY the
+    /// `Alloc{DynList}` + per-slot-store sequence the inline builder emitted before;
+    /// render_native maps it to `vec![…]`. Certificate/ownership: ONE `i`
+    /// (alloc-class) on `dst` — the identical event stream the replaced `Alloc`
+    /// produced, so the kernel checker sees no new vocabulary.
+    ListLit { dst: ValueId, elems: Vec<ValueId> },
+
+    /// `dst = list[idx]` for a SCALAR element — the bounds-checked element load
+    /// (idx < 0 or >= cap TRAPs, matching native's halt). Replaces the inline
+    /// `Handle` + `ElemAddr` + `Load{8}` sequence one-for-one; ownership-NEUTRAL
+    /// (the list handle is borrowed/live-checked, the scalar result carries none).
+    ListGetScalar { dst: ValueId, list: ValueId, idx: ValueId },
+
+    /// `list[idx] = val` for a SCALAR element — the bounds-checked element store
+    /// (COW is the caller's existing `MakeUnique` BEFORE this op). Replaces the
+    /// inline `Handle` + `ElemAddr` + `Store{8}` sequence one-for-one;
+    /// ownership-NEUTRAL like the load.
+    ListSetScalar { list: ValueId, idx: ValueId, val: ValueId },
+
     /// `dst = a <op> b` on scalars (no ownership) — the arithmetic runtime
     /// functions need.
     IntBinOp { dst: ValueId, op: IntOp, a: ValueId, b: ValueId },
@@ -528,6 +551,27 @@ pub enum PrimKind {
     /// ownership certificate emits an `i` (alloc) for it, balanced by the caller's
     /// scope-end drop (a recursive `DropListStr` over the owned element Strings).
     ArgsGetList,
+    /// The SAME WASI args floor as [`ArgsGetList`] but INCLUDING argv[0] (the program
+    /// path) — `process.args()` = native `std::env::args()`. Renders as
+    /// `(call $args_get_list (i32.const 0))` (the one parameterized bridge, skip=0);
+    /// same fresh OWNED `List[String]` dst, same [`Capability::CliArgs`] accounting.
+    ArgsGetListFull,
+    /// The WASI `environ_sizes_get` + `environ_get` lookup, packaged as ONE high-level
+    /// HEAP-RESULT prim — `args = [name]` (a BORROWED `String` handle), dst = a fresh
+    /// OWNED `Option[String]`: a 0-slot block (none) or a 1-slot block whose @12 holds
+    /// the owned value String (some) — the `materialize_opt_str_some` layout, so the
+    /// caller's `match`/`??`/`DropListStr` machinery handles it identically to a
+    /// self-host-built Option. Scans the `KEY=VALUE\0` environ entries for `name`
+    /// followed by `=` (byte-exact, first hit wins) — native `std::env::var(name).ok()`
+    /// is the oracle (C-133; the runner passes the host env through
+    /// `wasmtime -S inherit-env=y`). Reached only by the self-hosted `env.get`.
+    /// Carries [`Capability::CliArgs`] — the Env effect-profile's canonical capability
+    /// (reading the process's initial environment, the same class as argv; the profile
+    /// map `"Env" => CliArgs` already binds them). Its dst is a heap Ptr (like
+    /// [`ArgsGetList`]), so the ownership certificate emits an `i` (alloc) for it,
+    /// balanced by the caller's scope-end drop (the flat `DropListStr` frees the owned
+    /// payload String, if any, then the block) or a heap-return move-out.
+    EnvGet,
     /// The WASI `fd_read`-from-stdin line-read sequence, packaged as ONE high-level HEAP-RESULT
     /// prim — no args, dst = a fresh OWNED canonical `String` of ONE line of standard input.
     /// Reads fd 0 BYTE-BY-BYTE (so it never over-reads past the newline — a later
@@ -649,6 +693,16 @@ pub enum PrimKind {
     /// the SAME accounting as [`ReadTextFile`] → FsRead); counted in cap_witness. Reached only by
     /// the self-hosted `fs.exists`.
     PathExists,
+    /// The WASI `path_filestat_get` FULL-stat query — `args = [bufaddr, path]` (a raw scratch
+    /// ADDRESS the caller owns — the self-host's 64-byte Bytes data region — plus a BORROWED
+    /// `String` handle), dst = the SCALAR errno (i64; 0 = the host wrote the 64-byte WASI
+    /// filestat at `bufaddr`: filetype@16, size@32, mtim@48). The self-hosted `fs.stat` reads
+    /// the fields off its own scratch via `prim.load*` and builds the FileStat record in
+    /// ordinary Almide — the prim stays a thin syscall wrapper (no heap result, no ownership
+    /// event; the same scalar-dst discipline as [`PathExists`]). A stat IS a filesystem READ,
+    /// so it REUSES [`Capability::FsRead`] (counted in cap_witness). Reached only by the
+    /// self-hosted `fs.stat`.
+    PathFilestat,
     /// Release one reference of a RAW heap handle (`(call $rc_dec …)`), the inverse of [`RcInc`].
     /// The MECHANISM the self-hosted recursive `value.__drop_value` frees a dynamic Value tree with
     /// (the §4.1-compliant alternative to a hand-written WAT drop): it operates on raw Int handles,
@@ -956,6 +1010,30 @@ pub struct MirFunction {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct MirProgram {
     pub functions: Vec<MirFunction>,
+    /// `pub fn` export roots (#457 — the fns the v0 emitter also exports). Each entry:
+    /// (export_name — the `@export(wasm, "sym")` override or the fn name, internal fn
+    /// name, per-param is_float, ret: None = void / Some(is_float)). A Float-bearing
+    /// signature renders through a thin `f64.reinterpret_i64` wrapper so the export
+    /// presents REAL f64s (the v0 ABI) while the internal fn keeps the i64-bits
+    /// convention. Populated by the pipeline from the MAIN program's Public non-test
+    /// non-generic functions; empty everywhere else.
+    pub exports: Vec<(String, String, Vec<bool>, Option<bool>)>,
+    /// The number of MUTABLE module-level `var` storage slots. Slot `i` lives at linear
+    /// address [`mg_slot_addr`]`(i)` — the 8-byte region `[MG_SLOT_BASE, MG_SLOT_BASE +
+    /// 8*count)` carved between the print line buffer (which ends at `MG_SLOT_BASE`) and
+    /// the bump allocator (whose base the renderer shifts to `MG_SLOT_BASE + 8*count`).
+    /// A count of 0 renders byte-identically to a program with no mutable globals.
+    pub mutable_global_count: u32,
+}
+
+/// The base linear-memory address of the mutable-global slot region (== the renderer's
+/// `HEAP_BASE`; with no mutable globals the bump allocator starts exactly here).
+pub const MG_SLOT_BASE: u32 = 8192;
+
+/// The linear-memory address of mutable-global slot `index` (one uniform 8-byte slot per
+/// module-level `var`: a scalar holds its i64 value, a heap global its block handle).
+pub const fn mg_slot_addr(index: u32) -> u32 {
+    MG_SLOT_BASE + 8 * index
 }
 
 // ─────────────────────────── Ownership verifier ───────────────────────────
@@ -1047,6 +1125,22 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                 object_of.insert(*dst, *dst);
                 rc.insert(*dst, 1);
                 dead.insert(*dst, false);
+            }
+            // A rung-4 scalar-list LITERAL is alloc-class: one fresh owned object
+            // (the identical accounting the replaced `Alloc{DynList}` had). Its
+            // element values are raw i64 slot scalars — no ownership to check.
+            Op::ListLit { dst, .. } => {
+                object_of.insert(*dst, *dst);
+                rc.insert(*dst, 1);
+                dead.insert(*dst, false);
+            }
+            // The rung-4 element load/store BORROW the list handle (live-check,
+            // no refcount change — exactly the `Borrow`/`MakeUnique` discipline);
+            // the scalar element/index/value carry no ownership.
+            Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => {
+                if live_object(&object_of, &rc, &dead, &borrowed, *list).is_none() {
+                    violations.push(violation(i, *list, ViolationKind::UseAfterFree));
+                }
             }
             Op::Const { dst: _ } | Op::ConstInt { .. } => {
                 // A scalar — no ownership accounting.

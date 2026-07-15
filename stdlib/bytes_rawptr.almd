@@ -1,0 +1,36 @@
+// bytes_rawptr — SELF-HOSTED RawPtr / linear-memory bridge (#440, C-062):
+// `bytes.as_ptr` / `as_mut_ptr` yield the RAW ADDRESS of the Bytes DATA region
+// (handle + 12 — an i64 scalar, an i32 offset on wasm, never a tracked handle);
+// `from_raw_ptr(p, n)` copies n bytes FROM the raw address into a fresh OWNED
+// Bytes; `copy_to_ptr(b, ptr, cap)` writes min(len, cap) bytes THROUGH the raw
+// address and returns the count. Only the bytes moved through the bridge are
+// observable (the pointer VALUE differs per target by nature and is never
+// printed), matching the native *mut u8 semantics byte-for-byte on the data.
+// Address arithmetic runs on Int via the identity prim casts.
+fn bytes_as_ptr(b: Bytes) -> RawPtr = prim.int_to_ptr(prim.handle(b) + 12)
+
+fn bytes_as_mut_ptr(b: Bytes) -> RawPtr = prim.int_to_ptr(prim.handle(b) + 12)
+
+fn __brp_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.store8(dst + i, prim.load8(src + i))
+    __brp_copy(dst, src, n, i + 1)
+  }
+
+fn bytes_from_raw_ptr(p: RawPtr, n: Int) -> Bytes = {
+  let src = prim.ptr_to_int(p)
+  let out = prim.alloc_bytes(n)
+  let oh = prim.handle(out)
+  let _c = __brp_copy(oh + 12, src, n, 0)
+  out
+}
+
+fn bytes_copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = {
+  let dst = prim.ptr_to_int(ptr)
+  let h = prim.handle(b)
+  let len = prim.load32(h + 4)
+  let n = if len < cap then len else cap
+  let _c = __brp_copy(dst, h + 12, n, 0)
+  n
+}

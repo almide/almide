@@ -971,6 +971,36 @@ impl LowerCtx {
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }
+        // `prim.args_get_list_full()` — the argv[0]-INCLUSIVE twin (process.args =
+        // std::env::args()). Same fresh OWNED List[String] + DropListStr + CliArgs
+        // discipline; renders through the SAME parameterized $args_get_list bridge.
+        if func == "args_get_list_full" {
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::ArgsGetListFull, dst: Some(dst), args: vec![] });
+            self.heap_elem_lists.insert(dst);
+            return Ok(Some(dst));
+        }
+        // `prim.env_get(name)` — the WASI environ lookup floor (env.get). ONE BORROWED
+        // `String` arg (the variable name; the caller still owns it). Its dst is a FRESH
+        // OWNED `Option[String]` in the `materialize_opt_str_some` layout (0-slot none /
+        // 1-slot some owning the value String @12), registered in `heap_elem_lists` so
+        // the scope-end drop is the flat `DropListStr` (frees the payload String, if
+        // any, then the block). Carries Capability::CliArgs — the Env profile's
+        // canonical cap (counted in cap_witness exactly like ArgsGetList).
+        if func == "env_get" && args.len() == 1 {
+            let key = match self.lower_call_args(args)?.into_iter().next() {
+                Some(CallArg::Handle(v)) => v,
+                _ => {
+                    return Err(LowerError::Unsupported(
+                        "prim.env_get needs a borrowed String name".into(),
+                    ))
+                }
+            };
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::EnvGet, dst: Some(dst), args: vec![key] });
+            self.heap_elem_lists.insert(dst);
+            return Ok(Some(dst));
+        }
         // `prim.read_text_file(path)` — the WASI file-read floor (fs.read_text). ONE
         // BORROWED `String` arg (the path; the caller still owns it). Its dst is a FRESH
         // OWNED `Result[String, String]` built by the render in the EXACT
@@ -1099,6 +1129,41 @@ impl LowerCtx {
         // scalar with no scope-end drop and no ownership-cert `i`. Carries Capability::FsRead (a
         // stat IS a filesystem read — counted in cap_witness). The render emits the WASI
         // path_filestat_get query (errno 0 = exists).
+        // `prim.path_filestat(bufaddr, path)` — the WASI FULL-stat floor (fs.stat). TWO args: a
+        // raw scratch ADDRESS (an i64 scalar — the self-host's own Bytes data region, so the
+        // caller owns the buffer) and a BORROWED `String` path. dst = the SCALAR errno (0 = the
+        // 64-byte WASI filestat is at bufaddr). Like path_exists this allocates NO heap result —
+        // the dst joins no classification set. Carries Capability::FsRead (counted in cap_witness).
+        if func == "path_filestat" {
+            let bufaddr = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported(
+                    "prim.path_filestat buffer address is not a lowerable scalar".into(),
+                )
+            })?;
+            let path = self.lower_scalar_value(&args[1]).ok_or_else(|| {
+                LowerError::Unsupported(
+                    "prim.path_filestat path is not a lowerable scalar/handle".into(),
+                )
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: PrimKind::PathFilestat,
+                dst: Some(dst),
+                args: vec![bufaddr, path],
+            });
+            return Ok(Some(dst));
+        }
+        // `prim.ptr_to_int` / `prim.int_to_ptr` — REINTERPRET casts (identity at the
+        // value level: the RawPtr IS the i64 address). No op emitted — the operand's
+        // ValueId passes through, so the cert sees nothing (a pure hat-swap).
+        if func == "ptr_to_int" || func == "int_to_ptr" {
+            let v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported(
+                    "prim ptr cast operand is not a lowerable scalar".into(),
+                )
+            })?;
+            return Ok(Some(v));
+        }
         if func == "path_exists" {
             let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
                 LowerError::Unsupported("prim.path_exists path is not a lowerable scalar/handle".into())
@@ -1324,6 +1389,27 @@ impl LowerCtx {
                 // `List[(String,String)]` (map.entries) arg temp — DropListStrStr frees each tuple's
                 // two Strings; the flat heap_elem_lists fallback would leak them.
                 self.str_str_elem_lists.insert(dst);
+            } else if crate::lower::is_lenlist_list_ty(ty) {
+                self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+            } else if let Some(hname) = self.map_named_value_drop(ty) {
+                self.variant_drop_handles.insert(dst, hname);
+            } else if crate::lower::is_map_msv_ty(ty) {
+                // `Map[String, Map[String, String]]` arg temp (the inline nested-map literal
+                // fed straight to `map.get_or` — map_fold_heap_acc's r7): `$__drop_map_msv`
+                // sweeps each last-ref inner map; the flat fallback leaked the whole nested
+                // map per iteration (loop OOM).
+                self.variant_drop_handles.insert(dst, "map_msv".to_string());
+            } else if crate::lower::is_map_mlo_ty(ty) {
+                // `Map[String, List[Option[Int]]]` arg temp — `$__drop_map_mlo` (the
+                // bind-site route, mirrored; the flat fallback would leak the value lists).
+                self.variant_drop_handles.insert(dst, "map_mlo".to_string());
+            } else if matches!(ty,
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                    if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
+            {
+                // `Map[String, <scalar>]` arg temp — the key-slot sweep (split layout, @4 = n),
+                // mirroring the bind-site fix; the flat fallback leaked every key copy.
+                self.heap_elem_lists.insert(dst);
             } else if crate::lower::is_heap_elem_list_ty(ty) {
                 self.heap_elem_lists.insert(dst);
             }

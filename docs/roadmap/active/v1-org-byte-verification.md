@@ -271,6 +271,151 @@ float.parse's exact decimal→f64 rounding at the denormal/max boundaries
 (a strtod-class brick), the almide-grammar output divergence, and porta's 2
 native-FFI walls.
 
+## Sixth pass — org wall 101→0 arc, ceangal 77→21 (2026-07-14)
+
+- **Tail spread/record ctors** (`{ ...n, gap_main: v }` / `text()` returned):
+  tail.rs now routes SpreadRecord+Record through the arm-precedent builders;
+  `lower_owned_heap_field` gained the nested-spread arm + a `value_or_global`
+  Var arm (record globals like `_default`, scalar-only fallback included);
+  spread bases may be a Member (`{ ...v._style, … }` borrows via
+  `try_lower_heap_field_borrow`). ceangal 77→42.
+- **Mutable module-level `var` brick** (scroll bucket + a LIVE miscompile):
+  reads/assigns had silently materialized the init / rebound a local
+  (`5 3 0` vs native `5 8 8`, probe-confirmed; `inline_pure_call_globals`
+  also inlined mutable call-inits — writes invisible). Now each `var` gets a
+  linear-memory slot at `MG_SLOT_BASE + 8i` (bump base shifts; N=0 modules
+  byte-identical): read = `LoadHandle`+`Dup` (cert `a` = the render's rc_inc),
+  assign = build-new → `$__mg_take` (CallFn-owned, cert-honest) → type-routed
+  drop → store+Consume; `g[i] = v` = take → MakeUnique(COW) → elem store →
+  store-back; synthesized `__mg_init` runs before `__global_init` (walls the
+  program if an init can't lower). `__mg_take` excluded from the mir≤ir call
+  count (a prim-class injected accessor). ceangal 42→21 (scroll 21→0);
+  module_var_test + wasm_cross_pkg now run v1 (the corpus 0 is now HONEST).
+- **Float export ABI**: `pub fn` exports with Float params/ret render through a
+  `f64.reinterpret_i64` wrapper (`$__export_<fn>`) — the public ABI presents
+  real f64s (v0 parity); non-Float params keep their real reprs (i32 heap).
+- **Known v0-wasm divergence (recorded, unfixed)**: `let snapshot = g` then
+  `g[i] = v` — v0-wasm aliases (snapshot sees the write), native clones
+  (`9 9` vs `9 2.5`). v1's COW matches NATIVE; v0 retirement (Phase 3)
+  obsoletes the divergent path.
+- **Borrow-chain follow-ups (same day)**: `node.children[item.idx]` (index
+  whose list is a FIELD of a materialized aggregate) borrows through
+  `try_lower_heap_field_borrow`; `line.items[ii].idx` (scalar read off an
+  INDEXED element) resolves via an IndexAccess container arm. Together they
+  opened the whole Yoga layout core (compute_size / do_layout / resolve_line_
+  flex / layout_line / diff_tree) — ceangal 21→14. Fixtures:
+  `spec/lang/member_index_borrow_test.almd`.
+- **ceangal residual 14 — ALL cross-module-blocked (the per-file classify
+  floor)**: read each wall's actual code — every one depends on cross-module
+  state the per-file classify cannot resolve (`lay.MARGIN_AUTO` record-field
+  globals, `render.list_frame_height` cross-module mutable globals in the
+  both-arms-if conditions, `td.todos.get()` through the generic Cell API,
+  `v.*`/`lay.*` sibling calls in view_to_node/theme). The per-file wall
+  metric for ceangal has BOTTOMED at the cross-module boundary; further
+  ceangal progress routes through (a) sibling-resolved classification
+  tooling, (b) the generic-module-fn mono/link fix, (c) cross-module mutable
+  global bridging in the v1 pipeline (the slot map is same-region today).
+- **PRE-EXISTING checker bug (blocks ceangal's own suite, NOT this arc's
+  regression)**: `almide test` on ceangal fails the #433 name-pinning
+  postcondition (`Node` in build_lines/resolve_line_flex/layout_line/do_layout
+  should pin `layout.Node`) — reproduced identically on released v0.28.6.
+  Single-file / two-module minimal probes do NOT reproduce; needs ceangal's
+  real module graph. Separate checker workstream.
+- **PRE-EXISTING build blocker (ceangal, also on v0.28.6)**: `almide build
+  src/mod.almd --target wasm` fails IR verify — `call to unknown function
+  'cell.get'` (todoapp): the GENERIC module fn (`fn get[T](c: Cell[T])`)
+  called via cross-module UFCS never monomorphizes/links. Frontend (mono +
+  ir_link) workstream.
+- **homullus/almai frontier = the WASI-env runtime brick**: their dominant
+  walls (`memory_path`/`memory_dir`/`sessions_dir`/`require_env` …) are
+  `match env.get(..)` tails — v1 has no `env.get` lowering, AND v0-wasm ICEs
+  outright (`[ICE] emit_wasm: no WASM dispatch for env.get`,
+  calls_env.rs:63 — a PANIC, not a wall, on released binaries too). Opening
+  this class = env via WASI `environ_get` on BOTH engines (+ a C-contract for
+  env observability), then the match-tail machinery applies as-is. The
+  non-env homullus walls (value_to_tool_call/value_to_message Record/Value
+  shapes) are ordinary lowering bricks.
+  **SHIPPED (same day): the WASI-env brick, both engines.** (1) v0-wasm
+  `emit_env_call("get")` — environ scan mirroring `emit_wasi_argv_list`; the
+  some() is a BOXED cell holding the value String (`unwrap_or`/match load
+  `*opt` — the v0-wasm Option convention; the unboxed first draft matched
+  but printed empty). (2) The runner + all three test-gate wasmtime spawns
+  pass `-S inherit-env=y` (without it every guest lookup was none — the
+  silent-divergence trap the design predicted). (3) v1: `PrimKind::EnvGet`
+  (Capability::CliArgs — the Env profile's canonical cap, no new id), the
+  `$env_get` preamble WAT (4-ALIGNED out-pointers — `$alloc` guarantees no
+  alignment, wasmtime traps otherwise — and a ONE-TIME environ snapshot in
+  `$env_envp`/`$env_cnt` globals: the per-call re-read leaked its scratch,
+  the 120k leak-loop hung), the `env_get.almd` self-host + `prim.env_get`
+  declaration, cert `i`-alloc + kernel-verified. (4) C-133 (ALS-R5) +
+  `spec/wasm_cross/env_get.almd` (243 equal). almai 7→0, homullus 9→6,
+  RATCHET 0 (the fixture itself lowers through v1).
+
+- **homullus residual 6 = external-type artifacts + the glob path-model gap**:
+  `ok(Resp{...})` tails lower fine single-module (probe-verified) — the walls
+  come from `almai.LLMResponse`/`almai.ToolCall` being an EXTERNAL package's
+  types the per-file classify cannot resolve (the same artifact class as
+  ceangal's cross-module residue). The one REAL gap: `fs.glob` — native
+  matches patterns against ABSOLUTE canonicalized host paths (runtime/rs
+  fs.rs `glob_recursive`), which the wasm preopen path model cannot
+  reproduce byte-identically; v0-wasm ALSO has no glob dispatch (the same
+  latent-ICE class env.get was). Opening it needs a PATH-MODEL contract
+  first — out of the byte-parity subset by design until then.
+- **Measurement is now the org-arc bottleneck**: per-file classify has
+  bottomed on artifacts across ceangal/homullus. The next high-leverage
+  brick is sibling/package-RESOLVED classification (classify with the same
+  import resolution render_program uses), so org numbers count only real
+  lowering gaps.
+- **RESOLVED-strict measurement (same day, via render_program — it already
+  runs the canonical driver discovery)**: **homullus = 0 walls. ceangal = 8**
+  (vs 14 per-file): theme 3 — `let gray_50 = v.rgb(…)` MODULE→MODULE global
+  refs still UNBOUND even resolved (the cross-module top-let bridge misses
+  call-init globals referenced from a SIBLING module — a real pipeline gap);
+  scroll 2 + layout 1 — STRICT-mode scalar-binding/for-in-var value-subset
+  walls (permissive classify hid them); render 2 — view_to_node/
+  zip_view_rects heap-result-if (real, now measured resolved). The true org
+  frontier ≈ ceangal 8 + porta 2 + singles. org-trust-status.sh should adopt
+  the resolved sweep as the headline number.
+  **The 8 decompose into exactly THREE next bricks**: (1) theme 3 = the
+  MODULE→MODULE top-let bridge (`bridge_cross_module_toplets` only maps
+  main-side refs — `ir.var_table` with `module_origin`; a sibling module's
+  refs live in ITS `m.var_table` and never bridge; per-module region maps
+  needed, mind the VarId-collision hazard the shared union tolerates).
+  (2) scroll/layout 3 → SHIPPED same day for the scroll 2: `let id =
+  region_count` — a bind whose RHS is a bare mutable-global Var missed BOTH
+  the alias arm (`value_for` resolves locals only) AND the projection
+  attempt (no Var kind) → strict wall; adding Var to the scalar-value
+  attempt routes it through `value_or_global`'s slot Load. ceangal resolved
+  8→6. layout's resolve_line_flex (a for-in VAR wall) remains. (3) render
+  2 = the arm-BLOCK tail-helper lift: zip_view_rects' else arm is a full
+  block (global assigns + for-loops + accumulators) returning a record —
+  the heap-result-if ARM machinery lowers arm VALUES; the 1792e5d7 dense-
+  chain lift must generalize to lift such arm blocks into helper fns.
+
+## Seventh pass — CEANGAL 0 (2026-07-15)
+
+The last two render walls (view_to_node / zip_view_rects) decomposed through
+instrumented bisecting into THREE small gaps, each probe-verified + parity-run:
+
+- **Anon-record concat admission**: `items + [{ x: …, content: nm, … }]` — the
+  checker leaves the 19-field element STRUCTURAL, and the concat's admission
+  used the Named-only `record_drop_type_name`. Widened to
+  `record_or_anon_drop_type_name` (the `$__drop_list_anonrec_<hash>` wrapper
+  generation already existed).
+- **Module-keyed top-let bridge**: `kind: v.ROW` — view.ROW and layout.ROW
+  collide by NAME, and the bridge's ambiguity rule purged both (unbound →
+  the whole loop → arm → tail chain walled). The bridge now keys by
+  (module_origin, NAME) with the bare-name map as fallback — the collision
+  class is gone, not just dodged.
+- (Sixth-pass fixes carried the rest: alias-chase/ty-repair/pure-call subst,
+  rebind list-registration propagation, member-container borrows.)
+
+**ceangal resolved-strict: 0 walls, all 15 src modules.** zip-shape fixture:
+`spec/wasm_cross/zip_view_shape.almd`; 60k-call leak-loop parity green.
+The org frontier is now porta 2 (native-FFI, structurally excluded) + the
+external-package classify artifacts — the lowering side of the org arc is
+DONE pending the porta class decision.
+
 ## Remaining threads
 
 - **wall=0 count 21 → 19 (honesty, not regression)**: the linearization guard

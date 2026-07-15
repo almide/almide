@@ -1,0 +1,179 @@
+// map_msv — SELF-HOSTED `Map[String, Map[String, String]]` (String keys, MAP values —
+// map_fold_heap_acc's nested-map literal). Layout mirrors map_hval/map_skv (rc@0, n@4,
+// cap@8, n OWNED deep-copied String keys @ slots 0..n-1, n OWNED value handles @ slots
+// n..2n-1 — values rc-shared in on set, exactly map_hval's discipline). The ONE difference
+// from map_hval: a value is NOT a flat block — an inner `Map[String, String]` owns its own
+// String slots, so the map's drop must SWEEP each last-ref value's 2m string slots before
+// freeing it (a flat rc_dec would leak every inner key/value String). `get_or` returns the
+// stored value / default via the hshare co-own idiom (load_handle + return; the lowering
+// manages the share). Also hosts `__drop_list_str_mss`, the pairs-literal
+// `List[(String, Map[String, String])]` drop (per element: free the String slot, sweep the
+// last-ref inner map) — the same per-element-then-per-slot walk map_hval's list drop uses.
+
+fn __msv_eq_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else if prim.load8(pa + i) != prim.load8(pb + i) then false
+  else __msv_eq_bytes(pa, pb, n, i + 1)
+
+fn __msv_str_eq(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  if la != lb then false
+  else __msv_eq_bytes(ha + 12, hb + 12, la, 0)
+}
+
+fn __msv_find(h: Int, n: Int, k: String, i: Int) -> Int =
+  if i >= n then 0 - 1
+  else {
+    let kk = prim.load_str(h + 12 + i * 8)
+    if __msv_str_eq(kk, k) then i
+    else __msv_find(h, n, k, i + 1)
+  }
+
+fn __msv_store_key(addr: Int, s: String) -> Int = {
+  let copy = string.repeat(s, 1)
+  prim.store_str(addr, copy)
+  0
+}
+
+// Copy every entry from sh to rh: keys deep-copied, values rc-shared; the matched
+// key's value is replaced with an rc-share of `vh` (map_hval's __hvl_set_copy shape).
+fn __msv_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __msv_store_key(rh + 12 + i * 8, kk)
+    if __msv_str_eq(kk, k) then {
+      prim.rc_inc(vh)
+      prim.store64(rh + 12 + (rn + i) * 8, vh)
+    }
+    else {
+      let old = prim.load64(sh + 12 + (n + i) * 8)
+      prim.rc_inc(old)
+      prim.store64(rh + 12 + (rn + i) * 8, old)
+    }
+    __msv_set_copy(sh, rh, n, rn, k, vh, i + 1)
+  }
+
+fn __msv_set_append(rh: Int, rn: Int, idx: Int, k: String, vh: Int) -> Int =
+  if idx >= 0 then 0
+  else {
+    let _kc = __msv_store_key(rh + 12 + (rn - 1) * 8, k)
+    prim.rc_inc(vh)
+    prim.store64(rh + 12 + (rn + rn - 1) * 8, vh)
+    0
+  }
+
+fn map_new_msv() -> Map[String, Map[String, String]] = prim.alloc_map_kv(0)
+
+fn map_set_msv(
+  m: Map[String, Map[String, String]],
+  k: String,
+  v: Map[String, String],
+) -> Map[String, Map[String, String]] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let idx = __msv_find(sh, n, k, 0)
+  let rn = if idx < 0 then n + 1 else n
+  let r = prim.alloc_map_kv(rn * 2)
+  let rh = prim.handle(r)
+  let vh = prim.handle(v)
+  let _c = __msv_set_copy(sh, rh, n, rn, k, vh, 0)
+  let _a = __msv_set_append(rh, rn, idx, k, vh)
+  prim.store32(rh + 4, rn)
+  r
+}
+
+fn __msv_from_at(
+  ph: Int,
+  n: Int,
+  i: Int,
+  m: Map[String, Map[String, String]],
+) -> Map[String, Map[String, String]] =
+  if i >= n then m
+  else {
+    let th = prim.load64(ph + 12 + i * 8)
+    let k = prim.load_str(th + 12)
+    let v: Map[String, String] = prim.load_handle(th + 20)
+    let nm = map_set_msv(m, k, v)
+    __msv_from_at(ph, n, i + 1, nm)
+  }
+
+fn map_from_list_msv(
+  pairs: List[(String, Map[String, String])],
+) -> Map[String, Map[String, String]] = {
+  let ph = prim.handle(pairs)
+  let n = prim.load32(ph + 4)
+  __msv_from_at(ph, n, 0, map_new_msv())
+}
+
+// The stored value (or the default) via the hshare co-own idiom.
+fn __msv_elem(h: Int, n: Int, idx: Int) -> Map[String, String] = {
+  let v: Map[String, String] = prim.load_handle(h + 12 + (n + idx) * 8)
+  v
+}
+
+fn map_get_or_msv(
+  m: Map[String, Map[String, String]],
+  k: String,
+  default: Map[String, String],
+) -> Map[String, String] = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let idx = __msv_find(h, n, k, 0)
+  if idx < 0 then default
+  else __msv_elem(h, n, idx)
+}
+
+// Free an INNER `Map[String, String]` handle: sweep its 2m String slots at last ref,
+// then the block (a flat rc_dec alone would leak every inner key/value String).
+fn __drop_msv_inner_slots(ih: Int, m2: Int, j: Int) -> Unit =
+  if j >= m2 then ()
+  else {
+    prim.rc_dec(prim.load64(ih + 12 + j * 8))
+    __drop_msv_inner_slots(ih, m2, j + 1)
+  }
+
+// The inner map is the map_str INTERLEAVED layout, whose @4 is ALREADY the raw slot
+// count (2n) — NOT the entry count the split-layout maps store there. Multiplying it
+// again swept past the block into garbage handles (an immediate rc_dec trap).
+fn __drop_msv_inner(ih: Int) -> Unit = {
+  if prim.load32(ih + 0) == 1 then __drop_msv_inner_slots(ih, prim.load32(ih + 4), 0) else ()
+  prim.rc_dec(ih)
+}
+
+fn __drop_map_msv_slots(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    prim.rc_dec(prim.load64(h + 12 + i * 8))
+    __drop_msv_inner(prim.load64(h + 12 + (n + i) * 8))
+    __drop_map_msv_slots(h, n, i + 1)
+  }
+
+fn __drop_map_msv(m: Map[String, Map[String, String]]) -> Unit = {
+  let h = prim.handle(m)
+  if prim.load32(h + 0) == 1 then __drop_map_msv_slots(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+
+// The pairs-literal drop: `List[(String, Map[String, String])]` — per element (its own
+// refcounted 2-slot tuple block): free the String slot flat, sweep the last-ref inner map.
+fn __drop_list_str_mss_loop(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let th = prim.load64(h + 12 + i * 8)
+    if prim.load32(th + 0) == 1 then {
+      prim.rc_dec(prim.load64(th + 12))
+      __drop_msv_inner(prim.load64(th + 20))
+    } else ()
+    prim.rc_dec(th)
+    __drop_list_str_mss_loop(h, n, i + 1)
+  }
+
+fn __drop_list_str_mss(xs: List[(String, Map[String, String])]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_str_mss_loop(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}

@@ -65,6 +65,10 @@ const MKDIR_ERR_LEN: u32 = 12; // len of "mkdir failed"
 const REMOVE_ERR_ADDR: u32 = 124; // "remove failed" message bytes (fs.remove_all Err) — 124..137
 const REMOVE_ERR_LEN: u32 = 13; // len of "remove failed"
 const DIVZERO_MSG_ADDR: u32 = 144; // "Error: division by zero\n" — 144..169 (__div_trap)
+// The explicit-Result main Err protocol ($__main_err) REUSES the div-zero line's bytes:
+// its first 7 bytes are "Error: " and its byte 23 is the trailing "\n" — no new data.
+const MAIN_ERR_PREFIX_LEN: u32 = 7; // "Error: "
+const MAIN_ERR_NL_ADDR: u32 = DIVZERO_MSG_ADDR + 23; // the div-zero line's "\n"
 const OVERFLOW_MSG_ADDR: u32 = 176; // "Error: integer overflow\n" — 176..200 (__div_trap)
 const BOUNDS_MSG_ADDR: u32 = 208; // "Error: index out of bounds\n" — 208..235 (__div_trap)
 const LABELS_ADDR: u32 = 376; // print labels (the data section) — after ALL fixed messages (incl. fs errno)
@@ -81,7 +85,11 @@ const FS_ERR_NOTDIR_LEN: u32 = 29;
 const FS_ERR_ISDIR_ADDR: u32 = 344; // "Is a directory (os error 21)" — WASI ISDIR(31)
 const FS_ERR_ISDIR_LEN: u32 = 28;
 const SCRATCH_ADDR: u32 = 768; // the line build buffer
-const HEAP_BASE: u32 = 8192; // bump allocator start
+// The bump allocator's DEFAULT start — also the mutable-global slot region's base
+// (`crate::MG_SLOT_BASE`, one authoritative value): a program with N mutable
+// module-level `var`s shifts its allocator base to `HEAP_BASE + 8*N` so the slots
+// are never allocated over (N = 0 keeps every existing module byte-identical).
+const HEAP_BASE: u32 = crate::MG_SLOT_BASE;
 // The Ok/Err tag of a cap-as-tag `Result[String, String]` lives in the HIGH 32 bits of
 // the 1-slot block's element (@16) — the `materialize_result_str` layout `$read_text_file`
 // reproduces so the caller's match/`!`/DropListStr reads it identically.
@@ -203,6 +211,11 @@ fn preamble_func_names() -> BTreeSet<String> {
 fn resolvable_call_names(prog: &MirProgram) -> BTreeSet<String> {
     let mut names: BTreeSet<String> = prog.functions.iter().map(|f| f.name.clone()).collect();
     names.extend(preamble_func_names());
+    // The mutable-global slot take-accessor is emitted iff the program has slots — it
+    // resolves exactly then (a global-free program never names it).
+    if prog.mutable_global_count > 0 {
+        names.insert("__mg_take".to_string());
+    }
     names
 }
 
@@ -320,13 +333,22 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // value (`(Int) -> Option[Int]` for filter_map, `-> List[Int]` for flat_map) is a wasm
     // i32 result (`$closure_fnN_h`), a scalar result is i64 (`$closure_fnN`). The CallIndirect
     // render picks the matching type by its arg count + result repr.
-    let sigs: std::collections::BTreeSet<(usize, bool)> = prog
+    // Signature class per CallIndirect: 0 = VOID (a `() -> Unit` closure — the lifted
+    // lambda renders with NO result, so the dispatch type must be resultless too: typing
+    // it `(result i64)` trapped with "indirect call type mismatch" on the simplest
+    // `bench(name, f: () -> Unit)` shape), 1 = scalar i64, 2 = heap i32.
+    let sigs: std::collections::BTreeSet<(usize, u8)> = prog
         .functions
         .iter()
         .flat_map(|f| f.ops.iter())
         .filter_map(|op| match op {
             Op::CallIndirect { args, result, .. } => {
-                Some((args.len(), result.map(|r| r.is_heap()).unwrap_or(false)))
+                let class = match result {
+                    None => 0u8,
+                    Some(r) if r.is_heap() => 2,
+                    Some(_) => 1,
+                };
+                Some((args.len(), class))
             }
             _ => None,
         })
@@ -341,14 +363,17 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
             .join(" ");
         let types = sigs
             .iter()
-            .map(|(a, heap)| {
+            .map(|(a, class)| {
                 let params = if *a == 0 {
                     String::new()
                 } else {
                     format!(" (param {})", vec!["i64"; *a].join(" "))
                 };
-                let (suffix, res) = if *heap { ("_h", "i32") } else { ("", "i64") };
-                format!("  (type $closure_fn{a}{suffix} (func{params} (result {res})))\n")
+                match class {
+                    0 => format!("  (type $closure_fn{a}_v (func{params}))\n"),
+                    2 => format!("  (type $closure_fn{a}_h (func{params} (result i32)))\n"),
+                    _ => format!("  (type $closure_fn{a} (func{params} (result i64)))\n"),
+                }
             })
             .collect::<String>();
         format!("{types}  (table {n} funcref)\n  (elem (i32.const 0) func {names})\n")
@@ -361,12 +386,15 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // injected into the preamble's import region — right after the WASI imports,
     // before the first `(memory …)`. Deduped + sorted for host-determinism.
     let extern_imports = render_extern_imports(prog);
+    // The bump allocator starts past the mutable-global slot region (byte-identical
+    // to the plain preamble when the program has no mutable globals).
+    let bump_base = HEAP_BASE + 8 * prog.mutable_global_count;
     let preamble = if extern_imports.is_empty() {
-        preamble()
+        preamble_with_bump_base(bump_base)
     } else {
         // The preamble begins `(module\n  (import "wasi…` — splice the extern imports
         // in right after the opening `(module\n` so they sit in the import block.
-        let pre = preamble();
+        let pre = preamble_with_bump_base(bump_base);
         match pre.split_once('\n') {
             Some((head, rest)) => format!("{head}\n{extern_imports}{rest}"),
             None => pre,
@@ -387,19 +415,109 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // `__global_init` (the abortable top-let initializers — render_program builds
     // it), run it BEFORE `$main` so `let bad = 10 / 0` aborts at startup exactly
     // as native does, even when the global is never used.
-    let ginit = if prog.functions.iter().any(|f| f.name == "__global_init") {
-        "    (call $__global_init)\n"
+    // MUTABLE-GLOBAL init runs FIRST (the slots must hold their declared initializers
+    // before any code — `__global_init`'s abort re-evaluations included — can read them).
+    let mg_init = if prog.functions.iter().any(|f| f.name == "__mg_init") {
+        "    (call $__mg_init)\n"
     } else {
         ""
     };
+    let ginit: String = format!(
+        "{mg_init}{}",
+        if prog.functions.iter().any(|f| f.name == "__global_init") {
+            "    (call $__global_init)\n"
+        } else {
+            ""
+        }
+    );
     let start = if main_returns {
+        // main's Result[Unit, String] is LEN-AS-TAG (scalar Ok): len@4 == 0 ⇒ Ok (discard),
+        // len 1 ⇒ Err with the String handle in slot 0's low half (@12). The Err path runs
+        // v0's protocol via $__main_err: `Error: <msg>\n` on STDERR + exit 1. (The former
+        // @16 read was the cap-as-tag offset — always 0 here, so an erring main silently
+        // exited 0.)
         format!(
-            "  (func (export \"_start\") (local $r i32)\n{ginit}    (local.set $r (call $main))\n    (if (i32.ne (i32.load (i32.add (local.get $r) (i32.const 16))) (i32.const 0))\n      (then unreachable))\n    (call $rc_dec (local.get $r)))\n"
+            "  (func (export \"_start\") (local $r i32)\n{ginit}    (local.set $r (call $main))\n    (if (i32.ne (i32.load (i32.add (local.get $r) (i32.const {LIST_LEN_OFFSET}))) (i32.const 0))\n      (then (call $__main_err (i32.load (i32.add (local.get $r) (i32.const {LIST_HEADER}))))))\n    (call $rc_dec (local.get $r)))\n"
         )
     } else {
         format!("  (func (export \"_start\")\n{ginit}    (call $main))\n")
     };
-    format!("{preamble}{data}{closure_table}{funcs}{start})
+    let pub_exports: String = prog
+        .exports
+        .iter()
+        .map(|(export_name, internal, param_floats, ret_float)| {
+            if param_floats.iter().all(|f| !f) && !matches!(ret_float, Some(true)) {
+                // Float-free signature: the internal ABI (i64 scalars, i32 heap
+                // handles) IS the public ABI — v0 exports these fns verbatim too.
+                return format!("  (export {export_name:?} (func ${internal}))\n");
+            }
+            // Float-bearing signature: a thin REINTERPRET wrapper presents real f64s
+            // (the v0 export ABI) while the internal fn keeps the i64-bits convention.
+            // Non-Float params keep the internal wasm valtype (i64 scalar / i32 heap),
+            // so the wrapper must read each param's ACTUAL repr, not assume i64.
+            let f = prog
+                .functions
+                .iter()
+                .find(|f| f.name == *internal)
+                .expect("export names a lowered function (pipeline invariant)");
+            let reprs = value_reprs_wasm(f);
+            let params: String = f
+                .params
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let wat = if param_floats.get(i).copied().unwrap_or(false) {
+                        "f64"
+                    } else {
+                        wasm_ty(p.repr)
+                    };
+                    format!(" (param $p{i} {wat})")
+                })
+                .collect();
+            let internal_ret = f
+                .ret
+                .map(|r| wasm_ty(reprs.get(&r).copied().unwrap_or(SCALAR_REPR)));
+            let result = match (ret_float, internal_ret) {
+                (Some(true), _) => " (result f64)".to_string(),
+                (_, Some(wat)) => format!(" (result {wat})"),
+                (_, None) => String::new(),
+            };
+            let args: String = f
+                .params
+                .iter()
+                .enumerate()
+                .map(|(i, _)| {
+                    if param_floats.get(i).copied().unwrap_or(false) {
+                        format!(" (i64.reinterpret_f64 (local.get $p{i}))")
+                    } else {
+                        format!(" (local.get $p{i})")
+                    }
+                })
+                .collect();
+            let call = format!("(call ${internal}{args})");
+            let body = if matches!(ret_float, Some(true)) {
+                format!("    (f64.reinterpret_i64 {call})\n")
+            } else {
+                format!("    {call}\n")
+            };
+            format!(
+                "  (func $__export_{internal}{params}{result}\n{body}  )\n  (export {export_name:?} (func $__export_{internal}))\n"
+            )
+        })
+        .collect();
+    // The mutable-global slot TAKE accessor (emitted iff the program has slots): loads
+    // the slot's block handle WITHOUT an rc change — the slot's own reference transfers
+    // to the caller (the assign path drops it and stores a replacement), which is
+    // exactly the fresh-owned CallFn result the ownership certificate models. Reads
+    // need no helper: they borrow-then-`Dup` the slot handle inline (`rc_inc`).
+    let mg_helpers = if prog.mutable_global_count > 0 {
+        "  (func $__mg_take (param $a i64) (result i32)\n    \
+         (i32.load (i32.wrap_i64 (local.get $a))))\n"
+            .to_string()
+    } else {
+        String::new()
+    };
+    format!("{preamble}{data}{closure_table}{funcs}{mg_helpers}{start}{pub_exports})
 ")
 }
 
@@ -609,6 +727,8 @@ fn defined_value(op: &Op) -> Option<ValueId> {
         | Op::ConstInt { dst, .. }
         | Op::FuncRef { dst, .. }
         | Op::IntBinOp { dst, .. }
+        | Op::ListLit { dst, .. }
+        | Op::ListGetScalar { dst, .. }
         | Op::Pure { dst, .. } => Some(*dst),
         Op::CallFn { dst, .. } | Op::Call { dst, .. } => *dst,
         Op::CallImport { dst, .. } => *dst,
@@ -644,6 +764,14 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
             | Op::IntBinOp { dst, .. } => {
                 m.insert(*dst, SCALAR_REPR);
             }
+            // Rung-4 list ops: a literal is a fresh heap block; a scalar element load
+            // is an i64 value.
+            Op::ListLit { dst, .. } => {
+                m.insert(*dst, Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
+            }
+            Op::ListGetScalar { dst, .. } => {
+                m.insert(*dst, SCALAR_REPR);
+            }
             // A `LoadHandle` result is a heap PTR (i32 handle); an `ArgsGetList` result is a
             // freshly-allocated heap `List[String]` PTR; a `ReadTextFile` result is a
             // freshly-allocated heap `Result[String, String]` PTR; a `ReadDir` result is a
@@ -654,6 +782,8 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
                 dst: Some(dst),
                 kind: PrimKind::LoadHandle
                     | PrimKind::ArgsGetList
+                    | PrimKind::ArgsGetListFull
+                    | PrimKind::EnvGet
                     | PrimKind::ReadLine
                     | PrimKind::ReadNBytes
                     | PrimKind::ReadTextFile

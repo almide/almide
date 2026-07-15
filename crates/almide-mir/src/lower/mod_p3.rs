@@ -28,20 +28,18 @@ impl LowerCtx {
         for p in params {
             let v = self.fresh_value();
             self.value_of.insert(p.var, v);
-            // A FUNCTION-typed param (`f: (Int) -> Int`, the closures machinery) is a SCALAR
-            // table slot (an i64 index into the module function table), NOT a heap value:
-            // the caller passes the lifted lambda's `FuncRef` value. So it gets a scalar
-            // Repr and joins `funcref_values` — a `f(x)` call in the body then lowers to
-            // `Op::CallIndirect` through it (the dynamic-closure path; cap_witness taints
-            // it conservatively, so a higher-order function stays honestly caps-unverified).
-            // This is what lets `list.map`/`filter`/`fold` be self-hosted in Almide.
-            let repr = if matches!(p.ty, Ty::Fn { .. }) {
-                let r = Repr::Scalar { width: crate::ScalarWidth::Double };
-                self.funcref_values.insert(v);
-                r
-            } else {
-                repr_of(&p.ty)? // Ptr (heap) / Scalar; Unsupported if Unknown or non-value
-            };
+            // A FUNCTION-typed param (`f: (Int) -> Int`, the closures machinery) is a
+            // CLOSURE BLOCK — the uniform heap representation: the caller passes the
+            // block (borrowed, like every heap param) and it joins `closure_values` —
+            // a `f(x)` call in the body then lowers to `Op::CallIndirect` through it
+            // (fnidx from slot 0, the block forwarded as the callee's env; cap_witness
+            // taints it conservatively, so a higher-order function stays honestly
+            // caps-unverified). This is what lets `list.map`/`filter`/`fold` be
+            // self-hosted in Almide.
+            if matches!(p.ty, Ty::Fn { .. }) {
+                self.closure_values.insert(v);
+            }
+            let repr = repr_of(&p.ty)?; // Ptr (heap) / Scalar; Unsupported if Unknown or non-value
             if repr.is_heap() {
                 self.param_values.insert(v);
                 // A heap variant param (`Option[T]` / `Result[T, String]`) is passed by the caller
@@ -164,7 +162,7 @@ impl LowerCtx {
         // the other desugars, which operate on resolved call structure. Call-count-invariant
         // (a Method Call and its resolved Named Call both count as one), so the caps gate stays
         // exact; the SAME step runs in `desugar_all` for the `count_ir_calls` side.
-        if let Some(rewritten) = crate::lower::desugar_method_calls(body) {
+        if let Some(rewritten) = crate::lower::desugar_method_calls(body, &self.record_layouts) {
             return self.lower_body_into(&rewritten);
         }
         if let Some(rewritten) = crate::lower::desugar_guard(body) {
@@ -176,10 +174,59 @@ impl LowerCtx {
         if let Some(rewritten) = crate::lower::desugar_tuple_unwrap_or(body) {
             return self.lower_body_into(&rewritten);
         }
-        if let Some(rewritten) = desugar_effect_unwrap(body) {
+        // `unit_main` (the void-main die-on-error convention) applies ONLY to a `main` that
+        // declares the SYNTHETIC void return (bare `Unit`, no explicit Result/Option) — a
+        // `main` that EXPLICITLY declares `-> Result[Unit, String]` is a REAL Result-returning
+        // fn the caller inspects (cross_module_unit_effect_test), so its `!`-desugared Err arm
+        // must reconstruct `err(e)` normally, never the abort-line shape. `decl_ret_is_result`
+        // already draws exactly this line (tail.rs's Result[Unit] tail-voiding gate reuses it).
+        let unit_main = self.fn_name == "main" && !self.decl_ret_is_result;
+        if let Some(rewritten) =
+            desugar_effect_unwrap(body, unit_main, self.ret_is_result_abi, &self.variant_layouts)
+        {
             return self.lower_body_into(&rewritten);
         }
-        if let Some(rewritten) = desugar_heap_branches(body) {
+        if unit_main {
+            if let Some(rewritten) = crate::lower::desugar_unit_main_err_arms(body) {
+                return self.lower_body_into(&rewritten);
+            }
+        }
+        if let Some(rewritten) = crate::lower::desugar_sort_by_cached_keys(body) {
+            return self.lower_body_into(&rewritten);
+        }
+        if let Some(rewritten) = crate::lower::desugar_to_option_calls(body) {
+            return self.lower_body_into(&rewritten);
+        }
+        if let Some(rewritten) = crate::lower::desugar_offtype_testing_asserts(body) {
+            return self.lower_body_into(&rewritten);
+        }
+        if let Some(rewritten) = desugar_heap_branches(body, &self.variant_layouts) {
+            return self.lower_body_into(&rewritten);
+        }
+        if let Some(rewritten) = crate::lower::desugar_scalar_tuple_literal_match(body) {
+            return self.lower_body_into(&rewritten);
+        }
+        if let Some(rewritten) = crate::lower::desugar_scalar_guard_match(body) {
+            return self.lower_body_into(&rewritten);
+        }
+        if let Some(rewritten) = crate::lower::desugar_tuple_variant_match(body) {
+            return self.lower_body_into(&rewritten);
+        }
+        if let Some(rewritten) =
+            crate::lower::desugar_tuple_variant_match_deep(body, &self.variant_layouts)
+        {
+            return self.lower_body_into(&rewritten);
+        }
+        if let Some(rewritten) = crate::lower::desugar_tuple_empty_list_match(body) {
+            return self.lower_body_into(&rewritten);
+        }
+        if let Some(rewritten) = crate::lower::desugar_fan_block(body) {
+            return self.lower_body_into(&rewritten);
+        }
+        if let Some(rewritten) = crate::lower::desugar_record_destructure_match(body) {
+            return self.lower_body_into(&rewritten);
+        }
+        if let Some(rewritten) = crate::lower::desugar_list_pattern_match(body) {
             return self.lower_body_into(&rewritten);
         }
         // DEBUG (env `DBG_LOWER_FN`): the FULLY-desugared body this function actually lowers — the
@@ -257,6 +304,16 @@ impl LowerCtx {
             // SCALAR reassignment (`i = i + 1`) rebinds to a Copy `Const` with no handle
             // to dangle, so it is admitted unchanged (e.g. a loop counter).
             IrStmtKind::Assign { var, value } => {
+                // ASSIGN to a MUTABLE module-level `var`: write through its STORAGE SLOT
+                // (`lower_bind` below would rebind a function-LOCAL copy and the write
+                // silently vanishes for every other function). The `value_of` gate skips a
+                // CROSS-REGION VarId collision where the target really is a bound local
+                // (a mutable global itself never enters `value_of`: reads are uncached).
+                if !self.value_of.contains_key(var) {
+                    if let Some((index, gty)) = crate::lower::mutable_global_info(*var) {
+                        return self.lower_mutable_global_assign(*var, index, &gty, value);
+                    }
+                }
                 // Inside a scalar-marker loop, a reassignment mutates the var's STABLE
                 // local (the loop-carried state) — `SetLocal`, not a fresh rebind. A heap
                 // reassignment cannot run this way (the accumulator would need real heap
@@ -343,11 +400,39 @@ impl LowerCtx {
                                 // 1-slot DynListStr block materialize_result_str builds.
                                 IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
                                     let is_err = matches!(&value.kind, IrExprKind::ResultErr { .. });
-                                    match (self.lower_result_str_piece(expr), repr_of(&value.ty)) {
-                                        (Some(piece), Ok(repr)) => {
-                                            Some(self.materialize_result_str(piece, repr, is_err, false))
+                                    // Repr dispatch: a HEAP-Ok Result (`Result[String,_]` — base64
+                                    // decode_chunks) is the cap-tag block `materialize_result_str`
+                                    // builds; a SCALAR-Ok Result (`Result[Int,String]` — the
+                                    // early-return `res` accumulator) is the LEN-AS-TAG family, so
+                                    // routing it through the str builder emitted a scalar payload
+                                    // into a handle slot — invalid wasm (i32/i64 mismatch) that
+                                    // ESCAPED the render wall (probe-confirmed). Build len-tag:
+                                    // Ok → `materialize_result_ok` (len 0, scalar @12); Err →
+                                    // `materialize_opt_str_some` (len 1, owned String @12 — the
+                                    // same physical block `try_lower_result_err_variant_ctor`
+                                    // uses; the slot's bind-time tracking already frees slot-0
+                                    // on the Err path via DropListStr).
+                                    if Self::is_heap_ok_result(&value.ty) {
+                                        match (self.lower_result_str_piece(expr), repr_of(&value.ty)) {
+                                            (Some(piece), Ok(repr)) => {
+                                                Some(self.materialize_result_str(piece, repr, is_err, false))
+                                            }
+                                            _ => None,
                                         }
-                                        _ => None,
+                                    } else if is_err {
+                                        match (self.lower_result_str_piece(expr), repr_of(&value.ty)) {
+                                            (Some(piece), Ok(repr)) => {
+                                                Some(self.materialize_opt_str_some(piece, repr))
+                                            }
+                                            _ => None,
+                                        }
+                                    } else {
+                                        match (self.lower_scalar_value(expr), repr_of(&value.ty)) {
+                                            (Some(payload), Ok(repr)) => {
+                                                Some(self.materialize_result_ok(payload, repr))
+                                            }
+                                            _ => None,
+                                        }
                                     }
                                 }
                                 // CLOSURE-CALL accumulator: `acc = f(acc, x)` where `f` is a
@@ -359,18 +444,13 @@ impl LowerCtx {
                                 // (OwnershipChecker.v `check_line_unroll_sound` — any fresh-owned
                                 // producer). NOT pushed to live_heap_handles (the slot owns it).
                                 IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
-                                    if self.funcref_value_of(callee).is_some() =>
+                                    if self.closure_value_of(callee).is_some() =>
                                 {
-                                    let table_idx = self.funcref_value_of(callee).unwrap();
+                                    let blk = self.closure_value_of(callee).unwrap();
                                     match (repr_of(&value.ty), self.lower_call_args(args)) {
                                         (Ok(repr), Ok(lowered)) => {
                                             let new = self.fresh_value();
-                                            self.ops.push(Op::CallIndirect {
-                                                dst: Some(new),
-                                                table_idx,
-                                                args: lowered,
-                                                result: Some(repr),
-                                            });
+                                            self.emit_closure_call(blk, Some(new), lowered, Some(repr));
                                             Some(new)
                                         }
                                         _ => None,
@@ -452,6 +532,79 @@ impl LowerCtx {
             // The written value (and an index expression) are deferred — record any
             // call inside them so the caps fold is not blind to their effects.
             IrStmtKind::IndexAssign { target, index, value } => {
+                // A mutable-GLOBAL place target: `g[i] = v` routes through the slot as
+                // TAKE (the slot's owned ref transfers to us) → `MakeUnique` (COW if a
+                // reader's Dup is still live — the mutation must touch no alias) →
+                // bounds-checked element store → STORE-BACK (+`Consume`) of the possibly-
+                // copied block. Going through `lower_place_mutation` instead would COW the
+                // read-Dup and write the COPY — the global would silently keep the old
+                // value. SCALAR-element lists only this round (the #29 store subset);
+                // heap-element / non-scalar shapes WALL, as does a modeled frame (the
+                // write is an effect the model would elide).
+                if !self.value_of.contains_key(target) {
+                    if let Some((gindex, gty)) = crate::lower::mutable_global_info(*target) {
+                        if self.in_frame > 0
+                            && self.unit_arm_depth == 0
+                            && self.scalar_loop_depth == 0
+                        {
+                            return Err(LowerError::Unsupported(format!(
+                                "index-assign to mutable module-level var {target:?} inside \
+                                 a modeled (non-executable) frame"
+                            )));
+                        }
+                        if is_heap_ty(&value.ty)
+                            || !crate::lower::is_heap_ty(&gty)
+                            || crate::lower::is_heap_elem_list_ty(&gty)
+                        {
+                            return Err(LowerError::Unsupported(format!(
+                                "index-assign to mutable module-level var {target:?} outside \
+                                 the scalar-element subset is not in this brick"
+                            )));
+                        }
+                        let (idx, val) = match (
+                            self.lower_scalar_value(index),
+                            self.lower_scalar_value(value),
+                        ) {
+                            (Some(i), Some(v)) => (i, v),
+                            _ => {
+                                return Err(LowerError::Unsupported(format!(
+                                    "index-assign to mutable module-level var {target:?} with \
+                                     a non-lowerable index/value"
+                                )))
+                            }
+                        };
+                        let repr = repr_of(&gty)?;
+                        let addr = self.fresh_value();
+                        self.ops.push(Op::ConstInt {
+                            dst: addr,
+                            value: crate::mg_slot_addr(gindex) as i64,
+                        });
+                        let taken = self.fresh_value();
+                        self.ops.push(Op::CallFn {
+                            dst: Some(taken),
+                            name: "__mg_take".to_string(),
+                            args: vec![crate::CallArg::Scalar(addr)],
+                            result: Some(repr),
+                        });
+                        self.materialized_call_arg(taken, repr, &gty);
+                        self.ops.push(Op::MakeUnique { v: taken });
+                        self.ops.push(Op::ListSetScalar { list: taken, idx, val });
+                        let h2 = self.fresh_value();
+                        self.ops.push(Op::Prim {
+                            kind: crate::PrimKind::Handle,
+                            dst: Some(h2),
+                            args: vec![taken],
+                        });
+                        self.ops.push(Op::Prim {
+                            kind: crate::PrimKind::Store { width: 8 },
+                            dst: None,
+                            args: vec![addr, h2],
+                        });
+                        self.ops.push(Op::Consume { v: taken });
+                        self.live_heap_handles.retain(|v| *v != taken);
+                        return Ok(());
+                    }
+                }
                 // COW-guard the buffer (rebinds the local to a unique copy if shared), then ACTUALLY
                 // STORE: `xs[i] = v` → `i64.store($elem_addr(handle(xs), i), v)`. WITHOUT the store the
                 // assignment lowered to ONLY the MakeUnique guard (a silent no-op — `xs[1] = 99` never
@@ -472,11 +625,7 @@ impl LowerCtx {
                         self.lower_scalar_value(index),
                         self.lower_scalar_value(value),
                     ) {
-                        let h = self.fresh_value();
-                        self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });
-                        let addr = self.fresh_value();
-                        self.ops.push(Op::Prim { kind: crate::PrimKind::ElemAddr, dst: Some(addr), args: vec![h, idx] });
-                        self.ops.push(Op::Prim { kind: crate::PrimKind::Store { width: 8 }, dst: None, args: vec![addr, val] });
+                        self.ops.push(Op::ListSetScalar { list, idx, val });
                         true
                     } else {
                         false
@@ -493,6 +642,14 @@ impl LowerCtx {
                 Ok(())
             }
             IrStmtKind::FieldAssign { target, value, .. } => {
+                // Mutable-GLOBAL target: same COW-copy silent-miscompile class as the
+                // IndexAssign guard above — WALL.
+                if !self.value_of.contains_key(target) && crate::lower::is_mutable_global(*target) {
+                    return Err(LowerError::Unsupported(format!(
+                        "field-assign to mutable module-level var {target:?} (in-place \
+                         mutation through the global slot) is not in this brick"
+                    )));
+                }
                 self.lower_place_mutation(*target)?;
                 self.record_elided_calls(value);
                 Ok(())
@@ -502,6 +659,14 @@ impl LowerCtx {
             // `MakeUnique`. The key and value are deferred — record their calls so the
             // caps fold is not blind to their effects.
             IrStmtKind::MapInsert { target, key, value } => {
+                // Mutable-GLOBAL target: same COW-copy silent-miscompile class as the
+                // IndexAssign guard above — WALL.
+                if !self.value_of.contains_key(target) && crate::lower::is_mutable_global(*target) {
+                    return Err(LowerError::Unsupported(format!(
+                        "map-insert to mutable module-level var {target:?} (in-place \
+                         mutation through the global slot) is not in this brick"
+                    )));
+                }
                 self.lower_place_mutation(*target)?;
                 self.record_elided_calls(key);
                 self.record_elided_calls(value);
@@ -602,9 +767,11 @@ impl LowerCtx {
                 // SetLocal via the general heap-reassign, or a top-level rebind). `bytes.append` is the
                 // self-hosted functional append (bytes_core). Only a bare `Var` first arg qualifies; any
                 // other receiver keeps the (walling) effect-call path. Unblocks bigint.from_int / rsa.
+                // `bytes.append_u8(buf, x)` is the SAME in-place byte push under another
+                // name (`almide_rt_bytes_append_u8`) — identical rewrite.
                 IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
                     if module.as_str() == "bytes"
-                        && func.as_str() == "push"
+                        && (func.as_str() == "push" || func.as_str() == "append_u8")
                         && args.len() == 2
                         && matches!(&args[0].kind, IrExprKind::Var { .. }) =>
                 {
@@ -734,9 +901,131 @@ impl LowerCtx {
     /// memory-safe by construction (alloc once / drop once, the real global untouched)
     /// and its content deferred like every `Opaque`. Referencing a global does NOT
     /// re-run its initializer, so this adds no call/cap obligation.
+    /// ASSIGN through a mutable module-level `var`'s storage slot. A scalar stores the
+    /// value directly; a heap global builds the NEW value FIRST (so a self-referencing
+    /// RHS — `items = items + [n]`, the #501 alias pin — reads the old block via its own
+    /// owned `$__mg_get` Dup while the slot still holds it), then `$__mg_take`s the OLD
+    /// block (the slot's owned reference transfers to us — a fresh-owned CallFn result,
+    /// exactly the certificate's model), drops it by its type route, and stores+Consumes
+    /// the new block (the record-slot move-in pattern). Inside the synthesized
+    /// `__mg_init` the slot is still zero, so take+drop are SKIPPED (dropping handle 0
+    /// would trap). A MODELED frame (the model-one-iteration `while` fallback / a
+    /// non-executable branch arm) must WALL: both eliding and emitting a modeled global
+    /// write diverge from v0 (the write is an EFFECT).
+    fn lower_mutable_global_assign(
+        &mut self,
+        var: VarId,
+        index: u32,
+        gty: &Ty,
+        value: &IrExpr,
+    ) -> Result<(), LowerError> {
+        use crate::PrimKind;
+        if self.in_frame > 0 && self.unit_arm_depth == 0 && self.scalar_loop_depth == 0 {
+            return Err(LowerError::Unsupported(format!(
+                "assignment to mutable module-level var {var:?} inside a modeled (non-\
+                 executable) frame — the global write is an effect the model would elide"
+            )));
+        }
+        let in_mg_init = self.fn_name == "__mg_init";
+        if !is_heap_ty(gty) {
+            let src = self
+                .lower_scalar_value(value)
+                .or_else(|| self.try_lower_scalar_call(value, &value.ty))
+                .ok_or_else(|| {
+                    LowerError::Unsupported(format!(
+                        "non-scalar value assigned to mutable module-level var {var:?} \
+                         outside the executable subset"
+                    ))
+                })?;
+            let addr = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: addr, value: crate::mg_slot_addr(index) as i64 });
+            self.ops.push(Op::Prim {
+                kind: PrimKind::Store { width: 8 },
+                dst: None,
+                args: vec![addr, src],
+            });
+            return Ok(());
+        }
+        // Heap global: NEW value first (RHS may read the global), as a fresh OWNED handle.
+        let new = self.lower_owned_heap_field(value).ok_or_else(|| {
+            LowerError::Unsupported(format!(
+                "heap value assigned to mutable module-level var {var:?} outside the \
+                 executable subset"
+            ))
+        })?;
+        let repr = repr_of(gty)?;
+        let addr = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: addr, value: crate::mg_slot_addr(index) as i64 });
+        if !in_mg_init {
+            let old = self.fresh_value();
+            self.ops.push(Op::CallFn {
+                dst: Some(old),
+                name: "__mg_take".to_string(),
+                args: vec![crate::CallArg::Scalar(addr)],
+                result: Some(repr),
+            });
+            // Route the old block's drop by the global's TYPE (the same classification a
+            // call-arg temp gets), then release it — its holders elsewhere (an in-flight
+            // RHS `__mg_get` Dup) keep their own references, so this frees at last-ref only.
+            self.materialized_call_arg(old, repr, gty);
+            let drop_old = self.drop_op_for(old);
+            self.ops.push(drop_old);
+            self.live_heap_handles.retain(|v| *v != old);
+        }
+        let handle = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![new] });
+        self.ops.push(Op::Prim {
+            kind: PrimKind::Store { width: 8 },
+            dst: None,
+            args: vec![addr, handle],
+        });
+        self.ops.push(Op::Consume { v: new });
+        self.live_heap_handles.retain(|v| *v != new);
+        Ok(())
+    }
+
     pub(crate) fn value_or_global(&mut self, var: VarId) -> Result<ValueId, LowerError> {
         if let Some(&v) = self.value_of.get(&var) {
             return Ok(v);
+        }
+        // A MUTABLE module-level `var`: read its STORAGE SLOT fresh on every reference
+        // (never cached in `value_of` — an intervening write, ours or a callee's, must be
+        // seen; materializing the const INITIALIZER instead was a probe-confirmed silent
+        // miscompile: `5 3 0` vs native `5 8 8`). A scalar is a plain slot `Load`; a heap
+        // global goes through `$__mg_get` (slot load + `rc_inc` — the returned handle is a
+        // REAL owned reference, matching the certificate's fresh-owned CallFn result), is
+        // routed for its type-correct scope-end drop, and its block is materialized-real
+        // by construction (only real constructions are ever stored through `__mg_take`/
+        // `Store`), so member reads and spreads work on it.
+        if let Some((index, ty)) = crate::lower::mutable_global_info(var) {
+            let addr = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: addr, value: crate::mg_slot_addr(index) as i64 });
+            if is_heap_ty(&ty) {
+                let repr = repr_of(&ty)?;
+                // BORROW the slot's handle then `Dup` it — the same borrow-then-Dup the
+                // spread-record copy uses (cert `a`; the render's Dup IS the `rc_inc`),
+                // so the function owns a real reference the slot's later reassignment
+                // cannot invalidate. No call op is injected (the caps count stays exact).
+                let borrowed = self.fresh_value();
+                self.ops.push(Op::Prim {
+                    kind: crate::PrimKind::LoadHandle,
+                    dst: Some(borrowed),
+                    args: vec![addr],
+                });
+                let dst = self.fresh_value();
+                self.ops.push(Op::Dup { dst, src: borrowed });
+                self.materialized_call_arg(dst, repr, &ty);
+                self.materialized_aggregates.insert(dst);
+                self.materialized_lists.insert(dst);
+                return Ok(dst);
+            }
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: crate::PrimKind::Load { width: 8 },
+                dst: Some(dst),
+                args: vec![addr],
+            });
+            return Ok(dst);
         }
         let ty = self
             .globals
@@ -753,8 +1042,31 @@ impl LowerCtx {
             // count never sees (mir>ir = a false caps de-taint), so it keeps WALLING (no regression).
             // The fresh owned copy is dropped at scope end like any literal (cert: one `i` + one `d`);
             // `value_of[var]` caches it so repeated references in the SAME function reuse the one copy.
-            if let Some(init) = self.global_inits.get(&var) {
-                if let Some(const_init) = const_global_init(init) {
+            if let Some(init) = self.global_inits.get(&var).cloned() {
+                // A global whose init is ANOTHER global (`let DIRECT = letlib.GREETING` —
+                // the #632 alias-let): recurse through value_or_global on the SOURCE id (a
+                // fresh owned copy of ITS const init, cached + dropped at scope end); this
+                // reference aliases the same local copy (reads only — no second owner).
+                // Zero calls injected (the source resolves through the same const-only
+                // machinery), so the count gate stays exact.
+                if let IrExprKind::Var { id: src } = &init.kind {
+                    let src = *src;
+                    // `let snapshot = counter` over a MUTABLE source: v0 evaluates the
+                    // alias ONCE at startup; recursing here would read the slot's CURRENT
+                    // value at each use — a divergence, so WALL the alias instead.
+                    if crate::lower::is_mutable_global(src) {
+                        return Err(LowerError::Unsupported(format!(
+                            "global alias-let of a MUTABLE module-level var {src:?} (a \
+                             startup snapshot) is not in this brick"
+                        )));
+                    }
+                    if self.globals.contains_key(&src) {
+                        let v = self.value_or_global(src)?;
+                        self.value_of.insert(var, v);
+                        return Ok(v);
+                    }
+                }
+                if let Some(const_init) = const_global_init(&init) {
                     let repr = repr_of(&ty)?;
                     let dst = self.fresh_value();
                     self.ops.push(Op::Alloc { dst, repr, init: const_init });
@@ -773,10 +1085,61 @@ impl LowerCtx {
                 // builder registers the right recursive drop set (`heap_elem_lists` →
                 // `DropListStr`); we add it to `live_heap_handles` so the fresh owned copy is
                 // freed at scope end (cert one `i` + one `d`), the real module global untouched.
-                if is_pure_literal_list(init) {
-                    let init = init.clone();
+                if is_pure_literal_list(&init) {
                     if let Some(dst) = self.try_lower_str_list_literal(&init) {
                         self.live_heap_handles.push(dst);
+                        self.value_of.insert(var, dst);
+                        return Ok(dst);
+                    }
+                }
+                // A RECORD-literal heap global (`let CFG = Cfg { name: "c" }` — the #502
+                // spread/member base): call-free fields construct through the SAME builder
+                // a local record `let` uses (`try_lower_record_construct` — allocs + stores
+                // ONLY, zero `CallFn`, so the gate's `mir == ir` count stays exact), which
+                // registers the record's own drop route. The fresh owned copy frees at
+                // scope end; the real module global is untouched.
+                if matches!(init.kind, IrExprKind::Record { .. })
+                    && !crate::lower::expr_contains_call(&init)
+                {
+                    // A SCALAR-ONLY record global (`let _transparent = { r: 0.0, a: 0.0 }`)
+                    // constructs through the scalar builder (the mixed builder defers it).
+                    if let Some(dst) = self
+                        .try_lower_record_construct(&init)
+                        .or_else(|| self.try_lower_scalar_record_construct(&init))
+                    {
+                        if !self.live_heap_handles.contains(&dst) {
+                            self.live_heap_handles.push(dst);
+                        }
+                        // The copy's slots are REAL — register it so member reads and
+                        // `{ ...global, override }` spreads take the materialized path.
+                        self.materialized_aggregates.insert(dst);
+                        // A heap-nested record copy (`_default`'s `bg: Color` slot) frees
+                        // via its recursive `$__drop_<R>` at scope end — the flat mask
+                        // alone would leak a heap-IN-nested field on deeper shapes.
+                        if let Some(name) = self.record_or_anon_drop_type_name(&ty) {
+                            self.record_masks.remove(&dst);
+                            self.variant_drop_handles.insert(dst, name);
+                        }
+                        self.value_of.insert(var, dst);
+                        return Ok(dst);
+                    }
+                }
+                // A LIST-OF-RECORDS heap global (`let CFGS = [Cfg { name: "a" }, Cfg { name:
+                // "b" }]` — cross_module_toplet_byvalue's #486 list-of-records shape): a
+                // call-free `List` initializer whose elements are all record ctors builds
+                // through the SAME builder a local `let xs = [Cfg{..}, ..]` uses
+                // (`try_lower_record_list_literal` — per-element `try_lower_record_construct`
+                // MOVED into owned i64 slots, zero `CallFn`, so the gate's `mir == ir` count
+                // stays exact), which registers the list's own recursive `$__drop_list_<R>`
+                // drop route (each element freed via `$__drop_<R>`). The fresh owned copy
+                // frees at scope end; the real module global is untouched.
+                if matches!(init.kind, IrExprKind::List { .. })
+                    && !crate::lower::expr_contains_call(&init)
+                {
+                    if let Some(dst) = self.try_lower_record_list_literal(&init) {
+                        if !self.live_heap_handles.contains(&dst) {
+                            self.live_heap_handles.push(dst);
+                        }
                         self.value_of.insert(var, dst);
                         return Ok(dst);
                     }
@@ -939,6 +1302,14 @@ impl LowerCtx {
             Op::DropListStr { v }
         } else if self.value_handles.contains(&v) {
             Op::DropValue { v }
+        } else if self.closure_values.contains(&v) {
+            // A CLOSURE BLOCK frees through the uniform, SELF-DESCRIBING
+            // `$__drop_closure` (fixed runtime): at the last ref it reads the drop
+            // header (slot 1), recursively drops the captured-closure slots, rc_decs
+            // the captured-heap slots, and NEVER touches slot 0 (the fnidx — a table
+            // index, not a pointer). Works for any closure value regardless of where
+            // it was created (a call-result's captures are unknowable here).
+            Op::DropVariant { v, ty: "closure".to_string() }
         } else {
             Op::Drop { v }
         }

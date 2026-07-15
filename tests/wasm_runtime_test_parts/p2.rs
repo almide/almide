@@ -124,6 +124,10 @@ fn assert_cross_target_project(files: &[(&str, &str)]) {
     let w = match Command::new("wasmtime")
         .current_dir(dir.path())
         .arg("--dir=/")
+        // Env passthrough mirrors `almide run --target wasm` (`-S inherit-env=y`):
+        // the env_get fixture (C-133) reads HOME on both targets.
+        .arg("-S")
+        .arg("inherit-env=y")
         .arg("out.wasm")
         .output()
     {

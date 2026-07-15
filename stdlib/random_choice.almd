@@ -1,0 +1,30 @@
+// random_choice — SELF-HOSTED `random.choice(xs)` over the WASI entropy floor
+// (prim.random_get), the `random.int` discipline applied to list picking: an empty
+// list is `none`, else a uniform-ish in-bounds index via the same 8-byte entropy
+// scratch, delegated to the generic `list.get` (which builds the materialized
+// Option). Because `__rc_rand` reaches prim.random_get, the transitive cap_witness
+// carries Capability::Entropy — a caller is caps-verified only if it declares it
+// (an `effect fn`). Typed variants: the scalar-element impl and the `_str`
+// String-element impl (type-directed routing in `list_heap_call_name`; any other
+// element class routes to the unlinked `random.choice_x` and walls cleanly).
+fn __rc_rand(min: Int, max: Int) -> Int = {
+  let span = max - min + 1
+  let buf = prim.alloc_bytes(8)
+  let p = prim.handle(buf) + 12
+  let _e = prim.random_get(p, 8)
+  let r = prim.load64(p)
+  let rpos = int.band(r, 0x7FFFFFFFFFFFFFFF)
+  if span <= 0 then min else min + (rpos % span)
+}
+
+fn random_choice(xs: List[Int]) -> Option[Int] = {
+  let n = list.len(xs)
+  if n == 0 then none
+  else list.get(xs, __rc_rand(0, n - 1))
+}
+
+fn random_choice_str(xs: List[String]) -> Option[String] = {
+  let n = list.len(xs)
+  if n == 0 then none
+  else list.get(xs, __rc_rand(0, n - 1))
+}

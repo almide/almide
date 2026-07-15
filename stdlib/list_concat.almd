@@ -12,6 +12,16 @@
 // recursively-dropped variant; until then a `List[String] + …` stays deferred (the lowering
 // gates __list_concat to scalar-element lists).
 
+// GEOMETRIC capacity for a concat RESULT (churn-friendliness, C-131): pad the block to the
+// next power of two >= n (floor 4) and PATCH len down (the filtermap over-allocate/patch-len
+// precedent). Successive append-accumulator concats (`xs = xs + [e]` in a loop) then request
+// the SAME padded size within each pow2 class, so the freed previous buffer is an EXACT-size
+// free-list match — churn stays O(n) memory. An exact-size result (the old behavior) made
+// every growing request a fresh bump: the free-list's exact-match policy could never reuse a
+// smaller freed block, and the doubling workload OOM'd at 4GB (loop_buffer_churn, #696).
+fn __lc_cap(n: Int, c: Int) -> Int = if c >= n then c else __lc_cap(n, c * 2)
+
+
 fn __lc_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
   if i >= n then 0
   else {
@@ -24,8 +34,9 @@ fn __list_concat(a: List[Int], b: List[Int]) -> List[Int] = {
   let hb = prim.handle(b)
   let la = prim.load32(ha + 4)
   let lb = prim.load32(hb + 4)
-  let out = prim.alloc_list(la + lb)
+  let out = prim.alloc_list(__lc_cap(la + lb, 4))
   let ho = prim.handle(out)
+  prim.store32(ho + 4, la + lb)
   let _x = __lc_copy(ho + 12, ha + 12, la, 0)
   let _y = __lc_copy(ho + 12 + la * 8, hb + 12, lb, 0)
   out
@@ -52,8 +63,9 @@ fn __list_concat_rc(a: List[Int], b: List[Int]) -> List[Int] = {
   let hb = prim.handle(b)
   let la = prim.load32(ha + 4)
   let lb = prim.load32(hb + 4)
-  let out = prim.alloc_list(la + lb)
+  let out = prim.alloc_list(__lc_cap(la + lb, 4))
   let ho = prim.handle(out)
+  prim.store32(ho + 4, la + lb)
   let _x = __lc_copy_rc(ho + 12, ha + 12, la, 0)
   let _y = __lc_copy_rc(ho + 12 + la * 8, hb + 12, lb, 0)
   out

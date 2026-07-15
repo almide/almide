@@ -293,7 +293,10 @@ fn __fpow_special_x(x: Float, hx: Int, ix: Int, hy: Int, yisint: Int) -> Float =
   let z0 = if hy < 0 then 1.0 / ax else ax
   if hx < 0 then {
     if prim.bor(ix - 1072693248, yisint) == 0 then (z0 - z0) / (z0 - z0)   // (-1)**non-int = NaN
-    else if yisint == 1 then 0.0 - z0
+    // TRUE negation (sign-bit flip), NOT `0.0 - z0`: IEEE subtraction gives
+    // 0.0 - (+0.0) = +0.0, so pow(-0.0, odd int) lost the result's sign
+    // (native -0 vs wasm 0 — the pow_cross_target_boundary line-26 diff).
+    else if yisint == 1 then prim.ffrombits(prim.bxor(prim.fbits(z0), prim.bshl(1, 63)))
     else z0
   }
   else z0

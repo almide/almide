@@ -1,0 +1,54 @@
+// json_path — SELF-HOSTED json path API (root/field/index/get_path). v0's JsonPath
+// is an opaque Rust enum (JpRoot/JpField/JpIndex) consumed ONLY by these fns, so the
+// v1 self-host owns the rep: a List[String] of segments, root-first — "f<name>" is a
+// field step, "i<int>" an index step (digits from int.to_string, so int.parse always
+// round-trips). The newtype eraser publishes Named("JsonPath") → List[String], making
+// user-side binds route the List[String] drop. get_path walks the PROVEN value.get /
+// value.as_array / generic list.get path, byte-matching almide_json_get_path: a field
+// step on a non-object → none; an index step wraps a NEGATIVE i from the end (len + i)
+// and misses out-of-range.
+fn json_path_root() -> List[String] = []
+
+fn json_path_field(path: List[String], name: String) -> List[String] = {
+  let seg = "f" + name
+  path + [seg]
+}
+
+fn json_path_index(path: List[String], i: Int) -> List[String] = {
+  let seg = "i" + int.to_string(i)
+  path + [seg]
+}
+
+fn json_path_get(j: Value, path: List[String]) -> Option[Value] =
+  json_path_get_go(j, path, 0)
+
+fn json_path_get_go(j: Value, path: List[String], k: Int) -> Option[Value] =
+  if k >= list.len(path) then some(j)
+  else {
+    let seg = list.get(path, k) ?? ""
+    let rest = string.drop(seg, 1)
+    if string.take(seg, 1) == "f" then
+      match value.get(j, rest) {
+        ok(v) => json_path_get_go(v, path, k + 1)
+        err(_) => none
+      }
+    else
+      match int.parse(rest) {
+        ok(i) => json_path_step_index(j, path, k, i)
+        err(_) => none
+      }
+  }
+
+fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Option[Value] =
+  match value.as_array(j) {
+    ok(xs) => {
+      let n = list.len(xs)
+      let idx = if i < 0 then n + i else i
+      if idx < 0 then none
+      else match list.get(xs, idx) {
+        some(v) => json_path_get_go(v, path, k + 1)
+        none => none
+      }
+    }
+    err(_) => none
+  }

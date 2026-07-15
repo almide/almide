@@ -57,7 +57,30 @@ impl BuildDirLock {
 /// Compile an .almd file to a native binary, returning the path to the executable.
 /// Uses incremental caching: if the generated Rust code hasn't changed, skips cargo build.
 pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>) -> Result<std::path::PathBuf, String> {
+    compile_to_binary_with(file, no_check, test_mode, release, project_dir_override, false)
+}
+
+/// `compile_to_binary` with the NATIVE trust-spine opt-in (#764): when
+/// `native_verified`, try the v1 MIR renderer first (same Perceus MIR as the
+/// wasm leg; Drop erased to Rust scope-end, ownership verified pre-render) and
+/// fall back to the v0 source on a WALL — a v1-rendered program is never wrong.
+pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>, native_verified: bool) -> Result<std::path::PathBuf, String> {
     let rs_code = try_compile(file, no_check).map_err(|_| "compile failed".to_string())?;
+    let rs_code = if native_verified && !test_mode {
+        let source_text = std::fs::read_to_string(file).unwrap_or_default();
+        match almide_mir::pipeline::try_render_rust_source(&source_text) {
+            Ok(v1_code) => {
+                eprintln!("native: v1 trust-spine render");
+                v1_code
+            }
+            Err(e) => {
+                eprintln!("native: v1 walled ({e:?}) — falling back to v0 codegen");
+                rs_code
+            }
+        }
+    } else {
+        rs_code
+    };
 
     // Scratch dir. A per-call `project_dir_override` (one dir per test file)
     // gives each parallel worker its own `src/main.rs`, so cold rustc builds
@@ -153,7 +176,19 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
             if let Some(parent) = bin_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            if let Err(e) = std::fs::copy(&built_path, &bin_path) {
+            // Stage via copy-to-temp + ATOMIC RENAME: a direct fs::copy onto the
+            // cached path leaves a window where the file is open for writing while
+            // a PARALLEL test thread execs it — ETXTBSY ("Text file busy") on
+            // Linux, the CI examples-suite flake. The rename swaps a fully-written
+            // inode into place atomically, so an exec sees either the complete old
+            // binary or the complete new one, never a half-staged file.
+            let staged = bin_path.with_extension(format!("stage-{}", std::process::id()));
+            if let Err(e) = std::fs::copy(&built_path, &staged) {
+                return Err(format!("failed to stage built binary {} -> {}: {}",
+                    built_path.display(), staged.display(), e));
+            }
+            if let Err(e) = std::fs::rename(&staged, &bin_path) {
+                let _ = std::fs::remove_file(&staged);
                 return Err(format!("failed to stage built binary {} -> {}: {}",
                     built_path.display(), bin_path.display(), e));
             }
@@ -167,16 +202,33 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
 
 /// Run a compiled binary with the given args, returning exit code.
 pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
-    let status = Command::new(bin)
-        .env("RUST_MIN_STACK", "8388608")
-        .args(program_args)
-        .status()
-        .unwrap_or_else(|e| { eprintln!("Failed to execute: {}", e); std::process::exit(1); });
-    status.code().unwrap_or(1)
+    // Belt for the parallel-test ETXTBSY race (the staging rename above is the
+    // root fix): if another thread's stale write handle still overlaps the exec,
+    // back off briefly and retry instead of failing the whole suite.
+    let mut delay = std::time::Duration::from_millis(20);
+    for _ in 0..6 {
+        match Command::new(bin)
+            .env("RUST_MIN_STACK", "8388608")
+            .args(program_args)
+            .status()
+        {
+            Ok(status) => return status.code().unwrap_or(1),
+            Err(e) if e.raw_os_error() == Some(26) => {
+                std::thread::sleep(delay);
+                delay *= 2;
+            }
+            Err(e) => {
+                eprintln!("Failed to execute: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+    eprintln!("Failed to execute: Text file busy (persisted after retries)");
+    1
 }
 
-pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool, release: bool) -> i32 {
-    match compile_to_binary(file, no_check, test_mode, release, None) {
+pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool, release: bool, native_verified: bool) -> i32 {
+    match compile_to_binary_with(file, no_check, test_mode, release, None, native_verified) {
         Ok(bin) => run_binary(&bin, program_args),
         Err(e) => {
             eprintln!("Compile error:\n{}", e);
@@ -185,10 +237,10 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_m
     }
 }
 
-pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: bool, target: Option<&str>, verified: bool) {
+pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: bool, target: Option<&str>, verified: bool, native_verified: bool) {
     let code = match target {
         // Default and explicit native target: the cargo/rustc path.
-        None | Some("rust") | Some("native") => cmd_run_inner(file, program_args, no_check, false, release),
+        None | Some("rust") | Some("native") => cmd_run_inner(file, program_args, no_check, false, release, native_verified),
         // WASM target: build the same module `almide build --target wasm`
         // emits, then execute it on the `wasmtime` CLI. Both targets must
         // produce byte-identical stdout/stderr/exit — the cross-target gate.
@@ -234,10 +286,15 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool) -> i32 {
     }
 
     // `--dir=/` preopens the host root so WASI fs ops resolve the same absolute
-    // paths native sees — matches `compile_and_run_wasm_test`. Program args go
-    // after the module path; wasmtime forwards them to the guest as argv.
+    // paths native sees — matches `compile_and_run_wasm_test`. `-S inherit-env=y`
+    // passes the host environment through WASI so `env.get` observes the SAME
+    // variables native `std::env::var` does (without it every guest lookup is
+    // none — a silent cross-target divergence). Program args go after the module
+    // path; wasmtime forwards them to the guest as argv.
     let status = Command::new("wasmtime")
         .arg("--dir=/")
+        .arg("-S")
+        .arg("inherit-env=y")
         .arg(&wasm_path)
         .args(program_args)
         .status();

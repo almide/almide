@@ -58,7 +58,8 @@ pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<
             let returns_result = func.ret_ty.is_result();
             let (skip_unwrap, force_skip) = collect_result_match_vars(&func.body);
             let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, first_arg_unwraps, skip_unwrap, force_skip };
-            func.body = insert_try_body(std::mem::take(&mut func.body), returns_result, &mut ctx);
+            let ret_ty = func.ret_ty.clone();
+            func.body = insert_try_body(std::mem::take(&mut func.body), returns_result, &ret_ty, &mut ctx);
         }
     }
     for module in modules.iter_mut() {
@@ -68,7 +69,8 @@ pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<
                 let returns_result = func.ret_ty.is_result();
                 let (skip_unwrap, force_skip) = collect_result_match_vars(&func.body);
                 let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, first_arg_unwraps, skip_unwrap, force_skip };
-                func.body = insert_try_body(std::mem::take(&mut func.body), returns_result, &mut ctx);
+                let ret_ty = func.ret_ty.clone();
+                func.body = insert_try_body(std::mem::take(&mut func.body), returns_result, &ret_ty, &mut ctx);
             }
         }
     }
@@ -127,7 +129,7 @@ impl almide_ir::visit::IrVisitor for ResultConsumerScan {
     }
 }
 
-fn insert_try_body(expr: IrExpr, fn_returns_result: bool, ctx: &mut TryCtx) -> IrExpr {
+fn insert_try_body(expr: IrExpr, fn_returns_result: bool, ret_ty: &Ty, ctx: &mut TryCtx) -> IrExpr {
     if fn_returns_result {
         match expr.kind {
             IrExprKind::Block { stmts, expr: Some(tail) } => {
@@ -147,7 +149,99 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool, ctx: &mut TryCtx) -> I
             }
         }
     }
-    insert_try(expr, false, ctx)
+    // A NON-Result-declared effect fn (`fn_returns_result = false`) may still write an
+    // EXPLICIT `ok(x)` sugar wrapper at its own tail (`fetch(p) -> List[String] = ok(["a",
+    // "b"])`, `effect_if_branch_unwrap_test`'s `handler`'s `else { ok(["empty"]) }` arm) —
+    // the checker types `ok(x): Result[T,_]` by its normal construction rule regardless of
+    // the ENCLOSING function's declared return, so this Result wrapper survives `insert_try`
+    // untouched (unlike the auto-INSERTED `Try` node `strip_tail_try` handles above, there is
+    // no `Try` here to strip). But the function's WASM signature is built from its DECLARED
+    // (non-Result) return type — a compiled body that still returns a REAL Result wrapper
+    // object type-checks at the ABI level (both are opaque pointers) but points at the WRONG
+    // block shape; any caller reading it as the declared raw type reads garbage (the v1 MIR
+    // trust-spine DIAGNOSIS: `fetch`'s caller printed `0` instead of the real list). Collapse
+    // it here, unconditionally, at every tail position `strip_tail_try` itself reaches
+    // (Block/If/Match) — the SAME recursive shape, stripping `ResultOk` instead of `Try`.
+    let result = insert_try(expr, false, ctx);
+    // ONLY safe when the body never constructs an `err(...)` of its own anywhere (`fetch`'s
+    // shape) — a fn whose body CAN take an Err branch (`validate`'s `if n>0 then ok(n) else
+    // err("negative")`, this file's own no-regress guard: "must still type (and run) as a
+    // Result") genuinely needs its callers to be able to read a real Result tag, so its
+    // WASM repr must stay Result-shaped; stripping the `ok(n)` arm there would leave it
+    // type-mismatched against the untouched `err(...)` sibling arm (a real regression this
+    // was caught by — `validate`'s tail walled after an earlier, unconditional version of
+    // this strip). `body_never_constructs_err` is a simple LOCAL scan (no transitive `!`-
+    // propagation-through-callees analysis needed, unlike almide-mir's `compute_can_err` —
+    // this only needs to know whether THIS body's own construction sites ever emit `err`).
+    if body_never_constructs_err(&result) {
+        strip_tail_result_ok_sugar(result, ret_ty)
+    } else {
+        result
+    }
+}
+
+/// Does `body` construct an `err(...)` (`ResultErr`) ANYWHERE in its own AST? Does NOT follow
+/// calls (a callee's own errors are its own concern) — purely a local scan, gating
+/// `strip_tail_result_ok_sugar`'s safety (see its call site).
+fn body_never_constructs_err(body: &IrExpr) -> bool {
+    struct HasErr(bool);
+    impl almide_ir::visit::IrVisitor for HasErr {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(&e.kind, IrExprKind::ResultErr { .. }) {
+                self.0 = true;
+            }
+            if !self.0 {
+                almide_ir::visit::walk_expr(self, e);
+            }
+        }
+    }
+    let mut scan = HasErr(false);
+    scan.visit_expr(body);
+    !scan.0
+}
+
+/// Collapse a redundant tail-position explicit `ok(x)` to `x`, for a NON-Result-declared
+/// effect fn whose body writes it anyway (see `insert_try_body`'s call site for the full
+/// rationale). Mirrors `strip_tail_try`'s exact recursive shape (Block-tail / both `If` arms /
+/// every `Match` arm) so a wrapper nested inside a branch is reached too — `handler`'s
+/// `if c then { match … } else { ok([...]) }` needs the `If`-arm case, not just the bare-tail
+/// one `fetch`'s repro exercises. UNCONDITIONAL (no `inner.ty.is_result()` guard like
+/// `strip_tail_try` — an EXPLICIT `ok(x)` node itself, at this position, is ALWAYS the
+/// redundant sugar, never a real value the caller needs to keep, since the enclosing fn's own
+/// declared type has no Result to begin with). Every level's `.ty` is FORCED to `ret_ty` (the
+/// function's OWN declared type, not each subtree's own checker-assigned `Result[T,_]` type)
+/// so a stripped `If`/`Match` doesn't disagree with its now-raw-typed children. `ResultErr` is
+/// deliberately NOT stripped: a non-Result-declared fn's tail cannot type-check to `err(..)`
+/// (no error slot in its declared/compiled ABI) — the checker rejects that shape before
+/// lowering ever sees it, so no case for it is needed here.
+fn strip_tail_result_ok_sugar(expr: IrExpr, ret_ty: &Ty) -> IrExpr {
+    match expr.kind {
+        IrExprKind::ResultOk { expr: inner } => {
+            let mut inner = *inner;
+            inner.ty = ret_ty.clone();
+            inner
+        }
+        IrExprKind::Match { subject, arms } => {
+            let arms = arms.into_iter().map(|arm| IrMatchArm {
+                pattern: arm.pattern, guard: arm.guard,
+                body: strip_tail_result_ok_sugar(arm.body, ret_ty),
+            }).collect();
+            IrExpr { kind: IrExprKind::Match { subject, arms }, ty: ret_ty.clone(), span: expr.span, def_id: None }
+        }
+        IrExprKind::If { cond, then, else_ } => IrExpr {
+            kind: IrExprKind::If {
+                cond,
+                then: Box::new(strip_tail_result_ok_sugar(*then, ret_ty)),
+                else_: Box::new(strip_tail_result_ok_sugar(*else_, ret_ty)),
+            },
+            ty: ret_ty.clone(), span: expr.span, def_id: None,
+        },
+        IrExprKind::Block { stmts, expr: Some(tail) } => IrExpr {
+            kind: IrExprKind::Block { stmts, expr: Some(Box::new(strip_tail_result_ok_sugar(*tail, ret_ty))) },
+            ty: ret_ty.clone(), span: expr.span, def_id: None,
+        },
+        _ => expr,
+    }
 }
 
 /// True when the value is an effect-lifted `Result[OK, _]` whose OK type is

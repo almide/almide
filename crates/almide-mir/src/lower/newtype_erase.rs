@@ -1,0 +1,516 @@
+/// TRANSPARENT-NEWTYPE ERASURE (a pre-lowering program pass): `mod type SafeHtml =
+/// String` is a purely NOMINAL wrapper — the frontend rejects every operation that
+/// could observe the wrapper at runtime (direct `println`, arithmetic, off-type
+/// passing), so by IR time the newtype exists ONLY as (1) `Ty::Named(name, [])`
+/// tags, (2) a 1-arg ctor CALL `SafeHtml(s)` (which would render as an unlinked
+/// `$SafeHtml` — an honest wall), and (3) a 1-arg ctor PATTERN `SafeHtml(s) => …`.
+/// Erase all three to the inner type: the value IS its payload (v0's runtime is the
+/// same `#[repr(transparent)]` story), equality/print/drop all follow the inner ty.
+/// Alias CHAINS (`type A = B; type B = String`) resolve to a fixpoint first.
+/// GENERIC aliases keep their decl (the target mentions type params) — untouched.
+/// Runs on the WHOLE linked program (pipeline + classify — desugar-before-both:
+/// the caps `mir == ir` count sees the erased tree on BOTH sides by construction).
+pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
+    use almide_ir::visit_mut::{walk_expr_mut, walk_pattern_mut, walk_stmt_mut, IrMutVisitor};
+    use almide_ir::{IrExpr, IrPattern, IrStmt, IrTypeDeclKind};
+    use almide_lang::types::{Ty, VariantPayload};
+    use std::collections::HashMap;
+
+    fn collect(decls: &[almide_ir::IrTypeDecl], map: &mut HashMap<String, Ty>) {
+        for td in decls {
+            if let IrTypeDeclKind::Alias { target } = &td.kind {
+                if td.generics.is_none() {
+                    map.insert(td.name.as_str().to_string(), target.clone());
+                }
+            }
+        }
+    }
+    fn subst(ty: &Ty, map: &HashMap<String, Ty>) -> Ty {
+        match ty {
+            Ty::Named(name, args) => {
+                if args.is_empty() {
+                    if let Some(t) = map.get(name.as_str()) {
+                        return t.clone();
+                    }
+                }
+                Ty::Named(*name, args.iter().map(|a| subst(a, map)).collect())
+            }
+            Ty::Applied(id, args) => {
+                Ty::Applied(id.clone(), args.iter().map(|a| subst(a, map)).collect())
+            }
+            Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|a| subst(a, map)).collect()),
+            Ty::Union(ts) => Ty::Union(ts.iter().map(|a| subst(a, map)).collect()),
+            Ty::Record { fields } => Ty::Record {
+                fields: fields.iter().map(|(n, t)| (*n, subst(t, map))).collect(),
+            },
+            Ty::OpenRecord { fields } => Ty::OpenRecord {
+                fields: fields.iter().map(|(n, t)| (*n, subst(t, map))).collect(),
+            },
+            Ty::Fn { params, ret } => Ty::Fn {
+                params: params.iter().map(|a| subst(a, map)).collect(),
+                ret: Box::new(subst(ret, map)),
+            },
+            Ty::Variant { name, cases } => Ty::Variant {
+                name: *name,
+                cases: cases
+                    .iter()
+                    .map(|c| almide_lang::types::VariantCase {
+                        name: c.name,
+                        payload: match &c.payload {
+                            VariantPayload::Unit => VariantPayload::Unit,
+                            VariantPayload::Tuple(ts) => VariantPayload::Tuple(
+                                ts.iter().map(|a| subst(a, map)).collect(),
+                            ),
+                            VariantPayload::Record(fs) => VariantPayload::Record(
+                                fs.iter().map(|(n, t)| (*n, subst(t, map))).collect(),
+                            ),
+                        },
+                    })
+                    .collect(),
+            },
+            Ty::ConstParam { name, ty } => {
+                Ty::ConstParam { name: *name, ty: Box::new(subst(ty, map)) }
+            }
+            Ty::ConstValue { ty, value } => {
+                Ty::ConstValue { ty: Box::new(subst(ty, map)), value: *value }
+            }
+            _ => ty.clone(),
+        }
+    }
+
+    let mut map: HashMap<String, Ty> = HashMap::new();
+    collect(&program.type_decls, &mut map);
+    for m in &program.modules {
+        collect(&m.type_decls, &mut map);
+    }
+    // SELF-HOST REP table: opaque STDLIB nominals whose v1 self-host owns the
+    // representation (`stdlib/json_path.almd` — JsonPath = a List[String] of
+    // segments). Publishing the rep here makes every user-side bind/param of the
+    // opaque type route the CORRECT drop (heap_elem_list str). Only when the
+    // program does not declare its own type of the same name.
+    let declared: std::collections::HashSet<&str> = program
+        .type_decls
+        .iter()
+        .map(|td| td.name.as_str())
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter().map(|td| td.name.as_str())))
+        .collect();
+    if !declared.contains("JsonPath") {
+        map.insert(
+            "JsonPath".to_string(),
+            Ty::Applied(
+                almide_lang::types::constructor::TypeConstructorId::List,
+                vec![Ty::String],
+            ),
+        );
+    }
+    // HttpResponse — the self-host rep is `[status, body, k1, v1, …]`
+    // (stdlib/http_response.almd, the same List[String] discipline).
+    if !declared.contains("HttpResponse") {
+        map.insert(
+            "HttpResponse".to_string(),
+            Ty::Applied(
+                almide_lang::types::constructor::TypeConstructorId::List,
+                vec![Ty::String],
+            ),
+        );
+    }
+    // FileStat — the fs.stat Ok payload. Its decl lives in the BUNDLED stdlib fs module,
+    // which `source_to_ir` skips (defs come from the self-host registry), so the nominal
+    // `Named(FileStat)` never reaches `record_layouts` and a `meta.size` member read walls.
+    // Erase it to the STRUCTURAL record (the SAME field order stdlib/fs.almd declares and
+    // stdlib/fs_stat.almd constructs — `aggregate_field_tys` resolves a `Ty::Record`
+    // without any registry), so member reads land on the right uniform slots.
+    if !declared.contains("FileStat") {
+        use almide_lang::intern::sym;
+        map.insert(
+            "FileStat".to_string(),
+            Ty::Record {
+                fields: vec![
+                    (sym("size"), Ty::Int),
+                    (sym("is_dir"), Ty::Bool),
+                    (sym("is_file"), Ty::Bool),
+                    (sym("modified"), Ty::Int),
+                ],
+            },
+        );
+    }
+    if map.is_empty() {
+        return;
+    }
+    // Resolve alias-of-alias chains to a fixpoint (bounded — a cycle would be a
+    // frontend error; the bound just keeps this total).
+    for _ in 0..8 {
+        let snapshot = map.clone();
+        let mut changed = false;
+        for t in map.values_mut() {
+            let nt = subst(t, &snapshot);
+            if nt != *t {
+                *t = nt;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    struct Eraser<'a> {
+        map: &'a HashMap<String, Ty>,
+    }
+    impl Eraser<'_> {
+        fn subst(&self, ty: &Ty) -> Ty {
+            subst(ty, self.map)
+        }
+    }
+    impl IrMutVisitor for Eraser<'_> {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            use almide_ir::{CallTarget, IrExprKind};
+            walk_expr_mut(self, e);
+            e.ty = self.subst(&e.ty);
+            if let IrExprKind::Lambda { params, .. } = &mut e.kind {
+                for (_, ty) in params.iter_mut() {
+                    *ty = self.subst(ty);
+                }
+            }
+            // The 1-arg newtype ctor CALL is the payload itself (same block, same
+            // ownership — the arg was already erased/visited above).
+            let is_newtype_ctor = matches!(&e.kind,
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+                    if args.len() == 1 && self.map.contains_key(name.as_str()));
+            if is_newtype_ctor {
+                if let IrExprKind::Call { args, .. } = &mut e.kind {
+                    let payload = args.pop().expect("1-arg ctor");
+                    *e = payload;
+                }
+            }
+            // A match REDUCED to one bare-Bind arm by the pattern erasure
+            // (`match h { SafeHtml(s) => s }` → `match h { s => s }`) is a `let`:
+            // `{ let s = h; body }`. Count-invariant (subject + body appear once).
+            let is_unit_bind_match = matches!(&e.kind,
+                IrExprKind::Match { arms, .. }
+                    if arms.len() == 1
+                        && arms[0].guard.is_none()
+                        && matches!(arms[0].pattern, IrPattern::Bind { .. }));
+            if is_unit_bind_match {
+                if let IrExprKind::Match { subject, arms } = &mut e.kind {
+                    let arm = arms.pop().expect("1 arm");
+                    if let IrPattern::Bind { var, ty } = arm.pattern {
+                        let span = e.span.clone();
+                        let bind = IrStmt {
+                            kind: almide_ir::IrStmtKind::Bind {
+                                var,
+                                ty,
+                                value: (**subject).clone(),
+                                mutability: almide_ir::Mutability::Let,
+                            },
+                            span: span.clone(),
+                        };
+                        let body_ty = arm.body.ty.clone();
+                        let def_id = arm.body.def_id;
+                        *e = IrExpr {
+                            kind: IrExprKind::Block {
+                                stmts: vec![bind],
+                                expr: Some(Box::new(arm.body)),
+                            },
+                            ty: body_ty,
+                            span,
+                            def_id,
+                        };
+                    }
+                }
+            }
+        }
+        fn visit_stmt_mut(&mut self, s: &mut IrStmt) {
+            use almide_ir::IrStmtKind;
+            walk_stmt_mut(self, s);
+            if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
+                *ty = self.subst(ty);
+            }
+        }
+        fn visit_pattern_mut(&mut self, p: &mut IrPattern) {
+            walk_pattern_mut(self, p);
+            if let IrPattern::Bind { ty, .. } = p {
+                *ty = self.subst(ty);
+            }
+            // The 1-arg newtype ctor PATTERN always matches — it IS the inner pattern.
+            let inner = if let IrPattern::Constructor { name, args } = p {
+                if args.len() == 1 && self.map.contains_key(name.as_str()) {
+                    Some(args.remove(0))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some(ip) = inner {
+                *p = ip;
+            }
+        }
+    }
+
+    let mut v = Eraser { map: &map };
+    fn rewrite_fns(
+        v: &mut Eraser<'_>,
+        map: &HashMap<String, Ty>,
+        fns: &mut [almide_ir::IrFunction],
+    ) {
+        for f in fns.iter_mut() {
+            for p in f.params.iter_mut() {
+                p.ty = subst(&p.ty, map);
+            }
+            f.ret_ty = subst(&f.ret_ty, map);
+            v.visit_expr_mut(&mut f.body);
+        }
+    }
+    rewrite_fns(&mut v, &map, &mut program.functions);
+    let mut modules = std::mem::take(&mut program.modules);
+    for m in modules.iter_mut() {
+        rewrite_fns(&mut v, &map, &mut m.functions);
+        for tl in m.top_lets.iter_mut() {
+            tl.ty = subst(&tl.ty, &map);
+            v.visit_expr_mut(&mut tl.value);
+        }
+    }
+    program.modules = modules;
+    for tl in program.top_lets.iter_mut() {
+        tl.ty = subst(&tl.ty, &map);
+        v.visit_expr_mut(&mut tl.value);
+    }
+    // Other type decls may carry alias-typed fields (a record holding a SafeHtml).
+    for td in program.type_decls.iter_mut() {
+        match &mut td.kind {
+            almide_ir::IrTypeDeclKind::Record { fields } => {
+                for f in fields.iter_mut() {
+                    f.ty = subst(&f.ty, &map);
+                }
+            }
+            almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
+                for c in cases.iter_mut() {
+                    match &mut c.kind {
+                        almide_ir::IrVariantKind::Unit => {}
+                        almide_ir::IrVariantKind::Tuple { fields } => {
+                            for t in fields.iter_mut() {
+                                *t = subst(t, &map);
+                            }
+                        }
+                        almide_ir::IrVariantKind::Record { fields } => {
+                            for f in fields.iter_mut() {
+                                f.ty = subst(&f.ty, &map);
+                            }
+                        }
+                    }
+                }
+            }
+            almide_ir::IrTypeDeclKind::Alias { .. } => {}
+        }
+    }
+}
+
+/// INLINE-SUBSTITUTE pure call-bearing GLOBAL initializers at their use sites (a
+/// program-level pre-pass, run right after [`erase_transparent_newtypes`] in BOTH the
+/// pipeline and classify IR construction — desugar-before-both by construction).
+///
+/// `let BANNER = make_banner()` (the #632 / C-077 family) cannot materialize at a USE
+/// site under the count discipline (the reference is a `Var` = 0 IR calls; injecting the
+/// CallFn would breach `mir == ir`), and an eager `__init_globals` prologue is a whole
+/// new count/ownership subsystem. But v0 NATIVE globals are LAZY statics — every use
+/// evaluates the initializer's VALUE — so for a PURE initializer, substituting the init
+/// EXPRESSION at each use site is byte-equivalent (same value each time; v0-wasm's
+/// dependency-sorted eager init is pinned observably equal by C-077). The substitution
+/// happens in the SHARED IR both the lowering and `count_ir_calls` read, so the call
+/// counts stay 1:1.
+///
+/// GATES: (a) the init CONTAINS a call (const inits keep the existing materialization);
+/// (b) the init is transitively PURE — every `Named` callee is a non-`effect` fn whose
+/// body (transitively) makes only pure-module/Named calls (no RuntimeCall, no impure
+/// Module call) — an effectful init keeps walling (substitution would re-run the
+/// effect per use, an observable divergence); (c) REGION-LOCAL — main top-lets
+/// substitute into main functions/top-lets, a module's into its own functions — the
+/// main/module VarId numbering regions can collide, so cross-region substitution by
+/// raw VarId would hit unrelated locals (the bridge owns cross-module reads).
+/// Self-referencing inits never substitute into their own init (cycle guard); chained
+/// call-globals resolve by a bounded fixpoint.
+pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
+    use almide_ir::{CallTarget, IrExpr, IrExprKind};
+    use std::collections::{HashMap, HashSet};
+
+    // Function registry by name (program + modules) for the transitive purity scan.
+    let mut fns_by_name: HashMap<String, IrExpr> = HashMap::new();
+    let mut effect_fns: HashSet<String> = HashSet::new();
+    for f in &program.functions {
+        fns_by_name.insert(f.name.as_str().to_string(), f.body.clone());
+        if f.is_effect {
+            effect_fns.insert(f.name.as_str().to_string());
+        }
+    }
+    for m in &program.modules {
+        for f in &m.functions {
+            let qualified = format!("{}.{}", m.name.as_str(), f.name.as_str());
+            fns_by_name.insert(f.name.as_str().to_string(), f.body.clone());
+            fns_by_name.insert(qualified.clone(), f.body.clone());
+            if f.is_effect {
+                effect_fns.insert(f.name.as_str().to_string());
+                effect_fns.insert(qualified);
+            }
+        }
+    }
+
+    fn expr_is_pure(
+        e: &IrExpr,
+        fns: &HashMap<String, IrExpr>,
+        effects: &HashSet<String>,
+        visiting: &mut HashSet<String>,
+    ) -> bool {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct V<'a> {
+            ok: bool,
+            fns: &'a HashMap<String, IrExpr>,
+            effects: &'a HashSet<String>,
+            visiting: &'a mut HashSet<String>,
+        }
+        impl IrVisitor for V<'_> {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if !self.ok {
+                    return;
+                }
+                match &e.kind {
+                    IrExprKind::RuntimeCall { .. } => self.ok = false,
+                    IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } => {
+                        match target {
+                            CallTarget::Module { module, func, .. } => {
+                                if !crate::purity::is_pure(module.as_str(), func.as_str()) {
+                                    // Not a known-pure STDLIB call — but a USER module's
+                                    // fn (`let gray_50 = v.rgb(…)` calling view.rgb, the
+                                    // ceangal theme class) is in the registry under its
+                                    // QUALIFIED name: recurse into its body exactly like
+                                    // a Named callee (the same cycle guard applies). An
+                                    // unknown qualified name stays impure (declines).
+                                    let q = format!("{}.{}", module.as_str(), func.as_str());
+                                    if self.effects.contains(&q) {
+                                        self.ok = false;
+                                    } else if self.visiting.insert(q.clone()) {
+                                        match self.fns.get(&q) {
+                                            Some(body) => {
+                                                let body = body.clone();
+                                                if !expr_is_pure(
+                                                    &body,
+                                                    self.fns,
+                                                    self.effects,
+                                                    self.visiting,
+                                                ) {
+                                                    self.ok = false;
+                                                }
+                                            }
+                                            None => self.ok = false,
+                                        }
+                                    }
+                                }
+                            }
+                            CallTarget::Named { name } => {
+                                let n = name.as_str().to_string();
+                                if self.effects.contains(&n) {
+                                    self.ok = false;
+                                } else if self.visiting.insert(n.clone()) {
+                                    match self.fns.get(&n) {
+                                        Some(body) => {
+                                            let body = body.clone();
+                                            if !expr_is_pure(
+                                                &body,
+                                                self.fns,
+                                                self.effects,
+                                                self.visiting,
+                                            ) {
+                                                self.ok = false;
+                                            }
+                                        }
+                                        // An unknown callee (a variant ctor is fine — no
+                                        // body, no effect; anything else unknown declines).
+                                        None => {}
+                                    }
+                                }
+                            }
+                            // A Method/Computed callee is unanalyzable here — decline.
+                            _ => self.ok = false,
+                        }
+                    }
+                    _ => {}
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut v = V { ok: true, fns, effects, visiting };
+        v.visit_expr(e);
+        v.ok
+    }
+
+    // One REGION: substitute qualifying globals into the given fns + sibling inits.
+    fn run_region(
+        top_lets: &mut [almide_ir::IrTopLet],
+        fn_bodies: &mut [almide_ir::IrFunction],
+        fns: &HashMap<String, IrExpr>,
+        effects: &HashSet<String>,
+    ) {
+        let qualifying: Vec<(almide_ir::VarId, IrExpr)> = top_lets
+            .iter()
+            // A MUTABLE `var` must NEVER inline: substituting its INITIALIZER into a use
+            // site freezes the read at the init value (writes through the global slot
+            // become invisible — `speeds[i]` read `list.repeat(0.0, 4)[i]` = 0.0 forever).
+            .filter(|tl| !tl.mutable)
+            .filter(|tl| crate::lower::expr_contains_call(&tl.value))
+            .filter(|tl| {
+                let mut visiting = HashSet::new();
+                expr_is_pure(&tl.value, fns, effects, &mut visiting)
+            })
+            .map(|tl| (tl.var, tl.value.clone()))
+            .collect();
+        if qualifying.is_empty() {
+            return;
+        }
+        // Bounded fixpoint: a chained call-global (`let A = f(); let B = g(A)`) resolves
+        // in ≤ chain-depth rounds; the cycle guard is the self-substitution skip.
+        for _ in 0..4 {
+            let mut changed = false;
+            for (var, init) in &qualifying {
+                for f in fn_bodies.iter_mut() {
+                    let nb = almide_ir::substitute_var_in_expr(&f.body, *var, init);
+                    if !exprs_eq_shallow(&nb, &f.body) {
+                        f.body = nb;
+                        changed = true;
+                    }
+                }
+                for tl in top_lets.iter_mut() {
+                    if tl.var == *var {
+                        continue;
+                    }
+                    let nv = almide_ir::substitute_var_in_expr(&tl.value, *var, init);
+                    if !exprs_eq_shallow(&nv, &tl.value) {
+                        tl.value = nv;
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+    // Cheap change detector: substitution either changes the tree or returns an
+    // identical clone — compare the debug forms (bounded corpora; not hot).
+    fn exprs_eq_shallow(a: &almide_ir::IrExpr, b: &almide_ir::IrExpr) -> bool {
+        format!("{a:?}") == format!("{b:?}")
+    }
+
+    let fns_snapshot = fns_by_name;
+    let effects_snapshot = effect_fns;
+    run_region(
+        &mut program.top_lets,
+        &mut program.functions,
+        &fns_snapshot,
+        &effects_snapshot,
+    );
+    let mut modules = std::mem::take(&mut program.modules);
+    for m in modules.iter_mut() {
+        run_region(&mut m.top_lets, &mut m.functions, &fns_snapshot, &effects_snapshot);
+    }
+    program.modules = modules;
+}

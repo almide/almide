@@ -93,94 +93,48 @@ almide run hello.almd
 - **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
 - **Actionable diagnostics** — Every error includes file:line, context, and a concrete fix suggestion
 
+## The Equivalence Claim — Byte-Identical Across Targets
+
+**Every program that compiles for both targets produces byte-identical observable output — stdout, stderr, exit code — whether it runs as a native binary or as WebAssembly.** Native is the oracle; `native == wasm` is a hard invariant, not a "target difference" to be documented around.
+
+The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-identical" means the execution output, not the compiled artifacts; inherently nondeterministic sources certify deterministic *invariants* instead of exact bytes; and APIs not yet implemented on wasm are compile- or run-time *refusals* — never wrong bytes.
+
+This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
+
+<!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
+> **Ledger: 133 contracts — 133 active, 0 flagged-for-revision.**
+>
+> **Exceptions: none.** Every contract in the ledger is `active`, carrying
+> executable evidence of class ≥ `fixture`.
+<!-- claims:generated:end -->
+
+Full scope, ledger mechanics, and the evidence stack (contract ledger, cross-target fixture gate, differential fuzz, emit-time Σ-probes, Lean belt, org-wide byte-verify sweep): **[docs/EQUIVALENCE.md](./docs/EQUIVALENCE.md)**.
+
 ## Memory Safety — Formally Verified
 
-Almide uses [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/) reference counting for automatic memory management. No GC, no manual free, no pauses.
+You write no ownership annotations, no lifetimes, no `free` — memory management is decided by [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/)-style ownership inference in the compiler: garbage-collector-free, pause-free. The inference computes where every heap value is introduced, duplicated, and consumed; what differs per target is only the *execution mechanism* for those decisions:
+
+- **WebAssembly** — the decisions execute as reference counting: precise, compiler-placed RC with no GC. This is the path the Lean proofs below certify.
+- **Native (Rust)** — the same decisions are realized by Rust's own ownership machinery: the compiler emits ownership-idiomatic Rust, inserting borrows and clones for you; every heap value is freed by Rust's scope-end drops.
+
+Sharing one mechanically-checked Perceus MIR across both renderers — so the decisions are literally the same certified artifact on both legs — is the [native trust-spine ladder](docs/roadmap/active/native-trust-spine.md) ([#764](https://github.com/almide/almide/issues/764)); shared scalar and list ops already render on both targets from the same MIR.
 
 Where Rust gives you *zero-cost* abstraction (paid for in ownership annotations), Almide gives you **zero-annotation** abstraction: you write none, and every heap free is machine-proven — *write none, prove all.*
-
-The correctness of the RC insertion pass is **mathematically proven** in Lean 4:
 
 ```lean
 theorem perceus_all_heap_freed (fb : FnBody) :
     allHeapFreed (perceusTransform fb)
 ```
 
-**For any program, the compiler produces code where every heap allocation is freed on all execution paths.** 22 theorems, 0 sorry — verified by the Lean 4 kernel.
-
-This is connected to the actual compiler (not a separate paper proof):
-
-- `perceus_verified.rs` runs in the compiler's verify pipeline
-- 19 property-based tests validate Lean/Rust algorithm consistency
-- CI blocks any unproven theorem (`sorry`) from merging
-
-Details: [`crates/almide-perceus-belt/`](./crates/almide-perceus-belt/) — [Specification](./docs/specs/perceus.md)
+**For any program, the compiler produces code where every heap allocation is freed on all execution paths.** 22 theorems, 0 sorry — verified by the Lean 4 kernel, wired into the compiler's own verify pipeline (not a separate paper proof), with CI blocking any `sorry` from merging. Details: [`crates/almide-perceus-belt/`](./crates/almide-perceus-belt/) — [Specification](./docs/specs/perceus.md)
 
 ## What's Next — v1: The Trust Spine
 
-> In active development on the `develop` branch (the **v1** line). This is a ground-up redesign of the compiler's *trust model*, not a feature on top of v0.
+> In active development on the `develop` branch. A ground-up redesign of the compiler's *trust model*, not a feature on top of v0.
 
-The Perceus proof above proves one compiler pass, once. v1 generalizes that principle to the **whole pipeline** — but instead of proving every pass, it proves a tiny *checker* and makes the compiler re-verify itself on every build.
+The Perceus proof above proves one compiler pass, once. v1 generalizes that principle to the **whole pipeline** — but instead of proving the 100k-line compiler, it proves a tiny *checker* and has the compiler emit a certificate on every build that the checker re-verifies. If the checker accepts, the artifact has the property — a theorem that never mentions the compiler's internals. That single move collapses the trusted base from ~100,000 lines to a few hundred, and asks a harder question than testing ever can: **not "do the tests pass?" but "can a machine prove the output is correct?"**
 
-The v0 compiler (everything described above) takes the shortest path: `AST → IR → codegen`. It's fast, and it's correct *as far as the tests can tell*. v1 asks a harder question: **not "do the tests pass?" but "can a machine prove the output is correct?"**
-
-### The idea
-
-You don't make a compiler trustworthy by making it perfect — a correct 100k-line compiler is a proof obligation no one can discharge. Instead:
-
-> **Don't prove the compiler. Prove a tiny checker — and have the compiler emit a certificate on every build that the checker re-verifies.**
-
-This rests on an asymmetry the whole field stands on: **building is hard, checking is cheap.** Solving a sudoku is work; verifying a solved one is a glance. So the compiler is *allowed* to have bugs — if it emits a wrong artifact, the attached certificate won't check out and the checker rejects it. The only thing that must be proven correct is the checker, and the only theorem is:
-
-> *If the checker accepts, the artifact has the property* — and this theorem never mentions the compiler's internals.
-
-That single move collapses the **trusted base from ~100,000 lines to a few hundred.** The big compiler becomes *untrusted* — free to be as large and buggy as it likes, because nothing trusts it.
-
-### The pipeline (proof-carrying code)
-
-```
-        ALS — normative semantics (Coq; the single source of truth for meaning)
-         │ refine                                                    │ refine
- ┌───────┴───────────────────────────────┐                          │
- │ UNTRUSTED — any size, bugs allowed     │                          │
- │ .almd → check → lower → MIR → emit     │                          │
- └───────┬───────────────────────────────┘                          │
-         │                                                           │
-   ( wasm bytes a , certificate bundle c )                           │
-         │                                                           │
- ┌───────┴───────────────────────────────────────────────────────────────┐
- │ TRUSTED — a few hundred lines, machine-proven sound in Coq              │
- │   K  property checker      K(c, a) accepts ⟹ a satisfies property P    │
- │   V  translation checker   V(a, ALS) accepts ⟹ a refines ALS(s)       │
- └───────────────────────────────────────────────────────────────────────┘
-```
-
-- **K (property checker)** verifies the certificate: memory safety, name totality, capability upper bound, stack balance, termination behavior.
-- **V (translation checker)** verifies — *on every build* — that the emitted wasm actually refines the language semantics. This is the answer to the reviewer's killer question: *"You proved a model — but does the thing that actually runs match it?"*
-- **ALS** (Almide Language Specification) is the normative semantics, in Coq. The compiler and both backends don't define meaning; they *refine* ALS. So byte-for-byte agreement between targets isn't an afterthought — it falls out of the design.
-
-The **trusted base is a single Coq kernel** (plus CompCert/CertiCoq, the hardware, and the assumption that ALS says what we intend). Everything else is either proven against it or untrusted. There is no third category.
-
-### Receipts — verify it yourself
-
-Each build folds its certificates into claims, each with a published refutation procedure:
-
-| Receipt | Claim |
-|---|---|
-| **C-SAFE** | Capability-bounded, no undefined behavior — checkable from the artifact alone |
-| **C-REPRO** | Same source → byte-identical output on any host |
-| **C-FAITHFUL** | Observable behavior refines the language semantics |
-| **C-PROVEN** | Kernel-checked universal properties (RC balance, stack balance, …) |
-
-Run `make verify` and you re-derive every claim **on your own machine.** CI is a courtesy pre-run, deliberately *outside* the trusted base — you never have to trust our infrastructure to trust the artifact.
-
-### Why it's slower — on purpose
-
-v0 is fast because it stops at "the tests pass." v1 is slower because every unit of work runs the full verification gauntlet: the property checker (the *corpus-wall*) re-verifies ownership / name / capability certificates for every function; an output-parity gate byte-compares against v0 as an oracle; and where needed `coqc` plus an independent `coqchk` kernel re-check confirm the proofs introduce no stray axioms (`Print Assumptions ⊆ standard`). A single change can trigger minutes of checking.
-
-That cost isn't inefficiency. It's the price of replacing **"it should be correct" (trust the tests) with "a machine has verified that it is" (trust the proof).** v0 is quick but hopeful; v1 is slow but ships only what the checker has accepted.
-
-Where it stands today: the architecture is proven on a language subset, and the current work is taking it end-to-end over real `.almd` programs, on the road to byte-reproducibility and qualification-grade hardening. See [`docs/roadmap/active/v1-proof-architecture.md`](./docs/roadmap/active/v1-proof-architecture.md) and [`v1-system-map.md`](./docs/roadmap/active/v1-system-map.md).
+The full architecture — the untrusted/trusted split, the ALS normative semantics in Coq, the verify-it-yourself receipts (C-SAFE / C-REPRO / C-FAITHFUL / C-PROVEN), and why builds are slower on purpose: **[docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md)**.
 
 ## Why Almide?
 
@@ -226,59 +180,38 @@ test "greet succeeds" {
 
 Almide source (`.almd`) is compiled by a pure-Rust compiler through a three-layer codegen architecture:
 
-```
-.almd → Lexer → Parser → AST → Type Checker → Lowering → IR
-                                                            ↓
-                                              Nanopass Pipeline (semantic rewrites)
-                                                            ↓
-                                              Template Renderer (TOML-driven)
-                                                            ↓
-                                                    .rs / .wasm
+```mermaid
+flowchart TB
+    SRC[".almd → Lexer → Parser → AST → Type Checker → Lowering → IR"]
+    NANO["Nanopass Pipeline (semantic rewrites)"]
+    TMPL["Template Renderer (TOML-driven)"]
+    OUT[".rs / .wasm"]
+    SRC --> NANO --> TMPL --> OUT
 ```
 
 The Nanopass pipeline applies target-specific transformations: `ResultPropagation` (Rust `?`), `CloneInsertion` (Rust borrow analysis), `LICM` (loop-invariant code motion). The Template Renderer is purely syntactic — all semantic decisions are already encoded in the IR.
 
 ```bash
-almide run app.almd              # Compile + execute (Rust target)
-almide run app.almd -- arg1      # With arguments
-almide build app.almd -o app     # Build standalone binary
+almide run app.almd                  # Compile + execute (native)
 almide build app.almd --target wasm  # Build WebAssembly (WASI)
-almide compile                   # Compile to .almdi (module interface + IR)
-almide compile parser            # Compile a specific module
-almide compile --json            # Output interface as JSON
-almide test                      # Find and run all test blocks (recursive)
-almide test spec/lang/           # Run tests in a directory
-almide test --run "pattern"      # Filter tests by name
-almide check app.almd            # Type check only
-almide check app.almd --json     # Type check with JSON output
-almide fmt app.almd              # Format source code
-almide clean                     # Clear build + dependency cache
+almide test                          # Find and run all test blocks (recursive)
+almide check app.almd                # Type check only
+almide fmt app.almd                  # Format source code
 ```
 
-## WASM Binary Size
+Run `almide --help` for the full command list (compile, add, deps, clean, …).
 
-Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency. Aggressive DCE strips unused runtime functions and data automatically.
+## Performance
 
-| Program | Size |
-|---------|-----:|
-| Hello World | **467 B** |
-| FizzBuzz | **809 B** |
-| Fibonacci (recursive) | **682 B** |
-| Closure + call_indirect | **812 B** |
-| Variant (match + float) | **1,105 B** |
+No runtime, no GC, no interpreter — native compiles through Rust to machine code, and WASM is emitted directly (no LLVM, no Cranelift) as self-contained binaries.
 
-These are raw `almide build --target wasm` output — no post-processing. `wasm-opt -O3` saves only 1–5 more bytes because the compiler's built-in dead code and dead data elimination already strips everything unused.
+| Headline | Value |
+|---|---|
+| WASM "Hello World" binary | **467 B** — raw output, self-contained, `wasm-opt` saves only 1–5 more bytes |
+| Native minigit CLI binary | **444 KB** stripped, 0 dependencies |
+| MiniGit AI-coding benchmark | **100% pass** (41/41) vs 15 established languages |
 
-## Native Performance
-
-Almide compiles to Rust, which then compiles to native machine code. No runtime, no GC, no interpreter.
-
-| Metric | Value |
-|--------|-------|
-| Binary size (minigit CLI) | **444 KB** (stripped) |
-| Runtime (100 ops) | **1.1s** |
-| Dependencies | **0** (single static binary) |
-| WASM target | `almide build app.almd --target wasm` |
+Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.md)**.
 
 ## Project Status
 
@@ -294,37 +227,11 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 | Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — compiler runs as WASM in browser |
 
-### AI Coding Language Benchmark
-
-Comparison with 15 established languages using [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) (MiniGit implementation task).
-
-![Execution Time](docs/figures/lang-bench-time.png?v=1775655978)
-![Code Size](docs/figures/lang-bench-loc.png?v=1775655978)
-![Pass Rate](docs/figures/lang-bench-pass-rate.png?v=1775655978)
-
-> Almide uses Sonnet 4.6 (unknown language); all others use Opus 4.6 (known language). Almide achieves 100% pass rate with fewer lines of code than most languages, despite needing more time due to the model having no prior training data for the language.
-
 ## Ecosystem
 
 ### Grammar — [almide-grammar](https://github.com/almide/almide-grammar)
 
-Single source of truth for Almide syntax — keywords, operators, precedence, and TextMate scopes. Written in Almide itself.
-
-All tools that need to know Almide's syntax import this module rather than maintaining their own keyword lists:
-
-```toml
-# almide.toml
-[dependencies]
-almide-grammar = { git = "https://github.com/almide/almide-grammar", tag = "v0.1.0" }
-```
-
-```almide
-import almide_grammar
-almide_grammar.keyword_groups()    // 6 groups, 41 keywords
-almide_grammar.precedence_table()  // 8 levels, pipe → unary
-```
-
-The compiler itself uses `almide-grammar`'s TOML files (`tokens.toml`, `precedence.toml`) at build time to generate its lexer keyword table — ensuring the compiler and all tooling stay in sync.
+Single source of truth for Almide syntax — keywords, operators, precedence, and TextMate scopes, written in Almide itself. All tooling imports it instead of maintaining its own keyword lists, and the compiler generates its lexer keyword table from the same TOML files at build time — so the compiler and tooling cannot drift.
 
 ### Editor Support
 
@@ -342,6 +249,10 @@ Browser-based compiler and runner. The Almide compiler runs as WASM — no serve
 - [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
 - [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — Quick reference for AI code generation
 - [docs/DESIGN.md](./docs/DESIGN.md) — Design philosophy and trade-offs
+- [docs/EQUIVALENCE.md](./docs/EQUIVALENCE.md) — The byte-identity claim: scope, ledger mechanics, evidence layers
+- [docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md) — v1 proof-carrying compilation architecture
+- [docs/BENCHMARKS.md](./docs/BENCHMARKS.md) — Binary sizes, native performance, AI coding benchmark
+- [docs/contracts/](./docs/contracts/) — Behavior-contract ledger (cross-target equivalence)
 - [docs/stdlib/](./docs/stdlib/) — Standard library reference, per module (834 functions across 39 modules)
 - [docs/roadmap/](./docs/roadmap/README.md) — Language evolution plans
 

@@ -50,6 +50,10 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
     use crate::{Init, IntOp, Op, RtFn};
     Some(match op {
         Op::Alloc { init: Init::IntList(_), .. } => "call $list_new".into(),
+        // The rung-4 list ops: the literal's presence claim is its block alloc; the
+        // element load/store both realize through the bounds-checked `$elem_addr_chk`.
+        Op::ListLit { .. } => "call $alloc".into(),
+        Op::ListGetScalar { .. } | Op::ListSetScalar { .. } => "call $elem_addr_chk".into(),
         Op::Dup { .. } => "call $rc_inc".into(),
         Op::Call { func: RtFn::PrintInt, .. } => "call $print_int".into(),
         Op::Call { func: RtFn::PrintList, .. } => "call $print_list".into(),

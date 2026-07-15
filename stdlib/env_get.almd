@@ -1,0 +1,13 @@
+// env_get — SELF-HOSTED `env.get(name)` over the WASI environ floor (prim.env_get),
+// the v1 trust-spine realization of the effectful `env.get`. Scans the process
+// environment's `KEY=VALUE` entries for `name` and returns some(value) on a hit,
+// none otherwise — native `std::env::var(name).ok()` is the oracle (C-133; the
+// runner passes the host env through `wasmtime -S inherit-env=y`). The prim packages
+// the `environ_sizes_get` + `environ_get` WASI sequence, the byte-exact scan, and
+// the `Option[String]` construction; the result is a fresh OWNED Option block (the
+// value String owned @12 when some), dropped at scope end (flat DropListStr — no
+// leak). Because this body reaches prim.env_get, its cap_witness carries
+// Capability::CliArgs (the Env profile's canonical capability — argv and environ are
+// the same process-initial-state class), so a caller is caps-verified ONLY if it
+// declares the Env effect.
+effect fn env_get(name: String) -> Option[String] = prim.env_get(name)

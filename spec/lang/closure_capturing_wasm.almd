@@ -1,0 +1,29 @@
+// wasm:enabled
+// Locks in CAPTURING closures as first-class values — `fn adder(n: Int) -> (Int) -> Int =
+// (x) => x + n`. The trust-spine lifts the lambda with a leading ENV param and materializes a
+// CLOSURE BLOCK (`[rc][len][cap][fnidx][captured n]`, a plain heap DynList); the block is the
+// uniform function representation: `f(5)` loads the fnidx from slot 0 and dispatches through
+// Op::CallIndirect with the block as the borrowed env arg, and the lambda's prologue reads the
+// captured `n` back out. Two instances (`adder(3)` / `adder(100)`) carry independent envs.
+// Byte-identical to v0 --target wasm. (Captures are SCALAR — Int/Bool — in this slice; heap and
+// Float captures are a later ratchet.)
+
+fn adder(n: Int) -> (Int) -> Int = (x) => x + n
+
+effect fn main() -> Unit = {
+  let f = adder(3)
+  println(int.to_string(f(5)))
+  println(int.to_string(f(10)))
+  let g = adder(100)
+  println(int.to_string(g(5)))
+  println(int.to_string(f(1) + g(1)))
+}
+
+test "capturing closures carry independent envs" {
+  let f = adder(3)
+  let g = adder(100)
+  assert_eq(f(5), 8)
+  assert_eq(f(10), 13)
+  assert_eq(g(5), 105)
+  assert_eq(f(1) + g(1), 105)
+}

@@ -31,11 +31,12 @@ echo "== kernel check (coqc) + axiom audit (Print Assumptions) =="
 "$COQC" -Q . AlmideTrust WasmEncode.v
 "$COQC" -Q . AlmideTrust WasmExec.v
 "$COQC" -Q . AlmideTrust WasmIsa.v
+"$COQC" -Q . AlmideTrust WasmDecode.v
 "$COQC" -Q . AlmideTrust CowSafety.v
 
 echo
 echo "== independent re-check (coqchk — De Bruijn criterion) =="
-COQCHK_OUT="$("$COQCHK" -Q . AlmideTrust AlmideTrust.Subset AlmideTrust.OwnershipChecker AlmideTrust.OwnershipLoop AlmideTrust.OwnershipFilter AlmideTrust.CoownLoop AlmideTrust.CoownCompose AlmideTrust.ALS AlmideTrust.Translation AlmideTrust.RuntimeModel AlmideTrust.NameTotality AlmideTrust.TypeConcretization AlmideTrust.CapabilityBound AlmideTrust.CapabilityReach AlmideTrust.CallModes AlmideTrust.StackBalance AlmideTrust.Termination AlmideTrust.FreeList AlmideTrust.WasmRcDec AlmideTrust.WasmEncode AlmideTrust.WasmExec AlmideTrust.WasmIsa AlmideTrust.CowSafety 2>&1)"
+COQCHK_OUT="$("$COQCHK" -Q . AlmideTrust AlmideTrust.Subset AlmideTrust.OwnershipChecker AlmideTrust.OwnershipLoop AlmideTrust.OwnershipFilter AlmideTrust.CoownLoop AlmideTrust.CoownCompose AlmideTrust.ALS AlmideTrust.Translation AlmideTrust.RuntimeModel AlmideTrust.NameTotality AlmideTrust.TypeConcretization AlmideTrust.CapabilityBound AlmideTrust.CapabilityReach AlmideTrust.CallModes AlmideTrust.StackBalance AlmideTrust.Termination AlmideTrust.FreeList AlmideTrust.WasmRcDec AlmideTrust.WasmEncode AlmideTrust.WasmExec AlmideTrust.WasmIsa AlmideTrust.WasmDecode AlmideTrust.CowSafety 2>&1)"
 echo "$COQCHK_OUT"
 
 echo

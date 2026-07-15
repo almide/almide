@@ -263,6 +263,37 @@ fn map_count_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Int = {
   __skv_count_hits(sh, entries, f, 0, 0)
 }
 
+// map.find — the first (key, value) satisfying the predicate, as Some(a fresh DEEP-COPIED
+// key, value) or None. The key is read as a BORROW (the map keeps owning it); the copy is
+// the owned tuple's own key, independent of the map's lifetime (the returned Option may
+// outlive the source map going out of scope). Split so the lets live in a function BODY
+// and the heap-result `if` is its TAIL, each arm a single call (a block with lets as a
+// heap-result-if's arm does not lower — mirrors list_str.almd's `__list_find_str_at`/
+// `_loop` split exactly).
+fn __skv_find_some(k: String, v: Int) -> Option[(String, Int)] = {
+  let kc = string.repeat(k, 1)
+  Some((kc, v))
+}
+fn __skv_find_none() -> Option[(String, Int)] = None
+
+fn __skv_find_at(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int) -> Option[(String, Int)] = {
+  let k = prim.load_str(sh + 12 + i * 8)
+  let v = prim.load64(sh + 12 + (entries + i) * 8)
+  let hit = f(k, v)
+  if hit then __skv_find_some(k, v)
+  else __skv_find_loop(sh, entries, f, i + 1)
+}
+
+fn __skv_find_loop(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int) -> Option[(String, Int)] =
+  if i >= entries then __skv_find_none()
+  else __skv_find_at(sh, entries, f, i)
+
+fn map_find_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Option[(String, Int)] = {
+  let sh = prim.handle(m)
+  let entries = prim.load32(sh + 4)
+  __skv_find_loop(sh, entries, f, 0)
+}
+
 // map.fold — left fold with a THREE-arity closure f : (Acc, String, V) -> Acc (v0's fold(m, init,
 // f), acc first). The accumulator and the value share the raw i64 slot, so an Int or a Float
 // accumulator both thread through unchanged (the closure's own ops interpret the bits).

@@ -27,9 +27,10 @@ Contracts: C-008, C-009, C-010, C-011。
 
 `fan.race`・`fan.any`・`fan.map`・`fan.settle` の結果は**リスト順で決定的**
 （最初に完了したものではなく、引数リストの先頭から評価した最初の該当）。
-エラーは ALS-R1 の統一 abort 形で表面化する。`fan.timeout` は唯一の文書化
-された壁時計依存であり、wasm 側は警告を stderr に出す（結果は決定的側に
-縮退）。
+エラーは ALS-R1 の統一 abort 形で表面化する。`fan.timeout` は言語に**存在
+しない**（0.29.0 で削除）: 壁時計デッドラインは可搬なクロスターゲット意味を
+持たず、参照は両ターゲット共通の check 時 tombstone エラー（E027）になる。
+デッドラインはプログラムを起動するホスト境界で課す。
 Contracts: C-004, C-005, C-006。
 
 ## ALS-R4 非有限浮動小数の定数表示
@@ -41,9 +42,11 @@ Contracts: C-012。
 ## ALS-R5 プロセス環境
 
 `process.args` / `env.args` は argv[0]（プログラム名）を除いた引数列を
-返し、両ターゲットで一致する。`random.int(a, b)` は WASI entropy 下でも
-常に [a, b] 範囲内。
-Contracts: C-096, C-112, C-118。
+返し、両ターゲットで一致する。`env.get(name)` はホストプロセスの環境変数を
+観測し、存在すれば some(値)、無ければ none を両ターゲットで同一バイトで
+返す（wasm は WASI environ + ランナーの環境継承）。`random.int(a, b)` は
+WASI entropy 下でも常に [a, b] 範囲内。
+Contracts: C-096, C-112, C-118, C-133。
 
 ## ALS-R6 ファイルシステムのパス解決
 

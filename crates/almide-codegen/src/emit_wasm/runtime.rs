@@ -142,6 +142,20 @@ pub fn register_runtime_imports(emitter: &mut WasmEmitter) {
         vec![ValType::I32],
     );
     emitter.rt.args_get = emitter.register_import(args_get_ty);
+
+    // environ_sizes_get(count_ptr: i32, buf_size_ptr: i32) -> errno
+    let environ_sizes_get_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.environ_sizes_get = emitter.register_import(environ_sizes_get_ty);
+
+    // environ_get(environ_ptr: i32, environ_buf_ptr: i32) -> errno
+    let environ_get_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.environ_get = emitter.register_import(environ_get_ty);
 }
 
 /// Register runtime defined function signatures.

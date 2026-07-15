@@ -39,7 +39,7 @@
             ret: None,
             ..Default::default()
         };
-        MirProgram { functions: vec![add, main] }
+        MirProgram { functions: vec![add, main], exports: vec![], mutable_global_count: 0 }
     }
 
     #[test]
@@ -89,7 +89,7 @@
             ..Default::default()
         };
         // main at slot 0, add1 at slot 1 — FuncRef("add1") must resolve to 1.
-        let prog = MirProgram { functions: vec![main, add1] };
+        let prog = MirProgram { functions: vec![main, add1], exports: vec![], mutable_global_count: 0 };
         if let Some(out) = build_and_run("func_ref", &render_wasm_program(&prog)) {
             assert_eq!(out, "6");
         }
@@ -133,7 +133,7 @@
             ret: None,
             ..Default::default()
         };
-        let prog = MirProgram { functions: vec![add1, main] };
+        let prog = MirProgram { functions: vec![add1, main], exports: vec![], mutable_global_count: 0 };
         if let Some(out) = build_and_run("call_indirect", &render_wasm_program(&prog)) {
             assert_eq!(out, "6");
         }
@@ -168,7 +168,7 @@
             ret: None,
             ..Default::default()
         };
-        MirProgram { functions: vec![mk, main] }
+        MirProgram { functions: vec![mk, main], exports: vec![], mutable_global_count: 0 }
     }
 
     #[test]
@@ -321,10 +321,54 @@
         // re-lower with them in scope (the same two-pass as examples/render_program.rs).
         let anon_recs = crate::lower::collect_recursive_anon_records(&ir);
         let uses_result_opt_str = crate::lower::program_uses_result_option_str(&ir);
+        // First-class function values need the uniform `$__drop_closure` (same
+        // injection as the production pipeline).
+        let closure_drop = if crate::lower::program_uses_closures(&ir) {
+            crate::lower::CLOSURE_DROP_SRC
+        } else {
+            ""
+        };
+        let lenlist_drop = if crate::lower::program_uses_lenlist_elem_lists(&ir) {
+            crate::lower::LENLIST_DROP_SRC
+        } else {
+            ""
+        };
+        // `__drop_list_str` (a `List[String]` record/variant ctor field, OR a closure's
+        // nested-heap capture) — SHARED between the record and variant drop generators
+        // (see pipeline.rs's `source_to_ir_with`, the same two-pass this helper mirrors),
+        // emitted ONCE here rather than by either generator inline. Widened on
+        // `program_uses_closures` too — mirrors pipeline.rs's same conservative gate.
+        let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&ir.type_decls)
+            || crate::lower::program_uses_anon_list_str_record(&ir, &ir.type_decls)
+            || crate::lower::program_uses_closures(&ir)
+        {
+            crate::lower::LIST_STR_DROP_SRC
+        } else {
+            ""
+        };
+        // `List[<Fn>]` LITERAL — `$__drop_list_closure` (see pipeline.rs's mirror).
+        let list_closure_drop = if crate::lower::program_uses_closure_list(&ir) {
+            crate::lower::LIST_CLOSURE_DROP_SRC
+        } else {
+            ""
+        };
+        // `map.find`'s `Option[(String, <scalar>)]` result — `$__drop_opt_str_int` (see
+        // pipeline.rs's mirror).
+        let opt_str_int_drop = if crate::lower::program_calls_map_find(&ir) {
+            crate::lower::OPT_STR_INT_DROP_SRC
+        } else {
+            ""
+        };
         let drops = format!(
-            "{}{}",
+            "{}{}{}{}{}{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),
             crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
+            crate::lower::generate_variant_repr_sources(&ir.type_decls, &crate::lower::collect_interp_anon_records(&ir), &crate::lower::collect_interp_repr_containers(&ir)),
+            closure_drop,
+            lenlist_drop,
+            list_str_drop,
+            list_closure_drop,
+            opt_str_int_drop,
         );
         let ir = if drops.trim().is_empty() { ir } else { to_ir(&format!("{src}\n{drops}")) };
         let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =
@@ -337,6 +381,7 @@
                 globals.insert(tl.var, tl.ty.clone());
             }
         }
+        // (single-file test helper: no cross-module bridge needed — no sibling modules)
         let mut record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
         for m in &ir.modules {
             record_layouts.extend(crate::lower::build_record_layouts(&m.type_decls));
@@ -438,7 +483,7 @@
                 }
             }
         }
-        MirProgram { functions }
+        MirProgram { functions, exports: vec![], mutable_global_count: 0 }
     }
 
     /// Does any function CALL `name` (a `CallFn` to it)? Drives conditional auto-linking.
@@ -603,7 +648,7 @@
             ret: None,
             ..Default::default()
         };
-        let prog = MirProgram { functions: vec![print_str, main] };
+        let prog = MirProgram { functions: vec![print_str, main], exports: vec![], mutable_global_count: 0 };
         // The prim ops render to valid wasm and print "hi\n" (trimmed to "hi").
         if let Some(out) = build_and_run("prim_print_str", &render_wasm_program(&prog)) {
             assert_eq!(out, "hi");

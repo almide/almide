@@ -29,6 +29,44 @@ stamp_toolchain "$ROOT" || exit 1
 echo "== build the kernel-proven checker from the Coq proof =="
 "$ROOT/proofs/build-checker.sh" >/dev/null
 
+COQC="${COQC:-$(command -v coqc)}"
+
+# THE KERNEL ORACLE (brick 6b): re-verify a witness verdict with the Rocq KERNEL
+# itself — generate an assertion file with the witness bytes inlined verbatim and
+# `coqc` it (vm_compute inside the kernel-checked logic). The extracted binary's
+# verdict was already asserted by the caller, so binary and kernel must AGREE or
+# the row fails loudly — the extraction pipeline (OCaml codegen + ocamlopt) is no
+# longer a trust root for the gate's verdict, only a fast path (TRUSTED_BASE §2).
+# Returns nonzero on a verdict mismatch (callers decide whether that is fatal —
+# the tamper drill INVERTS it to prove the oracle has teeth).
+kernel_verify() { # checker-mode witness-file expected_exit(0=true|1=false)
+  local mode=$1 wf=$2 expect=$3 fn want gen
+  case "$mode" in
+    ownership)       fn="check_bc" ;;
+    names)           fn="check_names_cert" ;;
+    caps)            fn="check_caps_cert" ;;
+    caps-transitive) fn="check_prog_cert" ;;
+    call-modes)      fn="check_modes_cert" ;;
+    *) echo "kernel_verify: unknown checker mode $mode" >&2; return 2 ;;
+  esac
+  if [ "$expect" -eq 0 ]; then want=true; else want=false; fi
+  gen="$(mktemp /tmp/KernelGate_XXXXXX).v"
+  python3 - "$wf" "$fn" "$want" > "$gen" <<'PYEOF'
+import sys
+w = open(sys.argv[1]).read()
+lit = '"' + w.replace('"', '""') + '"'
+print("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes.")
+print("From Stdlib Require Import String.")
+print("Open Scope string_scope.")
+print("Goal %s %s = %s." % (sys.argv[2], lit, sys.argv[3]))
+print("Proof. vm_compute. reflexivity. Qed.")
+PYEOF
+  (cd "$ROOT/proofs" && "$COQC" -Q . AlmideTrust "$gen" >/dev/null 2>&1)
+  local rc=$?
+  rm -f "$gen" "${gen%.v}.vo" "${gen%.v}.vos" "${gen%.v}.vok" "${gen%.v}.glob"
+  return $rc
+}
+
 emit() { (cd "$ROOT" && cargo run -q -p almide-mir --example emit_cert -- "$1" "$2"); }
 
 run() { # scenario property expected_exit
@@ -41,11 +79,12 @@ run_mode() { # scenario emit-property checker-mode expected_exit
   set +e
   "$ROOT/proofs/checker" "$3" /tmp/compiler.witness >/tmp/gate.out 2>&1; local rc=$?
   set -e
-  if [ "$rc" -eq "$4" ]; then
-    echo "ok   [$2] $1: witness '$(cat /tmp/compiler.witness | tr '\n' '|')' -> $(cat /tmp/gate.out)"
-  else
+  if [ "$rc" -ne "$4" ]; then
     echo "FAIL [$2] $1: got exit $rc want $4 ($(cat /tmp/gate.out))"; exit 1
   fi
+  kernel_verify "$3" /tmp/compiler.witness "$4" \
+    || { echo "FAIL [$2] $1: KERNEL oracle disagrees with the binary verdict"; exit 1; }
+  echo "ok   [$2] $1: witness '$(cat /tmp/compiler.witness | tr '\n' '|')' -> $(cat /tmp/gate.out) (kernel agrees)"
 }
 
 # REAL .almd → frontend → MIR → witness, then the proven checker re-verifies it.
@@ -64,11 +103,12 @@ run_src_mode() { # fixture function emit-property checker-mode expected_exit
   set +e
   "$ROOT/proofs/checker" "$4" /tmp/real.witness >/tmp/gate.out 2>&1; local rc=$?
   set -e
-  if [ "$rc" -eq "$5" ]; then
-    echo "ok   [$3] $1::$2 (real source): witness '$(cat /tmp/real.witness | tr '\n' '|')' -> $(cat /tmp/gate.out)"
-  else
+  if [ "$rc" -ne "$5" ]; then
     echo "FAIL [$3] $1::$2 (real source): got exit $rc want $5 ($(cat /tmp/gate.out))"; exit 1
   fi
+  kernel_verify "$4" /tmp/real.witness "$5" \
+    || { echo "FAIL [$3] $1::$2: KERNEL oracle disagrees with the binary verdict"; exit 1; }
+  echo "ok   [$3] $1::$2 (real source): witness '$(cat /tmp/real.witness | tr '\n' '|')' -> $(cat /tmp/gate.out) (kernel agrees)"
 }
 
 echo "== compiler output  ⊳  proven checker =="
@@ -141,11 +181,12 @@ run_src_manifest() { # fixture function property manifest expected_exit
   set +e
   "$ROOT/proofs/checker" "$3" /tmp/real.witness >/tmp/gate.out 2>&1; local rc=$?
   set -e
-  if [ "$rc" -eq "$5" ]; then
-    echo "ok   [$3 ⊳ $4] $1::$2 (real source): witness '$(cat /tmp/real.witness | tr '\n' '|')' -> $(cat /tmp/gate.out)"
-  else
+  if [ "$rc" -ne "$5" ]; then
     echo "FAIL [$3 ⊳ $4] $1::$2 (real source): got exit $rc want $5 ($(cat /tmp/gate.out))"; exit 1
   fi
+  kernel_verify "$3" /tmp/real.witness "$5" \
+    || { echo "FAIL [$3 ⊳ $4] $1::$2: KERNEL oracle disagrees with the binary verdict"; exit 1; }
+  echo "ok   [$3 ⊳ $4] $1::$2 (real source): witness '$(cat /tmp/real.witness | tr '\n' '|')' -> $(cat /tmp/gate.out) (kernel agrees)"
 }
 run_src_manifest manifest_print.almd main caps manifest_io.toml   0
 run_src_manifest manifest_print.almd main caps manifest_rand.toml 1
@@ -166,10 +207,44 @@ run_src      heap_result_if.almd pick ownership 0
 # funcref, `f(5)` is an Op::CallIndirect — the witness expands the site to one
 # agreement row per possible callee (the lifted lambda), proven per-site.
 run_src_mode funcref_call.almd   main modes call-modes 0
+# A REAL CAPTURING closure: `adder(3)` returns a closure BLOCK (fnidx + captured
+# scalar — a fresh owned heap value, "im"/"id" balanced) and `f(5)` dispatches
+# with the block as the borrowed env arg — ownership AND the env's call-mode
+# agreement both re-verified by the proven checkers.
+run_src      closure_capture.almd main ownership 0
+run_src_mode closure_capture.almd main modes call-modes 0
+# A HEAP capture (closure env full mode): the block CO-OWNS the captured String
+# (`a`+`m` on the caller's object) and the dispatch passes TWO heap args
+# (env + argument) — both witnesses proven, kernel-agreed.
+run_src      closure_heap_capture.almd greeter ownership 0
+run_src      closure_heap_capture.almd main    ownership 0
+run_src_mode closure_heap_capture.almd main    modes call-modes 0
+
+echo "-- kernel-oracle TAMPER DRILL (the extraction-divergence detector, every build) --"
+# (i) a CORRUPTED witness (one extra release byte → double-free) must be rejected
+# by BOTH the extracted binary and the kernel — agreement on the reject side.
+emit balanced ownership > /tmp/tamper.witness
+printf 'd' >> /tmp/tamper.witness
+set +e; "$ROOT/proofs/checker" ownership /tmp/tamper.witness >/dev/null 2>&1; trc=$?; set -e
+if [ "$trc" -ne 1 ]; then echo "FAIL tamper(i): the binary accepted a corrupted witness"; exit 1; fi
+kernel_verify ownership /tmp/tamper.witness 1 \
+  || { echo "FAIL tamper(i): the kernel accepted a corrupted witness"; exit 1; }
+echo "ok   tamper(i): a corrupted witness is rejected by the binary AND the kernel"
+# (ii) a SIMULATED DIVERGENT VERDICT: hand the kernel the reject witness but claim
+# the binary said ACCEPT — the kernel twin must FAIL. This proves the oracle has
+# teeth: a generator that vacuously passed everything would slip through here.
+set +e; kernel_verify ownership /tmp/tamper.witness 0; krc=$?; set -e
+if [ "$krc" -eq 0 ]; then
+  echo "FAIL tamper(ii): the kernel oracle certified a WRONG verdict (drill broken)"; exit 1
+fi
+echo "ok   tamper(ii): a simulated divergent verdict is CAUGHT by the kernel oracle"
 
 echo
 echo "GATE OK: the kernel-proven checker re-verified per-build witnesses on THREE"
 echo "properties (ownership + name totality + capability bound), AND a REAL .almd"
 echo "program's ownership+name witnesses through the actual frontend (indicator ①"
-echo "0→1). Each accept ⟹ the property holds of the witnessed MIR, by the Coq"
-echo "theorems. (Whole-program WASM-byte safety is still the §3 renderer contract.)"
+echo "0→1) — with EVERY row's verdict independently certified by the Rocq KERNEL"
+echo "(vm_compute on the witness bytes; binary/kernel divergence fails the build,"
+echo "so the extraction pipeline is a fast path, not a trust root). Each accept ⟹"
+echo "the property holds of the witnessed MIR, by the Coq theorems. (Whole-program"
+echo "WASM-byte safety beyond the rc primitives is still the §3 renderer contract.)"

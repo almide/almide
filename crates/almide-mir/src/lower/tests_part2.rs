@@ -166,11 +166,14 @@
     }
 
     #[test]
-    fn unit_if_with_effect_arms_linearizes_balanced() {
+    fn unit_if_with_effect_arms_walls_instead_of_linearizing() {
         use almide_lang::intern::sym;
-        // if c then println("a") else println("b")  — each arm is a Unit effect call;
-        // its string arg is materialized into an arm-local temp and dropped by the
-        // per-arm frame. BOTH printlns lower (caps union); ownership balanced.
+        // if c then println("a") else println("b") — when the real-branch paths decline
+        // the condition, the linearized render RUNS BOTH arms (the rc4 double-print:
+        // `println(if e == err("a") then "eq" else "ne")` printed eq AND ne,
+        // 2026-07-12). A call-bearing arm therefore WALLS instead of linearizing —
+        // a clean Unsupported, never wrong output. (The former contract asserted the
+        // both-arms caps-union lowering; rc4 proved that observably wrong.)
         let prn = |s: &str| {
             ir_expr(
                 IrExprKind::Call {
@@ -182,13 +185,12 @@
             )
         };
         let b = body(vec![stmt(IrStmtKind::Expr { expr: iff(prn("a"), prn("b"), Ty::Unit) })]);
-        let mir = lower_body(&b, "main").expect("unit if lowers");
-        let prints = mir.ops.iter().filter(|o| matches!(o, Op::Call { .. })).count();
-        assert_eq!(prints, 2, "both arms' println are lowered (caps union, not Const-skipped)");
-        assert_eq!(verify_ownership(&mir), Ok(()));
-        let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
-        let drops = mir.ops.iter().filter(|o| matches!(o, Op::Drop { .. })).count();
-        assert_eq!(allocs, drops, "every arm-local alloc has its per-arm drop (balanced)");
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(m)) => {
+                assert!(m.contains("call-bearing arm"), "got: {m}")
+            }
+            other => panic!("expected the call-bearing linearization wall, got {other:?}"),
+        }
     }
 
     #[test]
@@ -502,11 +504,16 @@
     }
 
     #[test]
-    fn branch_arm_heap_reassign_is_deferred_and_safe() {
+    fn branch_arm_heap_reassign_ssa_merges_by_value() {
         // var z = []; if c then { z = [9] } else { }  — the arm reassigns pre-branch z.
-        // A naive rebind would point `value_of[z]` at an arm-local handle the per-arm
-        // teardown drops, so a post-branch read would UAF. The reassign is DEFERRED: `z`
-        // keeps its still-live pre-branch handle. Exactly one Alloc (`[]`), one Drop.
+        // HISTORY: this used to assert the reassign was DEFERRED (elided) — which pinned
+        // `z`'s pre-branch handle (no UAF) but silently DROPPED the new value: a LIVE
+        // wrong-value class (the lp5 probe: v0 `ok:42`, v1 `err:normal`, no wall —
+        // B127/B128). `desugar_unit_if_heap_reassign` now SSA-ifies the shape into a
+        // let-bound value-`if` (`let z' = if c then [9] else z`), so the conditional
+        // value merges BY VALUE through the proven heap-result-`if` machinery: BOTH
+        // allocs are real (the pre-branch `[]` and the arm's `[9]`), every object is
+        // dropped exactly once on each path, and the ownership certificate verifies.
         let then = unit_block(vec![stmt(IrStmtKind::Assign {
             var: VarId(0),
             value: ir_expr(IrExprKind::List { elements: vec![] }, list_int()),
@@ -515,12 +522,14 @@
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             stmt(IrStmtKind::Expr { expr: iff(then, unit_block(vec![]), Ty::Unit) }),
         ]);
-        let mir = lower_body(&b, "main").expect("the arm reassign is deferred, not walled");
+        let mir = lower_body(&b, "main").expect("the arm reassign SSA-merges, not walled");
         let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
-        let drops = mir.ops.iter().filter(|o| matches!(o, Op::Drop { .. })).count();
-        assert_eq!(allocs, 1, "only the pre-branch alloc — the arm reassign is deferred: {:?}", mir.ops);
-        assert_eq!(drops, 1, "z dropped exactly once at scope end: {:?}", mir.ops);
-        assert_eq!(verify_ownership(&mir), Ok(()), "no path-dependent UAF — z stays pinned");
+        assert_eq!(
+            allocs, 2,
+            "both the pre-branch alloc AND the arm's new value are real: {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()), "every path drop-balanced — no UAF, no leak");
     }
 
     #[test]
@@ -689,9 +698,11 @@
     #[test]
     fn heap_method_call_bound_to_a_var_is_walled_not_an_empty_opaque() {
         use almide_lang::intern::sym;
-        // var x = obj.method()  — an unresolvable Method callee returning a HEAP value. The
-        // OLD path bound `x` to a deferred `Alloc{Opaque}` (an EMPTY list); any later read
-        // of `x` observes empty bytes = a silent miscompile. It now REJECTS explicitly.
+        // var x = obj.method()  — a Method callee on a NON-Named receiver now RESOLVES to
+        // free-fn UFCS (`method(obj)`): the checker guarantees a surviving Method names a
+        // real free fn, so the desugar emits an ordinary Named CallFn with the receiver
+        // prepended (a genuinely-missing fn is caught by the render's unlinked wall, never
+        // an empty Opaque). The OLD contract (Method = unresolvable = wall) is superseded.
         let mcall = ir_expr(
             IrExprKind::Call {
                 target: CallTarget::Method {
@@ -708,8 +719,16 @@
             bind(1, list_int(), mcall),
         ]);
         match lower_body(&b, "main") {
-            Err(LowerError::Unsupported(_)) => {}
-            other => panic!("expected an explicit heap method-call reject, got: {other:?}"),
+            Ok(mir) => {
+                assert!(
+                    mir.ops.iter().any(|o| matches!(o,
+                        Op::CallFn { name, args, .. } if name == "method" && args.len() == 1)),
+                    "the UFCS resolution emits CallFn method(obj): {:?}",
+                    mir.ops
+                );
+                assert_eq!(verify_ownership(&mir), Ok(()));
+            }
+            other => panic!("expected the resolved UFCS call to lower, got: {other:?}"),
         }
     }
 
@@ -734,7 +753,7 @@
             Ty::Named(sym("Value"), vec![]),
         );
         let rewritten =
-            crate::lower::desugar_method_calls(&mcall).expect("a Named-receiver method resolves");
+            crate::lower::desugar_method_calls(&mcall, &Default::default()).expect("a Named-receiver method resolves");
         match &rewritten.kind {
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
                 assert_eq!(name.as_str(), "Person.encode", "qualified as TypeName.method");

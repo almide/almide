@@ -43,6 +43,12 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__ivh_set_copy",
     "__hvl_set_copy",
     "__hvl_set_append",
+    "__msv_set_copy",    // map.set_msv — rc_inc the shared value handles (map_hval's exact shape)
+    "__msv_set_append",  // map.set_msv — rc_inc the appended value handle
+    "__hobj_set_copy",   // map.from_list_hobj — rc_inc the shared value handles (the msv shape, opaque values)
+    "__hobj_set_append", // map.from_list_hobj — rc_inc the appended value handle
+    "__mlo_set_copy",    // map.set_mlo — rc_inc the shared value handles (the msv shape, list values)
+    "__mlo_set_append",  // map.set_mlo — rc_inc the appended value handle
     "__ivh_drop_vals",
     "__hvl_drop_slots",    // list.filter_rc — rc_inc each KEPT non-String heap element (handle share)
     "__vmerge_fill_a",    // value.merge — rc_inc each kept/overridden key+value
@@ -52,6 +58,7 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__enum_fill_h",      // list.enumerate_str — rc_inc the element into its (i, x) pair
     "__zip_fill_rc",      // list.zip_rc — rc_inc both elements into each pair
     "__take_h_fill",      // list.take_hshare — rc_inc each shared element slot
+    "__uh_acquire",       // list.unique_hshare / dedup_hshare — rc_inc each KEPT shared element
     "__skv_entries_fill", // map.entries_skv — rc_inc each key into its (k, v) pair
 ];
 

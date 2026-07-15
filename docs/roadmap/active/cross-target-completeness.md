@@ -25,7 +25,7 @@ RC) — makes no equivalence claim at all.
 | Mechanism | State |
 |---|---|
 | Cross-target gate (`tests/wasm_runtime_test.rs::wasm_cross_target_spec`) | 65+ corpus files, byte-compared, **0 @xt-allow** |
-| Documented divergence list | **N = 1** (`fan.timeout` — wall-clock; compile warning on wasm use) |
+| Documented divergence list | **N = 0** (`fan.timeout`, the last entry, was removed from the language in 0.29.0 — C-006 flipped to active) |
 | Oracle-pairing registry (`crates/almide-codegen/rt-oracle-registry.toml`, gate = `scripts/check-rt-oracle-registry.sh`) | 118 routines: **76 verified / 42 grandfathered** (was 48; drain in progress) |
 | By-construction tables (Σ-probe derived from Rust std at emit time + all-scalar CI locks) | case folding, whitespace, UTF-8 classification, Unicode properties (Alphabetic/Alphanumeric/Uppercase/Lowercase) |
 | Lean kernel-check in CI | 41 theorems (Perceus RC / closure env / heap) — `lake build`, not just a sorry-grep |

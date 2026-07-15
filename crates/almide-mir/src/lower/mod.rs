@@ -33,6 +33,26 @@ pub enum LowerError {
     Unsupported(String),
 }
 
+/// A FLAT scalar-slot heap block: an all-scalar tuple (`(Int, Int)`) or a
+/// `List[<scalar>]` (`List[Int]`) — every slot in the block is a raw i64 value,
+/// never a nested handle. Mirrors the `ListElemDrop::ScalarAggregate` gate in
+/// `binds_p3.rs`. This is the exact shape B32's `__uh_eq` (list_hshare.almd)
+/// compares correctly (length + raw-slot equality) — a String or any OTHER heap
+/// element (record, nested heap list, Value) is NOT this shape, and must not be
+/// routed to `__uh_eq`-based comparison (nor to the byte-level `__str_eq` String
+/// family — the source of a CONFIRMED silent wrong-bytes bug when a tuple/nested-
+/// list element was routed there: `__str_eq` misreads a slot-count `len` as a
+/// BYTE count, comparing only the object's first `len` bytes — a false-positive
+/// collision past the first ~2 bytes for any two elements sharing a leading Int).
+pub fn is_flat_scalar_block_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::Tuple(tys) => !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t)),
+        Ty::Applied(TypeConstructorId::List, b) => b.len() == 1 && !is_heap_ty(&b[0]),
+        _ => false,
+    }
+}
+
 /// Heap-managed types (need refcount: `Alloc`/`Dup`/`Drop`) vs `Copy` scalars.
 /// Mirrors the old `pass_perceus::is_heap_type` / `emit_wasm` copy — but here it
 /// is the SINGLE definition both renderers will read off the MIR.
@@ -77,6 +97,21 @@ fn const_global_init(init: &IrExpr) -> Option<crate::Init> {
                 })
                 .collect();
             ints.map(crate::Init::IntList)
+        }
+        // `string.from_codepoint(<int literal>)` (`let NL = string.from_codepoint(10)` —
+        // the stringify-escape test globals) CONST-FOLDS to its one-char string at
+        // lowering time: zero calls injected, so the count gate stays exact. An invalid
+        // codepoint keeps walling (never a wrong byte).
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            if module.as_str() == "string"
+                && func.as_str() == "from_codepoint"
+                && args.len() == 1 =>
+        {
+            let IrExprKind::LitInt { value } = &args[0].kind else { return None };
+            u32::try_from(*value)
+                .ok()
+                .and_then(char::from_u32)
+                .map(|c| crate::Init::Str(c.to_string()))
         }
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
             if module.as_str() == "bytes" && func.as_str() == "from_list" && args.len() == 1 =>
@@ -157,7 +192,12 @@ pub fn repr_of(ty: &Ty) -> Result<Repr, LowerError> {
         Ty::Int16 | Ty::UInt16 => ScalarWidth::Half,
         Ty::Int8 | Ty::UInt8 => ScalarWidth::Byte,
         Ty::Bool => ScalarWidth::Word, // Bool ABI slot is 4 bytes
-        // Unit/Never/RawPtr/Const* are not values that get a scalar slot here.
+        // A RawPtr is a RAW linear-memory ADDRESS carried in the uniform i64 scalar
+        // slot (the same value `prim.handle` yields; on wasm it is an i32 offset the
+        // consuming prim wraps). The bytes_rawptr bridge (#440) reads/writes THROUGH
+        // it via the self-hosted prim loops — never a tracked heap handle.
+        Ty::RawPtr => ScalarWidth::Double,
+        // Unit/Never/Const* are not values that get a scalar slot here.
         other => {
             return Err(LowerError::Unsupported(format!(
                 "no scalar Repr for {other:?}"
@@ -402,10 +442,234 @@ pub fn build_record_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> RecordLayou
 /// fields are named `_0`, `_1`, … — both matching v0's `emit_wasm` registration, so the
 /// backends agree on tag and field identity. Call once per program and pass the result
 /// into [`lower_function_all_with_layouts`].
+/// Does `e` contain ANY call node (Named/Module/Method/Computed Call, RuntimeCall,
+/// TailCall)? Used to gate synthesized-expr admissions (a default-field fill) whose calls
+/// the counted IR would not see (the caps `mir == ir` invariant).
+pub fn expr_contains_call(e: &almide_ir::IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct C(bool);
+    impl IrVisitor for C {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if matches!(
+                e.kind,
+                almide_ir::IrExprKind::Call { .. }
+                    | almide_ir::IrExprKind::RuntimeCall { .. }
+                    | almide_ir::IrExprKind::TailCall { .. }
+            ) {
+                self.0 = true;
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut c = C(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut c, e);
+    c.0
+}
+
+/// CROSS-MODULE top-let NAME BRIDGE: the main program references `toplib.SYSTEM` through a
+/// MAIN-side VarId (per-module VarId regions — no IR-level flatten), while the globals union
+/// keys the MODULE-side id — so the reference was "unbound" (or COLLIDED with an unrelated
+/// module id, resolving to the wrong init). Alias every main-side var-table id whose NAME +
+/// TYPE match a module top-let's onto that top-let's (ty, init). By-NAME, so an AMBIGUOUS
+/// name (a top-let in two modules) is skipped — those references stay walled; a same-named
+/// function LOCAL is harmless (locals resolve through `value_of` first — the globals map is
+/// only consulted for otherwise-unbound ids). Registration only: the reference site still
+/// materializes through the CONST-init machinery (count-exact, unchanged certs).
+pub fn bridge_cross_module_toplets(
+    ir: &almide_ir::IrProgram,
+    globals: &mut std::collections::HashMap<almide_ir::VarId, Ty>,
+    global_inits: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+) {
+    use std::collections::HashMap;
+    // The main-side reference entry is SYNTHESIZED by the frontend with an UPPERCASED
+    // name (`m.count` → a main var named "COUNT", `module_origin` set — the v0 Rust-const
+    // naming convention, expressions.rs's cross-module top-let path). So the bridge keys
+    // BOTH maps by the UPPERCASED module-side name: an all-caps `let SYSTEM` matched
+    // before by accident; a lowercase `let title`/`var count` silently MISSED the bridge
+    // and fell through to the raw numeric-id collision below (reading an UNRELATED
+    // top-let's init — a confirmed silent wrong value, `let N = 7; var count = 0` printed
+    // 7 for `m.count`; a heap-typed collider surfaced as invalid i64/i32 wasm instead).
+    // MUTABILITY: only immutable `let`s are bridged — aliasing a `var` reference to its
+    // INIT would const-fold reads across mutations (read-after-`bump()` returning 0).
+    // A `var` reference instead has its collided raw entry REMOVED below, so it is
+    // honestly UNBOUND → the reference site walls → `--verified` falls back to v0.
+    // Keyed by (SOURCE MODULE, UPPERCASED NAME): the ref entry's `module_origin`
+    // names which module it points at, so a name defined in TWO modules (view.ROW
+    // and layout.ROW — the ceangal zip class) resolves per-module instead of
+    // dropping as ambiguous. A bare-name fallback map keeps the pre-existing
+    // behavior for refs whose module_origin the frontend left unset.
+    let mut by_name: HashMap<(String, String), Option<(Ty, &almide_ir::IrExpr, bool)>> =
+        HashMap::new();
+    let mut by_bare: HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool)>> = HashMap::new();
+    for m in &ir.modules {
+        // In-module alias chains (`let white = _white`) leave the alias tl's ty
+        // UN-INFERRED — chase to the referent so the bridge carries the REAL
+        // (ty, init) and the reader materializes the record directly (the ceangal
+        // theme `v.white` class). Bounded hops; a non-Var / cross-module init stops.
+        let local: HashMap<u32, (&Ty, &almide_ir::IrExpr)> =
+            m.top_lets.iter().map(|t| (t.var.0, (&t.ty, &t.value))).collect();
+        for tl in &m.top_lets {
+            let Some(info) = m.var_table.entries.get(tl.var.0 as usize) else { continue };
+            let mutable = matches!(info.mutability, almide_ir::Mutability::Var);
+            let (mut ty, mut init) = (&tl.ty, &tl.value);
+            let mut hops = 0;
+            // Chase Var inits REGARDLESS of the alias's own ty — the init expr is
+            // about to cross regions, and any surviving REGION-LOCAL Var id inside
+            // it would capture an unrelated main-side id (a silent wrong-global
+            // read when that id's init is const; probe-confirmed as VarId(7)).
+            while hops < 4 {
+                let almide_ir::IrExprKind::Var { id } = &init.kind else { break };
+                let Some((t2, i2)) = local.get(&id.0) else { break };
+                if matches!(ty, Ty::Unknown) {
+                    ty = t2;
+                }
+                init = i2;
+                hops += 1;
+            }
+            // An UNANNOTATED module top-let leaves tl.ty Unknown even after the
+            // alias chase — the INIT expression's checker-inferred ty is the
+            // referent's real type (`let _white = { r: 1.0, … }` infers the record).
+            if matches!(ty, Ty::Unknown) && !matches!(init.ty, Ty::Unknown) {
+                ty = &init.ty;
+            }
+            // A chased init that STILL references region-local vars (a call init
+            // over a sibling const, a nested alias past the hop bound) must NOT
+            // cross: the ids would misresolve in the main region. Drop the name
+            // (honest unbound wall) rather than ship a capturing expr.
+            fn expr_has_var(e: &almide_ir::IrExpr) -> bool {
+                use almide_ir::visit::{walk_expr, IrVisitor};
+                struct V(bool);
+                impl IrVisitor for V {
+                    fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                        if matches!(e.kind, almide_ir::IrExprKind::Var { .. }) {
+                            self.0 = true;
+                        }
+                        walk_expr(self, e);
+                    }
+                }
+                let mut v = V(false);
+                v.visit_expr(e);
+                v.0
+            }
+            let entry = if expr_has_var(init) {
+                Option::None
+            } else {
+                Some((ty.clone(), init, mutable))
+            };
+            by_name
+                .entry((m.name.as_str().to_string(), info.name.as_str().to_uppercase()))
+                .and_modify(|e| *e = Option::None) // second definition ⇒ ambiguous, drop
+                .or_insert(entry.clone());
+            by_bare
+                .entry(info.name.as_str().to_uppercase())
+                .and_modify(|e| *e = Option::None) // cross-module name collision ⇒ ambiguous
+                .or_insert(entry);
+        }
+    }
+    // OVERRIDES an existing (module-raw, possibly colliding) entry — callers order the
+    // composition as: module union → this bridge → main top-lets re-inserted last, so the
+    // precedence is main > bridged-name > raw module id.
+    for (i, info) in ir.var_table.entries.iter().enumerate() {
+        let id = almide_ir::VarId(i as u32);
+        // Only the frontend-synthesized cross-module reference entries participate
+        // (module_origin set) — a main-local name that happens to match a module
+        // top-let must not be rebound.
+        if info.module_origin.is_none() {
+            continue;
+        }
+        let looked_up = info
+            .module_origin
+            .as_ref()
+            .and_then(|mo| by_name.get(&(mo.clone(), info.name.as_str().to_uppercase())))
+            .or_else(|| by_bare.get(&info.name.as_str().to_uppercase()));
+        match looked_up {
+            // An UNKNOWN-typed reference entry (the frontend leaves an alias-let's
+            // synthesized ref un-inferred — `let white = _white` read as `v.white`,
+            // the ceangal theme class) takes the MODULE side's type: the name is
+            // unique (the ambiguity arm below dropped collisions), so the module
+            // top-let IS the referent. A concretely-typed ref still must agree.
+            Some(Some((ty, init, mutable)))
+                if !mutable && (*ty == info.ty || matches!(info.ty, Ty::Unknown)) =>
+            {
+                globals.insert(id, ty.clone());
+                global_inits.insert(id, (*init).clone());
+            }
+            _ => {
+                // Unmatched or MUTABLE cross-module reference: purge any raw
+                // module-id numeric collision so the reference is honestly
+                // unbound (wall → v0 fallback), never an unrelated init.
+                globals.remove(&id);
+                global_inits.remove(&id);
+            }
+        }
+    }
+}
+
+/// Repair UNKNOWN expression types the frontend leaves on CROSS-MODULE global
+/// references (`v.white` — the ref entry's ty is un-inferred, so the whole fn
+/// trips the AllTypesConcrete precondition): a `Var` whose id the bridged
+/// globals map types gets that type, and a member read off a now-typed
+/// STRUCTURAL record object gets its field's type. Types come from the
+/// authoritative top-let declaration — never guessed.
+pub fn repair_unknown_global_ref_tys(
+    func: &mut almide_ir::IrFunction,
+    globals: &std::collections::HashMap<almide_ir::VarId, Ty>,
+) {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    struct R<'a> {
+        globals: &'a std::collections::HashMap<almide_ir::VarId, Ty>,
+    }
+    impl IrMutVisitor for R<'_> {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e); // children first — the object types before the member
+            match &mut e.kind {
+                IrExprKind::Var { id } if matches!(e.ty, Ty::Unknown) => {
+                    if let Some(t) = self.globals.get(id) {
+                        e.ty = t.clone();
+                    }
+                }
+                IrExprKind::Member { object, field } if matches!(e.ty, Ty::Unknown) => {
+                    if let Ty::Record { fields } = &object.ty {
+                        if let Some((_, ft)) =
+                            fields.iter().find(|(n, _)| n.as_str() == field.as_str())
+                        {
+                            e.ty = ft.clone();
+                        }
+                    }
+                }
+                // The PARENT of a repaired member read stays Unknown too — a BinOp is
+                // TYPE-DISPATCHED (AddFloat vs AddInt), so its result type is intrinsic.
+                IrExprKind::BinOp { op, .. } if matches!(e.ty, Ty::Unknown) => {
+                    if let Some(t) = op.result_ty() {
+                        e.ty = t;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut r = R { globals };
+    r.visit_expr_mut(&mut func.body);
+}
+
 pub fn build_variant_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> VariantLayouts {
     use almide_ir::{IrTypeDeclKind, IrVariantKind};
     let mut out = VariantLayouts::default();
     for decl in type_decls {
+        // A plain RECORD's field defaults ride the same map, keyed by the record TYPE
+        // name (`AllDefault()` — the paren-empty ctor fills them in
+        // try_lower_record_construct; a variant record-ctor keys by CTOR name below).
+        if let IrTypeDeclKind::Record { fields } = &decl.kind {
+            for f in fields {
+                if let Some(d) = &f.default {
+                    out.ctor_field_defaults
+                        .entry(decl.name.as_str().to_string())
+                        .or_default()
+                        .insert(f.name.as_str().to_string(), d.clone());
+                }
+            }
+            continue;
+        }
         let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else {
             continue;
         };
@@ -428,6 +692,14 @@ pub fn build_variant_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> VariantLay
                     .map(|(i, ty)| (almide_lang::intern::sym(&format!("_{i}")), ty.clone()))
                     .collect(),
                 IrVariantKind::Record { fields } => {
+                    for f in fields {
+                        if let Some(d) = &f.default {
+                            out.ctor_field_defaults
+                                .entry(case.name.as_str().to_string())
+                                .or_default()
+                                .insert(f.name.as_str().to_string(), d.clone());
+                        }
+                    }
                     fields.iter().map(|f| (f.name, f.ty.clone())).collect()
                 }
             };
@@ -482,8 +754,11 @@ pub fn variant_needs_recursive_drop(
         return false;
     };
     // A ctor field the generated `$__drop_<V>` can free: a nested variant (recurse), a String
-    // (rc_dec), a List[scalar] (flat rc_dec), a List[<variant>] (per-element), or a RECORD (recurse
-    // via `$__drop_<R>` / a scalar-only record's flat rc_dec — see the drop generator's field loop).
+    // (rc_dec), a List[scalar] (flat rc_dec), an Option[scalar] (flat rc_dec — the 0-or-1 block
+    // owns no children), a List[<variant>] (per-element), a List[String] (per-element via the
+    // generic `__drop_list_str` — each element is an OWNED String handle a flat rc_dec of just
+    // the list block would leak), or a RECORD (recurse via `$__drop_<R>` / a scalar-only record's
+    // flat rc_dec — see the drop generator's field loop).
     let supported_heap = |t: &Ty| -> bool {
         use almide_lang::types::constructor::TypeConstructorId;
         variant_field_name(t, variant_names).is_some()
@@ -492,7 +767,10 @@ pub fn variant_needs_recursive_drop(
             || matches!(t, Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1
                     && (!is_heap_ty(&a[0])
+                        || matches!(a[0], Ty::String)
                         || variant_field_name(&a[0], variant_names).is_some()))
+            || matches!(t, Ty::Applied(TypeConstructorId::Option, a)
+                if a.len() == 1 && !is_heap_ty(&a[0]))
     };
     let mut any_heap = false;
     let mut all_supported = true;
@@ -574,878 +852,6 @@ pub fn drop_fn_ident(type_name: &str) -> String {
     type_name.replace('.', "_")
 }
 
-/// Generate the ALMIDE SOURCE for each variant type's recursive drop fn `__drop_<T>` (ADT brick
-/// 5b) — the `$__drop_value` shape: at the last ref (rc==1) read the tag, recursively
-/// `__drop_<V>` each nested-variant field + `prim.rc_dec` each leaf `String` field, then release
-/// the block. Returns the concatenated source to APPEND to the program (so the `type` decls it
-/// references are in scope); only types that `variant_needs_recursive_drop` get a fn. The fn is
-/// `prim`-only ⇒ empty ownership cert (a trusted routine — its leak/double-free correctness is
-/// the create+drop LEAK LOOP's burden, exactly like `__drop_value`). The slot offsets match the
-/// v1 construct (`[rc@0][len@4][cap@8][tag=slot0@12][field i @ 12+(1+i)*8]`).
-pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> String {
-    use almide_ir::{IrTypeDeclKind, IrVariantKind};
-    let names = variant_type_names(type_decls);
-    // A variant FIELD that is itself a FLAT variant (e.g. `BlockType.BlockVal(ValType)`) is a single
-    // owned tag-block with no inner handle: it must be freed by a flat `rc_dec`, NOT a recursive
-    // `__drop_<flatvariant>` (which is never generated for a flat variant — it has no heap field — and
-    // would render a DANGLING call). Mirrors the record-drop generator's `is_flat_variant_elem` treatment.
-    let flat_names = flat_variant_type_names(type_decls);
-    // The RICH (recursive-drop) variant type names — those for which `$__drop_<V>` is generated below.
-    // A `List[<rich variant>]` ctor field (the wasm `Instr.Block(BlockType, List[Instr])` shape) is
-    // freed RECURSIVELY via `$__drop_list_<V>` (each element → `$__drop_<V>`, mutually recursive); a
-    // flat one-level `rc_dec` of the list block would leak every element's nested children.
-    // A ctor field that is itself a RECORD: freed via `$__drop_<R>` (recursive-drop record — a
-    // nested String/heap field) or a flat `rc_dec` (scalar-only record). `all_record_names` gates the
-    // detection + the `needs_recursive_drop` widening, `rec_record_names` selects the free.
-    let all_record_names: std::collections::HashSet<String> = type_decls
-        .iter()
-        .filter(|d| matches!(&d.kind, IrTypeDeclKind::Record { .. }))
-        .map(|d| d.name.as_str().to_string())
-        .collect();
-    let rec_record_names = recursive_record_drop_names(type_decls);
-    let rec_variant_names: std::collections::HashSet<String> = type_decls
-        .iter()
-        .filter(|d| variant_needs_recursive_drop(d, &names, &all_record_names))
-        .map(|d| d.name.as_str().to_string())
-        .collect();
-    let mut out = String::new();
-    for decl in type_decls {
-        if !variant_needs_recursive_drop(decl, &names, &all_record_names) {
-            continue;
-        }
-        let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else { continue };
-        let tname = decl.name.as_str();
-        // The fn NAME sanitizes the module prefix (`types.RunResult` → `types_RunResult`); the param
-        // TYPE annotation keeps the dotted module-qualified name (a valid Almide type reference).
-        let fname = drop_fn_ident(tname);
-        out.push_str(&format!("fn __drop_{fname}(e: {tname}) -> Unit = {{\n"));
-        out.push_str("  let h = prim.handle(e)\n");
-        out.push_str("  if prim.load32(h + 0) == 1 then {\n");
-        out.push_str(&format!("    let t = prim.load64(h + {})\n", layout::slot_offset(0)));
-        // One tag branch per ctor that has a heap field; chained `if t == k then {..} else ..`.
-        let mut branch = String::new();
-        let mut first = true;
-        for (tag, case) in cases.iter().enumerate() {
-            let tys: Vec<Ty> = match &case.kind {
-                IrVariantKind::Unit => vec![],
-                IrVariantKind::Tuple { fields } => fields.clone(),
-                IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect(),
-            };
-            // Per-field free statements (variant → recurse, String → rc_dec, scalar → skip).
-            let mut frees = String::new();
-            let mut idx = 0usize;
-            for (i, ty) in tys.iter().enumerate() {
-                let off = layout::slot_offset(1 + i);
-                if let Some(fv) = variant_field_name(ty, &names) {
-                    if flat_names.contains(&fv) {
-                        // A flat-variant field — a single owned block, freed by one `rc_dec` (no
-                        // recursive `__drop_<fv>` exists for a flat variant). No `let` binding needed.
-                        frees.push_str(&format!(
-                            "        prim.rc_dec(prim.load64(h + {off}))\n"
-                        ));
-                    } else {
-                        let fv_fn = drop_fn_ident(&fv);
-                        frees.push_str(&format!(
-                            "        let f{idx}: {fv} = prim.load_handle(h + {off})\n        __drop_{fv_fn}(f{idx})\n"
-                        ));
-                        idx += 1;
-                    }
-                } else if matches!(ty, Ty::String) {
-                    frees.push_str(&format!(
-                        "        prim.rc_dec(prim.load64(h + {off}))\n"
-                    ));
-                } else if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                    if a.len() == 1 && !is_heap_ty(&a[0]))
-                {
-                    // A List[scalar] ctor field — a FLAT block, one rc_dec is its full free.
-                    frees.push_str(&format!(
-                        "        prim.rc_dec(prim.load64(h + {off}))
-"
-                    ));
-                } else if let Some(ev) = list_rich_variant_elem(ty, &rec_variant_names) {
-                    // A `List[<rich variant>]` ctor field (`Block(_, List[Instr])`): each element is a
-                    // recursive-drop variant block, freed per-element by the generated `$__drop_list_<ev>`
-                    // (→ `$__drop_<ev>`). A flat `rc_dec` of the list block would leak every element.
-                    let ev_fn = drop_fn_ident(&ev);
-                    frees.push_str(&format!(
-                        "        let f{idx}: List[{ev}] = prim.load_handle(h + {off})\n        __drop_list_{ev_fn}(f{idx})\n"
-                    ));
-                    idx += 1;
-                } else if let Ty::Named(rn, _) = ty {
-                    if all_record_names.contains(rn.as_str()) {
-                        // A RECORD-type ctor field (`Wrap(Color)` / `Box(Inner)`). A recursive-drop
-                        // record (a String / nested-heap field) recurses via `$__drop_<R>`; a
-                        // scalar-only record block is a single owned allocation, one `rc_dec` its full
-                        // free. Either way the ctor stored its HANDLE at this slot.
-                        if rec_record_names.contains(rn.as_str()) {
-                            let rn_fn = drop_fn_ident(rn.as_str());
-                            let rn_s = rn.as_str();
-                            frees.push_str(&format!(
-                                "        let f{idx}: {rn_s} = prim.load_handle(h + {off})\n        __drop_{rn_fn}(f{idx})\n"
-                            ));
-                            idx += 1;
-                        } else {
-                            frees.push_str(&format!(
-                                "        prim.rc_dec(prim.load64(h + {off}))\n"
-                            ));
-                        }
-                    }
-                }
-            }
-            if frees.is_empty() {
-                continue; // scalar/Unit ctor — nothing to free
-            }
-            let kw = if first { "if" } else { "else if" };
-            branch.push_str(&format!("    {kw} t == {tag} then {{\n{frees}      }}\n"));
-            first = false;
-        }
-        if branch.is_empty() {
-            // No heap-field ctor (shouldn't happen — needs_recursive_drop was true), guard anyway.
-            out.push_str("    ()\n");
-        } else {
-            out.push_str(&branch);
-            out.push_str("    else ()\n");
-        }
-        out.push_str("  } else ()\n");
-        out.push_str("  prim.rc_dec(h)\n");
-        out.push_str("}\n");
-    }
-    // A per-element-recursive `$__drop_list_<V>` for EVERY rich variant V — so a `List[V]` value (the
-    // wasm `read_instrs` accumulator) AND a `List[V]` FIELD of a record (`Global.init`, freed via
-    // `record_drop_field_frees` → `__drop_list_<V>`) reclaim each element through `$__drop_<V>`. Mirrors
-    // the record list-drop loop in `generate_record_drop_sources` (the variant is the element drop). The
-    // recursion `$__drop_<V> ↔ $__drop_list_<V>` terminates on a finite (parsed) tree; both are trusted
-    // prim-only routines (empty cert), verified by the create+drop leak loop. Sorted for host-determinism.
-    let mut list_drop_names: Vec<&String> = rec_variant_names.iter().collect();
-    list_drop_names.sort();
-    for vn in list_drop_names {
-        let vn_fn = drop_fn_ident(vn);
-        out.push_str(&format!(
-            "fn __drop_list_{vn_fn}(xs: List[{vn}]) -> Unit = {{\n  \
-               let h = prim.handle(xs)\n  \
-               if prim.load32(h + 0) == 1 then __drop_list_{vn_fn}_loop(h, prim.load32(h + 4), 0) else ()\n  \
-               prim.rc_dec(h)\n}}\n\
-             fn __drop_list_{vn_fn}_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
-               if i >= n then ()\n  \
-               else {{ let e: {vn} = prim.load_handle(h + 12 + i * 8)\n         __drop_{vn_fn}(e)\n         __drop_list_{vn_fn}_loop(h, n, i + 1) }}\n"
-        ));
-    }
-    out
-}
-
-/// Does a record carrying a field of type `ty` need a generated recursive `$__drop_<R>` (rather than
-/// a flat one-level `rc_dec` of its block)? ANY heap field does: a flat `rc_dec` of the record block
-/// frees only the block, leaking every owned heap SLOT (a `String` handle, a `List`/`Map`/`Value`
-/// handle, a nested record). This was historically `false` for `String` / `List[scalar]` because the
-/// DIRECT-drop path masks those slots (`record_masks` → `DropListStr`); but a record so classified
-/// gets NO `$__drop_<R>`, so when it is NESTED as a field of ANOTHER recursive record the outer's
-/// per-field free (`record_drop_field_frees`) has no routine to call and falls back to a flat
-/// `rc_dec` that LEAKS the inner slot (the porta `Parser = { bytes: List[Int], pos: Int }` nested in
-/// `{ val, next: Parser }` — its `bytes` list leaked). Generating `$__drop_<R>` for every heap-field
-/// record closes that: for an already-direct-dropped record the generated body frees the SAME slots
-/// as the mask (`String`/`List[scalar]` → one `rc_dec` each), so the output is byte-identical and the
-/// ownership cert stays a single `d`; the only delta is that the routine now EXISTS for nesting.
-pub fn record_field_needs_recursive_drop(ty: &Ty) -> bool {
-    is_heap_ty(ty)
-}
-
-/// The set of RECORD type names whose drop must be the recursive `$__drop_<R>` (any field
-/// [`record_field_needs_recursive_drop`]). A scalar/String-only record keeps the flat masked
-/// `DropListStr`. Mirrors [`variant_needs_recursive_drop`] for records.
-pub fn recursive_record_drop_names(
-    type_decls: &[almide_ir::IrTypeDecl],
-) -> std::collections::HashSet<String> {
-    use almide_ir::IrTypeDeclKind;
-    type_decls
-        .iter()
-        .filter_map(|d| match &d.kind {
-            IrTypeDeclKind::Record { fields }
-                if fields.iter().any(|f| record_field_needs_recursive_drop(&f.ty)) =>
-            {
-                Some(d.name.as_str().to_string())
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-/// `Some(name)` iff `ty` is a NAMED record/aggregate whose `$__drop_<name>` is generated (it is in
-/// `rec_names`) — so a field of that type recurses via `__drop_<name>`. A non-recursive (scalar-only)
-/// record is `None`: it is freed by a flat `rc_dec` of its block.
-fn recursive_aggregate_name(ty: &Ty, rec_names: &std::collections::HashSet<String>) -> Option<String> {
-    use almide_lang::types::constructor::TypeConstructorId;
-    let n = match ty {
-        Ty::Named(n, _) => n.as_str().to_string(),
-        Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
-        // An ANONYMOUS record field that itself needs the recursive drop (a heap-nested anon
-        // record, e.g. `{ st: Cfb8State }` inside another anon record) routes to its synthesized
-        // `__drop_<anon_hash>` (registered by `anon_record_drop_name`). It is NOT in `type_decls`,
-        // so `rec_names` won't carry it — admit it directly here.
-        Ty::Record { fields } if anon_record_needs_recursive_drop(fields) => {
-            return Some(anon_record_drop_name(fields));
-        }
-        _ => return None,
-    };
-    // A cross-module field may be spelled BARE (`Lin`) while `rec_names` carries the
-    // QUALIFIED decl name (`types_mod.Lin`) — resolve via the unique-suffix rule so the
-    // generated free targets the real `$__drop_<canonical>` (an ambiguous bare name stays
-    // unresolved → the field falls to the flat arm, never a wrong-name dangling call).
-    canonical_name_in(rec_names, &n).map(|k| k.to_string())
-}
-
-/// A DETERMINISTIC, host-independent synthetic type name for an ANONYMOUS record shape, used as the
-/// suffix of its synthesized recursive drop `$__drop_<name>` (and the `variant_drop_handles` route).
-/// FNV-1a over the ordered `(field-name, field-type-tag)` shape — the SAME shape two structurally
-/// equal anon records share, so they dedup to one `__drop`. The `anonrec_` prefix keeps it disjoint
-/// from any user type name. Stable across native/wasm hosts (pure arithmetic, no pointer/order deps).
-pub(crate) fn anon_record_drop_name(fields: &[(almide_lang::intern::Sym, Ty)]) -> String {
-    let mut h: u64 = 0xcbf29ce484222325;
-    let mut mix = |bytes: &[u8]| {
-        for &b in bytes {
-            h ^= b as u64;
-            h = h.wrapping_mul(0x100000001b3);
-        }
-    };
-    for (name, ty) in fields {
-        mix(name.as_str().as_bytes());
-        mix(b"\x00");
-        mix(ty_shape_tag(ty).as_bytes());
-        mix(b"\x00");
-    }
-    format!("anonrec_{h:016x}")
-}
-
-/// A structural string tag for a field type, fine enough that two anon records with DIFFERENT field
-/// types (hence different drop bodies) get different names, recursing into nested aggregates so a
-/// `{ st: A }` and `{ st: B }` never collide. Only the drop-relevant structure matters.
-fn ty_shape_tag(ty: &Ty) -> String {
-    use almide_lang::types::constructor::TypeConstructorId;
-    match ty {
-        Ty::Named(n, _) => format!("N{}", n.as_str()),
-        Ty::Applied(TypeConstructorId::UserDefined(n), _) => format!("N{n}"),
-        Ty::Applied(c, a) => {
-            let inner: Vec<String> = a.iter().map(ty_shape_tag).collect();
-            format!("A{c:?}[{}]", inner.join(","))
-        }
-        Ty::Record { fields } | Ty::OpenRecord { fields } => {
-            let inner: Vec<String> =
-                fields.iter().map(|(k, t)| format!("{}:{}", k.as_str(), ty_shape_tag(t))).collect();
-            format!("R{{{}}}", inner.join(","))
-        }
-        Ty::Tuple(elems) => {
-            let inner: Vec<String> = elems.iter().map(ty_shape_tag).collect();
-            format!("T({})", inner.join(","))
-        }
-        other => format!("{other:?}"),
-    }
-}
-
-/// Does an ANONYMOUS record (`Ty::Record`) need a SYNTHESIZED recursive `$__drop_<hash>`? It does iff
-/// ANY field needs a recursive drop ([`record_field_needs_recursive_drop`]) — EXACTLY the predicate
-/// `recursive_record_drop_names` uses for NAMED records, since the slot layout is identical. A flat
-/// one-level mask `rc_dec`s only each field's HANDLE: that fully frees a flat-heap field (Bytes /
-/// String — a single buffer) but only frees the BLOCK of a field that itself holds heap handles (a
-/// nested record / Value / Map / `List[heap]`), leaking what's inside. So an anon record that owns
-/// any heap field at all needs the synthesized recursive drop (the body flat-frees the
-/// single-buffer fields and recurses into the handle-holding ones via `record_drop_field_frees`).
-/// `record_field_needs_recursive_drop` is structural and host-independent.
-pub(crate) fn anon_record_needs_recursive_drop(fields: &[(almide_lang::intern::Sym, Ty)]) -> bool {
-    fields.iter().any(|(_, t)| record_field_needs_recursive_drop(t))
-}
-
-/// The per-field FREE statements of a record's recursive `$__drop` body (shared by the named-record
-/// and the synthesized anon-record generators — the SINGLE source of truth for record field drops,
-/// so the two can never drift). Each field at `slot_offset(i)` is freed by its CONCRETE type:
-/// `String → rc_dec`, `Map[String,String] → __drop_map_ss`, `List[String] → __drop_list_str`,
-/// `List[<recursive record>] → __drop_list_<R>`, a recursive record (named or anon) → `__drop_<R>`,
-/// a `Value → __drop_value`, a scalar-only nested aggregate / `List[scalar]` → flat `rc_dec`, a
-/// scalar → skip. Records the needed shared-helper flags into the caller's accumulators so they are
-/// emitted once at the end.
-#[allow(clippy::too_many_arguments)]
-fn record_drop_field_frees(
-    field_tys: &[Ty],
-    rec_names: &std::collections::HashSet<String>,
-    flat_variant_names: &std::collections::HashSet<String>,
-    rec_variant_names: &std::collections::HashSet<String>,
-    list_drops: &mut std::collections::BTreeSet<String>,
-    need_map_ss: &mut bool,
-    need_list_str: &mut bool,
-    need_matrix: &mut bool,
-    need_list_matrix: &mut bool,
-) -> String {
-    use almide_lang::types::constructor::TypeConstructorId;
-    let mut frees = String::new();
-    for (i, ty) in field_tys.iter().enumerate() {
-        let off = layout::slot_offset(i);
-        match ty {
-            Ty::String => {
-                frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
-            }
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-                if let Some(rn) = recursive_aggregate_name(&a[0], rec_names) {
-                    list_drops.insert(rn.clone());
-                    let rn_fn = drop_fn_ident(&rn);
-                    // The BINDING type must be valid Almide source: a NAMED element renders
-                    // its name, an ANONYMOUS element its STRUCTURAL `{ k: T, … }` form — the
-                    // synthesized `anonrec_<hash>` is a drop-fn identity, NOT a type name
-                    // (writing `List[anonrec_…]` type-errored the whole generated batch:
-                    // "undefined variable 'f0'" after the rejected let).
-                    let src = aggregate_source_ty(&a[0]);
-                    frees.push_str(&format!(
-                        "    let f{i}: List[{src}] = prim.load_handle(h + {off})\n    __drop_list_{rn_fn}(f{i})\n"
-                    ));
-                } else if let Some(ev) = list_rich_variant_elem(ty, rec_variant_names) {
-                    // `List[<rich variant>]` (`Global.init: List[Instr]`): each element is a
-                    // recursive-drop variant block, freed per-element by `$__drop_list_<ev>` (→
-                    // `$__drop_<ev>`, generated by `generate_variant_drop_sources`). A flat `rc_dec`
-                    // of the list block would leak every element's nested children (its own List[Instr]).
-                    let ev_fn = drop_fn_ident(&ev);
-                    frees.push_str(&format!(
-                        "    let f{i}: List[{ev}] = prim.load_handle(h + {off})\n    __drop_list_{ev_fn}(f{i})\n"
-                    ));
-                } else if matches!(&a[0], Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _)) {
-                    // `List[Matrix]` — each element is a matrix block whose slots hold owned
-                    // row blocks: sweep TWO levels via `__drop_list_matrix` (each element
-                    // through `__drop_matrix`, then the list). A flat `rc_dec` would leak
-                    // every matrix AND its rows.
-                    *need_matrix = true;
-                    *need_list_matrix = true;
-                    frees.push_str(&format!(
-                        "    let f{i}: List[Matrix] = prim.load_handle(h + {off})\n    __drop_list_matrix(f{i})\n"
-                    ));
-                } else if matches!(&a[0],
-                    Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && !is_heap_ty(&b[0]))
-                {
-                    // A matrix-shaped STRUCTURAL field (`List[List[scalar]]`): its slots hold
-                    // owned flat row blocks — `__drop_matrix`'s per-row `rc_dec` sweep is its
-                    // exact free (a flat `rc_dec` frees only the outer block, leaking rows).
-                    *need_matrix = true;
-                    frees.push_str(&format!(
-                        "    let f{i}: Matrix = prim.load_handle(h + {off})\n    __drop_matrix(f{i})\n"
-                    ));
-                } else if matches!(a[0], Ty::String) || is_flat_variant_elem(&a[0], flat_variant_names) {
-                    // `List[String]` OR `List[flat-variant]` (a nullary/scalar-only enum like
-                    // `Capability`): each element is a single FLAT block, so `__drop_list_str` frees
-                    // them per-element (`rc_dec` of each element handle + the list block). The flat
-                    // variant element holds no inner handle, so the byte-identical String-list drop is
-                    // its full free — a flat `rc_dec` of just the list block would LEAK each element.
-                    *need_list_str = true;
-                    frees.push_str(&format!(
-                        "    let f{i}: List[String] = prim.load_handle(h + {off})\n    __drop_list_str(f{i})\n"
-                    ));
-                } else {
-                    // List[scalar] or List[non-recursive heap]: flat free the block.
-                    frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
-                }
-            }
-            // A `Matrix` field (the v1 value model: a List[List[Float]] block whose slots
-            // hold owned flat row blocks — nn WhisperWeights.conv1_w): free each row + the
-            // block via `__drop_matrix`. The previous flat `rc_dec` fallback leaked every row.
-            Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _) => {
-                *need_matrix = true;
-                frees.push_str(&format!(
-                    "    let f{i}: Matrix = prim.load_handle(h + {off})\n    __drop_matrix(f{i})\n"
-                ));
-            }
-            Ty::Applied(TypeConstructorId::Map, a)
-                if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String) =>
-            {
-                *need_map_ss = true;
-                frees.push_str(&format!(
-                    "    let f{i}: Map[String, String] = prim.load_handle(h + {off})\n    __drop_map_ss(f{i})\n"
-                ));
-            }
-            t if is_value_ty(t) => {
-                frees.push_str(&format!(
-                    "    let f{i}: Value = prim.load_handle(h + {off})\n    __drop_value(f{i})\n"
-                ));
-            }
-            t => {
-                if let Some(rn) = recursive_aggregate_name(t, rec_names) {
-                    let src = aggregate_source_ty(t);
-                    let rn_fn = drop_fn_ident(&rn);
-                    frees.push_str(&format!(
-                        "    let f{i}: {src} = prim.load_handle(h + {off})\n    __drop_{rn_fn}(f{i})\n"
-                    ));
-                } else if is_heap_ty(t) {
-                    // a non-recursive heap field (scalar-only nested record, Bytes, scalar map) — flat.
-                    frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
-                }
-                // a scalar field — skip (no free).
-            }
-        }
-    }
-    frees
-}
-
-/// Is `ty` a FLAT custom variant (in `flat_variant_names`) — a `List[ty]` element that frees as a
-/// single block? `Named`/`UserDefined` only; `List`/`Map`/`Value`/record types never qualify.
-fn is_flat_variant_elem(ty: &Ty, flat_variant_names: &std::collections::HashSet<String>) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    let n = match ty {
-        Ty::Named(n, _) => n.as_str(),
-        Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.as_str(),
-        _ => return false,
-    };
-    flat_variant_names.contains(n)
-}
-
-/// If `ty` is `List[V]` where `V` is a RICH (recursive-drop) variant (in `rec_variant_names`), return
-/// `V`'s name — the element drop `$__drop_<V>` that `$__drop_list_<V>` calls per element. `None` for a
-/// non-list, a scalar/String/flat-variant element list, or a record-element list (those route
-/// elsewhere). Used by the variant-ctor field generator AND `record_drop_field_frees` so a `List[Instr]`
-/// field (`Global.init`, `Block`'s payload) is freed recursively instead of leaking.
-fn list_rich_variant_elem(
-    ty: &Ty,
-    rec_variant_names: &std::collections::HashSet<String>,
-) -> Option<String> {
-    use almide_lang::types::constructor::TypeConstructorId;
-    let Ty::Applied(TypeConstructorId::List, a) = ty else { return None };
-    if a.len() != 1 {
-        return None;
-    }
-    let n = match &a[0] {
-        Ty::Named(n, _) => n.as_str().to_string(),
-        Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
-        _ => return None,
-    };
-    rec_variant_names.contains(&n).then_some(n)
-}
-
-/// The ALMIDE SOURCE TYPE for a recursive-aggregate field (the `let fN: <ty> =` binding type in a
-/// drop body). A NAMED aggregate renders to its name; an ANONYMOUS record renders to its structural
-/// `{ k: T, … }` form (so a heap-nested anon-record field binds + recurses through `__drop_<hash>`).
-fn aggregate_source_ty(ty: &Ty) -> String {
-    use almide_lang::types::constructor::TypeConstructorId;
-    match ty {
-        Ty::Named(n, _) => n.as_str().to_string(),
-        Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
-        Ty::Record { fields } | Ty::OpenRecord { fields } => anon_record_source_ty(fields),
-        _ => field_source_ty(ty),
-    }
-}
-
-/// The ALMIDE SOURCE rendering of an anonymous record TYPE — `{ k0: T0, k1: T1 }` — used as the
-/// synthesized `__drop_<hash>` parameter type and a nested anon-record field binding type. Field
-/// types render via [`field_source_ty`] (the drop-relevant subset: Bytes/String/Int/.../named
-/// records / `List[..]` / `Map[..]` / `Value` / nested anon records).
-fn anon_record_source_ty(fields: &[(almide_lang::intern::Sym, Ty)]) -> String {
-    let inner: Vec<String> = fields
-        .iter()
-        .map(|(k, t)| format!("{}: {}", k.as_str(), field_source_ty(t)))
-        .collect();
-    format!("{{ {} }}", inner.join(", "))
-}
-
-/// Render a record FIELD type back to Almide source for a drop binding/param. Total over the field
-/// types a recursive-drop record can carry; an unhandled exotic type falls back to `Bytes` (a flat
-/// heap block) ONLY as a defensive default — discovery (`anon_record_needs_recursive_drop`) never
-/// synthesizes a drop for a shape whose fields it cannot classify, so this fallback is unreachable
-/// for the registered shapes.
-fn field_source_ty(ty: &Ty) -> String {
-    use almide_lang::types::constructor::TypeConstructorId;
-    match ty {
-        Ty::Int | Ty::Int64 => "Int".to_string(),
-        Ty::Int8 => "Int8".to_string(),
-        Ty::Int16 => "Int16".to_string(),
-        Ty::Int32 => "Int32".to_string(),
-        Ty::UInt8 => "UInt8".to_string(),
-        Ty::UInt16 => "UInt16".to_string(),
-        Ty::UInt32 => "UInt32".to_string(),
-        Ty::UInt64 => "UInt64".to_string(),
-        Ty::Float | Ty::Float64 => "Float".to_string(),
-        Ty::Float32 => "Float32".to_string(),
-        Ty::Bool => "Bool".to_string(),
-        Ty::String => "String".to_string(),
-        Ty::Bytes => "Bytes".to_string(),
-        Ty::Named(n, _) => n.as_str().to_string(),
-        Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
-        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-            format!("List[{}]", field_source_ty(&a[0]))
-        }
-        Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 => {
-            format!("Map[{}, {}]", field_source_ty(&a[0]), field_source_ty(&a[1]))
-        }
-        t if is_value_ty(t) => "Value".to_string(),
-        Ty::Record { fields } | Ty::OpenRecord { fields } => anon_record_source_ty(fields),
-        Ty::Tuple(elems) => {
-            let inner: Vec<String> = elems.iter().map(field_source_ty).collect();
-            format!("({})", inner.join(", "))
-        }
-        // Defensive: a shape the synthesizer never registers (see doc). Bytes = a flat heap block.
-        _ => "Bytes".to_string(),
-    }
-}
-
-/// Walk the IR (every function's signature + body-expr types, every type decl's record fields) and
-/// COLLECT the distinct ANONYMOUS record shapes that need a synthesized recursive drop — the input
-/// to [`generate_record_drop_sources`]'s anon-drop loop. A shape qualifies iff at least one field
-/// frees NON-flat (the flat one-level mask would leak — `anon_record_needs_recursive_drop`), where a
-/// NAMED field record's recursiveness is resolved through the program's `rec_names`. Deduped by the
-/// content-hash drop name. This is the discovery half; the generation half is the anon loop in
-/// `generate_record_drop_sources`.
-pub fn collect_recursive_anon_records(
-    program: &almide_ir::IrProgram,
-) -> Vec<Vec<(almide_lang::intern::Sym, Ty)>> {
-    let mut all_decls: Vec<almide_ir::IrTypeDecl> = program.type_decls.clone();
-    // A visitor that inspects every expression's type (every IrExpr carries its `ty`), collecting
-    // the distinct anon record shapes that need a synthesized recursive drop (deduped by drop name).
-    // RECURSES into a qualifying anon record's own anon-record FIELDS so a nested anon shape
-    // (`{ st: { iv: Bytes } }`) gets its inner `__drop_anonrec_<hash>` generated too (the outer drop
-    // body `let f: { iv: Bytes } = …; __drop_anonrec_<inner>(f)` would otherwise call a missing fn).
-    struct TyCollector {
-        seen: std::collections::HashSet<String>,
-        out: Vec<Vec<(almide_lang::intern::Sym, Ty)>>,
-    }
-    impl TyCollector {
-        fn consider(&mut self, ty: &Ty) {
-            use almide_lang::types::constructor::TypeConstructorId;
-            match ty {
-                Ty::Record { fields } if anon_record_needs_recursive_drop(fields) => {
-                    let name = anon_record_drop_name(fields);
-                    if self.seen.insert(name) {
-                        self.out.push(fields.clone());
-                    }
-                    // Recurse into field types so a nested anon record / a `List[anon]` element
-                    // also registers its drop.
-                    for (_, fty) in fields {
-                        self.consider(fty);
-                    }
-                }
-                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => self.consider(&a[0]),
-                Ty::Tuple(elems) => {
-                    for e in elems {
-                        self.consider(e);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    impl almide_ir::visit::IrVisitor for TyCollector {
-        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
-            self.consider(&expr.ty);
-            almide_ir::visit::walk_expr(self, expr);
-        }
-    }
-
-    let mut collector = TyCollector { seen: std::collections::HashSet::new(), out: Vec::new() };
-    let funcs = program
-        .functions
-        .iter()
-        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
-    for f in funcs {
-        collector.consider(&f.ret_ty);
-        let param_tys: Vec<Ty> = f.params.iter().map(|p| p.ty.clone()).collect();
-        for ty in &param_tys {
-            collector.consider(ty);
-        }
-        almide_ir::visit::IrVisitor::visit_expr(&mut collector, &f.body);
-    }
-    collector.out
-}
-
-/// Does the program reference the `Result[Option[String], String]` shape anywhere (a function
-/// signature or an expression type)? Gates `$__drop_opt_str` emission in
-/// [`generate_record_drop_sources`] — the recursive-drop leaf `try_lower_result_option_scalar_str_ctor`
-/// routes an `ok(some(<string>))` / `ok(none)` `Result[Option[String], String]` through
-/// (`resrec:opt_str`). Only that shape needs the generated fn; a scalar Option leaf frees flat. Scans
-/// the SAME positions as [`collect_recursive_anon_records`] (ret/param/body-expr types).
-pub fn program_uses_result_option_str(program: &almide_ir::IrProgram) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    fn is_result_opt_str(ty: &Ty) -> bool {
-        let Ty::Applied(TypeConstructorId::Result, a) = ty else { return false };
-        if a.len() != 2 || !matches!(a[1], Ty::String) {
-            return false;
-        }
-        matches!(&a[0], Ty::Applied(TypeConstructorId::Option, oa)
-            if oa.len() == 1 && matches!(oa[0], Ty::String))
-    }
-    struct Finder {
-        found: bool,
-    }
-    impl almide_ir::visit::IrVisitor for Finder {
-        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
-            if is_result_opt_str(&expr.ty) {
-                self.found = true;
-            }
-            almide_ir::visit::walk_expr(self, expr);
-        }
-    }
-    let mut finder = Finder { found: false };
-    let funcs = program
-        .functions
-        .iter()
-        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
-    for f in funcs {
-        if is_result_opt_str(&f.ret_ty) || f.params.iter().any(|p| is_result_opt_str(&p.ty)) {
-            return true;
-        }
-        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
-        if finder.found {
-            return true;
-        }
-    }
-    false
-}
-
-/// Generate the ALMIDE SOURCE for each RECORD type's recursive drop `$__drop_<R>` (the records
-/// counterpart of [`generate_variant_drop_sources`]). Records have NO tag — fields sit at
-/// `slot_offset(i)`, freed per CONCRETE field type: `String → rc_dec`, `Map[String,String] →
-/// __drop_map_ss`, `List[String] → __drop_list_str`, `List[<recursive record>] → __drop_list_<R>`,
-/// a recursive record → `__drop_<R>`, a `Value → __drop_value`, a scalar-only nested aggregate or
-/// `List[scalar]` → flat `rc_dec` of the block, a scalar → skip. Emits the needed `__drop_list_<R>`
-/// loops + the generic `__drop_map_ss` / `__drop_list_str` helpers. Also emits a synthesized
-/// `__drop_anonrec_<hash>` for each ANONYMOUS record shape in `anon_records` that needs the
-/// recursive drop (a heap-nested anon record return — aes cfb8). All `__drop_`-prefixed ⇒ on the
-/// `prim.rc_dec` whitelist + an empty ownership cert (a trusted free, leak-loop verified).
-pub fn generate_record_drop_sources(
-    type_decls: &[almide_ir::IrTypeDecl],
-    anon_records: &[Vec<(almide_lang::intern::Sym, Ty)>],
-    uses_result_opt_str: bool,
-) -> String {
-    use almide_ir::IrTypeDeclKind;
-    let rec_names = recursive_record_drop_names(type_decls);
-    let flat_variant_names = flat_variant_type_names(type_decls);
-    // The RICH variant names — a record `List[<rich variant>]` field (`Global.init: List[Instr]`) routes
-    // to `$__drop_list_<V>` (generated by `generate_variant_drop_sources`, appended to the same program).
-    let variant_names = variant_type_names(type_decls);
-    let all_record_names: std::collections::HashSet<String> = type_decls
-        .iter()
-        .filter(|d| matches!(&d.kind, IrTypeDeclKind::Record { .. }))
-        .map(|d| d.name.as_str().to_string())
-        .collect();
-    let rec_variant_names: std::collections::HashSet<String> = type_decls
-        .iter()
-        .filter(|d| variant_needs_recursive_drop(d, &variant_names, &all_record_names))
-        .map(|d| d.name.as_str().to_string())
-        .collect();
-    let mut out = String::new();
-    let mut list_drops: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    let mut need_map_ss = false;
-    let mut need_list_str = false;
-    let mut need_matrix = false;
-    let mut need_list_matrix = false;
-    for decl in type_decls {
-        let IrTypeDeclKind::Record { fields } = &decl.kind else { continue };
-        if !rec_names.contains(decl.name.as_str()) {
-            continue;
-        }
-        let tname = decl.name.as_str();
-        let fname = drop_fn_ident(tname);
-        let field_tys: Vec<Ty> = fields.iter().map(|f| f.ty.clone()).collect();
-        out.push_str(&format!("fn __drop_{fname}(e: {tname}) -> Unit = {{\n"));
-        out.push_str("  let h = prim.handle(e)\n");
-        out.push_str("  if prim.load32(h + 0) == 1 then {\n");
-        out.push_str(&record_drop_field_frees(
-            &field_tys,
-            &rec_names,
-            &flat_variant_names,
-            &rec_variant_names,
-            &mut list_drops,
-            &mut need_map_ss,
-            &mut need_list_str,
-            &mut need_matrix,
-            &mut need_list_matrix,
-        ));
-        out.push_str("  } else ()\n");
-        out.push_str("  prim.rc_dec(h)\n");
-        out.push_str("}\n");
-    }
-    // `$__drop_opt_<R>` for each recursive-drop record R — frees an `Option[R]` (the 0-or-1-element
-    // layout) used by `Result[Option[R], String]` wrappers (`resrec:opt_<R>`, porta read_message's
-    // `ok(none)` / `ok(r)` bases). The `match` drops the bound record `r` at the Some-arm end (routing
-    // to `$__drop_<R>`); a None is a no-op; consuming `e` frees the Option block. Same per-R set as the
-    // `$__drop_<R>` loop above, so an `$__drop_opt_<R>` is emitted only when its `$__drop_<R>` exists.
-    for decl in type_decls {
-        let IrTypeDeclKind::Record { .. } = &decl.kind else { continue };
-        if !rec_names.contains(decl.name.as_str()) {
-            continue;
-        }
-        let tname = decl.name.as_str();
-        out.push_str(&format!(
-            "fn __drop_opt_{tname}(e: Option[{tname}]) -> Unit = {{\n  match e {{\n    some(r) => (),\n    none => (),\n  }}\n}}\n"
-        ));
-    }
-    // `$__drop_opt_str` — frees an `Option[String]` (the recursive-drop leaf of a `Result[Option[String],
-    // String]`, the derived-Codec `__decode_option_string`). The `some(r)` arm binds the inner String
-    // whose scope-end `rc_dec` frees it; consuming `e` frees the 0-or-1 Option block. Emitted ONLY when
-    // the program constructs that shape (via `try_lower_result_option_scalar_str_ctor`'s `resrec:opt_str`),
-    // so a program without it is not perturbed. (The scalar Option leaves — Int/Float/Bool — need no drop
-    // fn: their `Result[Option[<scalar>], String]` frees flat via `DropListStr`.)
-    if uses_result_opt_str {
-        out.push_str(
-            "fn __drop_opt_str(e: Option[String]) -> Unit = {\n  match e {\n    some(r) => (),\n    none => (),\n  }\n}\n",
-        );
-    }
-    // `$__drop_tup_int_<R>` for each recursive-drop record R — frees a `(R, Int)` TUPLE
-    // block (record handle @12 recursed via `$__drop_<R>`, the Int @20 is scalar), used
-    // by `Result[(R, Int), String]` wrappers (`resrec:tup_int_<R>` — the gguf
-    // parse_header `ok((GGUFHeader {…}, 24))` shape).
-    for decl in type_decls {
-        let IrTypeDeclKind::Record { .. } = &decl.kind else { continue };
-        if !rec_names.contains(decl.name.as_str()) {
-            continue;
-        }
-        let tname = decl.name.as_str();
-        let fname = drop_fn_ident(tname);
-        out.push_str(&format!(
-            "fn __drop_tup_int_{fname}(e: ({tname}, Int)) -> Unit = {{
-                 let h = prim.handle(e)
-                 if prim.load32(h + 0) == 1 then {{
-                     let r: {tname} = prim.load_handle(h + 12)
-                     __drop_{fname}(r)
-                 }} else ()
-                 prim.rc_dec(h)
-}}
-"
-        ));
-    }
-    // SYNTHESIZED recursive drops for the ANONYMOUS record return/binding shapes the corpus uses
-    // (`{ data: Bytes, state: Cfb8State }` — aes cfb8). An anon record is NOT a `type` decl, so the
-    // loop above never names it; it would otherwise drop via the flat one-level mask `DropListStr`,
-    // which `rc_dec`s the `state` BLOCK but LEAKS the Bytes INSIDE Cfb8State. Each shape gets a
-    // content-hashed `__drop_anonrec_<hash>` (dedup'd) with the SAME per-field-type recursion the
-    // named generator emits — so the `state` field is freed through `__drop_Cfb8State`. The param is
-    // the structural anon record type in source (`e: { data: Bytes, state: Cfb8State }`). Sorted by
-    // name for host-determinism. (The discovery of WHICH anon shapes appear is the caller's; see
-    // `generate_anon_record_drop_sources`.)
-    let mut anon_sorted: Vec<&Vec<(almide_lang::intern::Sym, Ty)>> = anon_records.iter().collect();
-    anon_sorted.sort_by_key(|fields| anon_record_drop_name(fields));
-    anon_sorted.dedup_by_key(|fields| anon_record_drop_name(fields));
-    for fields in anon_sorted {
-        if !anon_record_needs_recursive_drop(fields) {
-            continue;
-        }
-        let name = anon_record_drop_name(fields);
-        let field_tys: Vec<Ty> = fields.iter().map(|(_, t)| t.clone()).collect();
-        let param_ty = anon_record_source_ty(fields);
-        out.push_str(&format!("fn __drop_{name}(e: {param_ty}) -> Unit = {{\n"));
-        out.push_str("  let h = prim.handle(e)\n");
-        out.push_str("  if prim.load32(h + 0) == 1 then {\n");
-        out.push_str(&record_drop_field_frees(
-            &field_tys,
-            &rec_names,
-            &flat_variant_names,
-            &rec_variant_names,
-            &mut list_drops,
-            &mut need_map_ss,
-            &mut need_list_str,
-            &mut need_matrix,
-            &mut need_list_matrix,
-        ));
-        out.push_str("  } else ()\n");
-        out.push_str("  prim.rc_dec(h)\n");
-        out.push_str("}\n");
-    }
-    // The SAME per-element list wrapper for each synthesized ANON-record drop — a
-    // STRUCTURAL record-list literal (`take([{key: "x", val: "2"}])`, the checker
-    // leaves the elements structural) routes to `list_anonrec_<hash>`; without this
-    // wrapper the route referenced a missing `$__drop_list_anonrec_<hash>`.
-    {
-        let mut anon_sorted: Vec<&Vec<(almide_lang::intern::Sym, Ty)>> =
-            anon_records.iter().collect();
-        anon_sorted.sort_by_key(|fields| anon_record_drop_name(fields));
-        anon_sorted.dedup_by_key(|fields| anon_record_drop_name(fields));
-        for fields in anon_sorted {
-            if !anon_record_needs_recursive_drop(fields) {
-                continue;
-            }
-            let name = anon_record_drop_name(fields);
-            let param_ty = anon_record_source_ty(fields);
-            out.push_str(&format!(
-                "fn __drop_list_{name}(xs: List[{param_ty}]) -> Unit = {{
-                     let h = prim.handle(xs)
-                     if prim.load32(h + 0) == 1 then __drop_list_{name}_loop(h, prim.load32(h + 4), 0) else ()
-                     prim.rc_dec(h)
-}}
-                 fn __drop_list_{name}_loop(h: Int, n: Int, i: Int) -> Unit =
-                     if i >= n then ()
-                     else {{ let e: {param_ty} = prim.load_handle(h + 12 + i * 8)
-         __drop_{name}(e)
-         __drop_list_{name}_loop(h, n, i + 1) }}
-"
-            ));
-        }
-    }
-    // A per-element-recursive `$__drop_list_<R>` for EVERY recursive-drop record R (not just the
-    // field-referenced ones in `list_drops`) — so a standalone `List[R]` LITERAL value (`group([…])`)
-    // routes its drop here too. Sorted for host-determinism.
-    let _ = &list_drops; // (subsumed by rec_names below)
-    let mut list_drop_names: Vec<&String> = rec_names.iter().collect();
-    list_drop_names.sort();
-    for rn in list_drop_names {
-        // fn NAMES sanitize the module prefix; the `List[{rn}]` / `e: {rn}` type annotations keep
-        // the dotted module-qualified name (a valid Almide type reference).
-        let rn_fn = drop_fn_ident(rn);
-        out.push_str(&format!(
-            "fn __drop_list_{rn_fn}(xs: List[{rn}]) -> Unit = {{\n  \
-               let h = prim.handle(xs)\n  \
-               if prim.load32(h + 0) == 1 then __drop_list_{rn_fn}_loop(h, prim.load32(h + 4), 0) else ()\n  \
-               prim.rc_dec(h)\n}}\n\
-             fn __drop_list_{rn_fn}_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
-               if i >= n then ()\n  \
-               else {{ let e: {rn} = prim.load_handle(h + 12 + i * 8)\n         __drop_{rn_fn}(e)\n         __drop_list_{rn_fn}_loop(h, n, i + 1) }}\n"
-        ));
-    }
-    if need_map_ss {
-        // v1's `Map[String,String]` borrows the `map_skv` (String,Int) layout: the n KEYS are the
-        // first n slots (`@ 12 + i*8`), DEEP-COPIED + owned by the map (`__skv_store_key` store_str);
-        // the n VALUES are the next n slots, stored RAW (`store64`) — NOT owned by the map (the proper
-        // owned-value `Map[String,String]` self-host is a separate brick, docs/roadmap v1-records-svg).
-        // So the drop frees ONLY the owned key copies (rc_dec the first n slots) — freeing the borrowed
-        // values would DOUBLE-FREE. (`n = load32(h+4)` is the entry count.)
-        out.push_str(
-            "fn __drop_map_ss(m: Map[String, String]) -> Unit = {\n  \
-               let h = prim.handle(m)\n  \
-               if prim.load32(h + 0) == 1 then __drop_map_ss_loop(h, prim.load32(h + 4), 0) else ()\n  \
-               prim.rc_dec(h)\n}\n\
-             fn __drop_map_ss_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
-               if i >= n then ()\n  \
-               else { prim.rc_dec(prim.load64(h + 12 + i * 8))\n         __drop_map_ss_loop(h, n, i + 1) }\n",
-        );
-    }
-    if need_matrix {
-        // The v1 Matrix free: at the block's last ref, `rc_dec` each owned flat row
-        // (slot i64-widened handles @12 + i*8, count @4), then the block — the
-        // `__drop_list_str` sweep typed over Matrix.
-        out.push_str(
-            "fn __drop_matrix(m: Matrix) -> Unit = {\n  \
-               let h = prim.handle(m)\n  \
-               if prim.load32(h + 0) == 1 then __drop_matrix_loop(h, prim.load32(h + 4), 0) else ()\n  \
-               prim.rc_dec(h)\n}\n\
-             fn __drop_matrix_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
-               if i >= n then ()\n  \
-               else { prim.rc_dec(prim.load64(h + 12 + i * 8))\n         __drop_matrix_loop(h, n, i + 1) }\n",
-        );
-    }
-    if need_list_matrix {
-        // A `List[Matrix]` field: each element recurses through `__drop_matrix`, then
-        // the list block — the two-level sweep `DropListListStr` performs for values.
-        out.push_str(
-            "fn __drop_list_matrix(xs: List[Matrix]) -> Unit = {\n  \
-               let h = prim.handle(xs)\n  \
-               if prim.load32(h + 0) == 1 then __drop_list_matrix_loop(h, prim.load32(h + 4), 0) else ()\n  \
-               prim.rc_dec(h)\n}\n\
-             fn __drop_list_matrix_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
-               if i >= n then ()\n  \
-               else { let e: Matrix = prim.load_handle(h + 12 + i * 8)\n         __drop_matrix(e)\n         __drop_list_matrix_loop(h, n, i + 1) }\n",
-        );
-    }
-    if need_list_str {
-        out.push_str(
-            "fn __drop_list_str(xs: List[String]) -> Unit = {\n  \
-               let h = prim.handle(xs)\n  \
-               if prim.load32(h + 0) == 1 then __drop_list_str_loop(h, prim.load32(h + 4), 0) else ()\n  \
-               prim.rc_dec(h)\n}\n\
-             fn __drop_list_str_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
-               if i >= n then ()\n  \
-               else { prim.rc_dec(prim.load64(h + 12 + i * 8))\n         __drop_list_str_loop(h, n, i + 1) }\n",
-        );
-    }
-    out
-}
-
 /// [`lower_function_all`] WITH the program's record-layout registry threaded in —
 /// the entry the real pipeline (render_program) uses so a `Ty::Named` record
 /// resolves its fields (and `r.x` materializes). The plain [`lower_function_all`]
@@ -1488,6 +894,92 @@ pub fn lower_function_all_with_layouts(
     lower_function_all_impl(func, globals, &HashMap::new(), record_layouts, variant_layouts)
 }
 
+fn body_has_stmt_position_propagating_unwrap(body: &IrExpr) -> bool {
+    fn stmt_is_propagating(kind: &IrStmtKind) -> bool {
+        match kind {
+            IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
+                matches!(&value.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. })
+            }
+            IrStmtKind::Expr { expr } => {
+                matches!(&expr.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. })
+            }
+            _ => false,
+        }
+    }
+    fn scan(e: &IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::Block { stmts, expr } => {
+                stmts.iter().any(|s| stmt_is_propagating(&s.kind))
+                    || expr.as_deref().is_some_and(scan)
+            }
+            IrExprKind::If { then, else_, .. } => scan(then) || scan(else_),
+            IrExprKind::Match { arms, .. } => arms.iter().any(|a| scan(&a.body)),
+            _ => false,
+        }
+    }
+    scan(body)
+}
+
+/// Does `body`'s TAIL (recursing through Block/If/Match, the same control-flow-transparent
+/// positions `body_has_stmt_position_propagating_unwrap` scans) end in a bare `!` over an
+/// OPTION-typed operand? Such a tail can only compile correctly under a `Result[T, String]`
+/// ABI: the desugar (`desugar_tail_effect_unwrap`'s bare-Unwrap case) turns it into
+/// `match o { none => err("none"), some(v) => ok(v) }`, which constructs a real Result — under
+/// a RAW scalar ABI there is no channel for the none case at all (the old pass-through returned
+/// the raw Option handle, a confirmed silent wrong-value/invalid-wasm bug in BOTH the
+/// declared-Result and the scalar-lifted case). So this is an AUTO_WRAP_ABI_FNS INCLUSION
+/// criterion. Gated to OPTION operands only: a RESULT-typed tail-`!` operand (including a
+/// never-err `self()!`/`f()!` — Result-typed at this pre-strip point) is repr-compatible with
+/// the pass-through in every ABI (same block IS the propagated Result), so wrapping those would
+/// only churn working fns (the yaml TCO cluster's tail self-calls among them).
+/// Does `body` carry a TAIL/arm-position `Try`/`Unwrap` over a CAN-ERR Named callee
+/// (`if n < 0 then fail("negative") else ... checked(n-1)` — every branch either
+/// propagates the callee's Result verbatim or yields a raw scalar)? Such a fn's REAL
+/// ABI must be Result (the err channel propagates), so it joins `AUTO_WRAP_ABI_FNS`:
+/// the `body.ty` override then makes the SCALAR arms wrap (`0` → `ok(0)` via the
+/// heap-result arm machinery) while the Try arms pass the callee's same-repr Result
+/// through. Without this, `checked` classified can-err (post the Try fixpoint fix)
+/// but its base arm still produced a raw i64 against the i32 Result ABI — the
+/// effect_tco invalid-wasm divergence, second layer.
+fn body_has_tail_position_canerr_try(
+    body: &IrExpr,
+    can_err: &std::collections::HashSet<String>,
+) -> bool {
+    fn scan(e: &IrExpr, can_err: &std::collections::HashSet<String>) -> bool {
+        match &e.kind {
+            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => match &expr.kind {
+                IrExprKind::Call { target: CallTarget::Named { name }, .. } => {
+                    can_err.contains(name.as_str())
+                }
+                IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                | IrExprKind::RuntimeCall { .. } => true,
+                _ => false,
+            },
+            IrExprKind::Block { expr, .. } => expr.as_deref().is_some_and(|t| scan(t, can_err)),
+            IrExprKind::If { then, else_, .. } => scan(then, can_err) || scan(else_, can_err),
+            IrExprKind::Match { arms, .. } => arms.iter().any(|a| scan(&a.body, can_err)),
+            _ => false,
+        }
+    }
+    scan(body, can_err)
+}
+
+fn body_has_tail_position_option_unwrap(body: &IrExpr) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    fn scan(e: &IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::Unwrap { expr } => {
+                matches!(&expr.ty, Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1)
+            }
+            IrExprKind::Block { expr, .. } => expr.as_deref().is_some_and(scan),
+            IrExprKind::If { then, else_, .. } => scan(then) || scan(else_),
+            IrExprKind::Match { arms, .. } => arms.iter().any(|a| scan(&a.body)),
+            _ => false,
+        }
+    }
+    scan(body)
+}
+
 fn lower_function_all_impl(
     func: &IrFunction,
     globals: &HashMap<VarId, Ty>,
@@ -1520,6 +1012,13 @@ fn lower_function_all_impl(
                 _
             )
         ),
+        // STRICTLY-Result declared return (Option excluded — see the field doc) OR an
+        // auto-wrapped scalar ABI: the bare-tail-Option-`!` desugar's gate.
+        ret_is_result_abi: matches!(
+            &func.ret_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)
+        ) || crate::lower::AUTO_WRAP_ABI_FNS
+            .with(|s| s.borrow().contains(func.name.as_str())),
         ..Default::default()
     };
     let params = ctx.bind_params(&func.params)?;
@@ -1535,9 +1034,18 @@ fn lower_function_all_impl(
     // `lower_body_into` desugars again (idempotent) for the non-TCO path; the caps gate counts the
     // SAME desugared tree (desugar-before-both), so mir == ir. Unblocks base64 encode/decode_chunks +
     // toml read_basic/parse_val (the let-bound-heap-`if`-in-a-loop frontier).
-    crate::lower::dump_desugared_ir(func.name.as_str(), &func.body);
-    let pre_tco = desugar_heap_branches(&func.body);
-    let body_ref: &IrExpr = pre_tco.as_ref().unwrap_or(&func.body);
+    let owned_body;
+    let func_body: &IrExpr = if crate::lower::AUTO_WRAP_ABI_FNS
+        .with(|s| s.borrow().contains(func.name.as_str()))
+    {
+        owned_body = IrExpr { ty: Ty::result(func.ret_ty.clone(), Ty::String), ..func.body.clone() };
+        &owned_body
+    } else {
+        &func.body
+    };
+    crate::lower::dump_desugared_ir(func.name.as_str(), func_body, variant_layouts, record_layouts);
+    let pre_tco = desugar_heap_branches(func_body, variant_layouts);
+    let body_ref: &IrExpr = pre_tco.as_ref().unwrap_or(func_body);
     let tco_body = try_tco_rewrite(&ctx.fn_name, &func.params, body_ref);
     let ret = ctx.lower_body_into(tco_body.as_ref().unwrap_or(body_ref))?;
     // The function's EFFECT SIGNATURE → its declared capability bound. The v1 model
@@ -1595,8 +1103,18 @@ pub use control::unwrap_or_operand_admitted;
 #[cfg(test)]
 mod tests;
 
+include!("drop_sources.rs");
+include!("repr_sources.rs");
+include!("newtype_erase.rs");
 include!("mod_p2.rs");
 include!("mod_p3.rs");
 include!("mod_p4.rs");
 include!("mod_p5.rs");
-include!("mod_p6.rs");
+// The desugar family (formerly one 4.8k-line mod_p6.rs), split by concern:
+include!("desugar.rs");
+include!("desugar_unwrap.rs");
+include!("desugar_loop.rs");
+include!("desugar_branch.rs");
+include!("desugar_fan.rs");
+include!("desugar_match.rs");
+include!("desugar_match_subject.rs");

@@ -69,9 +69,9 @@ EOF
 wat2wasm "$tmp/rc_dec_full.wat" -o "$tmp/rc_dec_full.wasm"
 RC_DEC_BODY="200041006a28020021012001450440000b200141016b2101200041006a20013602002001450440200041046a2300360200200024000b0b"
 if [[ "$(hex "$tmp/rc_dec_full.wasm")" == *"$RC_DEC_BODY"* ]]; then
-  echo "ok   full rc_dec body bytes match WasmExec.rc_dec_bytes (incl global.get/set 0x23/0x24)"
+  echo "ok   full rc_dec body bytes match WasmDecode.rc_dec_real_bytes (incl global.get/set 0x23/0x24)"
 else
-  echo "FAIL full rc_dec: assembler bytes do not match WasmExec.rc_dec_bytes"; exit 1
+  echo "FAIL full rc_dec: assembler bytes do not match WasmDecode.rc_dec_real_bytes"; exit 1
 fi
 
 echo

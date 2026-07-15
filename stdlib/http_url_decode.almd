@@ -1,0 +1,49 @@
+// http_url_decode — SELF-HOSTED http.url_decode (a PURE percent-decoder on the
+// blanket-impure http module — the testing_assert whitelist precedent). v0
+// (runtime/rs http.rs percent_decode): '+' → space; '%' with BOTH hex digits
+// present (i + 2 < n) and valid → the raw byte (consume 3); a '%' with
+// missing/invalid digits passes through as '%' (consume 1); the decoded byte
+// stream is UTF-8-decoded LOSSILY — delegated to the self-hosted
+// string.from_bytes (byte-identical to v0's from_utf8_lossy). Source
+// borrowed; result owned.
+
+// ASCII hex digit -> value 0..15, else -1 (v0's to_digit(16)).
+fn __ud_hex(b: Int) -> Int =
+  if b >= 48 and b <= 57 then b - 48
+  else if b >= 97 and b <= 102 then b - 87
+  else if b >= 65 and b <= 70 then b - 55
+  else 0 - 1
+
+// One decode step at byte i: consumed * 256 + out_byte.
+fn __ud_step(d: Int, n: Int, i: Int) -> Int = {
+  let b = prim.load8(d + i)
+  if b == 43 then 1 * 256 + 32
+  else if b == 37 and i + 2 < n then {
+    let hi = __ud_hex(prim.load8(d + i + 1))
+    let lo = __ud_hex(prim.load8(d + i + 2))
+    if hi >= 0 and lo >= 0 then 3 * 256 + hi * 16 + lo
+    else 1 * 256 + 37
+  }
+  else 1 * 256 + b
+}
+
+fn __ud_count(d: Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else __ud_count(d, n, i + __ud_step(d, n, i) / 256, acc + 1)
+
+fn __ud_fill(lh: Int, d: Int, n: Int, i: Int, o: Int) -> Int =
+  if i >= n then o
+  else {
+    let st = __ud_step(d, n, i)
+    prim.store64(lh + 12 + o * 8, st - st / 256 * 256)
+    __ud_fill(lh, d, n, i + st / 256, o + 1)
+  }
+
+fn http_url_decode(s: String) -> String = {
+  let h = prim.handle(s)
+  let n = prim.load32(h + 4)
+  let m = __ud_count(h + 12, n, 0, 0)
+  let buf = prim.alloc_list(m)
+  let _x = __ud_fill(prim.handle(buf), h + 12, n, 0, 0)
+  string.from_bytes(buf)
+}

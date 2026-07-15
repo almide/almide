@@ -175,6 +175,12 @@ fn source_to_ir_with(
     optimize::optimize_program(&mut ir);
     mono::monomorphize(&mut ir);
     ir_link::ir_link(&mut ir);
+    // Transparent-newtype erasure LAST (post-link, pre-lowering): `mod type X = String`
+    // ctor calls/patterns/Ty tags become the inner type (see newtype_erase.rs).
+    crate::lower::erase_transparent_newtypes(&mut ir);
+    // Pure call-bearing GLOBAL inits inline at their use sites (the lazy-static value
+    // semantics — see inline_pure_call_globals; shared with classify: desugar-before-both).
+    crate::lower::inline_pure_call_globals(&mut ir);
     Ok(ir)
 }
 
@@ -209,11 +215,92 @@ pub fn try_render_wasm_source(
     for m in &ir.modules {
         all_type_decls.extend(m.type_decls.iter().cloned());
     }
+    // A GENERIC user variant instantiated with concrete args as a `List[<...>]` LITERAL element
+    // type (`List[Either[Int,String]]`) needs a SHADOW `type <inst>` + `$__drop_<inst>`/
+    // `$__drop_list_<inst>` generated for THIS SPECIFIC instantiation — the raw declaration
+    // (`Either[L,R]`) carries unresolved type-parameter placeholders the drop generator can't
+    // classify (see `is_rich_variant_ty`'s doc comment, mod_p2.rs). Built from a PRE-relower
+    // `VariantLayouts` (this program's OWN declared generics/cases, before the drops text is
+    // appended) so discovery sees the ORIGINAL `Left(1)`/`Right("y")` list literal. The shadow
+    // type declaration text is prepended to `drops` below; the shadow `IrTypeDecl` is spliced
+    // into `all_type_decls` so the SAME `generate_variant_drop_sources` call already below
+    // covers it too (no separate/duplicate drop-generation call).
+    let pre_relower_variant_layouts = crate::lower::build_variant_layouts(&all_type_decls);
+    let generic_variant_list_insts =
+        crate::lower::discover_generic_variant_list_instantiations(&ir, &pre_relower_variant_layouts);
+    let (generic_variant_type_decl_src, generic_variant_synthetic_decls) =
+        crate::lower::generate_generic_variant_instantiation_type_decls(
+            &generic_variant_list_insts,
+            &pre_relower_variant_layouts,
+        );
+    all_type_decls.extend(generic_variant_synthetic_decls);
     let uses_result_opt_str = crate::lower::program_uses_result_option_str(&ir);
+    // First-class function values need the UNIFORM closure-block release
+    // (`$__drop_closure` — self-describing recursive drop, DropVariant "closure").
+    let closure_drop =
+        if crate::lower::program_uses_closures(&ir) { crate::lower::CLOSURE_DROP_SRC } else { "" };
+    // A `List[<Fn>]` LITERAL (`[(x)=>x+1, (x)=>x*2]`) routes its scope-end drop to the
+    // generated `$__drop_list_closure` (per-element `$__drop_closure` — required, not a
+    // blind rc_dec, since a captured heap slot would otherwise leak). Needs
+    // `CLOSURE_DROP_SRC` in scope, which `program_uses_closures` already guarantees
+    // whenever a closure LIST exists (the list's elements are Lambda exprs).
+    let list_closure_drop = if crate::lower::program_uses_closure_list(&ir) {
+        crate::lower::LIST_CLOSURE_DROP_SRC
+    } else {
+        ""
+    };
+    // A `List[Option/Result]` literal with owned-handle-slot elements routes its drop to the
+    // generated `$__drop_list_lenlist` (the shared `lenlist_elem_class` decides both sides).
+    let lenlist_drop = if crate::lower::program_uses_lenlist_elem_lists(&ir) {
+        crate::lower::LENLIST_DROP_SRC
+    } else {
+        ""
+    };
+    // `__drop_list_str` (a `List[String]` record OR variant ctor field, OR a closure's
+    // nested-heap capture — `CLOSURE_DROP_SRC`'s `__drop_closure_loop` unconditionally
+    // references it once ANY closure exists, since a capture's concrete type isn't known
+    // at this gate without re-running `lift_lambda`'s own free-vars scan; conservatively
+    // widened on `program_uses_closures` rather than precisely detecting a List[String]
+    // capture — always correct, occasionally includes an unused routine) — SHARED between
+    // the record and variant drop generators, so it is emitted ONCE here rather than by
+    // either generator inline (two independent copies would be a duplicate-fn compile
+    // error).
+    let list_str_drop = if crate::lower::program_uses_list_str_drop_field(&all_type_decls)
+        || crate::lower::program_uses_anon_list_str_record(&ir, &all_type_decls)
+        || crate::lower::program_uses_closures(&ir)
+    {
+        crate::lower::LIST_STR_DROP_SRC
+    } else {
+        ""
+    };
+    // `Result[List[Int], List[String]]` (result.collect) routes its drop to the
+    // TAG-AWARE `$__drop_res_ilsl` (Err → recursive string free; Ok → flat).
+    let res_ilsl_drop = if crate::lower::program_uses_res_intlist_strlist(&ir) {
+        crate::lower::RES_ILSL_DROP_SRC
+    } else {
+        ""
+    };
+    // `map.find`'s `Option[(String, <scalar>)]` result routes its drop to the TAG-AWARE
+    // `$__drop_opt_str_int` (Some → recursive String-slot free; None → nothing) — a blind
+    // flat `rc_dec` of the Option's payload slot would only free the TUPLE's own refcount,
+    // leaking its String.
+    let opt_str_int_drop = if crate::lower::program_calls_map_find(&ir) {
+        crate::lower::OPT_STR_INT_DROP_SRC
+    } else {
+        ""
+    };
     let drops = format!(
-        "{}{}",
+        "{}{}{}{}{}{}{}{}{}{}",
+        generic_variant_type_decl_src,
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
+        crate::lower::generate_variant_repr_sources(&all_type_decls, &crate::lower::collect_interp_anon_records(&ir), &crate::lower::collect_interp_repr_containers(&ir)),
+        closure_drop,
+        res_ilsl_drop,
+        lenlist_drop,
+        list_str_drop,
+        list_closure_drop,
+        opt_str_int_drop,
     );
     // The generated drops free a `Value` field via value_core's INTERNAL `__drop_value` — bring
     // value_core's source into scope for the re-lower's type check; the auto-link dedups it.
@@ -241,6 +328,19 @@ pub fn try_render_wasm_source(
             globals.insert(tl.var, tl.ty.clone());
             global_inits.insert(tl.var, tl.value.clone());
         }
+    }
+    // PER-REGION globals: the shared union above keys BOTH the main program's and each
+    // module's top-let VarIds — two PRIVATE numbering regions that can COLLIDE (main-side
+    // VarId(2) vs a module's VarId(2) are unrelated). MAIN functions must resolve through
+    // main's own entries first (re-inserted last, winning collisions) plus the cross-module
+    // NAME bridge (`toplib.SYSTEM` referenced through a main-side id); MODULE functions keep
+    // the module-entries-win union (their region, as today).
+    let mut main_globals = globals.clone();
+    let mut main_global_inits = global_inits.clone();
+    crate::lower::bridge_cross_module_toplets(&ir, &mut main_globals, &mut main_global_inits);
+    for tl in &ir.top_lets {
+        main_globals.insert(tl.var, tl.ty.clone());
+        main_global_inits.insert(tl.var, tl.value.clone());
     }
 
     // Record-layout registry (type name → fields) for the VALUE MODEL.
@@ -271,6 +371,7 @@ pub fn try_render_wasm_source(
         let m_vl = crate::lower::build_variant_layouts(&m.type_decls);
         variant_layouts.by_type.extend(m_vl.by_type);
         variant_layouts.ctor_to_type.extend(m_vl.ctor_to_type);
+        variant_layouts.ctor_field_defaults.extend(m_vl.ctor_field_defaults);
     }
     {
         let mut owners: std::collections::HashMap<String, Vec<String>> = Default::default();
@@ -288,8 +389,193 @@ pub fn try_render_wasm_source(
     }
 
     // PROGRAM pre-pass: inline mutual-recursive tail siblings (semantics-preserving TCO exposure).
+    // The input is the WHOLE program — main's functions PLUS every linked user-module sibling
+    // under its MANGLED `almide_rt_<m>_<f>` name (bodies already reference siblings by that
+    // name, post-`resolve_user_module_calls`). Without the siblings, the never-err/auto-wrap
+    // ABI registries were populated from MAIN's functions only: a cross-module effect callee
+    // (`m.estep`) was UNCLASSIFIED, so the caller kept its auto-`?` Try (expecting a heap
+    // Result handle) while the separately-lowered callee returned its raw scalar — the
+    // crossmod_shape_matrix i64/i32 invalid-wasm class. One combined classification makes
+    // caller and callee agree by construction; the returned rewritten bodies are then split
+    // back into the main / module lowering regions (each keeps its own globals union).
+    let module_fn_sibs: Vec<almide_ir::IrFunction> = ir
+        .modules
+        .iter()
+        .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
+        .flat_map(|m| {
+            let mname = m.name.as_str().to_string();
+            // INTRA-MODULE bare sibling calls resolve MODULE-LOCALLY (the #692 rule:
+            // current-module qualified > bare > any-module) — a clone body left with a
+            // bare `route(x, 100)` linked MAIN's same-named 0-arg `route` and shipped
+            // invalid wasm as "v1-verified" (values remaining on stack at the callee's
+            // arity mismatch — wasm_same_name_crossmod_test).
+            let sibs: std::collections::HashSet<String> =
+                m.functions.iter().map(|f| f.name.as_str().to_string()).collect();
+            m.functions.iter().filter(|f| !f.is_test).map(move |f| {
+                let mut nf = f.clone();
+                nf.name = almide_lang::intern::sym(&user_module_fn_name(&mname, f.name.as_str()));
+                struct Rw<'a> {
+                    mname: &'a str,
+                    sibs: &'a std::collections::HashSet<String>,
+                }
+                impl almide_ir::IrMutVisitor for Rw<'_> {
+                    fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+                        almide_ir::walk_expr_mut(self, e);
+                        if let almide_ir::IrExprKind::Call { target, .. } = &mut e.kind {
+                            if let almide_ir::CallTarget::Named { name } = target {
+                                let f = name.as_str();
+                                if !f.starts_with("almide_rt_") && self.sibs.contains(f) {
+                                    *target = almide_ir::CallTarget::Named {
+                                        name: almide_lang::intern::sym(&user_module_fn_name(
+                                            self.mname, f,
+                                        )),
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+                let mut rw = Rw { mname: &mname, sibs: &sibs };
+                almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut nf.body);
+                nf
+            })
+        })
+        .collect();
+    let mut all_fns: Vec<almide_ir::IrFunction> = ir.functions.clone();
+    all_fns.extend(module_fn_sibs.iter().cloned());
+    // The combined run POPULATES the name-keyed ABI registries over the WHOLE program
+    // (that is the crossmod fix — caller and callee classify identically); only MAIN's
+    // rewritten bodies are kept. The module siblings lower below from their ORIGINAL
+    // bodies: feeding the pre-pass's REWRITTEN module bodies through the module loop
+    // regressed the intra-module tail-call shape (`route(x, 100)` left values on the
+    // wasm stack — wasm_same_name_crossmod_test), and the registries alone are what the
+    // module-side lowering consults by MANGLED name.
     let inlined_fns =
-        crate::lower::inline_mutual_tail_recursion(&ir.functions, &globals, &record_layouts);
+        crate::lower::inline_mutual_tail_recursion(&ir.functions, &main_globals, &record_layouts);
+    // WIDEN the ABI registries over the whole program AFTER the main pre-pass (whose own
+    // population is main-only, the pre-batch behavior its rewrites were verified under):
+    // every LOWERING-time keyed lookup (never-err strip exclusions, AUTO_WRAP body.ty
+    // override, `ret_is_result_abi`) then sees module callees by their mangled names —
+    // the crossmod caller/callee ABI agreement — without the pre-pass rewrites ever
+    // touching module bodies.
+    crate::lower::populate_abi_registries(&all_fns, &record_layouts);
+    // MUTABLE module-level `var`s (program + modules): assign each a linear-memory
+    // storage slot (declaration order = VarId order, the same ordering `__global_init`
+    // uses) and publish the VarId → (slot, Ty) map — reads/assigns then route through the
+    // slot (`Load`/`$__mg_get`/`$__mg_take`+`Store`). A VarId collision across regions or
+    // an over-cap count WALLS the program (honest, never a mis-routed slot).
+    let mut mutable_tls: Vec<_> = ir
+        .top_lets
+        .iter()
+        .chain(ir.modules.iter().flat_map(|m| m.top_lets.iter()))
+        .filter(|tl| tl.mutable)
+        .collect();
+    mutable_tls.sort_by_key(|tl| tl.var.0);
+    if mutable_tls.len() > 64 {
+        return Err(LowerError::Unsupported(format!(
+            "{} mutable module-level vars exceed the 64-slot global region",
+            mutable_tls.len()
+        )));
+    }
+    {
+        let mut seen = std::collections::HashSet::new();
+        for tl in &mutable_tls {
+            if !seen.insert(tl.var.0) {
+                return Err(LowerError::Unsupported(format!(
+                    "mutable module-level var id collision across regions ({:?})",
+                    tl.var
+                )));
+            }
+        }
+    }
+    let mutable_global_count = mutable_tls.len() as u32;
+    crate::lower::set_mutable_global_vars(
+        mutable_tls
+            .iter()
+            .enumerate()
+            .map(|(i, tl)| (tl.var.0, (i as u32, tl.ty.clone())))
+            .collect(),
+    );
+
+    // CROSS-MODULE global refs carry UNKNOWN expr types the frontend never infers
+    // (`v.white` — the ceangal theme class): repair them from the bridged globals
+    // maps BEFORE lowering, or the AllTypesConcrete precondition walls the whole fn.
+    let mut inlined_fns = inlined_fns;
+    for f in inlined_fns.iter_mut() {
+        crate::lower::repair_unknown_global_ref_tys(f, &main_globals);
+    }
+    let mut module_fn_sibs = module_fn_sibs;
+    for f in module_fn_sibs.iter_mut() {
+        crate::lower::repair_unknown_global_ref_tys(f, &globals);
+    }
+
+    // A BRIDGED cross-module ref whose module-side init is a PURE CALL (`v.black` →
+    // view's `let black = rgb(0,0,0)`, the ceangal theme class) cannot materialize in
+    // `value_or_global` (a lowering-time CallFn would break the classify `mir == ir`
+    // count). SUBSTITUTE the init into the fn bodies instead — the call then exists in
+    // the IR itself, so every count and cap sees it (the exact discipline
+    // `inline_pure_call_globals` applies within one region, extended to the refs the
+    // bridge resolves across regions). Purity gate: every call inside the init is a
+    // pure stdlib call or a RESOLVED user fn that is itself call-transitively clean
+    // (effect fns were mangled through the resolver and appear in no pure set).
+    {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct HasImpure<'a> {
+            impure: bool,
+            effectish: &'a std::collections::HashSet<String>,
+        }
+        impl IrVisitor for HasImpure<'_> {
+            fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                match &e.kind {
+                    almide_ir::IrExprKind::RuntimeCall { .. } => self.impure = true,
+                    almide_ir::IrExprKind::Call { target, .. } => match target {
+                        almide_ir::CallTarget::Module { module, func, .. } => {
+                            if !crate::purity::is_pure(module.as_str(), func.as_str()) {
+                                self.impure = true;
+                            }
+                        }
+                        almide_ir::CallTarget::Named { name } => {
+                            if self.effectish.contains(name.as_str()) {
+                                self.impure = true;
+                            }
+                        }
+                        _ => self.impure = true,
+                    },
+                    _ => {}
+                }
+                walk_expr(self, e);
+            }
+        }
+        let effectish: std::collections::HashSet<String> = all_fns
+            .iter()
+            .filter(|f| f.is_effect)
+            .map(|f| f.name.as_str().to_string())
+            .collect();
+        let mut subs: Vec<(almide_ir::VarId, almide_ir::IrExpr)> = Vec::new();
+        for (i, info) in ir.var_table.entries.iter().enumerate() {
+            if info.module_origin.is_none() {
+                continue;
+            }
+            let id = almide_ir::VarId(i as u32);
+            let Some(init) = main_global_inits.get(&id) else { continue };
+            if !crate::lower::expr_contains_call(init) {
+                continue;
+            }
+            let mut h = HasImpure { impure: false, effectish: &effectish };
+            h.visit_expr(init);
+            if !h.impure {
+                subs.push((id, init.clone()));
+            }
+        }
+        for (id, init) in &subs {
+            for f in inlined_fns.iter_mut() {
+                f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
+            }
+            for f in module_fn_sibs.iter_mut() {
+                f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
+            }
+        }
+    }
 
     let mut functions = Vec::new();
     let mut walled = Vec::new();
@@ -301,8 +587,8 @@ pub fn try_render_wasm_source(
         }
         match crate::lower::lower_function_all_with_globals(
             func,
-            &globals,
-            &global_inits,
+            &main_globals,
+            &main_global_inits,
             &record_layouts,
             &variant_layouts,
         ) {
@@ -327,35 +613,79 @@ pub fn try_render_wasm_source(
     // unlinked-call render wall if it truly needed it). Stdlib modules stay out (self-host below).
     let already: std::collections::HashSet<String> =
         functions.iter().map(|f| f.name.clone()).collect();
-    for m in &ir.modules {
-        if almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()) {
+    for func in &module_fn_sibs {
+        // ORIGINAL bodies under the mangled name — every keyed lookup (never-err strip,
+        // AUTO_WRAP ABI, `ret_is_result_abi`) sees the SAME name callers use via the
+        // combined registry population above.
+        if already.contains(func.name.as_str()) {
             continue;
         }
-        let mname = m.name.as_str().to_string();
-        for func in &m.functions {
-            if func.is_test {
-                continue;
-            }
-            let mangled = user_module_fn_name(&mname, func.name.as_str());
-            if already.contains(&mangled) {
-                continue;
-            }
-            if let Ok(mirs) = crate::lower::lower_function_all_with_globals(
-                func,
-                &globals,
-                &global_inits,
-                &record_layouts,
-                &variant_layouts,
-            ) {
-                for (i, mut mir) in mirs.into_iter().enumerate() {
-                    if i == 0 {
-                        mir.name = mangled.clone();
-                    }
-                    functions.push(mir);
-                }
+        if let Ok(mirs) = crate::lower::lower_function_all_with_globals(
+            func,
+            &globals,
+            &global_inits,
+            &record_layouts,
+            &variant_layouts,
+        ) {
+            functions.extend(mirs);
+        }
+    }
+
+    // MUTABLE-GLOBAL INITIALIZATION: synthesize `__mg_init` assigning each mutable
+    // top-let its declared initializer (declaration order), lowered through the SAME
+    // slot-routed Assign path user code uses (minus the old-value take/drop — the slots
+    // start zeroed). `_start` calls it before `__global_init`/`main`. A non-lowerable
+    // initializer WALLS the whole program: shipping zeroed globals would be a silent
+    // miscompile, and the v0 fallback initializes them correctly.
+    if !mutable_tls.is_empty() {
+        let stmts: Vec<almide_ir::IrStmt> = mutable_tls
+            .iter()
+            .map(|tl| almide_ir::IrStmt {
+                kind: almide_ir::IrStmtKind::Assign { var: tl.var, value: tl.value.clone() },
+                span: None,
+            })
+            .collect();
+        let body = almide_ir::IrExpr {
+            kind: almide_ir::IrExprKind::Block { stmts, expr: None },
+            ty: almide_lang::types::Ty::Unit,
+            span: Default::default(),
+            def_id: None,
+        };
+        let init_fn = almide_ir::IrFunction {
+            name: almide_lang::intern::sym("__mg_init"),
+            params: vec![],
+            ret_ty: almide_lang::types::Ty::Unit,
+            body,
+            is_effect: false,
+            is_async: false,
+            is_test: false,
+            generics: None,
+            extern_attrs: vec![],
+            export_attrs: vec![],
+            attrs: vec![],
+            visibility: almide_ir::IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
+            def_id: None,
+            module_origin: None,
+            mutated_params: vec![],
+        };
+        match crate::lower::lower_function_all_with_globals(
+            &init_fn,
+            &main_globals,
+            &main_global_inits,
+            &record_layouts,
+            &variant_layouts,
+        ) {
+            Ok(mirs) => functions.extend(mirs),
+            Err(e) => {
+                return Err(LowerError::Unsupported(format!(
+                    "mutable module-level var initializer outside the executable subset: {e:?}"
+                )))
             }
         }
     }
+
 
     // Auto-link the self-hosted stdlib runtime (int.to_string, string.concat, …) when an entry is
     // called but not defined, renaming its impl fn to the call name. A linked impl may call ANOTHER
@@ -560,7 +890,164 @@ pub fn try_render_wasm_source(
         ));
     }
 
+    // `pub fn` EXPORT roots (#457): a Public non-test MAIN-program fn must be a named wasm
+    // export (host-invocable, the v0 emitter's export contract). One that LOWERED gets an
+    // `(export …)` directive; one that WALLED cannot be exported — decline the WHOLE module
+    // so the `--verified` pipeline falls back to v0 (which exports it) rather than shipping
+    // an artifact silently missing a public entry point.
+    let mut exports: Vec<(String, String, Vec<bool>, Option<bool>)> = Vec::new();
+    let is_float_ty = |t: &almide_lang::types::Ty| {
+        matches!(
+            t,
+            almide_lang::types::Ty::Float
+                | almide_lang::types::Ty::Float32
+                | almide_lang::types::Ty::Float64
+        )
+    };
+    for func in &ir.functions {
+        if !func.is_test
+            && func.name.as_str() != "main"
+            && !func.generics.as_ref().map_or(false, |g| !g.is_empty())
+            && matches!(func.visibility, almide_ir::IrVisibility::Public)
+        {
+            let n = func.name.as_str();
+            if functions.iter().any(|f| f.name == n) {
+                // `@export(wasm, "sym")` overrides the export name (v0's criterion,
+                // mod_p3.rs). v1's internal value model carries a Float as raw i64 BITS;
+                // the renderer emits a reinterpret wrapper for Float-bearing signatures
+                // so the public ABI presents real f64s (v0 parity).
+                let export_name = func
+                    .export_attrs
+                    .iter()
+                    .find(|a| a.target.as_str() == "wasm")
+                    .map(|a| a.symbol.to_string())
+                    .unwrap_or_else(|| n.to_string());
+                let param_floats: Vec<bool> =
+                    func.params.iter().map(|p| is_float_ty(&p.ty)).collect();
+                let ret_float = match &func.ret_ty {
+                    almide_lang::types::Ty::Unit => None,
+                    t => Some(is_float_ty(t)),
+                };
+                exports.push((export_name, n.to_string(), param_floats, ret_float));
+            } else {
+                return Err(LowerError::Unsupported(format!(
+                    "exported `pub fn {n}` is outside the MIR-lowering subset (the wasm module \
+                     must carry its export)"
+                )));
+            }
+        }
+    }
+
     // Any UNLINKED stdlib/runtime call would render a dangling `(call $name)` (invalid wasm) — the
     // renderer rejects it cleanly. Returns the WAT on success.
-    try_render_wasm_program(&MirProgram { functions })
+    try_render_wasm_program(&MirProgram { functions, exports, mutable_global_count })
+}
+
+/// NATIVE leg of the trust spine (#764, rung 1): lower `.almd` source through the
+/// SAME Perceus MIR the wasm leg uses and render it to native Rust — `Dup` as
+/// `.clone()`, `Drop` erased to Rust's scope-end drop, the runtime boundary mapped
+/// to a closed native shim floor. `verify_ownership` certifies the Perceus balance
+/// on the same ops before the erasure. WALLS (`Err`) on anything outside the
+/// rung-1 subset — the CLI falls back to v0, so a rendered program is never wrong.
+pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
+    crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
+    let ir = source_to_ir_with(source, &[])?;
+    if !ir.modules.is_empty() {
+        return Err(LowerError::Unsupported(
+            "native: multi-module program — outside rung 1".into(),
+        ));
+    }
+    if !ir.top_lets.is_empty() {
+        return Err(LowerError::Unsupported(
+            "native: top-level lets — outside rung 1".into(),
+        ));
+    }
+    let globals = std::collections::HashMap::new();
+    let mut functions = Vec::new();
+    for func in &ir.functions {
+        if func.is_test {
+            continue;
+        }
+        // PRECISION WALL (rung 2): the native renderer types a heap `Repr::Ptr`
+        // param/result as a STRING — only sound when the DECLARED type says so.
+        // Any signature outside {Int, Bool, String, Unit-ret} walls here, where
+        // the Almide-level `Ty` is still visible (`MirParam` carries only reprs).
+        use almide_lang::types::Ty;
+        use almide_lang::types::constructor::TypeConstructorId;
+        let is_scalar_list = |t: &Ty| {
+            matches!(t, Ty::Applied(TypeConstructorId::List, a)
+                if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool))
+        };
+        let sig_ok =
+            |t: &Ty| matches!(t, Ty::Int | Ty::Bool | Ty::String) || is_scalar_list(t);
+        for p in &func.params {
+            if !sig_ok(&p.ty) {
+                return Err(LowerError::Unsupported(format!(
+                    "native: fn `{}` param `{:?}` type — outside the native rung subset",
+                    func.name, p.ty
+                )));
+            }
+        }
+        if !matches!(func.ret_ty, Ty::Unit) && !sig_ok(&func.ret_ty) {
+            return Err(LowerError::Unsupported(format!(
+                "native: fn `{}` return type {:?} — outside the native rung subset",
+                func.name, func.ret_ty
+            )));
+        }
+        // ALL-OR-NOTHING: any unlowerable fn walls the program (the native rungs
+        // have no per-fn fallback — a partial native binary cannot call into v0).
+        let all = crate::lower::lower_function_all(func, &globals).map_err(|e| {
+            LowerError::Unsupported(format!("native: fn `{}`: {e:?}", func.name))
+        })?;
+        functions.extend(all);
+    }
+    if !functions.iter().any(|f| f.name == "main") {
+        return Err(LowerError::Unsupported(
+            "native: main is outside the MIR-lowering subset".into(),
+        ));
+    }
+    // The SIG-KIND table (rung 4): the declared param/return kinds, computed here
+    // where the Almide-level `Ty` is visible, so the native render can type a heap
+    // `Repr::Ptr` as `&str` vs `&[i64]` per the declaration.
+    let mut sigs: crate::render_native::NativeSigs = Default::default();
+    {
+        use almide_lang::types::constructor::TypeConstructorId;
+        use almide_lang::types::Ty;
+        use crate::render_native::NativeSigKind;
+        let kind = |t: &Ty| -> Option<NativeSigKind> {
+            match t {
+                Ty::Int | Ty::Bool => Some(NativeSigKind::I64),
+                Ty::String => Some(NativeSigKind::Str),
+                Ty::Applied(TypeConstructorId::List, a)
+                    if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
+                {
+                    Some(NativeSigKind::ListI64)
+                }
+                _ => None,
+            }
+        };
+        for func in &ir.functions {
+            if func.is_test {
+                continue;
+            }
+            let params: Option<Vec<_>> = func.params.iter().map(|p| kind(&p.ty)).collect();
+            let ret = if matches!(func.ret_ty, Ty::Unit) {
+                Some(None)
+            } else {
+                kind(&func.ret_ty).map(Some)
+            };
+            if let (Some(ps), Some(r)) = (params, ret) {
+                sigs.insert(func.name.as_str().to_string(), (ps, r));
+            }
+        }
+    }
+    crate::render_native::try_render_native_program(
+        &MirProgram {
+            functions,
+            exports: Vec::new(),
+            // Rung 1 walls every top-let above, so there are no mutable-global slots.
+            mutable_global_count: 0,
+        },
+        &sigs,
+    )
 }

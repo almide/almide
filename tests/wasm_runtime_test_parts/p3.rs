@@ -390,7 +390,7 @@ fn run_wasm_capture(source: &str) -> Option<(i32, String, String)> {
         .output()
         .expect("failed to build wasm");
     assert!(build.status.success(), "wasm build failed:\n{}", String::from_utf8_lossy(&build.stderr));
-    match Command::new("wasmtime").arg("--dir=/").arg(wasm_path.to_str().unwrap()).output() {
+    match Command::new("wasmtime").arg("--dir=/").arg("-S").arg("inherit-env=y").arg(wasm_path.to_str().unwrap()).output() {
         Ok(o) if o.status.code() != Some(127) => Some((
             o.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&o.stdout).trim().to_string(),

@@ -1,0 +1,29 @@
+// wasm:enabled
+// Locks in HEAP captures (closure env full mode, part 1). A capture is co-owned by
+// the closure block (Dup + move-in; CowSafety keeps the share value-semantics-safe)
+// and read back as a borrowed handle by the lambda prologue. The block is
+// SELF-DESCRIBING (slot 0 fnidx, slot 1 = n_heap | n_closure << 16) so the uniform
+// generated `$__drop_closure` frees any closure at any drop site — the fnidx slot is
+// never touched. Byte-identical to v0 on BOTH targets. (Fn captures — closures
+// capturing closures — are part 2, closure_capturing_fn_wasm.almd: v0's wasm target
+// still traps on those, so they verify against v0 native.)
+
+fn greeter(name: String) -> (String) -> String = (x) => name + ", " + x
+
+effect fn main() -> Unit = {
+  let hi = greeter("Hello")
+  println(hi("world"))
+  println(hi("Almide"))
+  let bye = greeter("Bye")
+  println(bye("now"))
+  let ns = [10, 20, 30]
+  let picker = (i: Int) => list.get(ns, i) ?? 0
+  println(int.to_string(picker(1)))
+}
+
+test "heap captures carry independent co-owned envs" {
+  let hi = greeter("Hello")
+  let bye = greeter("Bye")
+  assert_eq(hi("world"), "Hello, world")
+  assert_eq(bye("now"), "Bye, now")
+}

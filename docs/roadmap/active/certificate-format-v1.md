@@ -3,9 +3,14 @@
 > Status: **design accepted; bricks 1–2 and 5 shipped** (ownership alphabet
 > i/a/d/m; calls 2a/2b/2c — effect calls, per-call-site caps, param-mode
 > signatures + manifest-declared caps; full mode 5a/5b/5c — branch agreement
-> `{…|…}`, the `b` letter, closure-dispatch signatures), 3a/3b + 4a/4b shipped
-> inside their bricks. Remaining: 3c (WasmCert ISA byte binding), A2 raw-byte
-> encoding, brick 6 (CertiCoq).
+> `{…|…}`, the `b` letter, closure-dispatch signatures + capturing closures),
+> 3a/3b/3c + 4a/4b shipped inside their bricks (3c = the in-tree raw-byte ⟶ ISA
+> decoder, WasmDecode.v), **brick 6 shipped** (the kernel-as-oracle gate —
+> extraction retired as a verdict trust root). **The v1 brick ladder is
+> COMPLETE.** Remaining ratchets (recorded, not bricks): heap-capture closure
+> envs (`b`'s env consumer), A2 beyond the rc fragment (whole-function bodies
+> stay the renderer contract), verified-extraction/CertiRocq adoption for the
+> fast path when the toolchains align.
 > Supersedes the implicit "i/d-per-object" format. Grounded in a prior-art +
 > adversarial design pass (Perceus/Koka reuse, linear/foundational PCC,
 > WasmCert-Coq byte semantics, the v0 ownership taxonomy).
@@ -219,9 +224,26 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      accepted certificate (balanced from rc 0) is realized by a machine that
      NEVER double-frees in memory. So the abstract Dec is no longer a free-floating
      token — it is bound to a concrete memory operation (both theorems axiom-clean,
-     coqchk-verified). REMAINING (3c): bind this memory machine to the actual wasm
-     BYTES — that the wasm `call $rc_dec` INSTRUCTION executes precisely these cell
-     writes — the WasmCert-Coq ISA layer, the last mile of G1.2.
+     coqchk-verified).
+   - **3c: the raw-byte ⟶ ISA binding (the G1.2 last mile, in-tree).** ✅
+     **SHIPPED (2026-07-09, `proofs/WasmDecode.v`).** A proven DECODER
+     `decode : bytes → option (list instr)` for the rc opcode subset (unknown
+     opcode / malformed memarg / non-zero global index / missing `end` ⇒ None —
+     conservative reject) binds the REAL assembler bytes to WasmIsa's relational
+     small-step semantics: `decode rc_inc_bytes` and `decode rc_dec_real_bytes`
+     (BOTH wat2wasm-grounded per build by check-wasm-bytes.sh — the renderer's
+     actual shapes, `p + 0` adds included) yield programs whose EVERY `irun`
+     reduction carries the proven effects — `rc_inc_bytes_isa_effect` (+1 on the
+     cell), `rc_dec_bytes_isa_traps` (a double-free is STUCK in the spec at the
+     byte level), `rc_dec_bytes_isa_frees` (a unique release zeroes the cell AND
+     links it onto $freelist). Chain closed: real bytes ⟹(decode, proven) ISA
+     program ⟹(irun, proven) memory effect. HONEST residual (recorded, same
+     class as WasmCert-Coq's own): the wasm ENGINE's fidelity to the ISA spec
+     (cross-checked per build by wasmtime in check-wasm-exec.sh), the assembler
+     grounding, the kernel; whole-function bodies beyond the rc primitives
+     remain the §3 renderer contract. A full WasmCert-Coq IMPORT stays
+     infeasible in-tree (it targets older Coq, not Rocq 9) — the in-tree ISA +
+     decoder is the accepted architecture (WasmIsa.v header).
 4. **perceus mode (`r`) + leak-freedom.**
    - **4a: the `r` event + memory-level leak-freedom.** ✅ **SHIPPED.**
      `OwnershipChecker.v` gains `Reuse` (`r`) — a reuse-eligible release (perceus
@@ -325,17 +347,70 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      out-of-range sentinel → conservative REJECT. Real-source gate row:
      `funcref_call.almd` (a returned lifted funcref dispatched via
      CallIndirect; lifted `__lambda_*` auxiliaries included in the witness
-     program). HONEST SCOPE: capturing closures still WALL at lowering (no
-     closure ENV exists in-profile yet), so `b`'s closure-env emission — the
-     env is a heap value the closure body borrows — awaits that lowering brick;
-     when it lands, the env rides the existing `b` semantics and the captured
-     sig section, no new checker rule.
+     program). **FOLLOW-UP SHIPPED (2026-07-09): capturing closures.** First-
+     class function values are now UNIFORMLY a CLOSURE BLOCK — a heap
+     `[rc][len][cap][fnidx][captured…]` DynList; a call loads the fnidx from
+     slot 0 and passes the block as the leading BORROWED env arg, and the
+     lifted lambda's prologue reads its captures back out (`fn adder(n) =
+     (x) => x + n` returned/bound/dispatched, v0-byte-identical —
+     closure_capturing_wasm.almd; corpus in-profile 4,693 → 4,745, walls 317 →
+     306). ZERO new ops / render rules / checker rules: the block is an
+     ordinary owned heap object (`i`/`d`/`m` certs), the env an ordinary
+     borrowed heap param (the CallModes agreement covers the closure boundary —
+     the possible-callee expansion now matches on the env+args shape).
+     **CLOSURE ENV FULL MODE shipped 2026-07-10**: captures now include HEAP
+     values (one-level-exact kinds — String / List[Int] / List[Float]) and Fn
+     values (closures capturing closures — `compose`). A heap capture is
+     CO-OWNED: `Dup` + move-in at creation (cert `a`+`m` on the caller's
+     object; CowSafety makes the share value-semantics-safe), read back as a
+     BORROWED handle by the prologue (`LoadHandle`, the param discipline). The
+     block is SELF-DESCRIBING — slot 0 fnidx, slot 1 = n_heap | n_closure<<16 —
+     so the uniform GENERATED-ALMIDE `$__drop_closure` (injected by the render
+     pipeline, outside the witness surface like every generated `$__drop_*`)
+     frees any closure at any drop site: captured closures via SELF-RECURSION,
+     heap captures via one rc_dec each, the fnidx slot NEVER touched. Heap-
+     result closure calls now also lower in call-ARGUMENT position
+     (`println(hi("world"))`). v0-byte-identical (closure_capturing_heap_wasm);
+     gate rows `closure_heap_capture.almd` (greeter `im|am` + the 2-heap-arg
+     dispatch modes row), kernel-agreed. **`b`'s consumer question RESOLVED**:
+     env reads inside the lambda are loads through a zero-seeded borrowed
+     stream — event-free by the 5b param discipline — so `b`'s load-bearing
+     cert consumer is `Op::MakeUnique`/`Op::Borrow` on OWNED streams (shipped
+     in 5b), and the earlier "closure-env borrow letter" framing is retired:
+     the env boundary is carried by the CallModes agreement + the co-owned
+     capture accounting, not by `b`. REMAINING ratchet: nested-heap captures
+     (List[String]/Value/variant envs — needs a typed recursive slot free) and
+     Float captures (an f64↔i64 reinterpret prim).
    - Gates: build-checker byte demos ×6 (borrow live/uaf/nothing, branch
      agree/disagree/cross-arm), gate.sh 29 rows (8 new: branch A/R, borrow A/R,
      closure A/R, real `heap_result_if.almd` + `funcref_call.almd`),
      `check_bc_unroll_sound` axiom-clean + coqchk'd + ledgered, corpus-wall
      coverage UNCHANGED (4,693 in-profile / 317 walled — nothing silently
      dropped), almide-mir 579, workspace + spec suites green.
+6. **retire the extraction trust: the KERNEL-AS-ORACLE gate.** ✅ **SHIPPED
+   (2026-07-09).** The per-build gate's VERDICT no longer rests on the
+   unverified OCaml extraction + `ocamlopt` (TRUSTED_BASE item 2, the Thompson
+   hole): `gate.sh`'s `kernel_verify` inlines each witness's bytes verbatim
+   into a generated assertion file and `coqc`s it — the Rocq KERNEL itself
+   evaluates the proven checker (`vm_compute`) on the exact bytes, per row
+   (all 31 rows + both manifest rows), with binary/kernel DIVERGENCE failing
+   the build. `corpus-wall.sh` runs the batch oracle over the ENTIRE corpus
+   witness set (one `check_bc` fold over the 27k-object ownership cert +
+   `forallb` over 4.7k names / 3.9k caps / 281 tcaps witnesses) — measured
+   ~4 min `vm_compute`, wired UNCONDITIONALLY (no sampling). A TAMPER DRILL
+   runs every build: (i) a corrupted witness is rejected by binary AND kernel;
+   (ii) a simulated divergent verdict is CAUGHT (proving the oracle has teeth).
+   The extracted binary remains the fast path — cross-checked, never the
+   verdict root. SCOUT record (6a): `rocq-verified-extraction` (MetaRocq,
+   Rocq 9.1 packages exist) and CertiRocq (the CertiCoq → Rocq 9.1 port, 2026)
+   both now exist upstream — adoption deferred (local is a no-opam source
+   build 9.1.1, CI is opam 9.2; and both keep a compiler in the fast path's
+   base: Malfunction→ocamlopt / C→CompCert) and recorded as the fast-path
+   ratchet; NEITHER is needed for the verdict, which the kernel now carries.
+   Residual, honest: `vm_compute`'s bytecode evaluator is part of the kernel's
+   own TCB (as always), and the oracle certifies the WITNESS-level properties
+   (the wasm-byte link beyond the rc primitives stays the §3 renderer
+   contract).
 
 ## Open risks (honest)
 

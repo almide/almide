@@ -334,6 +334,20 @@ fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
   buf
 }
 
+// list.drop_end over a List[String] — all but the LAST n elements, each kept element
+// CO-OWNED (`__copy_slots_rc` rc_inc's it into the fresh list; the balancing release is
+// the result's recursive per-element drop). The raw `list_drop_end` copy would alias the
+// String handles un-owned — sound only in the old flat-drop world (it leaked instead of
+// crashing); under the nested Option[List[String]] drop it double-freed (is_balanced).
+fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let endi = if n < 0 then 0 else (if n >= len then 0 else len - n)
+  let buf = prim.alloc_list_str(endi)
+  let _c = __copy_slots_rc(h + 12, prim.handle(buf) + 12, endi, 0)
+  buf
+}
+
 // Apply f to slot i of the list at base `bh` iff 0 <= i < n (else no-op). The closure `f` is
 // invoked via CallIndirect (the list.map machinery), here CONDITIONALLY — v0's update only calls
 // `f(s.clone())` when the index is in bounds. Returns 0 (a scalar helper, so list_update keeps a

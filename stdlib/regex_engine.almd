@@ -1,0 +1,577 @@
+// regex_engine — bundled-Almide stdlib module (the v1 trust-spine self-host of
+// the regex runtime; STAGE 1: is_match + full_match).
+//
+// v0's `runtime/rs/src/regex.rs` is the SEMANTIC ORACLE, ported quirk-for-quirk:
+//  - CHAR-based matching (UTF-8 decoded on the fly, codepoint compares);
+//  - greedy backtracking with v0's ZERO-WIDTH repetition guard
+//    (`consumed > 0 || count == 0` — `(a*)*` terminates);
+//  - alternation is FIRST-WIN, and a GROUP boundary does not backtrack
+//    (`(a|ab)c` on "abc" does NOT match — v0 semantics, kept);
+//  - empty alternatives are natural (`a|`, `|a`, `a||b` all match anywhere);
+//  - `.` matches any char EXCEPT '\n';
+//  - escapes: \d \D \w \W \s \S classes ('\s' = space/tab/nl/cr), \n \t \r
+//    literals, anything else the escaped char itself;
+//  - classes: leading '^' negates; '\d' '\w' '\s' '\n' '\t' expand INSIDE a
+//    class, any other escape is the literal char ('\D' in a class = 'D' — v0
+//    quirk); 'a-z' ranges (a '-' before ']' or at the end is a literal);
+//  - anchors '^' '$' are matched at sequence level and a quantifier on an
+//    anchor is parsed but IGNORED (v0 quirk);
+//  - no '{n,m}' counted repetition (zero corpus usage, v0 has none).
+//
+// All positions are BYTE ADDRESSES into the pattern/text data (handle + 12);
+// `pe`/`te` are one-past-the-end addresses. Groups are MATCHED but captures are
+// not yet extracted (regex.captures is a later stage). Like every self-host,
+// this carries its own PCC certificates through the proven checker.
+
+// ── UTF-8 decode ──
+
+fn __rx_w(a: Int) -> Int = {
+  let b = prim.load8(a)
+  if b < 128 then 1
+  else if b < 224 then 2
+  else if b < 240 then 3
+  else 4
+}
+
+fn __rx_cp(a: Int) -> Int = {
+  let b = prim.load8(a)
+  if b < 128 then b
+  else if b < 224 then (b - 192) * 64 + (prim.load8(a + 1) - 128)
+  else if b < 240 then ((b - 224) * 64 + (prim.load8(a + 1) - 128)) * 64 + (prim.load8(a + 2) - 128)
+  else (((b - 240) * 64 + (prim.load8(a + 1) - 128)) * 64 + (prim.load8(a + 2) - 128)) * 64 + (prim.load8(a + 3) - 128)
+}
+
+// ── pattern navigation (byte addresses; classes and groups are opaque) ──
+
+// End of the class body starting AFTER '[' — the address just past the closing
+// ']' (an escape skips the escaped char; an unterminated class ends at `pe`).
+fn __rx_class_end(p: Int, pe: Int) -> Int =
+  if p >= pe then pe
+  else {
+    let b = prim.load8(p)
+    if b == 93 then p + 1
+    else if b == 92 and p + 1 < pe then __rx_class_end(p + 1 + __rx_w(p + 1), pe)
+    else __rx_class_end(p + __rx_w(p), pe)
+  }
+
+// End of the group starting AFTER '(' — the address just past the MATCHING ')'
+// (nested groups tracked by depth; an unterminated group ends at `pe`, v0's
+// tolerance).
+fn __rx_group_end(p: Int, pe: Int, depth: Int) -> Int =
+  if p >= pe then pe
+  else {
+    let b = prim.load8(p)
+    if b == 92 and p + 1 < pe then __rx_group_end(p + 1 + __rx_w(p + 1), pe, depth)
+    else if b == 91 then __rx_group_end(__rx_class_end(p + 1, pe), pe, depth)
+    else if b == 40 then __rx_group_end(p + 1, pe, depth + 1)
+    else if b == 41 then {
+      if depth == 0 then p + 1
+      else __rx_group_end(p + 1, pe, depth - 1)
+    }
+    else __rx_group_end(p + __rx_w(p), pe, depth)
+  }
+
+// End of the ATOM starting at `p` (a class, a group, an escape+char, or one char).
+fn __rx_atom_end(p: Int, pe: Int) -> Int = {
+  let b = prim.load8(p)
+  if b == 92 then {
+    if p + 1 < pe then p + 1 + __rx_w(p + 1) else p + 1
+  }
+  else if b == 91 then __rx_class_end(p + 1, pe)
+  else if b == 40 then __rx_group_end(p + 1, pe, 0)
+  else p + __rx_w(p)
+}
+
+// End of the PIECE (atom + one optional quantifier byte * + ?).
+fn __rx_piece_end(p: Int, pe: Int) -> Int = {
+  let ae = __rx_atom_end(p, pe)
+  if ae < pe then {
+    let q = prim.load8(ae)
+    if q == 42 or q == 43 or q == 63 then ae + 1 else ae
+  } else ae
+}
+
+// End of the current ALTERNATIVE: the address of the next top-level '|', or `pe`.
+fn __rx_alt_end(p: Int, pe: Int) -> Int =
+  if p >= pe then pe
+  else {
+    if prim.load8(p) == 124 then p
+    else __rx_alt_end(__rx_piece_end(p, pe), pe)
+  }
+
+// ── single-char matchers (codepoint `c` against the atom at [p, ae)) ──
+
+fn __rx_esc_match(e: Int, c: Int) -> Bool =
+  if e == 100 then c >= 48 and c <= 57
+  else if e == 68 then { if c >= 48 and c <= 57 then false else true }
+  else if e == 119 then (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 95
+  else if e == 87 then {
+    if (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 95 then false else true
+  }
+  else if e == 115 then c == 32 or c == 9 or c == 10 or c == 13
+  else if e == 83 then { if c == 32 or c == 9 or c == 10 or c == 13 then false else true }
+  else if e == 110 then c == 10
+  else if e == 116 then c == 9
+  else if e == 114 then c == 13
+  else c == e
+
+// Does codepoint `c` hit any class item in [p, ie)? (v0's in-class expansions:
+// \d \w \s \n \t; every other escape is the literal escaped char.)
+fn __rx_class_hit(p: Int, ie: Int, c: Int) -> Bool =
+  if p >= ie then false
+  else {
+    let b = prim.load8(p)
+    if b == 92 and p + 1 < ie then {
+      let e = prim.load8(p + 1)
+      let hit =
+        if e == 100 then c >= 48 and c <= 57
+        else if e == 119 then (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 95
+        else if e == 115 then c == 32 or c == 9 or c == 10 or c == 13
+        else if e == 110 then c == 10
+        else if e == 116 then c == 9
+        else c == __rx_cp(p + 1)
+      if hit then true else __rx_class_hit(p + 1 + __rx_w(p + 1), ie, c)
+    }
+    else {
+      let cw = __rx_w(p)
+      let lo = __rx_cp(p)
+      if p + cw < ie and prim.load8(p + cw) == 45 and p + cw + 1 < ie and prim.load8(p + cw + 1) != 93 then {
+        let hi = __rx_cp(p + cw + 1)
+        if c >= lo and c <= hi then true
+        else __rx_class_hit(p + cw + 1 + __rx_w(p + cw + 1), ie, c)
+      } else {
+        if c == lo then true else __rx_class_hit(p + cw, ie, c)
+      }
+    }
+  }
+
+// Match ONE text char at `t` against the non-group atom at [p, ae).
+fn __rx_char_match(p: Int, ae: Int, t: Int, te: Int) -> Bool =
+  if t >= te then false
+  else {
+    let c = __rx_cp(t)
+    let b = prim.load8(p)
+    if b == 46 then c != 10
+    else if b == 91 then {
+      let ie = if ae > p + 1 and prim.load8(ae - 1) == 93 then ae - 1 else ae
+      let neg = p + 1 < ie and prim.load8(p + 1) == 94
+      let ps = if neg then p + 2 else p + 1
+      let hit = __rx_class_hit(ps, ie, c)
+      if neg then { if hit then false else true } else hit
+    }
+    else if b == 92 then {
+      if ae == p + 1 then c == 92
+      else __rx_esc_match(prim.load8(p + 1), c)
+    }
+    else c == __rx_cp(p)
+  }
+
+// ── the backtracking matcher ──
+// Returns the text END address of a match, or -1.
+
+// Alternation over [p, pend): FIRST alternative whose sequence matches wins.
+fn __rx_alts(p: Int, pend: Int, t: Int, ts: Int, te: Int) -> Int = {
+  let aend = __rx_alt_end(p, pend)
+  let r = __rx_seq(p, aend, t, ts, te)
+  if r >= 0 then r
+  else {
+    if aend < pend then __rx_alts(aend + 1, pend, t, ts, te)
+    else 0 - 1
+  }
+}
+
+// The piece sequence [p, pend) at text `t`.
+fn __rx_seq(p: Int, pend: Int, t: Int, ts: Int, te: Int) -> Int =
+  if p >= pend then t
+  else {
+    let b = prim.load8(p)
+    let pnext = __rx_piece_end(p, pend)
+    if b == 94 then { if t == ts then __rx_seq(pnext, pend, t, ts, te) else 0 - 1 }
+    else if b == 36 then { if t == te then __rx_seq(pnext, pend, t, ts, te) else 0 - 1 }
+    else {
+      let ae = __rx_atom_end(p, pend)
+      let q = if ae < pnext then prim.load8(ae) else 0
+      if q == 42 then __rx_rep(p, ae, pnext, pend, t, ts, te, 0)
+      else if q == 43 then {
+        let t2 = __rx_one(p, ae, t, ts, te)
+        if t2 < 0 then 0 - 1 else __rx_rep(p, ae, pnext, pend, t2, ts, te, 1)
+      }
+      else if q == 63 then {
+        let t2 = __rx_one(p, ae, t, ts, te)
+        if t2 >= 0 then {
+          let r = __rx_seq(pnext, pend, t2, ts, te)
+          if r >= 0 then r else __rx_seq(pnext, pend, t, ts, te)
+        } else __rx_seq(pnext, pend, t, ts, te)
+      }
+      else {
+        let t2 = __rx_one(p, ae, t, ts, te)
+        if t2 < 0 then 0 - 1 else __rx_seq(pnext, pend, t2, ts, te)
+      }
+    }
+  }
+
+// GREEDY repetition: try one more first (v0's zero-width guard: a zero-width
+// atom extends only from count 0), fall back to the rest from the current `t`.
+fn __rx_rep(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: Int, count: Int) -> Int = {
+  let t2 = __rx_one(p, ae, t, ts, te)
+  if t2 >= 0 and (t2 > t or count == 0) then {
+    let r = __rx_rep(p, ae, pnext, pend, t2, ts, te, count + 1)
+    if r >= 0 then r else __rx_seq(pnext, pend, t, ts, te)
+  } else __rx_seq(pnext, pend, t, ts, te)
+}
+
+// ONE atom at [p, ae) at text `t`: a group matches its alternatives (first-win,
+// atomic across the boundary — v0); anything else consumes one matching char.
+fn __rx_one(p: Int, ae: Int, t: Int, ts: Int, te: Int) -> Int = {
+  let b = prim.load8(p)
+  if b == 40 then {
+    let ce = if ae > p + 1 and prim.load8(ae - 1) == 41 then ae - 1 else ae
+    __rx_alts(p + 1, ce, t, ts, te)
+  }
+  else if b == 94 or b == 36 then 0 - 1
+  else {
+    if __rx_char_match(p, ae, t, te) then t + __rx_w(t) else 0 - 1
+  }
+}
+
+// Leftmost search: try every char boundary from `t` through `te` inclusive.
+fn __rx_find_from(p: Int, pe: Int, t: Int, ts: Int, te: Int) -> Int = {
+  let r = __rx_alts(p, pe, t, ts, te)
+  if r >= 0 then r
+  else if t >= te then 0 - 1
+  else __rx_find_from(p, pe, t + __rx_w(t), ts, te)
+}
+
+// ── public API (Stage 1) ──
+
+fn regex_is_match(pat: String, s: String) -> Bool = {
+  let ph = prim.handle(pat)
+  let sh = prim.handle(s)
+  let p0 = ph + 12
+  let pe = p0 + prim.load32(ph + 4)
+  let t0 = sh + 12
+  let te = t0 + prim.load32(sh + 4)
+  __rx_find_from(p0, pe, t0, t0, te) >= 0
+}
+
+fn regex_full_match(pat: String, s: String) -> Bool = {
+  let ph = prim.handle(pat)
+  let sh = prim.handle(s)
+  let p0 = ph + 12
+  let pe = p0 + prim.load32(ph + 4)
+  let t0 = sh + 12
+  let te = t0 + prim.load32(sh + 4)
+  __rx_alts(p0, pe, t0, t0, te) == te
+}
+
+// ── Stage 2: find / find_all / replace / replace_first / split ──
+
+// Copy `n` bytes from `src` to `dst`.
+fn __rx_copy(src: Int, dst: Int, n: Int) -> Int =
+  if n <= 0 then 0
+  else {
+    prim.store8(dst, prim.load8(src))
+    __rx_copy(src + 1, dst + 1, n - 1)
+  }
+
+// The text substring [a, b) as a fresh owned String.
+fn __rx_sub(a: Int, b: Int) -> String = {
+  let out = prim.alloc_str(b - a)
+  let _ = __rx_copy(a, prim.handle(out) + 12, b - a)
+  out
+}
+
+// Leftmost match START from `t` (or -1) — the companion of __rx_find_from.
+fn __rx_find_start(p: Int, pe: Int, t: Int, ts: Int, te: Int) -> Int = {
+  let r = __rx_alts(p, pe, t, ts, te)
+  if r >= 0 then t
+  else if t >= te then 0 - 1
+  else __rx_find_start(p, pe, t + __rx_w(t), ts, te)
+}
+
+fn regex_find(pat: String, s: String) -> Option[String] = {
+  let ph = prim.handle(pat)
+  let sh = prim.handle(s)
+  let p0 = ph + 12
+  let pe = p0 + prim.load32(ph + 4)
+  let t0 = sh + 12
+  let te = t0 + prim.load32(sh + 4)
+  let st = __rx_find_start(p0, pe, t0, t0, te)
+  if st < 0 then none
+  else {
+    let m = __rx_sub(st, __rx_alts(p0, pe, st, t0, te))
+    some(m)
+  }
+}
+
+// v0 find_all: repeat leftmost; a zero-width match advances one char past `end`.
+fn __rx_find_all_go(p: Int, pe: Int, pos: Int, ts: Int, te: Int, acc: List[String]) -> List[String] =
+  if pos > te then acc
+  else {
+    let st = __rx_find_start(p, pe, pos, ts, te)
+    if st < 0 then acc
+    else {
+      let en = __rx_alts(p, pe, st, ts, te)
+      let m = __rx_sub(st, en)
+      if en > st then __rx_find_all_go(p, pe, en, ts, te, acc + [m])
+      else {
+        if en < te then __rx_find_all_go(p, pe, en + __rx_w(en), ts, te, acc + [m])
+        else acc + [m]
+      }
+    }
+  }
+
+fn regex_find_all(pat: String, s: String) -> List[String] = {
+  let ph = prim.handle(pat)
+  let sh = prim.handle(s)
+  let p0 = ph + 12
+  let pe = p0 + prim.load32(ph + 4)
+  let t0 = sh + 12
+  let te = t0 + prim.load32(sh + 4)
+  let acc: List[String] = []
+  __rx_find_all_go(p0, pe, t0, t0, te, acc)
+}
+
+// v0 replace: scan; at each match emit the gap + the LITERAL replacement (no $n);
+// a zero-width match ALSO emits the char at `end` and advances past it (at
+// end-of-string it just terminates).
+fn __rx_replace_go(p: Int, pe: Int, pos: Int, ts: Int, te: Int, rep: String, acc: String) -> String =
+  if pos > te then acc
+  else {
+    let st = __rx_find_start(p, pe, pos, ts, te)
+    if st < 0 then acc + __rx_sub(pos, te)
+    else {
+      let en = __rx_alts(p, pe, st, ts, te)
+      let acc2 = acc + __rx_sub(pos, st) + rep
+      if en > st then __rx_replace_go(p, pe, en, ts, te, rep, acc2)
+      else {
+        if en < te then
+          __rx_replace_go(p, pe, en + __rx_w(en), ts, te, rep, acc2 + __rx_sub(en, en + __rx_w(en)))
+        else acc2
+      }
+    }
+  }
+
+fn regex_replace(pat: String, s: String, rep: String) -> String = {
+  let ph = prim.handle(pat)
+  let sh = prim.handle(s)
+  let p0 = ph + 12
+  let pe = p0 + prim.load32(ph + 4)
+  let t0 = sh + 12
+  let te = t0 + prim.load32(sh + 4)
+  let acc = ""
+  __rx_replace_go(p0, pe, t0, t0, te, rep, acc)
+}
+
+fn regex_replace_first(pat: String, s: String, rep: String) -> String = {
+  let ph = prim.handle(pat)
+  let sh = prim.handle(s)
+  let p0 = ph + 12
+  let pe = p0 + prim.load32(ph + 4)
+  let t0 = sh + 12
+  let te = t0 + prim.load32(sh + 4)
+  let st = __rx_find_start(p0, pe, t0, t0, te)
+  if st < 0 then s
+  else __rx_sub(t0, st) + rep + __rx_sub(__rx_alts(p0, pe, st, t0, te), te)
+}
+
+// v0 split: a zero-width match AT the current position takes ONE char as a
+// field; otherwise the gap [pos, start) is a field and the scan resumes at
+// `end`; the unmatched tail is the last field.
+fn __rx_split_go(p: Int, pe: Int, pos: Int, ts: Int, te: Int, acc: List[String]) -> List[String] =
+  if pos > te then acc
+  else {
+    let st = __rx_find_start(p, pe, pos, ts, te)
+    if st < 0 then acc + [__rx_sub(pos, te)]
+    else {
+      let en = __rx_alts(p, pe, st, ts, te)
+      if en == st and st == pos then {
+        if pos < te then __rx_split_go(p, pe, pos + __rx_w(pos), ts, te, acc + [__rx_sub(pos, pos + __rx_w(pos))])
+        else acc
+      }
+      else __rx_split_go(p, pe, en, ts, te, acc + [__rx_sub(pos, st)])
+    }
+  }
+
+fn regex_split(pat: String, s: String) -> List[String] = {
+  let ph = prim.handle(pat)
+  let sh = prim.handle(s)
+  let p0 = ph + 12
+  let pe = p0 + prim.load32(ph + 4)
+  let t0 = sh + 12
+  let te = t0 + prim.load32(sh + 4)
+  let acc: List[String] = []
+  __rx_split_go(p0, pe, t0, t0, te, acc)
+}
+
+// ── Stage 3: captures ──
+// v0 semantics: caps[k] is written at GROUP COMPLETION (k = the group's
+// pre-order '(' ordinal); the caller SAVES the caps before every alternative
+// try and every greedy extension try, restoring on failure — so only the
+// successful derivation's writes survive. The caps live in a caller-owned
+// List[Int] buffer (2 slots per group: start, end; -1 = unmatched), passed as
+// a raw handle so the matcher stays prim-only.
+
+// Count the REAL group-opens '(' in [p, q) (escapes and classes are opaque) —
+// the group at `q` has capture ordinal = this count.
+fn __rx_ngroups(p: Int, q: Int) -> Int =
+  if p >= q then 0
+  else {
+    let b = prim.load8(p)
+    if b == 92 and p + 1 < q then __rx_ngroups(p + 1 + __rx_w(p + 1), q)
+    else if b == 91 then __rx_ngroups(__rx_class_end(p + 1, q), q)
+    else if b == 40 then 1 + __rx_ngroups(p + 1, q)
+    else __rx_ngroups(p + __rx_w(p), q)
+  }
+
+// Copy `n` i64 slots from list-data address `src` to `dst`.
+fn __rx_copy64(src: Int, dst: Int, n: Int) -> Int =
+  if n <= 0 then 0
+  else {
+    prim.store64(dst, prim.load64(src))
+    __rx_copy64(src + 8, dst + 8, n - 1)
+  }
+
+// Fill `n` i64 slots at `dst` with -1 (unmatched).
+fn __rx_fill_neg(dst: Int, n: Int) -> Int =
+  if n <= 0 then 0
+  else {
+    prim.store64(dst, 0 - 1)
+    __rx_fill_neg(dst + 8, n - 1)
+  }
+
+// ── the capture-threading matcher (the `_c` family — v0's clone/restore) ──
+// `caps` = the buffer's DATA address (handle + 12); `nslots` = 2 * ncap;
+// `pat0` = the pattern's data start (for group ordinal computation).
+
+fn __rx_alts_c(p: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, nslots: Int, pat0: Int) -> Int = {
+  let save = prim.alloc_list(nslots)
+  let sd = prim.handle(save) + 12
+  let _ = __rx_copy64(caps, sd, nslots)
+  let aend = __rx_alt_end(p, pend)
+  let r = __rx_seq_c(p, aend, t, ts, te, caps, nslots, pat0)
+  if r >= 0 then r
+  else {
+    let _ = __rx_copy64(sd, caps, nslots)
+    if aend < pend then __rx_alts_c(aend + 1, pend, t, ts, te, caps, nslots, pat0)
+    else 0 - 1
+  }
+}
+
+fn __rx_seq_c(p: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, nslots: Int, pat0: Int) -> Int =
+  if p >= pend then t
+  else {
+    let b = prim.load8(p)
+    let pnext = __rx_piece_end(p, pend)
+    if b == 94 then { if t == ts then __rx_seq_c(pnext, pend, t, ts, te, caps, nslots, pat0) else 0 - 1 }
+    else if b == 36 then { if t == te then __rx_seq_c(pnext, pend, t, ts, te, caps, nslots, pat0) else 0 - 1 }
+    else {
+      let ae = __rx_atom_end(p, pend)
+      let q = if ae < pnext then prim.load8(ae) else 0
+      if q == 42 then __rx_rep_c(p, ae, pnext, pend, t, ts, te, 0, caps, nslots, pat0)
+      else if q == 43 then {
+        let t2 = __rx_one_c(p, ae, t, ts, te, caps, nslots, pat0)
+        if t2 < 0 then 0 - 1 else __rx_rep_c(p, ae, pnext, pend, t2, ts, te, 1, caps, nslots, pat0)
+      }
+      else if q == 63 then {
+        let save = prim.alloc_list(nslots)
+        let sd = prim.handle(save) + 12
+        let _ = __rx_copy64(caps, sd, nslots)
+        let t2 = __rx_one_c(p, ae, t, ts, te, caps, nslots, pat0)
+        if t2 >= 0 then {
+          let r = __rx_seq_c(pnext, pend, t2, ts, te, caps, nslots, pat0)
+          if r >= 0 then r
+          else {
+            let _ = __rx_copy64(sd, caps, nslots)
+            __rx_seq_c(pnext, pend, t, ts, te, caps, nslots, pat0)
+          }
+        } else {
+          let _ = __rx_copy64(sd, caps, nslots)
+          __rx_seq_c(pnext, pend, t, ts, te, caps, nslots, pat0)
+        }
+      }
+      else {
+        let t2 = __rx_one_c(p, ae, t, ts, te, caps, nslots, pat0)
+        if t2 < 0 then 0 - 1 else __rx_seq_c(pnext, pend, t2, ts, te, caps, nslots, pat0)
+      }
+    }
+  }
+
+fn __rx_rep_c(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: Int, count: Int, caps: Int, nslots: Int, pat0: Int) -> Int = {
+  let save = prim.alloc_list(nslots)
+  let sd = prim.handle(save) + 12
+  let _ = __rx_copy64(caps, sd, nslots)
+  let t2 = __rx_one_c(p, ae, t, ts, te, caps, nslots, pat0)
+  if t2 >= 0 and (t2 > t or count == 0) then {
+    let r = __rx_rep_c(p, ae, pnext, pend, t2, ts, te, count + 1, caps, nslots, pat0)
+    if r >= 0 then r
+    else {
+      let _ = __rx_copy64(sd, caps, nslots)
+      __rx_seq_c(pnext, pend, t, ts, te, caps, nslots, pat0)
+    }
+  } else {
+    let _ = __rx_copy64(sd, caps, nslots)
+    __rx_seq_c(pnext, pend, t, ts, te, caps, nslots, pat0)
+  }
+}
+
+fn __rx_one_c(p: Int, ae: Int, t: Int, ts: Int, te: Int, caps: Int, nslots: Int, pat0: Int) -> Int = {
+  let b = prim.load8(p)
+  if b == 40 then {
+    let ce = if ae > p + 1 and prim.load8(ae - 1) == 41 then ae - 1 else ae
+    let en = __rx_alts_c(p + 1, ce, t, ts, te, caps, nslots, pat0)
+    if en >= 0 then {
+      let ci = __rx_ngroups(pat0, p)
+      prim.store64(caps + ci * 16, t)
+      prim.store64(caps + ci * 16 + 8, en)
+      en
+    } else 0 - 1
+  }
+  else if b == 94 or b == 36 then 0 - 1
+  else {
+    if __rx_char_match(p, ae, t, te) then t + __rx_w(t) else 0 - 1
+  }
+}
+
+// Build the group strings from the caps buffer (an unmatched group is "").
+fn __rx_caps_out(caps: Int, i: Int, ncap: Int, acc: List[String]) -> List[String] =
+  if i >= ncap then acc
+  else {
+    let st = prim.load64(caps + i * 16)
+    if st < 0 then __rx_caps_out(caps, i + 1, ncap, acc + [""])
+    else {
+      let m = __rx_sub(st, prim.load64(caps + i * 16 + 8))
+      __rx_caps_out(caps, i + 1, ncap, acc + [m])
+    }
+  }
+
+// Leftmost scan with a FRESH caps buffer per position (v0 re-initializes).
+fn __rx_caps_scan(p: Int, pe: Int, t: Int, ts: Int, te: Int, caps: Int, nslots: Int) -> Int = {
+  let _ = __rx_fill_neg(caps, nslots)
+  let r = __rx_alts_c(p, pe, t, ts, te, caps, nslots, p)
+  if r >= 0 then r
+  else if t >= te then 0 - 1
+  else __rx_caps_scan(p, pe, t + __rx_w(t), ts, te, caps, nslots)
+}
+
+fn regex_captures(pat: String, s: String) -> Option[List[String]] = {
+  let ph = prim.handle(pat)
+  let sh = prim.handle(s)
+  let p0 = ph + 12
+  let pe = p0 + prim.load32(ph + 4)
+  let t0 = sh + 12
+  let te = t0 + prim.load32(sh + 4)
+  let ncap = __rx_ngroups(p0, pe)
+  if ncap == 0 then none
+  else {
+    let buf = prim.alloc_list(ncap * 2)
+    let bd = prim.handle(buf) + 12
+    let r = __rx_caps_scan(p0, pe, t0, t0, te, bd, ncap * 2)
+    if r < 0 then none
+    else {
+      let acc: List[String] = []
+      let out = __rx_caps_out(bd, 0, ncap, acc)
+      some(out)
+    }
+  }
+}

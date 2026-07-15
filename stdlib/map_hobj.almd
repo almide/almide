@@ -1,0 +1,98 @@
+// map_hobj — SELF-HOSTED Map[String, <opaque heap value>] CONSTRUCTION (the desugared map
+// literal's from_list for record/variant values — `["o": Point{..}]`, `["a": Circle(3.0)]`).
+// Values are handled ENTIRELY as raw refcounted handles (prim.load64 + rc_inc co-own —
+// value-type-agnostic); the map's type-specific DROP and DISPLAY live in GENERATED code
+// (`__drop_map_<V>` / `__drop_map_rec_<R>` / `__repr_map_<T>`), routed by the bind's
+// `map_named_value_drop`. SPLIT layout (map_msv's): @4 = entry count n, keys at slots
+// 0..n-1 (deep-copied Strings), values at slots n..2n-1 (co-owned handles). Internally
+// typed `Map[String, String]`: value slots never pass through a typed String op — the
+// binding-type reinterpretation is the established handle-level idiom the generators use.
+
+fn __hobj_eq_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else {
+    let ca = prim.load8(pa + i)
+    let cb = prim.load8(pb + i)
+    if ca == cb then __hobj_eq_bytes(pa, pb, n, i + 1)
+    else false
+  }
+
+fn __hobj_str_eq(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  if la != lb then false
+  else __hobj_eq_bytes(ha + 12, hb + 12, la, 0)
+}
+
+fn __hobj_find(h: Int, n: Int, k: String, i: Int) -> Int =
+  if i >= n then 0 - 1
+  else {
+    let kk = prim.load_str(h + 12 + i * 8)
+    if __hobj_str_eq(kk, k) then i
+    else __hobj_find(h, n, k, i + 1)
+  }
+
+fn __hobj_store_key(addr: Int, s: String) -> Int = {
+  let copy = string.repeat(s, 1)
+  prim.store_str(addr, copy)
+  0
+}
+
+// Copy every entry from sh to rh: keys deep-copied, values rc-shared; a matched key's
+// value is replaced with an rc-share of `vh` (map_msv's __msv_set_copy shape).
+fn __hobj_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __hobj_store_key(rh + 12 + i * 8, kk)
+    if __hobj_str_eq(kk, k) then {
+      prim.rc_inc(vh)
+      prim.store64(rh + 12 + (rn + i) * 8, vh)
+    }
+    else {
+      let old = prim.load64(sh + 12 + (n + i) * 8)
+      prim.rc_inc(old)
+      prim.store64(rh + 12 + (rn + i) * 8, old)
+    }
+    __hobj_set_copy(sh, rh, n, rn, k, vh, i + 1)
+  }
+
+fn __hobj_set_append(rh: Int, rn: Int, idx: Int, k: String, vh: Int) -> Int =
+  if idx >= 0 then 0
+  else {
+    let _kc = __hobj_store_key(rh + 12 + (rn - 1) * 8, k)
+    prim.rc_inc(vh)
+    prim.store64(rh + 12 + (rn + rn - 1) * 8, vh)
+    0
+  }
+
+fn __hobj_set(m: Map[String, String], k: String, vh: Int) -> Map[String, String] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let idx = __hobj_find(sh, n, k, 0)
+  let rn = if idx < 0 then n + 1 else n
+  let r = prim.alloc_map_kv(rn * 2)
+  let rh = prim.handle(r)
+  let _c = __hobj_set_copy(sh, rh, n, rn, k, vh, 0)
+  let _a = __hobj_set_append(rh, rn, idx, k, vh)
+  prim.store32(rh + 4, rn)
+  r
+}
+
+fn __hobj_from_at(ph: Int, n: Int, i: Int, m: Map[String, String]) -> Map[String, String] =
+  if i >= n then m
+  else {
+    let th = prim.load64(ph + 12 + i * 8)
+    let k = prim.load_str(th + 12)
+    let vh = prim.load64(th + 20)
+    let nm = __hobj_set(m, k, vh)
+    __hobj_from_at(ph, n, i + 1, nm)
+  }
+
+fn map_from_list_hobj(pairs: List[(String, String)]) -> Map[String, String] = {
+  let ph = prim.handle(pairs)
+  let n = prim.load32(ph + 4)
+  __hobj_from_at(ph, n, 0, prim.alloc_map_kv(0))
+}

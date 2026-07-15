@@ -80,6 +80,12 @@ impl LowerCtx {
                         // OPTION[String], and counting a str-Result there falsely taints mir>ir).
                         || self.value_result_results.contains(&v)
                         || self.value_result_lists.contains(&v)
+                        // A `Result[String, String]` Var (cap-as-tag, materialized_results_str)
+                        // routes to the `result.str_unwrap_or` helper below — admitted ONLY for
+                        // that type (any other _str-set shape would mis-take the len-as-tag
+                        // String branch, reading an Err payload as Some).
+                        || (self.materialized_results_str.contains(&v)
+                            && crate::lower::is_result_str_str_ty(&expr.ty))
                         || self.param_values.contains(&v) =>
                 {
                     v
@@ -165,6 +171,10 @@ impl LowerCtx {
             Some("option.value_unwrap_or")
         } else if crate::lower::is_option_liststr_ty(&expr.ty) {
             Some("option.liststr_unwrap_or")
+        } else if crate::lower::is_option_listscalar_ty(&expr.ty) {
+            // `map.get(groups, k) ?? []` — Option[List[<scalar>]] (the group_by class):
+            // the FLAT sibling (scalar elements own nothing; flat rc drop is exact).
+            Some("option.listint_unwrap_or")
         } else if crate::lower::is_option_listvalue_ty(&expr.ty) {
             Some("option.listvalue_unwrap_or")
         } else {
@@ -207,6 +217,63 @@ impl LowerCtx {
                     self.live_heap_handles.push(dst);
                 }
                 return Some(dst);
+            }
+        }
+        // `Option[<custom variant>] ?? <ctor(...)>` (`list.get(xs, i) ?? Empty` — a
+        // custom-ADT element list's search-with-fallback shape, `variant_ctor_fn_test`):
+        // Some → BORROW the payload handle (LoadHandle @12 — the Option/its source list
+        // keeps owning it) then `Dup` to a fresh OWNED reference (the SAME borrowed-param
+        // Some(p) precedent used throughout this file); None → build the fallback via
+        // `try_lower_variant_ctor` (already a fresh owned value, no Dup needed). Both arms
+        // now produce UNIFORM (owned) values, merged via the proven `Op::IfThen`/`Else`/
+        // `EndIf` heap-result-if skeleton (the SAME shape the scalar path below uses for
+        // scalar payloads) — never the scalar `Load{width:8}` fallback further down, which
+        // would misread the payload HANDLE as a raw i64 scalar.
+        if !is_result {
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) =
+                &expr.ty
+            {
+                if a.len() == 1 {
+                    if let Ty::Named(tn, _) = &a[0] {
+                        if self.variant_layouts.by_type.contains_key(tn.as_str()) {
+                            let is_ctor_fallback = matches!(
+                                &fallback.kind,
+                                IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                                    if self.variant_layouts.ctor_to_type.contains_key(name.as_str())
+                            ) || matches!(
+                                &fallback.kind,
+                                IrExprKind::Record { name: Some(n), .. }
+                                    if self.variant_layouts.ctor_to_type.contains_key(n.as_str())
+                            );
+                            if is_ctor_fallback {
+                                use crate::PrimKind;
+                                let h = self.fresh_value();
+                                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![handle] });
+                                let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+                                let result = self.fresh_value();
+                                self.ops.push(Op::IfThen { cond: tag, dst: Some(result) });
+                                let borrowed = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                                let owned = self.fresh_value();
+                                self.ops.push(Op::Dup { dst: owned, src: borrowed });
+                                self.ops.push(Op::Else { val: Some(owned) });
+                                match self.try_lower_variant_ctor(fallback) {
+                                    Some(fb) => {
+                                        self.ops.push(Op::EndIf { val: Some(fb) });
+                                    }
+                                    None => {
+                                        self.ops.truncate(ops_mark);
+                                        self.live_heap_handles.truncate(lhh_mark);
+                                        return None;
+                                    }
+                                }
+                                if track_result {
+                                    self.live_heap_handles.push(result);
+                                }
+                                return Some(result);
+                            }
+                        }
+                    }
+                }
             }
         }
         // HEAP-String result (`Option[String] ?? "default"` — the most common heap `??`): the scalar
@@ -593,7 +660,7 @@ impl LowerCtx {
     /// model-one-iteration argument), the markers only make wasm actually run it N times.
     /// Returns false (and rolls back) when out of subset; `lower_while` then falls back.
     pub(crate) fn try_lower_scalar_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> bool {
-        if !matches!(cond.ty, Ty::Int | Ty::Bool) || body_breaks_or_continues(body) {
+        if !matches!(cond.ty, Ty::Int | Ty::Bool) {
             return false;
         }
         let ops_mark = self.ops.len();
@@ -616,7 +683,7 @@ impl LowerCtx {
         self.scalar_loop_depth += 1;
         let mut ok = true;
         for stmt in body {
-            if self.lower_stmt(stmt).is_err() {
+            if self.lower_while_body_stmt(stmt).is_err() {
                 ok = false;
                 break;
             }
@@ -633,6 +700,181 @@ impl LowerCtx {
         self.drop_arm_locals(body_mark);
         self.ops.push(Op::LoopEnd);
         true
+    }
+
+    /// One while-body statement, admitting the CONDITIONAL-BREAK forms the real loop
+    /// can execute with the EXISTING marker vocabulary (no new op):
+    ///   `if c then <rest> else break`  (the guard-else-break desugar) →
+    ///       `LoopBreakUnless(c)` then <rest> emitted linearly — on the broken path the
+    ///       `br` already exited, exactly like the loop-head condition;
+    ///   `if c then break else ()`      (the do-block shape) →
+    ///       `LoopBreakUnless(1 - c)`.
+    /// Any OTHER Break/Continue in the statement ERRS (aborting the attempt → the
+    /// model-one-iteration fallback then WALLS): `lower_stmt` silently swallows a bare
+    /// Break (mod_p3), so delegating one would silently drop the early exit.
+    /// `{ A…; break }` → `Some({ A… })` — the then-arm of a mid-body conditional break
+    /// with statements BEFORE the break. `None` when the expr does not end in a bare
+    /// trailing break (or has nothing before it — the simpler cases own that shape).
+    fn strip_trailing_break_expr(e: &IrExpr) -> Option<IrExpr> {
+        let IrExprKind::Block { stmts, expr } = &e.kind else { return None };
+        // Trailing break as the block TAIL.
+        if let Some(t) = expr.as_deref() {
+            if matches!(t.kind, IrExprKind::Break) && !stmts.is_empty() {
+                return Some(IrExpr {
+                    kind: IrExprKind::Block { stmts: stmts.clone(), expr: None },
+                    ty: almide_lang::types::Ty::Unit,
+                    span: e.span.clone(),
+                    def_id: e.def_id,
+                });
+            }
+            return None;
+        }
+        // Trailing break as the LAST statement.
+        if stmts.len() >= 2 {
+            if let IrStmtKind::Expr { expr: last } = &stmts[stmts.len() - 1].kind {
+                if matches!(last.kind, IrExprKind::Break) {
+                    return Some(IrExpr {
+                        kind: IrExprKind::Block {
+                            stmts: stmts[..stmts.len() - 1].to_vec(),
+                            expr: None,
+                        },
+                        ty: almide_lang::types::Ty::Unit,
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    fn lower_while_body_stmt(&mut self, stmt: &IrStmt) -> Result<(), LowerError> {
+        fn is_break(e: &IrExpr) -> bool {
+            match &e.kind {
+                IrExprKind::Break => true,
+                IrExprKind::Block { stmts, expr } => {
+                    (stmts.is_empty() && expr.as_deref().is_some_and(is_break))
+                        || (expr.is_none()
+                            && stmts.len() == 1
+                            && matches!(&stmts[0].kind,
+                                IrStmtKind::Expr { expr } if is_break(expr)))
+                }
+                _ => false,
+            }
+        }
+        fn is_unit(e: &IrExpr) -> bool {
+            match &e.kind {
+                IrExprKind::Unit => true,
+                IrExprKind::Block { stmts, expr } => {
+                    stmts.is_empty() && expr.as_deref().map_or(true, is_unit)
+                }
+                _ => false,
+            }
+        }
+        if let IrStmtKind::Expr { expr } = &stmt.kind {
+            // A BARE break statement (`if true then break else ()` const-folds to it):
+            // break unconditionally — LoopBreakUnless over a 0 cond.
+            if matches!(expr.kind, IrExprKind::Break) {
+                let z = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: z, value: 0 });
+                self.ops.push(Op::LoopBreakUnless { cond: z });
+                return Ok(());
+            }
+            if let IrExprKind::If { cond, then, else_ } = &expr.kind {
+                if is_break(else_) {
+                    let c = self.lower_scalar_value(cond).ok_or_else(|| {
+                        LowerError::Unsupported("while conditional-break cond".into())
+                    })?;
+                    self.ops.push(Op::LoopBreakUnless { cond: c });
+                    return self.lower_while_body_inline(then);
+                }
+                if is_break(then) && is_unit(else_) {
+                    let c = self.lower_scalar_value(cond).ok_or_else(|| {
+                        LowerError::Unsupported("while conditional-break cond".into())
+                    })?;
+                    let one = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                    let nc = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: nc, op: IntOp::Sub, a: one, b: c });
+                    self.ops.push(Op::LoopBreakUnless { cond: nc });
+                    return Ok(());
+                }
+                // `if c then { A…; break } else B` (find_factor: `if n % i == 0 then
+                // { result = i; break } else { i = i + 1 }`): CAPTURE the (call-free,
+                // pure-scalar) cond once, run the ordinary unit `if` with the trailing
+                // break STRIPPED (both arms then break-free — the statement-if machinery
+                // branches the arm assigns correctly), and break on the CAPTURED value
+                // after. The capture keeps the break test the value the branch dispatched
+                // on even when an arm mutates the cond's operands (`i = i + 1`).
+                if let Some(then_stripped) = Self::strip_trailing_break_expr(then) {
+                    if !body_breaks_or_continues(std::slice::from_ref(&IrStmt {
+                        kind: IrStmtKind::Expr { expr: then_stripped.clone() },
+                        span: stmt.span.clone(),
+                    })) && !body_breaks_or_continues(std::slice::from_ref(&IrStmt {
+                        kind: IrStmtKind::Expr { expr: (**else_).clone() },
+                        span: stmt.span.clone(),
+                    })) && !crate::lower::expr_contains_call(cond)
+                    {
+                        let c = self.lower_scalar_value(cond).ok_or_else(|| {
+                            LowerError::Unsupported("while conditional-break cond".into())
+                        })?;
+                        let unit_if = IrStmt {
+                            kind: IrStmtKind::Expr {
+                                expr: IrExpr {
+                                    kind: IrExprKind::If {
+                                        cond: cond.clone(),
+                                        then: Box::new(then_stripped),
+                                        else_: else_.clone(),
+                                    },
+                                    ty: almide_lang::types::Ty::Unit,
+                                    span: expr.span.clone(),
+                                    def_id: expr.def_id,
+                                },
+                            },
+                            span: stmt.span.clone(),
+                        };
+                        self.lower_stmt(&unit_if)?;
+                        let one = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                        let nc = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst: nc, op: IntOp::Sub, a: one, b: c });
+                        self.ops.push(Op::LoopBreakUnless { cond: nc });
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        if body_breaks_or_continues(std::slice::from_ref(stmt)) {
+            return Err(LowerError::Unsupported(
+                "unrecognized break/continue in a while body (lower_stmt would silently \
+                 swallow it) not in this brick"
+                    .into(),
+            ));
+        }
+        self.lower_stmt(stmt)
+    }
+
+    /// Inline the surviving arm of a while conditional-break (`if c then <rest> else
+    /// break`): a Block's statements re-enter [`Self::lower_while_body_stmt`] (a nested
+    /// conditional break chains), a unit tail is nothing, any other tail lowers as an
+    /// effect statement.
+    fn lower_while_body_inline(&mut self, e: &IrExpr) -> Result<(), LowerError> {
+        match &e.kind {
+            IrExprKind::Unit => Ok(()),
+            IrExprKind::Block { stmts, expr } => {
+                for s in stmts {
+                    self.lower_while_body_stmt(s)?;
+                }
+                match expr.as_deref() {
+                    Some(t) => self.lower_while_body_inline(t),
+                    None => Ok(()),
+                }
+            }
+            _ => self.lower_while_body_stmt(&IrStmt {
+                kind: IrStmtKind::Expr { expr: e.clone() },
+                span: e.span.clone(),
+            }),
+        }
     }
 
     /// Roll back a scalar-loop ATTEMPT (`try_lower_scalar_while` / `_for_range` / `_for_list`),
@@ -845,6 +1087,120 @@ impl LowerCtx {
             });
             return Some(dst);
         }
+        // A SMALL-VARIANT eq (`Tagged("x") == Tagged("y")` — deep_eq_heap's Box =
+        // Tagged(String) | Empty): every ctor carries ≤1 field, each scalar or String.
+        // Composed as tag-eq AND a tag-dispatched field-compare chain (String fields via
+        // a borrowed string.eq, scalar fields an i64 compare, fieldless ctors true).
+        // All values are scalar Bools — the IfThen/Else/EndIf merges carry no ownership.
+        if let Some(tyname) = self.custom_variant_type_name(ty) {
+            let layout = self.variant_layouts.by_type.get(&tyname).cloned();
+            if let Some(layout) = layout {
+                let small = layout.cases.iter().all(|c| {
+                    c.fields.len() <= 1
+                        && c.fields
+                            .iter()
+                            .all(|(_, t)| !is_heap_ty(t) || matches!(t, Ty::String))
+                });
+                if small {
+                    let lb = self.materialize_eq_operand(left, ty)?;
+                    let rb = self.materialize_eq_operand(right, ty)?;
+                    let lh = self.handle_of(lb);
+                    let rh = self.handle_of(rb);
+                    let toff = crate::lower::layout::slot_offset(0) as i64;
+                    let foff = crate::lower::layout::slot_offset(1) as i64;
+                    let tl = self.load_at_offset(lh, toff, crate::PrimKind::Load { width: 8 });
+                    let tr = self.load_at_offset(rh, toff, crate::PrimKind::Load { width: 8 });
+                    let t_eq = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: t_eq, op: IntOp::Eq, a: tl, b: tr });
+                    // Field chain under EQUAL tags: nested merges over the field-carrying
+                    // ctors; the fieldless remainder compares true.
+                    let fielded: Vec<(i64, Ty)> = layout
+                        .cases
+                        .iter()
+                        .filter(|c| c.fields.len() == 1)
+                        .map(|c| (c.tag as i64, c.fields[0].1.clone()))
+                        .collect();
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::IfThen { cond: t_eq, dst: Some(dst) });
+                    // then-branch: the chain value.
+                    let mut ends: Vec<(usize, ValueId)> = Vec::new();
+                    let mut chain_val: Option<ValueId> = None;
+                    for (i, (tag, fty)) in fielded.iter().enumerate() {
+                        let tagv = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: tagv, value: *tag });
+                        let is_c = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst: is_c, op: IntOp::Eq, a: tl, b: tagv });
+                        let d2 = self.fresh_value();
+                        self.ops.push(Op::IfThen { cond: is_c, dst: Some(d2) });
+                        let cmp = if matches!(fty, Ty::String) {
+                            let l1 = self.load_at_offset(lh, foff, crate::PrimKind::LoadHandle);
+                            let r1 = self.load_at_offset(rh, foff, crate::PrimKind::LoadHandle);
+                            let s_eq = self.fresh_value();
+                            self.ops.push(Op::CallFn {
+                                dst: Some(s_eq),
+                                name: "string.eq".to_string(),
+                                args: vec![CallArg::Handle(l1), CallArg::Handle(r1)],
+                                result: Some(repr_of(&Ty::Bool).ok()?),
+                            });
+                            s_eq
+                        } else {
+                            let l1 =
+                                self.load_at_offset(lh, foff, crate::PrimKind::Load { width: 8 });
+                            let r1 =
+                                self.load_at_offset(rh, foff, crate::PrimKind::Load { width: 8 });
+                            let f_eq = self.fresh_value();
+                            self.ops.push(Op::IntBinOp { dst: f_eq, op: IntOp::Eq, a: l1, b: r1 });
+                            f_eq
+                        };
+                        self.ops.push(Op::Else { val: Some(cmp) });
+                        ends.push((i, d2));
+                        chain_val = Some(d2);
+                    }
+                    // innermost else: no field-ctor matched (a fieldless ctor) — equal.
+                    let one = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                    let mut inner: ValueId = one;
+                    // close the nested merges inside-out.
+                    for (_i, d2) in ends.iter().rev() {
+                        self.ops.push(Op::EndIf { val: Some(inner) });
+                        inner = *d2;
+                    }
+                    let then_v = chain_val.unwrap_or(one);
+                    let zero = self.fresh_value();
+                    self.ops.push(Op::Else { val: Some(then_v) });
+                    self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+                    self.ops.push(Op::EndIf { val: Some(zero) });
+                    return Some(dst);
+                }
+            }
+        }
+        // A (String, Int) TUPLE eq (`("a", 1) == ("b", 1)` — deep_eq_heap): composed in
+        // MIR directly — string.eq over the slot-0 handles AND an i64 compare of slot 1.
+        // No self-host needed; the operands materialize like any eq operand (borrowed).
+        if let Ty::Tuple(ts) = ty {
+            if ts.len() == 2 && matches!(ts[0], Ty::String) && !is_heap_ty(&ts[1]) {
+                let lb = self.materialize_eq_operand(left, ty)?;
+                let rb = self.materialize_eq_operand(right, ty)?;
+                let lh = self.handle_of(lb);
+                let rh = self.handle_of(rb);
+                let l0 = self.load_at_offset(lh, 12, crate::PrimKind::LoadHandle);
+                let r0 = self.load_at_offset(rh, 12, crate::PrimKind::LoadHandle);
+                let s_eq = self.fresh_value();
+                self.ops.push(Op::CallFn {
+                    dst: Some(s_eq),
+                    name: "string.eq".to_string(),
+                    args: vec![CallArg::Handle(l0), CallArg::Handle(r0)],
+                    result: Some(repr_of(&Ty::Bool).ok()?),
+                });
+                let l1 = self.load_at_offset(lh, 20, crate::PrimKind::Load { width: 8 });
+                let r1 = self.load_at_offset(rh, 20, crate::PrimKind::Load { width: 8 });
+                let i_eq = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: i_eq, op: IntOp::Eq, a: l1, b: r1 });
+                let both = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: both, op: IntOp::And, a: s_eq, b: i_eq });
+                return Some(both);
+            }
+        }
         // Option[T] — the scalar masked compare or the heap conditional compare, over the two
         // materialized DynListStr / OptSome blocks (read via their handles).
         if let Ty::Applied(TC::Option, oa) = ty {
@@ -955,6 +1311,8 @@ impl LowerCtx {
             self.str_str_elem_lists.insert(obj);
         } else if crate::lower::is_list_int_str_ty(ty) {
             self.variant_drop_handles.insert(obj, "list_int_str".to_string());
+        } else if crate::lower::is_lenlist_list_ty(ty) {
+            self.variant_drop_handles.insert(obj, "list_lenlist".to_string());
         } else if is_heap_elem_list_ty(ty) {
             // List[heap] / Option[heap] / Result[_, heap] — the DynListStr recursive free.
             self.heap_elem_lists.insert(obj);

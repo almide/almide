@@ -97,6 +97,8 @@ impl WasmEmitter {
                 fd_prestat_dir_name: 0,
                 args_sizes_get: 0,
                 args_get: 0,
+                environ_sizes_get: 0,
+                environ_get: 0,
                 resolve_path: 0,
                 init_preopen_dirs: 0,
                 dragon: rt_dragon::DragonRuntime::default(),

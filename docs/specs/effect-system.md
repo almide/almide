@@ -147,7 +147,8 @@ effect fn example() -> Result[Unit, String] = {
 - `fan.any(thunks)` — リスト順に逐次試行し最初の Ok。副作用順序も決定的。
 - `fan.settle(thunks)` — **結果リストの順序のみ**を契約する。native は実スレッドで
   実行するため thunk 内副作用の交互順は wall-clock(契約外)。wasm は逐次。
-- `fan.timeout` — wall-clock 例外として契約済み(N=1、cross-target 等価性の対象外)。
+- `fan.timeout` — **存在しない**(0.29.0 で削除、C-006)。壁時計デッドラインは可搬な
+  意味を持たないため、参照は check 時 tombstone エラー(E027)。ホスト境界で課す。
 
 ### Thunk typing
 

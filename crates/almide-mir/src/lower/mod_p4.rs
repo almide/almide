@@ -188,18 +188,35 @@ pub(crate) fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
 pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     match module {
         "list" => {
-            matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min" | "find" | "find_int_str" | "find_index" | "reduce" | "get_str" | "first_str" | "last_str")
+            // `fold` is here for the ONE Option-returning variant (`list.fold_ols`,
+            // Option[List[String]] acc) — a scalar-acc fold subject never reaches the
+            // variant-tracking sites (they gate on a heap/variant subject type first).
+            matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min" | "find" | "find_int_str" | "find_index" | "reduce" | "fold" | "get_str" | "first_str" | "last_str")
         }
         "string" => matches!(func, "index_of" | "last_index_of" | "codepoint" | "first" | "last" | "get" | "strip_prefix" | "strip_suffix"),
         "bytes" => matches!(func, "get" | "index_of"),
+        // regex.find builds a materialized Option[String] via the self-hosted
+        // engine's ordinary some()/none ctors (stdlib/regex_engine.almd) — a
+        // `match` over the bound result EXECUTES.
+        "regex" => matches!(func, "find" | "captures"),
+        // random.choice delegates to the generic list.get (a materialized Option) /
+        // returns a literal `none` — either way the bound result is a real len-tag block.
+        "random" => func == "choice",
         // result.to_option builds a materialized Option[Int] from a Result's len-tag (Ok → Some,
         // Err → None); option.map rebuilds a materialized Option (Some(f(x)) / None) — a `match`
         // over either result EXECUTES.
         "result" => matches!(func, "to_option" | "to_err_option"),
-        "option" => matches!(func, "map" | "filter" | "flat_map" | "or_else" | "flatten" | "zip" | "collect"),
+        "option" => matches!(func, "map" | "filter" | "flat_map" | "or_else" | "flatten" | "zip" | "collect" | "collect_map"),
         // map.get(m, k) builds a materialized Option[Int] (Some(value) when the key is found via
         // the paired-slot scan, None otherwise) — a `match` over it EXECUTES.
-        "map" => matches!(func, "get"),
+        // map.find(m, pred) — the predicate-search HOF — builds a materialized
+        // Option[(K, V)] (Some((key, value)) on the first predicate hit, None otherwise); a
+        // `match` over it should ALSO execute. See the paired routing in control.rs (near
+        // `is_self_host_option_call`), which detects an Option[(String, <scalar>)] SUBJECT
+        // and routes its DROP to the type-specific generated `$__drop_opt_str_int` instead of
+        // the generic flat one-level-exact path — the payload is a TUPLE that itself owns a
+        // heap slot (the String), not a single flat handle a blind `rc_dec` would free.
+        "map" => matches!(func, "get" | "find"),
         // int.to_{int,uint}N_checked builds a materialized Option[Int] (Some(n) when n fits the
         // N-bit range, None otherwise) — a `match` over it EXECUTES.
         "int" => matches!(
@@ -241,10 +258,14 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         // err(_) => none }`), returning a materialized Option[T] — `json.get_string(v,k) ?? ""`,
         // `json.get_bool(v,k) ?? false`, `json.get_array(v,k) ?? []` and a `match` over any of them
         // EXECUTE (the typed-accessor sibling of json.get, the manifest/jsonrpc parser idiom root).
+        // http.get_header is self-hosted (stdlib/http_response.almd) returning a real
+        // materialized Option[String] — a `match` over it EXECUTES.
+        "http" => matches!(func, "get_header"),
         "json" => matches!(
             func,
             "as_int" | "as_float" | "as_bool" | "as_string" | "get" | "as_array"
                 | "get_string" | "get_int" | "get_float" | "get_bool" | "get_array"
+                | "get_path"
         ),
         _ => false,
     }
@@ -423,7 +444,18 @@ fn display_value(expr: &IrExpr, registry: &RecordLayouts) -> Option<IrExpr> {
 /// `None` for a type with NO Display leaf at all (a bare unresolved var) — the Display declines.
 fn display_leaf_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
     match ty {
-        Ty::Int => Some(("int", "to_string")),
+        // SIZED ints display like Int: a v1 record/variant slot is a uniform i64
+        // (the narrow literal was widened at construction), so int.to_string prints
+        // the exact stored value — incl. negative Int8/16/32 (sign carried in the
+        // i64). UInt64 is EXCLUDED (a value above i64::MAX would misprint).
+        Ty::Int
+        | Ty::Int8
+        | Ty::Int16
+        | Ty::Int32
+        | Ty::Int64
+        | Ty::UInt8
+        | Ty::UInt16
+        | Ty::UInt32 => Some(("int", "to_string")),
         Ty::Bool => Some(("bool", "to_string")),
         Ty::Float => Some(("float", "to_string_compound")),
         Ty::String => Some(("string", "quote")),
@@ -456,7 +488,17 @@ fn display_leaf_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
 fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
     use almide_lang::types::constructor::TypeConstructorId;
     Some(match ty {
-        Ty::Int => ("int", "to_string"),
+        // SIZED ints display like Int: a v1 scalar value is a uniform i64 (widened at
+        // the literal/load), so int.to_string prints the exact stored value including
+        // negative Int8/16/32. UInt64 is EXCLUDED (above i64::MAX would misprint).
+        Ty::Int
+        | Ty::Int8
+        | Ty::Int16
+        | Ty::Int32
+        | Ty::Int64
+        | Ty::UInt8
+        | Ty::UInt16
+        | Ty::UInt32 => ("int", "to_string"),
         Ty::Bool => ("bool", "to_string"),
         // Scalar `${f}` interp uses v0's Display format, which DROPS the `.0` for integer-valued
         // floats (`3.0`->`3`, `100.0`->`100`) — exactly the compound formatter
@@ -479,6 +521,43 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
                 if inner.len() == 1 && matches!(inner[0], Ty::Float) =>
             {
                 ("list", "to_string_llf")
+            }
+            // `${List[Option[Int]]}` → `[some(1), none, some(3)]` — composed from the
+            // per-element option display (stdlib/list_to_string_lo.almd).
+            Ty::Applied(TypeConstructorId::Option, inner)
+                if inner.len() == 1 && matches!(inner[0], Ty::Int) =>
+            {
+                ("list", "to_string_lo")
+            }
+            // `${List[Result[Int, String]]}` → `[ok(1), err("bad")]` — fan.settle's
+            // pure-thunk result list, composed from the per-element result display
+            // (stdlib/list_to_string_lr.almd).
+            Ty::Applied(TypeConstructorId::Result, inner)
+                if inner.len() == 2
+                    && matches!(inner[0], Ty::Int)
+                    && matches!(inner[1], Ty::String) =>
+            {
+                ("list", "to_string_lr")
+            }
+            // `${List[Map[String, List[Option[Int]]]]}` — compound_repr_interp's `deep`,
+            // composed from the per-element mlo map display (stdlib/map_mlo.almd).
+            Ty::Applied(TypeConstructorId::Map, kv)
+                if kv.len() == 2 && matches!(kv[0], Ty::String)
+                    && matches!(&kv[1], Ty::Applied(TypeConstructorId::List, b)
+                        if b.len() == 1
+                            && matches!(&b[0], Ty::Applied(TypeConstructorId::Option, o)
+                                if o.len() == 1 && matches!(o[0], Ty::Int))) =>
+            {
+                ("list", "to_string_lmlo")
+            }
+            // `${List[Map[String, List[Int]]]}` → `[["a": [1, 2]], ["b": [3]]]` — each
+            // map through its own interp (stdlib/map_hval.almd's list_to_string_lmh).
+            Ty::Applied(TypeConstructorId::Map, kv)
+                if kv.len() == 2 && matches!(kv[0], Ty::String)
+                    && matches!(&kv[1], Ty::Applied(TypeConstructorId::List, b)
+                        if b.len() == 1 && matches!(b[0], Ty::Int)) =>
+            {
+                ("list", "to_string_lmh")
             }
             // Any other unsupported element type (`List[Map]`, deeper nesting, …) routes to an
             // UNLINKED variant name so the interp DESUGARS to a real `list.to_string_x` CallFn that
@@ -640,6 +719,30 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
         Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
             match (&args[0], &args[1]) {
                 (Ty::String, Ty::Int) => ("map", "to_string"),
+                // `${Map[String, String]}` — quoted keys AND values (stdlib/map_to_string.almd).
+                (Ty::String, Ty::String) => ("map", "to_string_ss"),
+                // `${Map[String, List[Option[Int]]]}` — the mlo family display
+                // (stdlib/map_mlo.almd; values via the list.to_string_lo composition).
+                (Ty::String, Ty::Applied(TypeConstructorId::List, b))
+                    if b.len() == 1
+                        && matches!(&b[0], Ty::Applied(TypeConstructorId::Option, o)
+                            if o.len() == 1 && matches!(o[0], Ty::Int)) =>
+                {
+                    ("map", "to_string_mlo")
+                }
+                // `${Map[Int, String]}` — the ivh display (`[10: "x", 20: "y"]`, raw int
+                // keys + quoted/escaped String values; stdlib/map_ivh.almd).
+                (Ty::Int, Ty::String) => ("map", "to_string_ivh"),
+                // `${Map[Int, Float]}` — `[1: 0.5]` (raw int keys, shortest-round-trip
+                // float values; stdlib/map_if.almd).
+                (Ty::Int, Ty::Float) => ("map", "to_string_if"),
+                // `${Map[String, List[Int]]}` — `["xs": [1, 2, 3]]` (quoted keys, list
+                // values through their own interp; stdlib/map_hval.almd).
+                (Ty::String, Ty::Applied(TypeConstructorId::List, b))
+                    if b.len() == 1 && matches!(b[0], Ty::Int) =>
+                {
+                    ("map", "to_string_hval")
+                }
                 _ => ("map", "to_string_x"),
             }
         }
@@ -714,16 +817,147 @@ fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr
             if matches!(expr.ty, Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..))
                 && resolve_aggregate(&expr.ty, registry).is_some() =>
         {
-            if aggregate_part_expandable(expr, registry) {
+            // An ANONYMOUS record ALWAYS takes the generated sorted-field repr: v0 sorts
+            // anon fields by name, while the inline display_aggregate expansion reads the
+            // STRUCTURAL (source) order — expanding it would emit wrong bytes.
+            if let Ty::Record { fields } = &expr.ty {
+                // An ANONYMOUS record part — route to the generated
+                // `__repr_anonrec_<hash>` (sorted-field render); an unemitted shape
+                // (a nested payload) leaves the call unlinked = the honest wall.
+                Some(IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Named {
+                            name: sym(&format!(
+                                "__repr_{}",
+                                crate::lower::anon_record_drop_name(fields)
+                            )),
+                        },
+                        args: vec![expr.clone()],
+                        type_args: Vec::new(),
+                    },
+                    ty: Ty::String,
+                    span: None,
+                    def_id: None,
+                })
+            } else if aggregate_part_expandable(expr, registry) {
                 display_aggregate(expr, &expr.ty, registry)
+            } else if let Ty::Named(name, _) = &expr.ty {
+                // A NAMED record outside the inline-expand subset (a recursive record, a
+                // List[record] field — the compound_repr class): route to the GENERATED
+                // `__repr_rec_<R>` (render-pipeline-injected). A record the generator does
+                // not emit leaves the call unlinked — the same honest render wall the
+                // `compound.to_string` wrapper gives, with the SAME call-count (one node).
+                Some(IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Named {
+                            name: sym(&format!(
+                                "__repr_rec_{}",
+                                crate::lower::drop_fn_ident(name.as_str())
+                            )),
+                        },
+                        args: vec![expr.clone()],
+                        type_args: Vec::new(),
+                    },
+                    ty: Ty::String,
+                    span: None,
+                    def_id: None,
+                })
             } else {
                 Some(to_string_call("compound", "to_string", expr.clone()))
             }
+        }
+        // A custom-VARIANT part (`"${Overflow(\"x\")}"` / a bound variant var): route
+        // to the GENERATED `__repr_<V>` (render-pipeline-injected; the classify gate
+        // counts the same call node). A variant the generator does not emit (a field
+        // outside Int/Bool/String/nested-variant) leaves an unlinked call — the same
+        // honest render wall the `compound.to_string` wrapper gives records.
+        IrStringPart::Expr { expr }
+            if matches!(&expr.ty, Ty::Named(..))
+                && resolve_aggregate(&expr.ty, registry).is_none() =>
+        {
+            let Ty::Named(name, _) = &expr.ty else { unreachable!() };
+            Some(IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Named {
+                        name: sym(&format!(
+                            "__repr_{}",
+                            crate::lower::drop_fn_ident(name.as_str())
+                        )),
+                    },
+                    args: vec![expr.clone()],
+                    type_args: Vec::new(),
+                },
+                ty: Ty::String,
+                span: None,
+                def_id: None,
+            })
+        }
+        // A CONTAINER of a named record/variant (`${pts}` over List[Point], `${op}` over
+        // Option[Point], `${shapes}` over List[Shape]) — route to the GENERATED container
+        // repr (`__repr_list_rec_<R>` / `__repr_opt_rec_<R>` / `__repr_list_<V>`, emitted by
+        // `generate_variant_repr_sources` for exactly the container/element pairs collected
+        // from interp parts). An unemitted pair leaves the call unlinked — the honest wall
+        // (same contract as the bare `__repr_rec_<R>` arm above).
+        IrStringPart::Expr { expr }
+            if container_repr_name(&expr.ty, registry).is_some() =>
+        {
+            let name = container_repr_name(&expr.ty, registry).unwrap();
+            Some(IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Named { name: sym(&name) },
+                    args: vec![expr.clone()],
+                    type_args: Vec::new(),
+                },
+                ty: Ty::String,
+                span: None,
+                def_id: None,
+            })
         }
         IrStringPart::Expr { expr } => {
             let (module, func) = interp_to_string_call(&expr.ty)?;
             Some(to_string_call(module, func, expr.clone()))
         }
+    }
+}
+
+/// The generated container-repr callee for a `${List[<record>]}` / `${Option[<record>]}` /
+/// `${List[<variant>]}` interp part, or `None` for every other type (falls to the
+/// `interp_to_string_call` table). Record-vs-variant discrimination mirrors the bare-part
+/// arms: a `Named` that resolves in the record registry is a record, else a variant.
+fn container_repr_name(ty: &Ty, registry: &RecordLayouts) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let named = |t: &Ty| -> Option<(String, bool)> {
+        let Ty::Named(n, _) = t else { return None };
+        Some((n.as_str().to_string(), resolve_aggregate(t, registry).is_some()))
+    };
+    match ty {
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+            let (n, is_rec) = named(&a[0])?;
+            let n_fn = crate::lower::drop_fn_ident(&n);
+            Some(if is_rec {
+                format!("__repr_list_rec_{n_fn}")
+            } else {
+                format!("__repr_list_{n_fn}")
+            })
+        }
+        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
+            let (n, is_rec) = named(&a[0])?;
+            if !is_rec {
+                return None; // Option[<variant>] keeps its existing table routing
+            }
+            let n_fn = crate::lower::drop_fn_ident(&n);
+            Some(format!("__repr_opt_rec_{n_fn}"))
+        }
+        // `${Map[String, <record/variant>]}` — the paired-slot map repr (quoted keys,
+        // element repr values, `[:]` when empty).
+        Ty::Applied(TypeConstructorId::Map, a)
+            if a.len() == 2 && matches!(a[0], Ty::String) =>
+        {
+            let (n, _is_rec) = named(&a[1])?;
+            let n_fn = crate::lower::drop_fn_ident(&n);
+            Some(format!("__repr_map_{n_fn}"))
+        }
+        _ => None,
     }
 }
 
@@ -866,17 +1100,32 @@ pub fn interp_synthetic_call_names(parts: &[IrStringPart], registry: &RecordLayo
             if matches!(expr.ty, Ty::String) {
                 continue; // a String part is a no-call passthrough
             }
-            // A TOP-LEVEL record/tuple part mirrors `interp_part_leaf`'s expand-vs-wrap: an
-            // EXPAND-foldable part (a materialized Var with displayable fields) credits the full
-            // recursive tree; a NON-expandable one credits ONE `compound.to_string` (the wall).
+            // A TOP-LEVEL record/tuple part mirrors `interp_part_leaf`'s decision tree
+            // EXACTLY (the mir == ir contract): an ANON record is ALWAYS one generated
+            // `__repr_anonrec_<hash>` call; an expand-foldable named/tuple part credits the
+            // full recursive tree; a non-expandable NAMED record one `__repr_rec_<R>`; any
+            // other non-expandable aggregate one `compound.to_string` (the wall).
             if matches!(expr.ty, Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..))
                 && resolve_aggregate(&expr.ty, registry).is_some()
             {
-                if aggregate_part_expandable(expr, registry) {
+                if let Ty::Record { fields } = &expr.ty {
+                    names.push(format!(
+                        "__repr_{}",
+                        crate::lower::anon_record_drop_name(fields)
+                    ));
+                } else if aggregate_part_expandable(expr, registry) {
                     aggregate_synthetic_names(&expr.ty, registry, &mut names);
+                } else if let Ty::Named(name, _) = &expr.ty {
+                    names.push(format!(
+                        "__repr_rec_{}",
+                        crate::lower::drop_fn_ident(name.as_str())
+                    ));
                 } else {
                     names.push("compound.to_string".to_string());
                 }
+            } else if let Some(n) = container_repr_name(&expr.ty, registry) {
+                // Mirrors `interp_part_leaf`'s container-repr arm: ONE generated call node.
+                names.push(n);
             } else {
                 value_synthetic_names(&expr.ty, registry, &mut names);
             }
@@ -905,6 +1154,21 @@ pub fn interp_str_desugarable(parts: &[IrStringPart], registry: &RecordLayouts) 
 /// the plain name. `module.func` is unchanged for everything else.
 pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], result_ty: &Ty) -> String {
     use almide_lang::types::constructor::TypeConstructorId;
+    // `random.choice` / `random.shuffle` key on the LIST ELEMENT: a scalar element uses the
+    // flat self-host (i64 slots, flat drops), a String element the rc-aware `_str` variant
+    // (random_choice.almd / random_shuffle.almd). Any other element class routes to the
+    // UNLINKED `random.<func>_x` → a clean render wall (never a wrong-typed link).
+    if module == "random" && matches!(func, "choice" | "shuffle") {
+        if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+            if a.len() == 1 && !is_heap_ty(&a[0]) {
+                return format!("random.{func}");
+            }
+            if a.len() == 1 && matches!(a[0], Ty::String) {
+                return format!("random.{func}_str");
+            }
+        }
+        return format!("random.{func}_x");
+    }
     // `fan.map` selects a monomorphic self-host by (input element A, output element B) — `fan.map<sfx>`
     // where A/B in {Int (""), String ("s")}. The input A is `arg_tys[0] = List[A]`; the output B is
     // `result_ty = Result[List[B], String]`. An unsupported pairing routes to the UNLINKED
@@ -937,12 +1201,53 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
     // it cleanly (a controlled reject) rather than emitting a repr-mismatched module. (Soundness-
     // preserving: a wall is never a miscompile.)
     if func == "fold" && matches!(module, "list" | "map" | "set") && is_heap_ty(result_ty) {
+        // The ONE self-hosted heap-accumulator variant: `Option[List[String]]` acc over
+        // `List[String]` elements (is_balanced's paren-stack fold) — `list.fold_ols`, the
+        // (heap, heap) -> heap 2-arity CallIndirect (`list_reduce_str`'s proven closure
+        // shape). Every other heap-acc fold keeps the unregistered `fold_hacc` wall.
+        let is_ols_acc = matches!(result_ty,
+            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1
+                && matches!(&a[0], Ty::Applied(TypeConstructorId::List, b)
+                    if b.len() == 1 && matches!(b[0], Ty::String)));
+        let src_is_list_str = matches!(arg_tys.first(),
+            Some(Ty::Applied(TypeConstructorId::List, e)) if e.len() == 1 && matches!(e[0], Ty::String));
+        if module == "list" && is_ols_acc && src_is_list_str {
+            return "list.fold_ols".to_string();
+        }
+        // The `Map[String, Int]`-accumulator map.fold pair (the map_fold_heap_acc corpus
+        // shape): keyed on the EXACT acc type + subject family — `Map[String, String]`
+        // (fold_str_msi) / `Map[String, Int]` (fold_skv_msi). Other heap accs keep the wall.
+        let is_msi_acc = matches!(result_ty,
+            Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
+                && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
+        if module == "map" && is_msi_acc {
+            if let Some(Ty::Applied(TypeConstructorId::Map, s)) = arg_tys.first() {
+                if s.len() == 2 && matches!(s[0], Ty::String) {
+                    if matches!(s[1], Ty::String) {
+                        return "map.fold_str_msi".to_string();
+                    }
+                    if matches!(s[1], Ty::Int) {
+                        return "map.fold_skv_msi".to_string();
+                    }
+                }
+            }
+        }
         return format!("{module}.fold_hacc");
     }
     // `list.enumerate` keys on its SOURCE element: scalar → the flat-pair self-host;
     // String → the rc-share pair variant (`DropListIntStr` at the call site frees each
     // pair's key ref); any other heap element routes to an UNREGISTERED name (walls
     // cleanly — a flat pair drop would leak a rich element's children).
+    // `list.drop_end` keys on its SOURCE element: a String element routes to the CO-OWNED
+    // rc-copy variant (`__copy_slots_rc`) — the raw slot copy aliases heap handles un-owned,
+    // which double-frees under the nested Option[List[String]] drop (is_balanced's fold).
+    if module == "list" && func == "drop_end" {
+        if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+            if a.len() == 1 && matches!(a[0], Ty::String) {
+                return "list.drop_end_str".to_string();
+            }
+        }
+    }
     if module == "list" && func == "enumerate" {
         if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
             if a.len() == 1 {
@@ -1071,6 +1376,14 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
             {
                 return "option.liststr_unwrap_or".to_string();
             }
+            // A FLAT scalar-element list payload (`map.get(groups, "0") ?? []` —
+            // Option[List[Int]], the group_by class): the rc-correct flat variant.
+            if a.len() == 1
+                && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+                    if e.len() == 1 && !is_heap_ty(&e[0]))
+            {
+                return "option.listint_unwrap_or".to_string();
+            }
         }
     }
     if module == "list" {
@@ -1104,6 +1417,14 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                     } else {
                         "list.sort_by_float".to_string()
                     };
+                }
+                // A STRING-key sort_by has NO registered typed variant: the generic
+                // impl compares scalar slots (a String key = handle order, and a
+                // heap-elem list traps the funcref signature — the ll1 indirect-call
+                // mismatch). Route to the unlinkable `_x` name so the caller WALLS
+                // honestly instead of trapping or handle-sorting.
+                if **ret == Ty::String {
+                    return "list.sort_by_str_key_x".to_string();
                 }
             }
         }
@@ -1267,8 +1588,23 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 {
                     return format!("list.{func}_value");
                 }
-                if args.len() == 1 && is_heap_ty(&args[0]) {
+                // `find`'s Some() result is a DEEP COPY of the found element (`string.repeat`,
+                // list_find_str's `__lfs_some`) — correct only for an actual String element; any
+                // other heap type here (a flat scalar tuple, a record) falls through to a WALL
+                // rather than corrupting the copy (the same class of bug fixed above for
+                // contains/index_of — `find` just hasn't grown a `_hshare` copy variant yet).
+                if args.len() == 1 && matches!(args[0], Ty::String) {
                     return format!("list.{func}_str");
+                }
+                // Any remaining heap-element shape (find over Value/List/Map/Set; get/first/last
+                // over a non-String heap List element) has no covering arm above — route to a
+                // deliberately UNREGISTERED `_x` name. The bare `list.{func}` name is NOT a safe
+                // fallback here: it links against the Int-typed generic self-host (list_search.almd
+                // et al), which silently "succeeds" via raw i64-slot / pointer-identity comparison
+                // instead of refusing to link (the fallthrough danger confirmed by probe elsewhere
+                // in this dispatch — see the contains/index_of comment above).
+                if args.len() == 1 && is_heap_ty(&args[0]) {
+                    return format!("list.{func}_x");
                 }
             }
         }
@@ -1288,9 +1624,40 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
             return "list.get_or_hshare".to_string();
         }
         // SUBJECT-keyed (arg 0) over a List[heap], where the result is scalar (Bool/Int/Option[Int])
-        // so it can't be keyed on the result type: search (contains/index_of) + the predicate
-        // higher-order all/any/count.
-        if matches!(func, "contains" | "index_of" | "all" | "any" | "count" | "fold") {
+        // so it can't be keyed on the result type: search (contains/index_of) does an ELEMENT-
+        // EQUALITY comparison — String routes to the byte-eq `_str` family (correct only for actual
+        // String elements: __str_eq reads the length FIELD as a byte count); a flat scalar-slot
+        // block (all-scalar tuple / List[scalar]) routes to the slot-wise `_hshare` family (B32's
+        // `__uh_eq`, which reads length as an ELEMENT count and compares raw i64 slots — exact for
+        // this shape). Any OTHER heap element (record, Value, nested heap list, String-bearing
+        // tuple) has no correct comparison variant yet — falls through to a WALL (never routed to
+        // `_str`, which would silently produce WRONG results: a tuple/list `len` misread as a byte
+        // count truncates the compare to its first ~2 bytes, a confirmed false-positive collision).
+        // NOTE: falling through to the bare `list.contains`/`list.index_of` name here is NOT a
+        // safe wall — it links against the Int-typed generic (list_search.almd), which silently
+        // "succeeds" (raw i64-slot compare, i.e. POINTER-IDENTITY on a heap handle — the exact
+        // OLD C-015 bug) rather than refusing to link (CONFIRMED by probe: a record-element
+        // `list.contains` produced invalid wasm via this path, and a tuple-element `set.from_list`
+        // sharing the same generic-fallthrough shape silently mis-deduped). Any excluded heap
+        // element must route to a deliberately UNREGISTERED name (`_x`, the established
+        // wall-suffix convention) so the render step's unlinked-call check catches it.
+        if matches!(func, "contains" | "index_of") {
+            if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+                if a.len() == 1 && is_heap_ty(&a[0]) {
+                    if matches!(a[0], Ty::String) {
+                        return format!("list.{func}_str");
+                    }
+                    if is_flat_scalar_block_ty(&a[0]) {
+                        return format!("list.{func}_hshare");
+                    }
+                    return format!("list.{func}_x");
+                }
+            }
+        }
+        // all/any/count/fold are pure closure-passthrough (each element handle is loaded and handed
+        // to the predicate/accumulator closure — no internal equality compare or deep copy), so the
+        // byte-eq `_str` family's ITERATION shape is safe for ANY heap element type, not just String.
+        if matches!(func, "all" | "any" | "count" | "fold") {
             if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
                 if a.len() == 1 && is_heap_ty(&a[0]) {
                     return format!("list.{func}_str");
@@ -1301,30 +1668,65 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
     if module == "set" {
         // `Set[heap]`-RETURNING constructors key on the RESULT element type; `set.to_list` over a
         // `Set[heap]` returns a `List[heap]`; the predicate `set.contains` keys on its SUBJECT
-        // (arg 0) element type (its result is Bool). Each routes to the heap-element `_str` variant.
-        let result_is_heap_container = matches!(
+        // (arg 0) element type (its result is Bool). Every one of these funcs relies on `__str_eq`
+        // (byte-level String-layout equality, for membership/dedup) AND/OR `string.repeat` (a
+        // String-specific deep copy) internally (set_str.almd) — BOTH are unsound for a non-String
+        // heap element: `__str_eq` misreads a block's slot-count `len` as a byte count (a confirmed
+        // false-positive collision past the first ~2 bytes), and `string.repeat` would corrupt a
+        // tuple/record/list block's bytes. Restrict the `_str` route to an ACTUAL String element;
+        // any other heap element (tuple, record, nested list, Value) falls through to a WALL — no
+        // correct Set variant exists yet for those (the flat-scalar `_hshare` family list.contains
+        // just grew does not cover Set's dedup-on-build/algebra ops).
+        let result_elem_is_string = matches!(
+            result_ty,
+            Ty::Applied(TypeConstructorId::Set | TypeConstructorId::List, a)
+                if a.len() == 1 && matches!(a[0], Ty::String)
+        );
+        // RESULT-keyed: constructors / Set-returning algebra over heap elements. The bare
+        // `set.{func}` fallback is NOT a safe wall for a non-String heap element here — it links
+        // against the Int-typed generic (set_core.almd), which silently "succeeds" via raw i64-slot
+        // / pointer-identity comparison (the OLD C-015 bug) instead of refusing to link (CONFIRMED
+        // by probe: `set.from_list` over a `List[(Int,Int)]` silently mis-deduped, len 3 instead of
+        // 2, then trapped later). Route explicitly to the UNREGISTERED `_x` wall name instead.
+        let result_elem_is_heap = matches!(
             result_ty,
             Ty::Applied(TypeConstructorId::Set | TypeConstructorId::List, a)
                 if a.len() == 1 && is_heap_ty(&a[0])
         );
-        // RESULT-keyed: constructors / Set-returning algebra over heap elements.
         if matches!(
             func,
             "from_list" | "to_list" | "union" | "intersection" | "difference"
                 | "new" | "insert" | "remove" | "symmetric_difference" | "filter"
-        ) && result_is_heap_container
+        ) && result_elem_is_heap
         {
-            return format!("set.{func}_str");
+            return if result_elem_is_string {
+                format!("set.{func}_str")
+            } else {
+                format!("set.{func}_x")
+            };
         }
-        // ARG-keyed: a Bool/scalar-returning fn over a `Set[heap]` subject (arg 0).
-        let arg0_is_heap_set = matches!(
+        // `all`/`any`/`fold` are pure closure-passthrough (no internal eq compare or deep copy) —
+        // safe for any heap element type, same as the list-module analogue above.
+        let arg0_elem_is_heap = matches!(
             arg_tys.first(),
             Some(Ty::Applied(TypeConstructorId::Set, a)) if a.len() == 1 && is_heap_ty(&a[0])
         );
-        if matches!(func, "contains" | "is_subset" | "is_disjoint" | "all" | "any" | "fold" | "eq")
-            && arg0_is_heap_set
-        {
+        if matches!(func, "all" | "any" | "fold") && arg0_elem_is_heap {
             return format!("set.{func}_str");
+        }
+        // ARG-keyed eq/membership: a Bool-returning fn over a `Set[heap]` subject (arg 0) — String
+        // element only (the `__str_eq`/`__set_has_str` unsoundness above); any other heap element
+        // routes to the `_x` wall (the same fallthrough danger as the RESULT-keyed family).
+        let arg0_elem_is_string = matches!(
+            arg_tys.first(),
+            Some(Ty::Applied(TypeConstructorId::Set, a)) if a.len() == 1 && matches!(a[0], Ty::String)
+        );
+        if matches!(func, "contains" | "is_subset" | "is_disjoint" | "eq") && arg0_elem_is_heap {
+            return if arg0_elem_is_string {
+                format!("set.{func}_str")
+            } else {
+                format!("set.{func}_x")
+            };
         }
     }
     if module == "map" {
@@ -1360,6 +1762,18 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 arg_tys.first().or(Some(result_ty)),
                 Some(Ty::Applied(TypeConstructorId::Map, a)) if a.len() == 2 && matches!(a[1], Ty::String)
             );
+            // Both the `_str` (all-String interleaved entries) and `_skv` (String key + i64 value)
+            // families do KEY EQUALITY via `__str_eq`/`__skv_eq` — a byte-level compare that
+            // misreads a non-String heap block's slot-count `len` as a byte count (the same
+            // confirmed false-positive-collision class fixed above for list/set). A non-String heap
+            // KEY (a tuple, record, nested list) must NOT route to either family — CONFIRMED via
+            // probe to currently produce INVALID WASM (an i32/i64 ABI-width mismatch on `map.set`
+            // with a tuple key), not silently wrong bytes, but still not the honest wall this repr
+            // gate is meant to guarantee. Gate both families on an ACTUAL String key.
+            let key_is_string = matches!(
+                arg_tys.first().or(Some(result_ty)),
+                Some(Ty::Applied(TypeConstructorId::Map, a)) if a.len() == 2 && matches!(a[0], Ty::String)
+            );
             // The FLAT-heap-value class map_hval actually implements (List[scalar]).
             let val_is_flat_list = matches!(
                 arg_tys.first().or(Some(result_ty)),
@@ -1373,34 +1787,143 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 (true, true) if val_is_flat_list && matches!(func, "new" | "set" | "eq") => {
                     Some("_hval")
                 }
+                // `Map[String, List[Int]]` from_list / display (the map-of-lists literal):
+                // keyed on the RESULT/first-arg map; to_string_hval passes through
+                // verbatim (the B22 suffix guard).
+                // `Map[String, String]` from_list (the String-valued map literal): keyed on
+                // the RESULT type (from_list's first arg is the pairs List, not a Map).
+                (true, true)
+                    if func == "from_list"
+                        && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                            if a.len() == 2
+                                && matches!(a[0], Ty::String)
+                                && matches!(a[1], Ty::String)) =>
+                {
+                    Some("_str")
+                }
+                (true, true)
+                    if !val_is_string
+                        && func == "from_list"
+                        && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                            if a.len() == 2
+                                && matches!(a[0], Ty::String)
+                                && matches!(&a[1], Ty::Applied(TypeConstructorId::List, b)
+                                    if b.len() == 1 && matches!(b[0], Ty::Int))) =>
+                {
+                    Some("_hval")
+                }
+                // `Map[String, Map[String, String]]` get_or / from_list — the msv family
+                // (map_fold_heap_acc's nested-map literal + get_or default).
+                (true, true)
+                    if func == "get_or"
+                        && matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::Map, a))
+                            if a.len() == 2 && matches!(a[0], Ty::String)
+                                && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
+                                    if b.len() == 2
+                                        && matches!(b[0], Ty::String)
+                                        && matches!(b[1], Ty::String))) =>
+                {
+                    Some("_msv")
+                }
+                (true, true)
+                    if func == "from_list"
+                        && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                            if a.len() == 2 && matches!(a[0], Ty::String)
+                                && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
+                                    if b.len() == 2
+                                        && matches!(b[0], Ty::String)
+                                        && matches!(b[1], Ty::String))) =>
+                {
+                    Some("_msv")
+                }
+                // `Map[String, List[Option[Int]]]` from_list — the mlo family
+                // (compound_repr_interp's `deep` inner-map literal).
+                (true, true)
+                    if func == "from_list"
+                        && crate::lower::is_map_mlo_ty(result_ty) =>
+                {
+                    Some("_mlo")
+                }
+                (true, true) if func == "to_string_hval" => Some(""),
+                // An ALREADY-SUFFIXED mlo display (`map.to_string_mlo` from the interp
+                // leaf) — pass through verbatim (re-suffixing would fabricate
+                // `to_string_mlo_hval_wall`).
+                (true, true) if func == "to_string_mlo" => Some(""),
+                // `map.from_list` over a NAMED-value map (`["o": Point{..}]` / `["a":
+                // Circle(3.0)]` — the desugared map literal): construction is handle-level
+                // (the `_str` family's pair copy + co-own rc_inc works for ANY heap value
+                // slot); the RESULT's type-driven drop routing (`map_named_value_drop`)
+                // decides the correct sweep, and an unadmitted value type walls THERE —
+                // never a leaky flat link here.
+                (true, true)
+                    if func == "from_list"
+                        && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                            if a.len() == 2 && matches!(a[0], Ty::String)
+                                && matches!(a[1], Ty::Named(..))) =>
+                {
+                    Some("_hobj")
+                }
                 (true, true) if !val_is_string => Some("_hval_wall"),
-                (true, true) => matches!(
+                (true, true) if key_is_string => matches!(
                     func,
                     "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
                         | "values" | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
                         | "entries"
                 )
                 .then_some("_str"),
-                (true, false) => matches!(
+                (true, false) if key_is_string => matches!(
                     func,
                     "new" | "set" | "remove" | "filter" | "get" | "get_or" | "keys" | "values"
                         | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold" | "eq"
+                        | "find"
                 )
                 .then_some("_skv"),
+                // A non-String heap KEY (tuple/record/nested list) reaching here has no correct
+                // variant — route to an explicit UNREGISTERED wall name rather than falling through
+                // to the bare `map.{func}` name, which links against the scalar-key map_core generic
+                // and produces INVALID WASM (an i32/i64 ABI-width mismatch, CONFIRMED by probe) —
+                // a crash, not the honest compile-time wall this repr gate exists to guarantee.
+                (true, true) | (true, false) => Some("_key_wall"),
                 // `Map[Int, String]` — the implemented scalar-key/heap-value variant
                 // (new/set/eq). Other funcs, and other heap value types, keep an
                 // UNREGISTERED wall name (never the plain Map[Int,Int] i64-slot link
                 // that emitted invalid wasm — map_set_eq's original failure).
+                // An ALREADY-SUFFIXED synthesized display call (`map.to_string_ivh` from
+                // the interp leaf table) — pass through verbatim (re-suffixing would
+                // fabricate `to_string_ivh_ivh_wall`).
+                (false, true) if func == "to_string_ivh" => Some(""),
                 (false, true)
-                    if matches!(
-                        arg_tys.first().or(Some(result_ty)),
-                        Some(Ty::Applied(TypeConstructorId::Map, a))
-                            if a.len() == 2 && matches!(a[0], Ty::Int) && matches!(a[1], Ty::String)
-                    ) && matches!(func, "new" | "set" | "eq") =>
+                    if {
+                        // `from_list`'s FIRST arg is the pairs List, not the Map — key
+                        // its admission on the RESULT type instead (either probe works
+                        // for the Map-first fns).
+                        let is_ivh = |t: &Ty| {
+                            matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+                                if a.len() == 2
+                                    && matches!(a[0], Ty::Int)
+                                    && matches!(a[1], Ty::String))
+                        };
+                        (arg_tys.first().is_some_and(is_ivh) || is_ivh(result_ty))
+                            && matches!(func, "new" | "set" | "eq" | "from_list")
+                    } =>
                 {
                     Some("_ivh")
                 }
                 (false, true) => Some("_ivh_wall"),
+                // `Map[Int, Float]` from_list (the float_map literal): ONE scalar-KV impl
+                // (map_if.almd) — the paired i64 slots carry f64 bits verbatim. Display
+                // routes separately (the interp table's to_string_if). Other scalar-scalar
+                // maps keep the plain (unlinked) name — walls cleanly.
+                (false, false)
+                    if func == "from_list"
+                        && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                            if a.len() == 2
+                                && matches!(a[0], Ty::Int)
+                                && matches!(a[1], Ty::Float)) =>
+                {
+                    Some("_if")
+                }
+                (false, false) if func == "to_string_if" => Some(""),
                 _ => None,
             };
             if let Some(suffix) = variant {

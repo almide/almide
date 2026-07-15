@@ -8,14 +8,20 @@ use almide_ir::{
 use almide_lang::types::Ty;
 
 /// One parsed arm of a custom-variant `match` (ADT bricks 3/5c). A `Ctor` arm tests `tag ==
-/// tag` and binds its fields from slots — `(slot index 1+i, bound var, is_heap)`: a SCALAR
-/// field is an i64 value copy; a leaf-heap (`String`) field is a BORROW of the slot handle
-/// (the subject keeps ownership). A move-out arm auto-`Dup`s in `lower_heap_result_arm`; a
-/// consuming re-use `Dup`s in `lower_owned_heap_field` — so the borrow is never released at
-/// rc 0. A `Wildcard` arm is the unconditional catch-all.
+/// tag` and binds its fields from slots — `(slot index 1+i, bound var, is_heap, field ty)`: a
+/// SCALAR field is an i64 value copy; a leaf-heap (`String`) field is a BORROW of the slot
+/// handle (the subject keeps ownership). The field TY lets an Option/Result payload bind seed
+/// its READ-shape (`seed_variant_param`) so an inner `match` over it executes. A move-out arm
+/// auto-`Dup`s in `lower_heap_result_arm`; a consuming re-use `Dup`s in
+/// `lower_owned_heap_field` — so the borrow is never released at rc 0. A `Wildcard` arm is the
+/// unconditional catch-all.
 enum VariantArmKind {
-    Ctor { tag: i64, binds: Vec<(usize, VarId, bool)> },
+    Ctor { tag: i64, binds: Vec<(usize, VarId, bool, Ty)> },
     Wildcard,
+    /// A BINDER catch-all (`e => err(e)` — the regrouped compute fall-through): matches any
+    /// tag and binds the WHOLE subject value as a BORROW (`param_values` — a consuming
+    /// re-use Dups, exactly the borrowed-param ctor discipline).
+    BindAll { var: VarId },
 }
 
 impl LowerCtx {
@@ -62,6 +68,25 @@ impl LowerCtx {
             IrExprKind::If { cond, then, else_ } => {
                 // The condition is evaluated ONCE before the branch — it is scalar
                 // (Bool), so no ownership, but capture the caps of any call in it.
+                //
+                // A CALL-BEARING arm must NOT linearize: reaching here means every
+                // real-branch path (try_lower_unit_if / the scalar-if machinery)
+                // declined the condition, and the linearized render RUNS BOTH arms —
+                // the rc4 double-print (`println(if e == err("a") then "eq" else
+                // "ne")` printed eq AND ne, 2026-07-12). WALL it, mirroring the
+                // untracked-subject match rule below: an unlowered shape must be a
+                // clean Unsupported, never wrong output. (Call-free arms stay
+                // linearizable — their double-evaluation has no observable effect;
+                // the merged Opaque result carries the content.)
+                if crate::lower::expr_contains_call(then) || crate::lower::expr_contains_call(else_)
+                {
+                    return Err(LowerError::Unsupported(
+                        "if over an unresolvable condition with a call-bearing arm cannot \
+                         take the both-arms linearization (it would run the untaken arm's \
+                         effects) not in this brick"
+                            .into(),
+                    ));
+                }
                 self.record_elided_calls(cond);
                 self.lower_branch_arm(None, then)?;
                 self.lower_branch_arm(None, else_)?;
@@ -122,6 +147,30 @@ impl LowerCtx {
                         if crate::lower::is_heap_elem_list_ty(&subject.ty) {
                             self.heap_elem_lists.insert(v);
                         }
+                        // `map.find`'s `Option[(String, <scalar>)]` payload OWNS a HEAP slot (the
+                        // String) inside the tuple — the flat `heap_elem_lists`/`DropListStr` route
+                        // above would only `rc_dec` the TUPLE's own handle, leaking its String (the
+                        // exact class of bug this session's `_str`-dispatch fix already caught
+                        // elsewhere). Override with the type-specific recursive
+                        // `$__drop_opt_str_int` (generated, gated on `program_calls_map_find`) —
+                        // `variant_drop_handles` is checked BEFORE `heap_elem_lists` in the drop-op
+                        // cascade (`drop_op_for`), so this takes priority for the SAME value; the
+                        // `heap_elem_lists` entry above still stands and is harmlessly unused for
+                        // drop purposes (kept only so the Some-arm heap-bind admission gate, which
+                        // checks `heap_elem_lists.contains`, still fires).
+                        use almide_lang::types::constructor::TypeConstructorId;
+                        if let Ty::Applied(TypeConstructorId::Option, oa) = &subject.ty {
+                            if oa.len() == 1 {
+                                if let Ty::Tuple(tys) = &oa[0] {
+                                    if tys.len() == 2
+                                        && matches!(tys[0], Ty::String)
+                                        && !is_heap_ty(&tys[1])
+                                    {
+                                        self.variant_drop_handles.insert(v, "opt_str_int".to_string());
+                                    }
+                                }
+                            }
+                        }
                     }
                     if is_self_host_result_call(subject) {
                         self.materialized_results.insert(v);
@@ -159,7 +208,9 @@ impl LowerCtx {
                     // WALL it cleanly — never a trap. (The common `ok(x)` shape is already rewritten away
                     // and never reaches here.)
                     if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &subject.kind {
-                        if crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str())) {
+                        if crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str()))
+                            && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()))
+                        {
                             return Err(LowerError::Unsupported(
                                 "match over a never-err effect-fn call with a non-`ok(x)` Ok pattern \
                                  (ok(_)/structured/guarded) not in this brick — the effect-fn returns a \
@@ -661,8 +712,31 @@ impl LowerCtx {
         let cond_v = match self.lower_scalar_value(cond) {
             Some(v) => v,
             None => {
-                self.ops.truncate(ops_mark);
-                return false;
+                // A HEAP `==`/`!=` condition (`if e == err("a") then println(…) …` —
+                // the rc4 shape, previously the call-bearing linearization wall): the
+                // typed materialized eq yields a REAL scalar Bool (rollback-safe on
+                // decline), so the if executes ONE arm like any scalar cond.
+                let heap_eq = if let IrExprKind::BinOp { op, left, right } = &cond.kind {
+                    match op {
+                        almide_ir::BinOp::Eq if is_heap_ty(&left.ty) => {
+                            self.lower_heap_eq_cond(left, right, false)
+                        }
+                        almide_ir::BinOp::Neq if is_heap_ty(&left.ty) => {
+                            self.lower_heap_eq_cond(left, right, true)
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                match heap_eq {
+                    Some(v) => v,
+                    None => {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        return false;
+                    }
+                }
             }
         };
         self.ops.push(Op::IfThen { cond: cond_v, dst: None });
@@ -826,7 +900,12 @@ impl LowerCtx {
                     let bind = match inner.as_ref() {
                         IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some((*var, false, ty.clone())),
                         IrPattern::Bind { var, ty }
-                            if is_heap_ty(ty) && self.heap_elem_lists.contains(&subj) =>
+                            if is_heap_ty(ty)
+                                && (self.heap_elem_lists.contains(&subj)
+                                    // `Option[List[String]]` (the heap-acc fold value) — routed
+                                    // to the nested DropListListStr set; the payload-borrow
+                                    // discipline is identical.
+                                    || self.list_list_str_lists.contains(&subj)) =>
                         {
                             Some((*var, true, ty.clone()))
                         }
@@ -883,12 +962,16 @@ impl LowerCtx {
                 use almide_lang::types::constructor::TypeConstructorId;
                 if matches!(&bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
                     self.materialized_options.insert(payload);
-                    if crate::lower::is_heap_elem_list_ty(&bind_ty) {
+                    if crate::lower::is_lenlist_list_ty(&bind_ty) {
+                        self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+                    } else if crate::lower::is_heap_elem_list_ty(&bind_ty) {
                         self.heap_elem_lists.insert(payload);
                     }
                 } else if crate::lower::is_result_ty(&bind_ty) {
                     self.materialized_results.insert(payload);
-                    if crate::lower::is_heap_elem_list_ty(&bind_ty) {
+                    if crate::lower::is_lenlist_list_ty(&bind_ty) {
+                        self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+                    } else if crate::lower::is_heap_elem_list_ty(&bind_ty) {
                         self.heap_elem_lists.insert(payload);
                     }
                 }
@@ -913,8 +996,17 @@ impl LowerCtx {
 
 include!("control_p2.rs");
 include!("control_p3.rs");
-include!("control_p4.rs");
-include!("control_p5.rs");
+include!("heap_result_arm.rs");
+include!("result_materialize.rs");
+include!("result_ctors.rs");
+include!("scalar_for.rs");
+// The defunc HOF family (formerly one 3.5k-line control_p5.rs), split by concern:
+include!("defunc_hof.rs");
+include!("defunc_fold.rs");
+include!("defunc_str_acc.rs");
+include!("defunc_find.rs");
+include!("defunc_tuple_fold.rs");
+include!("control_while.rs");
 
 /// Is `subject` a call to a SELF-HOST Option-returning stdlib fn? Such a call returns a
 /// real MATERIALIZED 0-or-1-element-list Option (its impl returns through `Some(scalar)`/

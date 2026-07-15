@@ -545,13 +545,19 @@
     // path_create_directory / path_remove_directory+path_unlink_file + the cap-as-tag
     // `Result[Unit, String]` build); `$read_line` (`PrimKind::ReadLine`, Capability::Stdin) is
     // the byte-by-byte fd_read-from-stdin + canonical-String build the self-hosted
-    // `io.read_line` reaches. Each is a host-call boundary with no pure-Almide form, accounted in
+    // `io.read_line` reaches. `$path_filestat_q` (`PrimKind::PathFilestat`, Capability::FsRead)
+    // is the FULL path_filestat_get bridge the self-hosted `fs.stat` reaches (the host writes
+    // the raw 64-byte filestat into the self-host's own scratch — the field reads stay Almide).
+    // Each is a host-call boundary with no pure-Almide form, accounted in
     // the closed host-floor set exactly like the read sequences above.
+    // `$env_get` (`PrimKind::EnvGet`, Capability::CliArgs — the Env profile's cap) is the
+    // environ_sizes_get/environ_get lookup + Option[String] build the self-hosted
+    // `env.get` reaches (C-133) — the same host-call-boundary class as `$args_get_list`.
     const WASI_FLOOR_FNS: &[&str] = &[
-        "$args_get_list", "$read_text_file", "$rtf_str", "$rtf_result", "$alloc8",
+        "$args_get_list", "$env_get", "$read_text_file", "$rtf_str", "$rtf_result", "$alloc8",
         "$read_dir", "$str_lt", "$is_dot_entry",
         "$write_text_file", "$make_dir", "$remove_all", "$remove_path", "$read_line",
-        "$read_n_bytes", "$path_exists",
+        "$read_n_bytes", "$path_exists", "$path_filestat_q",
     ];
 
     // The §13 TERMINATION-CONVENTION floor: contract-mandated aborts (C-001/C-035
@@ -559,8 +565,11 @@
     // is a diverging stderr writer the capability model deliberately excludes
     // (an abort is a halt, not an effect). A new entry must correspond to a
     // contract-pinned abort fixture in spec/wasm_cross.
+    // `$__main_err` is C-035's v1 realization (the explicit-Result main Err protocol:
+    // `Error: <msg>` on STDERR + proc_exit(1)) — the same diverging-stderr-writer class as
+    // `$__div_trap`, pinned by C-035's spec/wasm_cross fixtures.
     const TERMINATION_FLOOR_FNS: &[&str] =
-        &["$__div_trap", "$__chk_div", "$__chk_rem", "$__die", "$elem_addr_chk"];
+        &["$__div_trap", "$__chk_div", "$__chk_rem", "$__die", "$elem_addr_chk", "$__main_err"];
 
     #[test]
     fn handwritten_wasm_runtime_does_not_grow() {

@@ -6,7 +6,7 @@
 
 ## Active
 
-62 items
+64 items
 
 | Item | Description |
 |------|-------------|
@@ -18,6 +18,7 @@
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
 | [Closure Architecture v2](active/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
 | [Closure cross-target completeness](active/closure-cross-target-completeness.md) |  |
+| [Code Health: Codopsy-Driven File Splits and Function Decomposition](active/code-health-codopsy.md) | Codopsy-driven code health: split 1000+ line files, decompose cog>100 fns |
 | [Codegen traversal totality](active/codegen-traversal-totality.md) |  |
 | [Completeness by Construction](active/completeness-by-construction.md) |  |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
@@ -37,6 +38,7 @@
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) |  |
 | [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](active/native-boxed-pattern-lowering.md) |  |
+| [Native Trust Spine — Perceus as the single memory model (#764)](active/native-trust-spine.md) |  |
 | [Protocols: declared conformance + opt-in `any P`](active/protocol-any-existentials.md) | Declared conformance + opt-in `any P` existentials — take Go's interface-value ergonomics without its implicit-satisfaction and nil-interface traps; the one Swift idea worth stealing, none of the rest |
 | [Receipt Logic — 受領書の論理](active/receipt-logic.md) | Formal foundation for the trust layer — receipt logic: claim types, threat model, trust bases, falsification procedures, completeness relative to use-case |
 | [reconciliation follow-up — v0.28.0 で見送った develop 側の残件](active/reconciliation-followup.md) | v0.28.0 reconciliation follow-up: deferred develop commits for 0.28.1 |
@@ -112,13 +114,18 @@
 
 ## Done
 
-253 items
+258 items
 
 <details>
-<summary>Show all 253 completed items</summary>
+<summary>Show all 258 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-07-15 | [Claim wording: Perceus phrasing and the byte-identity guarantee scope](done/claim-wording-perceus-byte-identity.md) | Two claim-wording fixes so the public pitch is 100% backed by measurement |
+| 2026-07-14 | [v1 walled-real → 0 (ENDGAME — COMPLETE 2026-07-14, 112 → 0)](done/v1-wall-histogram-goal.md) | ENDGAME COMPLETE - v1 walled-real 112 to 0 (2026-07-14); stage ledger B1-B129 |
+| 2026-07-10 | [GOAL PROMPT — closure env full mode: heap, Float and Fn captures](done/closure-env-heap-captures-goal.md) | GOAL PROMPT — closure env full mode: heap/Float/Fn captures with masked recursive drop |
+| 2026-07-09 | [GOAL PROMPT — cert format brick 6: retire the extraction trust (kernel oracle + verified extraction)](done/cert-format-brick6-goal.md) | GOAL PROMPT — cert format brick 6: retire extraction trust (kernel-as-oracle gate + verified extraction) |
+| 2026-07-08 | [GOAL PROMPT — cert format brick 5: full mode (branch agreement + `b` + closure signatures)](done/cert-format-brick5-goal.md) | GOAL PROMPT — cert format brick 5: full mode (branch resource-state agreement + closure-env borrow + closure signatures) |
 | 2026-07-04 | [Crush-Pass Continuation — gguf + Matrix walls closed](done/crush-pass-continuation.md) | gguf ADT walls, the Matrix value model, and coverage pins — all closed; nn walls 0 |
 | 2026-07-02 | [Handoff — porta wall=0 + read_message cross-module on v1 (session record)](done/v1-porta-read-message-handoff.md) | PC-switch handoff: porta wall=0 + read_message cross-module on v1 (steps 1-3 done) |
 | 2026-06-05 | [WASM Remaining 15 Skips — Fix Roadmap](done/wasm-remaining-15.md) | WASM spec skip burndown — fixable skips all resolved, 233/233 wasm-eligible (8 intentional skips) |

@@ -1934,4 +1934,35 @@ fn derived_codec_option_fields_decode() {
              {\"name\":\"B\",\"nick\":null,\"age\":null}"
         );
     }
+
+}
+
+#[test]
+fn heap_and_fn_captures_execute_and_free_via_drop_closure() {
+    // CLOSURE ENV FULL MODE: a String capture (co-owned, read back borrowed), a
+    // List[Int] capture, and Fn captures (compose — the block captures two other
+    // closure blocks, freed by $__drop_closure's SELF-RECURSION). Every closure
+    // drop routes through the self-describing $__drop_closure — slot 0 (the
+    // fnidx) is never treated as a pointer: a corrupted free would trap here,
+    // so a clean byte-matched run IS the slot-0/mask/recursion pin.
+    let src = "fn greeter(name: String) -> (String) -> String = (x) => name + \", \" + x\n\
+        fn adder(n: Int) -> (Int) -> Int = (x) => x + n\n\
+        fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int = (x) => g(f(x))\n\
+        effect fn main() -> Unit = {\n\
+        let hi = greeter(\"Hello\")\n\
+        println(hi(\"world\"))\n\
+        let ns = [10, 20, 30]\n\
+        let picker = (i: Int) => list.get(ns, i) ?? 0\n\
+        println(int.to_string(picker(1)))\n\
+        let h = compose(adder(3), adder(100))\n\
+        println(int.to_string(h(5))) }\n";
+    let prog = lower_source(src);
+    let wat = render_wasm_program(&prog);
+    assert!(
+        wat.contains("$__drop_closure"),
+        "closure drops must route through the uniform recursive $__drop_closure"
+    );
+    if let Some(out) = build_and_run("heap_fn_captures", &wat) {
+        assert_eq!(out, "Hello, world\n20\n108");
+    }
 }

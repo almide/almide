@@ -1,0 +1,12 @@
+// A REAL capturing closure through the actual frontend: `adder(3)` materializes a
+// CLOSURE BLOCK (fnidx + the captured scalar) — a fresh owned heap value ("im" in
+// adder, "id" at main's scope end) — and `f(5)` dispatches through CallIndirect
+// with the block as the borrowed env arg. The call-mode witness expands the
+// indirect site against the lifted lambda's signature (env = one borrowed heap
+// param), so the closure boundary rides the proven per-site agreement.
+fn adder(n: Int) -> (Int) -> Int = (x) => x + n
+
+fn main() -> Int = {
+  let f = adder(3)
+  f(5)
+}

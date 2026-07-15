@@ -1,0 +1,44 @@
+// result_collect — SELF-HOSTED result.collect: List[Result[Int, String]] →
+// Result[List[Int], List[String]]. v0 gathers EVERY Err payload in list order
+// (mixed → err(["x", "y"])); with no Err the Ok ints collect in order.
+// Element layout: the outer list's slot i (@ sh+12+8i) holds the element
+// Result handle; a Result[Int, String] is len-as-tag (@4: Ok=0, Err=1) with
+// the payload in slot 0 (@12 — an i64 scalar for Ok, an owned String handle
+// for Err). Err strings are DEEP-COPIED (string.repeat ·1 — the
+// list_filter_str discipline) so the result is single-owned; source borrowed,
+// result owned. The caller-side drop is the TAG-AWARE `$__drop_res_ilsl`.
+
+fn __rcol_errs(dh: Int, sh: Int, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let e = prim.load64(sh + 12 + i * 8)
+    if prim.load32(e + 4) == 1 then {
+      let s = prim.load_str(e + 12)
+      let copy = string.repeat(s, 1)
+      prim.store_str(dh + 12 + di * 8, copy)
+      __rcol_errs(dh, sh, n, i + 1, di + 1)
+    }
+    else __rcol_errs(dh, sh, n, i + 1, di)
+  }
+
+fn __rcol_oks(dh: Int, sh: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let e = prim.load64(sh + 12 + i * 8)
+    prim.store64(dh + 12 + i * 8, prim.load64(e + 12))
+    __rcol_oks(dh, sh, n, i + 1)
+  }
+
+fn result_collect(rs: List[Result[Int, String]]) -> Result[List[Int], List[String]] = {
+  let sh = prim.handle(rs)
+  let n = prim.load32(sh + 4)
+  let ebuf = prim.alloc_list_str(n)
+  let ec = __rcol_errs(prim.handle(ebuf), sh, n, 0, 0)
+  prim.store32(prim.handle(ebuf) + 4, ec)
+  if ec > 0 then err(ebuf)
+  else {
+    let obuf = prim.alloc_list(n)
+    __rcol_oks(prim.handle(obuf), sh, n, 0)
+    ok(obuf)
+  }
+}

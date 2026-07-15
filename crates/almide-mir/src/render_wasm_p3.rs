@@ -1,6 +1,15 @@
 /// The fixed WAT runtime: WASI import, memory, bump allocator, list ops, integer
 /// formatting, and line printing. Addresses are the named constants above.
+/// The bump allocator starts at [`HEAP_BASE`]; [`preamble_with_bump_base`] shifts
+/// it past the mutable-global slot region.
 pub(crate) fn preamble() -> String {
+    preamble_with_bump_base(HEAP_BASE)
+}
+
+/// [`preamble`] with the bump allocator starting at `bump_base` (`HEAP_BASE +
+/// 8*mutable_global_count`), so the mutable-global slots `[HEAP_BASE, bump_base)`
+/// are never allocated over. With no mutable globals this IS `preamble()`.
+pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     format!(
         r#"(module
   (import "wasi_snapshot_preview1" "fd_write"
@@ -11,6 +20,10 @@ pub(crate) fn preamble() -> String {
     (func $args_sizes_get (param i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "args_get"
     (func $args_get (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "environ_sizes_get"
+    (func $environ_sizes_get (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "environ_get"
+    (func $environ_get (param i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "path_open"
     (func $path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "fd_read"
@@ -53,7 +66,13 @@ pub(crate) fn preamble() -> String {
   (data (i32.const {MKDIR_ERR_ADDR}) "mkdir failed")
   ;; the fs.remove_all path_remove_directory/path_unlink_file error message — a CONST byte run.
   (data (i32.const {REMOVE_ERR_ADDR}) "remove failed")
-  (global $bump (mut i32) (i32.const {HEAP_BASE}))
+  (global $bump (mut i32) (i32.const {bump_base}))
+  ;; env.get's ONE-TIME environ snapshot (the environment is immutable for the
+  ;; guest's lifetime): 0 = not yet read; else the pointer array + entry count.
+  ;; Caching bounds the WASI scratch to one allocation (a per-call re-read leaked
+  ;; envp/envbuf each call — the env.get leak-loop OOM).
+  (global $env_envp (mut i32) (i32.const 0))
+  (global $env_cnt (mut i32) (i32.const 0))
   ;; __div_trap(msg,len): write the interned abort line to STDERR and proc_exit(1)
   ;; — the render-path twin of v0-wasm's __div_trap (§13 termination convention).
   ;; Uses the fd_write iovec scratch; never returns.
@@ -61,6 +80,27 @@ pub(crate) fn preamble() -> String {
     (i32.store (i32.const {IOVEC_ADDR}) (local.get $msg))
     (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const {IOVEC_LEN_OFFSET}))
       (local.get $len))
+    (drop (call $fd_write (i32.const 2) (i32.const {IOVEC_ADDR})
+      (i32.const 1) (i32.const {NWRITTEN_ADDR})))
+    (call $proc_exit (i32.const 1))
+    (unreachable))
+  ;; __main_err(s): the explicit-Result main Err protocol — v0 prints `Error: <msg>` to
+  ;; STDERR and exits 1 (the native main wrapper); this writes the same three spans
+  ;; (prefix / payload bytes / newline) and proc_exit(1). The prefix + newline reuse the
+  ;; div-zero line's bytes ("Error: " head, "\n" tail) — no new data segment.
+  (func $__main_err (param $s i32)
+    (i32.store (i32.const {IOVEC_ADDR}) (i32.const {DIVZERO_MSG_ADDR}))
+    (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const {IOVEC_LEN_OFFSET}))
+      (i32.const {MAIN_ERR_PREFIX_LEN}))
+    (drop (call $fd_write (i32.const 2) (i32.const {IOVEC_ADDR})
+      (i32.const 1) (i32.const {NWRITTEN_ADDR})))
+    (i32.store (i32.const {IOVEC_ADDR}) (i32.add (local.get $s) (i32.const {LIST_HEADER})))
+    (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const {IOVEC_LEN_OFFSET}))
+      (i32.load (i32.add (local.get $s) (i32.const {LIST_LEN_OFFSET}))))
+    (drop (call $fd_write (i32.const 2) (i32.const {IOVEC_ADDR})
+      (i32.const 1) (i32.const {NWRITTEN_ADDR})))
+    (i32.store (i32.const {IOVEC_ADDR}) (i32.const {MAIN_ERR_NL_ADDR}))
+    (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const {IOVEC_LEN_OFFSET})) (i32.const 1))
     (drop (call $fd_write (i32.const 2) (i32.const {IOVEC_ADDR})
       (i32.const 1) (i32.const {NWRITTEN_ADDR})))
     (call $proc_exit (i32.const 1))
@@ -197,6 +237,7 @@ pub(crate) fn preamble() -> String {
     (i32.store (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET}))
                (i32.add (i32.load (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET})))
                         (i32.const 1))))
+
 
   (func $elem_addr (param $list i32) (param $idx i32) (result i32)
     ;; SAFETY WALL: an out-of-range index would compute an address OUTSIDE the
@@ -341,7 +382,10 @@ pub(crate) fn preamble() -> String {
   ;; canonical `[rc][len][cap][bytes…]` String copied from the argv C-string. The
   ;; result is the third sandbox exit (Capability::CliArgs) — its dst is an owned
   ;; heap handle the caller's scope-end DropListStr balances.
-  (func $args_get_list (result i32)
+  ;; $skip = how many leading argv entries to drop: 1 = env.args (argv[1..], the
+  ;; program args only), 0 = process.args (argv[0..] — std::env::args includes the
+  ;; program path). ONE WAT bridge serves both prims (no host-floor growth).
+  (func $args_get_list (param $skip i32) (result i32)
     (local $argc_ptr i32) (local $bufsz_ptr i32) (local $argc i32)
     (local $count i32) (local $bufsz i32) (local $argv i32) (local $argbuf i32)
     (local $result i32) (local $i i32) (local $cstr i32) (local $slen i32)
@@ -352,11 +396,11 @@ pub(crate) fn preamble() -> String {
     (drop (call $args_sizes_get (local.get $argc_ptr) (local.get $bufsz_ptr)))
     (local.set $argc (i32.load (local.get $argc_ptr)))
     (local.set $bufsz (i32.load (local.get $bufsz_ptr)))
-    ;; count = max(argc - 1, 0): drop argv[0]. Clamp so a degenerate argc 0 never
-    ;; underflows the unsigned loop bound below.
+    ;; count = max(argc - $skip, 0). Clamp so a degenerate argc never underflows
+    ;; the unsigned loop bound below.
     (local.set $count
-      (select (i32.sub (local.get $argc) (i32.const 1)) (i32.const 0)
-              (i32.ge_u (local.get $argc) (i32.const 1))))
+      (select (i32.sub (local.get $argc) (local.get $skip)) (i32.const 0)
+              (i32.ge_u (local.get $argc) (local.get $skip))))
     ;; Phase 2: alloc the pointer array (argc i32 ptrs, +4 guard) + the string buffer,
     ;; then fill them via args_get.
     (local.set $argv (call $alloc (i32.add (i32.mul (local.get $argc) (i32.const 4)) (i32.const 4))))
@@ -369,9 +413,9 @@ pub(crate) fn preamble() -> String {
     (local.set $i (i32.const 0))
     (block $done (loop $loop
       (br_if $done (i32.ge_u (local.get $i) (local.get $count)))
-      ;; cstr = argv[$i + 1]
+      ;; cstr = argv[$i + $skip]
       (local.set $cstr (i32.load (i32.add (local.get $argv)
-                                          (i32.mul (i32.add (local.get $i) (i32.const 1)) (i32.const 4)))))
+                                          (i32.mul (i32.add (local.get $i) (local.get $skip)) (i32.const 4)))))
       ;; slen = strlen(cstr): scan to NUL
       (local.set $slen (i32.const 0))
       (block $sdone (loop $sloop
@@ -396,6 +440,88 @@ pub(crate) fn preamble() -> String {
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
       (br $loop)))
     (local.get $result))
+
+  ;; env.get(name) — the WASI environ lookup floor. Scans the `KEY=VALUE\0` entries
+  ;; (environ_sizes_get/environ_get — the SAME two-phase discovery as $args_get_list)
+  ;; for `name` followed by '=' (byte-exact against the canonical String's bytes @12;
+  ;; first hit wins — std::env::var is the oracle, C-133). Returns a fresh OWNED
+  ;; `Option[String]`: a len-0 block (none) or a len-1 block whose @12 slot owns the
+  ;; value String (the `materialize_opt_str_some` layout) — the caller's `match`/`??`/
+  ;; `DropListStr` machinery handles it identically to a self-host-built Option. The
+  ;; Env profile's Capability::CliArgs sandbox exit; dst is an owned heap handle.
+  (func $env_get (param $key i32) (result i32)
+    (local $klen i32) (local $kdata i32)
+    (local $cnt_ptr i32) (local $sz_ptr i32) (local $cnt i32) (local $bufsz i32)
+    (local $envp i32) (local $envbuf i32) (local $i i32) (local $entry i32)
+    (local $j i32) (local $val i32) (local $vlen i32) (local $str i32)
+    (local $opt i32)
+    (local.set $klen (i32.load (i32.add (local.get $key) (i32.const {LIST_LEN_OFFSET}))))
+    (local.set $kdata (i32.add (local.get $key) (i32.const {LIST_HEADER})))
+    ;; Phases 1-2 run ONCE per program (the guest environment is immutable):
+    ;; the snapshot's pointer array + count live in $env_envp/$env_cnt. WASI
+    ;; demands 4-ALIGNED i32 out-pointers and $alloc guarantees no alignment —
+    ;; over-allocate and round up (the +3 & -4 idiom), for the pointer ARRAY too.
+    (if (i32.eqz (global.get $env_envp))
+      (then
+        (local.set $cnt_ptr (i32.and (i32.add (call $alloc (i32.const 8)) (i32.const 3)) (i32.const -4)))
+        (local.set $sz_ptr (i32.and (i32.add (call $alloc (i32.const 8)) (i32.const 3)) (i32.const -4)))
+        (drop (call $environ_sizes_get (local.get $cnt_ptr) (local.get $sz_ptr)))
+        (local.set $cnt (i32.load (local.get $cnt_ptr)))
+        (local.set $bufsz (i32.load (local.get $sz_ptr)))
+        (local.set $envp (i32.and (i32.add (call $alloc (i32.add (i32.mul (local.get $cnt) (i32.const 4)) (i32.const 8))) (i32.const 3)) (i32.const -4)))
+        (local.set $envbuf (call $alloc (i32.add (local.get $bufsz) (i32.const 4))))
+        (drop (call $environ_get (local.get $envp) (local.get $envbuf)))
+        (global.set $env_envp (local.get $envp))
+        (global.set $env_cnt (local.get $cnt))))
+    (local.set $envp (global.get $env_envp))
+    (local.set $cnt (global.get $env_cnt))
+    ;; Phase 3: scan. $opt = 0 marks "not found yet".
+    (local.set $opt (i32.const 0))
+    (local.set $i (i32.const 0))
+    (block $done (loop $loop
+      (br_if $done (i32.ge_u (local.get $i) (local.get $cnt)))
+      (local.set $entry (i32.load (i32.add (local.get $envp) (i32.mul (local.get $i) (i32.const 4)))))
+      ;; Prefix compare: $j == $klen afterwards ⟺ the key bytes all matched.
+      (local.set $j (i32.const 0))
+      (block $pdone (loop $ploop
+        (br_if $pdone (i32.ge_u (local.get $j) (local.get $klen)))
+        (br_if $pdone (i32.ne (i32.load8_u (i32.add (local.get $entry) (local.get $j)))
+                              (i32.load8_u (i32.add (local.get $kdata) (local.get $j)))))
+        (local.set $j (i32.add (local.get $j) (i32.const 1)))
+        (br $ploop)))
+      (if (i32.and (i32.eq (local.get $j) (local.get $klen))
+                   (i32.eq (i32.load8_u (i32.add (local.get $entry) (local.get $klen)))
+                           (i32.const 61)))  ;; '='
+        (then
+          ;; $val = the NUL-terminated value bytes after '='.
+          (local.set $val (i32.add (i32.add (local.get $entry) (local.get $klen)) (i32.const 1)))
+          (local.set $vlen (i32.const 0))
+          (block $sdone (loop $sloop
+            (br_if $sdone (i32.eqz (i32.load8_u (i32.add (local.get $val) (local.get $vlen)))))
+            (local.set $vlen (i32.add (local.get $vlen) (i32.const 1)))
+            (br $sloop)))
+          ;; Build the canonical value String [rc][len][cap][bytes].
+          (local.set $str (call $alloc (i32.add (i32.const {LIST_HEADER}) (local.get $vlen))))
+          (i32.store (i32.add (local.get $str) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))
+          (i32.store (i32.add (local.get $str) (i32.const {LIST_LEN_OFFSET})) (local.get $vlen))
+          (i32.store (i32.add (local.get $str) (i32.const {LIST_CAP_OFFSET})) (local.get $vlen))
+          (local.set $j (i32.const 0))
+          (block $cdone (loop $cloop
+            (br_if $cdone (i32.ge_u (local.get $j) (local.get $vlen)))
+            (i32.store8 (i32.add (i32.add (local.get $str) (i32.const {LIST_HEADER})) (local.get $j))
+                        (i32.load8_u (i32.add (local.get $val) (local.get $j))))
+            (local.set $j (i32.add (local.get $j) (i32.const 1)))
+            (br $cloop)))
+          ;; some(str): a len-1 block owning the String @12.
+          (local.set $opt (call $list_new (i32.const 1) (i32.const 1)))
+          (call $list_set (local.get $opt) (i32.const 0) (i64.extend_i32_u (local.get $str)))))
+      (br_if $done (i32.ne (local.get $opt) (i32.const 0)))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $loop)))
+    ;; none: a len-0 block (the canonical empty Option).
+    (if (i32.eqz (local.get $opt))
+      (then (local.set $opt (call $list_new (i32.const 0) (i32.const 0)))))
+    (local.get $opt))
 
   ;; fs.read_text(path) — open the file at $path and read its bytes, returning a fresh
   ;; OWNED `Result[String, String]` in the EXACT `materialize_result_str` cap-as-tag
@@ -603,6 +729,22 @@ pub(crate) fn preamble() -> String {
   ;; file OR directory exists there → return 1, else 0 — matching native Path::exists(). The stat
   ;; buffer is 8-aligned $alloc8 scratch (the host writes i64 fields there). Returns a SCALAR i32
   ;; Bool (the caller i64.extend's it) — NO heap result, so no Capability beyond FsRead.
+  ;; fs.stat(path) — the WASI FULL-stat floor. $buf is a CALLER-OWNED 64-byte scratch (the
+  ;; self-host's Bytes data region — the host writes the WASI filestat there: filetype@16,
+  ;; size@32, mtim@48); $path a BORROWED canonical String. Same resolution as $path_exists
+  ;; (leading '/' stripped, preopen fd 3, symlink_follow). Returns the RAW errno (0 = ok).
+  (func $path_filestat_q (param $buf i32) (param $path i32) (result i32)
+    (local $pdata i32) (local $plen i32)
+    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
+    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
+    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
+                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
+      (then
+        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
+        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    (call $path_filestat_get (i32.const 3) (i32.const 1) (local.get $pdata) (local.get $plen)
+                             (local.get $buf)))
+
   (func $path_exists (param $path i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $stat i32) (local $errno i32)
     ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.

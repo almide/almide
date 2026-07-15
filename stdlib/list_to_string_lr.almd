@@ -1,0 +1,6 @@
+// list_to_string_lr — SELF-HOSTED `${xs}` interp display for a `List[Result[Int, String]]`
+// (v0 renders `[ok(1), err("bad")]` via Debug — fan.settle's pure-thunk result list).
+// Composed exactly like list_to_string_lo: each element renders through its own `"${r}"`
+// interp (routing picks result.to_string for the (Int, String) pair), joined inside brackets.
+fn list_to_string_lr(xs: List[Result[Int, String]]) -> String =
+  "[" + (xs |> list.map((r) => "${r}") |> list.join(", ")) + "]"

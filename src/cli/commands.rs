@@ -273,14 +273,6 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
     almide::optimize::optimize_program(&mut ir_program);
     almide::mono::monomorphize(&mut ir_program);
     if prof { marks.push(("opt_mono", std::time::Instant::now())); }
-    // fan.timeout has no wall clock on WASM (runs the thunk to completion); warn.
-    if almide::codegen::program_uses_fan_timeout(&ir_program) {
-        eprintln!(
-            "warning: fan.timeout uses a wall clock, which the WASM target has none of — \
-             on WASM the thunk runs to completion and the timeout never elapses, so its result \
-             can differ from native. fan.timeout is excluded from the cross-target equivalence guarantee."
-        );
-    }
     // Native-only matrix ops (e.g. qwen3_block_q1_0_kv) have no WASM lowering;
     // skip with a clear reason instead of reaching the emitter (whose panic would
     // surface as a generic "WASM codegen panic" skip).
@@ -310,8 +302,12 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         return skip(format!("write: {}", e));
     }
 
+    // `-S inherit-env=y` mirrors `cmd_run_wasm`: `env.get` in a test observes the
+    // same host variables native does (the env cross-target contract).
     let output = std::process::Command::new("wasmtime")
         .arg("--dir=/")
+        .arg("-S")
+        .arg("inherit-env=y")
         .arg(wasm_path.to_str().unwrap())
         .output();
     match output {
@@ -793,7 +789,7 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
     }
 
     for test_file in &test_files {
-        let code = super::cmd_run_inner(test_file, &program_args, false, true, false);
+        let code = super::cmd_run_inner(test_file, &program_args, false, true, false, false);
         // Emit JSON per file
         let status = if code == 0 { "pass" } else { "fail" };
         println!(

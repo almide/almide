@@ -188,6 +188,24 @@ fn random_get(buf: Int, len: Int) -> Int = _
 @intrinsic("almide_rt_prim_args_get_list")
 fn args_get_list() -> List[String] = _
 
+// The argv[0]-INCLUSIVE twin of args_get_list — `process.args()` = native
+// std::env::args() (program path + program args). The SAME args_sizes_get/args_get
+// WASI bridge with skip=0; the SAME Capability::CliArgs accounting. Reached only by
+// the self-hosted `process.args` (process_args.almd). No native runtime impl.
+@intrinsic("almide_rt_prim_args_get_list_full")
+fn args_get_list_full() -> List[String] = _
+
+// The environ_sizes_get + environ_get WASI lookup, packaged as ONE high-level HEAP-RESULT
+// prim — the Env profile's sandbox exit (reaches Capability::CliArgs, the same
+// process-initial-state class as argv). Scans the `KEY=VALUE` environ entries for `name`
+// followed by '=' (byte-exact, first hit wins; std::env::var is the oracle — C-133) and
+// returns a fresh OWNED `Option[String]` (the value String owned when some). Reached only
+// by the self-hosted `env.get` (env_get.almd) in the v1 trust-spine wasm backend; the
+// render emits the $env_get preamble routine. No native runtime impl — the native target
+// uses env.get's own @intrinsic.
+@intrinsic("almide_rt_prim_env_get")
+fn env_get(name: String) -> Option[String] = _
+
 // The path_open + fd_read WASI host calls, packaged as ONE high-level HEAP-RESULT prim —
 // the FS-READ sandbox exit (reaches Capability::FsRead). Opens the file at `path` (relative
 // to the first preopened dir, leading '/' stripped — the same absolute-path fallback native
@@ -254,6 +272,37 @@ fn make_dir(path: String) -> Result[Unit, String] = _
 // runtime impl — the native target uses fs.remove_all's own @intrinsic.
 @intrinsic("almide_rt_prim_remove_all")
 fn remove_all(path: String) -> Result[Unit, String] = _
+
+// The path_filestat_get WASI EXISTENCE query, packaged as ONE high-level SCALAR prim — a
+// FS-READ sandbox exit (reaches Capability::FsRead — a stat IS a filesystem read, the SAME
+// capability as read_text_file, NOT a new one). Stats `path` (preopen-relative, leading '/'
+// stripped — the same resolution read_text_file uses) and returns `true` iff a file OR
+// directory exists there (errno 0), matching native `Path::exists()`. UNLIKE the fs prims
+// above this is NOT a heap result — a stat allocates nothing. Reached only by the self-hosted
+// `fs.exists` (fs_exists.almd) in the v1 trust-spine wasm backend; the render emits the WASI
+// path_filestat_get query. No native runtime impl — the native target uses fs.exists's own
+// @intrinsic.
+@intrinsic("almide_rt_prim_path_exists")
+fn path_exists(path: String) -> Bool = _
+
+// RawPtr ⇄ Int reinterpret casts — the SAME i64 scalar at the value level (a raw
+// linear-memory address); the v1 lowering emits NO op (identity), the type system
+// just changes hats. The bytes_rawptr bridge's address arithmetic runs on Int.
+@intrinsic("almide_rt_prim_ptr_to_int")
+fn ptr_to_int(p: RawPtr) -> Int = _
+@intrinsic("almide_rt_prim_int_to_ptr")
+fn int_to_ptr(a: Int) -> RawPtr = _
+
+// The path_filestat_get WASI FULL-stat query, packaged as ONE high-level SCALAR prim — a
+// FS-READ sandbox exit (Capability::FsRead, same accounting as path_exists). Writes the raw
+// 64-byte WASI filestat at the caller-owned scratch ADDRESS `buf` (the self-host's own Bytes
+// data region: filetype@16, size@32, mtim@48) for `path` (preopen-relative, leading '/'
+// stripped) and returns the raw errno (0 = the buffer is filled). Reached only by the
+// self-hosted `fs.stat` (fs_stat.almd), which reads the fields back via prim.load* and builds
+// the FileStat record in ordinary Almide. No native runtime impl — the native target uses
+// fs.stat's own @intrinsic.
+@intrinsic("almide_rt_prim_path_filestat")
+fn path_filestat(buf: Int, path: String) -> Int = _
 
 // The fd_read-from-stdin line-read WASI host call, packaged as ONE high-level HEAP-RESULT prim —
 // the STANDARD-INPUT sandbox exit (reaches Capability::Stdin, a DISTINCT capability: reading the

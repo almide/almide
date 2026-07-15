@@ -114,7 +114,7 @@ fn unit_ir() -> IrExpr {
     IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None }
 }
 
-/// True for a `fan.*` call (`fan.any`/`settle`/`race`/`map`/`timeout`, in either
+/// True for a `fan.*` call (`fan.any`/`settle`/`race`/`map`, in either
 /// `Module{fan}` or already-lowered `almide_rt_fan_*` form). Their closure
 /// arguments run on threads and must stay raw (`Send + Sync`); `Rc<dyn Fn>` is
 /// neither, so boxing them would break the Rust target.
@@ -144,7 +144,7 @@ fn unbox_consumed(e: &mut IrExpr) -> bool {
     false
 }
 
-/// `fan.*` method name (`map`/`race`/`any`/`settle`/`timeout`) for a fan call in
+/// `fan.*` method name (`map`/`race`/`any`/`settle`) for a fan call in
 /// either `Module{fan, func}` or already-lowered `almide_rt_fan_*` form.
 fn fan_method(expr: &IrExpr) -> Option<String> {
     match &expr.kind {
@@ -299,7 +299,6 @@ fn box_node(expr: &mut IrExpr) -> bool {
     //   map → `Rc<dyn Fn>`: the runtime runs it SEQUENTIALLY over an `Rc<dyn Fn>`,
     //     which also accepts a closure VALUE in a var — a `Send + Sync` box can't,
     //     since the uniform repr of a stored closure is `Rc` (neither Send nor Sync).
-    //   timeout → left raw: one monomorphic thunk already satisfies `impl Fn + Send`.
     if let Some(method) = fan_method(expr) {
         let args = match &mut expr.kind {
             IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => args,

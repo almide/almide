@@ -236,8 +236,22 @@ impl LowerCtx {
         // input stream is neither a write, a filesystem, an entropy, nor a clock effect). The
         // caller is an `effect fn` (declares the host caps) so the `used ⊆ declared` checker
         // verifies it; a pure caller is a frontend error.
+        // `random.choice` / `random.shuffle` self-host over the SAME prim.random_get floor
+        // (random_choice.almd / random_shuffle.almd — typed element variants selected in
+        // `list_heap_call_name`, unsupported elements route `_x` and wall at render), so the
+        // transitive cap_witness counts Entropy exactly like `random.int`.
         let is_admitted_effectful = (module == "random" && func == "int")
+            // `process.args` = argv[0]-inclusive CLI args (std::env::args) — self-hosted
+            // over the SAME WASI args bridge as env.args (skip=0), Capability::CliArgs.
+            || (module == "process" && func == "args")
+            || (module == "random" && matches!(func, "choice" | "shuffle"))
             || (module == "env" && func == "args")
+            // `env.get` READS the process environment — Capability::CliArgs (the Env
+            // profile's canonical cap, argv and environ are the same initial-state
+            // class). Self-hosted to `prim.env_get` (env_get.almd → the WASI environ
+            // $env_get floor), so its prim is in the program map and the transitive
+            // cap_witness counts CliArgs. Returns Option[String] (heap Option block).
+            || (module == "env" && func == "get")
             || (module == "env" && func == "unix_timestamp")
             || (module == "fs" && func == "read_text")
             || (module == "fs" && func == "read_bytes_raw")
@@ -252,6 +266,11 @@ impl LowerCtx {
             // and the transitive cap_witness counts FsRead. UNLIKE the heap-Result fs prims,
             // it returns a SCALAR Bool (no allocation, no scope-end drop).
             || (module == "fs" && func == "exists")
+            // `fs.stat` READS the filesystem (the full path_filestat_get) — REUSES
+            // Capability::FsRead. Self-hosted to `prim.path_filestat` (fs_stat.almd), so its
+            // prim floor is in the program map and the transitive cap_witness counts FsRead.
+            // Returns Result[FileStat, String] (a record Ok payload).
+            || (module == "fs" && func == "stat")
             || (module == "io" && func == "print")
             || (module == "io" && func == "read_line")
             // `io.read_n_bytes` READS standard input (the SIBLING of read_line) — REUSES
@@ -286,10 +305,13 @@ impl LowerCtx {
                 // function through the FuncRef edge (folded at creation), so a printing
                 // closure can never be silently caps-verified.
                 IrExprKind::Lambda { params, body, .. } => match self.lift_lambda(params, body) {
-                    Some(slot) => out.push(CallArg::Scalar(slot)),
+                    // The closure BLOCK is passed like any heap arg (borrowed; it stays in
+                    // the live set here and is dropped at scope end after the combinator).
+                    Some(blk) => out.push(CallArg::Handle(blk)),
                     None => {
-                        // A capturing / param-invoking lambda — no liftable form. The self-host
-                        // combinator runs with a missing closure slot → an empty/garbage result.
+                        // A lambda outside the liftable subset — no closure form. The
+                        // self-host combinator runs with a missing closure slot → an
+                        // empty/garbage result.
                         self.last_call_had_unlifted_closure = true;
                         self.record_elided_calls(body);
                     }
@@ -306,6 +328,25 @@ impl LowerCtx {
                     args: Vec::new(),
                     result: None,
                 }),
+                // A FIRST-CLASS fn VALUE argument (`fn transform(xs, f, …) = xs |>
+                // list.map(f)` — a Fn-typed PARAM/let flowing into the pure combinator):
+                // pass its closure BLOCK by handle — the self-host combinator
+                // CallIndirects it exactly like a lifted lambda's block (the 5c
+                // possible-callee rows bound the witness). Capability-sound: a PURE
+                // combinator can only receive a PURE closure (the frontend's effect
+                // typing — an effectful closure is not a plain `(A) -> B` value), so the
+                // callback contributes no host capability of its own; a lifted lambda's
+                // caps were already folded at its creation site.
+                IrExprKind::Var { id } if matches!(a.ty, Ty::Fn { .. }) => {
+                    match self.value_for(*id) {
+                        Ok(v) => out.push(CallArg::Handle(v)),
+                        Err(_) => {
+                            return Err(LowerError::Unsupported(format!(
+                                "Module call {module}.{func} with an unresolved function-value argument not in this brick"
+                            )))
+                        }
+                    }
+                }
                 _ if matches!(a.ty, Ty::Fn { .. }) => {
                     return Err(LowerError::Unsupported(format!(
                         "Module call {module}.{func} with an opaque function-value argument (capabilities unanalyzable) not in this brick"
@@ -545,20 +586,29 @@ impl LowerCtx {
                 // (e.g. `let f = (x) => print_it(x); f(3)`). Otherwise — a dynamic closure
                 // value we cannot name — DEFER as before (calls captured, the Computed call
                 // elided ⇒ honest caps taint).
-                if let Some(table_idx) = self.funcref_value_of(callee) {
+                if let Some(blk) = self.closure_block_of_mut(callee) {
                     let mark = self.ops.len();
                     let lhh = self.live_heap_handles.len();
                     if let Ok(lowered) = self.lower_call_args(args) {
-                        self.ops.push(Op::CallIndirect {
-                            dst: None,
-                            table_idx,
-                            args: lowered,
-                            result: None,
-                        });
+                        self.emit_closure_call(blk, None, lowered, None);
                         return Ok(());
                     }
                     self.ops.truncate(mark);
                     self.live_heap_handles.truncate(lhh);
+                }
+                // STRICT value mode (the real render path — pipeline.rs sets it): eliding a
+                // dynamic closure INVOCATION drops its side effects entirely (`run3(() => {
+                // p = p + 10 })` printed p=0 — a silent wrong value, worse than the honest
+                // caps taint the elision was designed around). REFUSE instead: the function
+                // walls and `--verified` falls back to v0. The permissive caps-counting
+                // classifier path keeps the elision (its only consumer is call accounting).
+                if crate::lower::strict_values() {
+                    return Err(LowerError::Unsupported(
+                        "computed closure call outside the liftable subset cannot be \
+                         faithfully executed (eliding it would drop the invocation's \
+                         effects — a silently wrong value) not in this brick"
+                            .into(),
+                    ));
                 }
                 self.record_elided_calls(call);
                 if is_heap_ty(&call.ty) {
@@ -614,6 +664,8 @@ impl LowerCtx {
                         self.value_result_lists.insert(dst);
                     } else if crate::lower::is_value_result_ty(&call.ty) {
                         self.value_result_results.insert(dst);
+                    } else if crate::lower::is_lenlist_list_ty(&call.ty) {
+                        self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
                     } else if crate::lower::is_heap_elem_list_ty(&call.ty) {
                         self.heap_elem_lists.insert(dst);
                     }

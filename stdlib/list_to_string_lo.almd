@@ -1,0 +1,6 @@
+// list_to_string_lo — SELF-HOSTED `${xs}` interp display for a `List[Option[Int]]`
+// (v0 renders `[some(1), none, some(3)]` via Debug). Composed exactly like
+// list_to_string_ll: each element renders through its own `"${o}"` interp (routing
+// picks option.to_string for the Int payload), joined with ", " inside brackets.
+fn list_to_string_lo(xs: List[Option[Int]]) -> String =
+  "[" + (xs |> list.map((o) => "${o}") |> list.join(", ")) + "]"

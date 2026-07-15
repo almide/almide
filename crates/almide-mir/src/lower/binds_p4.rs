@@ -48,8 +48,24 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
+            // A LAMBDA field (`{ run: (x) => n + ":" + x, name: n }` — the record_fn_field
+            // make_handler class): LIFT it to a closure block (the full capture machinery —
+            // scalar/heap/Fn/Float captures — builds the self-describing [fnidx][nh|nc<<16][env…]
+            // block and pushes it live), which the enclosing aggregate then Consumes into its
+            // slot. The record's drop frees it via the generated `__drop_closure` field arm.
+            IrExprKind::Lambda { params, body, .. } => {
+                let blk = self.lift_lambda(params, body)?;
+                if !self.live_heap_handles.contains(&blk) {
+                    self.live_heap_handles.push(blk);
+                }
+                Some(blk)
+            }
+            // A tracked LOCAL heap var, or a MODULE-LEVEL global (`_style: _default` — the
+            // ceangal View ctors): `value_or_global` materializes a global's const/record
+            // initializer as a fresh owned cached copy (dropped at scope end); the Dup here
+            // gives the aggregate its own distinct reference either way.
             IrExprKind::Var { id } => {
-                let src = *self.value_of.get(id)?;
+                let src = self.value_or_global(*id).ok()?;
                 let dup = self.fresh_value();
                 self.ops.push(Op::Dup { dst: dup, src });
                 self.live_heap_handles.push(dup);
@@ -153,14 +169,22 @@ impl LowerCtx {
                 self.live_heap_handles.push(obj);
                 Some(obj)
             }
-            // A `(String, String)` TUPLE element of a list literal (`[(k, v), …]` — the map.entries /
-            // str_str shape): a fresh owned tuple block (try_lower_tuple_construct), tracked so the
-            // list builder's Consume + retain balances it. GATED to (String,String) so other tuples
-            // keep the scalar-only `Record | Tuple` arm below (a bare heap-field tuple still defers
-            // there — no leak regression).
+            // A `(<flat heap>, <flat heap>)` TUPLE element of a list literal (`[(k, v), …]` —
+            // the map.entries / str_str shape, `[Color{r,g,b}: "red"]`'s pairs): a fresh
+            // owned tuple block (try_lower_tuple_construct), tracked so the list builder's
+            // Consume + retain balances it. Widened from (String,String)/(String,List[
+            // scalar]) to ANY pair of ONE-LEVEL-EXACT heap types (String, List[scalar], a
+            // flat record, a flat variant) — `Op::DropListStrStr`'s render is purely
+            // handle-based (confirmed by reading it), so it frees the pair exactly
+            // regardless of which flat-heap kind sits in each slot. GATED so other tuples
+            // keep the scalar-only `Record | Tuple` arm below (a bare heap-field tuple
+            // still defers there — no leak regression).
             IrExprKind::Tuple { elements }
                 if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)) =>
+                    Ty::Tuple(tys) if tys.len() == 2
+                        && is_heap_ty(&tys[0]) && is_heap_ty(&tys[1])
+                        && self.is_flat_heap_tuple_slot(&tys[0])
+                        && self.is_flat_heap_tuple_slot(&tys[1])) =>
             {
                 let obj = self.try_lower_tuple_construct(elements)?;
                 if !self.live_heap_handles.contains(&obj) {
@@ -168,13 +192,31 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
-            // An `(Int, String)` TUPLE element of a list literal (`[(i, line)]` — the list.enumerate
-            // shape): Int slot 0 (scalar @12), String slot 1 (heap @20). try_lower_tuple_construct
-            // builds it (heap mask [1]); it is moved into the enclosing list, whose `$__drop_list_int_str`
-            // frees each tuple's String + block, so the tuple's own (harmless) mask never scope-end-fires.
+            // A `(<flat heap>, <scalar>)` TUPLE literal (`("a", 1)` — the deep_eq tuple-eq
+            // operand / the gguf (key, pos) accumulator element / `[East: 90]`'s pairs):
+            // flat-heap slot 0 (@12), scalar slot 1 (@20). try_lower_tuple_construct builds
+            // it; the enclosing consumer (an eq operand's cond frame, a list's
+            // DropListStrInt) frees the heap slot exactly once.
             IrExprKind::Tuple { elements }
                 if matches!(&expr.ty,
-                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)) =>
+                    Ty::Tuple(tys) if tys.len() == 2 && is_heap_ty(&tys[0]) && !is_heap_ty(&tys[1])
+                        && self.is_flat_heap_tuple_slot(&tys[0])) =>
+            {
+                let obj = self.try_lower_tuple_construct(elements)?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
+            // A `(<scalar>, <flat heap>)` TUPLE element of a list literal (`[(i, line)]` —
+            // the list.enumerate shape): scalar slot 0 (@12), flat-heap slot 1 (@20).
+            // try_lower_tuple_construct builds it (heap mask [1]); it is moved into the
+            // enclosing list, whose `$__drop_list_int_str` frees each tuple's heap slot +
+            // block, so the tuple's own (harmless) mask never scope-end-fires.
+            IrExprKind::Tuple { elements }
+                if matches!(&expr.ty,
+                    Ty::Tuple(tys) if tys.len() == 2 && !is_heap_ty(&tys[0]) && is_heap_ty(&tys[1])
+                        && self.is_flat_heap_tuple_slot(&tys[1])) =>
             {
                 let obj = self.try_lower_tuple_construct(elements)?;
                 if !self.live_heap_handles.contains(&obj) {
@@ -263,6 +305,24 @@ impl LowerCtx {
                 self.live_heap_handles.push(obj);
                 Some(obj)
             }
+            // A NESTED SPREAD field (`{ ...v, _style: { ...v._style, width: w } }` — the
+            // ceangal modifier class): build the inner record via the SAME spread machinery
+            // the bind/tail positions use (base slots Dup-copied, overrides moved in), then
+            // route its drop like the nested-record-literal arm above — a heap-nested field
+            // frees via the generated recursive `$__drop_<R>`, a scalar-only spread keeps
+            // the flat mask (sound: no nested heap). The handle joins `live_heap_handles`
+            // so the enclosing aggregate's `Consume` (move-in) + `retain` balances it.
+            IrExprKind::SpreadRecord { .. } => {
+                let obj = self.try_lower_spread_record_construct(expr)?;
+                if let Some(name) = self.record_or_anon_drop_type_name(&expr.ty) {
+                    self.record_masks.remove(&obj);
+                    self.variant_drop_handles.insert(obj, name);
+                }
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
             // A heap-result `if`/`match` ELEMENT (`(if retries == 0 then "pass-1shot" else "pass-retry",
             // "")` — the dojo `classify` tuple-result-if shape). EXECUTE it via the proven heap-result-`if`
             // machinery: each arm `Alloc`s + `Consume`s its value (the per-arm `"im"` move-out balance),
@@ -329,36 +389,23 @@ impl LowerCtx {
         owned
     }
 
-    /// Shared block-builder for a scalar tuple/list: lower each element to a scalar value, alloc a
-    /// `DynList` of `n` i64 slots, `store64` each. Element ownership-free (scalars), flat drop.
-    fn try_lower_scalar_list_slots(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
-        use crate::{IntOp, PrimKind};
+    /// Shared block-builder for a scalar tuple/list: lower each element to a scalar value,
+    /// then emit ONE target-neutral [`Op::ListLit`] (rung 4 — the wasm render expands it to
+    /// the exact `DynList`-alloc + per-slot-store sequence this built inline before; the
+    /// native leg maps it to `vec![…]`). Element ownership-free (scalars), flat drop, the
+    /// identical single-`i` certificate the replaced `Alloc` carried.
+    pub(crate) fn try_lower_scalar_list_slots(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
         if elements.iter().any(|e| is_heap_ty(&e.ty)) {
             return None;
         }
-        // Lower each field's scalar value first (before the alloc, so a field expr that itself
-        // allocates doesn't interleave with our store sequence).
+        // Lower each field's scalar value first (before the literal op, so a field expr
+        // that itself allocates doesn't interleave with the block build).
         let vals: Vec<ValueId> = elements
             .iter()
             .map(|e| self.lower_scalar_value(e))
             .collect::<Option<Vec<_>>>()?;
-        let len = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: len, value: elements.len() as i64 });
         let dst = self.fresh_value();
-        self.ops.push(Op::Alloc {
-            dst,
-            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
-            init: crate::Init::DynList { len },
-        });
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
-        for (i, v) in vals.into_iter().enumerate() {
-            let off = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: off, value: 12 + (i as i64) * 8 });
-            let addr = self.fresh_value();
-            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
-            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, v] });
-        }
+        self.ops.push(Op::ListLit { dst, elems: vals });
         // A REAL, POPULATED scalar list block — admit a direct `xs[i]` bounds-checked load.
         self.materialized_lists.insert(dst);
         Some(dst)
@@ -632,6 +679,72 @@ impl LowerCtx {
                 let piece = self.lower_owned_heap_field(expr)?;
                 Some(self.materialize_opt_int_str_some(piece, repr))
             }
+            // `some(Number(7))` — Some wrapping a CUSTOM-VARIANT ctor payload (the
+            // option-of-variant shape): build the variant block, move it into the
+            // 1-element Option. Drop routing by the payload's own discipline: a
+            // recursive-drop variant routes "optrec:<Type>" → the generated
+            // `$__drop_<Type>` frees the payload (fields, then block) then the option
+            // block; a flat variant (no heap fields, `Number(Int)`) uses the
+            // Some(string) shape — DropListStr's flat slot-0 free IS its exact drop.
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind,
+                    IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                        if self.variant_layouts.ctor_to_type.contains_key(name.as_str())) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind
+                else {
+                    return None;
+                };
+                let type_name = self.variant_layouts.ctor_to_type.get(name.as_str())?.clone();
+                let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name, &|rn| {
+                    crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+                });
+                let piece = self.try_lower_variant_ctor(expr)?;
+                Some(if needs_rec {
+                    self.materialize_opt_aggregate_some(piece, repr, type_name)
+                } else {
+                    self.materialize_opt_str_some(piece, repr)
+                })
+            }
+            // `Some((1, 2))` — an ALL-SCALAR tuple literal payload (`match x { some((a, b))
+            // => a + b, … }` — the nested-some-tuple pattern shape). Build the flat tuple
+            // block, move it into the 1-element Option: the payload block owns NO inner
+            // heap, so DropListStr's flat slot-0 free is EXACT (frees the tuple block, then
+            // the option block) — the same discipline as the (Int,String) case above minus
+            // the recursive element drop.
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind, IrExprKind::Tuple { .. })
+                    && matches!(&expr.ty,
+                        Ty::Tuple(tys) if !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t))) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let IrExprKind::Tuple { elements } = &expr.kind else { return None };
+                let elements = elements.clone();
+                let piece = self.try_lower_scalar_tuple_construct(&elements)?;
+                Some(self.materialize_opt_str_some(piece, repr))
+            }
+            // `Some((k, v))` — a `(String, <scalar>)` tuple literal payload (`map.find`'s
+            // `__skv_find_some(k, v) = Some((kc, v))`). Build the tuple (`try_lower_tuple_
+            // construct`, one heap slot: the String), move it into the 1-element Option. The
+            // DEFAULT `materialize_opt_str_some` flat drop would only `rc_dec` the TUPLE's
+            // own handle, leaking its String (the same class of bug the `_str`-dispatch fix
+            // and the drop-authority swap below both guard against) — override the routing
+            // to the type-specific recursive `$__drop_opt_str_int` (generated,
+            // OPT_STR_INT_DROP_SRC), mirroring the `(Value, scalar)` swap immediately below.
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind, IrExprKind::Tuple { .. })
+                    && matches!(&expr.ty,
+                        Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && !is_heap_ty(&tys[1])) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let IrExprKind::Tuple { elements } = &expr.kind else { return None };
+                let elements = elements.clone();
+                let piece = self.try_lower_tuple_construct(&elements)?;
+                let obj = self.materialize_opt_str_some(piece, repr);
+                self.variant_drop_handles.insert(obj, "opt_str_int".to_string());
+                Some(obj)
+            }
             IrExprKind::OptionSome { expr }
                 if crate::lower::is_value_ty(&expr.ty)
                     || matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e)
@@ -661,6 +774,25 @@ impl LowerCtx {
                 let piece = self.try_lower_record_construct(expr)?;
                 Some(self.materialize_opt_aggregate_some(piece, repr, drop_fn))
             }
+            // `some(<SCALAR-ONLY record>)` (`some(Point { x: 7, y: 8 })` — compound_repr's
+            // opt_rec): the record block owns NO children, so the flat 0-or-1 Option drop
+            // (`DropListStr`: rc_dec of the payload handle + the block) frees it EXACTLY —
+            // materialize instead of deferring. (The deferred-empty placeholder was silently
+            // read as `none` once the container-repr display routed over it — the wrong-bytes
+            // class this campaign exists to prevent; construction must be real before display.)
+            IrExprKind::OptionSome { expr }
+                if matches!(expr.kind, IrExprKind::Record { .. })
+                    && matches!(&expr.ty, Ty::Named(..))
+                    && self
+                        .aggregate_field_tys(&expr.ty)
+                        .is_some_and(|(_, tys)| tys.iter().all(|t| !is_heap_ty(t))) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let piece = self
+                    .try_lower_record_construct(expr)
+                    .or_else(|| self.try_lower_scalar_record_construct(expr))?;
+                Some(self.materialize_opt_str_some(piece, repr))
+            }
             IrExprKind::OptionSome { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(ty).ok()?;
                 let piece = match &expr.kind {
@@ -671,6 +803,22 @@ impl LowerCtx {
                             .unwrap_or(false) =>
                     {
                         self.value_for(*id).ok()?
+                    }
+                    // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
+                    // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
+                    // (cert `a`) and move THAT in — the caller keeps its own reference (freed by
+                    // its owner once), the wrapper owns the Dup. The borrow-then-Dup discipline
+                    // the spread-record copy already proves.
+                    IrExprKind::Var { id }
+                        if self
+                            .value_for(*id)
+                            .map(|v| self.param_values.contains(&v))
+                            .unwrap_or(false) =>
+                    {
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     IrExprKind::LitStr { value } => {
                         let pr = repr_of(&expr.ty).ok()?;
@@ -700,6 +848,21 @@ impl LowerCtx {
                     | IrExprKind::OptionNone
                     | IrExprKind::ResultOk { .. }
                     | IrExprKind::ResultErr { .. } => self.try_lower_option_ctor(expr, &expr.ty)?,
+                    // A COMPUTED String Some payload (`some("v=" + s)` / `some("v=${x}")`) — the
+                    // fresh-owned `__str_concat` chain, operand temps dropped here (the ok/err
+                    // ConcatStr/StringInterp arms' Option sibling).
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_concat_str(expr)?;
+                        self.drop_arm_locals(mark);
+                        obj
+                    }
+                    IrExprKind::StringInterp { parts } if matches!(expr.ty, Ty::String) => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_string_interp(parts)?;
+                        self.drop_arm_locals(mark);
+                        obj
+                    }
                     // A SCALAR-element LIST-literal Some payload (`some([1, 2, 3])`, `some([])`) — build
                     // the fresh owned block (0-length for the empty case, which `try_lower_scalar_list_
                     // construct` declines), moved into the Some slot; `materialize_opt_str_some`'s
@@ -720,6 +883,18 @@ impl LowerCtx {
                     | IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. }
                         if matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
                             if a.len() == 1 && !is_heap_ty(&a[0])) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
+                    // `some(string.slice(s, …))` — a PURE Module call yielding a fresh owned
+                    // STRING payload (the parse_tag tail-if family): lower_owned_heap_field
+                    // routes it via lower_pure_module_value_call; MOVE it into the Some slot
+                    // (retain-remove — materialize_opt_str_some is the sole owner, its flat
+                    // heap_elem_lists drop frees the one String exactly).
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                        if matches!(expr.ty, Ty::String) =>
                     {
                         let p = self.lower_owned_heap_field(expr)?;
                         self.live_heap_handles.retain(|h| *h != p);
@@ -761,6 +936,15 @@ impl LowerCtx {
                 // free-list reuses a block between Some/None results; tracked as materialized.
                 self.ops.push(Op::Alloc { dst, repr, init: Init::OptNone });
                 self.materialized_options.insert(dst);
+                // A HEAP-payload Option (`let x: Option[Msg] = none`) ALSO registers the
+                // nested-ownership class so a downstream match ADMITS its Some-arm payload
+                // bind (heap_or_scalar_bind gates on it); DropListStr over len 0 frees only
+                // the block, so the class change is drop-equivalent for a None value.
+                if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) = ty {
+                    if a.len() == 1 && is_heap_ty(&a[0]) {
+                        self.heap_elem_lists.insert(dst);
+                    }
+                }
                 Some(dst)
             }
             // A `Result[Int, String]` ctor RETURNED / bound directly (`fn f() = Ok(y)` / `… = Err(
@@ -785,6 +969,22 @@ impl LowerCtx {
                             .unwrap_or(false) =>
                     {
                         self.value_for(*id).ok()?
+                    }
+                    // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
+                    // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
+                    // (cert `a`) and move THAT in — the caller keeps its own reference (freed by
+                    // its owner once), the wrapper owns the Dup. The borrow-then-Dup discipline
+                    // the spread-record copy already proves.
+                    IrExprKind::Var { id }
+                        if self
+                            .value_for(*id)
+                            .map(|v| self.param_values.contains(&v))
+                            .unwrap_or(false) =>
+                    {
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     IrExprKind::LitStr { value } => {
                         let pr = repr_of(&expr.ty).ok()?;
@@ -827,6 +1027,15 @@ impl LowerCtx {
                     IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
                         let mark = self.live_heap_handles.len();
                         let obj = self.try_lower_concat_str(expr)?;
+                        self.drop_arm_locals(mark);
+                        obj
+                    }
+                    // An INTERPOLATED String payload (`err("bad ${id}")`, `ok("v=${x}")`) — the
+                    // same fresh-owned `__str_concat` chain as the ConcatStr arm (the interp IS a
+                    // concat fold); operand temps drop here so only the result survives the move.
+                    IrExprKind::StringInterp { parts } if matches!(expr.ty, Ty::String) => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_string_interp(parts)?;
                         self.drop_arm_locals(mark);
                         obj
                     }
@@ -881,6 +1090,34 @@ impl LowerCtx {
                 self.materialized_results.insert(dst);
                 Some(dst)
             }
+            // `err(<scalar>)` for a SCALAR-SCALAR Result (`Result[Int, Int]` — the
+            // match_container `ck(err(404))` class): the len-as-tag Err twin of the
+            // scalar-Ok arm above. NOT heap_elem_lists-tracked — the flat Drop is the
+            // exact free (a DropListStr over len 1 would rc_dec the raw scalar payload
+            // as a handle). Gated to BOTH sides scalar so the heap-err layouts (String
+            // err → DropListStr slot-0 free) keep their existing arms below.
+            IrExprKind::ResultErr { expr }
+                if !is_heap_ty(&expr.ty)
+                    && matches!(ty,
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                            if a.len() == 2 && !is_heap_ty(&a[0]) && !is_heap_ty(&a[1])) =>
+            {
+                let payload = self.lower_scalar_value(expr)?;
+                let repr = repr_of(ty).ok()?;
+                let dst = self.materialize_result_err_scalar(payload, repr);
+                self.materialized_results.insert(dst);
+                Some(dst)
+            }
+            // `err(<user-variant ctor>)` for `Result[T_scalar, <user variant>]` — the
+            // structured-error class (`let e: Result[Int, MathError] =
+            // err(Overflow("m"))`, `assert_eq(f(x), err(DivideByZero))`). The
+            // len-as-tag Err wrapper the reader seeds for this type; rich payloads
+            // route to `$__drop_res_<V>`. NOT self-tracked: like every ctor arm here,
+            // the CALLER owns the tracking (a call-arg site re-tracks via
+            // `materialized_call_arg` — a push here double-freed at scope end).
+            IrExprKind::ResultErr { .. } if self.is_scalar_ok_variant_err_result(ty) => {
+                self.try_lower_result_err_variant_ctor(value, ty)
+            }
             // HEAP-Ok `Result[(Int,Int), String]` etc. — `Err(msg)` RETURNED / bound directly
             // (`fn __rzip_err(..) = Err(copy)`). The Err message goes into the SAME cap-as-tag 1-slot
             // DynListStr as the heap-Ok arm (payload @12, tag @16 = 1), so a `match` reading tag @16
@@ -898,6 +1135,22 @@ impl LowerCtx {
                             .unwrap_or(false) =>
                     {
                         self.value_for(*id).ok()?
+                    }
+                    // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
+                    // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
+                    // (cert `a`) and move THAT in — the caller keeps its own reference (freed by
+                    // its owner once), the wrapper owns the Dup. The borrow-then-Dup discipline
+                    // the spread-record copy already proves.
+                    IrExprKind::Var { id }
+                        if self
+                            .value_for(*id)
+                            .map(|v| self.param_values.contains(&v))
+                            .unwrap_or(false) =>
+                    {
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     IrExprKind::LitStr { value } => {
                         let pr = repr_of(&expr.ty).ok()?;
@@ -925,6 +1178,31 @@ impl LowerCtx {
                         self.drop_arm_locals(mark);
                         obj
                     }
+                    // An INTERPOLATED String payload (`err("bad ${id}")`, `ok("v=${x}")`) — the
+                    // same fresh-owned `__str_concat` chain as the ConcatStr arm (the interp IS a
+                    // concat fold); operand temps drop here so only the result survives the move.
+                    IrExprKind::StringInterp { parts } if matches!(expr.ty, Ty::String) => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_string_interp(parts)?;
+                        self.drop_arm_locals(mark);
+                        obj
+                    }
+                    // `err(["a", "b"])` — a `List[String]` LITERAL payload (the result.collect
+                    // Err side, `Result[List[Int], List[String]]`): the inner list builds
+                    // fresh-owned; the Result block's flat DropListStr would free slot-0 as a
+                    // STRING (leaking the inner list's elements), so RECLASSIFY the drop below
+                    // to the recursive list-of-list-str free.
+                    IrExprKind::List { .. }
+                        if matches!(&expr.ty,
+                            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
+                                if i.len() == 1 && matches!(i[0], Ty::String)) =>
+                    {
+                        let obj = self.try_lower_str_list_literal(expr)?;
+                        let dst = self.materialize_result_str(obj, repr, true, false);
+                        self.heap_elem_lists.remove(&dst);
+                        self.list_list_str_lists.insert(dst);
+                        return Some(dst);
+                    }
                     _ => return None,
                 };
                 Some(self.materialize_result_str(piece, repr, true, false))
@@ -944,6 +1222,22 @@ impl LowerCtx {
                             .unwrap_or(false) =>
                     {
                         self.value_for(*id).ok()?
+                    }
+                    // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
+                    // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
+                    // (cert `a`) and move THAT in — the caller keeps its own reference (freed by
+                    // its owner once), the wrapper owns the Dup. The borrow-then-Dup discipline
+                    // the spread-record copy already proves.
+                    IrExprKind::Var { id }
+                        if self
+                            .value_for(*id)
+                            .map(|v| self.param_values.contains(&v))
+                            .unwrap_or(false) =>
+                    {
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     IrExprKind::LitStr { value } => {
                         let pr = repr_of(&expr.ty).ok()?;
@@ -967,6 +1261,15 @@ impl LowerCtx {
                     IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
                         let mark = self.live_heap_handles.len();
                         let obj = self.try_lower_concat_str(expr)?;
+                        self.drop_arm_locals(mark);
+                        obj
+                    }
+                    // An INTERPOLATED String payload (`err("bad ${id}")`, `ok("v=${x}")`) — the
+                    // same fresh-owned `__str_concat` chain as the ConcatStr arm (the interp IS a
+                    // concat fold); operand temps drop here so only the result survives the move.
+                    IrExprKind::StringInterp { parts } if matches!(expr.ty, Ty::String) => {
+                        let mark = self.live_heap_handles.len();
+                        let obj = self.try_lower_string_interp(parts)?;
                         self.drop_arm_locals(mark);
                         obj
                     }

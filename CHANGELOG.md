@@ -9,7 +9,75 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
-## [Unreleased]
+## [0.29.0] — 2026-07-15
+
+### Changed — compilation
+
+- **The v1 verified renderer is now the default wasm path** (97e1cd8c): every
+  `almide run` / `almide build --target wasm` compiles through the certified
+  MIR pipeline — ownership, name-totality, and capability certificates are
+  re-verified on every build by a checker whose soundness is machine-proven in
+  Coq. `--no-verified` opts back into the v0 emitter. Six verified-default
+  output divergences surfaced by the org byte-verify sweep were fixed before
+  the flip (cross-module ABI registries, void closure dispatch, nested lambda
+  naming, cached-key `sort_by`, geometric concat capacity, C-129 guards).
+
+### Added — language
+
+- **Mutable module-level `var`s on the verified path** (C-033): module globals
+  live in linear-memory slots with certified take/drop transitions, and
+  aliased snapshots are copy-on-write — `var g = [...]; let s = g; g[0] = 9`
+  observes the snapshot, byte-identical with native. This closed the last
+  known default-path output divergence, pinned by
+  `spec/wasm_cross/module_var_alias_cow.almd`.
+- **`env.get`** (C-133, ALS-R5): reads the host environment over WASI environ
+  on both wasm engines (with `-S inherit-env` wired into every wasmtime
+  spawn); native reads the process environment. Capability-gated like every
+  effectful surface.
+
+### Added — tooling
+
+- **Native trust-spine, rungs 1–4** (`--target rust --verified`): scalar,
+  String, and list programs render native Rust from the same certified MIR
+  that feeds the wasm leg (Dup→clone, Drop→scope-end erasure, shared
+  ListLit/ListGet/ListSet ops), gated by a v0 output differential. Off-subset
+  programs wall honestly and fall back to v0.
+
+### Removed — language
+
+- **`fan.timeout` is gone** (C-006, #765): a wall-clock timeout has no portable
+  cross-target meaning (wasm has no clock, scheduler, or threads), and it was
+  the sole stdlib surface whose result was not a function of the program + its
+  inputs — whether the deadline fired depended on machine load even between two
+  native runs. Referencing it is now a check-time tombstone error (**E027**)
+  with a migration hint; deadlines belong at the host boundary that invokes the
+  program (`timeout 5 ./app`). An org-wide sweep found zero consumers. This
+  retired the ledger's last `flagged-for-revision` contract — the flagged
+  ratchet is 0 and the README equivalence claim now reads "Exceptions: none."
+
+### Fixed — WASM codegen
+
+- **Perceus RC: `guard`-`else` heap temporaries** (#755): a heap local bound
+  inside a `guard … else { … }` block was never reference-count processed on
+  the WASM target. `Guard` is an `IrStmtKind`, so `block_to_fnbody` funnelled
+  it into perceus's `FnBody::Stmt` pass-through arm, which recursed into
+  nothing — the else block's temps got no scope-end `Dec` and WASM RC
+  verification refused the build (`[perceus-belt] LEAK: no RcDec`). The Stmt
+  arm now `perceus_expr`s a Guard's `cond` and `else_`, so the divergent else
+  block is round-tripped and Dec-balanced like any other block.
+
+### Fixed — Rust codegen
+
+- **Bare-value `@intrinsic` effect fns in tail position** (#758): a tail call
+  to an intrinsic effect fn whose runtime returns a plain value (`io.print →
+  Unit`, `io.read_line → String`, `fs.exists → Bool`, `env.get → Option`) was
+  wrongly exempted from the Result tail-wrap — the exemption set held *every*
+  `@intrinsic` effect fn, not just the runtime-`Result` ones — leaving a bare
+  `()`/value tail in the auto-`Result`-wrapped fn (invalid Rust, E0308). The
+  set is now built from intrinsics that actually return `Result` (declared
+  `-> Result[...]`, plus `http.serve`, whose runtime returns `Result<(),
+  String>` under a `-> Unit` declaration), so bare-value intrinsic tails get
+  their `Ok(...)` like any other tail.
 
 ## [0.23.3] — 2026-05-24
 

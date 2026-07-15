@@ -102,6 +102,51 @@ fn render_op(
         // A DynList (List[Int], scalar slots) OR a DynListStr (List[String], heap-handle
         // slots) — physically IDENTICAL: alloc `LIST_HEADER + len*ELEM_SIZE`, rc=1, len=cap.
         // (The DropListStr free is what distinguishes the nested-ownership variant.)
+        // The rung-4 SCALAR-list literal — the SAME `[rc][len][cap][slots…]` block the
+        // inline `Alloc{DynList}`+store sequence built (byte-behavior identical): alloc
+        // len==cap==N, store each raw i64 slot value at its offset. One op, so the
+        // native leg can map it to `vec![…]` without prim-idiom guessing.
+        Op::ListLit { dst, elems } => {
+            let n = elems.len() as u32;
+            let total = LIST_HEADER + n * ELEM_SIZE;
+            let mut s = format!(
+                "    (local.set {d} (call $alloc (i32.const {total})))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) (i32.const {n}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) (i32.const {n}))\n",
+                d = local(*dst),
+            );
+            for (i, e) in elems.iter().enumerate() {
+                let off = LIST_HEADER + i as u32 * ELEM_SIZE;
+                s.push_str(&format!(
+                    "    (i64.store (i32.add (local.get {d}) (i32.const {off})) (local.get {e}))\n",
+                    d = local(*dst),
+                    e = local(*e),
+                ));
+            }
+            s
+        }
+        // The rung-4 bounds-checked SCALAR element load — the exact composition the
+        // inline `Handle`+`ElemAddr`+`Load{8}` sequence rendered (`$elem_addr_chk`
+        // TRAPs on idx<0 / >=cap, matching native's halt).
+        Op::ListGetScalar { dst, list, idx } => {
+            format!(
+                "    (local.set {d} (i64.load (call $elem_addr_chk (local.get {l}) (i32.wrap_i64 (local.get {i})))))\n",
+                d = local(*dst),
+                l = local(*list),
+                i = local(*idx),
+            )
+        }
+        // The rung-4 bounds-checked SCALAR element store (COW is the caller's
+        // MakeUnique before this op) — the inline `Handle`+`ElemAddr`+`Store{8}` twin.
+        Op::ListSetScalar { list, idx, val } => {
+            format!(
+                "    (i64.store (call $elem_addr_chk (local.get {l}) (i32.wrap_i64 (local.get {i}))) (local.get {v}))\n",
+                l = local(*list),
+                i = local(*idx),
+                v = local(*val),
+            )
+        }
         Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. } => {
             let wlen = format!("(i32.wrap_i64 (local.get {}))", local(*len));
             let bytes = format!("(i32.mul {wlen} (i32.const {ELEM_SIZE}))");
@@ -205,16 +250,23 @@ fn render_op(
                 .collect::<Vec<_>>()
                 .join(" ");
             let arity = args.len();
-            // Pick the closure type of this arity AND result repr (`_h` = heap/i32 result).
-            let suffix = if result.map(|r| r.is_heap()).unwrap_or(false) { "_h" } else { "" };
+            // Pick the closure type by arity AND result class: `_v` = void (a `() -> Unit`
+            // closure — the lifted lambda has NO wasm result, so the dispatch type must be
+            // resultless and the call must NOT be dropped), `_h` = heap/i32, else scalar i64.
+            let suffix = match result {
+                None => "_v",
+                Some(r) if r.is_heap() => "_h",
+                Some(_) => "",
+            };
             // The table index is a wasm i32; the MIR value is the uniform i64, so wrap it.
             let call = format!(
                 "(call_indirect (type $closure_fn{arity}{suffix}) {argstr} (i32.wrap_i64 (local.get {})))",
                 local(*table_idx)
             );
-            match dst {
-                Some(d) => format!("    (local.set {} {call})\n", local(*d)),
-                None => format!("    (drop {call})\n"),
+            match (dst, result) {
+                (Some(d), _) => format!("    (local.set {} {call})\n", local(*d)),
+                (None, None) => format!("    {call}\n"),
+                (None, Some(_)) => format!("    (drop {call})\n"),
             }
         }
         Op::CallFn { dst, name, args, result } => {
@@ -688,7 +740,15 @@ fn render_op(
                 // `List[String]` of argv[1..] in the preamble helper. dst is a heap Ptr
                 // (i32 handle, value_reprs_wasm), so the call result sets the local DIRECTLY
                 // (no i64 extend) — exactly like a LoadHandle.
-                PrimKind::ArgsGetList => "(call $args_get_list)".to_string(),
+                PrimKind::ArgsGetList => "(call $args_get_list (i32.const 1))".to_string(),
+                PrimKind::ArgsGetListFull => "(call $args_get_list (i32.const 0))".to_string(),
+                // env_get(name) — the WASI environ lookup floor; scans KEY=VALUE entries
+                // for `name` + '=' and builds a fresh owned `Option[String]` in the
+                // preamble helper. Same heap-Ptr name arg + heap-Ptr dst conventions as
+                // ReadTextFile (the i32 handle passes DIRECTLY, no wrap).
+                PrimKind::EnvGet => {
+                    format!("(call $env_get (local.get {}))", local(args[0]))
+                }
                 // read_text_file(path) — the WASI file-read floor; opens + reads the file at
                 // `path` and builds a fresh owned `Result[String, String]` in the preamble helper.
                 // The path arg is a heap Ptr local (i32 handle, like a $list ptr), passed DIRECTLY
@@ -739,6 +799,18 @@ fn render_op(
                 // i64.extend'd into it — exactly the FloatCmp scalar-Bool widening discipline.
                 PrimKind::PathExists => {
                     format!("(i64.extend_i32_u (call $path_exists (local.get {})))", local(args[0]))
+                }
+                // path_filestat(bufaddr, path) — the WASI FULL-stat floor; path_filestat_get on
+                // `path` writing the 64-byte filestat at `bufaddr`. The bufaddr arg is an i64
+                // scalar local (wrapped to the i32 address); the path arg is a heap Ptr local
+                // (i32 handle, passed directly). dst is the SCALAR errno (i64.extend'd) — the
+                // PathExists scalar-result discipline.
+                PrimKind::PathFilestat => {
+                    format!(
+                        "(i64.extend_i32_u (call $path_filestat_q (i32.wrap_i64 (local.get {})) (local.get {})))",
+                        local(args[0]),
+                        local(args[1])
+                    )
                 }
                 // read_line() — the WASI stdin-line floor; reads fd 0 byte-by-byte until '\n'/EOF
                 // and builds a fresh owned canonical `String` (newline excluded, trailing '\r'

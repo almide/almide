@@ -10,6 +10,57 @@ thread_local! {
     /// residue. Thread-local because lowering runs single-threaded per program right after the pre-pass.
     pub(crate) static NEVER_ERR_LIFTED_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+
+    /// The names of AUTO-WRAP ABI functions — an `effect fn` declared with a bare scalar return
+    /// (`-> Int`, not `-> Result[Int, String]`) whose body contains a STATEMENT-position
+    /// propagating `!`/auto-`?` (`body_has_stmt_position_propagating_unwrap`, mod.rs), so its
+    /// TRUE compiled ABI is `Result[<declared>, String]` even though `func.ret_ty` stays the bare
+    /// sugar type. Populated by `inline_mutual_tail_recursion` (the SAME program-wide pre-pass
+    /// `NEVER_ERR_LIFTED_FNS` uses, run once before any per-function lowering, so it is fully
+    /// populated before ANY caller's own lowering — including a caller that is itself never-err
+    /// lifted and processed before this callee). EXCLUDES `main` — see the population site.
+    pub(crate) static AUTO_WRAP_ABI_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+
+    /// Effect fns whose DECLARED return is `Option[..]` — in the v1 model they are NOT
+    /// lifted (the Option IS the real return; there is no err channel), so a caller's
+    /// frontend auto-`?` (`Try`) over such a call is a NO-OP and must be STRIPPED: left
+    /// in place, the effect-unwrap desugar built an err/ok match over the raw OPTION
+    /// block (read with Result polarity/offsets — r5's `hit=999` silent wrong value +
+    /// rc_dec trap). A SPELLED `!` is different (unwrap-the-Option, die on none) and is
+    /// NOT stripped.
+    pub(crate) static DECLARED_OPTION_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+
+    /// MUTABLE module-level `var` globals (program + module top_lets, `tl.mutable ==
+    /// true`): VarId → (storage-slot index, declared Ty). Cross-function shared state
+    /// lives in a dedicated linear-memory slot (`crate::mg_slot_addr(index)`): a read
+    /// loads the slot fresh each time (a scalar `Load`, a heap `$__mg_get` owned Dup),
+    /// an assign stores through it (`$__mg_take` + type-routed drop of the old value +
+    /// `Store`+`Consume` of the new). WITHOUT slot routing, a read materialized the
+    /// const initializer and an assign rebound a function-local copy (`var counter = 0;
+    /// bump(); bump()` printed `5 3 0` where native says `5 8 8` — a LIVE miscompile).
+    /// Populated by the pipeline / classify globals collection (the same pre-lowering
+    /// point the maps are built); shapes beyond the slot subset still WALL.
+    pub(crate) static MUTABLE_GLOBAL_VARS: std::cell::RefCell<std::collections::HashMap<u32, (u32, Ty)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Publish the mutable module-level `var` map (VarId.0 → (slot index, declared Ty)) for
+/// [`MUTABLE_GLOBAL_VARS`]. Called wherever the globals maps are collected (pipeline +
+/// classify), BEFORE any per-function lowering.
+pub fn set_mutable_global_vars(vars: std::collections::HashMap<u32, (u32, Ty)>) {
+    MUTABLE_GLOBAL_VARS.with(|s| *s.borrow_mut() = vars);
+}
+
+/// Is `var` a mutable module-level `var` (slot-routed cross-function state)?
+pub(crate) fn is_mutable_global(var: almide_ir::VarId) -> bool {
+    MUTABLE_GLOBAL_VARS.with(|s| s.borrow().contains_key(&var.0))
+}
+
+/// The (slot index, declared Ty) of a mutable module-level `var`, if `var` is one.
+pub(crate) fn mutable_global_info(var: almide_ir::VarId) -> Option<(u32, Ty)> {
+    MUTABLE_GLOBAL_VARS.with(|s| s.borrow().get(&var.0).cloned())
 }
 
 /// A function CAN-ERR (returns `Err` on some input) iff its body has a direct `err(…)` (`ResultErr`) OR
@@ -49,7 +100,7 @@ fn has_result_err(body: &IrExpr) -> bool {
             // classified never-err, its callers' `!` got stripped, and the caller
             // read the REAL Result block as the raw payload (record fields off a
             // Result handle — the read_message `method=` garbage, 2026-07-03).
-            if let IrExprKind::Unwrap { expr: inner } = &e.kind {
+            if let IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner } = &e.kind {
                 if matches!(&inner.kind,
                     IrExprKind::Call { target: CallTarget::Module { .. }, .. }
                         | IrExprKind::RuntimeCall { .. })
@@ -70,7 +121,13 @@ fn unwrap_named_callees(body: &IrExpr) -> std::collections::HashSet<String> {
     struct V(std::collections::HashSet<String>);
     impl IrVisitor for V {
         fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Unwrap { expr } = &e.kind {
+            // `Try` is the frontend's auto-`?` — the SAME monadic err-propagation as a
+            // spelled-out `!` (the effect-unwrap desugar treats them identically), so the
+            // can-err fixpoint must see through BOTH. Missing `Try` classified `checked`
+            // (whose only propagation is an auto-?'d `fail(..)` arm) as NEVER-ERR: its ABI
+            // stripped to raw i64 while the Try arm produced fail's i32 Result — the
+            // effect_tco invalid-wasm divergence (i64/i32 at wasm load).
+            if let IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } = &e.kind {
                 if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind {
                     self.0.insert(name.as_str().to_string());
                 }
@@ -115,6 +172,31 @@ pub fn compute_can_err(fns: &[IrFunction]) -> std::collections::HashSet<String> 
 /// returns `Ok`, so the `!` is a no-op; a CAN-ERR callee's `!` is LEFT untouched (it still walls in
 /// `lower_destructure`/`lower_bind`), so its error is never silently dropped (the blanket strip that did
 /// drop it byte-mismatched safe_div_chain & co. — see the roadmap note).
+/// Strip the frontend's auto-`?` (`Try`) over a call to a DECLARED-OPTION effect fn
+/// (see [`DECLARED_OPTION_FNS`]): in the v1 model that callee returns the raw Option —
+/// there is no err channel to propagate, so the Try is the identity. A spelled `!`
+/// (Unwrap) keeps its unwrap-the-Option semantics and is untouched.
+pub fn strip_declared_option_trys(body: &mut IrExpr) {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    struct S;
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            let strip = matches!(&expr.kind,
+                IrExprKind::Try { expr: inner }
+                if matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if DECLARED_OPTION_FNS.with(|s| s.borrow().contains(name.as_str()))));
+            if strip {
+                if let IrExprKind::Try { expr: inner } = &expr.kind {
+                    let mut inner = (**inner).clone();
+                    std::mem::swap(expr, &mut inner);
+                }
+            }
+        }
+    }
+    S.visit_expr_mut(body);
+}
+
 pub fn strip_never_err_unwraps(
     body: &mut IrExpr,
     can_err: &std::collections::HashSet<String>,
@@ -147,7 +229,8 @@ pub fn strip_never_err_unwraps(
                 IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }
                 if matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
                     if !self.can_err.contains(name.as_str())
-                        && (self.lifted.contains(name.as_str()) || name.as_str() == self.self_name)));
+                        && (self.lifted.contains(name.as_str()) || name.as_str() == self.self_name)
+                        && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()))));
             if strip {
                 if let IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner } =
                     &expr.kind
@@ -298,7 +381,10 @@ pub fn unwrap_never_err_call_types(
             if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind {
                 // Unwrap ONLY a call to a LIFTED user effect fn that is also NEVER-err. (Pure Result
                 // fns are excluded — not in `lifted_effect_fns` — the list_iter_tco regression fix.)
-                if self.1.contains(name.as_str()) && !self.0.contains(name.as_str()) {
+                if self.1.contains(name.as_str())
+                    && !self.0.contains(name.as_str())
+                    && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()))
+                {
                     if let Ty::Applied(TypeConstructorId::Result, a) = &expr.ty {
                         if a.len() == 2 && matches!(a[1], Ty::String) {
                             expr.ty = a[0].clone();
@@ -313,14 +399,21 @@ pub fn unwrap_never_err_call_types(
 
 /// Re-wrap a NEVER-ERR lifted call assigned/bound to an EXPLICITLY `Result`-typed target
 /// (`var r: Result[Int, String] = ok(0); r = step(5)` / `let r2: Result[Int, String] =
-/// step(7)` — the #485 "annotated Result keeps the Result" rule). The never-err type
-/// rewrite makes the CALL yield raw `T` on v1, but the target slot IS a Result block —
-/// assigning the raw i64 into the i32 handle slot emitted invalid wasm
-/// (effect_assign_unwrap). Since the callee never errs, `ok(call)` is exact.
+/// step(7)` — the #485 "annotated Result keeps the Result" rule) OR sitting in a
+/// CONSTRUCTION position whose declared slot type is Result (`[step(), step()]: List[Result[..]]`,
+/// `Holder { r: step() }`, `(step(), 9): (Result[..], Int)` — the SAME C-068 "construction
+/// positions are target-directed" rule `auto_try.rs` already applies at the frontend). The
+/// never-err type rewrite (`unwrap_never_err_call_types`, run unconditionally over EVERY
+/// function by this pre-pass, not just the mutually-recursive ones it exists for) makes the
+/// CALL yield raw `T` on v1 — but a List/Record/Tuple slot whose OWN type says Result must
+/// still hold a Result block (autotry_construction: v0 already keeps the Result via C-068;
+/// this pre-pass silently undid it for v1, since the original bind/assign-only re-wrap never
+/// covered construction positions). Since the callee never errs, `ok(call)` is exact.
 pub fn rewrap_never_err_into_result_targets(
     body: &mut IrExpr,
     can_err: &std::collections::HashSet<String>,
     lifted_effect_fns: &std::collections::HashSet<String>,
+    record_layouts: &RecordLayouts,
 ) {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
     use almide_lang::types::constructor::TypeConstructorId;
@@ -347,6 +440,7 @@ pub fn rewrap_never_err_into_result_targets(
         can_err: &'a std::collections::HashSet<String>,
         lifted: &'a std::collections::HashSet<String>,
         result_vars: std::collections::HashSet<u32>,
+        record_layouts: &'a RecordLayouts,
     }
     impl S<'_> {
         fn is_raw_never_err_call(&self, e: &IrExpr) -> bool {
@@ -390,8 +484,75 @@ pub fn rewrap_never_err_into_result_targets(
                 _ => {}
             }
         }
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            match &mut expr.kind {
+                // `[step(), step()]: List[Result[..]]` — the element slot type is the LIST's
+                // own type's sole type arg (mirrors auto_try.rs's `elem_is_result`).
+                IrExprKind::List { elements } => {
+                    if let Ty::Applied(TypeConstructorId::List, a) = &expr.ty {
+                        if a.len() == 1 {
+                            if let Ty::Applied(TypeConstructorId::Result, _) = &a[0] {
+                                let elem_ty = a[0].clone();
+                                for el in elements.iter_mut() {
+                                    if self.is_raw_never_err_call(el) {
+                                        self.wrap(el, elem_ty.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // `(step(), 9): (Result[..], Int)` — each slot's type comes directly from the
+                // TUPLE expr's own `Ty::Tuple` positionally (no registry lookup needed).
+                IrExprKind::Tuple { elements } => {
+                    if let Ty::Tuple(tys) = &expr.ty {
+                        if tys.len() == elements.len() {
+                            for (el, t) in elements.iter_mut().zip(tys.iter()) {
+                                if matches!(t, Ty::Applied(TypeConstructorId::Result, _))
+                                    && self.is_raw_never_err_call(el)
+                                {
+                                    self.wrap(el, t.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                // `Holder { r: step() }` — field types come from the record expr's own
+                // structural type (`Ty::Record`/`Ty::OpenRecord`) or, for a NAMED record, the
+                // declared layout registry — mirrors auto_try.rs's `field_tys` construction.
+                IrExprKind::Record { name, fields } => {
+                    let field_tys: std::collections::HashMap<almide_lang::intern::Sym, Ty> =
+                        match &expr.ty {
+                            Ty::Record { fields: fs } | Ty::OpenRecord { fields: fs } => {
+                                fs.iter().cloned().collect()
+                            }
+                            Ty::Named(tn, _) => self
+                                .record_layouts
+                                .get(tn.as_str())
+                                .map(|(_, fs)| fs.iter().cloned().collect())
+                                .unwrap_or_default(),
+                            _ => name
+                                .as_ref()
+                                .and_then(|n| self.record_layouts.get(n.as_str()))
+                                .map(|(_, fs)| fs.iter().cloned().collect())
+                                .unwrap_or_default(),
+                        };
+                    for (k, v) in fields.iter_mut() {
+                        if let Some(ft) = field_tys.get(k) {
+                            if matches!(ft, Ty::Applied(TypeConstructorId::Result, _))
+                                && self.is_raw_never_err_call(v)
+                            {
+                                self.wrap(v, ft.clone());
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
-    S { can_err, lifted: lifted_effect_fns, result_vars }.visit_expr_mut(body);
+    S { can_err, lifted: lifted_effect_fns, result_vars, record_layouts }.visit_expr_mut(body);
 }
 
 /// Rewrite `match <never-err lifted-effect call> { ok(pat) => A, err(_) => B }` to `{ let pat =
@@ -491,6 +652,50 @@ pub fn lifted_effect_fn_names(fns: &[IrFunction]) -> std::collections::HashSet<S
 /// is NEVER touched (inlining could make it self-recursive and push it into a TCO path that walls). The
 /// guard lowers F and inlined-F with the program's `globals`/`record_layouts`, exactly as the real
 /// lowering will, so its verdict matches.
+/// Populate the name-keyed ABI registries (never-err lifted / auto-wrap / declared-Option)
+/// from `fns` — extracted from [`inline_mutual_tail_recursion`] so the pipeline can WIDEN the
+/// registries over the WHOLE program (main + mangled module siblings) without feeding module
+/// bodies through the main pre-pass rewrites (which regressed the intra-module tail-call shape).
+pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayouts) {
+    let can_err = compute_can_err(fns);
+    let lifted_effect_fns = lifted_effect_fn_names(fns);
+    // Publish the never-err lifted set (lifted ∖ can-err) for the match-subject wall (the rare residue
+    // `rewrite_never_err_effect_match` cannot turn into a `let`-block — `ok(_)`/structured/guarded Ok).
+    NEVER_ERR_LIFTED_FNS.with(|s| {
+        *s.borrow_mut() =
+            lifted_effect_fns.iter().filter(|n| !can_err.contains(*n)).cloned().collect();
+    });
+    AUTO_WRAP_ABI_FNS.with(|s| {
+        *s.borrow_mut() = fns
+            .iter()
+            .filter(|f| f.name.as_str() != "main")
+            .filter(|f| {
+                !matches!(
+                    &f.ret_ty,
+                    Ty::Applied(
+                        almide_lang::types::constructor::TypeConstructorId::Result
+                            | almide_lang::types::constructor::TypeConstructorId::Option,
+                        _
+                    )
+                ) && (body_has_stmt_position_propagating_unwrap(&f.body)
+                    || body_has_tail_position_option_unwrap(&f.body)
+                    || body_has_tail_position_canerr_try(&f.body, &can_err))
+            })
+            .map(|f| f.name.as_str().to_string())
+            .collect();
+    });
+    DECLARED_OPTION_FNS.with(|s| {
+        *s.borrow_mut() = fns
+            .iter()
+            .filter(|f| {
+                matches!(&f.ret_ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _))
+            })
+            .map(|f| f.name.as_str().to_string())
+            .collect();
+    });
+}
+
 pub fn inline_mutual_tail_recursion(
     fns: &[IrFunction],
     globals: &HashMap<VarId, Ty>,
@@ -519,24 +724,25 @@ pub fn inline_mutual_tail_recursion(
     // `f()!` self-call → bare `f()` (which `tco_collect` then recognizes). This is what lets the yaml
     // parser cluster (entirely never-err) TCO; `safe_div` & co. (can-err) keep their `!` and stay walled.
     // Done HERE, before the inline guard's try-lower, so inlined-F sees the stripped body and lowers.
+    populate_abi_registries(fns, record_layouts);
     let can_err = compute_can_err(fns);
     let lifted_effect_fns = lifted_effect_fn_names(fns);
-    // Publish the never-err lifted set (lifted ∖ can-err) for the match-subject wall (the rare residue
-    // `rewrite_never_err_effect_match` cannot turn into a `let`-block — `ok(_)`/structured/guarded Ok).
-    NEVER_ERR_LIFTED_FNS.with(|s| {
-        *s.borrow_mut() =
-            lifted_effect_fns.iter().filter(|n| !can_err.contains(*n)).cloned().collect();
-    });
     let stripped: Vec<IrFunction> = fns
         .iter()
         .map(|f| {
             let mut nf = f.clone();
+            strip_declared_option_trys(&mut nf.body);
             strip_never_err_unwraps(&mut nf.body, &can_err, &lifted_effect_fns, f.name.as_str());
             rewrite_fan_map_pure(&mut nf.body);
             crate::lower::desugar_option_str_literal_match(&mut nf.body);
             rewrite_never_err_effect_match(&mut nf.body, &can_err, &lifted_effect_fns);
             unwrap_never_err_call_types(&mut nf.body, &can_err, &lifted_effect_fns);
-            rewrap_never_err_into_result_targets(&mut nf.body, &can_err, &lifted_effect_fns);
+            rewrap_never_err_into_result_targets(
+                &mut nf.body,
+                &can_err,
+                &lifted_effect_fns,
+                record_layouts,
+            );
             nf
         })
         .collect();
@@ -743,10 +949,13 @@ pub(crate) struct LowerCtx {
     /// without this prefix (one lambda's certificate silently lost). Set by
     /// `lower_function_all`; empty for the param-free testable `lower_body` entry.
     fn_name: String,
-    /// MIR values that denote a lifted lambda's table slot (an `Op::FuncRef` dst). A later
-    /// call whose callee is one of these (`f(args)` where `f` bound a lifted lambda) lowers
-    /// to `Op::CallIndirect` through it instead of deferring — the closure EXECUTES.
-    funcref_values: HashSet<ValueId>,
+    /// MIR values that denote a CLOSURE BLOCK — the uniform first-class function
+    /// representation: a heap `[rc][len][cap][fnidx][captured…]` block (`lift_lambda`).
+    /// A later call whose callee is one of these (`f(args)` where `f` bound a lambda /
+    /// a function-typed param or call result) lowers to `Op::CallIndirect` through the
+    /// block (fnidx loaded from slot 0, the block passed as the borrowed env arg —
+    /// `emit_closure_call`) instead of deferring — the closure EXECUTES.
+    closure_values: HashSet<ValueId>,
     /// C1 DIRECT-CALL INLINE: source-`VarId` → the INLINE lambda (`params`, `body`) a `let f =
     /// (x) => body` statically bound. A later DIRECT call `f(args)` whose callee is this `f`
     /// is DEFUNCTIONALIZED — the body is lowered INLINE with each param bound to its arg, and
@@ -921,6 +1130,14 @@ pub(crate) struct LowerCtx {
     /// already declaring Result/Option is NOT lifted — its return is real). Set in
     /// `lower_function_all_impl`; defaults false (the void convention) for the bare entries.
     decl_ret_is_result: bool,
+    /// The fn's REAL compiled ABI returns `Result[T, String]` — either GENUINELY declared
+    /// `-> Result[..]` (STRICTLY Result: an `-> Option[..]` fn is excluded, since a bare tail
+    /// Option-`!` there is a same-repr pass-through, which is already correct), or auto-wrapped
+    /// via [`AUTO_WRAP_ABI_FNS`]. Gates the bare-tail-Option-`!` desugar
+    /// (`desugar_tail_effect_unwrap`): under a Result ABI that pass-through returns the RAW
+    /// Option handle AS the Result — a confirmed silent wrong-value. Threaded as an explicit
+    /// per-fn FACT (the `unit_main` pattern) so the desugar never trusts a tree-local `.ty`.
+    ret_is_result_abi: bool,
 }
 
 /// Type NAME → (generic param names, declaration-ordered fields) — the VALUE-MODEL
@@ -963,6 +1180,75 @@ impl VariantLayout {
     }
 }
 
+/// Recursively replace a bare generic-parameter reference (`Ty::Named(p, [])` where `p` is a
+/// key of `subst`) with its concrete binding — the DECLARATION-time field type of a generic
+/// variant (`type Either[L,R] = Left(L) | Right(R)`) stores `L`/`R` verbatim as `Named("L",[])`/
+/// `Named("R",[])` (confirmed via debug trace, NOT `Ty::TypeVar`), so heap/flat classification
+/// over the RAW registry entry is blind to any concrete instantiation. Recurses into `Named`'s
+/// own args and `Applied`'s args (a generic parameter could itself appear nested, e.g.
+/// `List[L]`) so a partially-generic composite field also resolves correctly.
+fn substitute_generic_ty(ty: &Ty, subst: &HashMap<almide_lang::intern::Sym, Ty>) -> Ty {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::Named(n, args) if args.is_empty() => {
+            subst.get(n).cloned().unwrap_or_else(|| ty.clone())
+        }
+        Ty::Named(n, args) => {
+            Ty::Named(*n, args.iter().map(|a| substitute_generic_ty(a, subst)).collect())
+        }
+        Ty::Applied(TypeConstructorId::UserDefined(n), args) => Ty::Applied(
+            TypeConstructorId::UserDefined(n.clone()),
+            args.iter().map(|a| substitute_generic_ty(a, subst)).collect(),
+        ),
+        Ty::Applied(c, args) => {
+            Ty::Applied(c.clone(), args.iter().map(|a| substitute_generic_ty(a, subst)).collect())
+        }
+        _ => ty.clone(),
+    }
+}
+
+/// A WASM-identifier-safe, unique suffix for a generic variant instantiation (`Either` +
+/// `[Int, String]` → `"Either_Int_String"`) — the name of the PER-INSTANTIATION drop function
+/// (`$__drop_<this>`/`$__drop_list_<this>`) generated for it, distinct from the bare generic
+/// name so two different instantiations of the same type (were the corpus ever to use both)
+/// never collide on one ambiguous function. `None` for an arg shape not confidently nameable
+/// here (a nested generic instantiation, a tuple, …) — the caller declines (stays walled)
+/// rather than guess a name that could collide or misrender.
+/// The bare Almide SOURCE spelling of a scalar `Ty` — the set both the instantiation-name
+/// mangler and the shadow-type-declaration renderer (`generate_generic_variant_instantiation_
+/// sources`, drop_sources.rs) treat as safely nameable/renderable. Kept as ONE shared list so
+/// the two never drift apart (a type nameable-but-not-renderable, or vice versa, would break the
+/// admission⟹generation invariant `is_rich_variant_ty` depends on).
+pub fn generic_variant_instantiation_scalar_name(ty: &Ty) -> Option<&'static str> {
+    match ty {
+        Ty::Int => Some("Int"),
+        Ty::Float => Some("Float"),
+        Ty::Bool => Some("Bool"),
+        Ty::String => Some("String"),
+        Ty::Int8 => Some("Int8"),
+        Ty::Int16 => Some("Int16"),
+        Ty::Int32 => Some("Int32"),
+        Ty::Int64 => Some("Int64"),
+        Ty::UInt8 => Some("UInt8"),
+        Ty::UInt16 => Some("UInt16"),
+        Ty::UInt32 => Some("UInt32"),
+        Ty::UInt64 => Some("UInt64"),
+        Ty::Float32 => Some("Float32"),
+        Ty::Float64 => Some("Float64"),
+        _ => None,
+    }
+}
+
+pub fn generic_variant_instantiation_name(base: &str, args: &[Ty]) -> Option<String> {
+    let mut out = base.to_string();
+    for a in args {
+        let piece = generic_variant_instantiation_scalar_name(a)?;
+        out.push('_');
+        out.push_str(piece);
+    }
+    Some(out)
+}
+
 /// The variant-type sibling of [`RecordLayouts`]: type NAME → its [`VariantLayout`], plus a
 /// constructor-name → owning-type reverse index (a `Lit(7)` constructor expression carries
 /// its ctor name; this resolves the variant type the way v0's `find_variant_tag_by_ctor`
@@ -973,6 +1259,11 @@ impl VariantLayout {
 pub struct VariantLayouts {
     pub by_type: HashMap<String, VariantLayout>,
     pub ctor_to_type: HashMap<String, String>,
+    /// Record-variant field DEFAULT exprs (`Rect { color: String = "" }`), keyed
+    /// `ctor → field → expr` — consulted by the ctor builder when a literal OMITS a
+    /// defaulted field (v0 fills the default at construction; leaving the slot would be
+    /// garbage, and declining walled the whole default_fields family).
+    pub ctor_field_defaults: HashMap<String, HashMap<String, almide_ir::IrExpr>>,
 }
 
 impl VariantLayouts {
@@ -984,29 +1275,37 @@ impl VariantLayouts {
         Some((ty.as_str(), layout, case))
     }
 
-    /// Does the variant type `type_name` need the RECURSIVE [`Op::DropVariant`] (the generated
-    /// `$__drop_<ty>`) — i.e. does some ctor field hold another user variant whose flat free would
-    /// leak its children? A String-only-field variant uses the masked `DropListStr` instead (ADT
-    /// brick 5a/5c). This is the lowering-side mirror of
-    /// [`crate::lower::variant_needs_recursive_drop`], computed from the registry's field Tys.
-    pub fn needs_recursive_drop(&self, type_name: &str, is_record: &dyn Fn(&str) -> bool) -> bool {
+    /// The CORE of [`Self::needs_recursive_drop`], factored out so an INSTANTIATED (generic-
+    /// substituted) case list can share the exact same classification as the raw registry entry
+    /// — the two must never disagree (a false "doesn't need recursion" verdict on a heap field
+    /// is a silent leak, not a wall).
+    fn cases_need_recursive_drop(
+        &self,
+        cases: &[VariantCaseLayout],
+        is_record: &dyn Fn(&str) -> bool,
+    ) -> bool {
         use almide_lang::types::constructor::TypeConstructorId;
-        let Some(layout) = self.by_type.get(type_name) else { return false };
         // Mirrors the generator's `variant_needs_recursive_drop`: a nested-variant field (the
         // original rule) OR heap fields the generated drop can ALL free (String / List[scalar] /
-        // List[variant] / a RECORD — via `$__drop_<R>` or a scalar-only record's flat rc_dec). The
-        // `is_record` predicate is supplied by the caller (LowerCtx checks its record registry).
+        // List[variant] / List[String] (per-element via `__drop_list_str`) / a RECORD — via
+        // `$__drop_<R>` or a scalar-only record's flat rc_dec). The `is_record` predicate is
+        // supplied by the caller (LowerCtx checks its record registry).
         let supported_heap = |t: &Ty| -> bool {
             self.field_is_variant(t)
                 || matches!(t, Ty::Named(n, _) if is_record(n.as_str()))
                 || matches!(t, Ty::String)
                 || matches!(t, Ty::Applied(TypeConstructorId::List, a)
-                    if a.len() == 1 && (!is_heap_ty(&a[0]) || self.field_is_variant(&a[0])))
+                    if a.len() == 1
+                        && (!is_heap_ty(&a[0])
+                            || matches!(a[0], Ty::String)
+                            || self.field_is_variant(&a[0])))
+                || matches!(t, Ty::Applied(TypeConstructorId::Option, a)
+                    if a.len() == 1 && !is_heap_ty(&a[0]))
         };
         let mut any_heap = false;
         let mut all_supported = true;
         let mut has_variant_field = false;
-        for c in &layout.cases {
+        for c in cases {
             for (_, ty) in &c.fields {
                 if self.field_is_variant(ty) {
                     has_variant_field = true;
@@ -1022,25 +1321,100 @@ impl VariantLayouts {
         has_variant_field || (any_heap && all_supported)
     }
 
+    /// Does the variant type `type_name` need the RECURSIVE [`Op::DropVariant`] (the generated
+    /// `$__drop_<ty>`) — i.e. does some ctor field hold another user variant whose flat free would
+    /// leak its children? A String-only-field variant uses the masked `DropListStr` instead (ADT
+    /// brick 5a/5c). This is the lowering-side mirror of
+    /// [`crate::lower::variant_needs_recursive_drop`], computed from the registry's field Tys.
+    /// UNSUBSTITUTED: for a GENERIC variant this reads the raw declaration (type-parameter
+    /// placeholders, never a concrete instantiation) — see [`Self::instantiated_needs_recursive_
+    /// drop`] for the instantiation-aware sibling a `List[<generic variant>]` element check needs.
+    pub fn needs_recursive_drop(&self, type_name: &str, is_record: &dyn Fn(&str) -> bool) -> bool {
+        let Some(layout) = self.by_type.get(type_name) else { return false };
+        self.cases_need_recursive_drop(&layout.cases, is_record)
+    }
+
+    /// Substitute a generic variant's DECLARED field types (`Left(L) | Right(R)` → `L`/`R` as
+    /// bare `Ty::Named(sym,[])` placeholders, confirmed via debug trace — never `Ty::TypeVar`)
+    /// with the CONCRETE type args at one instantiation site (`Either[Int,String]`'s `[Int,
+    /// String]`, zipped positionally against `layout.generics`). A NON-generic variant (`layout.
+    /// generics.is_empty()`) returns its cases UNCHANGED (zero-cost passthrough, no behavior
+    /// change for the entire existing non-generic corpus). `None` on an arity mismatch (the
+    /// checker guarantees this never happens for a well-typed program, but a mismatched
+    /// registry/call-site pairing declines rather than substituting garbage).
+    fn instantiated_cases(&self, type_name: &str, args: &[Ty]) -> Option<Vec<VariantCaseLayout>> {
+        let layout = self.by_type.get(type_name)?;
+        if layout.generics.is_empty() {
+            return Some(layout.cases.clone());
+        }
+        if layout.generics.len() != args.len() {
+            return None;
+        }
+        let subst: HashMap<almide_lang::intern::Sym, Ty> =
+            layout.generics.iter().copied().zip(args.iter().cloned()).collect();
+        Some(
+            layout
+                .cases
+                .iter()
+                .map(|c| VariantCaseLayout {
+                    ctor: c.ctor,
+                    tag: c.tag,
+                    fields: c
+                        .fields
+                        .iter()
+                        .map(|(n, t)| (*n, substitute_generic_ty(t, &subst)))
+                        .collect(),
+                })
+                .collect(),
+        )
+    }
+
+    /// The instantiation-aware sibling of [`Self::needs_recursive_drop`] — substitutes generic
+    /// field types with `args` BEFORE classifying, so `Either[Int,String]`'s `Right(String)` case
+    /// is correctly seen as heap (unlike the raw registry's unresolved `Right(R)`). Identical to
+    /// `needs_recursive_drop` for a non-generic type (args ignored via `instantiated_cases`'s
+    /// passthrough).
+    pub fn instantiated_needs_recursive_drop(
+        &self,
+        type_name: &str,
+        args: &[Ty],
+        is_record: &dyn Fn(&str) -> bool,
+    ) -> bool {
+        match self.instantiated_cases(type_name, args) {
+            Some(cases) => self.cases_need_recursive_drop(&cases, is_record),
+            None => false,
+        }
+    }
+
+    /// Extract `(bare type name, concrete type args)` from a variant-type reference — the
+    /// SHARED match arms `is_flat_variant_ty`/`is_rich_variant_ty`/`field_variant_name` each
+    /// duplicated (discarding the args); factored out so the instantiation-aware paths can see
+    /// both halves. `Ty::Named(n, args)` carries a GENERIC variant's concrete instantiation args
+    /// at a USE site (`Either[Int,String]` → `Named("Either", [Int, String])`, confirmed via
+    /// debug trace) — `args` is empty for a non-generic reference or an unresolved bare mention.
+    fn variant_name_and_args(ty: &Ty) -> Option<(&str, &[Ty])> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        match ty {
+            Ty::Named(n, args) => Some((n.as_str(), args.as_slice())),
+            Ty::Variant { name, .. } => Some((name.as_str(), &[])),
+            Ty::Applied(TypeConstructorId::UserDefined(n), args) => Some((n.as_str(), args.as_slice())),
+            _ => None,
+        }
+    }
+
     /// Is `ty` a registry variant ALL of whose constructors have ONLY scalar fields — i.e. a FLAT
     /// tag-block with NO heap slot (a nullary enum like `Capability`, or a scalar-payload variant)?
     /// Such a block is a single allocation freed by one `prim.rc_dec`, so a `List[flat-variant]`
     /// drops correctly via the per-element-`rc_dec` `__drop_list_str` (each element + the list block),
     /// the SAME flat shape as a `List[String]`. A variant carrying a `String`/nested/`List` field is
     /// NOT flat (its block owns an inner handle a flat `rc_dec` would leak) → `false` (stays walled).
+    /// Substitutes generic field types against `ty`'s own instantiation args first (a no-op for a
+    /// non-generic variant), so a generic instantiated with an all-scalar arg set (`Pair[Int,Int]`)
+    /// is correctly flat while one with a heap arg (`Either[Int,String]`) correctly is not.
     pub fn is_flat_variant_ty(&self, ty: &Ty) -> bool {
-        use almide_lang::types::constructor::TypeConstructorId;
-        let n = match ty {
-            Ty::Named(n, _) => n.as_str(),
-            Ty::Variant { name, .. } => name.as_str(),
-            Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.as_str(),
-            _ => return false,
-        };
-        match self.by_type.get(n) {
-            Some(layout) => layout
-                .cases
-                .iter()
-                .all(|c| c.fields.iter().all(|(_, fty)| !is_heap_ty(fty))),
+        let Some((n, args)) = Self::variant_name_and_args(ty) else { return false };
+        match self.instantiated_cases(n, args) {
+            Some(cases) => cases.iter().all(|c| c.fields.iter().all(|(_, fty)| !is_heap_ty(fty))),
             None => false,
         }
     }
@@ -1051,13 +1425,55 @@ impl VariantLayouts {
     /// element (the wasm `Instr` accumulator) — its drop routes to `$__drop_list_<V>` via
     /// `variant_drop_handles`. Mirrors [`crate::lower::variant_needs_recursive_drop`] (the generator's
     /// gate) so the two never disagree: a variant admitted here ALWAYS has a generated `$__drop_list_<V>`.
-    pub fn is_rich_variant_ty(&self, ty: &Ty) -> Option<String> {
-        let name = self.field_variant_name(ty)?;
-        // A `List[<variant>]` ELEMENT check keys on nested-variant fields only (a variant with a
-        // record field is neither flat nor list-rich here → the list materializer walls it cleanly,
-        // never a leak). The record-widening applies to the direct-ctor `needs_rec` (LowerCtx), not
-        // to the list-element admission.
-        self.needs_recursive_drop(&name, &|_| false).then_some(name)
+    ///
+    /// For a GENERIC variant instantiated with concrete args (`Either[Int,String]`), the returned
+    /// name is the INSTANTIATION-SPECIFIC one (`generic_variant_instantiation_name`, e.g.
+    /// `"Either_Int_String"`) rather than the bare generic name — a distinct `$__drop_list_<this>`
+    /// is generated per instantiation actually used (see `discover_generic_variant_list_
+    /// instantiations` in drop_sources.rs), since a single shared function could not correctly
+    /// serve two instantiations with DIFFERENT per-slot heap-ness. `None` if the args aren't a
+    /// confidently nameable shape (declines / stays walled rather than risk a colliding name) or
+    /// this specific instantiation doesn't actually need recursive drop.
+    pub fn is_rich_variant_ty(&self, ty: &Ty, is_record: &dyn Fn(&str) -> bool) -> Option<String> {
+        let (n, args) = Self::variant_name_and_args(ty)?;
+        if !self.by_type.contains_key(n) {
+            return None;
+        }
+        // A NON-generic variant element admits the SAME record-field widening the drop
+        // GENERATOR uses (`variant_needs_recursive_drop` counts record fields via
+        // `all_record_names`) — admission ⊆ generation stays intact because both sides now
+        // ask the same question: `$__drop_<V>`/`$__drop_list_<V>` free a record field via
+        // `$__drop_<R>` / a scalar-only record's flat rc_dec (the drop generator's field
+        // loop), so a record-field variant list (`List[Shape]`, `Label { at: Point }`) is
+        // freed exactly. The GENERIC arm below keeps the `|_| false` narrowing (shadow-type
+        // generation covers no record fields).
+        if args.is_empty() {
+            return self
+                .needs_recursive_drop(n, is_record)
+                .then(|| n.to_string());
+        }
+        let inst_name = generic_variant_instantiation_name(n, args)?;
+        // ADMISSION must never outrun GENERATION: the shadow `type <inst_name> = ...` +
+        // `$__drop_<inst_name>` source text (`generate_generic_variant_instantiation_sources`,
+        // drop_sources.rs) can only render a field whose SUBSTITUTED type is one of the scalars
+        // `generic_variant_instantiation_name` itself already supports, or another ALREADY-
+        // DECLARED (non-generic) user variant referenced by its real bare name. A field type
+        // outside that set (e.g. a generic field like `Left(List[L])` — Either's OWN fields
+        // happen to be bare type params, so this never fires for it, but a future generic
+        // variant might declare a composite field) declines the WHOLE instantiation here, so a
+        // "yes" from this method is ALWAYS backed by real generated source — never a dangling
+        // `$__drop_list_<inst_name>` call (the exact class of bug this campaign nearly shipped
+        // once already, this session, on a different wall).
+        let cases = self.instantiated_cases(n, args)?;
+        if !cases.iter().all(|c| {
+            c.fields.iter().all(|(_, fty)| {
+                generic_variant_instantiation_scalar_name(fty).is_some() || self.field_is_variant(fty)
+            })
+        }) {
+            return None;
+        }
+        self.instantiated_needs_recursive_drop(n, args, &|_| false)
+            .then_some(inst_name)
     }
 
     /// Is `ty` one of the variant types in this registry (a nested-variant ctor field)?
@@ -1148,6 +1564,18 @@ pub(crate) fn is_list_list_str_ty(ty: &Ty) -> bool {
             Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(b[0], Ty::String)))
 }
 
+/// An `Option[List[String]]` — the heap-accumulator fold's value (is_balanced's paren
+/// stack). PHYSICALLY a 0/1-element `List[List[String]]`, so `DropListListStr`'s nested
+/// sweep (per outer slot: rc_dec each inner cell String + the inner block, then the outer
+/// block) is its exact recursive free — the flat `DropListStr` (`heap_elem_lists`) would
+/// rc_dec only the inner-list HANDLE, leaking every stack String (a fold loop OOMs).
+pub(crate) fn is_opt_list_str_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty,
+        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && matches!(&a[0],
+            Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(b[0], Ty::String)))
+}
+
 /// A `List[(String, String)]` — the `map.entries` / render_attrs shape. Each element is an owned
 /// (String, String) TUPLE; its scope-end drop must be [`Op::DropListStrStr`] (per tuple: rc_dec BOTH
 /// String slots, then the tuple, then the list). The flat `DropListStr` (`heap_elem_lists`) would
@@ -1188,6 +1616,31 @@ pub fn is_map_hval_ty(ty: &Ty) -> bool {
         Ty::Applied(TypeConstructorId::Map, a)
             if a.len() == 2 && matches!(a[0], Ty::String) && matches!(&a[1],
                 Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && !is_heap_ty(&e[0])))
+}
+
+/// `Map[String, Map[String, String]]` — the msv family (String keys, MAP values;
+/// stdlib/map_msv.almd). Its drop must sweep each last-ref inner map's String slots
+/// (`$__drop_map_msv`), so binds route it by type exactly like `is_map_hval_ty`.
+pub fn is_map_msv_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
+        && matches!(a[0], Ty::String)
+        && matches!(&a[1], Ty::Applied(TypeConstructorId::Map, b)
+            if b.len() == 2 && matches!(b[0], Ty::String) && matches!(b[1], Ty::String)))
+}
+
+/// `Map[String, List[Option[Int]]]` — the mlo family (String keys, LIST-OF-OPTIONS values;
+/// stdlib/map_mlo.almd — compound_repr_interp's `deep` literal). Its drop must sweep each
+/// last-ref value list's Option-block slots (`$__drop_map_mlo`), exactly the msv discipline
+/// with list slots instead of inner-map string slots.
+pub fn is_map_mlo_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
+        && matches!(a[0], Ty::String)
+        && matches!(&a[1], Ty::Applied(TypeConstructorId::List, b)
+            if b.len() == 1
+                && matches!(&b[0], Ty::Applied(TypeConstructorId::Option, o)
+                    if o.len() == 1 && matches!(o[0], Ty::Int))))
 }
 
 pub(crate) fn is_list_int_str_ty(ty: &Ty) -> bool {

@@ -1,0 +1,6 @@
+// env_os — SELF-HOSTED `env.os()` for the v1 trust-spine WASM target. On wasm the
+// platform IS the WASI sandbox, so v0's emit_wasm folds this to the CONSTANT "wasi"
+// (calls_env.rs) — the v1 self-host is the same constant: no host reach, no
+// capability (pure on this target; the native target's real host read lives in the
+// runtime intrinsic, irrelevant here).
+fn env_os() -> String = "wasi"

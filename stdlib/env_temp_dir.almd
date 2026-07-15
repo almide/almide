@@ -1,0 +1,6 @@
+// env_temp_dir — SELF-HOSTED `env.temp_dir()` for the v1 trust-spine WASM target.
+// v0's emit_wasm folds this to the CONSTANT "/tmp" (calls_env.rs — the WASI preopen
+// convention) — the v1 self-host is the same constant: no host reach, no capability
+// (pure on this target; the native target's real host read lives in the runtime
+// intrinsic, irrelevant here).
+fn env_temp_dir() -> String = "/tmp"
