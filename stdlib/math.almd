@@ -9,6 +9,9 @@
 @intrinsic("almide_rt_math_abs")
 fn abs(n: Int) -> Int = _
 
+@intrinsic("almide_rt_math_atan")
+fn atan(x: Float) -> Float = _
+
 @intrinsic("almide_rt_math_choose")
 fn choose(n: Int, k: Int) -> Int = _
 
@@ -68,3 +71,6 @@ fn sqrt(x: Float) -> Float = _
 
 @intrinsic("almide_rt_math_tan")
 fn tan(x: Float) -> Float = _
+
+@intrinsic("almide_rt_math_tanh")
+fn tanh(x: Float) -> Float = _

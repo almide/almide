@@ -822,3 +822,207 @@ pub(super) fn compile_math_exp(emitter: &mut WasmEmitter) {
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.math_exp, type_idx, f));
 }
+
+// ── atan constants (s_atan.c, vendored libm 0.2.16) ──
+const ATANHI0: f64 = 4.63647609000806093515e-01; /* atan(0.5)hi 0x3FDDAC67, 0x0561BB4F */
+const ATANHI1: f64 = 7.85398163397448278999e-01; /* atan(1.0)hi 0x3FE921FB, 0x54442D18 */
+const ATANHI2: f64 = 9.82793723247329054082e-01; /* atan(1.5)hi 0x3FEF730B, 0xD281F69B */
+const ATANHI3: f64 = 1.57079632679489655800e+00; /* atan(inf)hi 0x3FF921FB, 0x54442D18 */
+const ATANLO0: f64 = 2.26987774529616870924e-17; /* atan(0.5)lo 0x3C7A2B7F, 0x222F65E2 */
+const ATANLO1: f64 = 3.06161699786838301793e-17; /* atan(1.0)lo 0x3C81A626, 0x33145C07 */
+const ATANLO2: f64 = 1.39033110312309984516e-17; /* atan(1.5)lo 0x3C700788, 0x7AF0CBBD */
+const ATANLO3: f64 = 6.12323399573676603587e-17; /* atan(inf)lo 0x3C91A626, 0x33145C07 */
+const AT0: f64 = 3.33333333333329318027e-01; /* 0x3FD55555, 0x5555550D */
+const AT1: f64 = -1.99999999998764832476e-01; /* 0xBFC99999, 0x9998EBC4 */
+const AT2: f64 = 1.42857142725034663711e-01; /* 0x3FC24924, 0x920083FF */
+const AT3: f64 = -1.11111104054623557880e-01; /* 0xBFBC71C6, 0xFE231671 */
+const AT4: f64 = 9.09088713343650656196e-02; /* 0x3FB745CD, 0xC54C206E */
+const AT5: f64 = -7.69187620504482999495e-02; /* 0xBFB3B0F2, 0xAF749A6D */
+const AT6: f64 = 6.66107313738753120669e-02; /* 0x3FB10D66, 0xA0D03D51 */
+const AT7: f64 = -5.83357013379057348645e-02; /* 0xBFADDE2D, 0x52DEFD9A */
+const AT8: f64 = 4.97687799461593236017e-02; /* 0x3FA97B4B, 0x24760DEB */
+const AT9: f64 = -3.65315727442169155270e-02; /* 0xBFA2B444, 0x2C6A6C2F */
+const AT10: f64 = 1.62858201153657823623e-02; /* 0x3F90AD3A, 0xE322DA11 */
+
+/// __math_atan(x: f64) -> f64
+/// Faithful port of libm `atan` (s_atan.c; vendored twin:
+/// runtime/rs/src/libm_p4.rs). Subrange reduction to [0, 7/16] + odd/even
+/// polynomial split, no tables, no helpers. Bit-identical to the native
+/// vendored `atan`.
+pub(super) fn compile_math_atan(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.math_atan];
+    // 0x1p-120f reinterpreted through f64 bits, exactly as upstream writes it.
+    let tiny = f64::from_bits(0x0380_0000);
+    // params: 0=x (mutated, as in the Rust source). locals:
+    //   1=i32 ix, 2=i32 sign, 3=i32 id,
+    //   4=f64 z, 5=f64 w, 6=f64 s1, 7=f64 s2, 8=f64 hi, 9=f64 lo
+    const X: u32 = 0;
+    const IX: u32 = 1; const SIGN: u32 = 2; const ID: u32 = 3;
+    const Z: u32 = 4; const W: u32 = 5; const S1: u32 = 6; const S2: u32 = 7;
+    const HI: u32 = 8; const LO: u32 = 9;
+    let mut f = Function::new([(3, ValType::I32), (6, ValType::F64)]);
+    wasm!(f, {
+        // ix = (to_bits(x) >> 32); sign = ix >> 31; ix &= 0x7fffffff
+        local_get(X); i64_reinterpret_f64; i64_const(32); i64_shr_u; i32_wrap_i64; local_set(IX);
+        local_get(IX); i32_const(31); i32_shr_u; local_set(SIGN);
+        local_get(IX); i32_const(0x7fffffff); i32_and; local_set(IX);
+
+        // if ix >= 0x44100000 (|x| >= 2^66 or nan)
+        local_get(IX); i32_const(0x44100000); i32_ge_u;
+        if_empty;
+            local_get(X); local_get(X); f64_ne;
+            if_empty; local_get(X); return_; end;
+            // z = ATANHI[3] + 0x1p-120f
+            f64_const(ATANHI3); f64_const(tiny); f64_add; local_set(Z);
+            local_get(SIGN); if_f64; local_get(Z); f64_neg; else_; local_get(Z); end;
+            return_;
+        end;
+
+        // subrange selection
+        local_get(IX); i32_const(0x3fdc0000); i32_lt_u;
+        if_empty;
+            // |x| < 0.4375
+            local_get(IX); i32_const(0x3e400000); i32_lt_u;
+            if_empty; local_get(X); return_; end;   // |x| < 2^-27
+            i32_const(-1); local_set(ID);
+        else_;
+            local_get(X); f64_abs; local_set(X);
+            local_get(IX); i32_const(0x3ff30000); i32_lt_u;
+            if_empty;
+                // |x| < 1.1875
+                local_get(IX); i32_const(0x3fe60000); i32_lt_u;
+                if_empty;
+                    // 7/16 <= |x| < 11/16: x = (2x - 1)/(2 + x); id = 0
+                    f64_const(2.0); local_get(X); f64_mul; f64_const(1.0); f64_sub;
+                    f64_const(2.0); local_get(X); f64_add; f64_div; local_set(X);
+                    i32_const(0); local_set(ID);
+                else_;
+                    // 11/16 <= |x| < 19/16: x = (x - 1)/(x + 1); id = 1
+                    local_get(X); f64_const(1.0); f64_sub;
+                    local_get(X); f64_const(1.0); f64_add; f64_div; local_set(X);
+                    i32_const(1); local_set(ID);
+                end;
+            else_;
+                local_get(IX); i32_const(0x40038000); i32_lt_u;
+                if_empty;
+                    // |x| < 2.4375: x = (x - 1.5)/(1 + 1.5x); id = 2
+                    local_get(X); f64_const(1.5); f64_sub;
+                    f64_const(1.0); f64_const(1.5); local_get(X); f64_mul; f64_add; f64_div; local_set(X);
+                    i32_const(2); local_set(ID);
+                else_;
+                    // 2.4375 <= |x| < 2^66: x = -1/x; id = 3
+                    f64_const(-1.0); local_get(X); f64_div; local_set(X);
+                    i32_const(3); local_set(ID);
+                end;
+            end;
+        end;
+
+        // z = x*x; w = z*z
+        local_get(X); local_get(X); f64_mul; local_set(Z);
+        local_get(Z); local_get(Z); f64_mul; local_set(W);
+        // s1 = z*(AT0 + w*(AT2 + w*(AT4 + w*(AT6 + w*(AT8 + w*AT10)))))
+        local_get(Z);
+        f64_const(AT0);
+        local_get(W); f64_const(AT2);
+        local_get(W); f64_const(AT4);
+        local_get(W); f64_const(AT6);
+        local_get(W); f64_const(AT8);
+        local_get(W); f64_const(AT10); f64_mul; f64_add;
+        f64_mul; f64_add;
+        f64_mul; f64_add;
+        f64_mul; f64_add;
+        f64_mul; f64_add;
+        f64_mul; local_set(S1);
+        // s2 = w*(AT1 + w*(AT3 + w*(AT5 + w*(AT7 + w*AT9))))
+        local_get(W);
+        f64_const(AT1);
+        local_get(W); f64_const(AT3);
+        local_get(W); f64_const(AT5);
+        local_get(W); f64_const(AT7);
+        local_get(W); f64_const(AT9); f64_mul; f64_add;
+        f64_mul; f64_add;
+        f64_mul; f64_add;
+        f64_mul; f64_add;
+        f64_mul; local_set(S2);
+
+        // if id < 0: return x - x*(s1+s2)
+        local_get(ID); i32_const(0); i32_lt_s;
+        if_empty;
+            local_get(X); local_get(X); local_get(S1); local_get(S2); f64_add; f64_mul; f64_sub; return_;
+        end;
+        // (hi, lo) = (ATANHI[id], ATANLO[id]) — 4-way if chain, data-free
+        local_get(ID); i32_const(0); i32_eq;
+        if_empty; f64_const(ATANHI0); local_set(HI); f64_const(ATANLO0); local_set(LO); end;
+        local_get(ID); i32_const(1); i32_eq;
+        if_empty; f64_const(ATANHI1); local_set(HI); f64_const(ATANLO1); local_set(LO); end;
+        local_get(ID); i32_const(2); i32_eq;
+        if_empty; f64_const(ATANHI2); local_set(HI); f64_const(ATANLO2); local_set(LO); end;
+        local_get(ID); i32_const(3); i32_eq;
+        if_empty; f64_const(ATANHI3); local_set(HI); f64_const(ATANLO3); local_set(LO); end;
+        // z = hi - (x*(s1+s2) - lo - x)
+        local_get(HI);
+        local_get(X); local_get(S1); local_get(S2); f64_add; f64_mul;
+        local_get(LO); f64_sub;
+        local_get(X); f64_sub;
+        f64_sub; local_set(Z);
+        // sign ? -z : z
+        local_get(SIGN); if_f64; local_get(Z); f64_neg; else_; local_get(Z); end;
+        end;
+    });
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.math_atan, type_idx, f));
+}
+
+/// __math_tanh(x: f64) -> f64
+/// Faithful port of libm `tanh` (s_tanh.c; vendored twin:
+/// runtime/rs/src/libm_p4.rs). expm1-based range split; `f64.abs` is the
+/// bit-clear the Rust source does on the sign bit. Bit-identical to the
+/// native vendored `tanh`.
+pub(super) fn compile_math_tanh(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.math_tanh];
+    let expm1 = emitter.rt.libm.expm1;
+    // params: 0=x (mutated to |x|). locals: 1=i32 w, 2=i32 sign, 3=f64 t
+    const X: u32 = 0;
+    const W: u32 = 1; const SIGN: u32 = 2; const T: u32 = 3;
+    let mut f = Function::new([(2, ValType::I32), (1, ValType::F64)]);
+    wasm!(f, {
+        // sign = to_bits(x) >> 63; x = |x|; w = (to_bits(x) >> 32)
+        local_get(X); i64_reinterpret_f64; i64_const(63); i64_shr_u; i32_wrap_i64; local_set(SIGN);
+        local_get(X); f64_abs; local_set(X);
+        local_get(X); i64_reinterpret_f64; i64_const(32); i64_shr_u; i32_wrap_i64; local_set(W);
+
+        local_get(W); i32_const(0x3fe193ea); i32_gt_u;
+        if_empty;
+            // |x| > log(3)/2 ~= 0.5493 or nan
+            local_get(W); i32_const(0x40340000); i32_gt_u;
+            if_empty;
+                // |x| > 20 or nan: t = 1 - 0/x (avoids raising overflow)
+                f64_const(1.0); f64_const(0.0); local_get(X); f64_div; f64_sub; local_set(T);
+            else_;
+                // t = expm1(2x); t = 1 - 2/(t + 2)
+                f64_const(2.0); local_get(X); f64_mul; call(expm1); local_set(T);
+                f64_const(1.0); f64_const(2.0); local_get(T); f64_const(2.0); f64_add; f64_div; f64_sub; local_set(T);
+            end;
+        else_;
+            local_get(W); i32_const(0x3fd058ae); i32_gt_u;
+            if_empty;
+                // |x| > log(5/3)/2 ~= 0.2554: t = expm1(2x); t = t/(t + 2)
+                f64_const(2.0); local_get(X); f64_mul; call(expm1); local_set(T);
+                local_get(T); local_get(T); f64_const(2.0); f64_add; f64_div; local_set(T);
+            else_;
+                local_get(W); i32_const(0x00100000); i32_ge_u;
+                if_empty;
+                    // |x| >= 0x1p-1022: t = expm1(-2x); t = -t/(t + 2)
+                    f64_const(-2.0); local_get(X); f64_mul; call(expm1); local_set(T);
+                    local_get(T); f64_neg; local_get(T); f64_const(2.0); f64_add; f64_div; local_set(T);
+                else_;
+                    // |x| is subnormal (upstream force_eval only raises underflow)
+                    local_get(X); local_set(T);
+                end;
+            end;
+        end;
+        // sign ? -t : t
+        local_get(SIGN); if_f64; local_get(T); f64_neg; else_; local_get(T); end;
+        end;
+    });
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.math_tanh, type_idx, f));
+}

@@ -149,6 +149,7 @@ pub struct LibmRuntime {
     pub log2: u32,            // __libm_log2(x: f64) -> f64
     pub log10: u32,           // __libm_log10(x: f64) -> f64
     pub pow: u32,             // __libm_pow(x: f64, y: f64) -> f64
+    pub expm1: u32,           // __libm_expm1(x: f64) -> f64
 }
 
 // ───────────────────── named layout constants ──────────────────
@@ -193,6 +194,7 @@ pub fn register(emitter: &mut WasmEmitter) {
     emitter.rt.libm.log2 = emitter.register_func("__libm_log2", f64_f64);
     emitter.rt.libm.log10 = emitter.register_func("__libm_log10", f64_f64);
     emitter.rt.libm.pow = emitter.register_func("__libm_pow", f64f64_f64);
+    emitter.rt.libm.expm1 = emitter.register_func("__libm_expm1", f64_f64);
 }
 
 /// Compile the libm helper bodies (floor/scalbn/rem_pio2_large/rem_pio2/kernels).
@@ -212,6 +214,7 @@ pub fn compile_helpers(emitter: &mut WasmEmitter) {
     compile_log2(emitter);
     compile_log10(emitter);
     compile_pow(emitter);
+    compile_expm1(emitter);
 }
 
 // ───────────────────────── __libm_floor ───────────────────────
@@ -523,3 +526,4 @@ fn compile_k_tan(emitter: &mut WasmEmitter) {
 
 include!("rt_libm_p2.rs");
 include!("rt_libm_p3.rs");
+include!("rt_libm_p4.rs");

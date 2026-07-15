@@ -1366,3 +1366,30 @@ class = "fixture"
 oracle = "runtime/rs/src/value.rs::derive(PartialEq) on enum Value (strict tags, in-order object pairs)"
 test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Deep structural Value equality dispatched from the emit_eq Named(\"Value\") arm; exercised by spec/wasm_cross/value_deep_eq.almd (nulls, scalars, cross-tag, arrays, in-order objects, parsed-vs-built)."
+
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_math_atan"
+status = "verified"
+class = "fuzz"
+oracle = "runtime/rs/src/libm_p4.rs::atan (vendored libm s_atan.c — subrange reduction + odd/even poly; native math.atan runs the same vendored fn, not platform f64::atan)"
+test = "tests/libm_atan_tanh_cross_target_test.rs::atan_tanh_cross_target_random_fuzz"
+note = "Boundary battery covers all four ATANHI/ATANLO subranges, the 2^-27 tiny return and the 2^66 huge cutoff; upstream identity vectors (atan(1)=pi/4, atan(inf)=pi/2) pinned by atan_tanh_native_matches_libm_published_vectors."
+
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_math_tanh"
+status = "verified"
+class = "fuzz"
+oracle = "runtime/rs/src/libm_p4.rs::tanh (vendored libm s_tanh.c — expm1-based range split)"
+test = "tests/libm_atan_tanh_cross_target_test.rs::atan_tanh_cross_target_random_fuzz"
+note = "Range splits (log(5/3)/2, log(3)/2, |x|>20, subnormal) pinned by atan_tanh_cross_target_boundary; the expm1(1.1) upstream sanity vector reaches this routine through tanh(0.55)."
+
+[[routine]]
+file = "rt_libm_p4.rs"
+routine = "compile_expm1"
+status = "verified"
+class = "fuzz"
+oracle = "runtime/rs/src/libm_p4.rs::expm1 (vendored libm s_expm1.c — k*ln2 reduction + scaled-Q rational)"
+test = "tests/libm_atan_tanh_cross_target_test.rs::atan_tanh_cross_target_random_fuzz"
+note = "__math_tanh is the only caller; every k branch (0, ±1, >56, <20 twopk scaling) is reached through the tanh batteries."

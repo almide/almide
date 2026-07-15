@@ -701,6 +701,8 @@ impl FuncCompiler<'_> {
             "exp"   => Some(StdlibOp::FloatUnaryCall(self.emitter.rt.math_exp)),
             "log10" => Some(StdlibOp::FloatUnaryCall(self.emitter.rt.math_log10)),
             "log2"  => Some(StdlibOp::FloatUnaryCall(self.emitter.rt.math_log2)),
+            "atan"  => Some(StdlibOp::FloatUnaryCall(self.emitter.rt.math_atan)),
+            "tanh"  => Some(StdlibOp::FloatUnaryCall(self.emitter.rt.math_tanh)),
             _ => None,
         };
         if let Some(op) = op {
