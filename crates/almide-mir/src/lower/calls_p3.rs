@@ -472,6 +472,16 @@ impl LowerCtx {
             IrExprKind::IndexAccess { .. } if is_heap_ty(&container.ty) => {
                 self.try_lower_heap_field_borrow(container)?
             }
+            // A CALL-result container (`mk_paren().name` — the paren-ctor scalar field read):
+            // ANF-materialize the call to a synthetic temp via the SAME `lower_bind` path a
+            // `let tmp = mk_paren()` takes (tracked, recursive scope-end drop, read shapes
+            // seeded), then resolve the temp — the exact mirror of `lower_heap_extraction`'s
+            // Call arm on the scalar-field side.
+            IrExprKind::Call { .. } if is_heap_ty(&container.ty) => {
+                let tmp = self.fresh_synth_var();
+                self.lower_bind(tmp, &container.ty, container).ok()?;
+                self.value_for(tmp).ok()?
+            }
             _ => return None,
         };
         Some(block)
