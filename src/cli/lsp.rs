@@ -447,7 +447,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let doc = analyzed.get(uri)?;
             let hover = compute_hover(doc, pos);
             let result = hover.map(|h| serde_json::to_value(h).unwrap()).unwrap_or(serde_json::Value::Null);
-            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+            Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/completion" => {
             let params: CompletionParams = serde_json::from_value(req.params.clone()).ok()?;
@@ -456,21 +456,21 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let source = documents.get(uri)?;
             let items = compute_completions(source, pos);
             let result = serde_json::to_value(CompletionResponse::Array(items)).unwrap();
-            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+            Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/documentSymbol" => {
             let params: DocumentSymbolParams = serde_json::from_value(req.params.clone()).ok()?;
             let doc = analyzed.get(&params.text_document.uri)?;
             let symbols = compute_document_symbols(doc);
             let result = serde_json::to_value(DocumentSymbolResponse::Flat(symbols)).unwrap();
-            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+            Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/formatting" => {
             let params: DocumentFormattingParams = serde_json::from_value(req.params.clone()).ok()?;
             let doc = analyzed.get(&params.text_document.uri)?;
             let edits = compute_formatting(doc);
             let result = serde_json::to_value(edits).unwrap();
-            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+            Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/definition" => {
             let params: GotoDefinitionParams = serde_json::from_value(req.params.clone()).ok()?;
@@ -480,7 +480,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let loc = compute_definition(doc, pos, uri);
             let result = loc.map(|l| serde_json::to_value(GotoDefinitionResponse::Scalar(l)).unwrap())
                 .unwrap_or(serde_json::Value::Null);
-            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+            Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/signatureHelp" => {
             let params: SignatureHelpParams = serde_json::from_value(req.params.clone()).ok()?;
@@ -490,13 +490,13 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let doc = analyzed.get(uri);
             let help = compute_signature_help(source, pos, doc);
             let result = help.map(|h| serde_json::to_value(h).unwrap()).unwrap_or(serde_json::Value::Null);
-            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+            Some(Response::new_ok(req.id.clone(), result))
         }
         "workspace/symbol" => {
             let params: WorkspaceSymbolParams = serde_json::from_value(req.params.clone()).ok()?;
             let symbols = compute_workspace_symbols(&params.query, workspace_root);
             let result = serde_json::to_value(symbols).unwrap();
-            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+            Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/rename" => {
             let params: RenameParams = serde_json::from_value(req.params.clone()).ok()?;
@@ -505,7 +505,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let source = documents.get(uri)?;
             let edit = compute_rename(source, pos, uri, &params.new_name);
             let result = edit.map(|e| serde_json::to_value(e).unwrap()).unwrap_or(serde_json::Value::Null);
-            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+            Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/codeAction" => {
             let params: CodeActionParams = serde_json::from_value(req.params.clone()).ok()?;
@@ -513,7 +513,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let source = documents.get(uri)?;
             let actions = compute_code_actions(source, &params.context.diagnostics, uri);
             let result = serde_json::to_value(actions).unwrap();
-            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+            Some(Response::new_ok(req.id.clone(), result))
         }
         _ => None,
     }
