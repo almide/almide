@@ -55,13 +55,16 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
   型分岐）+ `lower_tail_unit` / `lower_tail_heap` / `lower_tail_scalar`
   （いずれも verbatim 移動）。検証: certs 3 本 byte 一致 + フルゲート。
   レシピはインデックス機械導出の python テキスト移動で再現可能。
+- 2026-07-16 `lower_scalar_value_inner`（cog 198）→ BinOp dispatch（340 行の
+  主因 arm）を `lower_scalar_binop` に抽出。verbatim 移動 + `(**left)` →
+  `left.clone()` の参照調整（Box パターン束縛→&IrExpr param）のみ。検証:
+  certs 3 本 byte 一致 + フルゲート。
 
 ## 残り: cog>100 関数（分解対象、ワースト順）
 
 | fn | cog | cyc | file |
 |---|---|---|---|
 | main (classify) | 199 | 96 | examples/classify_corpus.rs |
-| lower_scalar_value_inner | 198 | 177 | lower/calls_p4.rs |
 | lower_call_args | 184 | 137 | lower/calls_p2.rs |
 | verify_ownership | 140 | 92 | lib.rs |
 | generate_variant_repr_sources | 137 | 92 | lower/repr_sources.rs |
