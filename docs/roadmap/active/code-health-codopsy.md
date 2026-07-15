@@ -51,12 +51,15 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
   Block 再帰 + is_heap 分岐、~25 行）+ `lower_bind_scalar`（scalar 半分、
   verbatim 移動）+ `lower_bind_heap`（heap 半分、verbatim 移動）。検証:
   classify wall-list byte 一致 + certs 3 本 byte 一致 + フルゲート。
+- 2026-07-16 `lower_tail`（cog 232）→ router（Block 再帰 + voiding gate +
+  型分岐）+ `lower_tail_unit` / `lower_tail_heap` / `lower_tail_scalar`
+  （いずれも verbatim 移動）。検証: certs 3 本 byte 一致 + フルゲート。
+  レシピはインデックス機械導出の python テキスト移動で再現可能。
 
 ## 残り: cog>100 関数（分解対象、ワースト順）
 
 | fn | cog | cyc | file |
 |---|---|---|---|
-| lower_tail | 232 | 201 | lower/tail.rs |
 | main (classify) | 199 | 96 | examples/classify_corpus.rs |
 | lower_scalar_value_inner | 198 | 177 | lower/calls_p4.rs |
 | lower_call_args | 184 | 137 | lower/calls_p2.rs |
