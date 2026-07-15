@@ -1188,9 +1188,44 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
         "set" => set_call_name(func, arg_tys, result_ty),
         "map" => map_call_name(func, arg_tys, result_ty),
         "result" | "option" if func == "unwrap_or" => unwrap_or_call_name(module, arg_tys),
+        "option" => option_call_name(func, arg_tys, result_ty),
         _ => None,
     };
     routed.unwrap_or_else(|| format!("{module}.{func}"))
+}
+
+/// Route the payload-polymorphic `option` combinators by PAYLOAD/RESULT repr. The
+/// self-host impls (`option_map.almd`) are `Option[Int]`-typed — SCALAR payloads
+/// only (Int/Bool/Float ride the i64 slot identically). A HEAP payload or result
+/// (`option.map(some("hi"), (s) => s + "!")`) invoked the scalar impl anyway: the
+/// closure declares the `$closure_fnN_h` (i32-result) type while `__opt_map_some`
+/// calls through `$closure_fnN` (i64) — the "indirect call type mismatch" TRAP on
+/// the verified default (the #790 option.map row, main-reachable). Route those to
+/// an UNREGISTERED wall suffix instead — the fn walls, v0 runs the shape correctly
+/// (the same honest-wall pattern as the map `_skv_wall` family).
+fn option_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    let _ = arg_tys;
+    // The mismatch axis is the CLOSURE's RESULT repr only: params always ride the
+    // widened i64 slots, and an Option-returning closure uses the same `_h` table
+    // type the impl declares (flat_map / or_else match by construction; filter's
+    // pred is scalar-result; flatten / zip take no closure at all). The two shapes
+    // whose USER closure result repr can diverge from the scalar-typed impl:
+    //   - `option.map` with a HEAP mapped payload (impl `f: (Int) -> Int` = i64
+    //     result; a `(s) => s + "!"` closure declares the i32 `_h` type)
+    //   - `option.unwrap_or_else` with a HEAP payload (impl `f: () -> Int`)
+    let heap_option =
+        |t: &Ty| matches!(t, Ty::Applied(TC::Option, a) if a.len() == 1 && is_heap_ty(&a[0]));
+    let bad = match func {
+        "map" => heap_option(result_ty),
+        "unwrap_or_else" => is_heap_ty(result_ty),
+        _ => false,
+    };
+    if bad {
+        Some(format!("option.{func}_heap_wall"))
+    } else {
+        None
+    }
 }
 
 /// `random.choice`/`random.shuffle` routing (extracted from the monolithic
