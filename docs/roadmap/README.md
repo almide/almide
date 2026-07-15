@@ -6,7 +6,7 @@
 
 ## Active
 
-63 items
+65 items
 
 | Item | Description |
 |------|-------------|
@@ -16,6 +16,7 @@
 | [Certificate Format v1 — design](active/certificate-format-v1.md) |  |
 | [Certification-Grade Hardening — 認証級への硬化](active/certification-grade.md) | Certification-grade hardening — adopt the mechanisms of DO-178C / ISO 26262 / IEC 61508 (spec, traceability, coverage, tool qualification, dossier) for the machine-written-software trust layer |
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
+| [Claim wording: Perceus phrasing and the byte-identity guarantee scope](active/claim-wording-perceus-byte-identity.md) | Two claim-wording fixes so the public pitch is 100% backed by measurement |
 | [Closure Architecture v2](active/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
 | [Closure cross-target completeness](active/closure-cross-target-completeness.md) |  |
 | [Code Health: Codopsy-Driven File Splits and Function Decomposition](active/code-health-codopsy.md) | Codopsy-driven code health: split 1000+ line files, decompose cog>100 fns |
@@ -38,6 +39,7 @@
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) |  |
 | [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](active/native-boxed-pattern-lowering.md) |  |
+| [Native Trust Spine — Perceus as the single memory model (#764)](active/native-trust-spine.md) |  |
 | [Protocols: declared conformance + opt-in `any P`](active/protocol-any-existentials.md) | Declared conformance + opt-in `any P` existentials — take Go's interface-value ergonomics without its implicit-satisfaction and nil-interface traps; the one Swift idea worth stealing, none of the rest |
 | [Receipt Logic — 受領書の論理](active/receipt-logic.md) | Formal foundation for the trust layer — receipt logic: claim types, threat model, trust bases, falsification procedures, completeness relative to use-case |
 | [reconciliation follow-up — v0.28.0 で見送った develop 側の残件](active/reconciliation-followup.md) | v0.28.0 reconciliation follow-up: deferred develop commits for 0.28.1 |
