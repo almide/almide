@@ -79,7 +79,22 @@
       `DropListStr` record drop erases to scope-end (all-scalar ⇒ empty mask).
       3-way byte-identical; differential rows record_field / record_out_of_order
       / record_return / record_float_field; classify wall-list byte-identical.
-      **Variants next (same recipe, probed)**: the ctor block is the SAME
+      **Variants slab SHIPPED (2026-07-15 night)**: flat-variant ctors build
+      through `Op::ListLit` (tag@slot0 + fields + zero-fill to the type width;
+      heap-field ctors keep the prim path; tracking mirrors the prim path
+      exactly — needs_rec → variant_drop_handles, materialized_aggregates).
+      Match reads: the slot-0 tag and every SCALAR payload go through
+      `Op::ListGetScalar` on the subject block (value-match non-unwrap path,
+      unit-match, bind_variant_arm); heap payload binds keep the h-based
+      LoadHandle. Native adds a DEAD-PURE-HANDLE elision (a scalar-only match
+      leaves the threaded `Prim{Handle}` unused; Handle is pure, so an unused
+      one renders as a no-op — a USED one still walls honestly). 3-way
+      byte-identical (variant_match / variant_nullary / variant_multi_payload
+      differential rows); classify wall-list byte-identical. The first gate
+      REJECT (kernel checker) was the ListLit-feeder gap in
+      `loop_carried_slots` — certificate.rs now treats ListLit as alloc-class
+      there too (the records reassign `idd`+`i` split).
+      **Original variants recipe note (kept)**: the ctor block is the SAME
       DynList (slot0 = tag, slots1+ = payload — `try_lower_variant_ctor`'s
       Alloc+stores → ListLit with a leading tag const); match destructure = tag
       Load(slot 0) + Eq dispatch + payload loads (binds_p4:451/538 destructure
