@@ -1214,11 +1214,21 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 layout.cases.iter().all(|c| c.fields.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft)))
             })
         };
+        // Rung-5 closures slab: a SCALAR closure type (`(Int) -> Int` — every param
+        // and the return scalar) travels as its env block (`Vec<i64>`: [fnidx,
+        // drop-header, captures…]); invocation dispatches through the generated
+        // `__almd_ci_*` tables. Heap-param/-return closures stay wasm-only.
+        let is_scalar_fn = |t: &Ty| {
+            matches!(t, Ty::Fn { params, ret }
+                if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
+                    && matches!(**ret, Ty::Int | Ty::Bool))
+        };
         let sig_ok = |t: &Ty| {
             matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
                 || is_scalar_list(t)
                 || is_scalar_record(t)
                 || is_flat_variant(t)
+                || is_scalar_fn(t)
         };
         for p in &func.params {
             if !sig_ok(&p.ty) {
@@ -1289,6 +1299,13 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
                 {
                     Some(NativeSigKind::ListI64)
                 }
+                // A scalar closure travels as its env block (rung-5 closures slab).
+                Ty::Fn { params, ret }
+                    if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
+                        && matches!(**ret, Ty::Int | Ty::Bool) =>
+                {
+                    Some(NativeSigKind::ListI64)
+                }
                 _ => None,
             }
         };
@@ -1305,6 +1322,31 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             if let (Some(ps), Some(r)) = (params, ret) {
                 sigs.insert(func.name.as_str().to_string(), (ps, r));
             }
+        }
+        // LIFTED lambdas exist only as MirFunctions (no IR sig): param 0 is the env
+        // block (`&[i64]`), the rest are the lambda's own params — SCALAR reprs only
+        // in this slab (a heap-param lambda walls the program: all-or-nothing, and
+        // its dispatch arm could not type). The return kind is body-derived by the
+        // renderer, so it is not declared here.
+        for f in &functions {
+            if !f.name.starts_with("__lambda_") {
+                continue;
+            }
+            let mut ps = vec![crate::render_native::NativeSigKind::ListI64];
+            for p in &f.params[1..] {
+                match p.repr {
+                    crate::Repr::Scalar { .. } => {
+                        ps.push(crate::render_native::NativeSigKind::I64)
+                    }
+                    _ => {
+                        return Err(LowerError::Unsupported(format!(
+                            "native: lambda `{}` heap param — outside the closures slab",
+                            f.name
+                        )))
+                    }
+                }
+            }
+            sigs.insert(f.name.clone(), (ps, Some(crate::render_native::NativeSigKind::I64)));
         }
     }
     crate::render_native::try_render_native_program(

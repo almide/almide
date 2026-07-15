@@ -94,6 +94,24 @@
       REJECT (kernel checker) was the ListLit-feeder gap in
       `loop_carried_slots` — certificate.rs now treats ListLit as alloc-class
       there too (the records reassign `idd`+`i` split).
+      **Closures slab SHIPPED (2026-07-16 night)**: a SCALAR-CAPTURE env block
+      builds through `Op::ListLit` ([fnidx, drop-header=0, captures…] — the
+      lift_lambda fast path; heap/closure captures keep the prim Dup/Consume
+      path). Reads: the lambda prologue's scalar-capture loads and the call
+      site's fnidx (slot 0) go through `Op::ListGetScalar`. Native render:
+      `Op::FuncRef` = the lambda's NAME-SORTED index (a `let vN: i64 = K`),
+      `Op::CallIndirect` = a generated `__almd_ci_<arity>(idx, env, args…)`
+      dispatch table (one per arity; def and call site derive the index space
+      from the same BTreeMap order, agreement by construction; only i64-ret
+      lambdas get arms — a heap-ret CallIndirect walls before dispatch),
+      `DropVariant("closure")` on a Vec erases to scope-end (drop header 0 ⇒
+      nothing recursive to free). Sig admission: `(Int|Bool…) -> Int|Bool` Fn
+      types → ListI64 (the env block travels as `Vec<i64>`); lifted lambdas
+      register [ListI64, I64…] param kinds from their MirParam reprs (a heap
+      param walls the program — its dispatch arm could not type). 3-way
+      byte-identical (closure_capture / closure_two_envs / closure_multi_arg
+      differential rows). NEXT frontier: heap-capture env blocks (prim path),
+      heap-param/-ret lambdas (typed dispatch tables), Float captures.
       **Original variants recipe note (kept)**: the ctor block is the SAME
       DynList (slot0 = tag, slots1+ = payload — `try_lower_variant_ctor`'s
       Alloc+stores → ListLit with a leading tag const); match destructure = tag

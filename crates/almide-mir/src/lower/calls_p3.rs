@@ -61,19 +61,14 @@ impl LowerCtx {
     }
 
     /// Load a closure block's table index (slot 0) — the scalar a `call_indirect`
-    /// wraps to its i32 table offset. A Prim read through the block handle: no
-    /// ownership event (the block is live — the caller holds it).
+    /// wraps to its i32 table offset. Rung-5 closures slab: the read goes through the
+    /// TARGET-NEUTRAL `Op::ListGetScalar` (wasm: the bounds-checked element load;
+    /// native: `blk[0]`) — no ownership event (the block is live — the caller holds it).
     pub(crate) fn emit_closure_fnidx(&mut self, blk: ValueId) -> ValueId {
-        use crate::{IntOp, PrimKind};
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![blk] });
-        let off = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(0) as i64 });
-        let addr = self.fresh_value();
-        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+        let zero = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
         let idx = self.fresh_value();
-        self.ops
-            .push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(idx), args: vec![addr] });
+        self.ops.push(Op::ListGetScalar { dst: idx, list: blk, idx: zero });
         idx
     }
 

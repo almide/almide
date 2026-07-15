@@ -54,6 +54,11 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // ── Rung 5 closures slab: scalar-capture closures are env slot blocks
+    //    ([fnidx, drop-header, captures…]) dispatched via __almd_ci_* tables ──
+    ("closure_capture", "fn adder(n: Int) -> (Int) -> Int = (x) => x + n\n\nfn main() -> Unit = {\n  let add3 = adder(3)\n  println(int.to_string(add3(7)))\n  println(int.to_string(add3(39)))\n}\n"),
+    ("closure_two_envs", "fn adder(n: Int) -> (Int) -> Int = (x) => x + n\n\nfn main() -> Unit = {\n  let a = adder(1)\n  let b = adder(100)\n  println(int.to_string(a(1)))\n  println(int.to_string(b(1)))\n}\n"),
+    ("closure_multi_arg", "fn scaler(k: Int) -> (Int, Int) -> Int = (a, b) => (a + b) * k\n\nfn main() -> Unit = {\n  let s2 = scaler(2)\n  println(int.to_string(s2(3, 4)))\n}\n"),
     // ── Rung 5 variants slab: flat variants are tag+payload slot blocks ──
     ("variant_match", "type Shape = | Circle(Int) | Square(Int)\n\nfn area2(s: Shape) -> Int =\n  match s {\n    Circle(r) => 3 * r * r,\n    Square(w) => w * w,\n  }\n\nfn main() -> Unit = {\n  println(int.to_string(area2(Circle(2))))\n  println(int.to_string(area2(Square(3))))\n}\n"),
     ("variant_nullary", "type Light = | Red | Green | Yellow\n\nfn advice(l: Light) -> Int =\n  match l {\n    Red => 0,\n    Green => 1,\n    Yellow => 2,\n  }\n\nfn main() -> Unit = {\n  println(int.to_string(advice(Red)))\n  println(int.to_string(advice(Yellow)))\n}\n"),
