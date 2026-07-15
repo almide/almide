@@ -180,14 +180,13 @@ test "greet succeeds" {
 
 Almide source (`.almd`) is compiled by a pure-Rust compiler through a three-layer codegen architecture:
 
-```
-.almd → Lexer → Parser → AST → Type Checker → Lowering → IR
-                                                            ↓
-                                              Nanopass Pipeline (semantic rewrites)
-                                                            ↓
-                                              Template Renderer (TOML-driven)
-                                                            ↓
-                                                    .rs / .wasm
+```mermaid
+flowchart TB
+    SRC[".almd → Lexer → Parser → AST → Type Checker → Lowering → IR"]
+    NANO["Nanopass Pipeline (semantic rewrites)"]
+    TMPL["Template Renderer (TOML-driven)"]
+    OUT[".rs / .wasm"]
+    SRC --> NANO --> TMPL --> OUT
 ```
 
 The Nanopass pipeline applies target-specific transformations: `ResultPropagation` (Rust `?`), `CloneInsertion` (Rust borrow analysis), `LICM` (loop-invariant code motion). The Template Renderer is purely syntactic — all semantic decisions are already encoded in the IR.

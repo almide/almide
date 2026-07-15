@@ -20,21 +20,26 @@ That single move collapses the **trusted base from ~100,000 lines to a few hundr
 
 ## The pipeline (proof-carrying code)
 
-```
-        ALS — normative semantics (Coq; the single source of truth for meaning)
-         │ refine                                                    │ refine
- ┌───────┴───────────────────────────────┐                          │
- │ UNTRUSTED — any size, bugs allowed     │                          │
- │ .almd → check → lower → MIR → emit     │                          │
- └───────┬───────────────────────────────┘                          │
-         │                                                           │
-   ( wasm bytes a , certificate bundle c )                           │
-         │                                                           │
- ┌───────┴───────────────────────────────────────────────────────────────┐
- │ TRUSTED — a few hundred lines, machine-proven sound in Coq              │
- │   K  property checker      K(c, a) accepts ⟹ a satisfies property P    │
- │   V  translation checker   V(a, ALS) accepts ⟹ a refines ALS(s)       │
- └───────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    ALS["ALS — normative semantics<br/>(Coq; the single source of truth for meaning)"]
+
+    subgraph U["UNTRUSTED — any size, bugs allowed"]
+        P[".almd → check → lower → MIR → emit"]
+    end
+
+    A(["wasm bytes a + certificate bundle c"])
+
+    subgraph T["TRUSTED — a few hundred lines, machine-proven sound in Coq"]
+        K["K property checker<br/>K(c, a) accepts ⟹ a satisfies property P"]
+        V["V translation checker<br/>V(a, ALS) accepts ⟹ a refines ALS(s)"]
+    end
+
+    ALS -->|refine| P
+    P --> A
+    A --> K
+    A --> V
+    ALS -->|refine| V
 ```
 
 - **K (property checker)** verifies the certificate: memory safety, name totality, capability upper bound, stack balance, termination behavior.
