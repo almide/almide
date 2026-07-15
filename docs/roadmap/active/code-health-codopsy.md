@@ -68,6 +68,9 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
 - 注記: `verify_ownership`（cog 140）は 6+ の &mut 状態（object_of/rc/dead/
   borrowed/branches/violations）が match を貫通しており text-move の域を
   超える — OwnershipState struct 化が必要（別種の設計作業として保留）。
+- 2026-07-16 `interp_to_string_call`（cog 121）→ List/Option/Result の 3 大
+  routing arm を `interp_{list,option,result}_to_string` に抽出（pure table
+  fn、状態なし）。検証: certs 3 本 byte 一致 + フルゲート。
 
 ## 残り: cog>100 関数（分解対象、ワースト順）
 
@@ -79,7 +82,6 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
 | check_call_with_type_args | 129 | 83 | frontend check/calls.rs |
 | ownership_certificate | 123 | 101 | certificate.rs |
 | try_lower_variant_value_match | 121 | 148 | lower/control_p2.rs |
-| interp_to_string_call | 121 | 127 | lower/mod_p4.rs |
 | try_lower_defunc_tuple_acc_fold | 95 | 103 | lower/defunc_fold.rs |
 | lower_heap_result_arm | 99 | 112 | lower/heap_result_arm.rs |
 
