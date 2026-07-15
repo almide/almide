@@ -937,6 +937,335 @@ fn loop_carried_slots(
 /// Emit the per-object ownership certificate (format v2) for a function. Heap
 /// loop-carried accumulator slots are folded into a single `i(id)m` stream with
 /// loop delimiters (option C); everything else is the flat per-object format.
+/// The mutable emission state of [`ownership_certificate`] — one step per op
+/// (#781: the cog-123 loop body became [`CertScan::step`]).
+struct CertScan {
+    depth: u32,
+    s: Streams,
+    released_merge_dsts: std::collections::HashSet<crate::ValueId>,
+    consumed_values: std::collections::HashSet<crate::ValueId>,
+    feeder_to_slot: BTreeMap<ValueId, ValueId>,
+    slots: BTreeSet<ValueId>,
+    line_slots: BTreeSet<ValueId>,
+}
+
+impl CertScan {
+    /// One op's certificate emission. Verbatim text move of the emission loop
+    /// body (locals renamed to fields).
+    fn step(&mut self, op: &Op) {
+        match op {
+            // A rung-4 scalar-list LITERAL is alloc-class — the IDENTICAL `i` (and
+            // loop-slot feeder routing) the `Alloc{DynList}` it replaced emitted.
+            // The element load/store ops are ownership-NEUTRAL (a borrowed handle
+            // read/write), so they need no event arm — the catch-all below skips them.
+            Op::Alloc { dst, .. } | Op::ListLit { dst, .. } => {
+                // An Alloc that FEEDS a loop-carried slot routes its `i` into the slot
+                // stream (folded inside the loop delimiters); otherwise its own stream.
+                if let Some(&slot) = self.feeder_to_slot.get(dst) {
+                    // Resolve the slot through `of`: a Dup-INITIALIZED slot (`var iv =
+                    // state.iv`) aliases the Dup'self.s source object — its 'a'/'d'/'m' land
+                    // there, so the loop `(i…)`/feeder events must land on the SAME
+                    // stream (they split across two unbalanced lines otherwise — the
+                    // bytes_set_value_semantics::rotate REJECT, F8 residue).
+                    let so = self.s.object_of(slot);
+                    self.s.of.insert(*dst, so);
+                    if self.line_slots.contains(&slot) {
+                        self.s.event(so, '(');
+                    }
+                    self.s.event(so, 'i');
+                } else {
+                    self.s.of.insert(*dst, *dst);
+                    self.s.event(*dst, 'i');
+                }
+            }
+            Op::Dup { dst, src } => {
+                // ALIAS acquire (+1): a new handle on an existing shared object.
+                // `a` (not `i`) records the share-vs-move ground fact (format v1).
+                // A Dup that FEEDS a loop-carried slot (`cur = merged` swap-carry:
+                // `Dup tmp = merged; Drop cur; SetLocal cur = tmp`) routes its `a`
+                // into the SLOT stream, exactly as the Alloc/heap-call feeders route
+                // their `i`: the slot'self.s per-iteration acquire-new + drop-old then
+                // reads `(ad)` (rc-preserving), instead of the drop-old landing flat
+                // next to the scope-end drop (`idd` — a false double-free).
+                if let Some(&slot) = self.feeder_to_slot.get(dst) {
+                    let so = self.s.object_of(slot);
+                    self.s.of.insert(*dst, so);
+                    if self.line_slots.contains(&slot) {
+                        self.s.event(so, '(');
+                    }
+                    self.s.event(so, 'a');
+                } else {
+                    let o = self.s.object_of(*src);
+                    self.s.of.insert(*dst, o);
+                    self.s.event(o, 'a');
+                }
+            }
+            // Plain release (−1). A `DropListStr`/`DropListValue` is the SAME single `d` on the LIST
+            // object — its elements were already accounted as `m` (consumed) when stored into it, so
+            // the recursive runtime free (per-String, or per-Value via `$__drop_value`) adds no extra
+            // cert event.
+            Op::Drop { v }
+            | Op::DropListStr { v }
+            | Op::DropValue { v }
+            | Op::DropListValue { v }
+            | Op::DropListStrValue { v }
+            | Op::DropListStrStr { v }
+            | Op::DropListIntStr { v }
+            | Op::DropListStrInt { v }
+            | Op::DropResultListValue { v }
+            | Op::DropResultValue { v }
+            | Op::DropResultStrInt { v }
+            | Op::DropResultValueInt { v }
+            | Op::DropResultListValueInt { v }
+            | Op::DropResultListStrInt { v }
+            | Op::DropResultListStr { v }
+            | Op::DropListListStr { v }
+            | Op::DropVariant { v, .. }
+            | Op::DropWrapperRec { v, .. } => {
+                let o = self.s.object_of(*v);
+                self.s.event(o, 'd');
+            }
+            // MOVE-OUT (−1): the reference is transferred out (into a container /
+            // a consuming callee). `m` distinguishes move from a plain drop.
+            Op::Consume { v } => {
+                let o = self.s.object_of(*v);
+                self.s.event(o, 'm');
+            }
+            // A call that returns a FRESH OWNED heap value (the callee allocated
+            // it and moved it out to us — the return-mode signature read at the
+            // call site, callee not opened) is a +1, like Alloc. A `CallIndirect`
+            // (a closure invocation) returning heap is the SAME: a closure moves its
+            // result out, so a heap-returning closure call (`let o = f(x)` where
+            // `f: (Int) -> Option[Int]`) owns a fresh value, dropped at scope end —
+            // the foundation for `list.filter_map` / `flat_map`. A non-capturing
+            // lifted lambda materializes its result (`Some(x)` allocs), and a closure
+            // param points to one — so the result is always owned, never borrowed.
+            Op::Call { dst: Some(d), result: Some(r), .. }
+            | Op::CallFn { dst: Some(d), result: Some(r), .. }
+            | Op::CallImport { dst: Some(d), result: Some(r), .. }
+            | Op::CallIndirect { dst: Some(d), result: Some(r), .. }
+                if r.is_heap() =>
+            {
+                // A heap loop-carried FEEDER (`new = acc + [x]`): its `i` belongs to
+                // the SLOT stream (the slot absorbs `new` via the following SetLocal),
+                // folded inside the loop delimiters → `i(id)m`. Otherwise it is a
+                // fresh owned object with its own stream (`i`).
+                if let Some(&slot) = self.feeder_to_slot.get(d) {
+                    // Resolve through `of`: a Dup-initialized slot aliases its source
+                    // object (see the sibling arm above).
+                    let so = self.s.object_of(slot);
+                    self.s.of.insert(*d, so);
+                    // STRAIGHT-LINE slot: open its `(id)` CLoop body before the feeder'self.s `i`.
+                    if self.line_slots.contains(&slot) {
+                        self.s.event(so, '(');
+                    }
+                    self.s.event(so, 'i');
+                } else {
+                    self.s.of.insert(*d, *d);
+                    self.s.event(*d, 'i');
+                }
+            }
+            // Close a STRAIGHT-LINE slot'self.s `(id)` CLoop body: the feeder'self.s `i` + the drop-old'self.s `d`
+            // were already emitted; `)` here makes the per-reassign stream read `(id)` (rc-preserving).
+            // A loop slot'self.s SetLocal carries no cert event (its parens are the LoopStart/LoopEnd
+            // delimiters); a scalar SetLocal is cert-neutral. So this fires ONLY for a line slot.
+            Op::SetLocal { local, .. } if self.line_slots.contains(local) => {
+                let so = self.s.object_of(*local);
+                self.s.event(so, ')');
+            }
+            // Open the branch region (format v4, brick 5a): arm events buffer per
+            // arm so the flush can group non-self-balancing arms as `{then|else}`.
+            // The released merge dst'self.s `i` (the arm'self.s moved-in reference, +1) is a
+            // PRE-REGION event — the merge object is acquired at the merge point,
+            // outside either arm — so it is emitted before the region opens.
+            Op::IfThen { dst, .. } => {
+                if let Some(d) = dst {
+                    if self.released_merge_dsts.contains(d) {
+                        self.s.of.insert(*d, *d);
+                        self.s.event(*d, 'i');
+                    }
+                }
+                self.s.open_branch();
+            }
+            // An arm value that still HOLDS its reference when it flows into the merge
+            // (`Else/EndIf {{ val }}` with no prior `Consume` — the declared-Result tail-if
+            // style, effect_tco::checked) MOVES it there: emit the `m` the explicit-Consume
+            // style already has. A val already consumed (balance 0) or never tracked
+            // (a scalar) is untouched. The `m` lands in the CLOSING arm'self.s buffer (then
+            // at `Else`, else at `EndIf`); then the region switches arm / flushes.
+            Op::Else { val } | Op::EndIf { val } => {
+                if let Some(v) = val {
+                    let val_moves = self.s.of.contains_key(v)
+                        && self.s.balance(self.s.object_of(*v)) > 0
+                        // An EXPLICITLY-Consumed arm value already emitted its move `m` — the
+                        // val-move here would double-count it (the `else base` Var-arm `iammd`
+                        // REJECT: the Dup'd value'self.s Consume + this rule both fired on the shared
+                        // base object). Only the never-Consumed style (effect-TCO tail-if) reaches here.
+                        && !self.consumed_values.contains(v)
+                        // Loop-carried machinery keeps its own `(id)` accounting — a slot or
+                        // feeder flowing through a branch inside the loop is NOT a move-out
+                        // (heap_result_if_append's accumulator would double-`m`).
+                        && !self.slots.contains(&self.s.object_of(*v))
+                        && !self.feeder_to_slot.contains_key(v)
+                        && !self.line_slots.contains(&self.s.object_of(*v));
+                    if val_moves {
+                        let o = self.s.object_of(*v);
+                        self.s.event(o, 'm');
+                    }
+                }
+                if matches!(op, Op::Else { .. }) {
+                    self.s.else_branch();
+                } else {
+                    self.s.flush_branch();
+                }
+            }
+            // A LIVE USE — a read-only borrow or an in-place unique use (`xs[i] = v`
+            // via MakeUnique) — on an object whose stream HOLDS ownership (it has a
+            // +1 event) is witnessed as `b` (+0, liveness-guarded, brick 5b): a use
+            // after the last release makes the proven checker FAULT — owned-object
+            // use-after-free is now witnessable, not invisible. An object with no
+            // +1 on its stream (a borrowed param used directly) stays event-free:
+            // its liveness is the CALLER'self.s obligation, discharged by the call-mode
+            // agreement (CallModes.v), not by this stream'self.s count.
+            Op::Borrow { v } | Op::MakeUnique { v } => {
+                if self.s.of.contains_key(v) {
+                    let o = self.s.object_of(*v);
+                    let owned = self.s.stream.get(&o).map_or(false, |l| l.contains(['i', 'a']))
+                        || self.s.frames.iter().any(|fr| {
+                            fr.then_ev.get(&o).map_or(false, |l| l.contains(['i', 'a']))
+                                || fr.else_ev.get(&o).map_or(false, |l| l.contains(['i', 'a']))
+                        });
+                    if owned {
+                        self.s.event(o, 'b');
+                    }
+                }
+            }
+            // Loop delimiters for a heap loop-carried slot: open `(` on each slot
+            // stream when entering a top-level loop, close `)` on leaving — so the
+            // slot'self.s per-iteration acquire-new + drop-old reads `(id)`, certifying a
+            // rc-preserving body (option C, proved in check_line_unroll_sound).
+            Op::LoopStart => {
+                if self.depth == 0 {
+                    for slot in &self.slots {
+                        let so = self.s.object_of(*slot);
+                        self.s.event(so, '(');
+                    }
+                }
+                self.depth += 1;
+            }
+            Op::LoopEnd => {
+                self.depth = self.depth.saturating_sub(1);
+                if self.depth == 0 {
+                    for slot in &self.slots {
+                        let so = self.s.object_of(*slot);
+                        self.s.event(so, ')');
+                    }
+                }
+            }
+            // VALUE-RC (柱C extension) — MIRROR verify_ownership'self.s carrier model so the cert and the
+            // executable verifier AGREE on the prim.handle-fed rc case. prim.handle(v) registers the
+            // handle as a CARRIER of v'self.s object (no event); rc_inc/rc_dec on a carrier emit `a`/`d`
+            // (the proven checker, already rc-aware, verifies the balance). A load64-fed handle has no
+            // `of` entry → no event, exactly as before (the differential-test floor).
+            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } => {
+                if let Some(&o) = args.first().and_then(|a| self.s.of.get(a)) {
+                    self.s.of.insert(*d, o);
+                }
+            }
+            Op::Prim { kind: PrimKind::RcInc, args, .. } => {
+                if let Some(&o) = args.first().and_then(|a| self.s.of.get(a)) {
+                    self.s.event(o, 'a');
+                }
+            }
+            Op::Prim { kind: PrimKind::RcDec, args, .. } => {
+                if let Some(&o) = args.first().and_then(|a| self.s.of.get(a)) {
+                    self.s.event(o, 'd');
+                }
+            }
+            // `args_get_list` ALLOCATES a fresh owned `List[String]` (argv[1..]) — a +1, like
+            // `Alloc`. It feeds no loop, so it gets its own stream (`i`), balanced by the
+            // caller'self.s scope-end `DropListStr` (a `d`) or a heap-return move-out (`m`). Without
+            // this the heap result would be an unbacked object the cert never opens — the
+            // verify_ownership/cert agreement breaks for the env.args body.
+            Op::Prim { kind: PrimKind::ArgsGetList, dst: Some(d), .. } => {
+                self.s.of.insert(*d, *d);
+                self.s.event(*d, 'i');
+            }
+            // `env_get` ALLOCATES a fresh owned `Option[String]` (a 0/1-slot block owning
+            // the value String when some) — a +1, like `Alloc`. Its name arg is BORROWED
+            // (no cert event). Balanced by the caller'self.s scope-end `DropListStr` (`d`) or
+            // a heap-return move-out (`m`) — the exact ArgsGetList discipline.
+            Op::Prim { kind: PrimKind::EnvGet, dst: Some(d), .. } => {
+                self.s.of.insert(*d, *d);
+                self.s.event(*d, 'i');
+            }
+            // `read_text_file` ALLOCATES a fresh owned `Result[String, String]` (the cap-as-tag
+            // block owning one payload String) — a +1, like `Alloc`. Its path arg is BORROWED (the
+            // caller still owns it — no cert event). It feeds no loop, so it gets its own stream
+            // (`i`), balanced by the caller'self.s scope-end `DropListStr` (a `d`) or a heap-return
+            // move-out (`m`). Without this the heap result would be an unbacked object the cert
+            // never opens — the verify_ownership/cert agreement breaks for the fs.read_text body.
+            Op::Prim { kind: PrimKind::ReadTextFile, dst: Some(d), .. } => {
+                self.s.of.insert(*d, *d);
+                self.s.event(*d, 'i');
+            }
+            // `read_dir` ALLOCATES a fresh owned `Result[List[String], String]` (the cap-as-tag
+            // block owning one payload `List[String]`) — a +1, like `ReadTextFile`/`Alloc`. Its
+            // path arg is BORROWED (no cert event). Its own stream (`i`), balanced by the
+            // caller'self.s scope-end recursive `DropResultListStr` (`d`) or a heap-return move-out
+            // (`m`). Without this the heap result would be an unbacked object the cert never
+            // opens — the verify_ownership/cert agreement breaks for the fs.list_dir body.
+            Op::Prim { kind: PrimKind::ReadDir, dst: Some(d), .. } => {
+                self.s.of.insert(*d, *d);
+                self.s.event(*d, 'i');
+            }
+            // `write_text_file` ALLOCATES a fresh owned `Result[Unit, String]` (the cap-as-tag
+            // block — Ok carries NO payload, Err owns one message String) — a +1, like
+            // `ReadTextFile`/`Alloc`. Both its args (path + content) are BORROWED (no cert event).
+            // Its own stream (`i`), balanced by the caller'self.s scope-end flat `DropListStr` (`d`) or a
+            // heap-return move-out (`m`). Without this the heap result would be an unbacked object
+            // the cert never opens — the verify_ownership/cert agreement breaks for the fs.write body.
+            Op::Prim { kind: PrimKind::WriteTextFile, dst: Some(d), .. } => {
+                self.s.of.insert(*d, *d);
+                self.s.event(*d, 'i');
+            }
+            // `make_dir` ALLOCATES a fresh owned `Result[Unit, String]` (the cap-as-tag block —
+            // Ok carries NO payload, Err owns one message String) — a +1, EXACTLY like
+            // `WriteTextFile`/`Alloc`. Its path arg is BORROWED (no cert event). Its own stream
+            // (`i`), balanced by the caller'self.s scope-end flat `DropListStr` (`d`) or a heap-return
+            // move-out (`m`). Without this the heap result would be an unbacked object the cert
+            // never opens — the verify_ownership/cert agreement breaks for the fs.mkdir_p body.
+            Op::Prim { kind: PrimKind::MakeDir, dst: Some(d), .. } => {
+                self.s.of.insert(*d, *d);
+                self.s.event(*d, 'i');
+            }
+            // `remove_all` ALLOCATES a fresh owned `Result[Unit, String]` (the cap-as-tag block —
+            // Ok carries NO payload, Err owns one message String) — a +1, EXACTLY like
+            // `MakeDir`/`WriteTextFile`/`Alloc`. Its path arg is BORROWED (no cert event). Its own
+            // stream (`i`), balanced by the caller'self.s scope-end flat `DropListStr` (`d`) or a
+            // heap-return move-out (`m`). Without this the heap result would be an unbacked object
+            // the cert never opens — the verify_ownership/cert agreement breaks for the
+            // fs.remove_all body.
+            Op::Prim { kind: PrimKind::RemoveAll, dst: Some(d), .. } => {
+                self.s.of.insert(*d, *d);
+                self.s.event(*d, 'i');
+            }
+            // `read_line` ALLOCATES a fresh owned canonical `String` (one line of stdin) — a +1,
+            // like `Alloc`. No args. It feeds no loop, so it gets its own stream (`i`), balanced by
+            // the caller'self.s scope-end flat `Drop` (a String owns no nested handles) or a heap-return
+            // move-out (`m`). Without this the heap result would be an unbacked object the cert
+            // never opens — the verify_ownership/cert agreement breaks for the io.read_line body.
+            Op::Prim { kind: PrimKind::ReadLine | PrimKind::ReadNBytes, dst: Some(d), .. } => {
+                self.s.of.insert(*d, *d);
+                self.s.event(*d, 'i');
+            }
+            // No refcount change: Const/Pure/IntBinOp/scalar SetLocal, and a call
+            // with a void/scalar result (its heap-handle args are borrowed).
+            _ => {}
+        }
+    }
+}
+
 pub fn ownership_certificate(func: &MirFunction) -> String {
     let (feeder_to_slot, slots, line_slots) = loop_carried_slots(func);
     let mut depth: u32 = 0;
@@ -1014,337 +1343,39 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
         }
     }
 
+    // Decomposed (#781, cog 123): the per-op emission lives in `CertScan::step`;
+    // the pre-scan state moved into the scan struct verbatim.
+    let mut scan = CertScan {
+        depth,
+        s,
+        released_merge_dsts,
+        consumed_values,
+        feeder_to_slot,
+        slots,
+        line_slots,
+    };
     for op in &func.ops {
-        match op {
-            // A rung-4 scalar-list LITERAL is alloc-class — the IDENTICAL `i` (and
-            // loop-slot feeder routing) the `Alloc{DynList}` it replaced emitted.
-            // The element load/store ops are ownership-NEUTRAL (a borrowed handle
-            // read/write), so they need no event arm — the catch-all below skips them.
-            Op::Alloc { dst, .. } | Op::ListLit { dst, .. } => {
-                // An Alloc that FEEDS a loop-carried slot routes its `i` into the slot
-                // stream (folded inside the loop delimiters); otherwise its own stream.
-                if let Some(&slot) = feeder_to_slot.get(dst) {
-                    // Resolve the slot through `of`: a Dup-INITIALIZED slot (`var iv =
-                    // state.iv`) aliases the Dup's source object — its 'a'/'d'/'m' land
-                    // there, so the loop `(i…)`/feeder events must land on the SAME
-                    // stream (they split across two unbalanced lines otherwise — the
-                    // bytes_set_value_semantics::rotate REJECT, F8 residue).
-                    let so = s.object_of(slot);
-                    s.of.insert(*dst, so);
-                    if line_slots.contains(&slot) {
-                        s.event(so, '(');
-                    }
-                    s.event(so, 'i');
-                } else {
-                    s.of.insert(*dst, *dst);
-                    s.event(*dst, 'i');
-                }
-            }
-            Op::Dup { dst, src } => {
-                // ALIAS acquire (+1): a new handle on an existing shared object.
-                // `a` (not `i`) records the share-vs-move ground fact (format v1).
-                // A Dup that FEEDS a loop-carried slot (`cur = merged` swap-carry:
-                // `Dup tmp = merged; Drop cur; SetLocal cur = tmp`) routes its `a`
-                // into the SLOT stream, exactly as the Alloc/heap-call feeders route
-                // their `i`: the slot's per-iteration acquire-new + drop-old then
-                // reads `(ad)` (rc-preserving), instead of the drop-old landing flat
-                // next to the scope-end drop (`idd` — a false double-free).
-                if let Some(&slot) = feeder_to_slot.get(dst) {
-                    let so = s.object_of(slot);
-                    s.of.insert(*dst, so);
-                    if line_slots.contains(&slot) {
-                        s.event(so, '(');
-                    }
-                    s.event(so, 'a');
-                } else {
-                    let o = s.object_of(*src);
-                    s.of.insert(*dst, o);
-                    s.event(o, 'a');
-                }
-            }
-            // Plain release (−1). A `DropListStr`/`DropListValue` is the SAME single `d` on the LIST
-            // object — its elements were already accounted as `m` (consumed) when stored into it, so
-            // the recursive runtime free (per-String, or per-Value via `$__drop_value`) adds no extra
-            // cert event.
-            Op::Drop { v }
-            | Op::DropListStr { v }
-            | Op::DropValue { v }
-            | Op::DropListValue { v }
-            | Op::DropListStrValue { v }
-            | Op::DropListStrStr { v }
-            | Op::DropListIntStr { v }
-            | Op::DropListStrInt { v }
-            | Op::DropResultListValue { v }
-            | Op::DropResultValue { v }
-            | Op::DropResultStrInt { v }
-            | Op::DropResultValueInt { v }
-            | Op::DropResultListValueInt { v }
-            | Op::DropResultListStrInt { v }
-            | Op::DropResultListStr { v }
-            | Op::DropListListStr { v }
-            | Op::DropVariant { v, .. }
-            | Op::DropWrapperRec { v, .. } => {
-                let o = s.object_of(*v);
-                s.event(o, 'd');
-            }
-            // MOVE-OUT (−1): the reference is transferred out (into a container /
-            // a consuming callee). `m` distinguishes move from a plain drop.
-            Op::Consume { v } => {
-                let o = s.object_of(*v);
-                s.event(o, 'm');
-            }
-            // A call that returns a FRESH OWNED heap value (the callee allocated
-            // it and moved it out to us — the return-mode signature read at the
-            // call site, callee not opened) is a +1, like Alloc. A `CallIndirect`
-            // (a closure invocation) returning heap is the SAME: a closure moves its
-            // result out, so a heap-returning closure call (`let o = f(x)` where
-            // `f: (Int) -> Option[Int]`) owns a fresh value, dropped at scope end —
-            // the foundation for `list.filter_map` / `flat_map`. A non-capturing
-            // lifted lambda materializes its result (`Some(x)` allocs), and a closure
-            // param points to one — so the result is always owned, never borrowed.
-            Op::Call { dst: Some(d), result: Some(r), .. }
-            | Op::CallFn { dst: Some(d), result: Some(r), .. }
-            | Op::CallImport { dst: Some(d), result: Some(r), .. }
-            | Op::CallIndirect { dst: Some(d), result: Some(r), .. }
-                if r.is_heap() =>
-            {
-                // A heap loop-carried FEEDER (`new = acc + [x]`): its `i` belongs to
-                // the SLOT stream (the slot absorbs `new` via the following SetLocal),
-                // folded inside the loop delimiters → `i(id)m`. Otherwise it is a
-                // fresh owned object with its own stream (`i`).
-                if let Some(&slot) = feeder_to_slot.get(d) {
-                    // Resolve through `of`: a Dup-initialized slot aliases its source
-                    // object (see the sibling arm above).
-                    let so = s.object_of(slot);
-                    s.of.insert(*d, so);
-                    // STRAIGHT-LINE slot: open its `(id)` CLoop body before the feeder's `i`.
-                    if line_slots.contains(&slot) {
-                        s.event(so, '(');
-                    }
-                    s.event(so, 'i');
-                } else {
-                    s.of.insert(*d, *d);
-                    s.event(*d, 'i');
-                }
-            }
-            // Close a STRAIGHT-LINE slot's `(id)` CLoop body: the feeder's `i` + the drop-old's `d`
-            // were already emitted; `)` here makes the per-reassign stream read `(id)` (rc-preserving).
-            // A loop slot's SetLocal carries no cert event (its parens are the LoopStart/LoopEnd
-            // delimiters); a scalar SetLocal is cert-neutral. So this fires ONLY for a line slot.
-            Op::SetLocal { local, .. } if line_slots.contains(local) => {
-                let so = s.object_of(*local);
-                s.event(so, ')');
-            }
-            // Open the branch region (format v4, brick 5a): arm events buffer per
-            // arm so the flush can group non-self-balancing arms as `{then|else}`.
-            // The released merge dst's `i` (the arm's moved-in reference, +1) is a
-            // PRE-REGION event — the merge object is acquired at the merge point,
-            // outside either arm — so it is emitted before the region opens.
-            Op::IfThen { dst, .. } => {
-                if let Some(d) = dst {
-                    if released_merge_dsts.contains(d) {
-                        s.of.insert(*d, *d);
-                        s.event(*d, 'i');
-                    }
-                }
-                s.open_branch();
-            }
-            // An arm value that still HOLDS its reference when it flows into the merge
-            // (`Else/EndIf {{ val }}` with no prior `Consume` — the declared-Result tail-if
-            // style, effect_tco::checked) MOVES it there: emit the `m` the explicit-Consume
-            // style already has. A val already consumed (balance 0) or never tracked
-            // (a scalar) is untouched. The `m` lands in the CLOSING arm's buffer (then
-            // at `Else`, else at `EndIf`); then the region switches arm / flushes.
-            Op::Else { val } | Op::EndIf { val } => {
-                if let Some(v) = val {
-                    let val_moves = s.of.contains_key(v)
-                        && s.balance(s.object_of(*v)) > 0
-                        // An EXPLICITLY-Consumed arm value already emitted its move `m` — the
-                        // val-move here would double-count it (the `else base` Var-arm `iammd`
-                        // REJECT: the Dup'd value's Consume + this rule both fired on the shared
-                        // base object). Only the never-Consumed style (effect-TCO tail-if) reaches here.
-                        && !consumed_values.contains(v)
-                        // Loop-carried machinery keeps its own `(id)` accounting — a slot or
-                        // feeder flowing through a branch inside the loop is NOT a move-out
-                        // (heap_result_if_append's accumulator would double-`m`).
-                        && !slots.contains(&s.object_of(*v))
-                        && !feeder_to_slot.contains_key(v)
-                        && !line_slots.contains(&s.object_of(*v));
-                    if val_moves {
-                        let o = s.object_of(*v);
-                        s.event(o, 'm');
-                    }
-                }
-                if matches!(op, Op::Else { .. }) {
-                    s.else_branch();
-                } else {
-                    s.flush_branch();
-                }
-            }
-            // A LIVE USE — a read-only borrow or an in-place unique use (`xs[i] = v`
-            // via MakeUnique) — on an object whose stream HOLDS ownership (it has a
-            // +1 event) is witnessed as `b` (+0, liveness-guarded, brick 5b): a use
-            // after the last release makes the proven checker FAULT — owned-object
-            // use-after-free is now witnessable, not invisible. An object with no
-            // +1 on its stream (a borrowed param used directly) stays event-free:
-            // its liveness is the CALLER's obligation, discharged by the call-mode
-            // agreement (CallModes.v), not by this stream's count.
-            Op::Borrow { v } | Op::MakeUnique { v } => {
-                if s.of.contains_key(v) {
-                    let o = s.object_of(*v);
-                    let owned = s.stream.get(&o).map_or(false, |l| l.contains(['i', 'a']))
-                        || s.frames.iter().any(|fr| {
-                            fr.then_ev.get(&o).map_or(false, |l| l.contains(['i', 'a']))
-                                || fr.else_ev.get(&o).map_or(false, |l| l.contains(['i', 'a']))
-                        });
-                    if owned {
-                        s.event(o, 'b');
-                    }
-                }
-            }
-            // Loop delimiters for a heap loop-carried slot: open `(` on each slot
-            // stream when entering a top-level loop, close `)` on leaving — so the
-            // slot's per-iteration acquire-new + drop-old reads `(id)`, certifying a
-            // rc-preserving body (option C, proved in check_line_unroll_sound).
-            Op::LoopStart => {
-                if depth == 0 {
-                    for slot in &slots {
-                        let so = s.object_of(*slot);
-                        s.event(so, '(');
-                    }
-                }
-                depth += 1;
-            }
-            Op::LoopEnd => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    for slot in &slots {
-                        let so = s.object_of(*slot);
-                        s.event(so, ')');
-                    }
-                }
-            }
-            // VALUE-RC (柱C extension) — MIRROR verify_ownership's carrier model so the cert and the
-            // executable verifier AGREE on the prim.handle-fed rc case. prim.handle(v) registers the
-            // handle as a CARRIER of v's object (no event); rc_inc/rc_dec on a carrier emit `a`/`d`
-            // (the proven checker, already rc-aware, verifies the balance). A load64-fed handle has no
-            // `of` entry → no event, exactly as before (the differential-test floor).
-            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } => {
-                if let Some(&o) = args.first().and_then(|a| s.of.get(a)) {
-                    s.of.insert(*d, o);
-                }
-            }
-            Op::Prim { kind: PrimKind::RcInc, args, .. } => {
-                if let Some(&o) = args.first().and_then(|a| s.of.get(a)) {
-                    s.event(o, 'a');
-                }
-            }
-            Op::Prim { kind: PrimKind::RcDec, args, .. } => {
-                if let Some(&o) = args.first().and_then(|a| s.of.get(a)) {
-                    s.event(o, 'd');
-                }
-            }
-            // `args_get_list` ALLOCATES a fresh owned `List[String]` (argv[1..]) — a +1, like
-            // `Alloc`. It feeds no loop, so it gets its own stream (`i`), balanced by the
-            // caller's scope-end `DropListStr` (a `d`) or a heap-return move-out (`m`). Without
-            // this the heap result would be an unbacked object the cert never opens — the
-            // verify_ownership/cert agreement breaks for the env.args body.
-            Op::Prim { kind: PrimKind::ArgsGetList, dst: Some(d), .. } => {
-                s.of.insert(*d, *d);
-                s.event(*d, 'i');
-            }
-            // `env_get` ALLOCATES a fresh owned `Option[String]` (a 0/1-slot block owning
-            // the value String when some) — a +1, like `Alloc`. Its name arg is BORROWED
-            // (no cert event). Balanced by the caller's scope-end `DropListStr` (`d`) or
-            // a heap-return move-out (`m`) — the exact ArgsGetList discipline.
-            Op::Prim { kind: PrimKind::EnvGet, dst: Some(d), .. } => {
-                s.of.insert(*d, *d);
-                s.event(*d, 'i');
-            }
-            // `read_text_file` ALLOCATES a fresh owned `Result[String, String]` (the cap-as-tag
-            // block owning one payload String) — a +1, like `Alloc`. Its path arg is BORROWED (the
-            // caller still owns it — no cert event). It feeds no loop, so it gets its own stream
-            // (`i`), balanced by the caller's scope-end `DropListStr` (a `d`) or a heap-return
-            // move-out (`m`). Without this the heap result would be an unbacked object the cert
-            // never opens — the verify_ownership/cert agreement breaks for the fs.read_text body.
-            Op::Prim { kind: PrimKind::ReadTextFile, dst: Some(d), .. } => {
-                s.of.insert(*d, *d);
-                s.event(*d, 'i');
-            }
-            // `read_dir` ALLOCATES a fresh owned `Result[List[String], String]` (the cap-as-tag
-            // block owning one payload `List[String]`) — a +1, like `ReadTextFile`/`Alloc`. Its
-            // path arg is BORROWED (no cert event). Its own stream (`i`), balanced by the
-            // caller's scope-end recursive `DropResultListStr` (`d`) or a heap-return move-out
-            // (`m`). Without this the heap result would be an unbacked object the cert never
-            // opens — the verify_ownership/cert agreement breaks for the fs.list_dir body.
-            Op::Prim { kind: PrimKind::ReadDir, dst: Some(d), .. } => {
-                s.of.insert(*d, *d);
-                s.event(*d, 'i');
-            }
-            // `write_text_file` ALLOCATES a fresh owned `Result[Unit, String]` (the cap-as-tag
-            // block — Ok carries NO payload, Err owns one message String) — a +1, like
-            // `ReadTextFile`/`Alloc`. Both its args (path + content) are BORROWED (no cert event).
-            // Its own stream (`i`), balanced by the caller's scope-end flat `DropListStr` (`d`) or a
-            // heap-return move-out (`m`). Without this the heap result would be an unbacked object
-            // the cert never opens — the verify_ownership/cert agreement breaks for the fs.write body.
-            Op::Prim { kind: PrimKind::WriteTextFile, dst: Some(d), .. } => {
-                s.of.insert(*d, *d);
-                s.event(*d, 'i');
-            }
-            // `make_dir` ALLOCATES a fresh owned `Result[Unit, String]` (the cap-as-tag block —
-            // Ok carries NO payload, Err owns one message String) — a +1, EXACTLY like
-            // `WriteTextFile`/`Alloc`. Its path arg is BORROWED (no cert event). Its own stream
-            // (`i`), balanced by the caller's scope-end flat `DropListStr` (`d`) or a heap-return
-            // move-out (`m`). Without this the heap result would be an unbacked object the cert
-            // never opens — the verify_ownership/cert agreement breaks for the fs.mkdir_p body.
-            Op::Prim { kind: PrimKind::MakeDir, dst: Some(d), .. } => {
-                s.of.insert(*d, *d);
-                s.event(*d, 'i');
-            }
-            // `remove_all` ALLOCATES a fresh owned `Result[Unit, String]` (the cap-as-tag block —
-            // Ok carries NO payload, Err owns one message String) — a +1, EXACTLY like
-            // `MakeDir`/`WriteTextFile`/`Alloc`. Its path arg is BORROWED (no cert event). Its own
-            // stream (`i`), balanced by the caller's scope-end flat `DropListStr` (`d`) or a
-            // heap-return move-out (`m`). Without this the heap result would be an unbacked object
-            // the cert never opens — the verify_ownership/cert agreement breaks for the
-            // fs.remove_all body.
-            Op::Prim { kind: PrimKind::RemoveAll, dst: Some(d), .. } => {
-                s.of.insert(*d, *d);
-                s.event(*d, 'i');
-            }
-            // `read_line` ALLOCATES a fresh owned canonical `String` (one line of stdin) — a +1,
-            // like `Alloc`. No args. It feeds no loop, so it gets its own stream (`i`), balanced by
-            // the caller's scope-end flat `Drop` (a String owns no nested handles) or a heap-return
-            // move-out (`m`). Without this the heap result would be an unbacked object the cert
-            // never opens — the verify_ownership/cert agreement breaks for the io.read_line body.
-            Op::Prim { kind: PrimKind::ReadLine | PrimKind::ReadNBytes, dst: Some(d), .. } => {
-                s.of.insert(*d, *d);
-                s.event(*d, 'i');
-            }
-            // No refcount change: Const/Pure/IntBinOp/scalar SetLocal, and a call
-            // with a void/scalar result (its heap-handle args are borrowed).
-            _ => {}
-        }
+        scan.step(op);
     }
 
     // Defensive: a dangling IfThen (no EndIf — malformed MIR) still flushes, so
     // its buffered arm events land on the stream (and unbalance ⟹ reject) rather
     // than vanish.
-    while !s.frames.is_empty() {
-        s.flush_branch();
+    while !scan.s.frames.is_empty() {
+        scan.s.flush_branch();
     }
 
     // A heap return is MOVED OUT to the caller (a −1) — a move, hence `m`.
     if let Some(r) = func.ret {
-        if s.of.contains_key(&r) {
-            let o = s.object_of(r);
-            s.event(o, 'm');
+        if scan.s.of.contains_key(&r) {
+            let o = scan.s.object_of(r);
+            scan.s.event(o, 'm');
         }
     }
 
     let mut out = String::new();
-    for o in &s.order {
-        out.push_str(&s.stream[o]);
+    for o in &scan.s.order {
+        out.push_str(&scan.s.stream[o]);
         out.push('\n');
     }
     out
