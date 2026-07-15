@@ -197,7 +197,9 @@ fn shim(name: &str) -> Option<(&'static [NTy], Option<NTy>, &'static str)> {
         "__chk_mod" => Some((
             &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "fn rt_chk_mod(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: modulo by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a % b\n}",
+            // v0's `almide_mod` macro prints "division by zero" for a zero rhs (mod and
+            // div share the message — the C-002 oracle text); keep byte parity.
+            "fn rt_chk_mod(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a % b\n}",
         )),
         _ => None,
     }

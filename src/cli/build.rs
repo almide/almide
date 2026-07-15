@@ -65,11 +65,15 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         let source_text = std::fs::read_to_string(file).unwrap_or_default();
         match almide_mir::pipeline::try_render_rust_source(&source_text) {
             Ok(v1_code) => {
-                eprintln!("native: v1 trust-spine render (rung 1)");
+                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+                    eprintln!("native: v1 trust-spine render");
+                }
                 v1_code
             }
             Err(e) => {
-                eprintln!("native: v1 walled ({e:?}) — falling back to v0 codegen");
+                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+                    eprintln!("native: v1 walled ({e:?}) — falling back to v0 codegen");
+                }
                 rs_code
             }
         }
