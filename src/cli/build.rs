@@ -394,20 +394,25 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // v0 codegen below. Honest-wall: a v1 module is never wrong; a walled program builds via v0
     // exactly as without `--verified`.
     if verified {
-        if let Ok(wat) =
-            almide_mir::pipeline::try_render_wasm_source(&source_text, &v1_self_modules, false)
-        {
-            if let Ok(bytes) = wat::parse_str(&wat) {
-                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-                    eprintln!(
-                        "[almide] --verified: v1 trust-spine emitted the module ({} bytes)",
-                        bytes.len()
-                    );
+        match almide_mir::pipeline::try_render_wasm_source(&source_text, &v1_self_modules, false) {
+            Ok(wat) => {
+                if let Ok(bytes) = wat::parse_str(&wat) {
+                    if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+                        eprintln!(
+                            "[almide] --verified: v1 trust-spine emitted the module ({} bytes)",
+                            bytes.len()
+                        );
+                    }
+                    return Ok((bytes, true));
                 }
-                return Ok((bytes, true));
             }
-        } else if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-            eprintln!("[almide] --verified: v1 walled — falling back to v0 codegen");
+            Err(e) => {
+                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+                    // Name WHICH wall fired — the burn-down (and any user staring at a
+                    // fallback) needs the reason, exactly like the native leg's message.
+                    eprintln!("[almide] --verified: v1 walled ({e:?}) — falling back to v0 codegen");
+                }
+            }
         }
     }
 

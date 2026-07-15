@@ -13,7 +13,6 @@
 #   list-mut         — list.pop's mut-arg protocol in an eq operand
 #   list-slice       — xs[a..=b] result not yet tracked as a materialized list
 #   closure-value    — computed-callee / lambda-returning-lambda in an operand
-#   codec-match      — decoded-Option match subjects (codec bridge piece 1 kin)
 #   where-expand     — test-where parametrized bodies (substituted param shapes)
 #
 spec/integration/codegen_functional_test.almd :: __test_almd_currying
