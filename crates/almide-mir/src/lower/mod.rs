@@ -1174,6 +1174,19 @@ fn lower_function_all_impl(
     if let Some(import_fn) = try_lower_extern_wasm(func)? {
         return Ok(vec![import_fn]);
     }
+    // A `mut` param's write-back rides v0's tuple-return + place-writeback
+    // convention (C-131/C-132). The v1 lower has NO move-mode calling convention
+    // yet: a mutation through the borrowed param COWs a copy and silently DROPS
+    // the caller-visible write (`push9(v, 20)` left `v` unchanged on the verified
+    // default while v0 pushed — the #790 mut_list_param row, main-reachable).
+    // WALL the fn — v0 emits the correct convention on both targets.
+    if !func.mutated_params.is_empty() {
+        return Err(LowerError::Unsupported(format!(
+            "fn `{}` mutates its `mut` param(s) — the move-mode write-back \
+             convention (C-132) not in this brick",
+            func.name
+        )));
+    }
     let mut ctx = LowerCtx {
         globals: globals.clone(),
         global_inits: global_inits.clone(),
