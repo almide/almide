@@ -9,7 +9,39 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
-## [Unreleased]
+## [0.29.0] — 2026-07-15
+
+### Changed — compilation
+
+- **The v1 verified renderer is now the default wasm path** (97e1cd8c): every
+  `almide run` / `almide build --target wasm` compiles through the certified
+  MIR pipeline — ownership, name-totality, and capability certificates are
+  re-verified on every build by a checker whose soundness is machine-proven in
+  Coq. `--no-verified` opts back into the v0 emitter. Six verified-default
+  output divergences surfaced by the org byte-verify sweep were fixed before
+  the flip (cross-module ABI registries, void closure dispatch, nested lambda
+  naming, cached-key `sort_by`, geometric concat capacity, C-129 guards).
+
+### Added — language
+
+- **Mutable module-level `var`s on the verified path** (C-033): module globals
+  live in linear-memory slots with certified take/drop transitions, and
+  aliased snapshots are copy-on-write — `var g = [...]; let s = g; g[0] = 9`
+  observes the snapshot, byte-identical with native. This closed the last
+  known default-path output divergence, pinned by
+  `spec/wasm_cross/module_var_alias_cow.almd`.
+- **`env.get`** (C-133, ALS-R5): reads the host environment over WASI environ
+  on both wasm engines (with `-S inherit-env` wired into every wasmtime
+  spawn); native reads the process environment. Capability-gated like every
+  effectful surface.
+
+### Added — tooling
+
+- **Native trust-spine, rungs 1–4** (`--target rust --verified`): scalar,
+  String, and list programs render native Rust from the same certified MIR
+  that feeds the wasm leg (Dup→clone, Drop→scope-end erasure, shared
+  ListLit/ListGet/ListSet ops), gated by a v0 output differential. Off-subset
+  programs wall honestly and fall back to v0.
 
 ### Removed — language
 
