@@ -15,7 +15,8 @@
 
 - [x] [#757](https://github.com/almide/almide/issues/757) nested variant-tag panic — 根治: #610 box 書き換えの `matches!` guard が非 boxed の inner tag/リテラルを `_` に消していた。guard_shape 再帰で全 refutable 制約を保持。C-070 拡張 + `nested_variant_tag_box.almd`（全量ゲート実行中）
 - [x] [#753](https://github.com/almide/almide/issues/753) debug-profile ANF trap — 現 develop で再現せず（0.29 サイクルの lowering 修正で解消）。両 fixture を debug バイナリで検証しクローズ。debug-only の postcondition 実行は設計どおり（pass.rs に文書化済み）
-- [ ] [#783](https://github.com/almide/almide/issues/783) name-pinning postcondition が ceangal の実モジュールグラフで再発（#433 クラス、最小プローブでは再現せず）→ 構造的な根治は [#528](https://github.com/almide/almide/issues/528) QualifiedRef newtype
+- [x] [#783](https://github.com/almide/almide/issues/783) name-pinning 再発 — 根治: repair が `map_children` ベースで ForIn/While body（`Vec<IrStmt>`）内の Bind ty を素通ししていた。canonical `IrMutVisitor` に書き換えて checker と同じ走査族に統一（enumeration drift クラスごと解消）。gate の where_ に位置粒度も追加
+- [ ] [#784](https://github.com/almide/almide/issues/784) 匿名 record フィールドがエイリアス import 定数で Unknown のまま — #783 解消で露出した ceangal の次ブロッカー（pre-existing）
 
 ## 戦略級（次の大玉）
 
