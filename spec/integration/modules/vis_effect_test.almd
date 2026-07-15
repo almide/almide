@@ -1,14 +1,12 @@
-// wasm:skip — no test blocks, cross-target mismatch
 // ============================================================
 // Visibility + Effect — Specification Tests (effect context)
 // ============================================================
 // Effect functions from external packages are callable in effect context.
 // Pure functions are also accessible.
-// Note: uses effect fn main because test blocks cannot be effect.
 
 import effectlib
 
-effect fn main(_args: List[String]) -> Result[Unit, String] = {
+effect fn main() -> Result[Unit, String] = {
   // effect fn callable from effect context
   let config = effectlib.read_config()!
   assert_eq(config, "config_value")
@@ -18,4 +16,12 @@ effect fn main(_args: List[String]) -> Result[Unit, String] = {
 
   println("vis_effect: 2 assertions passed")
   ok(())
+}
+
+test "cross-module effect fn callable, pure fn accessible" {
+  match effectlib.read_config() {
+    ok(config) => assert_eq(config, "config_value"),
+    _ => assert(false),
+  }
+  assert_eq(effectlib.pure_(), "pure")
 }

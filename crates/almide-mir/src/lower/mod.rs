@@ -980,6 +980,69 @@ fn body_has_tail_position_option_unwrap(body: &IrExpr) -> bool {
     scan(body)
 }
 
+/// The `Result[Unit, E]` this fn's ABI promises when its body's effective TAIL is Unit-typed
+/// (descending Block chains; an absent tail is Unit) — `None` when the tail carries a real
+/// value or the fn is not Result-ABI. Declared `Result[Unit, E]` keeps its own `E`; a
+/// declared-Unit AUTO_WRAP lift synthesizes `Result[Unit, String]` (the same type the
+/// `owned_body` override stamps). Declared-Option and declared-Unit-non-AUTO_WRAP fns
+/// (including a void-convention main) are excluded by construction.
+fn unit_tail_result_abi_ty(func: &IrFunction, body: &IrExpr) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    fn tail_is_unit(e: &IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::Block { expr: Some(t), .. } => tail_is_unit(t),
+            IrExprKind::Block { expr: None, .. } => true,
+            _ => matches!(e.ty, Ty::Unit),
+        }
+    }
+    let result_ty = match &func.ret_ty {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(a[0], Ty::Unit) => {
+            func.ret_ty.clone()
+        }
+        Ty::Unit
+            if crate::lower::AUTO_WRAP_ABI_FNS
+                .with(|s| s.borrow().contains(func.name.as_str())) =>
+        {
+            Ty::result(Ty::Unit, Ty::String)
+        }
+        _ => return None,
+    };
+    tail_is_unit(body).then_some(result_ty)
+}
+
+/// `{ stmts…; unit_tail }` → `{ stmts…; unit_tail; ok(()) }` — the old Unit tail becomes a
+/// statement (the standard stmt-position effect shape), and the fn returns the real ok-Unit
+/// Result block its ABI classification promises. Only the TOP-level Block is flattened; a
+/// non-Block unit body becomes the single statement.
+fn wrap_unit_body_in_ok(body: &IrExpr, result_ty: Ty) -> IrExpr {
+    let (mut stmts, old_tail) = match &body.kind {
+        IrExprKind::Block { stmts, expr } => (stmts.clone(), expr.as_deref().cloned()),
+        _ => (Vec::new(), Some(body.clone())),
+    };
+    if let Some(t) = old_tail {
+        stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: t }, span: None });
+    }
+    let ok_unit = IrExpr {
+        kind: IrExprKind::ResultOk {
+            expr: Box::new(IrExpr {
+                kind: IrExprKind::Unit,
+                ty: Ty::Unit,
+                span: None,
+                def_id: None,
+            }),
+        },
+        ty: result_ty.clone(),
+        span: None,
+        def_id: None,
+    };
+    IrExpr {
+        kind: IrExprKind::Block { stmts, expr: Some(Box::new(ok_unit)) },
+        ty: result_ty,
+        span: body.span.clone(),
+        def_id: body.def_id,
+    }
+}
+
 fn lower_function_all_impl(
     func: &IrFunction,
     globals: &HashMap<VarId, Ty>,
@@ -1042,6 +1105,22 @@ fn lower_function_all_impl(
         &owned_body
     } else {
         &func.body
+    };
+    // A RESULT-ABI fn (declared `Result[Unit, E]`, or a declared-Unit AUTO_WRAP lift) whose
+    // effective TAIL is Unit-typed produces NO value on the unit path — the never-err strips
+    // reduce a lifted tail call to a raw Unit effect call, and a declared-Result effect fn can
+    // end on a bare effect stmt. But every CALL SITE consults the same name-keyed ABI
+    // registries and `local.set`s the expected Result handle over the void callee — invalid
+    // wasm (the #786 class: def and call sites disagree on the ABI). Materialize the missing
+    // value: `body_unit` → `{ body_unit; ok(()) }`, so the def returns the real Result block
+    // its classification promises (the proven alloc(i) + move-out(m) tail). A declared-Unit
+    // main is NEITHER case (both gates miss), so the exit-code void convention is untouched.
+    let ok_wrapped_body;
+    let func_body: &IrExpr = if let Some(result_ty) = unit_tail_result_abi_ty(func, func_body) {
+        ok_wrapped_body = wrap_unit_body_in_ok(func_body, result_ty);
+        &ok_wrapped_body
+    } else {
+        func_body
     };
     crate::lower::dump_desugared_ir(func.name.as_str(), func_body, variant_layouts, record_layouts);
     let pre_tco = desugar_heap_branches(func_body, variant_layouts);

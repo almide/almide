@@ -1,4 +1,3 @@
-// wasm:skip — no test blocks, cross-target mismatch
 import bytes
 
 fn read_val(b: Bytes, off: Int) -> Float = bytes.read_f32_le(b, off)

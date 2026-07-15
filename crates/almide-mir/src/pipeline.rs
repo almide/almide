@@ -398,7 +398,7 @@ pub fn try_render_wasm_source(
     // crossmod_shape_matrix i64/i32 invalid-wasm class. One combined classification makes
     // caller and callee agree by construction; the returned rewritten bodies are then split
     // back into the main / module lowering regions (each keeps its own globals union).
-    let module_fn_sibs: Vec<almide_ir::IrFunction> = ir
+    let mut module_fn_sibs: Vec<almide_ir::IrFunction> = ir
         .modules
         .iter()
         .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
@@ -450,7 +450,7 @@ pub fn try_render_wasm_source(
     // regressed the intra-module tail-call shape (`route(x, 100)` left values on the
     // wasm stack — wasm_same_name_crossmod_test), and the registries alone are what the
     // module-side lowering consults by MANGLED name.
-    let inlined_fns =
+    let mut inlined_fns =
         crate::lower::inline_mutual_tail_recursion(&ir.functions, &main_globals, &record_layouts);
     // WIDEN the ABI registries over the whole program AFTER the main pre-pass (whose own
     // population is main-only, the pre-batch behavior its rewrites were verified under):
@@ -459,6 +459,36 @@ pub fn try_render_wasm_source(
     // the crossmod caller/callee ABI agreement — without the pre-pass rewrites ever
     // touching module bodies.
     crate::lower::populate_abi_registries(&all_fns, &record_layouts);
+    // The registries above are program-wide, but the never-err REWRITES ran with MAIN-ONLY
+    // sets (inside the pre-pass) and never touched module bodies at all. So a MAIN caller of
+    // a cross-module never-err callee kept its lifted `Try`/Result-typed call, and a MODULE
+    // sibling caller kept its own — both then lower Result-handle reads (`local.set`) over
+    // the raw/void ABI the callee's def actually has: the #786 invalid-wasm class. Re-run
+    // the never-err rewrite family with the PROGRAM-WIDE sets over BOTH regions, so every
+    // caller agrees with the combined classification by construction (idempotent where the
+    // main-only pass already fired; call TARGETS are never renamed, so the module-side name
+    // resolution the original-bodies rule protects is untouched).
+    {
+        let wide_can_err = crate::lower::compute_can_err(&all_fns);
+        let wide_lifted = crate::lower::lifted_effect_fn_names(&all_fns);
+        for f in inlined_fns.iter_mut().chain(module_fn_sibs.iter_mut()) {
+            let self_name = f.name.as_str().to_string();
+            crate::lower::strip_never_err_unwraps(
+                &mut f.body,
+                &wide_can_err,
+                &wide_lifted,
+                &self_name,
+            );
+            crate::lower::rewrite_never_err_effect_match(&mut f.body, &wide_can_err, &wide_lifted);
+            crate::lower::unwrap_never_err_call_types(&mut f.body, &wide_can_err, &wide_lifted);
+            crate::lower::rewrap_never_err_into_result_targets(
+                &mut f.body,
+                &wide_can_err,
+                &wide_lifted,
+                &record_layouts,
+            );
+        }
+    }
     // MUTABLE module-level `var`s (program + modules): assign each a linear-memory
     // storage slot (declaration order = VarId order, the same ordering `__global_init`
     // uses) and publish the VarId → (slot, Ty) map — reads/assigns then route through the
@@ -500,11 +530,9 @@ pub fn try_render_wasm_source(
     // CROSS-MODULE global refs carry UNKNOWN expr types the frontend never infers
     // (`v.white` — the ceangal theme class): repair them from the bridged globals
     // maps BEFORE lowering, or the AllTypesConcrete precondition walls the whole fn.
-    let mut inlined_fns = inlined_fns;
     for f in inlined_fns.iter_mut() {
         crate::lower::repair_unknown_global_ref_tys(f, &main_globals);
     }
-    let mut module_fn_sibs = module_fn_sibs;
     for f in module_fn_sibs.iter_mut() {
         crate::lower::repair_unknown_global_ref_tys(f, &globals);
     }

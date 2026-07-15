@@ -1685,6 +1685,18 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-135"
+spec      = "ALS-M4"
+title     = "Declared-Unit effect fn ABI agrees between def and every call site"
+statement = "A declared-Unit `effect fn` compiles to a module in which its definition and EVERY call site agree on the ABI, on both targets and across module boundaries: a never-err callee is void/raw (callers strip the lifted `Try`/Result type), a can-err or stmt-propagating callee carries the lifted `Result[Unit, String]` ABI, and any Result-ABI fn whose body tail is Unit-typed materializes the promised `ok(())` block as its return. Previously the v1 wasm leg classified CALLERS by the name-keyed ABI registries but emitted the DEF by body shape: a Unit-tailed Result-ABI fn came out VOID while callers `local.set` the promised Result handle — a structurally invalid module (an honest build-time refusal, never wrong bytes) — and the never-err rewrites ran with main-only sets, so cross-module and module-sibling callers never stripped at all (the #786 class)."
+since     = "0.30.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unit_effect_abi.almd", class = "fixture" },
+  { path = "spec/integration/modules/cross_module_unit_effect_test.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-134"
 spec      = "ALS-T10"
 title     = "Vendored-libm atan / tanh are byte-identical cross-target"
