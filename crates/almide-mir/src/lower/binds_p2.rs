@@ -444,6 +444,21 @@ impl LowerCtx {
                         self.live_heap_handles.push(dst);
                         return Ok(());
                     }
+                    // STRICT value mode: an interp the executable subset declined (a
+                    // BLOCK-bodied operand — `${int.to_string({ let x = …; x * 3 })}` —
+                    // or another non-lowerable piece) must NOT defer to the Opaque
+                    // below: the binding reads back as an EMPTY string while native
+                    // prints the real text — a silent wrong value on the verified
+                    // default (the C-136 elide family, interp edition). REFUSE — the
+                    // fn walls and v0 emits the correct bytes.
+                    if crate::lower::strict_values() {
+                        return Err(LowerError::Unsupported(
+                            "string interpolation outside the executable subset — \
+                             deferring it would read back an empty string not in this \
+                             brick"
+                                .into(),
+                        ));
+                    }
                 }
                 // `let xs = ["a" + "b", "c"]` — a List[String] literal with fresh-owned elements
                 // (the heap-container-element concat position; the −214 caps recovery).
