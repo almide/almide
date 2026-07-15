@@ -45,11 +45,17 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
   byte 一致、フルゲート。routing ORDER が load-bearing（heap-acc fold guard は
   per-module table より先）— router のコメントに明記。
 
+## 完了: cog>100 関数分解（続き）
+
+- 2026-07-16 `lower_bind`（cog 272 — 残ワースト）→ router（unwrap wall +
+  Block 再帰 + is_heap 分岐、~25 行）+ `lower_bind_scalar`（scalar 半分、
+  verbatim 移動）+ `lower_bind_heap`（heap 半分、verbatim 移動）。検証:
+  classify wall-list byte 一致 + certs 3 本 byte 一致 + フルゲート。
+
 ## 残り: cog>100 関数（分解対象、ワースト順）
 
 | fn | cog | cyc | file |
 |---|---|---|---|
-| lower_bind | 272 | 234 | lower/binds_p2.rs |
 | lower_tail | 232 | 201 | lower/tail.rs |
 | main (classify) | 199 | 96 | examples/classify_corpus.rs |
 | lower_scalar_value_inner | 198 | 177 | lower/calls_p4.rs |
