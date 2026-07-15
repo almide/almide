@@ -435,6 +435,15 @@ impl LowerCtx {
         return match &tail.kind {
             IrExprKind::Var { id } => {
                 let v = self.value_or_global(*id)?;
+                // F2 pass-2 consumer gate (#790): RETURNING a deferred Opaque bind hands
+                // the CALLER an empty block it reads executably. Strict mode refuses.
+                if crate::lower::strict_values() && self.deferred_opaque_binds.contains(&v) {
+                    return Err(LowerError::Unsupported(
+                        "deferred (Opaque) value returned — the caller would read an \
+                         empty block not in this brick"
+                            .into(),
+                    ));
+                }
                 if self.param_values.contains(&v) {
                     // Returning a BORROWED param directly would move out a
                     // reference we do not own (the caller's) — a double-free. AUTO-

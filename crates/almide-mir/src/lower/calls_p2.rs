@@ -348,7 +348,21 @@ impl LowerCtx {
             IrExprKind::Var { id } if matches!(a.ty, Ty::Fn { .. }) => {
                 CallArg::Scalar(self.value_or_global(*id)?)
             }
-            IrExprKind::Var { id } if is_heap_ty(&a.ty) => CallArg::Handle(self.value_or_global(*id)?),
+            IrExprKind::Var { id } if is_heap_ty(&a.ty) => {
+                let v = self.value_or_global(*id)?;
+                // F2 pass-2 consumer gate (#790): a DEFERRED Opaque bind passed as a call
+                // argument hands the callee an EMPTY block it reads executably (the same
+                // class as the eq-operand and interp-bind holes). Strict mode REFUSES;
+                // the permissive classifier keeps the borrow for call accounting.
+                if crate::lower::strict_values() && self.deferred_opaque_binds.contains(&v) {
+                    return Err(LowerError::Unsupported(
+                        "deferred (Opaque) value passed as a call argument — the callee \
+                         would read an empty block not in this brick"
+                            .into(),
+                    ));
+                }
+                CallArg::Handle(v)
+            }
             IrExprKind::Var { id } => CallArg::Scalar(self.value_or_global(*id)?),
             IrExprKind::LitInt { value } => CallArg::Imm(*value),
             // A lambda ARGUMENT (`list.map(xs, (x) => x + n)`): LIFT it to a fresh
