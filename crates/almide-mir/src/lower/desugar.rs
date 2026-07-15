@@ -230,9 +230,19 @@ pub fn desugar_method_calls(
             let name = match &*target {
                 CallTarget::Method { object, method } => {
                     if method.as_str().contains('.') {
-                        Some(method.as_str().to_string())
+                        // A pre-dotted method (`Pigment.decode` via `varlib.Pigment.decode`)
+                        // resolves through the derived-method owner map too (#790 codec
+                        // bridge) — a uniquely-owned module type's codec method links the
+                        // module-mangled derived fn instead of an unlinked bare name.
+                        Some(crate::lower::resolve_derived_method_owner(
+                            method.as_str().to_string(),
+                        ))
                     } else if let Ty::Named(n, _) = &object.ty {
-                        Some(format!("{}.{}", n.as_str(), method.as_str()))
+                        Some(crate::lower::resolve_derived_method_owner(format!(
+                            "{}.{}",
+                            n.as_str(),
+                            method.as_str()
+                        )))
                     } else if !matches!(&object.ty, Ty::Record { .. } | Ty::OpenRecord { .. }) {
                         // A non-Named, non-record receiver (`3.double()`,
                         // `"hello".exclaim()`): the checker already resolved stdlib

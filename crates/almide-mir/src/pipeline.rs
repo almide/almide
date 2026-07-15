@@ -641,6 +641,92 @@ fn try_render_wasm_source_impl(
             );
         }
     }
+    // Cross-module DERIVED-METHOD name bridge (#790 codec row, piece 2 of the pinned
+    // design): a MAIN-region `T.encode` / `T.decode` reference whose type `T` is
+    // declared by exactly ONE linked module (and not by main) resolves to that
+    // module's MANGLED derived fn (`almide_rt_<m>_T.encode`) — the same unique-owner
+    // rule the variant-layout bridging above uses. Without this the reference stays
+    // unlinked and the whole program walls (honest, but the direct-method shapes are
+    // fully lowerable). Container helpers (`__encode_list_<m>.T`) stay walled — their
+    // v1 lowering is the recorded remainder of the bridge design.
+    {
+        let main_types: std::collections::HashSet<&str> =
+            ir.type_decls.iter().map(|td| td.name.as_str()).collect();
+        let mut owners: std::collections::HashMap<&str, Vec<&str>> =
+            std::collections::HashMap::new();
+        for m in &ir.modules {
+            if almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()) {
+                continue;
+            }
+            for td in &m.type_decls {
+                // Module type names may arrive QUALIFIED (`varlib.Pigment`) — key the
+                // owner map by the BASE name (the same normalization the variant-layout
+                // bridging above applies).
+                let base = td.name.as_str().rsplit('.').next().unwrap_or(td.name.as_str());
+                owners.entry(base).or_default().push(m.name.as_str());
+            }
+        }
+        struct Rw<'a> {
+            main_types: &'a std::collections::HashSet<&'a str>,
+            owners: &'a std::collections::HashMap<&'a str, Vec<&'a str>>,
+        }
+        impl almide_ir::IrMutVisitor for Rw<'_> {
+            fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+                almide_ir::walk_expr_mut(self, e);
+                if let almide_ir::IrExprKind::Call {
+                    target: almide_ir::CallTarget::Named { name },
+                    ..
+                } = &mut e.kind
+                {
+                    let n = name.as_str();
+                    if n.starts_with("almide_rt_") || n.starts_with("__") {
+                        return;
+                    }
+                    let Some((ty_name, method)) = n.rsplit_once('.') else { return };
+                    if method != "encode" && method != "decode" {
+                        return;
+                    }
+                    // `varlib.Pigment.decode` → qualifier "varlib" + base "Pigment";
+                    // `Pigment.decode` → base only. A qualified ref must match the
+                    // owner; a bare ref must not shadow a MAIN type of the same name.
+                    let (qualifier, base) = match ty_name.rsplit_once('.') {
+                        Some((q, b)) => (Some(q), b),
+                        None => (None, ty_name),
+                    };
+                    if qualifier.is_none() && self.main_types.contains(base) {
+                        return;
+                    }
+                    if let Some(ms) = self.owners.get(base) {
+                        if let [only] = ms.as_slice() {
+                            if qualifier.is_none() || qualifier == Some(only) {
+                                *name = almide_lang::intern::sym(&user_module_fn_name(
+                                    only,
+                                    &format!("{base}.{method}"),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut rw = Rw { main_types: &main_types, owners: &owners };
+        // BOTH regions: main's derived fns reference the imported payload type's codec
+        // methods, and the OWNING module's own derived fns reference their sibling
+        // types' methods by the same bare `T.method` names (the derive emits Named
+        // targets directly — no Method desugar ever re-forms them).
+        for f in inlined_fns.iter_mut().chain(module_fn_sibs.iter_mut()) {
+            almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut f.body);
+        }
+        // …and publish the unique-owner map for the DESUGAR-time resolution: the
+        // `T.method` Named names are FORMED inside the per-fn lowering (from Method
+        // targets), after this pipeline pass — the registry is how they see it.
+        let derived_owners: std::collections::HashMap<String, String> = owners
+            .iter()
+            .filter(|(t, ms)| ms.len() == 1 && !main_types.contains(*t))
+            .map(|(t, ms)| (t.to_string(), ms[0].to_string()))
+            .collect();
+        crate::lower::set_derived_type_owners(derived_owners);
+    }
     // MUTABLE module-level `var`s (program + modules): assign each a linear-memory
     // storage slot (declaration order = VarId order, the same ordering `__global_init`
     // uses) and publish the VarId → (slot, Ty) map — reads/assigns then route through the
