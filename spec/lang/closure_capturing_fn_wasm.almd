@@ -1,7 +1,6 @@
-// wasm:skip — v0's WASM target traps on a closure CAPTURING another closure (the
-// compose shape): a pre-existing v0 emit_wasm closure-env gap, exposed 2026-07-10
-// when the v1 trust spine shipped Fn captures. This fixture verifies against v0
-// NATIVE; the v1 wasm path is pinned by the render test
+// Runs on BOTH targets since verified-default (0.29.0): the default wasm path
+// is the v1 renderer, which ships Fn captures (the compose shape that used to
+// trap v0's closure-env). Also pinned by the render test
 // (`heap_and_fn_captures_execute_and_free_via_drop_closure`) and the
 // closure_heap_capture.almd gate rows.
 // Locks in Fn CAPTURES (closure env full mode, part 2): `compose(f, g)` returns a

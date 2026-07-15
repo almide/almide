@@ -29,6 +29,27 @@ fn find_project_root(base_dir: &Path) -> Option<PathBuf> {
     }
 }
 
+/// #785: refresh every user module's top-let types in `env.top_lets` BEFORE
+/// the entry program is inferred, so cross-module constant readers see the
+/// fully inferred type instead of the registration seed. One call per driver,
+/// right before `infer_program`.
+pub fn refresh_module_toplets(
+    checker: &mut crate::check::Checker,
+    modules: &[(String, ast::Program, Option<project::PkgId>, bool)],
+) {
+    for (name, mod_prog, pkg_id, _) in modules {
+        if crate::stdlib::is_stdlib_module(name) && !crate::stdlib::is_bundled_module(name) {
+            continue;
+        }
+        let saved_self = checker.env.self_module_name;
+        if let Some(pid) = pkg_id.as_ref() {
+            checker.env.self_module_name = Some(crate::intern::sym(&pid.name));
+        }
+        checker.refresh_module_top_lets(mod_prog, name);
+        checker.env.self_module_name = saved_self;
+    }
+}
+
 pub fn resolve_imports_with_deps(
     source_file: &str,
     program: &ast::Program,

@@ -417,9 +417,14 @@ impl Ty {
                     && r1.compatible(r2)
             }
             (Ty::Record { fields: f1 }, Ty::Record { fields: f2 }) => {
-                // Both closed: exact match
+                // Both closed: same field SET. Order-independent (by name):
+                // a record's identity is its named fields — source order,
+                // declaration order, and the sorted canonical order all occur
+                // in Ty values, and the solver's unify_structural already
+                // compares by name. A positional zip here rejected
+                // `mix({ g: .., r: .. })` against `{ r, g }` (E005).
                 f1.len() == f2.len()
-                    && f1.iter().zip(f2.iter()).all(|((n1, t1), (n2, t2))| n1 == n2 && t1.compatible(t2))
+                    && f1.iter().all(|(n1, t1)| f2.iter().any(|(n2, t2)| n1 == n2 && t1.compatible(t2)))
             }
             (Ty::OpenRecord { fields: required }, Ty::Record { fields: actual })
             | (Ty::OpenRecord { fields: required }, Ty::OpenRecord { fields: actual }) => {

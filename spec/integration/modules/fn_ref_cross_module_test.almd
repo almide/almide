@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix WASM codegen bug
 import varlib
 
 test "cross-module function reference in filter_map" {

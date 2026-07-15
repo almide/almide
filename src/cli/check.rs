@@ -27,6 +27,10 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     let mut checker = check_mod::Checker::from_env(canon.env);
     checker.set_source(file, &source_text);
     checker.diagnostics = canon.diagnostics;
+    // #785: module top-let types must be fully inferred before the entry
+    // program reads them (drivers infer the entry FIRST; without this the
+    // readers see the registration seed — Unknown for non-literal inits).
+    almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
     let diagnostics = checker.infer_program(&mut program);
 
     // Lower to IR for unused variable analysis (only if no parse or type errors)
@@ -113,6 +117,10 @@ pub fn cmd_check_json(file: &str) {
     let mut checker = check_mod::Checker::from_env(canon.env);
     checker.set_source(file, &source_text);
     checker.diagnostics = canon.diagnostics;
+    // #785: module top-let types must be fully inferred before the entry
+    // program reads them (drivers infer the entry FIRST; without this the
+    // readers see the registration seed — Unknown for non-literal inits).
+    almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
     let diagnostics = checker.infer_program(&mut program);
 
     // Output each diagnostic as JSON (one per line)
@@ -169,6 +177,10 @@ pub fn cmd_check_effects(file: &str) {
     let mut checker = check_mod::Checker::from_env(canon.env);
     checker.set_source(file, &source_text);
     checker.diagnostics = canon.diagnostics;
+    // #785: module top-let types must be fully inferred before the entry
+    // program reads them (drivers infer the entry FIRST; without this the
+    // readers see the registration seed — Unknown for non-literal inits).
+    almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
     let diagnostics = checker.infer_program(&mut program);
 
     let errors: Vec<_> = diagnostics.iter()

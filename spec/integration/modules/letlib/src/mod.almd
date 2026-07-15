@@ -15,3 +15,10 @@ let MARGIN_AUTO = -2.0
 type Edges = { top: Float, left: Float }
 
 fn box_left(w: Float, e: Edges) -> Float = w + e.left
+
+// #785: a CALL-initialized constant has no syntactic seed at all — its type
+// must reach cross-module readers through the pre-entry top-let refresh
+// (drivers infer the entry first; the refresh pass runs module top-lets
+// beforehand so env.top_lets is fully typed).
+fn default_gap() -> Float = -3.5
+let GAP = default_gap()

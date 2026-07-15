@@ -44,3 +44,10 @@ test "unannotated negative constant through a bare let bind" {
   let v = 10.0 |> letlib.box_left({ top: 0.0, left: k })
   assert_eq(v, 8.0)
 }
+
+test "call-initialized constant reaches cross-module readers typed" {
+  // #785: { left: letlib.GAP } previously carried left: Unknown (no seed,
+  // and the refresh ran after the entry was already inferred).
+  let v = 10.0 |> letlib.box_left({ top: 0.0, left: letlib.GAP })
+  assert_eq(v, 6.5)
+}

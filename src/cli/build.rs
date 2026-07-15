@@ -297,6 +297,10 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     let mut checker = check::Checker::from_env(canon.env);
     checker.set_source(file, &source_text);
     checker.diagnostics = canon.diagnostics;
+    // #785: module top-let types must be fully inferred before the entry
+    // program reads them (drivers infer the entry FIRST; without this the
+    // readers see the registration seed — Unknown for non-literal inits).
+    almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
     let diagnostics = checker.infer_program(&mut program);
     if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
         for d in &diagnostics {

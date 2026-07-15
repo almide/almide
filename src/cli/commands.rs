@@ -231,6 +231,10 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
     let mut checker = check::Checker::from_env(canon.env);
     checker.set_source(test_file, &source_text);
     checker.diagnostics = canon.diagnostics;
+    // #785: module top-let types must be fully inferred before the entry
+    // program reads them (drivers infer the entry FIRST; without this the
+    // readers see the registration seed — Unknown for non-literal inits).
+    almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
     let diagnostics = checker.infer_program(&mut program);
     if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
         return skip("type errors".to_string());
@@ -648,6 +652,10 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
         let mut checker = check::Checker::from_env(canon.env);
         checker.set_source(test_file, &source_text);
         checker.diagnostics = canon.diagnostics;
+        // #785: module top-let types must be fully inferred before the entry
+        // program reads them (drivers infer the entry FIRST; without this the
+        // readers see the registration seed — Unknown for non-literal inits).
+        almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
         let diagnostics = checker.infer_program(&mut program);
         if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
             eprintln!("SKIP {} (type errors)", test_file);

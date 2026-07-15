@@ -388,6 +388,10 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         let mut checker = check::Checker::from_env(canon.env);
         checker.set_source(file, &source_text);
         checker.diagnostics = canon.diagnostics;
+        // #785: module top-let types must be fully inferred before the entry
+        // program reads them (drivers infer the entry FIRST; without this the
+        // readers see the registration seed — Unknown for non-literal inits).
+        almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
         let diagnostics = checker.infer_program(&mut program);
         // Combine parse errors + checker errors
         let mut all_errors: Vec<&diagnostic::Diagnostic> = parse_errors.iter().collect();

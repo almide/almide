@@ -1,4 +1,8 @@
-// wasm:skip — OS/native-only API, not available in WASM
+// wasm:skip — the V0 emitter has no random.* dispatch (the
+// wasm_dispatch_coverage gate pins the v0 surface). The DEFAULT (v1
+// verified) wasm path reaches WASI entropy via random_get (C-112) and runs
+// this file fine — verified 2026-07-15 — so this marker falls together with
+// the v0 retirement (#782).
 // Comprehensive random module tests
 // All random functions are effect, so we use top-level effect fn wrappers.
 import random

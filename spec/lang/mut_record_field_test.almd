@@ -1,7 +1,6 @@
-// wasm:skip — in-place mutation of a `mut` record/list param does not yet
-// persist on the wasm target (a reallocating `list.push` moves the inline list
-// header and the new pointer is not written back to the caller's slot — the
-// wasm counterpart of #703, still open). Native is correct; these run native.
+// Runs on BOTH targets since 0.28.6: a value-returning `mut` param lowers
+// through tuple return + place writeback (C-131/C-132), so a reallocating
+// `list.push` writes the new pointer back to the caller's slot on wasm too.
 //
 // #703: a `mut` parameter of a RECORD type can have `list.push` applied to one
 // of its List-typed fields — the field access `b.xs` of a `mut b` is a mutable

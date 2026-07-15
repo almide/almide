@@ -161,3 +161,25 @@ jobs:
             gh label create fuzz --color B60205 --description "Found by the nightly differential fuzzer" 2>/dev/null || true
             gh issue create --title "$TITLE" --body "$BODY" --label fuzz
           fi
+
+  coverage-ratchet:
+    name: Compiler structural coverage ratchet (#566)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: coverage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Install llvm-tools
+        run: rustup component add llvm-tools-preview
+      - name: Build almide (stamp expects an installed binary)
+        run: |
+          cargo build --release
+          mkdir -p ~/.local/bin && cp target/release/almide ~/.local/bin/
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Measure coverage and enforce the ratchet
+        run: bash proofs/coverage.sh --check

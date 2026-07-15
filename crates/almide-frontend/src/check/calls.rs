@@ -335,13 +335,22 @@ impl Checker {
                     _ => None,
                 };
                 if let Some(type_name) = cross_type_name {
-                    let defining_module = self.env.types.keys()
-                        .find(|k| {
-                            let s = k.as_str();
-                            s.ends_with(&format!(".{}", type_name))
-                                && s.len() > type_name.len() + 1
-                        })
-                        .map(|k| k.as_str()[..k.as_str().len() - type_name.len() - 1].to_string());
+                    // A pinned QUALIFIED type name (`box.Box` — the #433
+                    // canonical form every checked expr now carries) names its
+                    // defining module directly. The suffix scan below only
+                    // ever matched historical BARE names, so cross-module
+                    // UFCS silently fell through to the callable-object
+                    // fallback and E001'd (ceangal's `count.get()`).
+                    let defining_module = match type_name.rsplit_once('.') {
+                        Some((m, _)) => Some(m.to_string()),
+                        None => self.env.types.keys()
+                            .find(|k| {
+                                let s = k.as_str();
+                                s.ends_with(&format!(".{}", type_name))
+                                    && s.len() > type_name.len() + 1
+                            })
+                            .map(|k| k.as_str()[..k.as_str().len() - type_name.len() - 1].to_string()),
+                    };
                     if let Some(module) = defining_module {
                         let key = format!("{}.{}", module, field);
                         if self.env.functions.contains_key(&sym(&key)) {

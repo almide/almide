@@ -21,14 +21,22 @@
 
 ## 戦略級（次の大玉）
 
-- [ ] [#782](https://github.com/almide/almide/issues/782) **Phase 3: v0 wasm emitter 退役** — org wall 0 で前提充足。残: fallback を強いる frontend バグ（#783 ほか）、almide test の wasm 経路（native fallback 14 files）、oracle 役の後継決定
+- [ ] [#782](https://github.com/almide/almide/issues/782) **Phase 3: v0 wasm emitter 退役** — 前提を大幅前進: frontend バグ #783/#784/#785 済、**wasm:skip stale sweep 完了**（23→15 markers、8個は wasm 経路が既に追いついていた: fn_ref/再帰generics/closure-capture/borrow_hoist/mut params×2/random(C-112)/url_decode）。残る本物: [#786](https://github.com/almide/almide/issues/786) cross-module Unit effect fn の不正 wasm 生成、構造的 native 7 markers、oracle 後継決定
 - [ ] [#764](https://github.com/almide/almide/issues/764) native trust-spine 残り rung（records/variants/closures/Float）→ default flip でツイート100点化完結
 - [ ] [#617](https://github.com/almide/almide/issues/617) Matrix/Bytes の RcCow 化（値セマンティクス維持でディープクローン税を消す）
 
 ## 品質基盤（コツコツ級）
 
-- [ ] [#566](https://github.com/almide/almide/issues/566) コンパイラ構造カバレッジの ratchet 化（現状 line 65.89%、最低 control_p5 43%。F2 所見の残り）
+- [~] [#566](https://github.com/almide/almide/issues/566) カバレッジ ratchet — **機構出荷**: `proofs/coverage.sh` に baseline 比較（TOTAL line % は下がったら FAIL、`--update` で引き上げのみ）+ nightly CI job（fuzz-nightly.yml の coverage-ratchet）。残り: baseline のシード（フルゲート後に coverage.sh 実行）と MC/DC（flight 圏 #566 本体）
 - [ ] [#781](https://github.com/almide/almide/issues/781) cognitive complexity >100 の関数 15本 burndown（F3/#777 と相互補強）
+
+## ceangal suite burndown（#783→#784→UFCS→record-order で 3/6 まで前進）
+
+- [x] cross-module UFCS が qualified 型名で解決不能（`count.get()` E001）— checker/lowering 両方の defining-module 導出が bare 名前提の suffix スキャンだった。qualified 名は `rsplit_once('.')` で直接導出
+- [x] 匿名 record の field 順序で E005 — `Ty::compatible` の Record×Record が位置 zip 比較（solver は by-name で非対称だった）。by-name セット比較に統一。`mix({ g: .., r: .. })` の単一ファイル穴も同時に解消
+- [ ] [#787](https://github.com/almide/almide/issues/787) ScratchAllocator overflow（scroll、v0 wasm の slot 事前確保不足）
+- [ ] [#788](https://github.com/almide/almide/issues/788) cross-module mutable module var が native で E0425（v1 wasm は C-033 で対応済み、native 側のギャップ）
+- diff_bench の `view.box` E002 は ceangal 側の stale bench（view API 改名に未追従）— コンパイラバグではない
 
 ## 発信（ユーザー手番）
 

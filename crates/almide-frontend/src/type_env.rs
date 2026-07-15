@@ -5,7 +5,14 @@ use crate::import_table::ImportTable;
 pub struct EnvKeySnapshot {
     functions: std::collections::HashSet<Sym>,
     types: std::collections::HashSet<Sym>,
-    constructors: std::collections::HashSet<Sym>,
+    /// key → candidate count at snapshot time. Constructor registration
+    /// PUSHES candidates onto a Vec (same name across variant types), so a
+    /// key-set restore would leak candidates pushed under a pre-existing key
+    /// — the temp unprefixed registration then double-counts an owner and
+    /// `report_ambiguous_ctor` fires a false "declared in T and T" (#785
+    /// exposed this: the top-let refresh registers BEFORE the entry is
+    /// inferred, where the old infer_module leak was ordered after).
+    constructors: std::collections::HashMap<Sym, usize>,
     top_lets: std::collections::HashSet<Sym>,
 }
 
@@ -179,16 +186,23 @@ impl TypeEnv {
         EnvKeySnapshot {
             functions: self.functions.keys().cloned().collect(),
             types: self.types.keys().cloned().collect(),
-            constructors: self.constructors.keys().cloned().collect(),
+            constructors: self.constructors.iter().map(|(k, v)| (*k, v.len())).collect(),
             top_lets: self.top_lets.keys().cloned().collect(),
         }
     }
 
-    /// Remove any keys that were added since the snapshot was taken.
+    /// Remove any keys — and any constructor CANDIDATES — added since the
+    /// snapshot was taken. Registration pushes candidates in order, so
+    /// truncating to the snapshot count drops exactly the temp additions.
     pub fn restore_keys(&mut self, snapshot: &EnvKeySnapshot) {
         self.functions.retain(|k, _| snapshot.functions.contains(k));
         self.types.retain(|k, _| snapshot.types.contains(k));
-        self.constructors.retain(|k, _| snapshot.constructors.contains(k));
+        self.constructors.retain(|k, _| snapshot.constructors.contains_key(k));
+        for (k, v) in self.constructors.iter_mut() {
+            if let Some(&n) = snapshot.constructors.get(k) {
+                v.truncate(n);
+            }
+        }
         self.top_lets.retain(|k, _| snapshot.top_lets.contains(k));
     }
 

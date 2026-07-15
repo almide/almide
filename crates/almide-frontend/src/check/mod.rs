@@ -610,6 +610,61 @@ impl Checker {
         self.env.restore_keys(&snapshot);
     }
 
+    /// #785: re-infer ONLY this module's top-level `let`s so `env.top_lets`
+    /// carries fully inferred types BEFORE the entry program is checked.
+    /// The CLI drivers run `infer_program` (where every cross-module reader
+    /// lives) before the `infer_module` loop, so without this pre-pass a
+    /// reader sees the registration-time seed — `Unknown` for any
+    /// non-literal initializer (`let K = neg_two()`). Same isolation
+    /// bracket as `infer_module`; decls are cloned so the module AST stays
+    /// pristine for the real inference later.
+    pub fn refresh_module_top_lets(&mut self, prog: &ast::Program, module_name: &str) {
+        if !prog.decls.iter().any(|d| matches!(d, ast::Decl::TopLet { .. })) {
+            return;
+        }
+        let saved_constraints = std::mem::take(&mut self.constraints);
+        let saved_uf = std::mem::replace(&mut self.uf, UnionFind::new());
+        let saved_type_map = std::mem::take(&mut self.type_map);
+        // This is a TYPE-EXTRACTION pre-pass, not the module's real check —
+        // `infer_module` re-infers everything later and owns the reporting.
+        // Emitting here would DOUBLE-report every real initializer error and
+        // fire spurious ambiguity (the temp unprefixed decls coexist with the
+        // canonical prefixed ones, so a bare ctor initializer like
+        // `let MOOD = Happy` sees its own type twice). Discard everything
+        // this pass emits.
+        let saved_diag_len = self.diagnostics.len();
+
+        let self_name = self.env.self_module_name.map(|s| s.to_string());
+        let import_table_name = self_name.as_deref().unwrap_or(module_name);
+        let saved_import_table = std::mem::replace(&mut self.env.import_table, ImportTable::new());
+        let (mod_table, _diags) = build_import_table(prog, Some(import_table_name), &self.env.user_modules);
+        self.env.import_table = mod_table;
+
+        let snapshot = self.env.snapshot_keys();
+        crate::canonicalize::registration::register_decls(
+            &mut self.env, &mut Vec::new(), &prog.decls, None,
+        );
+        let saved_prefix = std::mem::replace(
+            &mut self.current_module_prefix,
+            Some(module_name.to_string()),
+        );
+        for decl in prog.decls.iter() {
+            if matches!(decl, ast::Decl::TopLet { .. }) {
+                let mut d = decl.clone();
+                self.check_decl(&mut d);
+            }
+        }
+        self.solve_constraints();
+        self.current_module_prefix = saved_prefix;
+
+        self.constraints = saved_constraints;
+        self.uf = saved_uf;
+        self.type_map = saved_type_map;
+        self.env.import_table = saved_import_table;
+        self.env.restore_keys(&snapshot);
+        self.diagnostics.truncate(saved_diag_len);
+    }
+
     // ── Declaration checking ──
 
     /// Push generic type vars, structural bounds, and protocol bounds into the environment.
