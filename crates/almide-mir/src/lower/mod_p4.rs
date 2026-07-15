@@ -1939,6 +1939,10 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
             // rc_inc, so the result map aliases its inputs' keys unowned and scope-end
             // double-frees them (`map.merge` on `Map[String, Int]` trapped the rc_dec
             // sentinel on the verified default — the #790 map-merge row).
+            // `to_string` (the `${map}` interp display) links the BARE self-host
+            // `map.to_string` — the pre-wall behavior this family's wall must not
+            // mangle (map_interp_self_hosts_via_keys_values pins it).
+            (true, true) | (true, false) if key_is_string && func == "to_string" => Some(""),
             (true, true) if key_is_string => Some(
                 if matches!(
                     func,

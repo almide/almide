@@ -82,25 +82,6 @@ impl LowerCtx {
         user_args: Vec<CallArg>,
         result: Option<crate::Repr>,
     ) {
-        // The closure dispatch tables are ARITY-typed with i64-UNIFORM slots
-        // (`$closure_fnN` on wasm; `__almd_ci_N` on native): a HEAP user arg or a
-        // HEAP result would call through the wrong table type — wasmtime rejects it
-        // at the `call_indirect` type check (`option.map(o, (s) => …)` trapped
-        // "indirect call type mismatch" on the verified default — the #790 row).
-        // Substitute an UNLINKED call marker instead: the fn WALLS at render on both
-        // legs (1:1 call-count swap, parity preserved) and v0's typed closure env
-        // runs the shape correctly. Typed dispatch tables are the recorded frontier.
-        let heap_arg = user_args.iter().any(|a| matches!(a, CallArg::Handle(_)));
-        let heap_result = matches!(result, Some(crate::Repr::Ptr { .. }));
-        if heap_arg || heap_result {
-            self.ops.push(Op::CallFn {
-                dst,
-                name: "__closure_call_heap_wall".to_string(),
-                args: user_args,
-                result,
-            });
-            return;
-        }
         let table_idx = self.emit_closure_fnidx(blk);
         let mut args = vec![CallArg::Handle(blk)];
         args.extend(user_args);
