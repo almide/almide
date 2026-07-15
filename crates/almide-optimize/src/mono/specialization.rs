@@ -14,16 +14,22 @@ pub(super) fn specialize_function(
     suffix: &str,
     bindings: &HashMap<String, Ty>,
     vt: &mut VarTable,
+    globals: &std::collections::HashSet<VarId>,
 ) -> IrFunction {
     // Phase 1: Collect all VarIds referenced in the original function
     let mut old_ids = Vec::new();
     for p in &orig.params { collect_var_id(p.var, &mut old_ids); }
     collect_varids_in_expr(&orig.body, &mut old_ids);
 
-    // Phase 2: Allocate fresh VarIds with substituted types
+    // Phase 2: Allocate fresh VarIds with substituted types. A module-level
+    // global (`var _dirty`) referenced by the body is a FREE variable, not a
+    // binding of this function — alpha-renaming it would detach the reference
+    // from the storage annotation (keyed by the top-let's VarId), so the
+    // walker rendered a bare local name and rustc E0425'd (#788). Globals
+    // keep their original VarId across every specialization.
     let mut remap: HashMap<VarId, VarId> = HashMap::with_capacity(old_ids.len());
     for old in &old_ids {
-        if remap.contains_key(old) { continue; }
+        if remap.contains_key(old) || globals.contains(old) { continue; }
         let info = vt.get(*old);
         let new_ty = substitute_ty(&info.ty, bindings);
         let new_id = vt.alloc(info.name.clone(), new_ty, info.mutability, info.span);

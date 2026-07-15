@@ -80,11 +80,18 @@ pub fn monomorphize(program: &mut IrProgram) {
             break;
         }
 
-        // Specialize new functions (alpha-renaming: fresh VarIds per specialization)
+        // Specialize new functions (alpha-renaming: fresh VarIds per specialization).
+        // Module-level globals are FREE vars — never alpha-renamed (#788).
+        let global_vars: std::collections::HashSet<almide_ir::VarId> = program
+            .top_lets
+            .iter()
+            .map(|tl| tl.var)
+            .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|tl| tl.var)))
+            .collect();
         let mut new_functions = Vec::new();
         for ((fn_name, suffix), bindings) in &new {
             if let Some(orig) = program.functions.iter().find(|f| !f.is_test && f.name == *fn_name) {
-                new_functions.push(specialize_function(orig, suffix, bindings, &mut program.var_table));
+                new_functions.push(specialize_function(orig, suffix, bindings, &mut program.var_table, &global_vars));
             }
         }
 
@@ -224,6 +231,10 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
                             && !matches!(ty, Ty::TypeVar(_))
                             && !ty.contains_typevar()
                         );
+                        if std::env::var_os("ALMIDE_MONO_DEBUG").is_some() {
+                            let atys: Vec<_> = args.iter().map(|a| &a.ty).collect();
+                            eprintln!("[mono-debug] {m}.{f} args={atys:?} ptys={ptys:?} bindings={bindings:?} concrete={all_concrete}");
+                        }
                         if !all_concrete { continue; }
                         // Deterministic suffix
                         let generic_names: Vec<String> = self.generics[gi].bounds.iter()
@@ -291,10 +302,14 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
                 let orig = &program.modules[mi].functions[fi];
                 orig.name.to_string()
             };
-            // Borrow split: take fn out, specialize against the module's var_table, put back both
+            // Borrow split: take fn out, specialize against the module's var_table, put back both.
+            // The module's OWN top-lets (`var _dirty`) are free vars in the body — never
+            // alpha-renamed (#788), same rule as the top-level driver.
+            let module_globals: std::collections::HashSet<almide_ir::VarId> =
+                program.modules[mi].top_lets.iter().map(|tl| tl.var).collect();
             let orig = program.modules[mi].functions[fi].clone();
             let mod_vt = &mut program.modules[mi].var_table;
-            let specialized = specialize_function(&orig, &suffix, &bindings, mod_vt);
+            let specialized = specialize_function(&orig, &suffix, &bindings, mod_vt, &module_globals);
             let new_name = specialized.name.to_string();
             let _ = orig_body_ptr_hash;
             program.modules[mi].functions.push(specialized);

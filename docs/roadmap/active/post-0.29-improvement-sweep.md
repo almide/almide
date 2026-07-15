@@ -34,8 +34,8 @@
 
 - [x] cross-module UFCS が qualified 型名で解決不能（`count.get()` E001）— checker/lowering 両方の defining-module 導出が bare 名前提の suffix スキャンだった。qualified 名は `rsplit_once('.')` で直接導出
 - [x] 匿名 record の field 順序で E005 — `Ty::compatible` の Record×Record が位置 zip 比較（solver は by-name で非対称だった）。by-name セット比較に統一。`mix({ g: .., r: .. })` の単一ファイル穴も同時に解消
-- [ ] [#787](https://github.com/almide/almide/issues/787) ScratchAllocator overflow（scroll、v0 wasm の slot 事前確保不足）
-- [ ] [#788](https://github.com/almide/almide/issues/788) cross-module mutable module var が native で E0425（v1 wasm は C-033 で対応済み、native 側のギャップ）
+- [~] [#787](https://github.com/almide/almide/issues/787) ScratchAllocator overflow — minimal tier 4/2/2 → 8/4/4（zero-cost margin、ledger 済みの「正確な修正 = two-pass hwm emit」は据え置き）。ceangal scroll の overflow panic 消滅を実測確認。ゲート通過待ち
+- [~] [#788](https://github.com/almide/almide/issues/788) 真因確定+修正: mono の `specialize_function` が body の**自由変数（module global）まで alpha-rename** → storage annotation（top-let VarId キー）から外れ bare 名 render → E0425。globals 集合を除外に（top-level/module 両ドライバ）。native レッグで再現→修正確認、crossmod_matrix に回帰 cell 追加。ゲート通過待ち
 - diff_bench の `view.box` E002 は ceangal 側の stale bench（view API 改名に未追従）— コンパイラバグではない
 
 ## 発信（ユーザー手番）
