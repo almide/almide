@@ -209,7 +209,7 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 |---|---|
 | WASM "Hello World" binary | **467 B** — raw output, self-contained, `wasm-opt` saves only 1–5 more bytes |
 | Native minigit CLI binary | **444 KB** stripped, 0 dependencies |
-| MiniGit AI-coding benchmark | **100% pass** (41/41) vs 15 established languages |
+| MiniGit AI-coding benchmark | **100% pass** (Sonnet 5 × 20 trials) — most concise of 5 languages (233 LOC), faster than Gleam/MoonBit |
 
 Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.md)**.
 
@@ -224,7 +224,7 @@ Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.m
 | Stdlib | 834 functions across 39 modules |
 | Tests | 285 test files pass (271 via WASM, 14 native) + 133-contract cross-target ledger |
 | MSR | 100% (30/30 tasks, Sonnet 4.6) — see the [scorecard](#msr-scorecard) above, measured by [almide-dojo](https://github.com/almide/almide-dojo) |
-| MiniGit Bench | 41/41 tests pass, 100% success rate ([ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench)) |
+| MiniGit Bench | 100% pass, Sonnet 5 × 20 trials, same-model snapshot vs Gleam/MoonBit/Rust/TypeScript ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)) |
 | Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — compiler runs as WASM in browser |
 
