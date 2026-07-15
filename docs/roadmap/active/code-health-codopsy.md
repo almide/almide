@@ -71,6 +71,10 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
 - 2026-07-16 `interp_to_string_call`（cog 121）→ List/Option/Result の 3 大
   routing arm を `interp_{list,option,result}_to_string` に抽出（pure table
   fn、状態なし）。検証: certs 3 本 byte 一致 + フルゲート。
+- 2026-07-16 `main`（classify_corpus、cog 199）→ per-file loop 本体（~380 行）
+  を `classify_file(&Path, &mut Tally, &mut CertStreams, …)` に抽出。5 本の
+  stream String は `CertStreams` struct に束ね、continue→return ×3。検証:
+  certs 3 本 + wall report が byte 一致 + フルゲート。
 
 ## 残り 8 本の分解性分類（2026-07-16 精査）
 
@@ -89,7 +93,6 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
 
 | fn | cog | cyc | file |
 |---|---|---|---|
-| main (classify) | 199 | 96 | examples/classify_corpus.rs |
 | verify_ownership | 140 | 92 | lib.rs |
 | check_named_call_with_type_args | 137 | 114 | frontend check/calls.rs |
 | check_call_with_type_args | 129 | 83 | frontend check/calls.rs |
