@@ -91,6 +91,12 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
   再適用で 583 pins + certs byte 一致（fresh baseline 比較）+ フルゲート
   全緑を確認。**#781 は 11/14 — 残 3 = ownership_certificate(123) /
   try_lower_variant_value_match(121) + 台帳外 1 本の再計測。**
+- 2026-07-16 `ownership_certificate`（cog 123）→ 発行状態 7 本（depth/Streams/
+  released_merge_dsts/consumed_values/feeder_to_slot/slots/line_slots）を
+  `CertScan` struct + `step(op)` に束ね（OwnershipScan と同パターン）。検証:
+  583 pins + **ownership.cert 含む 4 certs byte 一致**（cert 生成コード自身の
+  分解なので決定的）+ フルゲート。**#781 は 12/14 — 残 2 =
+  try_lower_variant_value_match(121) + 台帳外 1 本の再計測。**
 
 ## 残り 8 本の分解性分類（2026-07-16 精査）
 
