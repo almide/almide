@@ -84,6 +84,13 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
   抽出。検証: full suite + corpus-wall。**#781 は 10/14 — 残 4 は全て
   State-struct 設計組（verify_ownership / ownership_certificate /
   try_lower_variant_value_match + 台帳外 1 本の再計測が次アクション）。**
+- 2026-07-16 `verify_ownership`（cog 140）→ scan 状態 6 本（object_of/rc/
+  dead/borrowed/branches/violations）を `OwnershipScan` struct に束ね、
+  loop body を `step(i, op)` メソッド化（機械 rename + verbatim 移動）。
+  初回は closure-wall 起因の 77 fails と誤って共倒れ revert したが、単独
+  再適用で 583 pins + certs byte 一致（fresh baseline 比較）+ フルゲート
+  全緑を確認。**#781 は 11/14 — 残 3 = ownership_certificate(123) /
+  try_lower_variant_value_match(121) + 台帳外 1 本の再計測。**
 
 ## 残り 8 本の分解性分類（2026-07-16 精査）
 
