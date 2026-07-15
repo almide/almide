@@ -75,6 +75,10 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
   を `classify_file(&Path, &mut Tally, &mut CertStreams, …)` に抽出。5 本の
   stream String は `CertStreams` struct に束ね、continue→return ×3。検証:
   certs 3 本 + wall report が byte 一致 + フルゲート。
+- 2026-07-16 `check_named_call_with_type_args`（cog 137、frontend）→ no-sig
+  fallback（~110 行、name+arg_tys+self のみ参照のクリーン片）を
+  `check_unresolved_named_call` に抽出。検証: full suite（frontend の挙動
+  証明は suite）+ corpus-wall。
 
 ## 残り 8 本の分解性分類（2026-07-16 精査）
 
@@ -94,7 +98,6 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
 | fn | cog | cyc | file |
 |---|---|---|---|
 | verify_ownership | 140 | 92 | lib.rs |
-| check_named_call_with_type_args | 137 | 114 | frontend check/calls.rs |
 | check_call_with_type_args | 129 | 83 | frontend check/calls.rs |
 | ownership_certificate | 123 | 101 | certificate.rs |
 | try_lower_variant_value_match | 121 | 148 | lower/control_p2.rs |
