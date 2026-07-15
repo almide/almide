@@ -37,11 +37,18 @@ frontend check/calls.rs (1056), control_p3 (1024), codegen calls_option.rs (1016
 この帯の主因はファイル長よりも巨大関数 — 分割の限界効用は低下しており、
 関数分解が本丸。
 
+## 完了: cog>100 関数分解
+
+- 2026-07-15 `list_heap_call_name`（cog 324 — リポジトリ最悪）→ 23 行の
+  per-module router + 7 helpers（random/fan/heap-fold/unwrap_or/list/set/map、
+  最大 350 行）。純テキスト移動 + Option 化のみ。検証: classify wall-list
+  byte 一致、フルゲート。routing ORDER が load-bearing（heap-acc fold guard は
+  per-module table より先）— router のコメントに明記。
+
 ## 残り: cog>100 関数（分解対象、ワースト順）
 
 | fn | cog | cyc | file |
 |---|---|---|---|
-| list_heap_call_name | 324 | 262 | lower/mod_p4.rs |
 | lower_bind | 272 | 234 | lower/binds_p2.rs |
 | lower_tail | 232 | 201 | lower/tail.rs |
 | main (classify) | 199 | 96 | examples/classify_corpus.rs |

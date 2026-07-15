@@ -28,7 +28,7 @@
 ## 品質基盤（コツコツ級）
 
 - [~] [#566](https://github.com/almide/almide/issues/566) カバレッジ ratchet — **機構出荷**: `proofs/coverage.sh` に baseline 比較（TOTAL line % は下がったら FAIL、`--update` で引き上げのみ）+ nightly CI job（fuzz-nightly.yml の coverage-ratchet）。残り: baseline のシード（フルゲート後に coverage.sh 実行）と MC/DC（flight 圏 #566 本体）
-- [ ] [#781](https://github.com/almide/almide/issues/781) cognitive complexity >100 の関数 15本 burndown（F3/#777 と相互補強）
+- [~] [#781](https://github.com/almide/almide/issues/781) cog>100 burndown — **ワースト1本目完了**: `list_heap_call_name`（cog 324）を per-module router + 7 helpers に分解、wall-list byte 一致で検証。残り14本は台帳のワースト順で継続
 
 ## ceangal suite burndown（#783→#784→UFCS→record-order で 3/6 まで前進）
 

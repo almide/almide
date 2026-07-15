@@ -68,6 +68,21 @@
       is actively editing — do it WITH that workstream, not alongside it.
 - [ ] Rung 5: records/variants (native structs/enums), Float (real `f64` — no
       i64-bits convention on native), closures.
+      **Float slab design (2026-07-15 scouting)**: MIR carries Float as i64
+      locals holding f64 BITS (`PrimKind::FloatUn/FloatBin` reinterpret around
+      each op — render_wasm_p2 831-851). Native "real f64" needs: (1)
+      `NTy::F64` + `NativeSigKind::F64` (the sig table already disambiguates
+      declared Ty where `Repr` can't); (2) internal-local typing: a value is
+      F64 iff produced by FloatBin/FloatUn or a Float-kind param/call-result —
+      same op-driven inference `Str`/`Vec` locals use; (3) `FBits`/`FFromBits`
+      prims become `f64::to_bits`/`from_bits` (or no-ops where the consumer is
+      the matching reinterpret); (4) shims: `float.to_string` → the same
+      `almide_rt_float_to_string` v0 calls (Dragon4, byte-identical);
+      `prim.ffrombits(<const>)` on a literal folds to the exact f64 constant.
+      Differential rows: float literal print, arithmetic chain, compare/branch,
+      fn param/return, `float.to_string` round-trip. Gate: the corpus grows,
+      wall shrinks by the `float` row currently asserted in
+      `out_of_subset_walls_honestly`.
 - [ ] Rung 6: org byte-verify sweep column for the native leg; multi-module +
       top-lets.
 - [ ] Default flip: v1-first native (`--no-verified` opt-out), README memory
