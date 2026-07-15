@@ -1685,6 +1685,17 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-136"
+spec      = "ALS-M13"
+title     = "In-place place mutations persist to the subsequent read on both targets"
+statement = "An in-place PLACE mutation — record field assign (`r.f = v`, scalar or heap field, on all-scalar and mixed records), map insert (`m[k] = v`), list element store (`xs[i] = v`, scalar or heap element), and a heap-var reassignment inside an executing branch arm (`if let v = x { out = f(v) }`) — persists to every subsequent read identically on native and wasm. Previously the v1 leg lowered these to ONLY the `MakeUnique` COW guard (or nothing at all) and silently ELIDED the write (a caps-counting-era deferral left executable on the STRICT output path): the assign was a no-op and reads returned the pre-assign value while native mutated — a silent wrong value on the verified default (shipped in 0.29.0; surfaced by the v1 test-runner flip, which ran the long-v0-only test-block corpus on v1 for the first time). Now the scalar-slot stores execute on v1 (`ListSetScalar` on the uniform aggregate block) and every other shape WALLS honestly (v0 emits the correct bytes) — an elided write is never executable."
+since     = "0.30.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/place_mutation.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-135"
 spec      = "ALS-M4"
 title     = "Declared-Unit effect fn ABI agrees between def and every call site"

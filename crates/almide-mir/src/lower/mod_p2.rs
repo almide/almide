@@ -966,6 +966,11 @@ pub(crate) struct LowerCtx {
     /// inline route for the CAPTURING / non-lifted case (recorded for BOTH, the call site
     /// prefers inline). Cleared per function (Default).
     lambda_bindings: HashMap<VarId, (Vec<(VarId, Ty)>, IrExpr)>,
+    /// Every local's DECLARED type, recorded at its `Bind` (reassignment keeps the type).
+    /// `FieldAssign` resolves the TARGET's record layout through this — the stmt itself
+    /// carries only the VarId, and the field-slot store (`r.f = v` → `ListSetScalar`)
+    /// needs the container type's field offsets.
+    var_decl_tys: HashMap<VarId, Ty>,
     /// MIR values that are `List[String]` (NESTED-OWNERSHIP lists — their i64 slots hold OWNED
     /// String handles). A scope-end drop of one emits [`Op::DropListStr`] (recursive free),
     /// not a flat [`Op::Drop`] — so the element Strings are reclaimed. Populated when an
