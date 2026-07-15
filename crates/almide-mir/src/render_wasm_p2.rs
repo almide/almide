@@ -102,6 +102,51 @@ fn render_op(
         // A DynList (List[Int], scalar slots) OR a DynListStr (List[String], heap-handle
         // slots) — physically IDENTICAL: alloc `LIST_HEADER + len*ELEM_SIZE`, rc=1, len=cap.
         // (The DropListStr free is what distinguishes the nested-ownership variant.)
+        // The rung-4 SCALAR-list literal — the SAME `[rc][len][cap][slots…]` block the
+        // inline `Alloc{DynList}`+store sequence built (byte-behavior identical): alloc
+        // len==cap==N, store each raw i64 slot value at its offset. One op, so the
+        // native leg can map it to `vec![…]` without prim-idiom guessing.
+        Op::ListLit { dst, elems } => {
+            let n = elems.len() as u32;
+            let total = LIST_HEADER + n * ELEM_SIZE;
+            let mut s = format!(
+                "    (local.set {d} (call $alloc (i32.const {total})))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) (i32.const {n}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) (i32.const {n}))\n",
+                d = local(*dst),
+            );
+            for (i, e) in elems.iter().enumerate() {
+                let off = LIST_HEADER + i as u32 * ELEM_SIZE;
+                s.push_str(&format!(
+                    "    (i64.store (i32.add (local.get {d}) (i32.const {off})) (local.get {e}))\n",
+                    d = local(*dst),
+                    e = local(*e),
+                ));
+            }
+            s
+        }
+        // The rung-4 bounds-checked SCALAR element load — the exact composition the
+        // inline `Handle`+`ElemAddr`+`Load{8}` sequence rendered (`$elem_addr_chk`
+        // TRAPs on idx<0 / >=cap, matching native's halt).
+        Op::ListGetScalar { dst, list, idx } => {
+            format!(
+                "    (local.set {d} (i64.load (call $elem_addr_chk (local.get {l}) (i32.wrap_i64 (local.get {i})))))\n",
+                d = local(*dst),
+                l = local(*list),
+                i = local(*idx),
+            )
+        }
+        // The rung-4 bounds-checked SCALAR element store (COW is the caller's
+        // MakeUnique before this op) — the inline `Handle`+`ElemAddr`+`Store{8}` twin.
+        Op::ListSetScalar { list, idx, val } => {
+            format!(
+                "    (i64.store (call $elem_addr_chk (local.get {l}) (i32.wrap_i64 (local.get {i}))) (local.get {v}))\n",
+                l = local(*list),
+                i = local(*idx),
+                v = local(*val),
+            )
+        }
         Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. } => {
             let wlen = format!("(i32.wrap_i64 (local.get {}))", local(*len));
             let bytes = format!("(i32.mul {wlen} (i32.const {ELEM_SIZE}))");

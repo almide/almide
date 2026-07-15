@@ -1,0 +1,17 @@
+// @contract: C-033
+// COW for a MUTABLE MODULE-LEVEL var aliased into a local: after `let snap =
+// g` then `g[i] = v`, the snapshot keeps the pre-write value on BOTH targets
+// (the v1 global slot's take→MakeUnique→store-back realizes the same value
+// semantics native has; the raw `--no-verified` v0-wasm path aliased here — a
+// divergence this fixture pins OUT of the default path).
+
+var speeds: List[Float] = list.repeat(0.0, 4)
+
+fn set_speed(i: Int, v: Float) -> Unit = { speeds[i] = v }
+
+effect fn main() -> Unit = {
+  set_speed(1, 2.5)
+  let snap = speeds
+  set_speed(1, 9.0)
+  println("${speeds[1]} ${snap[1]}")
+}

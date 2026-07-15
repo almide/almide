@@ -393,7 +393,13 @@ fn plus_one_events_backed(mir: &MirFunction) -> bool {
     let cert = ownership_certificate(mir);
     let i = cert.chars().filter(|c| *c == 'i').count();
     let a = cert.chars().filter(|c| *c == 'a').count();
-    let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
+    // A rung-4 `ListLit` is alloc-class (the `Alloc{DynList}` it replaced) — it
+    // backs its `i` exactly like an Alloc.
+    let allocs = mir
+        .ops
+        .iter()
+        .filter(|o| matches!(o, Op::Alloc { .. } | Op::ListLit { .. }))
+        .count();
     let heap_results = mir
         .ops
         .iter()

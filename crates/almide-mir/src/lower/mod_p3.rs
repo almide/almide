@@ -588,23 +588,7 @@ impl LowerCtx {
                         });
                         self.materialized_call_arg(taken, repr, &gty);
                         self.ops.push(Op::MakeUnique { v: taken });
-                        let h = self.fresh_value();
-                        self.ops.push(Op::Prim {
-                            kind: crate::PrimKind::Handle,
-                            dst: Some(h),
-                            args: vec![taken],
-                        });
-                        let ea = self.fresh_value();
-                        self.ops.push(Op::Prim {
-                            kind: crate::PrimKind::ElemAddr,
-                            dst: Some(ea),
-                            args: vec![h, idx],
-                        });
-                        self.ops.push(Op::Prim {
-                            kind: crate::PrimKind::Store { width: 8 },
-                            dst: None,
-                            args: vec![ea, val],
-                        });
+                        self.ops.push(Op::ListSetScalar { list: taken, idx, val });
                         let h2 = self.fresh_value();
                         self.ops.push(Op::Prim {
                             kind: crate::PrimKind::Handle,
@@ -641,11 +625,7 @@ impl LowerCtx {
                         self.lower_scalar_value(index),
                         self.lower_scalar_value(value),
                     ) {
-                        let h = self.fresh_value();
-                        self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });
-                        let addr = self.fresh_value();
-                        self.ops.push(Op::Prim { kind: crate::PrimKind::ElemAddr, dst: Some(addr), args: vec![h, idx] });
-                        self.ops.push(Op::Prim { kind: crate::PrimKind::Store { width: 8 }, dst: None, args: vec![addr, val] });
+                        self.ops.push(Op::ListSetScalar { list, idx, val });
                         true
                     } else {
                         false

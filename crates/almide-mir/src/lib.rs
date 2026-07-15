@@ -422,6 +422,28 @@ pub enum Op {
     /// ownership (a scalar constant); no capability (the dispatch site taints, not this).
     FuncRef { dst: ValueId, name: String },
 
+    /// A SCALAR-element list LITERAL materialized as ONE target-neutral op (rung 4 of
+    /// the native trust-spine ladder — the shared-MIR list design): `dst` = a fresh
+    /// OWNED `List[<scalar>]` block whose slots hold `elems` (raw i64 slot values,
+    /// `len == cap == elems.len()`). render_wasm expands it to EXACTLY the
+    /// `Alloc{DynList}` + per-slot-store sequence the inline builder emitted before;
+    /// render_native maps it to `vec![…]`. Certificate/ownership: ONE `i`
+    /// (alloc-class) on `dst` — the identical event stream the replaced `Alloc`
+    /// produced, so the kernel checker sees no new vocabulary.
+    ListLit { dst: ValueId, elems: Vec<ValueId> },
+
+    /// `dst = list[idx]` for a SCALAR element — the bounds-checked element load
+    /// (idx < 0 or >= cap TRAPs, matching native's halt). Replaces the inline
+    /// `Handle` + `ElemAddr` + `Load{8}` sequence one-for-one; ownership-NEUTRAL
+    /// (the list handle is borrowed/live-checked, the scalar result carries none).
+    ListGetScalar { dst: ValueId, list: ValueId, idx: ValueId },
+
+    /// `list[idx] = val` for a SCALAR element — the bounds-checked element store
+    /// (COW is the caller's existing `MakeUnique` BEFORE this op). Replaces the
+    /// inline `Handle` + `ElemAddr` + `Store{8}` sequence one-for-one;
+    /// ownership-NEUTRAL like the load.
+    ListSetScalar { list: ValueId, idx: ValueId, val: ValueId },
+
     /// `dst = a <op> b` on scalars (no ownership) — the arithmetic runtime
     /// functions need.
     IntBinOp { dst: ValueId, op: IntOp, a: ValueId, b: ValueId },
@@ -1103,6 +1125,22 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                 object_of.insert(*dst, *dst);
                 rc.insert(*dst, 1);
                 dead.insert(*dst, false);
+            }
+            // A rung-4 scalar-list LITERAL is alloc-class: one fresh owned object
+            // (the identical accounting the replaced `Alloc{DynList}` had). Its
+            // element values are raw i64 slot scalars — no ownership to check.
+            Op::ListLit { dst, .. } => {
+                object_of.insert(*dst, *dst);
+                rc.insert(*dst, 1);
+                dead.insert(*dst, false);
+            }
+            // The rung-4 element load/store BORROW the list handle (live-check,
+            // no refcount change — exactly the `Borrow`/`MakeUnique` discipline);
+            // the scalar element/index/value carry no ownership.
+            Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => {
+                if live_object(&object_of, &rc, &dead, &borrowed, *list).is_none() {
+                    violations.push(violation(i, *list, ViolationKind::UseAfterFree));
+                }
             }
             Op::Const { dst: _ } | Op::ConstInt { .. } => {
                 // A scalar — no ownership accounting.

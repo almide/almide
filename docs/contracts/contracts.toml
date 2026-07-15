@@ -484,6 +484,7 @@ doc       = "C-033-cow-truth-table.md"
 evidence  = [
   { path = "spec/wasm_cross/alias_cow.almd", class = "fixture" },
   { path = "spec/lang/alias_cow_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/module_var_alias_cow.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
@@ -1543,6 +1544,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_passthrough_share.almd", class = "fixture" },
+  { path = "spec/wasm_cross/zip_view_shape.almd", class = "fixture" },
 ]
 
 [[contract]]

@@ -38,7 +38,24 @@
       / `to_upper` / `to_lower` / `trim` / `repeat` / `cmp` (each shim is the
       EXACT v0 oracle expression, so C-016/C-019/C-020 discipline carries over)
       — plus `almide run --verified` native wiring (`compile_to_binary_with`).
-- [ ] **Rung 4 — LISTS (needs a shared-MIR design, coordinate before building)**:
+- [x] **Rung 4 — SCALAR LISTS, SHIPPED via the shared-MIR ops (2026-07-15, the
+      ceangal/module-var workstream built it as planned)**: three target-neutral
+      ops — `Op::ListLit { dst, elems }` / `ListGetScalar { dst, list, idx }` /
+      `ListSetScalar { list, idx, val }` — replace the inline `Alloc{DynList}` +
+      `Handle`/`ElemAddr`/`Load|Store` prim sequences ONE-FOR-ONE at their three
+      producers (the scalar literal builder, `lower_scalar_index_access`, the
+      IndexAssign stores incl. the mutable-global path). render_wasm expands each
+      to the exact prior WAT (behavior-identical; RATCHET 0 + KERNEL re-verified
+      the whole corpus — the cert stream is UNCHANGED: ListLit is alloc-class
+      `i`, get/set are neutral borrows, so no Coq vocabulary moved). The native
+      leg types them `Vec<i64>`/`&[i64]` via a SIG-KIND table the pipeline builds
+      from declared types (a heap `Repr::Ptr` alone cannot tell String from
+      List), with bounds shims aborting byte-identically to `$elem_addr_chk`
+      ("Error: index out of bounds", exit 1). Differential corpus: list_param /
+      list_index_math / list_set. Scope: `List[Int]`/`List[Bool]` signatures
+      (Float lists ride rung 5's f64 convention); `list.len` stays the
+      self-host CallFn (already target-neutral — 4b decides whether to op it).
+- [ ] Rung 4 residue (original design note kept for the record):
       the v1 lower materializes list literals as `Alloc{DynList}` + inline
       `Prim` stores and admits direct `xs[i]` prim loads over materialized
       lists — the list world is BELOW the prim floor by design, so no

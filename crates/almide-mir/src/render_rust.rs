@@ -155,6 +155,23 @@ fn render_op(op: &Op) -> Option<String> {
         }
         Op::Const { dst } => Some(format!("let {}: i64 = 0;", var(*dst))),
         Op::ConstInt { dst, value } => Some(format!("let {}: i64 = {value};", var(*dst))),
+        // The rung-4 list ops in the dev Rust renderer: the natural Vec spellings.
+        Op::ListLit { dst, elems } => {
+            let items = elems.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ");
+            Some(format!("let mut {}: Vec<i64> = vec![{items}];", var(*dst)))
+        }
+        Op::ListGetScalar { dst, list, idx } => Some(format!(
+            "let {}: i64 = {}[{} as usize];",
+            var(*dst),
+            var(*list),
+            var(*idx)
+        )),
+        Op::ListSetScalar { list, idx, val } => Some(format!(
+            "{}[{} as usize] = {};",
+            var(*list),
+            var(*idx),
+            var(*val)
+        )),
         // The prim floor is the WASM self-host surface; native uses v0's runtime, so a
         // prim op never appears in a native MIR. Stub to keep the match total.
         Op::Prim { dst: Some(d), .. } => Some(format!("let {}: i64 = 0;", var(*d))),

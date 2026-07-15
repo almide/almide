@@ -389,36 +389,23 @@ impl LowerCtx {
         owned
     }
 
-    /// Shared block-builder for a scalar tuple/list: lower each element to a scalar value, alloc a
-    /// `DynList` of `n` i64 slots, `store64` each. Element ownership-free (scalars), flat drop.
+    /// Shared block-builder for a scalar tuple/list: lower each element to a scalar value,
+    /// then emit ONE target-neutral [`Op::ListLit`] (rung 4 — the wasm render expands it to
+    /// the exact `DynList`-alloc + per-slot-store sequence this built inline before; the
+    /// native leg maps it to `vec![…]`). Element ownership-free (scalars), flat drop, the
+    /// identical single-`i` certificate the replaced `Alloc` carried.
     pub(crate) fn try_lower_scalar_list_slots(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
-        use crate::{IntOp, PrimKind};
         if elements.iter().any(|e| is_heap_ty(&e.ty)) {
             return None;
         }
-        // Lower each field's scalar value first (before the alloc, so a field expr that itself
-        // allocates doesn't interleave with our store sequence).
+        // Lower each field's scalar value first (before the literal op, so a field expr
+        // that itself allocates doesn't interleave with the block build).
         let vals: Vec<ValueId> = elements
             .iter()
             .map(|e| self.lower_scalar_value(e))
             .collect::<Option<Vec<_>>>()?;
-        let len = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: len, value: elements.len() as i64 });
         let dst = self.fresh_value();
-        self.ops.push(Op::Alloc {
-            dst,
-            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
-            init: crate::Init::DynList { len },
-        });
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
-        for (i, v) in vals.into_iter().enumerate() {
-            let off = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: off, value: 12 + (i as i64) * 8 });
-            let addr = self.fresh_value();
-            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
-            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, v] });
-        }
+        self.ops.push(Op::ListLit { dst, elems: vals });
         // A REAL, POPULATED scalar list block — admit a direct `xs[i]` bounds-checked load.
         self.materialized_lists.insert(dst);
         Some(dst)

@@ -136,6 +136,22 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
             // A function reference DEFINES its scalar slot value; it uses no MIR value
             // (the referenced function name is resolved structurally by the render).
             Op::FuncRef { dst, .. } => defined.push(*dst),
+            // The rung-4 list ops: a literal DEFINES its fresh list and USES the
+            // element values; get/set USE the (borrowed) list handle + operands.
+            Op::ListLit { dst, elems } => {
+                defined.push(*dst);
+                used.extend(elems.iter().copied());
+            }
+            Op::ListGetScalar { dst, list, idx } => {
+                defined.push(*dst);
+                used.push(*list);
+                used.push(*idx);
+            }
+            Op::ListSetScalar { list, idx, val } => {
+                used.push(*list);
+                used.push(*idx);
+                used.push(*val);
+            }
         }
     }
     if let Some(r) = func.ret {
@@ -995,7 +1011,11 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
 
     for op in &func.ops {
         match op {
-            Op::Alloc { dst, .. } => {
+            // A rung-4 scalar-list LITERAL is alloc-class — the IDENTICAL `i` (and
+            // loop-slot feeder routing) the `Alloc{DynList}` it replaced emitted.
+            // The element load/store ops are ownership-NEUTRAL (a borrowed handle
+            // read/write), so they need no event arm — the catch-all below skips them.
+            Op::Alloc { dst, .. } | Op::ListLit { dst, .. } => {
                 // An Alloc that FEEDS a loop-carried slot routes its `i` into the slot
                 // stream (folded inside the loop delimiters); otherwise its own stream.
                 if let Some(&slot) = feeder_to_slot.get(dst) {

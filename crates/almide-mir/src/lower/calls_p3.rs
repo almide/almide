@@ -564,13 +564,11 @@ impl LowerCtx {
             _ => return None,
         };
         let idx = self.lower_scalar_value(index)?;
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list] });
-        // $elem_addr(list, idx) — bounds-checked i64 slot address (traps OOB).
-        let addr = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::ElemAddr, dst: Some(addr), args: vec![h, idx] });
+        // ONE target-neutral bounds-checked element load (rung 4): the wasm render
+        // expands to the exact `$elem_addr_chk` + `i64.load` the inline
+        // Handle/ElemAddr/Load sequence produced; the native leg maps to `v[i]`.
         let dst = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(dst), args: vec![addr] });
+        self.ops.push(Op::ListGetScalar { dst, list, idx });
         Some(dst)
     }
 

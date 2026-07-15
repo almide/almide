@@ -727,6 +727,8 @@ fn defined_value(op: &Op) -> Option<ValueId> {
         | Op::ConstInt { dst, .. }
         | Op::FuncRef { dst, .. }
         | Op::IntBinOp { dst, .. }
+        | Op::ListLit { dst, .. }
+        | Op::ListGetScalar { dst, .. }
         | Op::Pure { dst, .. } => Some(*dst),
         Op::CallFn { dst, .. } | Op::Call { dst, .. } => *dst,
         Op::CallImport { dst, .. } => *dst,
@@ -760,6 +762,14 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
             | Op::ConstInt { dst, .. }
             | Op::FuncRef { dst, .. }
             | Op::IntBinOp { dst, .. } => {
+                m.insert(*dst, SCALAR_REPR);
+            }
+            // Rung-4 list ops: a literal is a fresh heap block; a scalar element load
+            // is an i64 value.
+            Op::ListLit { dst, .. } => {
+                m.insert(*dst, Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
+            }
+            Op::ListGetScalar { dst, .. } => {
                 m.insert(*dst, SCALAR_REPR);
             }
             // A `LoadHandle` result is a heap PTR (i32 handle); an `ArgsGetList` result is a

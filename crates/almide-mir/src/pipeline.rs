@@ -973,7 +973,13 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
         // Any signature outside {Int, Bool, String, Unit-ret} walls here, where
         // the Almide-level `Ty` is still visible (`MirParam` carries only reprs).
         use almide_lang::types::Ty;
-        let sig_ok = |t: &Ty| matches!(t, Ty::Int | Ty::Bool | Ty::String);
+        use almide_lang::types::constructor::TypeConstructorId;
+        let is_scalar_list = |t: &Ty| {
+            matches!(t, Ty::Applied(TypeConstructorId::List, a)
+                if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool))
+        };
+        let sig_ok =
+            |t: &Ty| matches!(t, Ty::Int | Ty::Bool | Ty::String) || is_scalar_list(t);
         for p in &func.params {
             if !sig_ok(&p.ty) {
                 return Err(LowerError::Unsupported(format!(
@@ -1000,10 +1006,48 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             "native: main is outside the MIR-lowering subset".into(),
         ));
     }
-    crate::render_native::try_render_native_program(&MirProgram {
-        functions,
-        exports: Vec::new(),
-        // Rung 1 walls every top-let above, so there are no mutable-global slots.
-        mutable_global_count: 0,
-    })
+    // The SIG-KIND table (rung 4): the declared param/return kinds, computed here
+    // where the Almide-level `Ty` is visible, so the native render can type a heap
+    // `Repr::Ptr` as `&str` vs `&[i64]` per the declaration.
+    let mut sigs: crate::render_native::NativeSigs = Default::default();
+    {
+        use almide_lang::types::constructor::TypeConstructorId;
+        use almide_lang::types::Ty;
+        use crate::render_native::NativeSigKind;
+        let kind = |t: &Ty| -> Option<NativeSigKind> {
+            match t {
+                Ty::Int | Ty::Bool => Some(NativeSigKind::I64),
+                Ty::String => Some(NativeSigKind::Str),
+                Ty::Applied(TypeConstructorId::List, a)
+                    if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
+                {
+                    Some(NativeSigKind::ListI64)
+                }
+                _ => None,
+            }
+        };
+        for func in &ir.functions {
+            if func.is_test {
+                continue;
+            }
+            let params: Option<Vec<_>> = func.params.iter().map(|p| kind(&p.ty)).collect();
+            let ret = if matches!(func.ret_ty, Ty::Unit) {
+                Some(None)
+            } else {
+                kind(&func.ret_ty).map(Some)
+            };
+            if let (Some(ps), Some(r)) = (params, ret) {
+                sigs.insert(func.name.as_str().to_string(), (ps, r));
+            }
+        }
+    }
+    crate::render_native::try_render_native_program(
+        &MirProgram {
+            functions,
+            exports: Vec::new(),
+            // Rung 1 walls every top-let above, so there are no mutable-global slots.
+            mutable_global_count: 0,
+        },
+        &sigs,
+    )
 }

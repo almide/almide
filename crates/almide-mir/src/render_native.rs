@@ -35,13 +35,35 @@ enum NTy {
     Str,
     /// A BORROWED `&str` — a heap fn param (the MIR call mode borrows heap args).
     StrRef,
+    /// An OWNED `Vec<i64>` local (rung 4 — a scalar-list literal / clone / call result).
+    Vec,
+    /// A BORROWED `&[i64]` — a scalar-list fn param (the same borrow call mode).
+    VecRef,
 }
 
 impl NTy {
     fn is_stringy(self) -> bool {
         matches!(self, NTy::Str | NTy::StrRef)
     }
+    fn is_veccy(self) -> bool {
+        matches!(self, NTy::Vec | NTy::VecRef)
+    }
 }
+
+/// The DECLARED signature kind of a param/return, computed by the pipeline from the
+/// Almide-level `Ty` (a `MirParam` carries only reprs — `Repr::Ptr` is String OR
+/// List, and only the declaration disambiguates). Rung 4: scalar lists join strings.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NativeSigKind {
+    I64,
+    Str,
+    ListI64,
+}
+
+/// fn name → (param kinds, return kind; None = Unit). Built by the pipeline where
+/// the declared `Ty` is visible; the render trusts it (the precision wall already
+/// rejected anything outside these kinds).
+pub type NativeSigs = std::collections::BTreeMap<String, (Vec<NativeSigKind>, Option<NativeSigKind>)>;
 
 fn wall(msg: impl Into<String>) -> LowerError {
     LowerError::Unsupported(msg.into())
@@ -51,11 +73,17 @@ fn var(v: ValueId) -> String {
     format!("v{}", v.0)
 }
 
+/// The rung-4 bounds-checked element accessors — byte-identical abort text to the
+/// wasm `$elem_addr_chk` ("Error: index out of bounds" + exit 1) and to v0 native.
+const IDX_GET_SHIM: &str = "fn almide_idx_get(v: &[i64], i: i64) -> i64 {\n        if i < 0 || i as usize >= v.len() { eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }\n        v[i as usize]\n}";
+const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut Vec<i64>, i: i64, x: i64) {\n        if i < 0 || i as usize >= v.len() { eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }\n        v[i as usize] = x;\n}";
+
 /// Borrow a stringy value as `&str` for a call argument.
 fn as_str_arg(code: &str, t: NTy) -> String {
     match t {
         NTy::Str => format!("&{code}"),
         NTy::StrRef => code.to_string(),
+        NTy::Vec | NTy::VecRef => unreachable!("as_str_arg on vec"),
         NTy::I64 => unreachable!("as_str_arg on i64"),
     }
 }
@@ -157,7 +185,7 @@ fn shim_rust_name(name: &str) -> String {
 }
 
 /// Render a whole MIR program to a self-contained Rust source, or WALL.
-pub fn try_render_native_program(prog: &MirProgram) -> Result<String, LowerError> {
+pub fn try_render_native_program(prog: &MirProgram, sigs: &NativeSigs) -> Result<String, LowerError> {
     let user_fns: BTreeMap<&str, &MirFunction> =
         prog.functions.iter().map(|f| (f.name.as_str(), f)).collect();
     if !user_fns.contains_key("main") {
@@ -175,7 +203,7 @@ pub fn try_render_native_program(prog: &MirProgram) -> Result<String, LowerError
                 func.name
             )));
         }
-        let rendered = render_fn(func, &user_fns, &mut used_shims)?;
+        let rendered = render_fn(func, &user_fns, sigs, &mut used_shims)?;
         bodies.push_str(&rendered);
         bodies.push('\n');
     }
@@ -206,12 +234,21 @@ fn repr_nty(repr: &Repr, borrowed: bool) -> Result<NTy, LowerError> {
 fn render_fn(
     func: &MirFunction,
     user_fns: &BTreeMap<&str, &MirFunction>,
+    sigs: &NativeSigs,
     used_shims: &mut Vec<&'static str>,
 ) -> Result<String, LowerError> {
+    let own_sig = sigs.get(func.name.as_str());
     let mut tys: BTreeMap<ValueId, NTy> = BTreeMap::new();
-    for p in &func.params {
-        // The MIR call mode BORROWS heap args — a heap param is `&str`.
-        tys.insert(p.value, repr_nty(&p.repr, true)?);
+    for (i, p) in func.params.iter().enumerate() {
+        // The MIR call mode BORROWS heap args. The DECLARED kind (from the sig
+        // table) disambiguates a heap `Repr::Ptr` param: `&str` vs `&[i64]`.
+        let nty = match own_sig.and_then(|(ps, _)| ps.get(i)) {
+            Some(NativeSigKind::ListI64) => NTy::VecRef,
+            Some(NativeSigKind::Str) => NTy::StrRef,
+            Some(NativeSigKind::I64) => NTy::I64,
+            None => repr_nty(&p.repr, true)?,
+        };
+        tys.insert(p.value, nty);
     }
 
     let is_main = func.name == "main";
@@ -261,12 +298,62 @@ fn render_fn(
                         tys.insert(*dst, NTy::Str);
                         line!("let mut {} = {}.to_string();", var(*dst), var(*src));
                     }
+                    NTy::Vec => {
+                        tys.insert(*dst, NTy::Vec);
+                        line!("let mut {} = {}.clone();", var(*dst), var(*src));
+                    }
+                    NTy::VecRef => {
+                        // Dup of a borrowed list param mints a fresh owned Vec.
+                        tys.insert(*dst, NTy::Vec);
+                        line!("let mut {} = {}.to_vec();", var(*dst), var(*src));
+                    }
                 }
+            }
+            // Rung-4 scalar-list literal: the natural Vec spelling. Elements are raw
+            // i64 slot values (the wasm leg stores the same bits).
+            Op::ListLit { dst, elems } => {
+                for e in elems {
+                    if tys.get(e) != Some(&NTy::I64) {
+                        return Err(wall("native: ListLit with a non-scalar element"));
+                    }
+                }
+                tys.insert(*dst, NTy::Vec);
+                let items = elems.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ");
+                line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+            }
+            // Rung-4 bounds-checked element load/store — the shims abort with the
+            // byte-identical "Error: index out of bounds" + exit 1 the wasm
+            // `$elem_addr_chk` and v0 native emit.
+            Op::ListGetScalar { dst, list, idx } => {
+                let lt = *tys.get(list).ok_or_else(|| wall("native: ListGet of untyped list"))?;
+                if !lt.is_veccy() {
+                    return Err(wall("native: ListGet on a non-list value"));
+                }
+                used_shims.push(IDX_GET_SHIM);
+                tys.insert(*dst, NTy::I64);
+                let borrow = if lt == NTy::Vec { "&" } else { "" };
+                line!(
+                    "let mut {}: i64 = almide_idx_get({borrow}{}, {});",
+                    var(*dst),
+                    var(*list),
+                    var(*idx)
+                );
+            }
+            Op::ListSetScalar { list, idx, val } => {
+                let lt = *tys.get(list).ok_or_else(|| wall("native: ListSet of untyped list"))?;
+                // A borrowed param cannot be mutated in place (the MIR COW discipline
+                // guarantees a MakeUnique'd OWNED vec here; a VecRef reaching this op
+                // is a call-mode violation, walled like the Drop-of-param case).
+                if lt != NTy::Vec {
+                    return Err(wall("native: ListSet on a non-owned list"));
+                }
+                used_shims.push(IDX_SET_SHIM);
+                line!("almide_idx_set(&mut {}, {}, {});", var(*list), var(*idx), var(*val));
             }
             // Drop is ERASED: Rust frees at scope end (or at reassignment for a
             // loop-carried handle). `verify_ownership` above certified balance.
             Op::Drop { v } => {
-                if tys.get(v) == Some(&NTy::StrRef) {
+                if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef)) {
                     return Err(wall("native: Drop of a borrowed param — MIR call-mode violation"));
                 }
                 line!("// drop: scope-end");
@@ -279,8 +366,14 @@ fn render_fn(
                     NTy::I64 => var(*src),
                     NTy::Str => format!("{}.clone()", var(*src)),
                     NTy::StrRef => format!("{}.to_string()", var(*src)),
+                    NTy::Vec => format!("{}.clone()", var(*src)),
+                    NTy::VecRef => format!("{}.to_vec()", var(*src)),
                 };
-                let store_t = if t == NTy::StrRef { NTy::Str } else { t };
+                let store_t = match t {
+                    NTy::StrRef => NTy::Str,
+                    NTy::VecRef => NTy::Vec,
+                    other => other,
+                };
                 if let Some(prev) = tys.get(local) {
                     if *prev != store_t {
                         return Err(wall("native: SetLocal changes a value's type"));
@@ -301,9 +394,18 @@ fn render_fn(
                     if args.len() != callee.params.len() {
                         return Err(wall(format!("native: call to `{name}` arity mismatch")));
                     }
+                    let callee_sig = sigs.get(name.as_str());
                     let mut rendered_args = Vec::new();
-                    for (a, p) in args.iter().zip(&callee.params) {
-                        let want = repr_nty(&p.repr, true)?;
+                    for (i, (a, p)) in args.iter().zip(&callee.params).enumerate() {
+                        // The DECLARED kind (sig table) disambiguates a heap param:
+                        // `&str` vs `&[i64]`; absent (a synthesized helper) the repr
+                        // fallback keeps the string convention.
+                        let want = match callee_sig.and_then(|(ps, _)| ps.get(i)) {
+                            Some(NativeSigKind::I64) => NTy::I64,
+                            Some(NativeSigKind::Str) => NTy::StrRef,
+                            Some(NativeSigKind::ListI64) => NTy::VecRef,
+                            None => repr_nty(&p.repr, true)?,
+                        };
                         let (code, got) = call_arg(a, &tys)?;
                         match want {
                             NTy::I64 => {
@@ -313,6 +415,17 @@ fn render_fn(
                                     )));
                                 }
                                 rendered_args.push(code);
+                            }
+                            NTy::VecRef | NTy::Vec => {
+                                if !got.is_veccy() {
+                                    return Err(wall(format!(
+                                        "native: non-list arg to list param of `{name}`"
+                                    )));
+                                }
+                                rendered_args.push(match got {
+                                    NTy::Vec => format!("&{code}"),
+                                    _ => code,
+                                });
                             }
                             _ => {
                                 if !got.is_stringy() {
@@ -328,9 +441,19 @@ fn render_fn(
                     match (dst, result) {
                         (Some(d), Some(r)) => {
                             // A heap result is FRESH OWNED (the callee moved it out).
-                            let t = repr_nty(r, false)?;
+                            // Its KIND comes from the callee's declared return.
+                            let t = match callee_sig.and_then(|(_, r)| *r) {
+                                Some(NativeSigKind::ListI64) => NTy::Vec,
+                                Some(NativeSigKind::Str) => NTy::Str,
+                                Some(NativeSigKind::I64) => NTy::I64,
+                                None => repr_nty(r, false)?,
+                            };
                             tys.insert(*d, t);
-                            let ty_name = if t == NTy::Str { "String" } else { "i64" };
+                            let ty_name = match t {
+                                NTy::Str => "String",
+                                NTy::Vec => "Vec<i64>",
+                                _ => "i64",
+                            };
                             line!("let mut {}: {} = {};", var(*d), ty_name, call);
                         }
                         (None, _) => line!("{call};"),
@@ -446,6 +569,16 @@ fn render_fn(
                             NTy::Str,
                             format!("{}.to_string()", var(v)),
                         ),
+                        NTy::Vec => (
+                            format!("let mut {}: Vec<i64> = Vec::new();", var(*d)),
+                            NTy::Vec,
+                            format!("{}.clone()", var(v)),
+                        ),
+                        NTy::VecRef => (
+                            format!("let mut {}: Vec<i64> = Vec::new();", var(*d)),
+                            NTy::Vec,
+                            format!("{}.to_vec()", var(v)),
+                        ),
                     };
                     patch(&mut out, marker, &decl);
                     tys.insert(*d, join_t);
@@ -465,8 +598,14 @@ fn render_fn(
                         NTy::I64 => var(v),
                         NTy::Str => format!("{}.clone()", var(v)),
                         NTy::StrRef => format!("{}.to_string()", var(v)),
+                        NTy::Vec => format!("{}.clone()", var(v)),
+                        NTy::VecRef => format!("{}.to_vec()", var(v)),
                     };
-                    let arm_t = if t == NTy::StrRef { NTy::Str } else { t };
+                    let arm_t = match t {
+                        NTy::StrRef => NTy::Str,
+                        NTy::VecRef => NTy::Vec,
+                        other => other,
+                    };
                     if arm_t != join_t {
                         return Err(wall("native: if-value arms disagree on type"));
                     }
@@ -510,8 +649,15 @@ fn render_fn(
             .params
             .iter()
             .map(|p| {
-                let t = repr_nty(&p.repr, true).expect("param repr checked above");
-                format!("{}: {}", var(p.value), if t == NTy::StrRef { "&str" } else { "i64" })
+                // The param's NTy was seeded from the SIG table above — read it back
+                // so a list param renders `&[i64]` (repr alone cannot tell).
+                let t = tys.get(&p.value).copied().unwrap_or(NTy::I64);
+                let spelled = match t {
+                    NTy::StrRef | NTy::Str => "&str",
+                    NTy::VecRef | NTy::Vec => "&[i64]",
+                    NTy::I64 => "i64",
+                };
+                format!("{}: {}", var(p.value), spelled)
             })
             .collect();
         let ret = match func.ret {
@@ -520,6 +666,8 @@ fn render_fn(
                 Some(NTy::I64) => " -> i64".to_string(),
                 Some(NTy::Str) => " -> String".to_string(),
                 Some(NTy::StrRef) => " -> String".to_string(),
+                Some(NTy::Vec) => " -> Vec<i64>".to_string(),
+                Some(NTy::VecRef) => " -> Vec<i64>".to_string(),
                 None => return Err(wall("native: return value untyped")),
             },
         };
@@ -531,8 +679,9 @@ fn render_fn(
     if let Some(v) = func.ret {
         let t = tys[&v];
         let expr = match t {
-            NTy::I64 | NTy::Str => var(v),
+            NTy::I64 | NTy::Str | NTy::Vec => var(v),
             NTy::StrRef => format!("{}.to_string()", var(v)),
+            NTy::VecRef => format!("{}.to_vec()", var(v)),
         };
         out.push_str("    ");
         out.push_str(&expr);
