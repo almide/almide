@@ -1915,20 +1915,37 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
                 Some("_hobj")
             }
             (true, true) if !val_is_string => Some("_hval_wall"),
-            (true, true) if key_is_string => matches!(
-                func,
-                "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
-                    | "values" | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
-                    | "entries"
-            )
-            .then_some("_str"),
-            (true, false) if key_is_string => matches!(
-                func,
-                "new" | "set" | "remove" | "filter" | "get" | "get_or" | "keys" | "values"
-                    | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold" | "eq"
-                    | "find"
-            )
-            .then_some("_skv"),
+            // A fn OUTSIDE the family's implemented list must fall to an UNREGISTERED
+            // wall suffix, NEVER to `None`: a `None` here returns the BARE `map.{func}`
+            // name, which links the scalar-key map_core generic against the string-key
+            // 16-byte-stride layout — raw i64 slot copies of STRING handles with no
+            // rc_inc, so the result map aliases its inputs' keys unowned and scope-end
+            // double-frees them (`map.merge` on `Map[String, Int]` trapped the rc_dec
+            // sentinel on the verified default — the #790 map-merge row).
+            (true, true) if key_is_string => Some(
+                if matches!(
+                    func,
+                    "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
+                        | "values" | "len" | "is_empty" | "contains" | "all" | "any" | "count"
+                        | "fold" | "entries"
+                ) {
+                    "_str"
+                } else {
+                    "_str_wall"
+                },
+            ),
+            (true, false) if key_is_string => Some(
+                if matches!(
+                    func,
+                    "new" | "set" | "remove" | "filter" | "get" | "get_or" | "keys" | "values"
+                        | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
+                        | "eq" | "find"
+                ) {
+                    "_skv"
+                } else {
+                    "_skv_wall"
+                },
+            ),
             // A non-String heap KEY (tuple/record/nested list) reaching here has no correct
             // variant — route to an explicit UNREGISTERED wall name rather than falling through
             // to the bare `map.{func}` name, which links against the scalar-key map_core generic
