@@ -112,6 +112,24 @@
       byte-identical (closure_capture / closure_two_envs / closure_multi_arg
       differential rows). NEXT frontier: heap-capture env blocks (prim path),
       heap-param/-ret lambdas (typed dispatch tables), Float captures.
+      **Rung 6 measured + default FLIPPED (2026-07-16)**: the v1 native
+      renderer is the DEFAULT (`--no-verified` opts out of both legs;
+      diagnostics behind `ALMIDE_VERIFIED_DEBUG`). Flip evidence: 12
+      differential rows 3-way byte-identical (the differential's v0 oracle now
+      pins `--no-verified` — post-flip a bare `almide run` IS v1-first) + a
+      spec/wasm_cross native sweep: **18/249 fixtures render, 18/18
+      byte-identical** (the sweep caught one real divergence — `rt_chk_mod`
+      said "modulo by zero" where the v0/wasm C-002 oracle says "division by
+      zero" — fixed pre-flip). The ORG native column: **0/61 org src files
+      render** (yaml/sha1/toml/svg/rsa/base64/bigint/aes/ceangal/almai/
+      homullus/porta) — the subset (scalar core + the four rung-5 slabs) does
+      not yet reach org-grade code; first blockers by probe: `Bytes` params
+      (sha1/base64/aes), multi-module + top-lets (ceangal/porta/homullus),
+      Map/String-heavy stdlib surfaces. Honest wall → v0 everywhere, so the
+      flip ships zero behavior change outside the verified subset. NEXT
+      measurement tool: a per-FUNCTION native classifier (the wasm
+      classify_corpus analogue) so the org column counts fn-level coverage
+      instead of program-level all-or-nothing.
       **Original variants recipe note (kept)**: the ctor block is the SAME
       DynList (slot0 = tag, slots1+ = payload — `try_lower_variant_ctor`'s
       Alloc+stores → ListLit with a leading tag const); match destructure = tag
