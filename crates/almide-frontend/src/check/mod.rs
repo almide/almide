@@ -758,6 +758,12 @@ impl Checker {
                 // reads the prefixed key and gets `Ty::Unknown`.
                 let prefixed_key = self.current_module_prefix.as_ref()
                     .map(|p| sym(&format!("{}.{}", p, name)));
+                if std::env::var_os("ALMIDE_TOPLET_DEBUG").is_some() {
+                    eprintln!("[toplet-debug] refresh: name={} prefix={:?} resolved={:?} existing_prefixed={:?}",
+                        name, self.current_module_prefix,
+                        resolved,
+                        prefixed_key.as_ref().map(|k| self.env.top_lets.get(k)));
+                }
                 if let Some(k) = prefixed_key {
                     if matches!(self.env.top_lets.get(&k), Some(Ty::Unknown) | None) {
                         self.env.top_lets.insert(k, resolved.clone());
