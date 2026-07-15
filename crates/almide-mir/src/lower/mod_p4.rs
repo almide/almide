@@ -505,204 +505,16 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
         // `float.to_string_compound`, NOT `float.to_string` (which keeps `.0` for an EXPLICIT
         // `float.to_string(x)` call). Same drop-.0 Display a Float record/list field already uses.
         Ty::Float => ("float", "to_string_compound"),
-        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => match &args[0] {
-            Ty::Int => ("list", "to_string"),
-            Ty::Float => ("list", "to_string_f"),
-            Ty::Bool => ("list", "to_string_b"),
-            Ty::String => ("list", "to_string_s"),
-            // A NESTED `List[List[Int/Float]]` renders through the composed self-host
-            // (each row via the flat to_string, joined in brackets — byte-matches v0's Debug).
-            Ty::Applied(TypeConstructorId::List, inner)
-                if inner.len() == 1 && matches!(inner[0], Ty::Int) =>
-            {
-                ("list", "to_string_ll")
-            }
-            Ty::Applied(TypeConstructorId::List, inner)
-                if inner.len() == 1 && matches!(inner[0], Ty::Float) =>
-            {
-                ("list", "to_string_llf")
-            }
-            // `${List[Option[Int]]}` → `[some(1), none, some(3)]` — composed from the
-            // per-element option display (stdlib/list_to_string_lo.almd).
-            Ty::Applied(TypeConstructorId::Option, inner)
-                if inner.len() == 1 && matches!(inner[0], Ty::Int) =>
-            {
-                ("list", "to_string_lo")
-            }
-            // `${List[Result[Int, String]]}` → `[ok(1), err("bad")]` — fan.settle's
-            // pure-thunk result list, composed from the per-element result display
-            // (stdlib/list_to_string_lr.almd).
-            Ty::Applied(TypeConstructorId::Result, inner)
-                if inner.len() == 2
-                    && matches!(inner[0], Ty::Int)
-                    && matches!(inner[1], Ty::String) =>
-            {
-                ("list", "to_string_lr")
-            }
-            // `${List[Map[String, List[Option[Int]]]]}` — compound_repr_interp's `deep`,
-            // composed from the per-element mlo map display (stdlib/map_mlo.almd).
-            Ty::Applied(TypeConstructorId::Map, kv)
-                if kv.len() == 2 && matches!(kv[0], Ty::String)
-                    && matches!(&kv[1], Ty::Applied(TypeConstructorId::List, b)
-                        if b.len() == 1
-                            && matches!(&b[0], Ty::Applied(TypeConstructorId::Option, o)
-                                if o.len() == 1 && matches!(o[0], Ty::Int))) =>
-            {
-                ("list", "to_string_lmlo")
-            }
-            // `${List[Map[String, List[Int]]]}` → `[["a": [1, 2]], ["b": [3]]]` — each
-            // map through its own interp (stdlib/map_hval.almd's list_to_string_lmh).
-            Ty::Applied(TypeConstructorId::Map, kv)
-                if kv.len() == 2 && matches!(kv[0], Ty::String)
-                    && matches!(&kv[1], Ty::Applied(TypeConstructorId::List, b)
-                        if b.len() == 1 && matches!(b[0], Ty::Int)) =>
-            {
-                ("list", "to_string_lmh")
-            }
-            // Any other unsupported element type (`List[Map]`, deeper nesting, …) routes to an
-            // UNLINKED variant name so the interp DESUGARS to a real `list.to_string_x` CallFn that
-            // the render wall then REJECTS — the function walls cleanly. Returning `None` here would
-            // instead leave the interp Opaque and the `println` would emit NOTHING (a silent empty
-            // miscompile); routing-to-unlinked preserves the all-or-nothing wall. NEVER registered.
-            _ => ("list", "to_string_x"),
-        },
-        // `${Option[T]}` renders v0's `some(<T-repr>)` / `none`, routed to a PER-ELEMENT self-host
-        // (mirrors List): the inner value uses its own interp form — Int decimal, String QUOTED,
-        // Float drop-`.0`, Bool `true`/`false`. An unsupported element (a heap/nested payload) routes
-        // to the UNLINKED `option.to_string_x` so the function walls cleanly (never a wrong byte).
-        Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => match &args[0] {
-            Ty::Int => ("option", "to_string"),
-            Ty::String => ("option", "to_string_s"),
-            Ty::Float => ("option", "to_string_f"),
-            Ty::Bool => ("option", "to_string_b"),
-            // `${Option[List[Int]]}` → `some([1, 2, 3])` / `none` — the inner list renders like
-            // `${list}`, wrapped in `some(…)`. A deeper element routes to the UNLINKED `_x`.
-            Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::Int) => {
-                ("option", "to_string_li")
-            }
-            Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::String) => {
-                ("option", "to_string_ls")
-            }
-            Ty::Applied(TypeConstructorId::Option, e) if e.len() == 1 && matches!(e[0], Ty::Int) => {
-                ("option", "to_string_oi")
-            }
-            Ty::Applied(TypeConstructorId::Option, e) if e.len() == 1 && matches!(e[0], Ty::Bool) => {
-                ("option", "to_string_ob")
-            }
-            Ty::Applied(TypeConstructorId::Option, e) if e.len() == 1 && matches!(e[0], Ty::String) => {
-                ("option", "to_string_os")
-            }
-            Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::Bool) => {
-                ("option", "to_string_lb")
-            }
-            Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::Float) => {
-                ("option", "to_string_lf")
-            }
-            Ty::Applied(TypeConstructorId::Map, e)
-                if e.len() == 2 && matches!(e[0], Ty::String) && matches!(e[1], Ty::Int) =>
-            {
-                ("option", "to_string_msi")
-            }
-            Ty::Applied(TypeConstructorId::Result, e)
-                if e.len() == 2 && matches!(e[0], Ty::Int) && matches!(e[1], Ty::String) =>
-            {
-                ("option", "to_string_ri")
-            }
-            Ty::Applied(TypeConstructorId::Result, e)
-                if e.len() == 2 && matches!(e[0], Ty::String) && matches!(e[1], Ty::String) =>
-            {
-                ("option", "to_string_rs")
-            }
-            Ty::Applied(TypeConstructorId::Option, e)
-                if e.len() == 1
-                    && matches!(&e[0], Ty::Applied(TypeConstructorId::Option, e2)
-                        if e2.len() == 1 && matches!(e2[0], Ty::Int)) =>
-            {
-                ("option", "to_string_ooi")
-            }
-            Ty::Applied(TypeConstructorId::Option, e)
-                if e.len() == 1
-                    && matches!(&e[0], Ty::Applied(TypeConstructorId::List, e2)
-                        if e2.len() == 1 && matches!(e2[0], Ty::Int)) =>
-            {
-                ("option", "to_string_ooli")
-            }
-            Ty::Applied(TypeConstructorId::Result, e)
-                if e.len() == 2
-                    && matches!(&e[0], Ty::Applied(TypeConstructorId::List, e2)
-                        if e2.len() == 1 && matches!(e2[0], Ty::Int))
-                    && matches!(e[1], Ty::String) =>
-            {
-                ("option", "to_string_rli")
-            }
-            _ => ("option", "to_string_x"),
-        },
-        // `${Result[T, E]}` renders v0's `ok(<T>)` / `err(<E>)`, routed per (T, E) pair (err is almost
-        // always String). Self-hosted: (Int, String) and (String, String). Any other pairing routes to
-        // the UNLINKED `result.to_string_x` so the function walls cleanly (never a wrong byte).
+        // Decomposed (#781, cog 121): the List/Option/Result routings are verbatim
+        // text moves into interp_{list,option,result}_to_string.
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+            interp_list_to_string(&args[0])
+        }
+        Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
+            interp_option_to_string(&args[0])
+        }
         Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
-            match (&args[0], &args[1]) {
-                (Ty::Int, Ty::String) => ("result", "to_string"),
-                (Ty::String, Ty::String) => ("result", "to_string_ss"),
-                // `${Result[List[Int], String]}` → `ok([1, 2, 3])` / `err("<quoted>")`.
-                (Ty::Applied(TypeConstructorId::List, e), Ty::String)
-                    if e.len() == 1 && matches!(e[0], Ty::Int) =>
-                {
-                    ("result", "to_string_li")
-                }
-                (Ty::Applied(TypeConstructorId::List, e), Ty::String)
-                    if e.len() == 1 && matches!(e[0], Ty::String) =>
-                {
-                    ("result", "to_string_ls")
-                }
-                (Ty::Bool, Ty::String) => ("result", "to_string_b"),
-                (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
-                    if e.len() == 1 && matches!(e[0], Ty::Int) =>
-                {
-                    ("result", "to_string_oi")
-                }
-                (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
-                    if e.len() == 1 && matches!(e[0], Ty::String) =>
-                {
-                    ("result", "to_string_os")
-                }
-                (Ty::Applied(TypeConstructorId::Result, e), Ty::String)
-                    if e.len() == 2 && matches!(e[0], Ty::Int) && matches!(e[1], Ty::String) =>
-                {
-                    ("result", "to_string_ri")
-                }
-                (Ty::Applied(TypeConstructorId::List, e), Ty::String)
-                    if e.len() == 1 && matches!(e[0], Ty::Bool) =>
-                {
-                    ("result", "to_string_lb")
-                }
-                (Ty::Float, Ty::String) => ("result", "to_string_f"),
-                (Ty::Applied(TypeConstructorId::List, e), Ty::String)
-                    if e.len() == 1 && matches!(e[0], Ty::Float) =>
-                {
-                    ("result", "to_string_lf")
-                }
-                (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
-                    if e.len() == 1
-                        && matches!(&e[0], Ty::Applied(TypeConstructorId::List, e2)
-                            if e2.len() == 1 && matches!(e2[0], Ty::String)) =>
-                {
-                    ("result", "to_string_osl")
-                }
-                (Ty::Applied(TypeConstructorId::Map, e), Ty::String)
-                    if e.len() == 2 && matches!(e[0], Ty::String) && matches!(e[1], Ty::Int) =>
-                {
-                    ("result", "to_string_msi")
-                }
-                (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
-                    if e.len() == 1
-                        && matches!(&e[0], Ty::Applied(TypeConstructorId::List, e2)
-                            if e2.len() == 1 && matches!(e2[0], Ty::Int)) =>
-                {
-                    ("result", "to_string_oli")
-                }
-                _ => ("result", "to_string_x"),
-            }
+            interp_result_to_string(&args[0], &args[1])
         }
         // `${Set[T]}` renders v0's `set.from_list([<elems>])` (insertion order). Self-hosted for Int;
         // any other element routes to the UNLINKED `set.to_string_x` (walls cleanly).
@@ -754,6 +566,211 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
         // Opaque. NEVER registered, so every such function walls all-or-nothing.
         _ => ("compound", "to_string"),
     })
+}
+
+/// `${List[T]}` interp routing per element type. Verbatim text move (#781).
+fn interp_list_to_string(inner: &Ty) -> (&'static str, &'static str) {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match inner {
+        Ty::Int => ("list", "to_string"),
+        Ty::Float => ("list", "to_string_f"),
+        Ty::Bool => ("list", "to_string_b"),
+        Ty::String => ("list", "to_string_s"),
+        // A NESTED `List[List[Int/Float]]` renders through the composed self-host
+        // (each row via the flat to_string, joined in brackets — byte-matches v0's Debug).
+        Ty::Applied(TypeConstructorId::List, inner)
+            if inner.len() == 1 && matches!(inner[0], Ty::Int) =>
+        {
+            ("list", "to_string_ll")
+        }
+        Ty::Applied(TypeConstructorId::List, inner)
+            if inner.len() == 1 && matches!(inner[0], Ty::Float) =>
+        {
+            ("list", "to_string_llf")
+        }
+        // `${List[Option[Int]]}` → `[some(1), none, some(3)]` — composed from the
+        // per-element option display (stdlib/list_to_string_lo.almd).
+        Ty::Applied(TypeConstructorId::Option, inner)
+            if inner.len() == 1 && matches!(inner[0], Ty::Int) =>
+        {
+            ("list", "to_string_lo")
+        }
+        // `${List[Result[Int, String]]}` → `[ok(1), err("bad")]` — fan.settle's
+        // pure-thunk result list, composed from the per-element result display
+        // (stdlib/list_to_string_lr.almd).
+        Ty::Applied(TypeConstructorId::Result, inner)
+            if inner.len() == 2
+                && matches!(inner[0], Ty::Int)
+                && matches!(inner[1], Ty::String) =>
+        {
+            ("list", "to_string_lr")
+        }
+        // `${List[Map[String, List[Option[Int]]]]}` — compound_repr_interp's `deep`,
+        // composed from the per-element mlo map display (stdlib/map_mlo.almd).
+        Ty::Applied(TypeConstructorId::Map, kv)
+            if kv.len() == 2 && matches!(kv[0], Ty::String)
+                && matches!(&kv[1], Ty::Applied(TypeConstructorId::List, b)
+                    if b.len() == 1
+                        && matches!(&b[0], Ty::Applied(TypeConstructorId::Option, o)
+                            if o.len() == 1 && matches!(o[0], Ty::Int))) =>
+        {
+            ("list", "to_string_lmlo")
+        }
+        // `${List[Map[String, List[Int]]]}` → `[["a": [1, 2]], ["b": [3]]]` — each
+        // map through its own interp (stdlib/map_hval.almd's list_to_string_lmh).
+        Ty::Applied(TypeConstructorId::Map, kv)
+            if kv.len() == 2 && matches!(kv[0], Ty::String)
+                && matches!(&kv[1], Ty::Applied(TypeConstructorId::List, b)
+                    if b.len() == 1 && matches!(b[0], Ty::Int)) =>
+        {
+            ("list", "to_string_lmh")
+        }
+        // Any other unsupported element type (`List[Map]`, deeper nesting, …) routes to an
+        // UNLINKED variant name so the interp DESUGARS to a real `list.to_string_x` CallFn that
+        // the render wall then REJECTS — the function walls cleanly. Returning `None` here would
+        // instead leave the interp Opaque and the `println` would emit NOTHING (a silent empty
+        // miscompile); routing-to-unlinked preserves the all-or-nothing wall. NEVER registered.
+        _ => ("list", "to_string_x"),
+    }
+    }
+
+/// `${Option[T]}` interp routing per payload type. Verbatim text move (#781).
+fn interp_option_to_string(inner: &Ty) -> (&'static str, &'static str) {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match inner {
+        Ty::Int => ("option", "to_string"),
+        Ty::String => ("option", "to_string_s"),
+        Ty::Float => ("option", "to_string_f"),
+        Ty::Bool => ("option", "to_string_b"),
+        // `${Option[List[Int]]}` → `some([1, 2, 3])` / `none` — the inner list renders like
+        // `${list}`, wrapped in `some(…)`. A deeper element routes to the UNLINKED `_x`.
+        Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::Int) => {
+            ("option", "to_string_li")
+        }
+        Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::String) => {
+            ("option", "to_string_ls")
+        }
+        Ty::Applied(TypeConstructorId::Option, e) if e.len() == 1 && matches!(e[0], Ty::Int) => {
+            ("option", "to_string_oi")
+        }
+        Ty::Applied(TypeConstructorId::Option, e) if e.len() == 1 && matches!(e[0], Ty::Bool) => {
+            ("option", "to_string_ob")
+        }
+        Ty::Applied(TypeConstructorId::Option, e) if e.len() == 1 && matches!(e[0], Ty::String) => {
+            ("option", "to_string_os")
+        }
+        Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::Bool) => {
+            ("option", "to_string_lb")
+        }
+        Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::Float) => {
+            ("option", "to_string_lf")
+        }
+        Ty::Applied(TypeConstructorId::Map, e)
+            if e.len() == 2 && matches!(e[0], Ty::String) && matches!(e[1], Ty::Int) =>
+        {
+            ("option", "to_string_msi")
+        }
+        Ty::Applied(TypeConstructorId::Result, e)
+            if e.len() == 2 && matches!(e[0], Ty::Int) && matches!(e[1], Ty::String) =>
+        {
+            ("option", "to_string_ri")
+        }
+        Ty::Applied(TypeConstructorId::Result, e)
+            if e.len() == 2 && matches!(e[0], Ty::String) && matches!(e[1], Ty::String) =>
+        {
+            ("option", "to_string_rs")
+        }
+        Ty::Applied(TypeConstructorId::Option, e)
+            if e.len() == 1
+                && matches!(&e[0], Ty::Applied(TypeConstructorId::Option, e2)
+                    if e2.len() == 1 && matches!(e2[0], Ty::Int)) =>
+        {
+            ("option", "to_string_ooi")
+        }
+        Ty::Applied(TypeConstructorId::Option, e)
+            if e.len() == 1
+                && matches!(&e[0], Ty::Applied(TypeConstructorId::List, e2)
+                    if e2.len() == 1 && matches!(e2[0], Ty::Int)) =>
+        {
+            ("option", "to_string_ooli")
+        }
+        Ty::Applied(TypeConstructorId::Result, e)
+            if e.len() == 2
+                && matches!(&e[0], Ty::Applied(TypeConstructorId::List, e2)
+                    if e2.len() == 1 && matches!(e2[0], Ty::Int))
+                && matches!(e[1], Ty::String) =>
+        {
+            ("option", "to_string_rli")
+        }
+        _ => ("option", "to_string_x"),
+    }
+    }
+
+/// `${Result[T, E]}` interp routing per (ok, err) pair. Verbatim text move (#781).
+fn interp_result_to_string(ok: &Ty, err: &Ty) -> (&'static str, &'static str) {
+    use almide_lang::types::constructor::TypeConstructorId;
+        match (ok, err) {
+            (Ty::Int, Ty::String) => ("result", "to_string"),
+            (Ty::String, Ty::String) => ("result", "to_string_ss"),
+            // `${Result[List[Int], String]}` → `ok([1, 2, 3])` / `err("<quoted>")`.
+            (Ty::Applied(TypeConstructorId::List, e), Ty::String)
+                if e.len() == 1 && matches!(e[0], Ty::Int) =>
+            {
+                ("result", "to_string_li")
+            }
+            (Ty::Applied(TypeConstructorId::List, e), Ty::String)
+                if e.len() == 1 && matches!(e[0], Ty::String) =>
+            {
+                ("result", "to_string_ls")
+            }
+            (Ty::Bool, Ty::String) => ("result", "to_string_b"),
+            (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
+                if e.len() == 1 && matches!(e[0], Ty::Int) =>
+            {
+                ("result", "to_string_oi")
+            }
+            (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
+                if e.len() == 1 && matches!(e[0], Ty::String) =>
+            {
+                ("result", "to_string_os")
+            }
+            (Ty::Applied(TypeConstructorId::Result, e), Ty::String)
+                if e.len() == 2 && matches!(e[0], Ty::Int) && matches!(e[1], Ty::String) =>
+            {
+                ("result", "to_string_ri")
+            }
+            (Ty::Applied(TypeConstructorId::List, e), Ty::String)
+                if e.len() == 1 && matches!(e[0], Ty::Bool) =>
+            {
+                ("result", "to_string_lb")
+            }
+            (Ty::Float, Ty::String) => ("result", "to_string_f"),
+            (Ty::Applied(TypeConstructorId::List, e), Ty::String)
+                if e.len() == 1 && matches!(e[0], Ty::Float) =>
+            {
+                ("result", "to_string_lf")
+            }
+            (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
+                if e.len() == 1
+                    && matches!(&e[0], Ty::Applied(TypeConstructorId::List, e2)
+                        if e2.len() == 1 && matches!(e2[0], Ty::String)) =>
+            {
+                ("result", "to_string_osl")
+            }
+            (Ty::Applied(TypeConstructorId::Map, e), Ty::String)
+                if e.len() == 2 && matches!(e[0], Ty::String) && matches!(e[1], Ty::Int) =>
+            {
+                ("result", "to_string_msi")
+            }
+            (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
+                if e.len() == 1
+                    && matches!(&e[0], Ty::Applied(TypeConstructorId::List, e2)
+                        if e2.len() == 1 && matches!(e2[0], Ty::Int)) =>
+            {
+                ("result", "to_string_oli")
+            }
+            _ => ("result", "to_string_x"),
+        }
 }
 
 /// Does a record/tuple/list/scalar VALUE of type `ty` materialize with REAL slots the recursive
