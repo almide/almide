@@ -955,12 +955,18 @@ pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
     crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
     let ir = source_to_ir_with(source, &[])?;
     let globals = std::collections::HashMap::new();
+    let global_inits = std::collections::HashMap::new();
+    // The REAL pipeline's layout registries — without them a record literal
+    // lowers as an Opaque skeleton and a field read walls (the very first
+    // rung-5 records probe misread that as a lowering gap).
+    let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
+    let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
     let mut out = String::new();
     for func in &ir.functions {
         if func.is_test {
             continue;
         }
-        match crate::lower::lower_function_all(func, &globals) {
+        match crate::lower::lower_function_all_with_globals(func, &globals, &global_inits, &record_layouts, &variant_layouts) {
             Ok(all) => {
                 for f in all {
                     out.push_str(&format!("== fn {} ==\n", f.name));

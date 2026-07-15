@@ -67,6 +67,25 @@
       touches the same `lower/binds*` bricks the ceangal/module-var workstream
       is actively editing — do it WITH that workstream, not alongside it.
 - [ ] Rung 5: records/variants (native structs/enums), closures.
+      **Records/variants scouting (2026-07-15, probe_native --mir over the REAL
+      lower path — layouts threaded)**: a scalar record lowers to the SAME
+      DynList block as a list (12-byte header + 8-byte slots; `Init::DynList`),
+      and a field read is the raw `Handle + Add(12 + 8*slot) + Load` prim
+      sequence — the below-prim-floor class rung 4 already solved for lists.
+      Consequence: the records slab is smaller than feared — scalar-record
+      literals can REUSE `Op::ListLit` verbatim (same block, same cert `i`),
+      and field reads need ONE new op (`Op::FieldGetScalar { rec, slot }`,
+      static offset, no bounds check, wasm render byte-equal to today's prim
+      sequence; native `rec[slot]`). The prim sequences are emitted from
+      MULTIPLE lower sites (binds.rs:672, calls_p2.rs:1270, binds_p4.rs:451/538,
+      defunc_tuple_fold.rs ×2) — op-ify them one site at a time against the
+      classify wall-list byte gate. Variant ctors are `CallFn "<Ctor>"` to
+      SYNTHESIZED fns (assembler-side) whose bodies are prim stores — same
+      op-ification unlocks them; match destructure needs the tag-dispatch
+      lowering audited after that. CAUTION: my first probe used
+      `lower_function_all` WITHOUT layouts and misread records as a lowering
+      gap — always dump through `lower_function_all_with_globals` (the fixed
+      `debug_dump_mir` does).
       **Float slab SHIPPED (2026-07-15)**: `NTy::F64`/`NativeSigKind::F64`;
       float literals stay bits-typed `i64` locals and convert at each float-op
       boundary (`f64::from_bits`, bit-exact); FloatBin Add/Sub/Mul/Div,
