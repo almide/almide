@@ -951,10 +951,11 @@ evidence  = [
 id        = "C-070"
 spec      = "ALS-M1"
 title     = "Nested constructor patterns match and bind identically on both targets"
-statement = "A NESTED pattern as the argument of a user-defined constructor pattern — `Wrap(A(n))`, `Box(Some(n))`, `Held(Circle { r })`, `Node(Leaf(a), Leaf(b))` — emits the inner discriminant test(s) into the arm guard and binds the inner payload(s) recursively, byte-identical native == wasm. The wasm match backend's constructor arm-binding loop previously handled only top-level `Bind`/`Literal` args: a nested ctor / Some / None / variant-record arg got NO inner discriminant test and bound garbage (0), so wasm SILENTLY took the wrong arm (exit 0) while native was correct (and a nested ctor on a recursive boxed variant additionally emitted invalid Rust). Now `emit_arg_tests` recurses the discriminant tests into the guard and `bind_arg` recurses the binding through nested ctor / Some / variant-record payloads."
+statement = "A NESTED pattern as the argument of a user-defined constructor pattern — `Wrap(A(n))`, `Box(Some(n))`, `Held(Circle { r })`, `Node(Leaf(a), Leaf(b))` — emits the inner discriminant test(s) into the arm guard and binds the inner payload(s) recursively, byte-identical native == wasm. The wasm match backend's constructor arm-binding loop previously handled only top-level `Bind`/`Literal` args: a nested ctor / Some / None / variant-record arg got NO inner discriminant test and bound garbage (0), so wasm SILENTLY took the wrong arm (exit 0) while native was correct (and a nested ctor on a recursive boxed variant additionally emitted invalid Rust). Now `emit_arg_tests` recurses the discriminant tests into the guard and `bind_arg` recurses the binding through nested ctor / Some / variant-record payloads. The NATIVE side of the same promise (#757): the `matches!` shape-guard the #610 box rewrite synthesizes must carry EVERY refutable constraint of the boxed inner pattern — the inner variant tag and inner literals, at any depth — so a non-matching value REFINES to the next arm. Erasing them to `_` admitted the value past the guard and panicked at the body's `let-else unreachable!()` (exit 101) while wasm refined correctly."
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/nested_ctor_pattern.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_variant_tag_box.almd", class = "fixture" },
 ]
 
 [[contract]]

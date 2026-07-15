@@ -97,7 +97,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) |  | active | fixture | 1 |
 | C-068 | Auto-? is target-directed in construction positions |  | active | fixture | 2 |
 | C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets |  | active | fixture | 1 |
-| C-070 | Nested constructor patterns match and bind identically on both targets |  | active | fixture | 1 |
+| C-070 | Nested constructor patterns match and bind identically on both targets |  | active | fixture | 2 |
 | C-071 | Single-part interpolation RC balance |  | active | fixture | 1 |
 | C-072 | Inferred named-record repr parity |  | active | fixture | 1 |
 | C-073 | Tuple pattern testing a variant constructor |  | active | fixture | 1 |

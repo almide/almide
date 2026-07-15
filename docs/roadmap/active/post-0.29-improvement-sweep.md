@@ -9,12 +9,12 @@
 - [x] [#778](https://github.com/almide/almide/issues/778) README Project Status 表の陳腐化＋自己矛盾（Tests 240/232→285、MSR 23/25 vs 30/30、verified-default 未記載）
 - [x] [#779](https://github.com/almide/almide/issues/779) `almide.lock` の裁定（commit or gitignore、org 横断で統一）
 - [x] [#780](https://github.com/almide/almide/issues/780) org-trust-status の headline を resolved-strict sweep へ切替 — 正直な初回計測: 13/28 repos clean、24 modules wall、11 frontend-rejected（#783 クラス）。porta/almai/toml の新規 real wall が次の lowering ターゲット
-- [ ] [#741](https://github.com/almide/almide/issues/741) `math.tanh` / `math.atan` 追加（`tanh`→`tan` の誤誘導 did-you-mean も是正）
+- [x] [#741](https://github.com/almide/almide/issues/741) `math.tanh` / `math.atan` 追加 — vendored libm 転写を native/v0-wasm/v1-self-host の3経路に実装、C-134 + 3000点差分 fuzz。`0.0 - t` が IEEE 負零を失う罠も発見・修正（符号ビット bxor）
 
 ## 正しさ（native 側の非対称を塞ぐ）
 
-- [ ] [#757](https://github.com/almide/almide/issues/757) nested variant-tag パターンが native で inner ctor check を落とし `unreachable!()` panic（wasm は正しい）— verified が wasm 側だけの今、native の正しさは v0 rust codegen に無防備依存
-- [ ] [#753](https://github.com/almide/almide/issues/753) debug-profile ANF postcondition trap（heap-typed call arg が未 lift、release は正常）
+- [x] [#757](https://github.com/almide/almide/issues/757) nested variant-tag panic — 根治: #610 box 書き換えの `matches!` guard が非 boxed の inner tag/リテラルを `_` に消していた。guard_shape 再帰で全 refutable 制約を保持。C-070 拡張 + `nested_variant_tag_box.almd`（全量ゲート実行中）
+- [x] [#753](https://github.com/almide/almide/issues/753) debug-profile ANF trap — 現 develop で再現せず（0.29 サイクルの lowering 修正で解消）。両 fixture を debug バイナリで検証しクローズ。debug-only の postcondition 実行は設計どおり（pass.rs に文書化済み）
 - [ ] [#783](https://github.com/almide/almide/issues/783) name-pinning postcondition が ceangal の実モジュールグラフで再発（#433 クラス、最小プローブでは再現せず）→ 構造的な根治は [#528](https://github.com/almide/almide/issues/528) QualifiedRef newtype
 
 ## 戦略級（次の大玉）
