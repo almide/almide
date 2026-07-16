@@ -388,8 +388,11 @@ fn make_unrolled_mul(
         rows.push(format!("vec![{}]", cells.join(", ")));
     }
 
+    // #617: Matrix is the RcCow value type in generated code — the raw
+    // `from_lists` result wraps at this InlineRust boundary (the `&{a}`/`&{b}`
+    // reads deref-coerce through RcCow unchanged).
     let template = format!(
-        "{{ let __sa = &{{a}}; let __sb = &{{b}}; almide_rt_matrix_from_lists(&vec![{rows}]) }}",
+        "{{ let __sa = &{{a}}; let __sb = &{{b}}; RcCow::from(almide_rt_matrix_from_lists(&vec![{rows}])) }}",
         rows = rows.join(", "),
     );
 

@@ -3,6 +3,7 @@
 //! Memory layout: [len:i32][data:u8...]  (same as String)
 
 use super::FuncCompiler;
+use crate::pass_closure_conversion::is_inplace_mutator;
 use almide_ir::{IrExpr, IrExprKind};
 
 /// Requested primitive load for the typed byte-read family.
@@ -27,6 +28,19 @@ impl FuncCompiler<'_> {
     /// chained sub-matches in `calls_bytes_p2.rs`. Chain order is irrelevant
     /// because the groups never overlap.
     pub(super) fn emit_bytes_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
+        // Copy-on-write guard for the &mut bytes family reached as a MODULE call
+        // (the RuntimeCall spelling gets the same guard in `emit_expr_g2`; this
+        // dispatcher was the uncovered second door — `var b = a; bytes.set_at(b,…)`
+        // wrote through the alias on wasm while native kept value semantics, found
+        // by spec/lang/rccow_value_semantics_test.almd). The mutator set is the
+        // one source of truth in `is_inplace_mutator`; `cow_if_needed` is a no-op
+        // for vars AliasCowPass did not mark, so unaliased fast paths are
+        // byte-identical.
+        if is_inplace_mutator(&format!("almide_rt_bytes_{method}")) {
+            if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
+                self.cow_if_needed(id.0);
+            }
+        }
         if self.emit_bytes_call_g2(method, args) {
             return true;
         }

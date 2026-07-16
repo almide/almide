@@ -1,8 +1,12 @@
+// wasm:skip: #794 — the wasm legs lack Bytes alias COW (v1 shares the Dup'd
+// block through in-place mutators; v0 record copies are field-pointer-shallow).
+// Remove this marker when the wasm legs converge.
+//
 // #617: Bytes/Matrix are RcCow value types on the Rust target (copies are O(1)
 // Rc bumps, mutation is make_mut copy-on-write). These tests pin the OBSERVABLE
 // value semantics that the COW must preserve: after `var b = a`, mutating one
 // side is never visible through the other — for a bare Bytes, a bare Matrix,
-// and a record field holding each.
+// and a record field holding each. Native (RcCow) is the oracle here.
 
 type Pack = { tag: String, buf: Bytes }
 

@@ -215,6 +215,10 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 ty_str == "Vec<u8>"
                     || ty_str.starts_with("Vec<")
                     || ty_str.starts_with("HashMap<")
+                    // #617: Bytes/Matrix render as RcCow — their in-place mutators
+                    // (&mut deref-coerce = make_mut COW) still need a `mut` binding,
+                    // exactly like the raw spellings above.
+                    || ty_str.starts_with("RcCow<")
             };
             // Val-wrap: var of non-Copy type → RcCow<T> with RcCow::new(value) for COW
             if ctx.ann.is_rc_cow(var) {
