@@ -1036,6 +1036,15 @@ impl LowerCtx {
                 self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
+                // A closure-RETURNING closure call (`let triple = make_multiplier(3)` where
+                // `make_multiplier` is a lifted lambda whose tail lifts a capturing lambda):
+                // the result IS a closure block the callee moved out — track it so a later
+                // `triple(4)` dispatches through it (`Op::CallIndirect`) AND its scope-end
+                // drop routes to the recursive `$__drop_closure` (a heap capture would leak
+                // under the default flat rc_dec).
+                if matches!(ty, Ty::Fn { .. }) {
+                    self.closure_values.insert(dst);
+                }
                 // The funcref returns its Result/Option in the SAME materialized layout an `ok()`/
                 // `err()` ctor builds (a lifted lambda's body goes through `materialize_result_*`), so
                 // SEED its read-shape — a later `match o { ok/err }` over the bound var then reads its

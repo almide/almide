@@ -35,10 +35,28 @@ fn rewrite_calls_in_expr(expr: &mut ast::Expr, path: &[Sym], override_name: &str
 }
 
 fn lower_where_bind(ctx: &mut LowerCtx, bind_name: &Sym, value: &ast::Expr) -> IrStmt {
-    // The checker pins this binding's lambda param types during inference
-    // (`unify_where_override_with_fn_sig` in check/mod.rs), so `lower_expr`
-    // reads correct types straight from the TypeMap — no lowering-side patch.
-    let ir_val = lower_expr(ctx, value);
+    // The checker pins an OVERRIDE binding's lambda param types during inference
+    // (`unify_where_override_with_fn_sig` in check/mod.rs). A Case-table VALUE
+    // binding (`op = (a, b) => a + b` — no shadowed fn signature) resolves the
+    // BINDING's Fn type from the body's call site, but the annotation-less lambda's
+    // own param entries can stay `Unknown` and leak into the IR (tripping the v1
+    // direct-call inline's heap gate and the WASM param typing). Patch the lambda's
+    // IR params from the resolved Fn type — the same signature-driven patch the
+    // CallResponse path below already does.
+    let mut ir_val = lower_expr(ctx, value);
+    let fn_ty = ir_val.ty.clone();
+    if let (IrExprKind::Lambda { params: ir_params, .. }, Ty::Fn { params: ptys, .. }) =
+        (&mut ir_val.kind, &fn_ty)
+    {
+        for ((var_id, var_ty), concrete) in ir_params.iter_mut().zip(ptys.iter()) {
+            if matches!(var_ty, Ty::Unknown)
+                && !matches!(concrete, Ty::Unknown | Ty::TypeVar(_))
+            {
+                *var_ty = concrete.clone();
+                ctx.var_table.entries[var_id.0 as usize].ty = concrete.clone();
+            }
+        }
+    }
     let ty = ir_val.ty.clone();
     let var = ctx.define_var(bind_name.as_str(), ty.clone(), Mutability::Let, None);
     IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val }, span: None }

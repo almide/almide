@@ -134,6 +134,25 @@ pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
             },
         );
     }
+    // ProcessStatus — the process stdlib record (stdlib/process.almd). Its decl lives in
+    // the BUNDLED stdlib module `source_to_ir` skips, so an ANNOTATED literal
+    // (`let s: process.ProcessStatus = { code: …, stdout: …, stderr: … }`) carried an
+    // unresolvable `Named(ProcessStatus)` — the construct declined and every member read
+    // walled (the process_named_type walls). Erase it to the STRUCTURAL record (the same
+    // field order the decl declares), the exact FileStat treatment above.
+    if !declared.contains("ProcessStatus") {
+        use almide_lang::intern::sym;
+        map.insert(
+            "ProcessStatus".to_string(),
+            Ty::Record {
+                fields: vec![
+                    (sym("code"), Ty::Int),
+                    (sym("stdout"), Ty::String),
+                    (sym("stderr"), Ty::String),
+                ],
+            },
+        );
+    }
     if map.is_empty() {
         return;
     }

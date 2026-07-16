@@ -1131,6 +1131,21 @@ impl LowerCtx {
                     } else {
                         None
                     }
+                } else if let Ty::Tuple(ts) = &es[0] {
+                    // List[Tuple[scalar…]] — a scalar tuple block is LAYOUT-IDENTICAL to a
+                    // same-arity List of its slot class (len@4 = arity, 8-byte slots @12),
+                    // so the nested-list eq of the matching class compares it exactly:
+                    // Int/Bool slots bit-compare (list.eq_list_int), all-Float slots
+                    // float-compare per slot (list.eq_list_float). A MIXED Int/Float
+                    // tuple has no matching flat class (a bit-compare on the Float slot
+                    // is wrong on -0.0/NaN) — decline, the eq site walls honestly.
+                    if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::Int | Ty::Bool)) {
+                        Some("list.eq_list_int")
+                    } else if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::Float)) {
+                        Some("list.eq_list_float")
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }

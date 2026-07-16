@@ -8,21 +8,13 @@
 #   optional-chain   — `p?.f` desugars to the some/none match (2026-07-16), but a
 #                      HEAP-field projection's match still declines (Option[String]
 #                      arm bodies; the scalar-field chain lowers)
-#   closure-value    — computed-callee / lambda-returning-lambda in an operand
-#   where-expand     — test-where parametrized bodies (substituted param shapes)
 #   bytes-field-cow  — an in-place bytes mutator over a RECORD-FIELD receiver
 #                      needs the two-level record+field COW (#794; this entry
 #                      REPLACED a silent shared-write miscompile with an honest
 #                      wall when the bare-var receiver COW shipped, 2026-07-16)
 #
-spec/integration/codegen_functional_test.almd :: __test_almd_currying
-spec/integration/codegen_variant_record_test.almd :: __test_almd_extract fields from variant records
 spec/lang/fan_value_regression_test.almd :: __test_almd_fan.settle over capturing thunks preserves order and payloads
 spec/lang/fan_value_regression_test.almd :: __test_almd_fan.settle preserves ok and err payloads
 spec/lang/rccow_value_semantics_test.almd :: __test_almd_record copy shields the original's bytes field
-spec/lang/function_test.almd :: __test_almd_lambda returning lambda
-spec/lang/test_where_monkey_test.almd :: __test_almd_math operations / add 1+1
-spec/lang/test_where_monkey_test.almd :: __test_almd_math operations / mul 3*4
 spec/lang/unwrap_operators_test.almd :: __test_almd_optional chain none
 spec/lang/unwrap_operators_test.almd :: __test_almd_optional chain some
-spec/stdlib/process_named_type_test.almd :: __test_almd_annotated literal shape matches
