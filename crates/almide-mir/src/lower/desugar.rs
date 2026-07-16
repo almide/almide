@@ -522,6 +522,17 @@ fn rewrite_guard_stmt_list(
     else {
         return body;
     };
+    // ONLY `continue` (→ `()`) and `break` (verbatim) are sound inside a loop body.
+    // A VALUE else (`guard v != t else ok(mid)` — a function-level EARLY RETURN from
+    // inside the loop) has no loop-exit channel here: rewriting it to
+    // `if cond then { rest } else ok(mid)` in the Unit loop body silently DROPPED the
+    // return and looped forever (binary_search hung at v == target). Leave the Guard
+    // un-rewritten — the loop lowering declines a Guard body and walls honestly.
+    if let IrStmtKind::Guard { else_, .. } = &body[i].kind {
+        if !matches!(else_.kind, IrExprKind::Continue | IrExprKind::Break) {
+            return body;
+        }
+    }
     *changed = true;
     let mut pre = body;
     let rest = pre.split_off(i + 1);

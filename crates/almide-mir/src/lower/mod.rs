@@ -1084,7 +1084,15 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
             };
             let (cond, msg) = match (name.as_str(), args.as_slice()) {
                 ("assert", [c]) if matches!(c.ty, Ty::Bool) => {
-                    (c.clone(), "assertion failed: assert(false)")
+                    (c.clone(), "assertion failed: assert(false)".to_string())
+                }
+                // The 2-arg form `assert(cond, "msg")` with a LITERAL message —
+                // the message becomes the die text verbatim, matching v0's
+                // `assert(false, m)` abort line. (A non-literal message keeps the
+                // un-desugared call → the unlinked-`assert` wall, honest.)
+                ("assert", [c, m]) if matches!(c.ty, Ty::Bool) => {
+                    let IrExprKind::LitStr { value } = &m.kind else { return };
+                    (c.clone(), format!("assertion failed: {value}"))
                 }
                 ("assert_eq", [a, b]) => (
                     IrExpr {
@@ -1097,7 +1105,7 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
                         span: None,
                         def_id: None,
                     },
-                    "assertion failed: left == right",
+                    "assertion failed: left == right".to_string(),
                 ),
                 ("assert_ne", [a, b]) => (
                     IrExpr {
@@ -1110,7 +1118,7 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
                         span: None,
                         def_id: None,
                     },
-                    "assertion failed: left != right",
+                    "assertion failed: left != right".to_string(),
                 ),
                 _ => return,
             };
@@ -1119,7 +1127,7 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
                 kind: IrExprKind::If {
                     cond: Box::new(cond),
                     then: Box::new(unit),
-                    else_: Box::new(die_expr(msg)),
+                    else_: Box::new(die_expr(&msg)),
                 },
                 ty: Ty::Unit,
                 span: e.span.clone(),
