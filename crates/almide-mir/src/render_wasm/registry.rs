@@ -185,6 +185,14 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             &[("matrix_softmax_rows", "matrix.softmax_rows"), ("matrix_gelu", "matrix.gelu"), ("matrix_swiglu_gate", "matrix.swiglu_gate"), ("matrix_rope_rotate", "matrix.rope_rotate"), ("matrix_multi_head_attention", "matrix.multi_head_attention"), ("matrix_masked_multi_head_attention", "matrix.masked_multi_head_attention"), ("matrix_from_q1_0_bytes", "matrix.from_q1_0_bytes")],
         ),
         (
+            include_str!("../../../../stdlib/matrix_shape.almd"),
+            &[("matrix_shape", "matrix.shape")],
+        ),
+        (
+            include_str!("../../../../stdlib/matrix_arith.almd"),
+            &[("matrix_sub", "matrix.sub"), ("matrix_div", "matrix.div"), ("matrix_neg", "matrix.neg"), ("matrix_pow", "matrix.pow")],
+        ),
+        (
             include_str!("../../../../stdlib/matrix_core.almd"),
             &[
                 ("matrix_from_lists", "matrix.from_lists"),

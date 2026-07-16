@@ -410,6 +410,11 @@ pub fn desugar_all(
             cur = r;
             continue;
         }
+        // Matrix BinOps → matrix.mul/add/sub — same contract.
+        if let Some(r) = desugar_matrix_binops(&cur) {
+            cur = r;
+            continue;
+        }
         // `buf[i] = v` over Bytes → `bytes.set_at(buf, i, v)` — same contract
         // (the rewrite adds ONE counted Module call matching the lowering's CallFn).
         if let Some(r) = desugar_bytes_index_assign(&cur, params) {

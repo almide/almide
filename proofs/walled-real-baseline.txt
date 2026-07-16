@@ -17,3 +17,13 @@ spec/lang/control_flow_test.almd :: find_index_of
 spec/lang/control_flow_test.almd :: sum_until_threshold
 spec/lang/error_test.almd :: binary_search
 spec/lang/error_test.almd :: first_duplicate
+# 2026-07-17: exposed by the 2-arg assert desugar — these test fns previously carried
+# an UNLINKED bare `assert(cond, msg)` call (the whole file refused at link time, so
+# classify's "lowered" verdict was never executable). With assert desugared they hit
+# their REAL inner walls (computed-message conds / call-bearing if arms — the
+# deferred-Const F2 family). Honest walls; v0/native carry the files.
+spec/stdlib/json_path_test.almd :: __test_almd_json.set_path adds new key
+spec/stdlib/json_path_test.almd :: __test_almd_json.set_path nested field
+spec/stdlib/json_path_test.almd :: __test_almd_json.set_path on array index
+spec/stdlib/json_path_test.almd :: __test_almd_json.set_path simple field
+spec/stdlib/matrix_arith_test.almd :: __test_almd_pow with 0.5 = sqrt

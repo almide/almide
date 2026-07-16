@@ -1042,12 +1042,16 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
     use almide_lang::intern::sym;
     fn die_expr(msg: &str) -> IrExpr {
-        let lit = IrExpr {
+        die_on(IrExpr {
             kind: IrExprKind::LitStr { value: msg.to_string() },
             ty: Ty::String,
             span: None,
             def_id: None,
-        };
+        })
+    }
+    /// die on an arbitrary String-typed message EXPRESSION (the computed 2-arg
+    /// assert message: `assert(c, "got " + float.to_string(x))`).
+    fn die_on(lit: IrExpr) -> IrExpr {
         let handle = IrExpr {
             kind: IrExprKind::Call {
                 target: CallTarget::Module { module: sym("prim"), func: sym("handle"), def_id: None },
@@ -1084,15 +1088,13 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
             };
             let (cond, msg) = match (name.as_str(), args.as_slice()) {
                 ("assert", [c]) if matches!(c.ty, Ty::Bool) => {
-                    (c.clone(), "assertion failed: assert(false)".to_string())
+                    (c.clone(), None)
                 }
-                // The 2-arg form `assert(cond, "msg")` with a LITERAL message —
-                // the message becomes the die text verbatim, matching v0's
-                // `assert(false, m)` abort line. (A non-literal message keeps the
-                // un-desugared call → the unlinked-`assert` wall, honest.)
-                ("assert", [c, m]) if matches!(c.ty, Ty::Bool) => {
-                    let IrExprKind::LitStr { value } = &m.kind else { return };
-                    (c.clone(), format!("assertion failed: {value}"))
+                // The 2-arg form `assert(cond, msg)`: a LITERAL message folds into
+                // the die text; a COMPUTED String message dies on the CONCAT
+                // `"assertion failed: " + msg` (evaluated only on the failing path).
+                ("assert", [c, m]) if matches!(c.ty, Ty::Bool) && matches!(m.ty, Ty::String) => {
+                    (c.clone(), Some(m.clone()))
                 }
                 ("assert_eq", [a, b]) => (
                     IrExpr {
@@ -1105,7 +1107,7 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
                         span: None,
                         def_id: None,
                     },
-                    "assertion failed: left == right".to_string(),
+                    None,
                 ),
                 ("assert_ne", [a, b]) => (
                     IrExpr {
@@ -1118,16 +1120,46 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
                         span: None,
                         def_id: None,
                     },
-                    "assertion failed: left != right".to_string(),
+                    None,
                 ),
                 _ => return,
+            };
+            let default_text = match name.as_str() {
+                "assert_eq" => "assertion failed: left == right",
+                "assert_ne" => "assertion failed: left != right",
+                _ => "assertion failed: assert(false)",
+            };
+            let die = match msg {
+                None => die_expr(default_text),
+                Some(m) => match &m.kind {
+                    IrExprKind::LitStr { value } => {
+                        die_expr(&format!("assertion failed: {value}"))
+                    }
+                    _ => die_on(IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: almide_ir::BinOp::ConcatStr,
+                            left: Box::new(IrExpr {
+                                kind: IrExprKind::LitStr {
+                                    value: "assertion failed: ".to_string(),
+                                },
+                                ty: Ty::String,
+                                span: None,
+                                def_id: None,
+                            }),
+                            right: Box::new(m),
+                        },
+                        ty: Ty::String,
+                        span: None,
+                        def_id: None,
+                    }),
+                },
             };
             let unit = IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
             *e = IrExpr {
                 kind: IrExprKind::If {
                     cond: Box::new(cond),
                     then: Box::new(unit),
-                    else_: Box::new(die_expr(&msg)),
+                    else_: Box::new(die),
                 },
                 ty: Ty::Unit,
                 span: e.span.clone(),
@@ -1214,6 +1246,82 @@ fn desugar_bytes_index_calls(body: &IrExpr) -> Option<IrExpr> {
                 ty: e.ty.clone(),
                 span: e.span.clone(),
                 def_id: e.def_id,
+            };
+            self.changed = true;
+        }
+    }
+    let mut s = S { changed: false };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}
+
+/// A float-family BinOp over MATRIX operands (`a * b` / `a + b` / `a - b` on Matrix —
+/// the numeric-protocol operators) → the registered `matrix.mul`/`add`/`sub` module
+/// call. The scalar-binop path had NO operand gate on the arithmetic arms, so `a * b`
+/// lowered as an f64 multiply of the two BLOCK HANDLES — a silent garbage Matrix on
+/// the verified default (matrix_test's `*` row). Same desugar-before-both slot as
+/// `desugar_map_access_calls` (the rewrite adds ONE counted Module call).
+fn desugar_matrix_binops(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::intern::sym;
+    struct S {
+        changed: bool,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::BinOp { op, left, right } = &e.kind else { return };
+            let is_matrix = |t: &Ty| {
+                matches!(t, Ty::Matrix)
+                    || matches!(t, Ty::Applied(
+                        almide_lang::types::constructor::TypeConstructorId::Matrix, _))
+            };
+            // `m * k` / `k * m` (ScaleMatrix — one Matrix, one scalar) → matrix.scale
+            // with the Matrix normalized to the FIRST arg (the self-host's signature).
+            if matches!(op, almide_ir::BinOp::ScaleMatrix) {
+                let (m, k) = if is_matrix(&left.ty) {
+                    ((**left).clone(), (**right).clone())
+                } else {
+                    ((**right).clone(), (**left).clone())
+                };
+                e.kind = IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: sym("matrix"),
+                        func: sym("scale"),
+                        def_id: None,
+                    },
+                    args: vec![m, k],
+                    type_args: Vec::new(),
+                };
+                self.changed = true;
+                return;
+            }
+            if !is_matrix(&left.ty) || !is_matrix(&right.ty) {
+                return;
+            }
+            // The frontend's dispatch: `a * b` (both Matrix) → MulMatrix; `m * k` →
+            // ScaleMatrix (handled by the two-typed arm below); `a + b`/`a - b` fall
+            // through the NUMERIC arms as AddInt/SubInt (neither operand is Float),
+            // so those are matched here by the MATRIX operand types, not the op class.
+            let func = match op {
+                almide_ir::BinOp::MulMatrix => "mul",
+                almide_ir::BinOp::AddMatrix => "add",
+                almide_ir::BinOp::SubMatrix => "sub",
+                almide_ir::BinOp::AddInt | almide_ir::BinOp::AddFloat => "add",
+                almide_ir::BinOp::SubInt | almide_ir::BinOp::SubFloat => "sub",
+                almide_ir::BinOp::DivInt | almide_ir::BinOp::DivFloat => "div",
+                almide_ir::BinOp::MulInt | almide_ir::BinOp::MulFloat => "mul",
+                _ => return,
+            };
+            e.kind = IrExprKind::Call {
+                target: CallTarget::Module {
+                    module: sym("matrix"),
+                    func: sym(func),
+                    def_id: None,
+                },
+                args: vec![(**left).clone(), (**right).clone()],
+                type_args: Vec::new(),
             };
             self.changed = true;
         }
@@ -1603,6 +1711,15 @@ fn lower_function_all_impl(
     let func_body: &IrExpr = if let Some(rewritten) = desugar_bytes_index_calls(func_body) {
         bytes_index_body = rewritten;
         &bytes_index_body
+    } else {
+        func_body
+    };
+    // Matrix `a * b`/`+`/`-` → matrix.mul/add/sub (see `desugar_matrix_binops`) —
+    // same desugar-before-both slot.
+    let matrix_binop_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_matrix_binops(func_body) {
+        matrix_binop_body = rewritten;
+        &matrix_binop_body
     } else {
         func_body
     };
