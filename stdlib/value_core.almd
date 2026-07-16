@@ -298,6 +298,54 @@ fn list_eq_value(a: List[Value], b: List[Value]) -> Bool = {
   else __leq_val(ha, hb, 0, prim.load32(ha + 4))
 }
 
+// list.eq over NESTED lists — List[List[Int/Float/String]]: same length + element-wise
+// recursion into the flat list eq. Elements are handle slots (the inner list blocks),
+// BORROWED for the read-only compare — no ownership event, same discipline as eq_str.
+fn __leq_list_int(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let xa: List[Int] = prim.load_handle(ah + 12 + i * 8)
+    let xb: List[Int] = prim.load_handle(bh + 12 + i * 8)
+    if list_eq_int(xa, xb) then __leq_list_int(ah, bh, i + 1, n) else false
+  }
+
+fn list_eq_list_int(a: List[List[Int]], b: List[List[Int]]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_list_int(ha, hb, 0, prim.load32(ha + 4))
+}
+
+fn __leq_list_float(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let xa: List[Float] = prim.load_handle(ah + 12 + i * 8)
+    let xb: List[Float] = prim.load_handle(bh + 12 + i * 8)
+    if list_eq_float(xa, xb) then __leq_list_float(ah, bh, i + 1, n) else false
+  }
+
+fn list_eq_list_float(a: List[List[Float]], b: List[List[Float]]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_list_float(ha, hb, 0, prim.load32(ha + 4))
+}
+
+fn __leq_list_str(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let xa: List[String] = prim.load_handle(ah + 12 + i * 8)
+    let xb: List[String] = prim.load_handle(bh + 12 + i * 8)
+    if list_eq_str(xa, xb) then __leq_list_str(ah, bh, i + 1, n) else false
+  }
+
+fn list_eq_list_str(a: List[List[String]], b: List[List[String]]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_list_str(ha, hb, 0, prim.load32(ha + 4))
+}
+
 fn value_eq(a: Value, b: Value) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)

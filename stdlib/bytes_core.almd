@@ -408,6 +408,17 @@ fn bytes_read_u8(b: Bytes, pos: Int) -> Int = {
   if pos < 0 then 0 else { if pos < n then prim.load8(h + 12 + pos) else 0 }
 }
 
+// bytes indexing `buf[i]` — the CHECKED element read: a negative / past-len index
+// aborts `Error: index out of bounds` + exit 1 (v0's behavior on both targets),
+// unlike read_u8's 0-for-OOB convention.
+fn bytes_index(b: Bytes, pos: Int) -> Int = {
+  let h = prim.handle(b)
+  let n = prim.load32(h + 4)
+  if pos < 0 then prim.die(prim.handle("Error: index out of bounds\n")) else ()
+  if pos >= n then prim.die(prim.handle("Error: index out of bounds\n")) else ()
+  prim.load8(h + 12 + pos)
+}
+
 // Is the byte at addr non-zero? (a Bool-returning helper, so read_bool's arm stays a call.)
 fn __byte_nonzero(addr: Int) -> Bool = {
   let v = prim.load8(addr)

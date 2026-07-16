@@ -236,15 +236,16 @@ impl LowerCtx {
         // dispatches (the `compose` shape). A scalar capture is a raw 64-bit load. All
         // Prim reads — no ownership events (the block is the caller's).
         for (i, (v, _)) in captures.iter().enumerate() {
-            let h = sub.fresh_value();
-            sub.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![env_pv] });
-            let off = sub.fresh_value();
-            sub.ops
-                .push(Op::ConstInt { dst: off, value: layout::slot_offset(2 + i) as i64 });
-            let addr = sub.fresh_value();
-            sub.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
             let val = sub.fresh_value();
             if i < n_closure + n_heap + n_nested_heap {
+                let h = sub.fresh_value();
+                sub.ops
+                    .push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![env_pv] });
+                let off = sub.fresh_value();
+                sub.ops
+                    .push(Op::ConstInt { dst: off, value: layout::slot_offset(2 + i) as i64 });
+                let addr = sub.fresh_value();
+                sub.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
                 sub.ops.push(Op::Prim {
                     kind: PrimKind::LoadHandle,
                     dst: Some(val),
@@ -255,11 +256,14 @@ impl LowerCtx {
                     sub.closure_values.insert(val);
                 }
             } else {
-                sub.ops.push(Op::Prim {
-                    kind: PrimKind::Load { width: 8 },
-                    dst: Some(val),
-                    args: vec![addr],
-                });
+                // Rung-5 closures slab: a SCALAR capture reads its slot through the
+                // TARGET-NEUTRAL `Op::ListGetScalar` on the env block (wasm renders the
+                // bounds-checked element load; native `env[slot]`) — the same pattern as
+                // record fields and variant payloads. Heap/closure captures keep the
+                // h-based `LoadHandle` above (native walls them honestly).
+                let idx = sub.fresh_value();
+                sub.ops.push(Op::ConstInt { dst: idx, value: (2 + i) as i64 });
+                sub.ops.push(Op::ListGetScalar { dst: val, list: env_pv, idx });
             }
             sub.value_of.insert(*v, val);
         }
@@ -284,6 +288,27 @@ impl LowerCtx {
         // | n_closure<<32 — three 16-bit counts, what lets the uniform `$__drop_closure`
         // free any closure block at any drop site without lowering-time mask knowledge),
         // then the captures (closure, flat heap, nested heap, scalar).
+        // Rung-5 closures slab: an ALL-SCALAR-capture env block is a plain slot list
+        // ([fnidx, drop-header=0, scalars…]), so the TARGET-NEUTRAL `Op::ListLit`
+        // builds it on both legs — same cert `i`, same block bytes on wasm, a
+        // `Vec<i64>` on native. Heap/closure captures keep the prim path below
+        // (their Dup/Consume co-own dance needs the address stores).
+        if n_closure == 0 && n_heap == 0 && n_nested_heap == 0 {
+            let fr = self.fresh_value();
+            self.ops.push(Op::FuncRef { dst: fr, name });
+            let hdr = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: hdr, value: 0 });
+            let mut elems: Vec<ValueId> = Vec::with_capacity(2 + cap_vals.len());
+            elems.push(fr);
+            elems.push(hdr);
+            elems.extend(cap_vals.iter().copied());
+            let blk = self.fresh_value();
+            self.ops.push(Op::ListLit { dst: blk, elems });
+            // EXACT tracking mirror of the prim path below.
+            self.live_heap_handles.push(blk);
+            self.closure_values.insert(blk);
+            return Some(blk);
+        }
         let len_c = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: len_c, value: (2 + cap_vals.len()) as i64 });
         let blk = self.fresh_value();

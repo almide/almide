@@ -25,8 +25,11 @@ fn run_v0(name: &str, src: &str) -> (String, i32) {
     let dir = scratch(name);
     let file = dir.join("prog.almd");
     std::fs::write(&file, src).unwrap();
+    // `--no-verified`: the native default is v1-first since the #764 flip — the
+    // oracle side must stay the LEGACY v0 pipeline or the diff is tautological.
     let out = Command::new(almide())
-        .args(["run", file.to_str().unwrap()])
+        .args(["run", "--no-verified", file.to_str().unwrap()])
+        .env("ALMIDE_NO_VERIFIED_OK", "1")
         .output()
         .expect("almide run");
     (String::from_utf8_lossy(&out.stdout).into_owned(), out.status.code().unwrap_or(-1))
@@ -54,6 +57,25 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // ── Rung 5 closures slab: scalar-capture closures are env slot blocks
+    //    ([fnidx, drop-header, captures…]) dispatched via __almd_ci_* tables ──
+    ("closure_capture", "fn adder(n: Int) -> (Int) -> Int = (x) => x + n\n\nfn main() -> Unit = {\n  let add3 = adder(3)\n  println(int.to_string(add3(7)))\n  println(int.to_string(add3(39)))\n}\n"),
+    ("closure_two_envs", "fn adder(n: Int) -> (Int) -> Int = (x) => x + n\n\nfn main() -> Unit = {\n  let a = adder(1)\n  let b = adder(100)\n  println(int.to_string(a(1)))\n  println(int.to_string(b(1)))\n}\n"),
+    ("closure_multi_arg", "fn scaler(k: Int) -> (Int, Int) -> Int = (a, b) => (a + b) * k\n\nfn main() -> Unit = {\n  let s2 = scaler(2)\n  println(int.to_string(s2(3, 4)))\n}\n"),
+    // ── Rung 5 variants slab: flat variants are tag+payload slot blocks ──
+    ("variant_match", "type Shape = | Circle(Int) | Square(Int)\n\nfn area2(s: Shape) -> Int =\n  match s {\n    Circle(r) => 3 * r * r,\n    Square(w) => w * w,\n  }\n\nfn main() -> Unit = {\n  println(int.to_string(area2(Circle(2))))\n  println(int.to_string(area2(Square(3))))\n}\n"),
+    ("variant_nullary", "type Light = | Red | Green | Yellow\n\nfn advice(l: Light) -> Int =\n  match l {\n    Red => 0,\n    Green => 1,\n    Yellow => 2,\n  }\n\nfn main() -> Unit = {\n  println(int.to_string(advice(Red)))\n  println(int.to_string(advice(Yellow)))\n}\n"),
+    ("variant_multi_payload", "type Op = | Add(Int, Int) | Neg(Int)\n\nfn eval(o: Op) -> Int =\n  match o {\n    Add(a, b) => a + b,\n    Neg(x) => 0 - x,\n  }\n\nfn main() -> Unit = {\n  println(int.to_string(eval(Add(4, 5))))\n  println(int.to_string(eval(Neg(7))))\n}\n"),
+    // ── Rung 5 records slab: all-scalar records are DynList slot blocks ──
+    ("record_field", "type Point = { x: Int, y: Int }\n\nfn dist2(p: Point) -> Int = p.x * p.x + p.y * p.y\n\nfn main() -> Unit = {\n  let p = Point { x: 3, y: 4 }\n  println(int.to_string(dist2(p)))\n}\n"),
+    ("record_out_of_order", "type Cfg = { a: Int, b: Int, c: Int }\n\nfn main() -> Unit = {\n  let v = Cfg { c: 30, a: 10, b: 20 }\n  println(int.to_string(v.a))\n  println(int.to_string(v.b))\n  println(int.to_string(v.c))\n}\n"),
+    ("record_return", "type Pair = { lo: Int, hi: Int }\n\nfn mk(a: Int, b: Int) -> Pair = if a < b then Pair { lo: a, hi: b } else Pair { lo: b, hi: a }\n\nfn main() -> Unit = {\n  let p = mk(9, 2)\n  println(int.to_string(p.lo))\n  println(int.to_string(p.hi))\n}\n"),
+    ("record_float_field", "type V2 = { x: Float, y: Float }\n\nfn main() -> Unit = {\n  let v = V2 { x: 1.5, y: 2.5 }\n  println(float.to_string(v.x + v.y))\n}\n"),
+    // ── Rung 5 Float slab: real f64 on native (MIR carries bits in i64) ──
+    ("float_print", "fn main() -> Unit = {\n  println(float.to_string(1.5))\n  println(float.to_string(2.0))\n  println(float.to_string(-0.25))\n}\n"),
+    ("float_arith", "fn main() -> Unit = {\n  let x = 1.5\n  let y = x * 2.0 + 0.25\n  let z = y / 4.0 - 0.5\n  println(float.to_string(z))\n}\n"),
+    ("float_branch", "fn main() -> Unit = {\n  let y = 1.5 * 2.0\n  if y > 2.9 then println(\"big\") else println(\"small\")\n  if y <= 3.0 then println(\"le\") else println(\"gt\")\n}\n"),
+    ("float_fn_param", "fn scale(x: Float, k: Float) -> Float = x * k\n\nfn main() -> Unit = {\n  println(float.to_string(scale(1.25, 4.0)))\n}\n"),
     ("pure_exit", "fn add(a: Int, b: Int) -> Int = a + b\n\nfn main() -> Unit = {\n  let x = add(1, 2)\n}\n"),
     ("print_int", "fn main() -> Unit = {\n  let y = 3 * 4\n  println(int.to_string(y))\n}\n"),
     ("fn_calls", "fn sq(x: Int) -> Int = x * x\nfn tri(x: Int) -> Int = sq(x) + x\n\nfn main() -> Unit = {\n  println(int.to_string(tri(7)))\n}\n"),
@@ -101,7 +123,7 @@ fn divzero_abort_matches_v0() {
     let dir = scratch("divzero_v0");
     let file = dir.join("prog.almd");
     std::fs::write(&file, src).unwrap();
-    let v0 = Command::new(almide()).args(["run", file.to_str().unwrap()]).output().unwrap();
+    let v0 = Command::new(almide()).args(["run", "--no-verified", file.to_str().unwrap()]).env("ALMIDE_NO_VERIFIED_OK", "1").output().unwrap();
     // v1
     let rust = almide_mir::pipeline::try_render_rust_source(src).expect("in subset");
     let rs = dir.join("prog.rs");
@@ -127,7 +149,6 @@ fn divzero_abort_matches_v0() {
 fn out_of_subset_walls_honestly() {
     let walls = [
         ("list", "fn main() -> Unit = {\n  let xs = [1, 2, 3]\n  println(int.to_string(list.len(xs)))\n}\n"),
-        ("float", "fn main() -> Unit = {\n  println(float.to_string(1.5))\n}\n"),
         ("str_split", "fn main() -> Unit = {\n  let parts = string.split(\"a,b\", \",\")\n  println(parts[0])\n}\n"),
         // list_param moved to the POSITIVE corpus — rung 4 renders scalar-list
         // params/literals/indexing natively (`vec![…]` + the bounds shims).

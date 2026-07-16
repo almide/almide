@@ -3,7 +3,7 @@
   "description": "AI Coding Language Benchmark — MiniGit implementation task",
   "notes": {
     "official_15": "Data from mame/ai-coding-lang-bench results.json (Opus 4.6, 20 trials each)",
-    "almide": "Almide data from internal runs (Sonnet 4.6, 10 trials). Model differs because Almide has no training data in Opus corpus."
+    "almide": "Almide data from internal runs (Sonnet 5, 20 trials, 2026-07-15). Model differs from the official 15 (Opus 4.6) because Almide has no training data; it learns the language in-context from CHEATSHEET.md."
   },
   "languages": [
     {
@@ -52,7 +52,7 @@
       "stddev_loc": 25,
       "v1_pass": 20,
       "v2_pass": 20,
-      "avg_cost": 0.50
+      "avg_cost": 0.5
     },
     {
       "name": "Rust",
@@ -76,7 +76,7 @@
       "stddev_loc": 22,
       "v1_pass": 20,
       "v2_pass": 20,
-      "avg_cost": 0.50
+      "avg_cost": 0.5
     },
     {
       "name": "Python/mypy",
@@ -124,7 +124,7 @@
       "stddev_loc": 30,
       "v1_pass": 20,
       "v2_pass": 20,
-      "avg_cost": 0.60
+      "avg_cost": 0.6
     },
     {
       "name": "TypeScript",
@@ -188,15 +188,88 @@
     },
     {
       "name": "Almide",
-      "model": "sonnet",
-      "trials": 10,
-      "avg_total_time": 1159,
-      "stddev_time": 180,
-      "avg_v2_loc": 325,
-      "stddev_loc": 45,
-      "v1_pass": 10,
-      "v2_pass": 10,
-      "avg_cost": 5.20
+      "model": "sonnet-5",
+      "trials": 20,
+      "avg_total_time": 573.4,
+      "stddev_time": 111.5,
+      "avg_v2_loc": 233,
+      "stddev_loc": 27,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 3.19
     }
-  ]
+  ],
+  "snapshot_2026_07": {
+    "date": "2026-07-15",
+    "model_display": "Claude Sonnet 5",
+    "trials_per_lang": 20,
+    "notes": "Same-model one-shot snapshot: 5 languages x 20 trials, claude-sonnet-5, run 2026-07-15 with runner_multi.rb (upstream prompts verbatim; Almide additionally receives CHEATSHEET.md as it has no training data). Trials where the claude CLI died before attempting the task (<=4 turns, 0 LOC written, no tests executed) were re-run once and the originals quarantined in raw/retired/ — 4/100 trials affected (rust 5, rust 11, gleam 16, moonbit 8). Genuine model failures were never retried. Time figures were measured under 6-9x self-parallelism and are comparable within this snapshot, but conservative vs the sequential upstream runs.",
+    "languages": [
+      {
+        "name": "Almide",
+        "model": "claude-sonnet-5",
+        "toolchain": "almide 0.29.0",
+        "trials": 20,
+        "v1_pass": 20,
+        "v2_pass": 20,
+        "avg_total_time": 573.4,
+        "stddev_time": 111.5,
+        "avg_v2_loc": 233,
+        "stddev_loc": 27,
+        "avg_cost": 3.19
+      },
+      {
+        "name": "Gleam",
+        "model": "claude-sonnet-5",
+        "toolchain": "gleam 1.15.2",
+        "trials": 20,
+        "v1_pass": 20,
+        "v2_pass": 19,
+        "avg_total_time": 714.9,
+        "stddev_time": 257.5,
+        "avg_v2_loc": 394,
+        "stddev_loc": 27,
+        "avg_cost": 2.66
+      },
+      {
+        "name": "MoonBit",
+        "model": "claude-sonnet-5",
+        "toolchain": "moon 0.1.20260330 (c527f57 2026-03-30)",
+        "trials": 20,
+        "v1_pass": 20,
+        "v2_pass": 20,
+        "avg_total_time": 961.9,
+        "stddev_time": 357.8,
+        "avg_v2_loc": 448,
+        "stddev_loc": 54,
+        "avg_cost": 5.28
+      },
+      {
+        "name": "Rust",
+        "model": "claude-sonnet-5",
+        "toolchain": "rustc 1.94.1 (e408947bf 2026-03-25)",
+        "trials": 20,
+        "v1_pass": 20,
+        "v2_pass": 20,
+        "avg_total_time": 296.8,
+        "stddev_time": 89.0,
+        "avg_v2_loc": 351,
+        "stddev_loc": 18,
+        "avg_cost": 1.45
+      },
+      {
+        "name": "TypeScript",
+        "model": "claude-sonnet-5",
+        "toolchain": "tsx v4.23.1",
+        "trials": 20,
+        "v1_pass": 20,
+        "v2_pass": 20,
+        "avg_total_time": 296.6,
+        "stddev_time": 99.1,
+        "avg_v2_loc": 386,
+        "stddev_loc": 138,
+        "avg_cost": 1.44
+      }
+    ]
+  }
 }

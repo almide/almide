@@ -36,6 +36,7 @@ empty_collection_fold  out-of-interp-scope capability: map.new
 empty_from_list_mono  out-of-interp-scope capability: map.from_list
 encoding_base64  out-of-interp-scope capability: bytes.from_string
 env_args  out-of-interp-scope capability: env.args
+env_get  out-of-interp-scope capability: env.get
 fan_any_allfail  out-of-interp-scope capability: fan.any
 fan_deterministic  out-of-interp-scope capability: fan.map
 fan_map_err  out-of-interp-scope capability: fan.map
@@ -85,22 +86,25 @@ loop_buffer_churn  out-of-interp-scope capability: in-place container mutation `
 loop_outer_inplace_mutate_rc  out-of-interp-scope capability: list.slice
 map_filter  out-of-interp-scope capability: map.new
 map_fold  out-of-interp-scope capability: map.new
-map_fold_heap_acc  out-of-interp-scope capability: map.fold
+map_fold_heap_acc  out-of-interp-scope capability: HOF map.fold
 map_insertion_order  out-of-interp-scope capability: map.entries
 map_set_eq  out-of-interp-scope capability: map.new
 map_set_ops  out-of-interp-scope capability: map.from_list
 map_set_typechange  out-of-interp-scope capability: map.from_list
 map_wide_int_key  out-of-interp-scope capability: map.from_list
+math_atan_tanh  out-of-interp-scope capability: transcendental `math.atan` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 math_explog  out-of-interp-scope capability: transcendental `math.exp` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 math_log_gamma  out-of-interp-scope capability: transcendental `math.fpow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 memory_stress  out-of-interp-scope capability: in-place container mutation `list.push` (mut receiver; interp args are by-value so the binding cannot be written back)
 module_global_const  out-of-interp-scope capability: bytes.from_list
-mut_map_param  out-of-interp-scope capability: in-place container mutation `map.insert` (mut receiver; interp args are by-value so the binding cannot be written back)
+module_var_alias_cow  out-of-interp-scope capability: list.repeat
 mut_heap_param  out-of-interp-scope capability: in-place container mutation `list.push` (mut receiver; interp args are by-value so the binding cannot be written back)
+mut_map_param  out-of-interp-scope capability: in-place container mutation `map.insert` (mut receiver; interp args are by-value so the binding cannot be written back)
 mutual_append  out-of-interp-scope capability: string.get
 nested_hof_lambda_inference  out-of-interp-scope capability: list.zip
 nested_match_heap_arm  out-of-interp-scope capability: int.from_hex
 option_result  out-of-interp-scope capability: option.to_list
+place_mutation  out-of-interp-scope capability: map.new
 playground_default  out-of-interp-scope capability: string.drop
 process_args  out-of-interp-scope capability: process.args
 r5_lowmisc_param_try_err  out-of-interp-scope capability: map.from_list

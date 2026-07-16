@@ -102,7 +102,7 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 133 contracts — 133 active, 0 flagged-for-revision.**
+> **Ledger: 136 contracts — 136 active, 0 flagged-for-revision.**
 >
 > **Exceptions: none.** Every contract in the ledger is `active`, carrying
 > executable evidence of class ≥ `fixture`.
@@ -209,7 +209,7 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 |---|---|
 | WASM "Hello World" binary | **467 B** — raw output, self-contained, `wasm-opt` saves only 1–5 more bytes |
 | Native minigit CLI binary | **444 KB** stripped, 0 dependencies |
-| MiniGit AI-coding benchmark | **100% pass** (41/41) vs 15 established languages |
+| MiniGit AI-coding benchmark | **100% pass** (Sonnet 5 × 20 trials) — most concise of 5 languages (233 LOC), faster than Gleam/MoonBit |
 
 Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.md)**.
 
@@ -219,11 +219,12 @@ Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.m
 |----------|--------|
 | Compiler | Pure Rust, single binary, 0 ICE |
 | Targets | Rust (native), WASM (direct emit) |
-| Codegen | v3 — Nanopass + TOML templates, fully target-agnostic walker |
+| Verified codegen | The v1 PCC pipeline is the **default** wasm path since 0.29.0 — certificates re-verified on every build (`--no-verified` opts out) |
+| Codegen | v0 Rust: Nanopass + TOML templates; wasm: certified MIR → direct emit |
 | Stdlib | 834 functions across 39 modules |
-| Tests | 240 test files pass (Rust), 232 pass (WASM) |
-| MSR | 23/25 exercises pass (Sonnet 4.6, WASM, max 3 attempts) |
-| MiniGit Bench | 41/41 tests pass, 100% success rate ([ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench)) |
+| Tests | 285 test files pass (271 via WASM, 14 native) + 133-contract cross-target ledger |
+| MSR | 100% (30/30 tasks, Sonnet 4.6) — see the [scorecard](#msr-scorecard) above, measured by [almide-dojo](https://github.com/almide/almide-dojo) |
+| MiniGit Bench | 100% pass, Sonnet 5 × 20 trials, same-model snapshot vs Gleam/MoonBit/Rust/TypeScript ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)) |
 | Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — compiler runs as WASM in browser |
 

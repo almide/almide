@@ -193,6 +193,129 @@ fn source_to_ir(source: &str) -> Result<almide_ir::IrProgram, LowerError> {
 /// Render a `.almd` **source** program to a COMPLETE wasm module (WAT text) via the v1 MIR renderer.
 ///
 /// `self_modules` are the caller-resolved `import self.<submodule>` siblings (empty ⇒ single file).
+/// Promote a NO-`main` test file's `test` fns to ordinary effect fns and synthesize the
+/// runner `main` (v0 `__test_runner` protocol). See [`try_render_wasm_source_tests`].
+fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), LowerError> {
+    use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind};
+    use almide_lang::intern::sym;
+    use almide_lang::types::Ty;
+    if ir.functions.iter().any(|f| !f.is_test && f.name.as_str() == "main") {
+        // main-mode: both legs run main only (v0's `__main_runner` protocol); the
+        // test fns stay `is_test` and the render loop skips them as before.
+        return Ok(());
+    }
+    if ir.functions.iter().all(|f| !f.is_test) {
+        return Err(LowerError::Unsupported(
+            "test mode: no `main` and no test blocks — nothing to run".into(),
+        ));
+    }
+    // v0's `__test_runner` re-initializes module globals before EVERY test (native
+    // thread-isolation parity). The v1 `_start` runs `__global_init`/`__mg_init` ONCE —
+    // equivalent only when there is no top-let state to leak between tests.
+    if !ir.top_lets.is_empty() || ir.modules.iter().any(|m| !m.top_lets.is_empty()) {
+        return Err(LowerError::Unsupported(
+            "test mode: top-let globals need per-test re-init (the v0 runner's isolation \
+             semantics) not in this brick"
+                .into(),
+        ));
+    }
+    let unit_expr =
+        || IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
+    let println_stmt = |text: String| IrStmt {
+        kind: IrStmtKind::Expr {
+            expr: IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Named { name: sym("println") },
+                    args: vec![IrExpr {
+                        kind: IrExprKind::LitStr { value: text },
+                        ty: Ty::String,
+                        span: None,
+                        def_id: None,
+                    }],
+                    type_args: Vec::new(),
+                },
+                ty: Ty::Unit,
+                span: None,
+                def_id: None,
+            },
+        },
+        span: None,
+    };
+    let mut stmts: Vec<IrStmt> = Vec::new();
+    let mut idx = 0usize;
+    for f in ir.functions.iter_mut() {
+        if !f.is_test {
+            continue;
+        }
+        let display = f
+            .name
+            .as_str()
+            .strip_prefix(almide_ir::TEST_NAME_PREFIX)
+            .unwrap_or(f.name.as_str())
+            .to_string();
+        // Raw test names carry spaces/parens/unicode no WAT identifier admits — rename
+        // to a mechanical id and drop `is_test` so the render loop lowers it like any
+        // other effect fn (nothing else references a test fn by name).
+        let mangled = format!("__almd_test_{idx}");
+        idx += 1;
+        f.name = sym(&mangled);
+        f.is_test = false;
+        stmts.push(println_stmt(format!("test: {display} ... ")));
+        // The stmt-position effect call, in the SAME shape the frontend gives user
+        // code: `Try { call }` with the LIFTED `Result[Unit, String]` call type — the
+        // never-err strips / can-err propagation then classify it exactly like any
+        // other caller (the C-135 def/callsite agreement).
+        let call = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Named { name: sym(&mangled) },
+                args: Vec::new(),
+                type_args: Vec::new(),
+            },
+            ty: Ty::result(Ty::Unit, Ty::String),
+            span: None,
+            def_id: None,
+        };
+        stmts.push(IrStmt {
+            kind: IrStmtKind::Expr {
+                expr: IrExpr {
+                    kind: IrExprKind::Try { expr: Box::new(call) },
+                    ty: Ty::Unit,
+                    span: None,
+                    def_id: None,
+                },
+            },
+            span: None,
+        });
+        stmts.push(println_stmt("ok".to_string()));
+    }
+    let body = IrExpr {
+        kind: IrExprKind::Block { stmts, expr: Some(Box::new(unit_expr())) },
+        ty: Ty::Unit,
+        span: None,
+        def_id: None,
+    };
+    ir.functions.push(almide_ir::IrFunction {
+        name: sym("main"),
+        params: vec![],
+        ret_ty: Ty::Unit,
+        body,
+        is_effect: true,
+        is_async: false,
+        is_test: false,
+        generics: None,
+        extern_attrs: vec![],
+        export_attrs: vec![],
+        attrs: vec![],
+        visibility: almide_ir::IrVisibility::Public,
+        doc: None,
+        blank_lines_before: 0,
+        def_id: None,
+        mutated_params: vec![],
+        module_origin: None,
+    });
+    Ok(())
+}
+
 /// `verbose` gates the honest per-function "outside the lowering subset" diagnostics to stderr.
 ///
 /// Returns `Ok(wat)` when the WHOLE program lowers (every function in-subset, `main` present, no
@@ -202,6 +325,32 @@ pub fn try_render_wasm_source(
     source: &str,
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     verbose: bool,
+) -> Result<String, LowerError> {
+    try_render_wasm_source_impl(source, self_modules, verbose, false)
+}
+
+/// TEST-mode variant for the `almide test` wasm harness: when the file has NO `main`,
+/// its `test "…"` fns are promoted to ordinary effect fns (renamed `__almd_test_<i>` —
+/// the raw names carry spaces/unicode no WAT identifier admits) and a runner `main` is
+/// synthesized with v0's `__test_runner` protocol (`test: <name> ... ` / `ok` per test,
+/// assert failure = controlled halt with a non-zero exit). A file WITH `main` renders
+/// exactly like [`try_render_wasm_source`] — both legs run main only, the v0 protocol.
+/// Programs with top-let globals WALL in test mode (v0 re-inits globals before EVERY
+/// test; the v1 `_start` inits once — shipping that silently would leak one test's
+/// mutations into the next).
+pub fn try_render_wasm_source_tests(
+    source: &str,
+    self_modules: &[(String, almide_lang::ast::Program, bool)],
+    verbose: bool,
+) -> Result<String, LowerError> {
+    try_render_wasm_source_impl(source, self_modules, verbose, true)
+}
+
+fn try_render_wasm_source_impl(
+    source: &str,
+    self_modules: &[(String, almide_lang::ast::Program, bool)],
+    verbose: bool,
+    test_mode: bool,
 ) -> Result<String, LowerError> {
     // STRICT VALUE MODE: this is an OUTPUT path — a deferred Const-0 must never be executable
     // (flight-evidence-gaps F2, the prim.handle literal address-0 class).
@@ -310,11 +459,14 @@ pub fn try_render_wasm_source(
     } else {
         ""
     };
-    let ir = if drops.trim().is_empty() {
+    let mut ir = if drops.trim().is_empty() {
         ir
     } else {
         source_to_ir_with(&format!("{source}\n{value_core_src}\n{drops}"), self_modules)?
     };
+    if test_mode {
+        synthesize_test_runner_main(&mut ir)?;
+    }
 
     // Top-level `let` globals (VarId -> Ty) + their INITIALIZER exprs, union of program + modules.
     let mut globals: HashMap<almide_ir::VarId, almide_lang::types::Ty> = HashMap::new();
@@ -398,7 +550,7 @@ pub fn try_render_wasm_source(
     // crossmod_shape_matrix i64/i32 invalid-wasm class. One combined classification makes
     // caller and callee agree by construction; the returned rewritten bodies are then split
     // back into the main / module lowering regions (each keeps its own globals union).
-    let module_fn_sibs: Vec<almide_ir::IrFunction> = ir
+    let mut module_fn_sibs: Vec<almide_ir::IrFunction> = ir
         .modules
         .iter()
         .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
@@ -450,7 +602,7 @@ pub fn try_render_wasm_source(
     // regressed the intra-module tail-call shape (`route(x, 100)` left values on the
     // wasm stack — wasm_same_name_crossmod_test), and the registries alone are what the
     // module-side lowering consults by MANGLED name.
-    let inlined_fns =
+    let mut inlined_fns =
         crate::lower::inline_mutual_tail_recursion(&ir.functions, &main_globals, &record_layouts);
     // WIDEN the ABI registries over the whole program AFTER the main pre-pass (whose own
     // population is main-only, the pre-batch behavior its rewrites were verified under):
@@ -459,6 +611,122 @@ pub fn try_render_wasm_source(
     // the crossmod caller/callee ABI agreement — without the pre-pass rewrites ever
     // touching module bodies.
     crate::lower::populate_abi_registries(&all_fns, &record_layouts);
+    // The registries above are program-wide, but the never-err REWRITES ran with MAIN-ONLY
+    // sets (inside the pre-pass) and never touched module bodies at all. So a MAIN caller of
+    // a cross-module never-err callee kept its lifted `Try`/Result-typed call, and a MODULE
+    // sibling caller kept its own — both then lower Result-handle reads (`local.set`) over
+    // the raw/void ABI the callee's def actually has: the #786 invalid-wasm class. Re-run
+    // the never-err rewrite family with the PROGRAM-WIDE sets over BOTH regions, so every
+    // caller agrees with the combined classification by construction (idempotent where the
+    // main-only pass already fired; call TARGETS are never renamed, so the module-side name
+    // resolution the original-bodies rule protects is untouched).
+    {
+        let wide_can_err = crate::lower::compute_can_err(&all_fns);
+        let wide_lifted = crate::lower::lifted_effect_fn_names(&all_fns);
+        for f in inlined_fns.iter_mut().chain(module_fn_sibs.iter_mut()) {
+            let self_name = f.name.as_str().to_string();
+            crate::lower::strip_never_err_unwraps(
+                &mut f.body,
+                &wide_can_err,
+                &wide_lifted,
+                &self_name,
+            );
+            crate::lower::rewrite_never_err_effect_match(&mut f.body, &wide_can_err, &wide_lifted);
+            crate::lower::unwrap_never_err_call_types(&mut f.body, &wide_can_err, &wide_lifted);
+            crate::lower::rewrap_never_err_into_result_targets(
+                &mut f.body,
+                &wide_can_err,
+                &wide_lifted,
+                &record_layouts,
+            );
+        }
+    }
+    // Cross-module DERIVED-METHOD name bridge (#790 codec row, piece 2 of the pinned
+    // design): a MAIN-region `T.encode` / `T.decode` reference whose type `T` is
+    // declared by exactly ONE linked module (and not by main) resolves to that
+    // module's MANGLED derived fn (`almide_rt_<m>_T.encode`) — the same unique-owner
+    // rule the variant-layout bridging above uses. Without this the reference stays
+    // unlinked and the whole program walls (honest, but the direct-method shapes are
+    // fully lowerable). Container helpers (`__encode_list_<m>.T`) stay walled — their
+    // v1 lowering is the recorded remainder of the bridge design.
+    {
+        let main_types: std::collections::HashSet<&str> =
+            ir.type_decls.iter().map(|td| td.name.as_str()).collect();
+        let mut owners: std::collections::HashMap<&str, Vec<&str>> =
+            std::collections::HashMap::new();
+        for m in &ir.modules {
+            if almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()) {
+                continue;
+            }
+            for td in &m.type_decls {
+                // Module type names may arrive QUALIFIED (`varlib.Pigment`) — key the
+                // owner map by the BASE name (the same normalization the variant-layout
+                // bridging above applies).
+                let base = td.name.as_str().rsplit('.').next().unwrap_or(td.name.as_str());
+                owners.entry(base).or_default().push(m.name.as_str());
+            }
+        }
+        struct Rw<'a> {
+            main_types: &'a std::collections::HashSet<&'a str>,
+            owners: &'a std::collections::HashMap<&'a str, Vec<&'a str>>,
+        }
+        impl almide_ir::IrMutVisitor for Rw<'_> {
+            fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+                almide_ir::walk_expr_mut(self, e);
+                if let almide_ir::IrExprKind::Call {
+                    target: almide_ir::CallTarget::Named { name },
+                    ..
+                } = &mut e.kind
+                {
+                    let n = name.as_str();
+                    if n.starts_with("almide_rt_") || n.starts_with("__") {
+                        return;
+                    }
+                    let Some((ty_name, method)) = n.rsplit_once('.') else { return };
+                    if method != "encode" && method != "decode" {
+                        return;
+                    }
+                    // `varlib.Pigment.decode` → qualifier "varlib" + base "Pigment";
+                    // `Pigment.decode` → base only. A qualified ref must match the
+                    // owner; a bare ref must not shadow a MAIN type of the same name.
+                    let (qualifier, base) = match ty_name.rsplit_once('.') {
+                        Some((q, b)) => (Some(q), b),
+                        None => (None, ty_name),
+                    };
+                    if qualifier.is_none() && self.main_types.contains(base) {
+                        return;
+                    }
+                    if let Some(ms) = self.owners.get(base) {
+                        if let [only] = ms.as_slice() {
+                            if qualifier.is_none() || qualifier == Some(only) {
+                                *name = almide_lang::intern::sym(&user_module_fn_name(
+                                    only,
+                                    &format!("{base}.{method}"),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut rw = Rw { main_types: &main_types, owners: &owners };
+        // BOTH regions: main's derived fns reference the imported payload type's codec
+        // methods, and the OWNING module's own derived fns reference their sibling
+        // types' methods by the same bare `T.method` names (the derive emits Named
+        // targets directly — no Method desugar ever re-forms them).
+        for f in inlined_fns.iter_mut().chain(module_fn_sibs.iter_mut()) {
+            almide_ir::IrMutVisitor::visit_expr_mut(&mut rw, &mut f.body);
+        }
+        // …and publish the unique-owner map for the DESUGAR-time resolution: the
+        // `T.method` Named names are FORMED inside the per-fn lowering (from Method
+        // targets), after this pipeline pass — the registry is how they see it.
+        let derived_owners: std::collections::HashMap<String, String> = owners
+            .iter()
+            .filter(|(t, ms)| ms.len() == 1 && !main_types.contains(*t))
+            .map(|(t, ms)| (t.to_string(), ms[0].to_string()))
+            .collect();
+        crate::lower::set_derived_type_owners(derived_owners);
+    }
     // MUTABLE module-level `var`s (program + modules): assign each a linear-memory
     // storage slot (declaration order = VarId order, the same ordering `__global_init`
     // uses) and publish the VarId → (slot, Ty) map — reads/assigns then route through the
@@ -500,11 +768,9 @@ pub fn try_render_wasm_source(
     // CROSS-MODULE global refs carry UNKNOWN expr types the frontend never infers
     // (`v.white` — the ceangal theme class): repair them from the bridged globals
     // maps BEFORE lowering, or the AllTypesConcrete precondition walls the whole fn.
-    let mut inlined_fns = inlined_fns;
     for f in inlined_fns.iter_mut() {
         crate::lower::repair_unknown_global_ref_tys(f, &main_globals);
     }
-    let mut module_fn_sibs = module_fn_sibs;
     for f in module_fn_sibs.iter_mut() {
         crate::lower::repair_unknown_global_ref_tys(f, &globals);
     }
@@ -949,9 +1215,46 @@ pub fn try_render_wasm_source(
 /// to a closed native shim floor. `verify_ownership` certifies the Perceus balance
 /// on the same ops before the erasure. WALLS (`Err`) on anything outside the
 /// rung-1 subset — the CLI falls back to v0, so a rendered program is never wrong.
+/// Debug probe: dump the lowered MIR ops of every non-test fn (walls listed
+/// per fn). Used by examples/probe_native.rs during rung development.
+pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
+    crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
+    let ir = source_to_ir_with(source, &[])?;
+    let globals = std::collections::HashMap::new();
+    let global_inits = std::collections::HashMap::new();
+    // The REAL pipeline's layout registries — without them a record literal
+    // lowers as an Opaque skeleton and a field read walls (the very first
+    // rung-5 records probe misread that as a lowering gap).
+    let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
+    let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
+    let mut out = String::new();
+    for func in &ir.functions {
+        if func.is_test {
+            continue;
+        }
+        match crate::lower::lower_function_all_with_globals(func, &globals, &global_inits, &record_layouts, &variant_layouts) {
+            Ok(all) => {
+                for f in all {
+                    out.push_str(&format!("== fn {} ==\n", f.name));
+                    for op in &f.ops {
+                        out.push_str(&format!("  {op:?}\n"));
+                    }
+                }
+            }
+            Err(e) => out.push_str(&format!("== fn {} LOWER-WALL: {e:?}\n", func.name)),
+        }
+    }
+    Ok(out)
+}
+
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
     let ir = source_to_ir_with(source, &[])?;
+    // Rung-5 records slab: the layout registries the wasm leg threads — without
+    // them a record literal lowers as an Opaque skeleton and every field read
+    // strict-walls (the probe_native trap recorded in the trust-spine ledger).
+    let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
+    let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
     if !ir.modules.is_empty() {
         return Err(LowerError::Unsupported(
             "native: multi-module program — outside rung 1".into(),
@@ -978,8 +1281,41 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             matches!(t, Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool))
         };
-        let sig_ok =
-            |t: &Ty| matches!(t, Ty::Int | Ty::Bool | Ty::String) || is_scalar_list(t);
+        // Rung-5 records slab: an ALL-SCALAR record is layout-identical to a
+        // scalar list (the DynList block), so its params/returns ride the same
+        // `&[i64]`/`Vec<i64>` convention on native.
+        let is_scalar_record = |t: &Ty| -> bool {
+            let Ty::Named(n, args) = t else { return false };
+            if !args.is_empty() { return false; }
+            record_layouts
+                .get(n.as_str())
+                .is_some_and(|(_, ftys)| ftys.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft)))
+        };
+        // A FLAT variant (every ctor scalar-only) is likewise one slot block
+        // (tag@0, payload@1+) — same `&[i64]` convention (rung-5 variants slab).
+        let is_flat_variant = |t: &Ty| -> bool {
+            let Ty::Named(n, args) = t else { return false };
+            if !args.is_empty() { return false; }
+            variant_layouts.by_type.get(n.as_str()).is_some_and(|layout| {
+                layout.cases.iter().all(|c| c.fields.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft)))
+            })
+        };
+        // Rung-5 closures slab: a SCALAR closure type (`(Int) -> Int` — every param
+        // and the return scalar) travels as its env block (`Vec<i64>`: [fnidx,
+        // drop-header, captures…]); invocation dispatches through the generated
+        // `__almd_ci_*` tables. Heap-param/-return closures stay wasm-only.
+        let is_scalar_fn = |t: &Ty| {
+            matches!(t, Ty::Fn { params, ret }
+                if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
+                    && matches!(**ret, Ty::Int | Ty::Bool))
+        };
+        let sig_ok = |t: &Ty| {
+            matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
+                || is_scalar_list(t)
+                || is_scalar_record(t)
+                || is_flat_variant(t)
+                || is_scalar_fn(t)
+        };
         for p in &func.params {
             if !sig_ok(&p.ty) {
                 return Err(LowerError::Unsupported(format!(
@@ -996,7 +1332,14 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
         }
         // ALL-OR-NOTHING: any unlowerable fn walls the program (the native rungs
         // have no per-fn fallback — a partial native binary cannot call into v0).
-        let all = crate::lower::lower_function_all(func, &globals).map_err(|e| {
+        let all = crate::lower::lower_function_all_with_globals(
+            func,
+            &globals,
+            &std::collections::HashMap::new(),
+            &record_layouts,
+            &variant_layouts,
+        )
+        .map_err(|e| {
             LowerError::Unsupported(format!("native: fn `{}`: {e:?}", func.name))
         })?;
         functions.extend(all);
@@ -1017,9 +1360,35 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
         let kind = |t: &Ty| -> Option<NativeSigKind> {
             match t {
                 Ty::Int | Ty::Bool => Some(NativeSigKind::I64),
+                Ty::Float => Some(NativeSigKind::F64),
                 Ty::String => Some(NativeSigKind::Str),
                 Ty::Applied(TypeConstructorId::List, a)
                     if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
+                {
+                    Some(NativeSigKind::ListI64)
+                }
+                // An all-scalar record travels as its slot block (see sig_ok).
+                Ty::Named(n, args)
+                    if args.is_empty()
+                        && record_layouts
+                            .get(n.as_str())
+                            .is_some_and(|(_, ftys)| ftys.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft))) =>
+                {
+                    Some(NativeSigKind::ListI64)
+                }
+                // A flat variant travels as its tag+payload slot block.
+                Ty::Named(n, args)
+                    if args.is_empty()
+                        && variant_layouts.by_type.get(n.as_str()).is_some_and(|layout| {
+                            layout.cases.iter().all(|c| c.fields.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft)))
+                        }) =>
+                {
+                    Some(NativeSigKind::ListI64)
+                }
+                // A scalar closure travels as its env block (rung-5 closures slab).
+                Ty::Fn { params, ret }
+                    if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
+                        && matches!(**ret, Ty::Int | Ty::Bool) =>
                 {
                     Some(NativeSigKind::ListI64)
                 }
@@ -1039,6 +1408,31 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             if let (Some(ps), Some(r)) = (params, ret) {
                 sigs.insert(func.name.as_str().to_string(), (ps, r));
             }
+        }
+        // LIFTED lambdas exist only as MirFunctions (no IR sig): param 0 is the env
+        // block (`&[i64]`), the rest are the lambda's own params — SCALAR reprs only
+        // in this slab (a heap-param lambda walls the program: all-or-nothing, and
+        // its dispatch arm could not type). The return kind is body-derived by the
+        // renderer, so it is not declared here.
+        for f in &functions {
+            if !f.name.starts_with("__lambda_") {
+                continue;
+            }
+            let mut ps = vec![crate::render_native::NativeSigKind::ListI64];
+            for p in &f.params[1..] {
+                match p.repr {
+                    crate::Repr::Scalar { .. } => {
+                        ps.push(crate::render_native::NativeSigKind::I64)
+                    }
+                    _ => {
+                        return Err(LowerError::Unsupported(format!(
+                            "native: lambda `{}` heap param — outside the closures slab",
+                            f.name
+                        )))
+                    }
+                }
+            }
+            sigs.insert(f.name.clone(), (ps, Some(crate::render_native::NativeSigKind::I64)));
         }
     }
     crate::render_native::try_render_native_program(

@@ -71,8 +71,35 @@ nprof="$(ls "$COVDIR"/*.profraw 2>/dev/null | wc -l | tr -d ' ')"
 "$LLVM_BIN/llvm-profdata" merge -sparse "$COVDIR"/*.profraw -o "$COVDIR/all.profdata"
 OBJS="-object $RP -object $CLI"
 for tb in $TESTBINS; do OBJS="$OBJS -object $tb"; done
-"$LLVM_BIN/llvm-cov" report $OBJS \
+REPORT="$("$LLVM_BIN/llvm-cov" report $OBJS \
     -instr-profile="$COVDIR/all.profdata" \
     -ignore-filename-regex='(\.cargo|rustc|/tests?/|tests_part|examples/)' 2>/dev/null \
-  | awk 'NR<=2 || /almide-(mir|codegen|frontend)\// || /^TOTAL/' | grep -vE 'tests?_part' \
-  | tail -40
+  | awk 'NR<=2 || /almide-(mir|codegen|frontend)\// || /^TOTAL/' | grep -vE 'tests?_part')"
+printf '%s\n' "$REPORT" | tail -40
+
+# ── RATCHET (#566): TOTAL line coverage may only go UP ─────────────────────
+# Baseline file holds one number: the floor (integer percent ×100 to avoid
+# float compare, e.g. 6589 = 65.89%). `--check` fails when the measured TOTAL
+# drops below it; `--update` raises it to the measured value (never lowers).
+BASELINE_FILE="$ROOT/proofs/coverage-baseline.txt"
+total_line_pct="$(printf '%s\n' "$REPORT" | awk '/^TOTAL/ { for (i=1;i<=NF;i++) if ($i ~ /%$/) last=$i } END { gsub(/%/,"",last); print last }')"
+total_c="$(printf '%s\n' "$total_line_pct" | awk '{ printf "%d", $1 * 100 }')"
+echo
+echo "TOTAL line coverage: ${total_line_pct}%"
+if [ -f "$BASELINE_FILE" ]; then
+    floor="$(cat "$BASELINE_FILE")"
+    if [ "$total_c" -lt "$floor" ]; then
+        echo "COVERAGE RATCHET FAIL: TOTAL ${total_line_pct}% < baseline $(awk -v f="$floor" 'BEGIN{printf "%.2f", f/100}')%"
+        echo "  New code is landing untested. Add tests, or (only with a recorded"
+        echo "  justification) lower proofs/coverage-baseline.txt in its own commit."
+        exit 1
+    fi
+    echo "coverage ratchet OK: ${total_line_pct}% >= floor $(awk -v f="$floor" 'BEGIN{printf "%.2f", f/100}')%"
+    if [ "${1:-}" = "--update" ] && [ "$total_c" -gt "$floor" ]; then
+        echo "$total_c" > "$BASELINE_FILE"
+        echo "coverage ratchet RAISED to ${total_line_pct}%"
+    fi
+else
+    echo "$total_c" > "$BASELINE_FILE"
+    echo "coverage ratchet SEEDED at ${total_line_pct}%"
+fi

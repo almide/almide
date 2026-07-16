@@ -1076,6 +1076,252 @@ pub struct Violation {
 /// renderers rely on), or every violation found (deterministic order). This is
 /// the MIR-level analogue of the Perceus belt's IR check, but it is the SINGLE
 /// source — there is no second hand-written copy in a renderer to drift from.
+/// The mutable scan state of [`verify_ownership`] — one step per op (#781:
+/// the cog-140 loop body became [`OwnershipScan::step`]).
+struct OwnershipScan {
+    object_of: BTreeMap<ValueId, ValueId>,
+    rc: BTreeMap<ValueId, i64>,
+    dead: BTreeMap<ValueId, bool>,
+    borrowed: BTreeSet<ValueId>,
+    branches: Vec<BranchFrame>,
+    violations: Vec<Violation>,
+}
+
+    struct BranchFrame {
+        entry_rc: BTreeMap<ValueId, i64>,
+        entry_dead: BTreeMap<ValueId, bool>,
+        then_exit: Option<(BTreeMap<ValueId, i64>, BTreeMap<ValueId, bool>)>,
+    }
+
+impl OwnershipScan {
+    /// One op's ownership transition. Verbatim text move of the scan loop body
+    /// (locals renamed to fields).
+    fn step(&mut self, i: usize, op: &Op) {
+        match op {
+            Op::Alloc { dst, repr, .. } => {
+                debug_assert!(repr.is_heap(), "Alloc of a non-heap repr is malformed MIR");
+                self.object_of.insert(*dst, *dst);
+                self.rc.insert(*dst, 1);
+                self.dead.insert(*dst, false);
+            }
+            // A rung-4 scalar-list LITERAL is alloc-class: one fresh owned object
+            // (the identical accounting the replaced `Alloc{DynList}` had). Its
+            // element values are raw i64 slot scalars — no ownership to check.
+            Op::ListLit { dst, .. } => {
+                self.object_of.insert(*dst, *dst);
+                self.rc.insert(*dst, 1);
+                self.dead.insert(*dst, false);
+            }
+            // The rung-4 element load/store BORROW the list handle (live-check,
+            // no refcount change — exactly the `Borrow`/`MakeUnique` discipline);
+            // the scalar element/index/value carry no ownership.
+            Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => {
+                if live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *list).is_none() {
+                    self.violations.push(violation(i, *list, ViolationKind::UseAfterFree));
+                }
+            }
+            Op::Const { dst: _ } | Op::ConstInt { .. } => {
+                // A scalar — no ownership accounting.
+            }
+            Op::FuncRef { .. } => {
+                // A function-table slot index — a scalar constant, no ownership.
+            }
+            Op::Dup { dst, src } => {
+                if let Some(o) = live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *src) {
+                    // Acquire OUR own reference. A `Dup` of a self.borrowed param has no
+                    // prior self.rc entry (we owned none) — start it at 0, then +1.
+                    *self.rc.entry(o).or_insert(0) += 1;
+                    self.object_of.insert(*dst, o);
+                    self.dead.insert(*dst, false);
+                } else {
+                    self.violations.push(violation(i, *src, ViolationKind::UseAfterFree));
+                }
+            }
+            // A `DropListStr`/`DropListValue` releases the LIST object exactly like a `Drop` (the
+            // recursive element free is a RENDER concern, gated on self.rc==1; the cert sees one −1 on the
+            // list — its elements were `Consume`d into it when stored).
+            Op::Drop { v }
+            | Op::DropListStr { v }
+            | Op::DropValue { v }
+            | Op::DropListValue { v }
+            | Op::DropListStrValue { v }
+            | Op::DropListStrStr { v }
+            | Op::DropListIntStr { v }
+            | Op::DropListStrInt { v }
+            | Op::DropResultListValue { v }
+            | Op::DropResultValue { v }
+            | Op::DropResultStrInt { v }
+            | Op::DropResultValueInt { v }
+            | Op::DropResultListValueInt { v }
+            | Op::DropResultListStrInt { v }
+            | Op::DropResultListStr { v }
+            | Op::DropListListStr { v }
+            | Op::DropVariant { v, .. }
+            | Op::DropWrapperRec { v, .. } => {
+                match release(&self.object_of, &mut self.rc, &mut self.dead, &self.borrowed, *v) {
+                    Ok(()) => {}
+                    Err(()) => self.violations.push(violation(i, *v, ViolationKind::DoubleFree)),
+                }
+            }
+            Op::Consume { v } => match release(&self.object_of, &mut self.rc, &mut self.dead, &self.borrowed, *v) {
+                Ok(()) => {}
+                Err(()) => self.violations.push(violation(i, *v, ViolationKind::UseAfterMove)),
+            },
+            Op::Borrow { v } | Op::MakeUnique { v } => {
+                if live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *v).is_none() {
+                    self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
+                }
+            }
+            Op::Pure { dst: _, uses } => {
+                for v in uses {
+                    // Only heap handles are accountable; scalar uses are absent
+                    // from `self.object_of` and correctly skipped.
+                    if self.object_of.contains_key(v)
+                        && live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *v).is_none()
+                    {
+                        self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
+                    }
+                }
+            }
+            // A runtime/user call BORROWS its heap-handle args (live-checked, no
+            // refcount change). Immediate/label args carry no ownership. A call
+            // whose `result` is a heap repr returns a FRESH OWNED value (the
+            // callee allocated and moved it out — the return-mode signature): the
+            // `dst` becomes a new owned object, like Alloc.
+            Op::Call { args, dst, result, .. }
+            | Op::CallFn { args, dst, result, .. }
+            // A CallImport (a host wasm import) has the SAME ownership shape: heap-handle
+            // args are BORROWED, a heap result is a FRESH OWNED value (the host returns a
+            // pointer the caller now owns). Its scalar args carry no ownership.
+            | Op::CallImport { args, dst, result, .. }
+            // A CallIndirect has the same ownership shape as a CallFn: its heap-arg handles
+            // must be live, a heap result is a FRESH OWNED value. The `table_idx` is a
+            // scalar closure value (no ownership).
+            | Op::CallIndirect { args, dst, result, .. } => {
+                for a in args {
+                    if let CallArg::Handle(v) = a {
+                        if live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *v).is_none() {
+                            self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
+                        }
+                    }
+                }
+                if let (Some(d), Some(r)) = (dst, result) {
+                    if r.is_heap() {
+                        self.object_of.insert(*d, *d);
+                        self.rc.insert(*d, 1);
+                        self.dead.insert(*d, false);
+                    }
+                }
+            }
+            // The if-markers carry no ownership of their own, but they scope the
+            // BRANCH JOIN: both arms run from the entry state and must agree.
+            Op::IfThen { .. } => {
+                self.branches.push(BranchFrame {
+                    entry_rc: self.rc.clone(),
+                    entry_dead: self.dead.clone(),
+                    then_exit: None,
+                });
+            }
+            Op::Else { .. } => {
+                if let Some(fr) = self.branches.last_mut() {
+                    fr.then_exit = Some((self.rc.clone(), self.dead.clone()));
+                    self.rc = fr.entry_rc.clone();
+                    self.dead = fr.entry_dead.clone();
+                }
+            }
+            Op::EndIf { .. } => {
+                if let Some(fr) = self.branches.pop() {
+                    let (then_rc, then_dead) = match fr.then_exit {
+                        Some(t) => t,
+                        // No Else marker: everything since IfThen was the then arm;
+                        // the else arm is empty (= the entry state).
+                        None => {
+                            let cur = (self.rc.clone(), self.dead.clone());
+                            self.rc = fr.entry_rc.clone();
+                            self.dead = fr.entry_dead.clone();
+                            cur
+                        }
+                    };
+                    // Agreement per object (absent = 0 owned refs).
+                    let keys: BTreeSet<ValueId> =
+                        then_rc.keys().chain(self.rc.keys()).copied().collect();
+                    for k in keys {
+                        let a = then_rc.get(&k).copied().unwrap_or(0);
+                        let b = self.rc.get(&k).copied().unwrap_or(0);
+                        if a != b {
+                            self.violations.push(violation(i, k, ViolationKind::BranchDisagreement));
+                        }
+                    }
+                    // Continue with the JOIN: pointwise max keeps the run stable
+                    // after a reported disagreement (no cascading underflows); on
+                    // agreement it is the common value. A handle self.dead on EITHER
+                    // path is unusable after the merge.
+                    for (k, v) in then_rc {
+                        let e = self.rc.entry(k).or_insert(0);
+                        if v > *e {
+                            *e = v;
+                        }
+                    }
+                    for (k, d) in then_dead {
+                        let e = self.dead.entry(k).or_insert(d);
+                        *e = *e || d;
+                    }
+                }
+            }
+            // Scalar arithmetic — no ownership.
+            // A scalar arithmetic op and a primitive-floor op carry no ownership: a
+            // scalar result is Copy and a `Prim` handle arg is BORROWED (read only).
+            Op::IntBinOp { .. }
+            // Loop markers carry no ownership; the body ops between them are
+            // per-iteration-balanced (verified flat, one iteration).
+            | Op::LoopStart
+            | Op::LoopBreakUnless { .. }
+            | Op::LoopEnd => {}
+            // VALUE-RC modeling (柱C extension) — bring the Value refcount ops out of the prim blind
+            // spot for the NAMEABLE case: prim.handle(v) carries its source object in args[0], so the
+            // self.rc events on it verify against the same self.rc machine. load64-fed handles have no carrier
+            // and stay unmodeled (the differential-test floor). MIRRORED in ownership_certificate.
+            Op::Prim { kind, dst, args } => match kind {
+                PrimKind::Handle => {
+                    if let (Some(d), Some(&o)) =
+                        (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
+                    {
+                        self.object_of.insert(*d, o);
+                    }
+                }
+                PrimKind::RcInc => {
+                    if let Some(&o) = args.first().and_then(|a| self.object_of.get(a)) {
+                        *self.rc.entry(o).or_insert(0) += 1;
+                    }
+                }
+                PrimKind::RcDec => {
+                    if let Some(&o) = args.first().and_then(|a| self.object_of.get(a)) {
+                        if self.rc.get(&o).copied().unwrap_or(0) >= 1 {
+                            *self.rc.entry(o).or_insert(0) -= 1;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            // `SetLocal` into a HEAP slot is a loop-carried REBIND (`acc = acc + [x]`):
+            // the slot now aliases the source's object. The slot's OLD object was
+            // released by a preceding `Drop` in the loop body, so rebinding makes the
+            // slot LIVE again (= the new object), preserving the per-iteration invariant
+            // (slot owns exactly one ref at the body's start and end) — exactly the
+            // soundness condition proved in OwnershipChecker.v's `check_line_unroll_sound`
+            // (a self.rc-preserving loop body is leak/double-free-free for any iteration
+            // count). For a SCALAR src (the scalar-TCO loop var) `self.object_of` has no
+            // entry, so this is a no-op, as before.
+            Op::SetLocal { local, src } => {
+                if let Some(o) = self.object_of.get(src).copied() {
+                    self.object_of.insert(*local, o);
+                    self.dead.insert(*local, false);
+                }
+            }
+        }
+    }
+}
+
 pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
     // Handle ≠ object. Each known heap HANDLE (ValueId) maps to its OBJECT (the
     // `Alloc`'d representative ValueId); the refcount is per OBJECT. A handle is
@@ -1111,237 +1357,21 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
     // (the old model) counted BOTH arms' events, silently accepting cross-arm
     // compensation — a `Consume` in one arm "balancing" the other arm's missing
     // release, i.e. a path-dependent leak/double-free.
-    struct BranchFrame {
-        entry_rc: BTreeMap<ValueId, i64>,
-        entry_dead: BTreeMap<ValueId, bool>,
-        then_exit: Option<(BTreeMap<ValueId, i64>, BTreeMap<ValueId, bool>)>,
-    }
-    let mut branches: Vec<BranchFrame> = Vec::new();
 
+    // Decomposed (#781, cog 140): the per-op transition lives in
+    // `OwnershipScan::step`; the maps moved into the scan struct verbatim.
+    let mut scan = OwnershipScan {
+        object_of,
+        rc,
+        dead,
+        borrowed,
+        branches: Vec::new(),
+        violations,
+    };
     for (i, op) in func.ops.iter().enumerate() {
-        match op {
-            Op::Alloc { dst, repr, .. } => {
-                debug_assert!(repr.is_heap(), "Alloc of a non-heap repr is malformed MIR");
-                object_of.insert(*dst, *dst);
-                rc.insert(*dst, 1);
-                dead.insert(*dst, false);
-            }
-            // A rung-4 scalar-list LITERAL is alloc-class: one fresh owned object
-            // (the identical accounting the replaced `Alloc{DynList}` had). Its
-            // element values are raw i64 slot scalars — no ownership to check.
-            Op::ListLit { dst, .. } => {
-                object_of.insert(*dst, *dst);
-                rc.insert(*dst, 1);
-                dead.insert(*dst, false);
-            }
-            // The rung-4 element load/store BORROW the list handle (live-check,
-            // no refcount change — exactly the `Borrow`/`MakeUnique` discipline);
-            // the scalar element/index/value carry no ownership.
-            Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => {
-                if live_object(&object_of, &rc, &dead, &borrowed, *list).is_none() {
-                    violations.push(violation(i, *list, ViolationKind::UseAfterFree));
-                }
-            }
-            Op::Const { dst: _ } | Op::ConstInt { .. } => {
-                // A scalar — no ownership accounting.
-            }
-            Op::FuncRef { .. } => {
-                // A function-table slot index — a scalar constant, no ownership.
-            }
-            Op::Dup { dst, src } => {
-                if let Some(o) = live_object(&object_of, &rc, &dead, &borrowed, *src) {
-                    // Acquire OUR own reference. A `Dup` of a borrowed param has no
-                    // prior rc entry (we owned none) — start it at 0, then +1.
-                    *rc.entry(o).or_insert(0) += 1;
-                    object_of.insert(*dst, o);
-                    dead.insert(*dst, false);
-                } else {
-                    violations.push(violation(i, *src, ViolationKind::UseAfterFree));
-                }
-            }
-            // A `DropListStr`/`DropListValue` releases the LIST object exactly like a `Drop` (the
-            // recursive element free is a RENDER concern, gated on rc==1; the cert sees one −1 on the
-            // list — its elements were `Consume`d into it when stored).
-            Op::Drop { v }
-            | Op::DropListStr { v }
-            | Op::DropValue { v }
-            | Op::DropListValue { v }
-            | Op::DropListStrValue { v }
-            | Op::DropListStrStr { v }
-            | Op::DropListIntStr { v }
-            | Op::DropListStrInt { v }
-            | Op::DropResultListValue { v }
-            | Op::DropResultValue { v }
-            | Op::DropResultStrInt { v }
-            | Op::DropResultValueInt { v }
-            | Op::DropResultListValueInt { v }
-            | Op::DropResultListStrInt { v }
-            | Op::DropResultListStr { v }
-            | Op::DropListListStr { v }
-            | Op::DropVariant { v, .. }
-            | Op::DropWrapperRec { v, .. } => {
-                match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
-                    Ok(()) => {}
-                    Err(()) => violations.push(violation(i, *v, ViolationKind::DoubleFree)),
-                }
-            }
-            Op::Consume { v } => match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
-                Ok(()) => {}
-                Err(()) => violations.push(violation(i, *v, ViolationKind::UseAfterMove)),
-            },
-            Op::Borrow { v } | Op::MakeUnique { v } => {
-                if live_object(&object_of, &rc, &dead, &borrowed, *v).is_none() {
-                    violations.push(violation(i, *v, ViolationKind::UseAfterFree));
-                }
-            }
-            Op::Pure { dst: _, uses } => {
-                for v in uses {
-                    // Only heap handles are accountable; scalar uses are absent
-                    // from `object_of` and correctly skipped.
-                    if object_of.contains_key(v)
-                        && live_object(&object_of, &rc, &dead, &borrowed, *v).is_none()
-                    {
-                        violations.push(violation(i, *v, ViolationKind::UseAfterFree));
-                    }
-                }
-            }
-            // A runtime/user call BORROWS its heap-handle args (live-checked, no
-            // refcount change). Immediate/label args carry no ownership. A call
-            // whose `result` is a heap repr returns a FRESH OWNED value (the
-            // callee allocated and moved it out — the return-mode signature): the
-            // `dst` becomes a new owned object, like Alloc.
-            Op::Call { args, dst, result, .. }
-            | Op::CallFn { args, dst, result, .. }
-            // A CallImport (a host wasm import) has the SAME ownership shape: heap-handle
-            // args are BORROWED, a heap result is a FRESH OWNED value (the host returns a
-            // pointer the caller now owns). Its scalar args carry no ownership.
-            | Op::CallImport { args, dst, result, .. }
-            // A CallIndirect has the same ownership shape as a CallFn: its heap-arg handles
-            // must be live, a heap result is a FRESH OWNED value. The `table_idx` is a
-            // scalar closure value (no ownership).
-            | Op::CallIndirect { args, dst, result, .. } => {
-                for a in args {
-                    if let CallArg::Handle(v) = a {
-                        if live_object(&object_of, &rc, &dead, &borrowed, *v).is_none() {
-                            violations.push(violation(i, *v, ViolationKind::UseAfterFree));
-                        }
-                    }
-                }
-                if let (Some(d), Some(r)) = (dst, result) {
-                    if r.is_heap() {
-                        object_of.insert(*d, *d);
-                        rc.insert(*d, 1);
-                        dead.insert(*d, false);
-                    }
-                }
-            }
-            // The if-markers carry no ownership of their own, but they scope the
-            // BRANCH JOIN: both arms run from the entry state and must agree.
-            Op::IfThen { .. } => {
-                branches.push(BranchFrame {
-                    entry_rc: rc.clone(),
-                    entry_dead: dead.clone(),
-                    then_exit: None,
-                });
-            }
-            Op::Else { .. } => {
-                if let Some(fr) = branches.last_mut() {
-                    fr.then_exit = Some((rc.clone(), dead.clone()));
-                    rc = fr.entry_rc.clone();
-                    dead = fr.entry_dead.clone();
-                }
-            }
-            Op::EndIf { .. } => {
-                if let Some(fr) = branches.pop() {
-                    let (then_rc, then_dead) = match fr.then_exit {
-                        Some(t) => t,
-                        // No Else marker: everything since IfThen was the then arm;
-                        // the else arm is empty (= the entry state).
-                        None => {
-                            let cur = (rc.clone(), dead.clone());
-                            rc = fr.entry_rc.clone();
-                            dead = fr.entry_dead.clone();
-                            cur
-                        }
-                    };
-                    // Agreement per object (absent = 0 owned refs).
-                    let keys: BTreeSet<ValueId> =
-                        then_rc.keys().chain(rc.keys()).copied().collect();
-                    for k in keys {
-                        let a = then_rc.get(&k).copied().unwrap_or(0);
-                        let b = rc.get(&k).copied().unwrap_or(0);
-                        if a != b {
-                            violations.push(violation(i, k, ViolationKind::BranchDisagreement));
-                        }
-                    }
-                    // Continue with the JOIN: pointwise max keeps the run stable
-                    // after a reported disagreement (no cascading underflows); on
-                    // agreement it is the common value. A handle dead on EITHER
-                    // path is unusable after the merge.
-                    for (k, v) in then_rc {
-                        let e = rc.entry(k).or_insert(0);
-                        if v > *e {
-                            *e = v;
-                        }
-                    }
-                    for (k, d) in then_dead {
-                        let e = dead.entry(k).or_insert(d);
-                        *e = *e || d;
-                    }
-                }
-            }
-            // Scalar arithmetic — no ownership.
-            // A scalar arithmetic op and a primitive-floor op carry no ownership: a
-            // scalar result is Copy and a `Prim` handle arg is BORROWED (read only).
-            Op::IntBinOp { .. }
-            // Loop markers carry no ownership; the body ops between them are
-            // per-iteration-balanced (verified flat, one iteration).
-            | Op::LoopStart
-            | Op::LoopBreakUnless { .. }
-            | Op::LoopEnd => {}
-            // VALUE-RC modeling (柱C extension) — bring the Value refcount ops out of the prim blind
-            // spot for the NAMEABLE case: prim.handle(v) carries its source object in args[0], so the
-            // rc events on it verify against the same rc machine. load64-fed handles have no carrier
-            // and stay unmodeled (the differential-test floor). MIRRORED in ownership_certificate.
-            Op::Prim { kind, dst, args } => match kind {
-                PrimKind::Handle => {
-                    if let (Some(d), Some(&o)) =
-                        (dst.as_ref(), args.first().and_then(|a| object_of.get(a)))
-                    {
-                        object_of.insert(*d, o);
-                    }
-                }
-                PrimKind::RcInc => {
-                    if let Some(&o) = args.first().and_then(|a| object_of.get(a)) {
-                        *rc.entry(o).or_insert(0) += 1;
-                    }
-                }
-                PrimKind::RcDec => {
-                    if let Some(&o) = args.first().and_then(|a| object_of.get(a)) {
-                        if rc.get(&o).copied().unwrap_or(0) >= 1 {
-                            *rc.entry(o).or_insert(0) -= 1;
-                        }
-                    }
-                }
-                _ => {}
-            },
-            // `SetLocal` into a HEAP slot is a loop-carried REBIND (`acc = acc + [x]`):
-            // the slot now aliases the source's object. The slot's OLD object was
-            // released by a preceding `Drop` in the loop body, so rebinding makes the
-            // slot LIVE again (= the new object), preserving the per-iteration invariant
-            // (slot owns exactly one ref at the body's start and end) — exactly the
-            // soundness condition proved in OwnershipChecker.v's `check_line_unroll_sound`
-            // (a rc-preserving loop body is leak/double-free-free for any iteration
-            // count). For a SCALAR src (the scalar-TCO loop var) `object_of` has no
-            // entry, so this is a no-op, as before.
-            Op::SetLocal { local, src } => {
-                if let Some(o) = object_of.get(src).copied() {
-                    object_of.insert(*local, o);
-                    dead.insert(*local, false);
-                }
-            }
-        }
+        scan.step(i, op);
     }
+    let OwnershipScan { object_of, mut rc, mut dead, borrowed, mut violations, .. } = scan;
 
     // A heap return value is MOVED OUT to the caller. It must be a reference WE
     // own (an `Alloc`/call-result, or a `Dup` we acquired): releasing it transfers

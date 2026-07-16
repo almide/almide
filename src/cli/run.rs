@@ -70,11 +70,15 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
         let source_text = std::fs::read_to_string(file).unwrap_or_default();
         match almide_mir::pipeline::try_render_rust_source(&source_text) {
             Ok(v1_code) => {
-                eprintln!("native: v1 trust-spine render");
+                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+                    eprintln!("native: v1 trust-spine render");
+                }
                 v1_code
             }
             Err(e) => {
-                eprintln!("native: v1 walled ({e:?}) — falling back to v0 codegen");
+                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+                    eprintln!("native: v1 walled ({e:?}) — falling back to v0 codegen");
+                }
                 rs_code
             }
         }

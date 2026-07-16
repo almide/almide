@@ -225,6 +225,42 @@ fn extern_wasm_abi(ty: &Ty) -> Option<crate::WasmAbi> {
     }
 }
 
+/// A sized-int WIDENING conversion call (`int8.to_int64(x)`, `uint32.to_int64(x)`, …)
+/// whose runtime is the IDENTITY on the canonical-i64 slot value: every integer width
+/// lives sign-/zero-extended in one i64 (the `Ty` docs + `extern_wasm_abi` pin this),
+/// and the Rust runtime is `n as i64` over that already-canonical value (`u64 as i64`
+/// is the same bit-reinterpret the slot already holds). Returns the operand expr when
+/// the shape applies — the lowering forwards the operand's value with NO call, and
+/// `count_ir_calls` skips the node by the SAME predicate (mir == ir by construction).
+pub fn identity_int_widening_call(e: &IrExpr) -> Option<&IrExpr> {
+    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
+    else {
+        return None;
+    };
+    if args.len() != 1 || func.as_str() != "to_int64" {
+        return None;
+    }
+    if !matches!(
+        module.as_str(),
+        "int" | "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64"
+    ) {
+        return None;
+    }
+    let arg_int = matches!(
+        args[0].ty,
+        Ty::Int
+            | Ty::Int8
+            | Ty::Int16
+            | Ty::Int32
+            | Ty::Int64
+            | Ty::UInt8
+            | Ty::UInt16
+            | Ty::UInt32
+            | Ty::UInt64
+    );
+    arg_int.then(|| &args[0])
+}
+
 /// The `@extern(wasm, module, name)` attribute on a function, iff present (the
 /// browser-import case — a `rust`/`rs` target keeps walling: there is no wasm host
 /// for it, so emitting an import would be a hollow lie). Returns `(module, name)`.
@@ -980,6 +1016,268 @@ fn body_has_tail_position_option_unwrap(body: &IrExpr) -> bool {
     scan(body)
 }
 
+/// Desugar `assert(cond)` / `assert_eq(a, b)` / `assert_ne(a, b)` (Unit-typed builtin
+/// calls — the test-block floor, also legal in a main body) to the §13 controlled-halt
+/// shape the SELF-HOST stdlib already proves out (math.pow's negative-exponent guard):
+/// `if <cond> then () else prim.die(prim.handle("assertion failed…"))`. Everything
+/// downstream is EXISTING machinery — the stmt-position Unit-`if` executes via
+/// `try_lower_unit_if`, `==`/`!=` dispatch through the ordinary BinOp lowering (whatever
+/// operand types that subset admits; the rest walls honestly), and `prim.die` is the
+/// proven Die prim. Failure = message on stderr + exit 1 — the harness keys on the
+/// non-zero exit, exactly like v0's trap. Applied desugar-before-both (same slot as
+/// `desugar_heap_branches`), so every driver counts and lowers the SAME tree.
+fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::intern::sym;
+    fn die_expr(msg: &str) -> IrExpr {
+        let lit = IrExpr {
+            kind: IrExprKind::LitStr { value: msg.to_string() },
+            ty: Ty::String,
+            span: None,
+            def_id: None,
+        };
+        let handle = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Module { module: sym("prim"), func: sym("handle"), def_id: None },
+                args: vec![lit],
+                type_args: Vec::new(),
+            },
+            ty: Ty::Int,
+            span: None,
+            def_id: None,
+        };
+        IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Module { module: sym("prim"), func: sym("die"), def_id: None },
+                args: vec![handle],
+                type_args: Vec::new(),
+            },
+            ty: Ty::Unit,
+            span: None,
+            def_id: None,
+        }
+    }
+    struct S {
+        changed: bool,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            if !matches!(e.ty, Ty::Unit) {
+                return;
+            }
+            let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind
+            else {
+                return;
+            };
+            let (cond, msg) = match (name.as_str(), args.as_slice()) {
+                ("assert", [c]) if matches!(c.ty, Ty::Bool) => {
+                    (c.clone(), "assertion failed: assert(false)")
+                }
+                ("assert_eq", [a, b]) => (
+                    IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: almide_ir::BinOp::Eq,
+                            left: Box::new(a.clone()),
+                            right: Box::new(b.clone()),
+                        },
+                        ty: Ty::Bool,
+                        span: None,
+                        def_id: None,
+                    },
+                    "assertion failed: left == right",
+                ),
+                ("assert_ne", [a, b]) => (
+                    IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: almide_ir::BinOp::Neq,
+                            left: Box::new(a.clone()),
+                            right: Box::new(b.clone()),
+                        },
+                        ty: Ty::Bool,
+                        span: None,
+                        def_id: None,
+                    },
+                    "assertion failed: left != right",
+                ),
+                _ => return,
+            };
+            let unit = IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
+            *e = IrExpr {
+                kind: IrExprKind::If {
+                    cond: Box::new(cond),
+                    then: Box::new(unit),
+                    else_: Box::new(die_expr(msg)),
+                },
+                ty: Ty::Unit,
+                span: e.span.clone(),
+                def_id: e.def_id,
+            };
+            self.changed = true;
+        }
+    }
+    let mut s = S { changed: false };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}
+
+/// `m[k]` over a `Map` (the frontend emits `MapAccess` ONLY for `obj.ty.is_map()`) →
+/// `map.get(m, k)` — the ordinary self-host map lookup call (`Option[V]` result), which
+/// the repr dispatch suffixes (`get_skv`/`get_str`/…) like every other map call site.
+/// Applied desugar-before-both (same slot as `desugar_assert_calls`): the counted tree
+/// and the lowering see the SAME Call node, so `mir == ir` holds for the one CallFn.
+fn desugar_map_access_calls(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::intern::sym;
+    struct S {
+        changed: bool,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::MapAccess { object, key } = &e.kind else {
+                return;
+            };
+            *e = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: sym("map"),
+                        func: sym("get"),
+                        def_id: None,
+                    },
+                    args: vec![(**object).clone(), (**key).clone()],
+                    type_args: Vec::new(),
+                },
+                ty: e.ty.clone(),
+                span: e.span.clone(),
+                def_id: e.def_id,
+            };
+            self.changed = true;
+        }
+    }
+    let mut s = S { changed: false };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}
+
+/// `buf[i]` over `Bytes` (a scalar `Int` element read) → `bytes.index(buf, i)` — the
+/// CHECKED self-host byte read (aborts `Error: index out of bounds` + exit 1 exactly
+/// like v0's `b[i]`; `bytes.read_u8`'s 0-for-OOB convention is a DIFFERENT api).
+/// Same desugar-before-both slot as `desugar_map_access_calls`.
+fn desugar_bytes_index_calls(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::intern::sym;
+    struct S {
+        changed: bool,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::IndexAccess { object, index } = &e.kind else {
+                return;
+            };
+            if !matches!(object.ty, Ty::Bytes) || !matches!(e.ty, Ty::Int) {
+                return;
+            }
+            *e = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: sym("bytes"),
+                        func: sym("index"),
+                        def_id: None,
+                    },
+                    args: vec![(**object).clone(), (**index).clone()],
+                    type_args: Vec::new(),
+                },
+                ty: e.ty.clone(),
+                span: e.span.clone(),
+                def_id: e.def_id,
+            };
+            self.changed = true;
+        }
+    }
+    let mut s = S { changed: false };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}
+
+/// The `Result[Unit, E]` this fn's ABI promises when its body's effective TAIL is Unit-typed
+/// (descending Block chains; an absent tail is Unit) — `None` when the tail carries a real
+/// value or the fn is not Result-ABI. Declared `Result[Unit, E]` keeps its own `E`; a
+/// declared-Unit AUTO_WRAP lift synthesizes `Result[Unit, String]` (the same type the
+/// `owned_body` override stamps). Declared-Option and declared-Unit-non-AUTO_WRAP fns
+/// (including a void-convention main) are excluded by construction.
+fn unit_tail_result_abi_ty(func: &IrFunction, body: &IrExpr) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    fn tail_is_unit(e: &IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::Block { expr: Some(t), .. } => tail_is_unit(t),
+            IrExprKind::Block { expr: None, .. } => true,
+            _ => matches!(e.ty, Ty::Unit),
+        }
+    }
+    let result_ty = match &func.ret_ty {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(a[0], Ty::Unit) => {
+            func.ret_ty.clone()
+        }
+        // A LIFTED (declared-Unit effect) fn whose CALLERS keep the Result expectation:
+        // the AUTO_WRAP set, or any CAN-ERR lifted fn (∉ NEVER_ERR — e.g. an argument-
+        // position `!` errs without tripping the stmt/tail AUTO_WRAP heuristics, so the
+        // caller's `Try` is never stripped and it `local.set`s the promised handle).
+        // The def must return that handle: same registry, same verdict, by construction.
+        // `main` keeps the exit-code void convention (its caller is `_start`, not a
+        // registry-classified call site).
+        Ty::Unit
+            if func.is_effect
+                && func.name.as_str() != "main"
+                && (crate::lower::AUTO_WRAP_ABI_FNS
+                    .with(|s| s.borrow().contains(func.name.as_str()))
+                    || !crate::lower::NEVER_ERR_LIFTED_FNS
+                        .with(|s| s.borrow().contains(func.name.as_str()))) =>
+        {
+            Ty::result(Ty::Unit, Ty::String)
+        }
+        _ => return None,
+    };
+    tail_is_unit(body).then_some(result_ty)
+}
+
+/// `{ stmts…; unit_tail }` → `{ stmts…; unit_tail; ok(()) }` — the old Unit tail becomes a
+/// statement (the standard stmt-position effect shape), and the fn returns the real ok-Unit
+/// Result block its ABI classification promises. Only the TOP-level Block is flattened; a
+/// non-Block unit body becomes the single statement.
+fn wrap_unit_body_in_ok(body: &IrExpr, result_ty: Ty) -> IrExpr {
+    let (mut stmts, old_tail) = match &body.kind {
+        IrExprKind::Block { stmts, expr } => (stmts.clone(), expr.as_deref().cloned()),
+        _ => (Vec::new(), Some(body.clone())),
+    };
+    if let Some(t) = old_tail {
+        stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: t }, span: None });
+    }
+    let ok_unit = IrExpr {
+        kind: IrExprKind::ResultOk {
+            expr: Box::new(IrExpr {
+                kind: IrExprKind::Unit,
+                ty: Ty::Unit,
+                span: None,
+                def_id: None,
+            }),
+        },
+        ty: result_ty.clone(),
+        span: None,
+        def_id: None,
+    };
+    IrExpr {
+        kind: IrExprKind::Block { stmts, expr: Some(Box::new(ok_unit)) },
+        ty: result_ty,
+        span: body.span.clone(),
+        def_id: body.def_id,
+    }
+}
+
 fn lower_function_all_impl(
     func: &IrFunction,
     globals: &HashMap<VarId, Ty>,
@@ -993,6 +1291,19 @@ fn lower_function_all_impl(
     // (a `rust`/`rs` extern has no wasm host → `None` → it keeps walling as before).
     if let Some(import_fn) = try_lower_extern_wasm(func)? {
         return Ok(vec![import_fn]);
+    }
+    // A `mut` param's write-back rides v0's tuple-return + place-writeback
+    // convention (C-131/C-132). The v1 lower has NO move-mode calling convention
+    // yet: a mutation through the borrowed param COWs a copy and silently DROPS
+    // the caller-visible write (`push9(v, 20)` left `v` unchanged on the verified
+    // default while v0 pushed — the #790 mut_list_param row, main-reachable).
+    // WALL the fn — v0 emits the correct convention on both targets.
+    if !func.mutated_params.is_empty() {
+        return Err(LowerError::Unsupported(format!(
+            "fn `{}` mutates its `mut` param(s) — the move-mode write-back \
+             convention (C-132) not in this brick",
+            func.name
+        )));
     }
     let mut ctx = LowerCtx {
         globals: globals.clone(),
@@ -1042,6 +1353,49 @@ fn lower_function_all_impl(
         &owned_body
     } else {
         &func.body
+    };
+    // assert/assert_eq/assert_ne → the controlled-halt `if`/die shape (see
+    // `desugar_assert_calls`). Desugar-before-both: every downstream consumer
+    // (counting, TCO, lowering) sees the same tree.
+    let assert_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_assert_calls(func_body) {
+        assert_body = rewritten;
+        &assert_body
+    } else {
+        func_body
+    };
+    // `m[k]` → `map.get(m, k)` (see `desugar_map_access_calls`) — same
+    // desugar-before-both slot.
+    let map_access_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_map_access_calls(func_body) {
+        map_access_body = rewritten;
+        &map_access_body
+    } else {
+        func_body
+    };
+    // `buf[i]` over Bytes → `bytes.index(buf, i)` (see `desugar_bytes_index_calls`).
+    let bytes_index_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_bytes_index_calls(func_body) {
+        bytes_index_body = rewritten;
+        &bytes_index_body
+    } else {
+        func_body
+    };
+    // A RESULT-ABI fn (declared `Result[Unit, E]`, or a declared-Unit AUTO_WRAP lift) whose
+    // effective TAIL is Unit-typed produces NO value on the unit path — the never-err strips
+    // reduce a lifted tail call to a raw Unit effect call, and a declared-Result effect fn can
+    // end on a bare effect stmt. But every CALL SITE consults the same name-keyed ABI
+    // registries and `local.set`s the expected Result handle over the void callee — invalid
+    // wasm (the #786 class: def and call sites disagree on the ABI). Materialize the missing
+    // value: `body_unit` → `{ body_unit; ok(()) }`, so the def returns the real Result block
+    // its classification promises (the proven alloc(i) + move-out(m) tail). A declared-Unit
+    // main is NEITHER case (both gates miss), so the exit-code void convention is untouched.
+    let ok_wrapped_body;
+    let func_body: &IrExpr = if let Some(result_ty) = unit_tail_result_abi_ty(func, func_body) {
+        ok_wrapped_body = wrap_unit_body_in_ok(func_body, result_ty);
+        &ok_wrapped_body
+    } else {
+        func_body
     };
     crate::lower::dump_desugared_ir(func.name.as_str(), func_body, variant_layouts, record_layouts);
     let pre_tco = desugar_heap_branches(func_body, variant_layouts);

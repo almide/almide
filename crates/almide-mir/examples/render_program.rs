@@ -70,9 +70,15 @@ fn discover_self_modules(
 }
 
 fn main() {
-    let path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| die("usage: render_program <file.almd>".into()));
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // `--tests` renders through the TEST-mode pipeline (synthesized runner main for a
+    // no-main test file) — the `almide test` wasm harness's entry.
+    let test_mode = args.iter().any(|a| a == "--tests");
+    args.retain(|a| a != "--tests");
+    let path = args
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| die("usage: render_program [--tests] <file.almd>".into()));
     let source =
         std::fs::read_to_string(&path).unwrap_or_else(|e| die(format!("cannot read {path}: {e}")));
     // Resolve the input file's `import self.<submodule>` siblings (canonical driver discovery).
@@ -81,7 +87,12 @@ fn main() {
         .parse()
         .unwrap_or_else(|e| die(format!("parse error: {e:?}")));
     let self_modules = discover_self_modules(&path, &probe_prog);
-    match almide_mir::pipeline::try_render_wasm_source(&source, &self_modules, true) {
+    let rendered = if test_mode {
+        almide_mir::pipeline::try_render_wasm_source_tests(&source, &self_modules, true)
+    } else {
+        almide_mir::pipeline::try_render_wasm_source(&source, &self_modules, true)
+    };
+    match rendered {
         Ok(wat) => print!("{wat}"),
         Err(e) => die(format!("[render_program] {e:?}")),
     }

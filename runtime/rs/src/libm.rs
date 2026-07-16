@@ -621,3 +621,4 @@ fn rem_pio2(x: f64) -> (i32, f64, f64) {
 
 include!("libm_p2.rs");
 include!("libm_p3.rs");
+include!("libm_p4.rs");

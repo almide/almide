@@ -2,3 +2,4 @@
 .logs/
 raw/*
 !raw/.gitkeep
+.npm-prefix/

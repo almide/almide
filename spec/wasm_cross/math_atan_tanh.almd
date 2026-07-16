@@ -1,0 +1,51 @@
+// @contract: C-134
+// Cross-target equivalence for math.atan / math.tanh (and the expm1 kernel
+// tanh rides on).
+//
+// Both targets run the SAME vendored musl-libm reference (native:
+// runtime/rs/src/libm_p4.rs, wasm: emit_wasm/rt_numeric.rs +
+// emit_wasm/rt_libm_p4.rs), so every result must be byte-identical. Printed
+// via float.to_string (Dragon4, itself byte-identical cross-target), so any
+// diff the gate catches is the MATH. Covers:
+//   - every atan subrange (|x| < 7/16, the three reduction intervals, |x| >= 2^66)
+//     and the identities atan(1) = pi/4, atan(inf) = pi/2
+//   - every tanh range split (log(5/3)/2, log(3)/2, |x| > 20, subnormal) and
+//     the expm1(1.1) upstream sanity vector through tanh(0.55)
+//   - signs, ±0, ±inf, NaN
+
+fn main() -> Unit = {
+  let pinf = 1.0 / 0.0
+  let nan = 0.0 / 0.0
+  let nzero = -1.0 * 0.0
+
+  // atan: subranges + identities
+  println(float.to_string(math.atan(0.2)))
+  println(float.to_string(math.atan(0.5)))
+  println(float.to_string(math.atan(1.0)))
+  println(float.to_string(math.atan(1.5)))
+  println(float.to_string(math.atan(3.0)))
+  println(float.to_string(math.atan(1000000.0)))
+  println(float.to_string(math.atan(0.000000007450580596923828)))
+  println(float.to_string(math.atan(-0.7)))
+  println(float.to_string(math.atan(-2.4375)))
+  println(float.to_string(math.atan(pinf)))
+  println(float.to_string(math.atan(0.0 - pinf)))
+  println(float.to_string(math.atan(nan)))
+  println(float.to_string(math.atan(nzero)))
+
+  // tanh: range splits + expm1 vector + saturation
+  println(float.to_string(math.tanh(0.1)))
+  println(float.to_string(math.tanh(0.2554)))
+  println(float.to_string(math.tanh(0.5)))
+  println(float.to_string(math.tanh(0.55)))
+  println(float.to_string(math.tanh(1.0)))
+  println(float.to_string(math.tanh(5.0)))
+  println(float.to_string(math.tanh(20.5)))
+  println(float.to_string(math.tanh(-0.3)))
+  println(float.to_string(math.tanh(-19.0)))
+  println(float.to_string(math.tanh(0.0000000000000000000001)))
+  println(float.to_string(math.tanh(pinf)))
+  println(float.to_string(math.tanh(0.0 - pinf)))
+  println(float.to_string(math.tanh(nan)))
+  println(float.to_string(math.tanh(nzero)))
+}

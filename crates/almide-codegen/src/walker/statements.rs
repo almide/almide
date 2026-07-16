@@ -590,60 +590,88 @@ fn is_boxed_record_field(ctx: &RenderContext, ctor: &str, field: &str) -> bool {
 }
 
 /// `matches!`-shaped boolean that `access` (a `&Enum`-typed expr) structurally
-/// matches `pat`, deref-ing one box per level. Bindings render as `_`; a deeper
-/// boxed-nested sub-pattern binds a fresh var and recurses through `&**` into the
-/// matches! `if` clause.
+/// matches `pat`, deref-ing one box per level. The shape must carry EVERY
+/// refutable constraint the body's `let-else` will re-assert — the guard is the
+/// only thing standing between a non-matching value and the let-else's
+/// `unreachable!()` (#757: erasing a non-boxed inner tag like `Color::Red` to
+/// `_` let a `Black` node through the guard and panicked instead of falling
+/// through to the next arm).
 fn box_shape_guard(ctx: &RenderContext, pat: &IrPattern, access: &str, counter: &mut usize) -> String {
     match pat {
-        IrPattern::Constructor { name, args } => {
-            let qualified = qualify_ctor(ctx, name.as_str(), None);
-            if args.is_empty() {
-                return format!("matches!({}, {})", access, qualified);
-            }
-            let mut shape = Vec::with_capacity(args.len());
+        IrPattern::Constructor { .. } | IrPattern::RecordPattern { .. } => {
             let mut subs = Vec::new();
-            for (i, arg) in args.iter().enumerate() {
-                if is_boxed_tuple_field(ctx, name.as_str(), i) && pattern_is_complex(arg) {
-                    let g = fresh_box_var(counter);
-                    subs.push(box_shape_guard(ctx, arg, &format!("&**{}", g), counter));
-                    shape.push(g);
-                } else {
-                    shape.push("_".to_string());
-                }
-            }
-            let pat_str = format!("{}({})", qualified, shape.join(", "));
+            let shape = guard_shape(ctx, pat, counter, &mut subs);
             if subs.is_empty() {
-                format!("matches!({}, {})", access, pat_str)
+                format!("matches!({}, {})", access, shape)
             } else {
-                format!("matches!({}, {} if {})", access, pat_str, subs.join(" && "))
-            }
-        }
-        IrPattern::RecordPattern { name, fields, .. } => {
-            let qualified = qualify_ctor(ctx, name.as_str(), None);
-            let mut shape = Vec::with_capacity(fields.len());
-            let mut subs = Vec::new();
-            for fp in fields {
-                match &fp.pattern {
-                    Some(p) if is_boxed_record_field(ctx, name.as_str(), fp.name.as_str())
-                        && pattern_is_complex(p) =>
-                    {
-                        let g = fresh_box_var(counter);
-                        subs.push(box_shape_guard(ctx, p, &format!("&**{}", g), counter));
-                        shape.push(format!("{}: {}", fp.name, g));
-                    }
-                    _ => shape.push(format!("{}: _", fp.name)),
-                }
-            }
-            let pat_str = format!("{} {{ {}, .. }}", qualified, shape.join(", "));
-            if subs.is_empty() {
-                format!("matches!({}, {})", access, pat_str)
-            } else {
-                format!("matches!({}, {} if {})", access, pat_str, subs.join(" && "))
+                format!("matches!({}, {} if {})", access, shape, subs.join(" && "))
             }
         }
         // Non-constructor pattern in a boxed position cannot occur (a recursive
         // field is always a variant); be conservative and impose no constraint.
         _ => "true".to_string(),
+    }
+}
+
+/// Guard shape of a sub-pattern inside a `matches!` clause: bindings and
+/// wildcards impose no constraint (`_` — a real binding here would be dead and
+/// warn), literals and non-boxed constructors keep their refutable structure
+/// inline, and a boxed-nested sub-pattern binds a fresh var whose deref guard
+/// joins `subs` (Rust can't pattern-match through a `Box` on stable).
+fn guard_shape(ctx: &RenderContext, pat: &IrPattern, counter: &mut usize, subs: &mut Vec<String>) -> String {
+    match pat {
+        IrPattern::Wildcard | IrPattern::Bind { .. } => "_".to_string(),
+        IrPattern::Literal { .. } => render_pattern_hinted(ctx, pat, None),
+        IrPattern::Some { inner } => format!("Some({})", guard_shape(ctx, inner, counter, subs)),
+        IrPattern::None => "None".to_string(),
+        IrPattern::Ok { inner } => format!("Ok({})", guard_shape(ctx, inner, counter, subs)),
+        IrPattern::Err { inner } => format!("Err({})", guard_shape(ctx, inner, counter, subs)),
+        IrPattern::Tuple { elements } => {
+            let shapes: Vec<String> =
+                elements.iter().map(|p| guard_shape(ctx, p, counter, subs)).collect();
+            format!("({})", shapes.join(", "))
+        }
+        IrPattern::Constructor { name, args } => {
+            let qualified = qualify_ctor(ctx, name.as_str(), None);
+            if args.is_empty() {
+                return qualified;
+            }
+            let shapes: Vec<String> = args
+                .iter()
+                .enumerate()
+                .map(|(i, arg)| {
+                    if is_boxed_tuple_field(ctx, name.as_str(), i) && pattern_is_complex(arg) {
+                        let g = fresh_box_var(counter);
+                        subs.push(box_shape_guard(ctx, arg, &format!("&**{}", g), counter));
+                        g
+                    } else {
+                        guard_shape(ctx, arg, counter, subs)
+                    }
+                })
+                .collect();
+            format!("{}({})", qualified, shapes.join(", "))
+        }
+        IrPattern::RecordPattern { name, fields, .. } => {
+            let qualified = qualify_ctor(ctx, name.as_str(), None);
+            let shapes: Vec<String> = fields
+                .iter()
+                .map(|fp| match &fp.pattern {
+                    Some(p) if is_boxed_record_field(ctx, name.as_str(), fp.name.as_str())
+                        && pattern_is_complex(p) =>
+                    {
+                        let g = fresh_box_var(counter);
+                        subs.push(box_shape_guard(ctx, p, &format!("&**{}", g), counter));
+                        format!("{}: {}", fp.name, g)
+                    }
+                    Some(p) => format!("{}: {}", fp.name, guard_shape(ctx, p, counter, subs)),
+                    None => format!("{}: _", fp.name),
+                })
+                .collect();
+            format!("{} {{ {}, .. }}", qualified, shapes.join(", "))
+        }
+        // ListPatternLowering rewrites list patterns before rendering reaches
+        // this point; nothing refutable can arrive here.
+        IrPattern::List { .. } => "_".to_string(),
     }
 }
 

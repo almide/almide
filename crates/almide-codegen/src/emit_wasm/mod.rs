@@ -347,6 +347,8 @@ pub struct RuntimeFuncs {
     pub math_log10: u32,
     pub math_log2: u32,
     pub math_exp: u32,
+    pub math_atan: u32,
+    pub math_tanh: u32,
     /// IEEE-754 half-precision → f64 (for bytes.read_f16_le).
     pub bytes_f16_to_f64: u32,
     /// base64 / hex stdlib runtime helpers.

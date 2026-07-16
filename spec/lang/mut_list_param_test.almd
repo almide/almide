@@ -1,11 +1,7 @@
-// wasm:skip — a bare `mut List` PARAM mutated in place persists on native but
-// not yet on wasm (#705). Unlike a record field — whose pointer lives in an
-// addressable record block in linear memory — a bare list param's pointer lives
-// in a wasm LOCAL, which is not memory-addressable, so a reallocating push
-// cannot write the new pointer back to the caller's slot. Fixing this needs the
-// by-reference `mut` ABI (spill the arg to a memory cell around the call). The
-// record-field case (slabhra's tape) already works cross-target — see
-// mut_record_field_test.almd. Native is correct; this runs native.
+// Runs on BOTH targets since 0.28.6 (#705): a bare `mut List` param lowers
+// through tuple return + place writeback, so a reallocating push persists to
+// the caller's slot on wasm as well as native (C-131/C-132). The record-field
+// case is mut_record_field_test.almd.
 
 fn push9(mut v: List[Int], x: Int) -> Int = {
   list.push(v, x)

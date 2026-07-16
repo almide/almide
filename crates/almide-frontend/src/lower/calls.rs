@@ -450,13 +450,19 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             }
             // Cross-module UFCS: object type is Named → find defining module
             if let Ty::Named(type_name, _) = &obj_ty {
-                let defining_module = ctx.env.types.keys()
-                    .find(|k| {
-                        let s = k.as_str();
-                        s.ends_with(&format!(".{}", type_name.as_str()))
-                            && s.len() > type_name.as_str().len() + 1
-                    })
-                    .map(|k| k.as_str()[..k.as_str().len() - type_name.as_str().len() - 1].to_string());
+                // A pinned QUALIFIED name (`box.Box`) carries its defining
+                // module directly (same repair as the checker's UFCS arm —
+                // the suffix scan only matched historical bare names).
+                let defining_module = match type_name.as_str().rsplit_once('.') {
+                    Some((m, _)) => Some(m.to_string()),
+                    None => ctx.env.types.keys()
+                        .find(|k| {
+                            let s = k.as_str();
+                            s.ends_with(&format!(".{}", type_name.as_str()))
+                                && s.len() > type_name.as_str().len() + 1
+                        })
+                        .map(|k| k.as_str()[..k.as_str().len() - type_name.as_str().len() - 1].to_string()),
+                };
                 if let Some(module) = defining_module {
                     let key = format!("{}.{}", module, field);
                     if ctx.env.functions.contains_key(&sym(&key)) {

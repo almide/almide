@@ -264,6 +264,42 @@ fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
             .map(|(u, ne)| (u, mk(IrExprKind::Unwrap { expr: Box::new(ne) }))),
         IrExprKind::Try { expr } => extract_first_callarg_unwrap(expr, tmp)
             .map(|(u, ne)| (u, mk(IrExprKind::Try { expr: Box::new(ne) }))),
+        // An `if` COND / `match` SUBJECT is evaluated unconditionally FIRST, so an unwrap
+        // there lifts soundly (the desugared assert shape `if f(x)! == 42 then () else die`
+        // reaches its unwrap through the cond). ARMS are conditional — never descended.
+        IrExprKind::If { cond, then, else_ } => take_or_recurse(cond, tmp).map(|(u, nc)| {
+            (u, mk(IrExprKind::If { cond: Box::new(nc), then: then.clone(), else_: else_.clone() }))
+        }),
+        IrExprKind::Match { subject, arms } => take_or_recurse(subject, tmp).map(|(u, ns)| {
+            (u, mk(IrExprKind::Match { subject: Box::new(ns), arms: arms.clone() }))
+        }),
+        // Field/element access objects (`f(x)!.field`, `xs[g()!]`) and the `??` operand —
+        // all unconditionally evaluated subpositions (the `??` FALLBACK is conditional).
+        IrExprKind::Member { object, field } => take_or_recurse(object, tmp).map(|(u, no)| {
+            (u, mk(IrExprKind::Member { object: Box::new(no), field: *field }))
+        }),
+        IrExprKind::TupleIndex { object, index } => take_or_recurse(object, tmp).map(|(u, no)| {
+            (u, mk(IrExprKind::TupleIndex { object: Box::new(no), index: *index }))
+        }),
+        IrExprKind::IndexAccess { object, index } => {
+            if let Some((u, no)) = take_or_recurse(object, tmp) {
+                return Some((u, mk(IrExprKind::IndexAccess { object: Box::new(no), index: index.clone() })));
+            }
+            take_or_recurse(index, tmp).map(|(u, ni)| {
+                (u, mk(IrExprKind::IndexAccess { object: object.clone(), index: Box::new(ni) }))
+            })
+        }
+        IrExprKind::MapAccess { object, key } => {
+            if let Some((u, no)) = take_or_recurse(object, tmp) {
+                return Some((u, mk(IrExprKind::MapAccess { object: Box::new(no), key: key.clone() })));
+            }
+            take_or_recurse(key, tmp).map(|(u, nk)| {
+                (u, mk(IrExprKind::MapAccess { object: object.clone(), key: Box::new(nk) }))
+            })
+        }
+        IrExprKind::UnwrapOr { expr, fallback } => take_or_recurse(expr, tmp).map(|(u, ne)| {
+            (u, mk(IrExprKind::UnwrapOr { expr: Box::new(ne), fallback: fallback.clone() }))
+        }),
         _ => None,
     }
 }

@@ -7,6 +7,7 @@ use super::LowerCtx;
 use super::derive_codec::{
     auto_derive_encode, auto_derive_decode,
     auto_derive_variant_encode, auto_derive_variant_decode,
+    derive_container_helpers,
 };
 
 /// Generate IR functions for conventions declared via `deriving` but without custom implementation.
@@ -59,6 +60,12 @@ pub(super) fn generate_auto_derives(ctx: &mut LowerCtx, type_decls: &[IrTypeDecl
                         if !fn_names.contains(decode_name.as_str()) {
                             auto.push(auto_derive_variant_decode(&mut ctx.var_table, &td.name, &type_ty, cases));
                         }
+                    }
+                    // The four container helpers (`__{en,de}code_{list,option}_T`, #790
+                    // piece 1) every Codec type provides — real bodies the v1 leg links;
+                    // on v0 the BuiltinLowering call-rewrite keeps them unused (DCE'd).
+                    if !fn_names.contains(format!("__encode_list_{}", td.name).as_str()) {
+                        auto.extend(derive_container_helpers(&mut ctx.var_table, &td.name, &type_ty));
                     }
                 }
                 _ => {} // Ord, Hash — Rust #[derive] handles these for now

@@ -311,6 +311,10 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     emitter.rt.math_log2 = emitter.register_func("__math_log2", f64_f64_ty);
     // __math_exp(x: f64) -> f64  (e^x)
     emitter.rt.math_exp = emitter.register_func("__math_exp", f64_f64_ty);
+    // __math_atan(x: f64) -> f64  (arctangent, vendored libm)
+    emitter.rt.math_atan = emitter.register_func("__math_atan", f64_f64_ty);
+    // __math_tanh(x: f64) -> f64  (hyperbolic tangent, vendored libm via __libm_expm1)
+    emitter.rt.math_tanh = emitter.register_func("__math_tanh", f64_f64_ty);
 
     // Vendored-libm trig helpers (floor/scalbn/rem_pio2[_large]/k_sin/k_cos/k_tan).
     // Registered here so the __math_sin/cos/tan bodies (compiled by rt_numeric in
@@ -437,6 +441,8 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::rt_numeric::compile_math_log10(emitter);
     super::rt_numeric::compile_math_log2(emitter);
     super::rt_numeric::compile_math_exp(emitter);
+    super::rt_numeric::compile_math_atan(emitter);
+    super::rt_numeric::compile_math_tanh(emitter);
     // Vendored-libm trig helper bodies. Compile order MUST match the registration
     // order in `register_runtime` (right after __math_exp).
     super::rt_libm::compile_helpers(emitter);

@@ -27,13 +27,23 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 
 ## AI Coding Language Benchmark
 
-Comparison with 15 established languages using [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) (MiniGit implementation task).
+Based on [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) (MiniGit implementation task: v1 implement, v2 extend).
 
-![Execution Time](./figures/lang-bench-time.png?v=1775655978)
-![Code Size](./figures/lang-bench-loc.png?v=1775655978)
-![Pass Rate](./figures/lang-bench-pass-rate.png?v=1775655978)
+### Same-model snapshot (2026-07)
 
-> Almide uses Sonnet 4.6 (unknown language); all others use Opus 4.6 (known language). Almide achieves 100% pass rate with fewer lines of code than most languages, despite needing more time due to the model having no prior training data for the language.
+Five languages, one model (Claude Sonnet 5), 20 trials each, identical prompts and harness — Almide vs its modern peer group (Gleam, MoonBit) plus mainstream anchors (Rust, TypeScript):
+
+![Same-model snapshot](./figures/lang-bench-snapshot-2026-07.png?v=1784109014)
+
+> Almide is the only language absent from training data (the model learns it in-context from CHEATSHEET.md), yet it passes 40/40 phases, produces the most concise code of all five languages (233 LOC), and completes faster than both modern peers. Methodology, retry policy, and raw per-trial records: [research/benchmark/lang-bench](../research/benchmark/lang-bench/README.md).
+
+### Historic comparison vs 15 established languages
+
+![Execution Time](./figures/lang-bench-time.png?v=1784109014)
+![Code Size](./figures/lang-bench-loc.png?v=1784109014)
+![Pass Rate](./figures/lang-bench-pass-rate.png?v=1784109014)
+
+> The Almide row was refreshed 2026-07-15 (Sonnet 5, 20 trials, from the snapshot above); the other 15 languages use the upstream Opus 4.6 runs. Almide achieves 100% pass rate with fewer lines of code than most languages, despite needing more time because the model has no prior training data for the language.
 
 ## MSR — Modification Survival Rate
 

@@ -60,6 +60,27 @@ test "math.sin cos pythagorean identity" {
   assert(sum > 0.999 and sum < 1.001)
 }
 
+// ── atan / tanh ──
+test "math.atan identities" {
+  assert_eq(math.atan(0.0), 0.0);
+  // atan(1) = pi/4
+  let q = math.atan(1.0) * 4.0;
+  assert(q > 3.14159265 and q < 3.14159266);
+  // odd function
+  assert_eq(math.atan(-2.5), 0.0 - math.atan(2.5))
+}
+
+test "math.tanh range and identities" {
+  assert_eq(math.tanh(0.0), 0.0);
+  // saturates to ±1 for |x| > 20
+  assert_eq(math.tanh(25.0), 1.0);
+  assert_eq(math.tanh(-25.0), -1.0);
+  // odd function, strictly inside (-1, 1)
+  let t = math.tanh(0.5);
+  assert(t > 0.462 and t < 0.463);
+  assert_eq(math.tanh(-0.5), 0.0 - t)
+}
+
 // ── log / log10 / log2 ──
 test "math.log log10 log2" {
   assert_eq(math.log(1.0), 0.0);

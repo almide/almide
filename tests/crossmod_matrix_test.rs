@@ -66,6 +66,11 @@ fn bump() -> Unit = {
   count = count + 1
 }
 
+fn stash[T](v: T) -> T = {
+  count = count + 1
+  v
+}
+
 fn retitle(s: String) -> Unit = {
   title = s
 }
@@ -126,6 +131,24 @@ struct Cell {
 
 fn cells() -> Vec<Cell> {
     vec![
+        Cell {
+            name: "generic_fn_mutates_module_var",
+            // #788: a MONOMORPHIZED copy of a generic module fn alpha-renamed
+            // its free reference to the module-level `var` (a fresh VarId the
+            // storage annotation does not key), so native rendered a bare
+            // local `count = …` and rustc E0425'd. Two distinct instantiations
+            // force two specializations; both must route through the
+            // thread_local static.
+            main: r#"import self as m
+effect fn main() -> Unit = {
+  let a = m.stash(41)
+  let s = m.stash("x")
+  println(int.to_string(m.count))
+}
+"#,
+            expected: "2",
+            status: Status::Works,
+        },
         Cell {
             name: "tuple_variant_payload_type",
             main: r#"import self as m

@@ -1034,36 +1034,94 @@ impl LowerCtx {
     }
 
     /// Materialize both operands of a heap `==` into owned blocks (in the current cond frame) and
-    /// emit the typed equality, returning the Bool ValueId. Handled operand TYPES: String,
-    /// Value, List[scalar|Value], Option[scalar|heap], Result[scalar, String]. Each operand is
-    /// materialized by `materialize_eq_operand` (a tracked Var is BORROWED, a fresh heap value is
-    /// an owned temp added to `live_heap_handles` with its recursive drop set). The eq BORROWS the
-    /// operand handles (it only reads), so the owned temps survive to the frame teardown.
-    fn lower_heap_eq_typed_materialized(
+    /// emit the typed equality, returning the Bool ValueId. Each operand is materialized by
+    /// `materialize_eq_operand` (a tracked Var is BORROWED, a fresh heap value is an owned temp
+    /// added to `live_heap_handles` with its recursive drop set). The eq BORROWS the operand
+    /// handles (it only reads), so the owned temps survive to the frame teardown. The per-type
+    /// dispatch is the ONE recursive engine [`Self::typed_slot_eq`]; an unsupported shape returns
+    /// None and the caller rolls back (walls) — never wrong bytes.
+    pub(crate) fn lower_heap_eq_typed_materialized(
         &mut self,
         left: &IrExpr,
         right: &IrExpr,
         ty: &Ty,
     ) -> Option<ValueId> {
+        let lb = self.materialize_eq_operand(left, ty)?;
+        let rb = self.materialize_eq_operand(right, ty)?;
+        let lh = self.handle_of(lb);
+        let rh = self.handle_of(rb);
+        self.typed_slot_eq(lh, rh, ty, 0)
+    }
+
+    /// Recursive typed equality over two 8-byte SLOT VALUES of type `ty` — the ONE eq engine
+    /// every `==`/`!=` compose routes through (the unit-if cond, the value-position BinOp, and
+    /// every nested payload/field recursion). A scalar slot holds the value itself (int-class
+    /// i64 / float-class f64 bits); a heap slot holds the block's byte-address HANDLE, read
+    /// through its layout:
+    ///   String/Value/List[T] → the borrowed module eq call; Option/Result → the tag-compare
+    ///   cores; tuple/record → per-slot recursion ANDed; custom variant → tag eq + a
+    ///   tag-dispatched per-field recursion chain.
+    /// Every path only READS (borrows) — no ownership events — so the recursion composes freely
+    /// inside branch merges, and a `None` anywhere propagates to the caller's rollback (the
+    /// unlowered shape walls, never wrong output). `depth` caps type-level recursion (a variant
+    /// containing itself — `Cons(Int, MyList)` — would otherwise recurse forever at COMPILE
+    /// time); a capped shape walls, honest (runtime-recursive eq needs a synthesized fn brick).
+    pub(crate) fn typed_slot_eq(
+        &mut self,
+        lv: ValueId,
+        rv: ValueId,
+        ty: &Ty,
+        depth: u32,
+    ) -> Option<ValueId> {
         use almide_lang::types::constructor::TypeConstructorId as TC;
-        // String / Value / List[T] — a borrowed-handle module eq call. Reuse the same callee the
-        // Var path uses; the operands are materialized into owned blocks the call borrows.
-        let module_eq: Option<(&str, &str)> = if matches!(ty, Ty::String) {
-            Some(("string", "eq"))
+        const MAX_EQ_DEPTH: u32 = 8;
+        if depth > MAX_EQ_DEPTH {
+            return None;
+        }
+        // Scalars — the slot IS the value.
+        if Self::float_operand_ty(ty) {
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: crate::PrimKind::FloatCmp(crate::FCmpOp::Eq),
+                dst: Some(dst),
+                args: vec![lv, rv],
+            });
+            return Some(dst);
+        }
+        if Self::int_eq_operand_ty(ty) {
+            let dst = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst, op: IntOp::Eq, a: lv, b: rv });
+            return Some(dst);
+        }
+        // String / Value / List[T] — the borrowed-handle module eq call.
+        let module_eq: Option<&str> = if matches!(ty, Ty::String) {
+            Some("string.eq")
         } else if crate::lower::is_value_ty(ty) {
-            Some(("value", "eq"))
+            Some("value.eq")
         } else if let Ty::Applied(TC::List, es) = ty {
             if es.len() == 1 {
                 if matches!(es[0], Ty::Int) {
-                    Some(("list", "eq_int"))
+                    Some("list.eq_int")
                 } else if matches!(es[0], Ty::String) {
-                    Some(("list", "eq_str"))
+                    Some("list.eq_str")
                 } else if matches!(es[0], Ty::Float) {
-                    Some(("list", "eq_float"))
+                    Some("list.eq_float")
                 } else if matches!(es[0], Ty::Bool) {
-                    Some(("list", "eq_bool"))
+                    Some("list.eq_bool")
                 } else if crate::lower::is_value_ty(&es[0]) {
-                    Some(("list", "eq_value"))
+                    Some("list.eq_value")
+                } else if let Ty::Applied(TC::List, inner) = &es[0] {
+                    // Nested lists — the element-wise recursion into the flat list eq
+                    // (value_core `list_eq_list_*`).
+                    if inner.len() == 1 && matches!(inner[0], Ty::Int) {
+                        Some("list.eq_list_int")
+                    } else if inner.len() == 1 && matches!(inner[0], Ty::Float) {
+                        Some("list.eq_list_float")
+                    } else if inner.len() == 1 && matches!(inner[0], Ty::String) {
+                        Some("list.eq_list_str")
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -1073,181 +1131,223 @@ impl LowerCtx {
         } else {
             None
         };
-        if let Some((m, f)) = module_eq {
-            let lb = self.materialize_eq_operand(left, ty)?;
-            let rb = self.materialize_eq_operand(right, ty)?;
-            let lh = self.handle_of(lb);
-            let rh = self.handle_of(rb);
+        if let Some(name) = module_eq {
             let dst = self.fresh_value();
             self.ops.push(Op::CallFn {
                 dst: Some(dst),
-                name: format!("{m}.{f}"),
-                args: vec![CallArg::Handle(lh), CallArg::Handle(rh)],
+                name: name.to_string(),
+                args: vec![CallArg::Handle(lv), CallArg::Handle(rv)],
                 result: Some(repr_of(&Ty::Bool).ok()?),
             });
             return Some(dst);
         }
-        // A SMALL-VARIANT eq (`Tagged("x") == Tagged("y")` — deep_eq_heap's Box =
-        // Tagged(String) | Empty): every ctor carries ≤1 field, each scalar or String.
-        // Composed as tag-eq AND a tag-dispatched field-compare chain (String fields via
-        // a borrowed string.eq, scalar fields an i64 compare, fieldless ctors true).
-        // All values are scalar Bools — the IfThen/Else/EndIf merges carry no ownership.
+        // A custom VARIANT — tag eq + tag-dispatched per-field recursion.
         if let Some(tyname) = self.custom_variant_type_name(ty) {
             let layout = self.variant_layouts.by_type.get(&tyname).cloned();
             if let Some(layout) = layout {
-                let small = layout.cases.iter().all(|c| {
-                    c.fields.len() <= 1
-                        && c.fields
-                            .iter()
-                            .all(|(_, t)| !is_heap_ty(t) || matches!(t, Ty::String))
-                });
-                if small {
-                    let lb = self.materialize_eq_operand(left, ty)?;
-                    let rb = self.materialize_eq_operand(right, ty)?;
-                    let lh = self.handle_of(lb);
-                    let rh = self.handle_of(rb);
-                    let toff = crate::lower::layout::slot_offset(0) as i64;
-                    let foff = crate::lower::layout::slot_offset(1) as i64;
-                    let tl = self.load_at_offset(lh, toff, crate::PrimKind::Load { width: 8 });
-                    let tr = self.load_at_offset(rh, toff, crate::PrimKind::Load { width: 8 });
-                    let t_eq = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst: t_eq, op: IntOp::Eq, a: tl, b: tr });
-                    // Field chain under EQUAL tags: nested merges over the field-carrying
-                    // ctors; the fieldless remainder compares true.
-                    let fielded: Vec<(i64, Ty)> = layout
-                        .cases
-                        .iter()
-                        .filter(|c| c.fields.len() == 1)
-                        .map(|c| (c.tag as i64, c.fields[0].1.clone()))
-                        .collect();
-                    let dst = self.fresh_value();
-                    self.ops.push(Op::IfThen { cond: t_eq, dst: Some(dst) });
-                    // then-branch: the chain value.
-                    let mut ends: Vec<(usize, ValueId)> = Vec::new();
-                    let mut chain_val: Option<ValueId> = None;
-                    for (i, (tag, fty)) in fielded.iter().enumerate() {
-                        let tagv = self.fresh_value();
-                        self.ops.push(Op::ConstInt { dst: tagv, value: *tag });
-                        let is_c = self.fresh_value();
-                        self.ops.push(Op::IntBinOp { dst: is_c, op: IntOp::Eq, a: tl, b: tagv });
-                        let d2 = self.fresh_value();
-                        self.ops.push(Op::IfThen { cond: is_c, dst: Some(d2) });
-                        let cmp = if matches!(fty, Ty::String) {
-                            let l1 = self.load_at_offset(lh, foff, crate::PrimKind::LoadHandle);
-                            let r1 = self.load_at_offset(rh, foff, crate::PrimKind::LoadHandle);
-                            let s_eq = self.fresh_value();
-                            self.ops.push(Op::CallFn {
-                                dst: Some(s_eq),
-                                name: "string.eq".to_string(),
-                                args: vec![CallArg::Handle(l1), CallArg::Handle(r1)],
-                                result: Some(repr_of(&Ty::Bool).ok()?),
-                            });
-                            s_eq
-                        } else {
-                            let l1 =
-                                self.load_at_offset(lh, foff, crate::PrimKind::Load { width: 8 });
-                            let r1 =
-                                self.load_at_offset(rh, foff, crate::PrimKind::Load { width: 8 });
-                            let f_eq = self.fresh_value();
-                            self.ops.push(Op::IntBinOp { dst: f_eq, op: IntOp::Eq, a: l1, b: r1 });
-                            f_eq
-                        };
-                        self.ops.push(Op::Else { val: Some(cmp) });
-                        ends.push((i, d2));
-                        chain_val = Some(d2);
-                    }
-                    // innermost else: no field-ctor matched (a fieldless ctor) — equal.
-                    let one = self.fresh_value();
-                    self.ops.push(Op::ConstInt { dst: one, value: 1 });
-                    let mut inner: ValueId = one;
-                    // close the nested merges inside-out.
-                    for (_i, d2) in ends.iter().rev() {
-                        self.ops.push(Op::EndIf { val: Some(inner) });
-                        inner = *d2;
-                    }
-                    let then_v = chain_val.unwrap_or(one);
-                    let zero = self.fresh_value();
-                    self.ops.push(Op::Else { val: Some(then_v) });
-                    self.ops.push(Op::ConstInt { dst: zero, value: 0 });
-                    self.ops.push(Op::EndIf { val: Some(zero) });
-                    return Some(dst);
-                }
+                return self.variant_eq_from_handles(lv, rv, &layout, depth);
             }
         }
-        // A (String, Int) TUPLE eq (`("a", 1) == ("b", 1)` — deep_eq_heap): composed in
-        // MIR directly — string.eq over the slot-0 handles AND an i64 compare of slot 1.
-        // No self-host needed; the operands materialize like any eq operand (borrowed).
-        if let Ty::Tuple(ts) = ty {
-            if ts.len() == 2 && matches!(ts[0], Ty::String) && !is_heap_ty(&ts[1]) {
-                let lb = self.materialize_eq_operand(left, ty)?;
-                let rb = self.materialize_eq_operand(right, ty)?;
-                let lh = self.handle_of(lb);
-                let rh = self.handle_of(rb);
-                let l0 = self.load_at_offset(lh, 12, crate::PrimKind::LoadHandle);
-                let r0 = self.load_at_offset(rh, 12, crate::PrimKind::LoadHandle);
-                let s_eq = self.fresh_value();
-                self.ops.push(Op::CallFn {
-                    dst: Some(s_eq),
-                    name: "string.eq".to_string(),
-                    args: vec![CallArg::Handle(l0), CallArg::Handle(r0)],
-                    result: Some(repr_of(&Ty::Bool).ok()?),
-                });
-                let l1 = self.load_at_offset(lh, 20, crate::PrimKind::Load { width: 8 });
-                let r1 = self.load_at_offset(rh, 20, crate::PrimKind::Load { width: 8 });
-                let i_eq = self.fresh_value();
-                self.ops.push(Op::IntBinOp { dst: i_eq, op: IntOp::Eq, a: l1, b: r1 });
-                let both = self.fresh_value();
-                self.ops.push(Op::IntBinOp { dst: both, op: IntOp::And, a: s_eq, b: i_eq });
-                return Some(both);
-            }
-        }
-        // Option[T] — the scalar masked compare or the heap conditional compare, over the two
-        // materialized DynListStr / OptSome blocks (read via their handles).
+        // Option[T] — the scalar masked compare or the heap conditional compare.
         if let Ty::Applied(TC::Option, oa) = ty {
             if oa.len() == 1 {
-                let lb = self.materialize_eq_operand(left, ty)?;
-                let rb = self.materialize_eq_operand(right, ty)?;
-                let lh = self.handle_of(lb);
-                let rh = self.handle_of(rb);
                 if !is_heap_ty(&oa[0]) {
-                    return Some(self.option_scalar_eq_from_handles(lh, rh, &oa[0]));
+                    return Some(self.option_scalar_eq_from_handles(lv, rv, &oa[0]));
                 }
-                let eq_name: Option<&str> = if matches!(oa[0], Ty::String) {
-                    Some("string.eq")
-                } else if crate::lower::is_value_ty(&oa[0]) {
-                    Some("value.eq")
-                } else if let Ty::Applied(TC::List, es) = &oa[0] {
-                    if es.len() == 1 && matches!(es[0], Ty::Int) {
-                        Some("list.eq_int")
-                    } else if es.len() == 1 && matches!(es[0], Ty::String) {
-                        Some("list.eq_str")
-                    } else if es.len() == 1 && matches!(es[0], Ty::Float) {
-                        Some("list.eq_float")
-                    } else if es.len() == 1 && matches!(es[0], Ty::Bool) {
-                        Some("list.eq_bool")
-                    } else if es.len() == 1 && crate::lower::is_value_ty(&es[0]) {
-                        Some("list.eq_value")
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                return self.option_heap_eq_from_handles(lh, rh, eq_name?);
+                return self.option_heap_eq_from_handles(lv, rv, &oa[0], depth);
             }
         }
-        // Result[scalar, String] — the scalar/heap masked+conditional compare over the two
-        // materialized DynListStr Result blocks.
+        // Result[T, E] — the proven masked core for the (scalar Ok, String Err) layout;
+        // the general both-Ok/both-Err conditional recursion for every other payload pair.
         if let Ty::Applied(TC::Result, ra) = ty {
-            if ra.len() == 2 && !is_heap_ty(&ra[0]) && matches!(ra[1], Ty::String) {
-                let lb = self.materialize_eq_operand(left, ty)?;
-                let rb = self.materialize_eq_operand(right, ty)?;
-                let lh = self.handle_of(lb);
-                let rh = self.handle_of(rb);
-                return self.result_scalar_eq_from_handles(lh, rh, &ra[0]);
+            if ra.len() == 2 {
+                if !is_heap_ty(&ra[0]) && matches!(ra[1], Ty::String) {
+                    return self.result_scalar_eq_from_handles(lv, rv, &ra[0]);
+                }
+                return self.result_eq_general_from_handles(lv, rv, &ra[0], &ra[1], depth);
             }
+        }
+        // Tuple / record — per-slot recursion, ANDed in declaration order.
+        if let Some((_names, ftys)) = self.aggregate_field_tys(ty) {
+            return self.aggregate_eq_from_handles(lv, rv, &ftys, depth);
         }
         None
+    }
+
+    /// Tuple/record `==` over two materialized block HANDLES: load each declaration-order
+    /// uniform slot (a heap field as its owned handle, a scalar as its value), recurse the
+    /// typed eq per field, AND-fold. An empty aggregate compares equal.
+    fn aggregate_eq_from_handles(
+        &mut self,
+        hl: ValueId,
+        hr: ValueId,
+        ftys: &[Ty],
+        depth: u32,
+    ) -> Option<ValueId> {
+        let mut acc: Option<ValueId> = None;
+        for (i, fty) in ftys.iter().enumerate() {
+            let off = crate::lower::layout::slot_offset(i) as i64;
+            let kind = if is_heap_ty(fty) {
+                crate::PrimKind::LoadHandle
+            } else {
+                crate::PrimKind::Load { width: 8 }
+            };
+            let lf = self.load_at_offset(hl, off, kind);
+            let rf = self.load_at_offset(hr, off, kind);
+            let e = self.typed_slot_eq(lf, rf, fty, depth + 1)?;
+            acc = Some(match acc {
+                None => e,
+                Some(prev) => {
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst, op: IntOp::And, a: prev, b: e });
+                    dst
+                }
+            });
+        }
+        Some(acc.unwrap_or_else(|| {
+            let dst = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst, value: 1 });
+            dst
+        }))
+    }
+
+    /// Custom-variant `==` over two materialized block HANDLES (`[tag@slot0][field0@slot1]…`):
+    /// tag-eq AND a tag-dispatched field-compare chain — each field-carrying ctor's fields
+    /// recurse through the typed eq (ANDed), fieldless ctors compare true. All merge values are
+    /// scalar Bools — the IfThen/Else/EndIf merges carry no ownership. A field whose typed eq
+    /// cannot lower (e.g. a recursive `List[Self]` payload) propagates None → the caller walls.
+    fn variant_eq_from_handles(
+        &mut self,
+        hl: ValueId,
+        hr: ValueId,
+        layout: &crate::lower::VariantLayout,
+        depth: u32,
+    ) -> Option<ValueId> {
+        let toff = crate::lower::layout::slot_offset(0) as i64;
+        let tl = self.load_at_offset(hl, toff, crate::PrimKind::Load { width: 8 });
+        let tr = self.load_at_offset(hr, toff, crate::PrimKind::Load { width: 8 });
+        let t_eq = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: t_eq, op: IntOp::Eq, a: tl, b: tr });
+        // Field chain under EQUAL tags: nested merges over the field-carrying ctors; the
+        // fieldless remainder compares true.
+        let fielded: Vec<(i64, Vec<Ty>)> = layout
+            .cases
+            .iter()
+            .filter(|c| !c.fields.is_empty())
+            .map(|c| (c.tag as i64, c.fields.iter().map(|(_, t)| t.clone()).collect()))
+            .collect();
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: t_eq, dst: Some(dst) });
+        // then-branch: the chain value.
+        let mut ends: Vec<ValueId> = Vec::new();
+        let mut chain_val: Option<ValueId> = None;
+        for (tag, ftys) in &fielded {
+            let tagv = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: tagv, value: *tag });
+            let is_c = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: is_c, op: IntOp::Eq, a: tl, b: tagv });
+            let d2 = self.fresh_value();
+            self.ops.push(Op::IfThen { cond: is_c, dst: Some(d2) });
+            // This ctor's fields at slots 1.. — recurse the typed eq per field, AND-fold.
+            let mut cmp: Option<ValueId> = None;
+            for (j, fty) in ftys.iter().enumerate() {
+                let foff = crate::lower::layout::slot_offset(1 + j) as i64;
+                let kind = if is_heap_ty(fty) {
+                    crate::PrimKind::LoadHandle
+                } else {
+                    crate::PrimKind::Load { width: 8 }
+                };
+                let l1 = self.load_at_offset(hl, foff, kind);
+                let r1 = self.load_at_offset(hr, foff, kind);
+                let f_eq = self.typed_slot_eq(l1, r1, fty, depth + 1)?;
+                cmp = Some(match cmp {
+                    None => f_eq,
+                    Some(prev) => {
+                        let a2 = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst: a2, op: IntOp::And, a: prev, b: f_eq });
+                        a2
+                    }
+                });
+            }
+            self.ops.push(Op::Else { val: Some(cmp?) });
+            ends.push(d2);
+            chain_val = Some(d2);
+        }
+        // innermost else: no field-ctor matched (a fieldless ctor) — equal.
+        let one = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        let mut inner: ValueId = one;
+        // close the nested merges inside-out.
+        for d2 in ends.iter().rev() {
+            self.ops.push(Op::EndIf { val: Some(inner) });
+            inner = *d2;
+        }
+        let then_v = chain_val.unwrap_or(one);
+        let zero = self.fresh_value();
+        self.ops.push(Op::Else { val: Some(then_v) });
+        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+        self.ops.push(Op::EndIf { val: Some(zero) });
+        Some(dst)
+    }
+
+    /// General `Result[T, E] ==` over two materialized block HANDLES (len@4 = 0 Ok / 1 Err,
+    /// payload@12) for payload pairs beyond the proven (scalar, String) masked core. Two SIBLING
+    /// gated compares — dst = (bothOk ? okEq : 0) | (bothErr ? errEq : 0) — so a payload slot is
+    /// only ever read INSIDE the branch that knows both sides carry that variant (a heap handle
+    /// is never dereferenced against the wrong layout), and a mixed Ok/Err pair compares false.
+    fn result_eq_general_from_handles(
+        &mut self,
+        hl: ValueId,
+        hr: ValueId,
+        ok_ty: &Ty,
+        err_ty: &Ty,
+        depth: u32,
+    ) -> Option<ValueId> {
+        let tag_l = self.load_at_offset(hl, 4, crate::PrimKind::Load { width: 4 });
+        let tag_r = self.load_at_offset(hr, 4, crate::PrimKind::Load { width: 4 });
+        let zero = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+        let ok_l = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: ok_l, op: IntOp::Eq, a: tag_l, b: zero });
+        let ok_r = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: ok_r, op: IntOp::Eq, a: tag_r, b: zero });
+        let both_ok = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: both_ok, op: IntOp::And, a: ok_l, b: ok_r });
+        let both_err = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: both_err, op: IntOp::And, a: tag_l, b: tag_r });
+        // Gated Ok compare.
+        let ok_gate = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: both_ok, dst: Some(ok_gate) });
+        let kind = if is_heap_ty(ok_ty) {
+            crate::PrimKind::LoadHandle
+        } else {
+            crate::PrimKind::Load { width: 8 }
+        };
+        let pl = self.load_at_offset(hl, 12, kind);
+        let pr = self.load_at_offset(hr, 12, kind);
+        let ok_eq = self.typed_slot_eq(pl, pr, ok_ty, depth + 1)?;
+        self.ops.push(Op::Else { val: Some(ok_eq) });
+        let f1 = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: f1, value: 0 });
+        self.ops.push(Op::EndIf { val: Some(f1) });
+        // Gated Err compare.
+        let err_gate = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: both_err, dst: Some(err_gate) });
+        let kind = if is_heap_ty(err_ty) {
+            crate::PrimKind::LoadHandle
+        } else {
+            crate::PrimKind::Load { width: 8 }
+        };
+        let el = self.load_at_offset(hl, 12, kind);
+        let er = self.load_at_offset(hr, 12, kind);
+        let err_eq = self.typed_slot_eq(el, er, err_ty, depth + 1)?;
+        self.ops.push(Op::Else { val: Some(err_eq) });
+        let f2 = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: f2, value: 0 });
+        self.ops.push(Op::EndIf { val: Some(f2) });
+        let dst = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst, op: IntOp::Or, a: ok_gate, b: err_gate });
+        Some(dst)
     }
 
     /// The byte-address (`Prim::Handle`) of a materialized block — the operand handed to an eq core.
@@ -1270,7 +1370,31 @@ impl LowerCtx {
     fn materialize_eq_operand(&mut self, expr: &IrExpr, ty: &Ty) -> Option<ValueId> {
         if let IrExprKind::Var { id } = &expr.kind {
             // A tracked heap Var (a param or let-local) — borrow its block, no new ownership.
-            return self.value_for(*id).ok();
+            let v = self.value_for(*id).ok()?;
+            // The eq READS the block through the operand type's layout, so a DEFERRED
+            // Opaque bind (any heap type — a variant/tuple/record slot read of an empty
+            // block is a raw un-bounds-checked load, garbage compared silently) must
+            // decline on the strict path: the eq walls and v0 emits the correct bytes
+            // (the C-136 wrong-value family, consumer side).
+            if crate::lower::strict_values() && self.deferred_opaque_binds.contains(&v) {
+                return None;
+            }
+            // An Option/Result var must additionally be a genuinely MATERIALIZED block
+            // (ctor-built, or a param seeded by `seed_variant_param`). A deferred value
+            // that escaped the bind set — e.g. an optional-chain result outside the
+            // executable subset — has len 0, which the len-as-tag read MISREADS as
+            // `none`/`Ok` (`assert_eq(p?.name, some("Alice"))` compared false while
+            // native compared true — a silent wrong verdict, the #790 optional-chain
+            // row). Decline instead.
+            use almide_lang::types::constructor::TypeConstructorId as TC;
+            if matches!(ty, Ty::Applied(TC::Option | TC::Result, _))
+                && !self.materialized_options.contains(&v)
+                && !self.materialized_results.contains(&v)
+                && !self.materialized_results_str.contains(&v)
+            {
+                return None;
+            }
+            return Some(v);
         }
         // An Option/Result CTOR (`some("")`, `none`, `ok(v)`, `err(m)`) — `try_lower_option_ctor`
         // (which handles BOTH Option and Result ctors) builds the DynListStr/OptSome block +

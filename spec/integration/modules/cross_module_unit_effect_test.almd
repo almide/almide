@@ -1,11 +1,10 @@
-// wasm:skip — cross-module unit effect WASM codegen
 // ============================================================
 // Cross-module Unit-returning effect fn calls
 // ============================================================
 //
-// Regression test for the ResultPropagation pass. When an effect fn
-// in one module calls an effect fn in another module that returns Unit,
-// the compiler must:
+// Regression test for the declared-Unit effect fn ABI (#786, C-135) and
+// the ResultPropagation pass. When an effect fn in one module calls an
+// effect fn in another module that returns Unit, the compiler must:
 //
 //   1. Recognise the callee as already-lifted (its signature has been
 //      rewritten to Result[Unit, String]) and NOT wrap the call site
@@ -19,6 +18,13 @@
 //      lookup by `format!("{}.{}", module, func)` while `lifted_fns` was
 //      populated with bare function names, causing all cross-module
 //      lookups to miss.
+//
+//   3. On the v1 (verified-default) leg: classify never-err callees with
+//      PROGRAM-WIDE sets (main + mangled module siblings) so both regions
+//      strip the same lifted wrappers, and materialize `ok(())` in every
+//      Result-ABI fn whose tail is Unit-typed — previously the def was
+//      emitted VOID while call sites `local.set` the promised Result
+//      handle (invalid wasm, the #786 class).
 //
 // A passing test here means:
 //   - The test file compiles (cross-module lifted calls resolve)
@@ -45,7 +51,7 @@ effect fn nested_unit_call() -> Result[Unit, String] = {
   effectlib.do_nothing_twice()
 }
 
-effect fn main(_args: List[String]) -> Result[Unit, String] = {
+effect fn main() -> Result[Unit, String] = {
   // Invoking effect fns that call across module boundaries with Unit
   // return type. If the compiler double-wraps in ResultOk the WASM
   // stack validation fails and instantiate throws at load time.
@@ -55,4 +61,19 @@ effect fn main(_args: List[String]) -> Result[Unit, String] = {
 
   println("cross_module_unit_effect: all calls succeeded")
   ok(())
+}
+
+test "cross-module unit effect calls resolve and execute" {
+  match tail_unit_call() {
+    ok(_) => assert(true),
+    _ => assert(false),
+  }
+  match stmt_unit_calls() {
+    ok(_) => assert(true),
+    _ => assert(false),
+  }
+  match nested_unit_call() {
+    ok(_) => assert(true),
+    _ => assert(false),
+  }
 }

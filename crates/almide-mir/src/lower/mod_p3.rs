@@ -271,6 +271,7 @@ impl LowerCtx {
         // on both targets — no leak. See docs/roadmap/active/v0-unwrap-early-return-leak.md.)
         match &stmt.kind {
             IrStmtKind::Bind { var, ty, value, mutability } => {
+                self.var_decl_tys.insert(*var, ty.clone());
                 // A MUTABLE (`var`) binding may be COW-mutated later, so a heap-field
                 // extraction (`var b = r.items`) must take an OWNED copy (container-grain
                 // `Dup`), NOT a precise borrow (which cannot be mutated in place). Flag it so
@@ -517,6 +518,20 @@ impl LowerCtx {
                     }
                 }
                 if self.in_frame > 0 && is_heap_ty(&value.ty) {
+                    // STRICT value mode: this defer DROPS the write. In an EXECUTING frame
+                    // (a `try_lower_unit_if` arm) that is a silent wrong value on the
+                    // verified default — `if let v = x { out = int.to_string(v) }` left
+                    // `out` at its pre-branch value while native assigned. The executable
+                    // fix is a stable heap-handle slot (the loop-carried SetLocal shape,
+                    // branch-merged); until that lands, REFUSE — v0 emits correct bytes.
+                    if crate::lower::strict_values() {
+                        return Err(LowerError::Unsupported(
+                            "heap reassignment inside a control-flow frame — deferring \
+                             the write would be a silent no-op; the branch-merged handle \
+                             slot is not in this brick"
+                                .into(),
+                        ));
+                    }
                     self.record_elided_calls(value);
                     Ok(())
                 } else {
@@ -636,12 +651,23 @@ impl LowerCtx {
                 if !stored {
                     self.ops.truncate(ops_mark);
                     self.live_heap_handles.truncate(lhh_mark);
+                    // STRICT value mode: an elided element write is an EXECUTABLE silent
+                    // no-op (`xs[0] = "Z"` left the list unchanged on the verified default
+                    // while native stored). REFUSE — the fn walls, v0 emits correct bytes.
+                    if crate::lower::strict_values() {
+                        return Err(LowerError::Unsupported(
+                            "index-assign outside the scalar-element store subset (heap \
+                             element or non-scalar index/value) — eliding the write would \
+                             be a silent no-op not in this brick"
+                                .into(),
+                        ));
+                    }
                     self.record_elided_calls(index);
                     self.record_elided_calls(value);
                 }
                 Ok(())
             }
-            IrStmtKind::FieldAssign { target, value, .. } => {
+            IrStmtKind::FieldAssign { target, field, value } => {
                 // Mutable-GLOBAL target: same COW-copy silent-miscompile class as the
                 // IndexAssign guard above — WALL.
                 if !self.value_of.contains_key(target) && crate::lower::is_mutable_global(*target) {
@@ -650,8 +676,55 @@ impl LowerCtx {
                          mutation through the global slot) is not in this brick"
                     )));
                 }
+                // COW-guard the buffer, then ACTUALLY STORE the field: `r.f = v` →
+                // `ListSetScalar(block, slot(f), v)` on the uniform 8-byte-slot aggregate
+                // block (the rung-5 layout; `ListGetScalar` is the read side). WITHOUT the
+                // store, the assignment lowered to ONLY the MakeUnique guard — EVERY record
+                // field-assign was a silent no-op on the verified default (v1 read back the
+                // pre-assign value while native mutated: the recassign wrong-value class).
                 self.lower_place_mutation(*target)?;
-                self.record_elided_calls(value);
+                let ops_mark = self.ops.len();
+                let lhh_mark = self.live_heap_handles.len();
+                let stored = if !is_heap_ty(&value.ty) {
+                    let slot = self
+                        .var_decl_tys
+                        .get(target)
+                        .cloned()
+                        .and_then(|ty| self.aggregate_field_offset_any(&ty, field.as_str()))
+                        .map(|off| {
+                            (off - crate::lower::layout::BLOCK_HEADER)
+                                / crate::lower::layout::SLOT_SIZE
+                        });
+                    if let (Ok(list), Some(slot), Some(val)) =
+                        (self.value_for(*target), slot, self.lower_scalar_value(value))
+                    {
+                        let idx = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: idx, value: slot as i64 });
+                        self.ops.push(Op::ListSetScalar { list, idx, val });
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !stored {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    // STRICT value mode (the real render path): an elided field write is an
+                    // EXECUTABLE silent no-op — REFUSE, so the fn walls and v0 emits the
+                    // correct bytes. The permissive caps-counting classifier keeps the old
+                    // elision (its only consumer is call accounting).
+                    if crate::lower::strict_values() {
+                        return Err(LowerError::Unsupported(format!(
+                            "field-assign `.{} = …` outside the scalar-slot store subset \
+                             (heap-typed value, unresolved layout, or non-scalar RHS) — \
+                             eliding the write would be a silent no-op not in this brick",
+                            field.as_str()
+                        )));
+                    }
+                    self.record_elided_calls(value);
+                }
                 Ok(())
             }
             // `m[k] = v` — map insertion/update, in-place on the buffer. Like
@@ -668,6 +741,18 @@ impl LowerCtx {
                     )));
                 }
                 self.lower_place_mutation(*target)?;
+                // STRICT value mode: the insert itself was ELIDED (only the MakeUnique
+                // guard emitted) — `m[k] = v` was a silent no-op on the verified default
+                // (native inserted, v1 read the map unchanged). REFUSE so the fn walls
+                // and v0 emits the correct bytes; the permissive classifier keeps the
+                // old elision for call accounting.
+                if crate::lower::strict_values() {
+                    return Err(LowerError::Unsupported(
+                        "map-insert `m[k] = v` (in-place map mutation) — eliding the \
+                         write would be a silent no-op not in this brick"
+                            .into(),
+                    ));
+                }
                 self.record_elided_calls(key);
                 self.record_elided_calls(value);
                 Ok(())

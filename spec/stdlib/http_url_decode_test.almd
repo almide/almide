@@ -1,5 +1,7 @@
-// wasm:skip — http is a native-only module (no socket layer on wasm-direct);
-// the client and url_decode have no WASM dispatch, matching net/process/random.
+// wasm:skip — the V0 emitter has no url_decode dispatch (the
+// wasm_dispatch_coverage gate pins the v0 surface and ICEs on it). The
+// DEFAULT (v1 verified) wasm path handles this file fine — verified
+// 2026-07-15 — so this marker falls together with the v0 retirement (#782).
 import http
 
 test "http.url_decode decodes a multibyte percent-escaped value" {

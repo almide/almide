@@ -26,6 +26,7 @@ impl WasmEmitter {
                 float_parse: 0, float_to_fixed: 0, float_pow: 0,
                 math_sin: 0, math_cos: 0, math_tan: 0,
                 math_log: 0, math_log10: 0, math_log2: 0, math_exp: 0,
+                math_atan: 0, math_tanh: 0,
                 bytes_f16_to_f64: 0,
                 base64_encode: 0, base64_decode: 0,
                 base64_encode_url: 0, base64_decode_url: 0,

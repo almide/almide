@@ -69,6 +69,15 @@ pub fn infer_literal_type(expr: &ast::Expr) -> Ty {
         ast::ExprKind::Bool { .. } => Ty::Bool,
         ast::ExprKind::Unit => Ty::Unit,
         ast::ExprKind::Paren { expr } => infer_literal_type(expr),
+        // A signed literal is a literal: `let MARGIN_AUTO = -2.0` must seed
+        // Float, not Unknown (#784 — the Unknown seed leaked into every
+        // cross-module reader of the constant). `-` keeps the operand's
+        // numeric type; `not` is Bool.
+        ast::ExprKind::Unary { op, operand } => match op.as_str() {
+            "-" => infer_literal_type(operand),
+            "not" | "!" => Ty::Bool,
+            _ => Ty::Unknown,
+        },
         ast::ExprKind::Record { name: None, fields } => {
             let mut fs: Vec<(Sym, Ty)> = fields.iter()
                 .map(|fi| (fi.name, infer_literal_type(&fi.value)))

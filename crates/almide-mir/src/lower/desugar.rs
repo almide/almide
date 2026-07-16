@@ -230,9 +230,19 @@ pub fn desugar_method_calls(
             let name = match &*target {
                 CallTarget::Method { object, method } => {
                     if method.as_str().contains('.') {
-                        Some(method.as_str().to_string())
+                        // A pre-dotted method (`Pigment.decode` via `varlib.Pigment.decode`)
+                        // resolves through the derived-method owner map too (#790 codec
+                        // bridge) — a uniquely-owned module type's codec method links the
+                        // module-mangled derived fn instead of an unlinked bare name.
+                        Some(crate::lower::resolve_derived_method_owner(
+                            method.as_str().to_string(),
+                        ))
                     } else if let Ty::Named(n, _) = &object.ty {
-                        Some(format!("{}.{}", n.as_str(), method.as_str()))
+                        Some(crate::lower::resolve_derived_method_owner(format!(
+                            "{}.{}",
+                            n.as_str(),
+                            method.as_str()
+                        )))
                     } else if !matches!(&object.ty, Ty::Record { .. } | Ty::OpenRecord { .. }) {
                         // A non-Named, non-record receiver (`3.double()`,
                         // `"hello".exclaim()`): the checker already resolved stdlib
@@ -376,6 +386,26 @@ pub fn desugar_all(
     let mut cur = body.clone();
     loop {
         if let Some(r) = desugar_method_calls(&cur, record_layouts) {
+            cur = r;
+            continue;
+        }
+        // assert/assert_eq/assert_ne → the controlled-halt `if`/die shape — the SAME
+        // rewrite `lower_function_all_impl` applies before lowering. Without it here the
+        // COUNTED tree kept the bare `assert_eq(a, b)` Call while the lowering emitted the
+        // desugared eq's synthetic calls → a false `mir > ir` caps breach on every test fn
+        // whose assert condition now lowers (desugar-before-both must mean BOTH).
+        if let Some(r) = desugar_assert_calls(&cur) {
+            cur = r;
+            continue;
+        }
+        // `m[k]` → `map.get(m, k)` — same desugar-before-both contract as the assert
+        // rewrite above (the counted Call node matches the lowering's one CallFn).
+        if let Some(r) = desugar_map_access_calls(&cur) {
+            cur = r;
+            continue;
+        }
+        // `buf[i]` over Bytes → `bytes.index(buf, i)` — same contract.
+        if let Some(r) = desugar_bytes_index_calls(&cur) {
             cur = r;
             continue;
         }

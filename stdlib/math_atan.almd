@@ -1,0 +1,75 @@
+// math_atan — SELF-HOSTED math.atan, a FAITHFUL transcription of
+// runtime/rs/src/libm_p4.rs::atan (vendored libm 0.2.16 = FreeBSD s_atan.c).
+// v0 uses the SAME vendored fn on native and the same algorithm in wasm
+// (emit_wasm/rt_numeric.rs::compile_math_atan), so a transcription with
+// identical f64 ops in identical order is bit-identical across the whole
+// input range.
+//
+// Float constants are materialized via prim.ffrombits(<exact i64 bits>) —
+// decimal literals drift ~1 ULP. Op order / associativity is PRESERVED from
+// the Rust source. Pure scalar Float/Int — no lists, no scratch.
+
+fn math_atan(x0: Float) -> Float = {
+  let at0 = prim.ffrombits(4599676419421066509)      // 3FD5555555555550D
+  let at1 = prim.ffrombits(0 - 4626998257160492092)  // BFC999999998EBC4
+  let at2 = prim.ffrombits(4594314991288484863)      // 3FC24924920083FF
+  let at3 = prim.ffrombits(0 - 4630701217362536847)  // BFBC71C6FE231671
+  let at4 = prim.ffrombits(4591215095208222830)      // 3FB745CDC54C206E
+  let at5 = prim.ffrombits(0 - 4633165035261879699)  // BFB3B0F2AF749A6D
+  let at6 = prim.ffrombits(4589464229703073105)      // 3FB10D66A0D03D51
+  let at7 = prim.ffrombits(0 - 4634804155249132134)  // BFADDE2D52DEFD9A
+  let at8 = prim.ffrombits(4587333258118041067)      // 3FA97B4B24760DEB
+  let at9 = prim.ffrombits(0 - 4637946461342241745)  // BFA2B4442C6A6C2F
+  let at10 = prim.ffrombits(4580351289466214929)     // 3F90AD3AE322DA11
+  let atanhi3 = prim.ffrombits(4609753056924675352)  // atan(inf)hi 3FF921FB54442D18
+
+  let bits = prim.fbits(x0)
+  let ixf = prim.bshr_u(bits, 32)
+  let sign = prim.bshr_u(ixf, 31)
+  let ix = prim.band(ixf, 2147483647)
+  if ix >= 1141899264 then {                          // 0x44100000: |x| >= 2^66 or nan
+    if prim.fne(x0, x0) then x0
+    else {
+      let z = atanhi3 + prim.ffrombits(58720256)      // + 0x1p-120f
+      if sign != 0 then 0.0 - z else z
+    }
+  }
+  else if ix < 1071382528 and ix < 1044381696 then x0 // 0x3fdc0000 / 0x3e400000: |x| < 2^-27
+  else {
+    // subrange id: -1 = no reduction, 0..3 = the four reduction intervals
+    let id =
+      if ix < 1071382528 then 0 - 1                   // |x| < 0.4375
+      else if ix < 1072889856 then {                  // 0x3ff30000: |x| < 1.1875
+        if ix < 1072037888 then 0 else 1              // 0x3fe60000 splits 7/16 and 11/16
+      }
+      else if ix < 1073971200 then 2                  // 0x40038000: |x| < 2.4375
+      else 3
+    let xa = prim.ffrombits(prim.band(bits, 9223372036854775807))
+    let xr =
+      if id == 0 - 1 then x0
+      else if id == 0 then (2.0 * xa - 1.0) / (2.0 + xa)
+      else if id == 1 then (xa - 1.0) / (xa + 1.0)
+      else if id == 2 then (xa - 1.5) / (1.0 + 1.5 * xa)
+      else (0.0 - 1.0) / xa
+    let z = xr * xr
+    let w = z * z
+    // break sum from i=0 to 10 AT[i]z**(i+1) into odd and even poly
+    let s1 = z * (at0 + w * (at2 + w * (at4 + w * (at6 + w * (at8 + w * at10)))))
+    let s2 = w * (at1 + w * (at3 + w * (at5 + w * (at7 + w * at9))))
+    if id < 0 then xr - xr * (s1 + s2)
+    else {
+      let hi =
+        if id == 0 then prim.ffrombits(4602023952714414927)      // atan(0.5)hi
+        else if id == 1 then prim.ffrombits(4605249457297304856) // atan(1.0)hi
+        else if id == 2 then prim.ffrombits(4607027438436873883) // atan(1.5)hi
+        else atanhi3
+      let lo =
+        if id == 0 then prim.ffrombits(4357843414468748770)      // atan(0.5)lo
+        else if id == 1 then prim.ffrombits(4359948597267291143) // atan(1.0)lo
+        else if id == 2 then prim.ffrombits(4354989122426817469) // atan(1.5)lo
+        else prim.ffrombits(4364452196894661639)                 // atan(inf)lo
+      let zr = hi - (xr * (s1 + s2) - lo - xr)
+      if sign != 0 then 0.0 - zr else zr
+    }
+  }
+}

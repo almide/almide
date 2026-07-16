@@ -196,6 +196,25 @@ pub(super) fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str
             }
             extract_typevar_binding(p_ret, a_ret, var_name)
         }
+        // A QUALIFIED/bare Named pair (`cell.Cell[T]` param vs a bare `Cell[Int]`
+        // arg, or vice versa) is the SAME nominal type under the checker's
+        // names_match doctrine — descend into the type args instead of letting
+        // the constructor_id string mismatch bind T to Unknown (#788's second
+        // layer: `next_id.get()` never specialized, E0425 on the unsuffixed
+        // call while its sibling `update` survived via the lambda arg).
+        (Ty::Named(pn, p_args), Ty::Named(an, a_args))
+            if p_args.len() == a_args.len()
+                && !p_args.is_empty()
+                && pn.as_str().rsplit('.').next() == an.as_str().rsplit('.').next() =>
+        {
+            for (p, a) in p_args.iter().zip(a_args.iter()) {
+                let r = extract_typevar_binding(p, a, var_name);
+                if !matches!(r, Ty::Unknown) {
+                    return r;
+                }
+            }
+            Ty::Unknown
+        }
         _ => {
             if param_ty.constructor_id() == arg_ty.constructor_id() {
                 let p_args = param_ty.type_args();

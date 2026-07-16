@@ -118,7 +118,10 @@ impl TyChecker<'_> {
 
 impl IrVisitor for TyChecker<'_> {
     fn visit_expr(&mut self, expr: &IrExpr) {
+        let saved = self.where_.clone();
+        self.where_ = format!("{} / expr `{}` ty", saved, expr_kind_tag(&expr.kind));
         self.check_ty(&expr.ty);
+        self.where_ = saved.clone();
         // Ty positions outside expr.ty — the same set repair/mangle rewrite.
         match &expr.kind {
             IrExprKind::Lambda { params, .. } => {
@@ -140,12 +143,41 @@ impl IrVisitor for TyChecker<'_> {
             _ => {}
         }
         walk_expr(self, expr);
+        self.where_ = saved;
     }
     fn visit_stmt(&mut self, stmt: &IrStmt) {
         if let IrStmtKind::Bind { ty, .. } = &stmt.kind {
+            let saved = self.where_.clone();
+            self.where_ = format!("{} / bind-stmt ty", saved);
             self.check_ty(ty);
+            self.where_ = saved;
         }
         walk_stmt(self, stmt);
+    }
+}
+
+fn expr_kind_tag(k: &IrExprKind) -> &'static str {
+    match k {
+        IrExprKind::Var { .. } => "Var",
+        IrExprKind::Call { .. } => "Call",
+        IrExprKind::RuntimeCall { .. } => "RuntimeCall",
+        IrExprKind::TailCall { .. } => "TailCall",
+        IrExprKind::Match { .. } => "Match",
+        IrExprKind::If { .. } => "If",
+        IrExprKind::Block { .. } => "Block",
+        IrExprKind::Member { .. } => "Member",
+        IrExprKind::IndexAccess { .. } => "IndexAccess",
+        IrExprKind::List { .. } => "List",
+        IrExprKind::Record { .. } => "Record",
+        IrExprKind::Lambda { .. } => "Lambda",
+        IrExprKind::ForIn { .. } => "ForIn",
+        IrExprKind::While { .. } => "While",
+        IrExprKind::BinOp { .. } => "BinOp",
+        IrExprKind::Clone { .. } => "Clone",
+        IrExprKind::Borrow { .. } => "Borrow",
+        IrExprKind::FnRef { .. } => "FnRef",
+        IrExprKind::TupleIndex { .. } => "TupleIndex",
+        _ => "other",
     }
 }
 
@@ -176,9 +208,13 @@ pub fn collect_unresolvable_names(program: &IrProgram) -> Vec<UnresolvableName> 
     };
 
     let check_fn = |chk: &mut TyChecker, func: &IrFunction| {
-        chk.where_ = format!("fn `{}`", func.name);
-        for p in &func.params { chk.check_ty(&p.ty); }
+        for p in &func.params {
+            chk.where_ = format!("fn `{}` / param `{}`", func.name, p.name);
+            chk.check_ty(&p.ty);
+        }
+        chk.where_ = format!("fn `{}` / return ty", func.name);
         chk.check_ty(&func.ret_ty);
+        chk.where_ = format!("fn `{}`", func.name);
         chk.visit_expr(&func.body);
     };
 
@@ -272,47 +308,70 @@ fn repair_ty(ty: &Ty, map: &std::collections::HashMap<Sym, Sym>) -> Ty {
     }
 }
 
-fn repair_expr(e: IrExpr, map: &std::collections::HashMap<Sym, Sym>) -> IrExpr {
-    let mut e = e.map_children(&mut |c| repair_expr(c, map));
-    e.ty = repair_ty(&e.ty, map);
-    match &mut e.kind {
-        IrExprKind::Block { stmts, .. } => {
-            for s in stmts.iter_mut() {
-                if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
-                    *ty = repair_ty(ty, map);
+/// Canonical-walker repair: the SAME traversal family as the verifier
+/// (`IrMutVisitor`), so every position the gate scans is a position the
+/// repair rewrites — by construction, not by keeping two hand-maintained
+/// enumerations in sync. (#783: the old `map_children`-based rewrite fixed
+/// `Bind` tys only when the Bind was a DIRECT child of a `Block` expr; a
+/// `let child: Node = …` inside a ForIn/While body — `Vec<IrStmt>`, not a
+/// Block — kept its bare ty and tripped the gate four functions deep in
+/// ceangal's layout module.)
+struct RepairVisitor<'a> {
+    map: &'a std::collections::HashMap<Sym, Sym>,
+}
+
+impl almide_ir::visit_mut::IrMutVisitor for RepairVisitor<'_> {
+    fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+        e.ty = repair_ty(&e.ty, self.map);
+        match &mut e.kind {
+            // Record literals carry their type name as the ctor; a bare ctor
+            // would render a bare (post-mangle nonexistent) struct name.
+            IrExprKind::Record { name: Some(n), .. } => {
+                if let Some(q) = self.map.get(n) {
+                    *n = *q;
                 }
             }
-        }
-        // Record literals carry their type name as the ctor; a bare ctor
-        // would render a bare (post-mangle nonexistent) struct name.
-        IrExprKind::Record { name: Some(n), .. } => {
-            if let Some(q) = map.get(n) {
-                *n = *q;
+            // Lambda params / closure captures / call type-args / boxing casts
+            // carry Tys outside expr.ty.
+            IrExprKind::Lambda { params, .. } => {
+                for (_, ty) in params.iter_mut() {
+                    *ty = repair_ty(ty, self.map);
+                }
             }
-        }
-        // Lambda params / closure captures / call type-args / boxing casts
-        // carry Tys outside expr.ty.
-        IrExprKind::Lambda { params, .. } => {
-            for (_, ty) in params.iter_mut() {
-                *ty = repair_ty(ty, map);
+            IrExprKind::ClosureCreate { captures, .. } => {
+                for (_, ty) in captures.iter_mut() {
+                    *ty = repair_ty(ty, self.map);
+                }
             }
-        }
-        IrExprKind::ClosureCreate { captures, .. } => {
-            for (_, ty) in captures.iter_mut() {
-                *ty = repair_ty(ty, map);
+            IrExprKind::Call { type_args, .. } => {
+                for ty in type_args.iter_mut() {
+                    *ty = repair_ty(ty, self.map);
+                }
             }
-        }
-        IrExprKind::Call { type_args, .. } => {
-            for ty in type_args.iter_mut() {
-                *ty = repair_ty(ty, map);
+            IrExprKind::RcWrap { cast_ty: Some(ty), .. } => {
+                **ty = repair_ty(ty, self.map);
             }
+            _ => {}
         }
-        IrExprKind::RcWrap { cast_ty: Some(ty), .. } => {
-            **ty = repair_ty(ty, map);
-        }
-        _ => {}
+        almide_ir::visit_mut::walk_expr_mut(self, e);
     }
-    e
+    fn visit_stmt_mut(&mut self, s: &mut IrStmt) {
+        if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
+            *ty = repair_ty(ty, self.map);
+        }
+        almide_ir::visit_mut::walk_stmt_mut(self, s);
+    }
+    fn visit_pattern_mut(&mut self, p: &mut IrPattern) {
+        if let IrPattern::Bind { ty, .. } = p {
+            *ty = repair_ty(ty, self.map);
+        }
+        almide_ir::visit_mut::walk_pattern_mut(self, p);
+    }
+}
+
+fn repair_expr_in_place(e: &mut IrExpr, map: &std::collections::HashMap<Sym, Sym>) {
+    use almide_ir::visit_mut::IrMutVisitor;
+    RepairVisitor { map }.visit_expr_mut(e);
 }
 
 fn repair_fn(f: &mut IrFunction, map: &std::collections::HashMap<Sym, Sym>) {
@@ -320,11 +379,7 @@ fn repair_fn(f: &mut IrFunction, map: &std::collections::HashMap<Sym, Sym>) {
         p.ty = repair_ty(&p.ty, map);
     }
     f.ret_ty = repair_ty(&f.ret_ty, map);
-    let body = std::mem::replace(
-        &mut f.body,
-        IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
-    );
-    f.body = repair_expr(body, map);
+    repair_expr_in_place(&mut f.body, map);
 }
 
 fn repair_decl_kind(kind: &mut IrTypeDeclKind, map: &std::collections::HashMap<Sym, Sym>) {
@@ -360,6 +415,11 @@ fn repair_decl_kind(kind: &mut IrTypeDeclKind, map: &std::collections::HashMap<S
 pub fn repair_bare_type_names(program: &mut IrProgram) {
     let decls = index_decls(program);
     let map = build_repair_map(&decls);
+    if std::env::var_os("ALMIDE_NAMES_DEBUG").is_some() {
+        eprintln!("[names-debug] repair: bare decls = {:?}", decls.bare.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        eprintln!("[names-debug] repair: qualified = {:?}", decls.qualified);
+        eprintln!("[names-debug] repair: map = {:?}", map.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
+    }
     if map.is_empty() {
         return;
     }
@@ -371,11 +431,7 @@ pub fn repair_bare_type_names(program: &mut IrProgram) {
     }
     for tl in &mut program.top_lets {
         tl.ty = repair_ty(&tl.ty, &map);
-        let v = std::mem::replace(
-            &mut tl.value,
-            IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
-        );
-        tl.value = repair_expr(v, &map);
+        repair_expr_in_place(&mut tl.value, &map);
     }
     for v in &mut program.var_table.entries {
         v.ty = repair_ty(&v.ty, &map);
@@ -392,11 +448,7 @@ pub fn repair_bare_type_names(program: &mut IrProgram) {
         }
         for tl in &mut m.top_lets {
             tl.ty = repair_ty(&tl.ty, &map);
-            let v = std::mem::replace(
-                &mut tl.value,
-                IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
-            );
-            tl.value = repair_expr(v, &map);
+            repair_expr_in_place(&mut tl.value, &map);
         }
         for v in &mut m.var_table.entries {
             v.ty = repair_ty(&v.ty, &map);
@@ -410,6 +462,11 @@ pub fn repair_bare_type_names(program: &mut IrProgram) {
 /// into a structured compiler-bug report. Controlled error, not an ICE.
 pub fn assert_names_resolvable(program: &IrProgram) {
     let offenders = collect_unresolvable_names(program);
+    if std::env::var_os("ALMIDE_NAMES_DEBUG").is_some() {
+        let decls = index_decls(program);
+        eprintln!("[names-debug] gate: bare decls = {:?}", decls.bare.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        eprintln!("[names-debug] gate: qualified = {:?}", decls.qualified);
+    }
     if offenders.is_empty() { return; }
 
     let mut msg = String::new();
@@ -485,6 +542,57 @@ mod tests {
         program.var_table.alloc(sym("v"), named("Cfg"), Mutability::Let, None);
         assert!(collect_unresolvable_names(&program).is_empty(),
             "a bare decl satisfies the bare reference even when a qualified twin exists");
+    }
+
+    #[test]
+    fn repair_reaches_binds_in_loop_bodies() {
+        // #783: a `let v: Node = …` Bind inside a ForIn/While body (Vec<IrStmt>,
+        // not a Block expr) must be repaired like any Block-level Bind — the
+        // old map_children rewrite skipped it and the gate fired on ceangal's
+        // layout functions.
+        let mut program = IrProgram::default();
+        program.modules.push(module_with_decl("m.Cfg"));
+        let unit = || IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
+        let bind = IrStmt {
+            kind: IrStmtKind::Bind {
+                var: VarId(0),
+                mutability: Mutability::Let,
+                ty: named("Cfg"),
+                value: unit(),
+            },
+            span: None,
+        };
+        let body = IrExpr {
+            kind: IrExprKind::While {
+                cond: Box::new(IrExpr { kind: IrExprKind::LitBool { value: false }, ty: Ty::Bool, span: None, def_id: None }),
+                body: vec![bind],
+            },
+            ty: Ty::Unit, span: None, def_id: None,
+        };
+        program.modules[0].functions.push(IrFunction {
+            name: sym("m.f"),
+            params: vec![],
+            ret_ty: Ty::Unit,
+            body,
+            is_effect: false,
+            is_async: false,
+            is_test: false,
+            generics: None,
+            extern_attrs: vec![],
+            export_attrs: vec![],
+            attrs: vec![],
+            visibility: IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
+            def_id: None,
+            mutated_params: vec![],
+            module_origin: Some("m".to_string()),
+        });
+        assert_eq!(collect_unresolvable_names(&program).len(), 1,
+            "the loop-body Bind ty must be scanned");
+        repair_bare_type_names(&mut program);
+        assert!(collect_unresolvable_names(&program).is_empty(),
+            "repair must rewrite the loop-body Bind ty to the qualified name");
     }
 
     #[test]

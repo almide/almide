@@ -1,0 +1,39 @@
+// @contract: C-135
+// Declared-Unit effect fn ABI: def and every call site agree on both targets.
+// The four shapes of the #786 class:
+//   1. never-err declared-Unit effect fn (raw/void ABI) — do_nothing
+//   2. declared-Unit effect fn with stmt-position propagation (AUTO_WRAP
+//      Result ABI, Unit tail → materialized ok(())) — do_nothing_twice
+//   3. declared Result[Unit, String] fn whose tail is a never-err Unit call
+//      (raw-rewritten tail → materialized ok(())) — tail_unit_call
+//   4. declared Result[Unit, String] fn with stmt calls + explicit ok(())
+//      — stmt_unit_calls
+// Previously the wasm leg emitted a VOID def while callers `local.set` the
+// promised Result handle — a structurally invalid module (honest refusal at
+// build time, never wrong bytes).
+
+effect fn do_nothing() -> Unit = {
+  println("dn")
+}
+
+effect fn do_nothing_twice() -> Unit = {
+  do_nothing()
+  do_nothing()
+}
+
+effect fn tail_unit_call() -> Result[Unit, String] = {
+  do_nothing()
+}
+
+effect fn stmt_unit_calls() -> Result[Unit, String] = {
+  do_nothing()
+  do_nothing_twice()
+  ok(())
+}
+
+effect fn main() -> Unit = {
+  tail_unit_call()!
+  stmt_unit_calls()!
+  do_nothing_twice()
+  println("unit_effect_abi ok")
+}

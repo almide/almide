@@ -951,10 +951,11 @@ evidence  = [
 id        = "C-070"
 spec      = "ALS-M1"
 title     = "Nested constructor patterns match and bind identically on both targets"
-statement = "A NESTED pattern as the argument of a user-defined constructor pattern — `Wrap(A(n))`, `Box(Some(n))`, `Held(Circle { r })`, `Node(Leaf(a), Leaf(b))` — emits the inner discriminant test(s) into the arm guard and binds the inner payload(s) recursively, byte-identical native == wasm. The wasm match backend's constructor arm-binding loop previously handled only top-level `Bind`/`Literal` args: a nested ctor / Some / None / variant-record arg got NO inner discriminant test and bound garbage (0), so wasm SILENTLY took the wrong arm (exit 0) while native was correct (and a nested ctor on a recursive boxed variant additionally emitted invalid Rust). Now `emit_arg_tests` recurses the discriminant tests into the guard and `bind_arg` recurses the binding through nested ctor / Some / variant-record payloads."
+statement = "A NESTED pattern as the argument of a user-defined constructor pattern — `Wrap(A(n))`, `Box(Some(n))`, `Held(Circle { r })`, `Node(Leaf(a), Leaf(b))` — emits the inner discriminant test(s) into the arm guard and binds the inner payload(s) recursively, byte-identical native == wasm. The wasm match backend's constructor arm-binding loop previously handled only top-level `Bind`/`Literal` args: a nested ctor / Some / None / variant-record arg got NO inner discriminant test and bound garbage (0), so wasm SILENTLY took the wrong arm (exit 0) while native was correct (and a nested ctor on a recursive boxed variant additionally emitted invalid Rust). Now `emit_arg_tests` recurses the discriminant tests into the guard and `bind_arg` recurses the binding through nested ctor / Some / variant-record payloads. The NATIVE side of the same promise (#757): the `matches!` shape-guard the #610 box rewrite synthesizes must carry EVERY refutable constraint of the boxed inner pattern — the inner variant tag and inner literals, at any depth — so a non-matching value REFINES to the next arm. Erasing them to `_` admitted the value past the guard and panicked at the body's `let-else unreachable!()` (exit 101) while wasm refined correctly."
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/nested_ctor_pattern.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_variant_tag_box.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1681,4 +1682,39 @@ since     = "0.29.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_get.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-136"
+spec      = "ALS-M13"
+title     = "In-place place mutations persist to the subsequent read on both targets"
+statement = "An in-place PLACE mutation — record field assign (`r.f = v`, scalar or heap field, on all-scalar and mixed records), map insert (`m[k] = v`), list element store (`xs[i] = v`, scalar or heap element), and a heap-var reassignment inside an executing branch arm (`if let v = x { out = f(v) }`) — persists to every subsequent read identically on native and wasm. Previously the v1 leg lowered these to ONLY the `MakeUnique` COW guard (or nothing at all) and silently ELIDED the write (a caps-counting-era deferral left executable on the STRICT output path): the assign was a no-op and reads returned the pre-assign value while native mutated — a silent wrong value on the verified default (shipped in 0.29.0; surfaced by the v1 test-runner flip, which ran the long-v0-only test-block corpus on v1 for the first time). Now the scalar-slot stores execute on v1 (`ListSetScalar` on the uniform aggregate block) and every other shape WALLS honestly (v0 emits the correct bytes) — an elided write is never executable."
+since     = "0.30.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/place_mutation.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-135"
+spec      = "ALS-M4"
+title     = "Declared-Unit effect fn ABI agrees between def and every call site"
+statement = "A declared-Unit `effect fn` compiles to a module in which its definition and EVERY call site agree on the ABI, on both targets and across module boundaries: a never-err callee is void/raw (callers strip the lifted `Try`/Result type), a can-err or stmt-propagating callee carries the lifted `Result[Unit, String]` ABI, and any Result-ABI fn whose body tail is Unit-typed materializes the promised `ok(())` block as its return. Previously the v1 wasm leg classified CALLERS by the name-keyed ABI registries but emitted the DEF by body shape: a Unit-tailed Result-ABI fn came out VOID while callers `local.set` the promised Result handle — a structurally invalid module (an honest build-time refusal, never wrong bytes) — and the never-err rewrites ran with main-only sets, so cross-module and module-sibling callers never stripped at all (the #786 class)."
+since     = "0.30.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unit_effect_abi.almd", class = "fixture" },
+  { path = "spec/integration/modules/cross_module_unit_effect_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-134"
+spec      = "ALS-T10"
+title     = "Vendored-libm atan / tanh are byte-identical cross-target"
+statement = "`math.atan` and `math.tanh` route through the SAME vendored musl-libm reference on both targets (native runtime/rs/src/libm_p4.rs — atan/expm1/tanh; wasm emit_wasm/rt_numeric.rs + rt_libm_p4.rs), so every result is byte-identical — printed via the (itself byte-identical) Dragon4 `float.to_string`. Native previously carried a PLATFORM `f64::atan` (dead code, never exposed in stdlib); it now runs the vendored fn. Every atan subrange (7/16, 11/16, 19/16, 39/16, 2^-27 tiny, 2^66 huge) and every tanh/expm1 range split (log(5/3)/2, log(3)/2, |x|>20, subnormal, k = 0/±1/>56 scaling) is exercised; identities atan(1) = pi/4, atan(inf) = pi/2 and the upstream expm1(1.1) sanity vector hold. Differential fuzz certifies the continuous input space."
+since     = "0.30.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/math_atan_tanh.almd", class = "fixture" },
+  { path = "tests/libm_atan_tanh_cross_target_test.rs", name = "atan_tanh_cross_target_random_fuzz", class = "fuzz", n = 3000 },
 ]

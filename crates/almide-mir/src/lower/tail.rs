@@ -331,61 +331,11 @@ impl LowerCtx {
             }
             return self.lower_tail(expr.as_deref());
         }
+        // Decomposed (#781, cog 232): the UNIT / HEAP / SCALAR tails are verbatim
+        // text moves into lower_tail_unit / lower_tail_heap / lower_tail_scalar —
+        // behavior proven by the classify wall-list + cert byte-identity ladder.
         if matches!(tail.ty, Ty::Unit) {
-            return match &tail.kind {
-                IrExprKind::Unit => Ok(None),
-                // A Unit-typed call tail is an EFFECT call (e.g. `println(s)`):
-                // lower it as a statement-effect, no return value.
-                IrExprKind::Call { .. } => {
-                    self.lower_effect_call(tail)?;
-                    Ok(None)
-                }
-                // A Unit `if` tail EXECUTES (only the taken arm's effects run) when the
-                // cond is a scalar; else it linearizes.
-                IrExprKind::If { cond, then, else_ }
-                    if self.try_lower_unit_if(cond, then, else_) =>
-                {
-                    Ok(None)
-                }
-                // A Unit `match` tail over Int literal patterns EXECUTES: desugar to a
-                // nested if and run only the matched arm; non-literal patterns linearize.
-                IrExprKind::Match { subject, arms } => {
-                    if let Some(if_expr) = self.desugar_match_to_if(subject, arms, &Ty::Unit) {
-                        if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
-                            if self.try_lower_unit_if(cond, then, else_) {
-                                return Ok(None);
-                            }
-                        }
-                    }
-                    self.lower_branch(tail)?;
-                    Ok(None)
-                }
-                IrExprKind::If { .. } => {
-                    self.lower_branch(tail)?;
-                    Ok(None)
-                }
-                // A Unit-typed `for`/`while` tail is a per-iteration-framed loop.
-                IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-                    self.lower_for_in(*var, var_tuple, iterable, body)?;
-                    Ok(None)
-                }
-                IrExprKind::While { cond, body } => {
-                    self.lower_while(cond, body)?;
-                    Ok(None)
-                }
-                // A Unit-typed TAIL `g()` / `g()!` (effect-fn call propagating its
-                // `Result[Unit, _]`): the frontend wraps it in `Try`/`Unwrap` for the
-                // auto-`?`. The Result is the function's own Unit return, so strip the
-                // wrapper and lower the inner effect call — exactly the heap-`Unwrap`
-                // tail rule (line below), but for a discarded-Unit result.
-                IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
-                    self.lower_tail(Some(expr))
-                }
-                other => Err(LowerError::Unsupported(format!(
-                    "Unit-typed tail {} not in this brick",
-                    kind_name(other)
-                ))),
-            };
+            return self.lower_tail_unit(tail);
         }
         // A tail of type `Result[Unit, _]` is the return of an `effect fn … -> Unit`
         // (its auto-`?` effect Result). The v1 pipeline lowers such a fn to a VOID wasm
@@ -415,516 +365,596 @@ impl LowerCtx {
             }
         }
         if is_heap_ty(&tail.ty) {
-            return match &tail.kind {
-                IrExprKind::Var { id } => {
-                    let v = self.value_or_global(*id)?;
-                    if self.param_values.contains(&v) {
-                        // Returning a BORROWED param directly would move out a
-                        // reference we do not own (the caller's) — a double-free. AUTO-
-                        // ACQUIRE one first: `Op::Dup` (cert `a`) then move out the new
-                        // handle (cert `m`) — exactly `let q = p; q`. The returned `am`
-                        // is an OWNED reference (rc incremented), independent of the
-                        // caller's, so no double-free; the proven checker accepts it.
-                        let dst = self.fresh_value();
-                        self.ops.push(Op::Dup { dst, src: v });
-                        return Ok(Some(dst)); // moved out, NOT added to live_heap_handles
-                    }
-                    self.live_heap_handles.retain(|h| *h != v); // moved out, not dropped
-                    Ok(Some(v))
-                }
-                // A TAIL `e!` (Unwrap — effect-fn error propagation in return position):
-                // `f() = g()!` PROPAGATES g's Result unchanged (Ok→Ok, Err→Err), i.e. it IS
-                // `f() = g()` at the effect-Result level. So strip the `!` and lower `e` as the
-                // tail (return its Result directly). This unblocks the `parse_mapping =
-                // collect_map(..)!` shape (a tail call result propagated).
-                IrExprKind::Unwrap { expr } => return self.lower_tail(Some(expr)),
-                // A lambda RETURNED (`fn mk() -> (Int) -> Int = (x) => x + 1`, `fn adder(n)
-                // = (x) => x + n`) — LIFT it to a CLOSURE BLOCK (fnidx + captured scalars)
-                // and MOVE the block out as the return (a fresh owned heap value — removed
-                // from the scope-end set; cert `im`). The caller tracks the bound result in
-                // `closure_values` (binds_p2) so a later `f(args)` dispatches through it.
-                IrExprKind::Lambda { params, body, .. } => {
-                    return match self.lift_lambda(params, body) {
-                        Some(blk) => {
-                            self.live_heap_handles.retain(|h| *h != blk);
-                            Ok(Some(blk))
+            return self.lower_tail_heap(tail);
+        }
+        self.lower_tail_scalar(tail)
+    }
+
+    /// The UNIT-typed tail of [`Self::lower_tail`] (effects run, no value).
+    /// Verbatim text move.
+    fn lower_tail_unit(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
+        return match &tail.kind {
+            IrExprKind::Unit => Ok(None),
+            // A Unit-typed call tail is an EFFECT call (e.g. `println(s)`):
+            // lower it as a statement-effect, no return value.
+            IrExprKind::Call { .. } => {
+                self.lower_effect_call(tail)?;
+                Ok(None)
+            }
+            // A Unit `if` tail EXECUTES (only the taken arm's effects run) when the
+            // cond is a scalar; else it linearizes.
+            IrExprKind::If { cond, then, else_ }
+                if self.try_lower_unit_if(cond, then, else_) =>
+            {
+                Ok(None)
+            }
+            // A Unit `match` tail over Int literal patterns EXECUTES: desugar to a
+            // nested if and run only the matched arm; non-literal patterns linearize.
+            IrExprKind::Match { subject, arms } => {
+                if let Some(if_expr) = self.desugar_match_to_if(subject, arms, &Ty::Unit) {
+                    if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
+                        if self.try_lower_unit_if(cond, then, else_) {
+                            return Ok(None);
                         }
-                        None => Err(LowerError::Unsupported(
-                            "lambda outside the liftable subset returned (heap/Float captures \
-                             are a later ratchet) — cannot be faithfully materialized"
-                                .into(),
-                        )),
-                    };
-                }
-                // A fresh heap literal returned directly (`fn f() = [1, 2, 3]`):
-                // allocate it and move it out. It is NOT added to
-                // `live_heap_handles`, so it is the return value (consumed at the
-                // boundary) and never also dropped. Cert: alloc(i) + move-out(m) =
-                // balanced — and the runtime correspondence is exact (a real
-                // Alloc, a real move-out), so the gate fully covers it.
-                IrExprKind::List { .. }
-                | IrExprKind::MapLiteral { .. }
-                | IrExprKind::EmptyMap
-                | IrExprKind::Record { .. }
-                | IrExprKind::SpreadRecord { .. }
-                | IrExprKind::Tuple { .. }
-                | IrExprKind::LitStr { .. }
-                | IrExprKind::StringInterp { .. }
-                | IrExprKind::ResultOk { .. }
-                | IrExprKind::ResultErr { .. }
-                | IrExprKind::OptionSome { .. }
-                | IrExprKind::OptionNone
-                | IrExprKind::BinOp { .. }
-                | IrExprKind::UnOp { .. }
-                | IrExprKind::Try { .. }
-                | IrExprKind::UnwrapOr { .. }
-                | IrExprKind::ToOption { .. }
-                | IrExprKind::OptionalChain { .. }
-                // A CAPTURING CLOSURE value returned is a fresh heap env; a RANGE is a fresh value —
-                // both `Alloc{Opaque}`, moved out. (A non-capturing `Lambda` is lifted above.)
-                | IrExprKind::ClosureCreate { .. }
-                | IrExprKind::Range { .. }
-                | IrExprKind::RuntimeCall { .. } => {
-                    // A RECORD literal RETURNED (`fn mk(a) = P { x: a, y: a * 2 }`) — build the
-                    // real layout block (scalar fields stored, heap fields moved in) and MOVE
-                    // IT OUT as the return (NOT tracked → the caller owns it, no scope-end
-                    // drop). Same cert as the heap-literal return: alloc(i) + move-out(m).
-                    if let IrExprKind::Record { .. } = &tail.kind {
-                        if let Some(dst) = self
-                            .try_lower_record_construct(tail)
-                            .or_else(|| self.try_lower_scalar_record_construct(tail))
-                        {
-                            return Ok(Some(dst));
-                        }
-                    }
-                    // A SPREAD record RETURNED (`fn attr(e, k, v) = { ...e, attrs: map.set(…) }` —
-                    // the svg element-builder shape): build a fresh same-layout block COPYING each
-                    // non-overridden field from the materialized base (scalar Load, heap-handle Dup so
-                    // base keeps its own ref) + storing the overrides, then MOVE IT OUT as the return
-                    // (the caller owns it, no scope-end drop). Same `i…m` cert as the Record return.
-                    if let IrExprKind::SpreadRecord { .. } = &tail.kind {
-                        if let Some(dst) = self.try_lower_spread_record_construct(tail) {
-                            return Ok(Some(dst));
-                        }
-                    }
-                    // A TUPLE literal RETURNED (`fn pair(s) = (s, 5)`, `(parse_inline(t), pos + 1)`
-                    // — the dominant yaml `(Value, Int)` parser shape): build the real block (scalar
-                    // slots stored, heap elements moved in via `lower_owned_heap_field`) and MOVE IT
-                    // OUT as the return (the block is `record_masks`-tracked but NOT in
-                    // `live_heap_handles`, so it is the moved-out result — the caller owns it, no
-                    // scope-end drop). Same cert as the Record return: alloc(i) + per-element moves +
-                    // move-out(m). The caller's destructure reads it precisely (it's a masked aggregate).
-                    if let IrExprKind::Tuple { elements } = &tail.kind {
-                        if let Some(dst) = self
-                            .try_lower_scalar_tuple_construct(elements)
-                            .or_else(|| self.try_lower_tuple_construct(elements))
-                        {
-                            return Ok(Some(dst));
-                        }
-                    }
-                    // A heap-ELEMENT list literal RETURNED — a `List[(String, String)]`
-                    // (`fn keyword_aliases() = [("Ok", "ok"), …]`) or a `List[Record]`
-                    // (`fn keyword_groups() = [KeywordGroup { … }, …]`, `fn precedence_table() =
-                    // [PrecLevel { … }, …]`). Build the real nested-ownership block (each element
-                    // moved in, the recursive per-element drop registered), MOVED OUT as the return
-                    // (NOT tracked → no scope-end drop; the caller owns it). Without this the literal
-                    // fell through `try_lower_str_list_literal` (which returns None for these heap
-                    // elements) to the Opaque alloc = an empty len-0 list (a silent miscompile).
-                    if let Some(dst) = self.try_lower_record_list_literal_tail(tail) {
-                        return Ok(Some(dst));
-                    }
-                    // A `List[String]` literal RETURNED (`fn make() = [e0, e1]`) — build a real
-                    // nested-ownership DynListStr (each element moved/Dup'd in), moved out as the
-                    // return (NOT tracked, so no scope-end DropListStr — the caller owns it). Without
-                    // this the literal fell to the Opaque alloc = an empty len-0 list.
-                    if let Some(dst) = self.try_lower_str_list_literal(tail) {
-                        return Ok(Some(dst));
-                    }
-                    // A scalar `List[Int/Float/Bool]` literal RETURNED with computed elements —
-                    // build + store each slot, moved out (an all-literal list is the Opaque/IntList
-                    // path below). Without this a `[a, a]` of computed scalars returned an empty list.
-                    if let Some(dst) = self.try_lower_scalar_list_construct(tail) {
-                        return Ok(Some(dst));
-                    }
-                    // A string concat RETURNED (`fn greet(n) = "Hi, " + n`) — a fresh owned String
-                    // (via __str_concat), moved out as the return (cert CallFn-result i + ret m).
-                    if let Some(dst) = self.try_lower_concat_str(tail) {
-                        return Ok(Some(dst));
-                    }
-                    // A SCALAR-element list concat RETURNED (`fn pair(xs) = xs + [7]`) — a fresh owned
-                    // list (via __list_concat), moved out as the return (cert CallFn-result i + ret m).
-                    // A heap-element list concat returns None and falls through to the deferred Opaque.
-                    if let Some(dst) = self.try_lower_concat_list(tail) {
-                        return Ok(Some(dst));
-                    }
-                    // A STRING INTERPOLATION RETURNED (`fn greet(n) = "Hi, ${n}"`) over the
-                    // executable subset — a fresh owned String (via the __str_concat chain),
-                    // moved out as the return. A compound/call-operand interp falls through to
-                    // the deferred Opaque below.
-                    if let IrExprKind::StringInterp { parts } = &tail.kind {
-                        if let Some(dst) = self.try_lower_string_interp(parts) {
-                            return Ok(Some(dst));
-                        }
-                    }
-                    // A `Some(scalar)`/`None` RETURNED (`fn some_int(x) = Some(x)`) is
-                    // MATERIALIZED so the caller receives a real 0-or-1-element-list
-                    // Option (len-correct) it can `match` — the self-host Option fns
-                    // (list.get/first/last) return through such helpers. Moved out (NOT
-                    // pushed to live_heap_handles), cert = Alloc i + move-out m.
-                    // `ok(Pair(_e0, _e1))` / `ok(Plain)` / `err(msg)` for `Result[<user variant>, String]`
-                    // (derived variant decode) — materialize the variant Ok, recursive `$__drop_<V>` drop.
-                    // BEFORE the generic `try_lower_option_ctor` heap-Ok path, which would emit a dangling
-                    // `CallFn "Pair"` for the variant ctor.
-                    if let Some(dst) = self.try_lower_result_variant_ctor(tail, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // `err(Overflow(msg))` RETURNED for `Result[T_scalar, <user variant>]`
-                    // (the structured-error class): the len-as-tag Err wrapper, moved out.
-                    if self.is_scalar_ok_variant_err_result(&tail.ty) {
-                        if let Some(dst) = self.try_lower_result_err_variant_ctor(tail, &tail.ty) {
-                            self.live_heap_handles.retain(|h| *h != dst);
-                            return Ok(Some(dst));
-                        }
-                    }
-                    if let Some(dst) = self.try_lower_option_ctor(tail, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // `fn f() -> String = opt ?? "d"` — a heap-String `??` RETURNED. Executes via the
-                    // self-host `option.unwrap_or_str` call (try_lower_option_unwrap_or's heap branch),
-                    // MOVED OUT as the return (track_result=false — the caller owns it; tracking it
-                    // would double-free). Closes the tail-position heap-`??` silent-Opaque hole.
-                    if let IrExprKind::UnwrapOr { expr, fallback } = &tail.kind {
-                        if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, false) {
-                            return Ok(Some(dst));
-                        }
-                    }
-                    // `ok({val, next})` / `err(msg)` RETURNED for a `Result[heap-record, String]` (porta
-                    // read_valtype): materialize the record-Ok / String-Err block, MOVED OUT as the
-                    // return (the recursive `Op::DropWrapperRec` frees it via `$__drop_<R>` at the
-                    // caller's scope end). Checked before the generic ctor paths below.
-                    if let Some(dst) = self.try_lower_result_record_ctor(tail, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // `ok(none)` / `ok(<Option[record]>)` / `err(msg)` RETURNED for `Result[Option[record],
-                    // String]` (porta read_message): recursive `$__drop_opt_<R>` via `resrec:opt_<R>`.
-                    if let Some(dst) = self.try_lower_result_option_ctor(tail, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // `ok(some(x))` / `ok(none)` / `err(msg)` RETURNED for `Result[Option[T], String]` with a
-                    // STRING / SCALAR leaf (the derived-Codec `__decode_option_T`): flat `DropListStr` for a
-                    // scalar Option, recursive `$__drop_opt_str` for a String Option. Checked AFTER the
-                    // record ctor (which claims the record-Option shape) — the leaf gate keeps them disjoint.
-                    if let Some(dst) = self.try_lower_result_option_scalar_str_ctor(tail, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // `ok(value.array(...))` / `err(msg)` RETURNED for a `Result[Value, String]` (csv
-                    // `parse`): materialize the Value-Ok / String-Err Result block, MOVED OUT as the
-                    // return (the recursive `Op::DropResultValue` frees it at the caller's scope end).
-                    if let Some(dst) = self.try_lower_result_value_ctor(tail, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // `ok((slice, pos))` / `err(msg)` RETURNED for a `Result[(String, Int), String]`
-                    // (toml `parse_key_part`): materialize the (String,Int)-Ok / String-Err block,
-                    // MOVED OUT (the recursive `Op::DropResultStrInt` frees it at the caller's scope end).
-                    if let Some(dst) = self.try_lower_result_str_int_ctor(tail, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // `ok((value.…, pos))` / `err(msg)` RETURNED for `Result[(Value, Int), String]`
-                    // (toml parse_val): materialize the (Value,Int)-Ok / String-Err block, MOVED OUT
-                    // (the recursive `Op::DropResultValueInt` frees it at the caller's scope end).
-                    if let Some(dst) = self.try_lower_result_value_int_ctor(tail, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // `ok((keys, pos))` / `err(msg)` RETURNED for `Result[(List[String], Int), String]`
-                    // (toml parse_key / parse_table_key): the recursive `Op::DropResultListStrInt`.
-                    if let Some(dst) = self.try_lower_result_list_str_int_ctor(tail, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // `ok((items, np))` / `err` for `Result[(List[Value], Int), String]` (collect_array_items).
-                    if let Some(dst) = self.try_lower_result_list_value_int_ctor(tail, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // `ok(())` / `ok(<scalar>)` RETURNED for a `Result[<non-heap>, String]` (porta
-                    // `run_foreground` / `ensure_porta_dir` `ok(())`): materialize the flat len-0 Ok
-                    // block, MOVED OUT as the return (its scope-end `DropListStr` frees just the block —
-                    // no nested heap). The heap-Ok cases (record/value/tuple/String) were intercepted
-                    // by the ctors above, so reaching here is exactly the scalar/Unit Ok the arm path
-                    // already lowers — only the TAIL position was missing it (this closed that gap).
-                    if let Some(dst) = self.try_lower_result_scalar_ok_ctor(tail, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // A SPREAD-record (`{ ...n, gap_main: v }` — ceangal's with_* rebuilders) or a
-                    // plain RECORD literal RETURNED as the fn tail: the SAME construct machinery the
-                    // heap-result ARM position already uses (base slots copied via Dup — a borrowed
-                    // param base stays valid; overrides moved in), then MOVED OUT exactly per the arm
-                    // precedent (`Consume` + per-frame temp drops; the caller frees the return by its
-                    // type). A non-materialized base / out-of-subset field returns None → the honest
-                    // Opaque wall below.
-                    if matches!(&tail.kind, IrExprKind::SpreadRecord { .. }) {
-                        let mark = self.live_heap_handles.len();
-                        if let Some(dst) = self.try_lower_spread_record_construct(tail) {
-                            self.ops.push(Op::Consume { v: dst });
-                            self.drop_arm_locals(mark);
-                            return Ok(Some(dst));
-                        }
-                    }
-                    if matches!(&tail.kind, IrExprKind::Record { .. }) {
-                        let mark = self.live_heap_handles.len();
-                        if let Some(dst) = self
-                            .try_lower_record_construct(tail)
-                            .or_else(|| self.try_lower_scalar_record_construct(tail))
-                        {
-                            self.ops.push(Op::Consume { v: dst });
-                            self.drop_arm_locals(mark);
-                            return Ok(Some(dst));
-                        }
-                    }
-                    let repr = repr_of(&tail.ty)?;
-                    let init = alloc_init(tail);
-                    // `alloc_init` faithfully materializes a string literal and a scalar-
-                    // literal list/tuple (handled together with the faithful attempts above);
-                    // every other constructor (Map/Record/Result/Option/closure/range, a
-                    // non-foldable list) yields `Init::Opaque` — an EMPTY heap value the caller
-                    // would observe as the return = a SILENT MISCOMPILE. Reject the unfaithful
-                    // case explicitly.
-                    if matches!(init, Init::Opaque) {
-                        return Err(LowerError::Unsupported(format!(
-                            "heap-result {} cannot be faithfully returned in this brick \
-                             (would move out an empty deferred heap value)",
-                            kind_name(&tail.kind)
-                        )));
-                    }
-                    let dst = self.fresh_value();
-                    self.ops.push(Op::Alloc { dst, repr, init });
-                    self.record_elided_calls(tail);
-                    Ok(Some(dst))
-                }
-                // A VARIANT CONSTRUCTOR call returned DIRECTLY (`fn make(x) -> Boxed =
-                // Wrap(x)` — a bare ctor with no enclosing `let`/match; also reached via
-                // `lift_lambda`'s body-lowering for a synthesized `(x) => Wrap(x)` wrapper,
-                // the `list.map(Wrap)` desugar's exact shape). A constructor is NOT a real
-                // top-level wasm function — it has no `Op::FuncRef` target, `try_lower_
-                // variant_ctor` inlines its block construction at each call site — so the
-                // GENERIC Named-call arm below (a plain `Op::CallFn` by name) would reference
-                // a symbol that is NEVER linked (an "unlinked call" render wall). Checked
-                // BEFORE the generic arm. `try_lower_variant_ctor` does not itself track its
-                // result in `live_heap_handles` (the caller decides) — returning it directly
-                // IS the move-out tail position needs, no extra bookkeeping.
-                IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                    if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
-                {
-                    match self.try_lower_variant_ctor(tail) {
-                        Some(dst) => Ok(Some(dst)),
-                        None => Err(LowerError::Unsupported(
-                            "variant constructor returned directly cannot be faithfully \
-                             materialized in this brick (a heap/recursive field outside the \
-                             executable subset)"
-                                .into(),
-                        )),
                     }
                 }
-                // A function-call result returned directly (`fn f() = g(xs)`): the
-                // callee's heap result is a FRESH OWNED value (its return-mode
-                // signature), moved out — NOT added to live_heap_handles. Cert:
-                // CallFn-result + move-out, identical to the already-verified
-                // `var x = g(xs); x`, so the gate covers it by the same evidence
-                // (the runtime correspondence is exact — the callee returns rc 1).
-                IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-                    let mark = self.live_heap_handles.len();
-                    let lowered = self.lower_call_args(args)?;
-                    let dst = self.fresh_value();
-                    let repr = repr_of(&tail.ty)?;
-                    self.ops.push(Op::CallFn {
-                        dst: Some(dst),
-                        name: name.as_str().to_string(),
-                        args: lowered,
-                        result: Some(repr),
-                    });
-                    // Free any OWNED-temp arg the call materialized (`f(string.replace(s,…), s)` — the
-                    // yaml `parse_number(string.replace(s,"_",""), s)` shape). A heap-result tail returns
-                    // `dst` directly (moved out, NOT in live_heap_handles), bypassing the function's
-                    // scope-end drops — so the materialized arg temp would LEAK (a parse loop OOMs).
-                    self.drop_arm_locals(mark);
-                    Ok(Some(dst))
-                }
-                // `fn f() = string.trim(s)` — a stdlib MODULE call result returned
-                // directly. Admitted only when first-order + pure; the fresh owned
-                // result is moved out (NOT added to live_heap_handles), like the
-                // `Named` case above.
-                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
-                    let mark = self.live_heap_handles.len();
-                    let dst = self.lower_pure_module_value_call(
-                        module.as_str(),
-                        func.as_str(),
-                        args,
-                        &tail.ty,
-                    )?;
-                    // Free any owned-temp arg materialized for the call — a heap-result tail moves out
-                    // `dst` and bypasses scope-end drops (see the Named case above), so the temp leaks.
-                    // `dst` is moved out (not in live_heap_handles) so it is never among the dropped.
-                    self.live_heap_handles.retain(|h| *h != dst);
-                    self.drop_arm_locals(mark);
-                    Ok(Some(dst))
-                }
-                // `fn f(r) = r.x` — a HEAP extraction returned directly: alias the
-                // container (`Op::Dup`) and move it out (cert `a` + `m`). A non-var
-                // container (`f().x`, nested) cannot be aliased, so a failed extraction
-                // would move out a deferred Opaque EMPTY value the caller observes = a
-                // SILENT MISCOMPILE. Reject explicitly instead.
-                IrExprKind::Member { .. }
-                | IrExprKind::IndexAccess { .. }
-                | IrExprKind::MapAccess { .. }
-                | IrExprKind::TupleIndex { .. } => {
-                    let dst = self.lower_heap_extraction(tail)?;
-                    // A PRECISE field BORROW (`fn f(r) = r.name` over a materialized/param
-                    // record — the loaded slot handle is in `param_values`, the CONTAINER still
-                    // owns it) cannot be moved out as-is: the caller would drop it while the
-                    // container also drops it = a double-free. AUTO-ACQUIRE an OWNED reference
-                    // first (`Op::Dup` cert `a`, then move out cert `m` — exactly `let q = r.name;
-                    // q`), so the returned `am` is independent of the container's reference. A
-                    // container-grain `Dup` result (NOT a borrow — `lower_heap_extraction`'s
-                    // fallback already acquired its own reference) is moved out directly.
-                    if self.param_values.contains(&dst) {
-                        let owned = self.fresh_value();
-                        self.ops.push(Op::Dup { dst: owned, src: dst });
-                        return Ok(Some(owned)); // moved out, NOT tracked (no double-drop)
-                    }
-                    Ok(Some(dst))
-                }
-                // `fn f() = if c then "a" else "b"` — a heap-result branch RETURNED. A
-                // literal-armed `if` EXECUTES (only the taken arm allocates, returned rc=1)
-                // via per-arm Alloc+Consume balance; otherwise LINEARIZE the arms and move
-                // out ONE fresh `Alloc{Opaque}` (the deferred merged result slot, NOT added
-                // to live_heap_handles — it is the return value). See `lower_branch`.
-                IrExprKind::If { cond, then, else_ } => {
-                    if let Some(dst) = self.try_lower_heap_result_if(cond, then, else_, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // Outside the executable heap-result-if subset, the arms would linearize
-                    // and the RETURN value would be one deferred Opaque EMPTY heap object the
-                    // caller observes = a SILENT MISCOMPILE. Reject explicitly.
-                    Err(LowerError::Unsupported(
-                        "heap-result `if` outside the executable subset cannot be faithfully \
-                         returned in this brick (would move out an empty deferred heap value)"
+                self.lower_branch(tail)?;
+                Ok(None)
+            }
+            IrExprKind::If { .. } => {
+                self.lower_branch(tail)?;
+                Ok(None)
+            }
+            // A Unit-typed `for`/`while` tail is a per-iteration-framed loop.
+            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+                self.lower_for_in(*var, var_tuple, iterable, body)?;
+                Ok(None)
+            }
+            IrExprKind::While { cond, body } => {
+                self.lower_while(cond, body)?;
+                Ok(None)
+            }
+            // A Unit-typed TAIL `g()` / `g()!` (effect-fn call propagating its
+            // `Result[Unit, _]`): the frontend wraps it in `Try`/`Unwrap` for the
+            // auto-`?`. The Result is the function's own Unit return, so strip the
+            // wrapper and lower the inner effect call — exactly the heap-`Unwrap`
+            // tail rule (line below), but for a discarded-Unit result.
+            IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
+                self.lower_tail(Some(expr))
+            }
+            other => Err(LowerError::Unsupported(format!(
+                "Unit-typed tail {} not in this brick",
+                kind_name(other)
+            ))),
+        };
+    }
+
+    /// The HEAP-typed tail of [`Self::lower_tail`] (the moved-out owned return).
+    /// Verbatim text move.
+    fn lower_tail_heap(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
+        return match &tail.kind {
+            IrExprKind::Var { id } => {
+                let v = self.value_or_global(*id)?;
+                // F2 pass-2 consumer gate (#790): RETURNING a deferred Opaque bind hands
+                // the CALLER an empty block it reads executably. Strict mode refuses.
+                if crate::lower::strict_values() && self.deferred_opaque_binds.contains(&v) {
+                    return Err(LowerError::Unsupported(
+                        "deferred (Opaque) value returned — the caller would read an \
+                         empty block not in this brick"
                             .into(),
-                    ))
+                    ));
                 }
-                // A heap-result `match` over Int literal patterns with string-literal arms
-                // EXECUTES: desugar to a nested heap-result `if` and run only the matched
-                // arm; otherwise LINEARIZE to one deferred `Alloc{Opaque}`.
-                IrExprKind::Match { subject, arms } => {
-                    // A single-arm tuple-destructure `match t { (offs, _) => offs }` extracting ONE
-                    // component — semantically `t.<i>` (the wasm-bindgen post-`fold` extraction).
-                    // Re-route through the proven `TupleIndex` tail extraction (a heap component is a
-                    // borrow auto-acquired into an owned move-out; a scalar one a value read).
-                    if let Some((idx, elem_ty)) = self.tuple_extract_match_index(subject, arms) {
-                        let synth = Self::synth_tuple_index(subject, idx, elem_ty);
-                        return self.lower_tail(Some(&synth));
+                if self.param_values.contains(&v) {
+                    // Returning a BORROWED param directly would move out a
+                    // reference we do not own (the caller's) — a double-free. AUTO-
+                    // ACQUIRE one first: `Op::Dup` (cert `a`) then move out the new
+                    // handle (cert `m`) — exactly `let q = p; q`. The returned `am`
+                    // is an OWNED reference (rc incremented), independent of the
+                    // caller's, so no double-free; the proven checker accepts it.
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::Dup { dst, src: v });
+                    return Ok(Some(dst)); // moved out, NOT added to live_heap_handles
+                }
+                self.live_heap_handles.retain(|h| *h != v); // moved out, not dropped
+                Ok(Some(v))
+            }
+            // A TAIL `e!` (Unwrap — effect-fn error propagation in return position):
+            // `f() = g()!` PROPAGATES g's Result unchanged (Ok→Ok, Err→Err), i.e. it IS
+            // `f() = g()` at the effect-Result level. So strip the `!` and lower `e` as the
+            // tail (return its Result directly). This unblocks the `parse_mapping =
+            // collect_map(..)!` shape (a tail call result propagated).
+            IrExprKind::Unwrap { expr } => return self.lower_tail(Some(expr)),
+            // A lambda RETURNED (`fn mk() -> (Int) -> Int = (x) => x + 1`, `fn adder(n)
+            // = (x) => x + n`) — LIFT it to a CLOSURE BLOCK (fnidx + captured scalars)
+            // and MOVE the block out as the return (a fresh owned heap value — removed
+            // from the scope-end set; cert `im`). The caller tracks the bound result in
+            // `closure_values` (binds_p2) so a later `f(args)` dispatches through it.
+            IrExprKind::Lambda { params, body, .. } => {
+                return match self.lift_lambda(params, body) {
+                    Some(blk) => {
+                        self.live_heap_handles.retain(|h| *h != blk);
+                        Ok(Some(blk))
                     }
-                    // A CUSTOM variant (user ADT) subject with a HEAP result — tag@slot0 dispatch
-                    // with heap-result arms (ADT brick 4, e.g. recursive `to_string`).
-                    if let Some(dst) =
-                        self.try_lower_custom_variant_match(subject, arms, &tail.ty)
+                    None => Err(LowerError::Unsupported(
+                        "lambda outside the liftable subset returned (heap/Float captures \
+                         are a later ratchet) — cannot be faithfully materialized"
+                            .into(),
+                    )),
+                };
+            }
+            // A fresh heap literal returned directly (`fn f() = [1, 2, 3]`):
+            // allocate it and move it out. It is NOT added to
+            // `live_heap_handles`, so it is the return value (consumed at the
+            // boundary) and never also dropped. Cert: alloc(i) + move-out(m) =
+            // balanced — and the runtime correspondence is exact (a real
+            // Alloc, a real move-out), so the gate fully covers it.
+            IrExprKind::List { .. }
+            | IrExprKind::MapLiteral { .. }
+            | IrExprKind::EmptyMap
+            | IrExprKind::Record { .. }
+            | IrExprKind::SpreadRecord { .. }
+            | IrExprKind::Tuple { .. }
+            | IrExprKind::LitStr { .. }
+            | IrExprKind::StringInterp { .. }
+            | IrExprKind::ResultOk { .. }
+            | IrExprKind::ResultErr { .. }
+            | IrExprKind::OptionSome { .. }
+            | IrExprKind::OptionNone
+            | IrExprKind::BinOp { .. }
+            | IrExprKind::UnOp { .. }
+            | IrExprKind::Try { .. }
+            | IrExprKind::UnwrapOr { .. }
+            | IrExprKind::ToOption { .. }
+            | IrExprKind::OptionalChain { .. }
+            // A CAPTURING CLOSURE value returned is a fresh heap env; a RANGE is a fresh value —
+            // both `Alloc{Opaque}`, moved out. (A non-capturing `Lambda` is lifted above.)
+            | IrExprKind::ClosureCreate { .. }
+            | IrExprKind::Range { .. }
+            | IrExprKind::RuntimeCall { .. } => {
+                // A RECORD literal RETURNED (`fn mk(a) = P { x: a, y: a * 2 }`) — build the
+                // real layout block (scalar fields stored, heap fields moved in) and MOVE
+                // IT OUT as the return (NOT tracked → the caller owns it, no scope-end
+                // drop). Same cert as the heap-literal return: alloc(i) + move-out(m).
+                if let IrExprKind::Record { .. } = &tail.kind {
+                    if let Some(dst) = self
+                        .try_lower_record_construct(tail)
+                        .or_else(|| self.try_lower_scalar_record_construct(tail))
                     {
                         return Ok(Some(dst));
                     }
-                    // A heap-result VARIANT (Option/Result) match (`match scan_quote(..) {
-                    // some(p) => "..", none => ".." }`) over a SCALAR payload — the
-                    // subject-drop-before-arms desugar (cert-clean, scalar-payload only; a heap
-                    // payload self-gates back to None here = the true Camp-4 frontier).
-                    if is_variant_ty(&subject.ty) {
-                        if let Some(dst) =
-                            self.try_lower_variant_value_match(subject, arms, &tail.ty)
-                        {
-                            return Ok(Some(dst));
-                        }
-                    }
-                    // A len-as-tag RESULT subject with HEAP-result arms — the merge-based
-                    // value match (the Camp-4 `compute` opener; borrowed payload binds, the
-                    // subject temp freed by the scope epilogue after the merge move-out).
-                    if let Some(dst) = self.try_lower_result_match_value(subject, arms, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // An `Option[<heap>]` subject with HEAP-result arms — the Option twin
-                    // (is_balanced's fold step: `match acc { none => none, some(stack) => … }`).
-                    if let Some(dst) = self.try_lower_option_match_value(subject, arms, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // A LIST subject (`match xs { [] => .., ys => .. }`) with HEAP-result
-                    // arms — the len-tag twin of the Result opener (a bind-all arm aliases
-                    // the owned subject temp; release parity covers an arm move-out).
-                    if let Some(dst) = self.try_lower_list_match_value(subject, arms, &tail.ty) {
-                        return Ok(Some(dst));
-                    }
-                    // `desugar_match_to_if` wraps its OUTPUT in a `Block` (hoisted `let`s
-                    // preceding the `If`) whenever the subject isn't one of `subject_pure`'s
-                    // freely-substitutable kinds (`Var`/`LitInt`/`LitBool`/`LitFloat` —
-                    // notably missing `LitStr`: a single-use `let s = "hello world"` subject
-                    // gets constant-propagated to a bare `LitStr` upstream, same gap B52
-                    // fixed for the call-argument consumer in `calls_p2.rs`). Unwrap it
-                    // generically here too — lower the hoisted `let`s via `self.lower_stmt`,
-                    // then extract the inner `If` — rather than widening `subject_pure`
-                    // itself (a general fix, not LitStr-specific: ANY subject needing the
-                    // hoist now works in this tail position too).
-                    let lifted = self.desugar_match_to_if(subject, arms, &tail.ty).and_then(|e| {
-                        let (stmts, if_expr) = match e.kind {
-                            IrExprKind::If { .. } => (Vec::new(), e),
-                            IrExprKind::Block { stmts, expr: Some(t) } => (stmts, *t),
-                            _ => return None,
-                        };
-                        let IrExprKind::If { cond, then, else_ } = &if_expr.kind else { return None };
-                        for s in &stmts {
-                            self.lower_stmt(s).ok()?;
-                        }
-                        self.try_lower_heap_result_if(cond, then, else_, &tail.ty)
-                    });
-                    if let Some(dst) = lifted {
-                        return Ok(Some(dst));
-                    }
-                    // Outside the executable heap-result-match subset, the RETURN value would
-                    // be one deferred Opaque EMPTY heap object the caller observes = a SILENT
-                    // MISCOMPILE. Reject explicitly.
-                    Err(LowerError::Unsupported(
-                        "heap-result `match` outside the executable subset cannot be faithfully \
-                         returned in this brick (would move out an empty deferred heap value)"
-                            .into(),
-                    ))
                 }
-                // `fn apply(g, x) = g(x)` — a heap-result call through a KNOWN funcref (a lifted
-                // lambda / a function-typed param bound to a table slot). EXECUTE it via
-                // `Op::CallIndirect` and move the fresh owned result out, exactly like the Named /
-                // Module arms above (its var-bind sibling is `binds_p2`'s heap-result CallIndirect).
-                // This opens higher-order functions RETURNING a heap value (Result/List/String) — the
-                // foundation for a self-hosted `fan.map` / traverse. An UNKNOWN callee stays walled.
-                IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
-                    if self.closure_value_of(callee).is_some() =>
-                {
+                // A SPREAD record RETURNED (`fn attr(e, k, v) = { ...e, attrs: map.set(…) }` —
+                // the svg element-builder shape): build a fresh same-layout block COPYING each
+                // non-overridden field from the materialized base (scalar Load, heap-handle Dup so
+                // base keeps its own ref) + storing the overrides, then MOVE IT OUT as the return
+                // (the caller owns it, no scope-end drop). Same `i…m` cert as the Record return.
+                if let IrExprKind::SpreadRecord { .. } = &tail.kind {
+                    if let Some(dst) = self.try_lower_spread_record_construct(tail) {
+                        return Ok(Some(dst));
+                    }
+                }
+                // A TUPLE literal RETURNED (`fn pair(s) = (s, 5)`, `(parse_inline(t), pos + 1)`
+                // — the dominant yaml `(Value, Int)` parser shape): build the real block (scalar
+                // slots stored, heap elements moved in via `lower_owned_heap_field`) and MOVE IT
+                // OUT as the return (the block is `record_masks`-tracked but NOT in
+                // `live_heap_handles`, so it is the moved-out result — the caller owns it, no
+                // scope-end drop). Same cert as the Record return: alloc(i) + per-element moves +
+                // move-out(m). The caller's destructure reads it precisely (it's a masked aggregate).
+                if let IrExprKind::Tuple { elements } = &tail.kind {
+                    if let Some(dst) = self
+                        .try_lower_scalar_tuple_construct(elements)
+                        .or_else(|| self.try_lower_tuple_construct(elements))
+                    {
+                        return Ok(Some(dst));
+                    }
+                }
+                // A heap-ELEMENT list literal RETURNED — a `List[(String, String)]`
+                // (`fn keyword_aliases() = [("Ok", "ok"), …]`) or a `List[Record]`
+                // (`fn keyword_groups() = [KeywordGroup { … }, …]`, `fn precedence_table() =
+                // [PrecLevel { … }, …]`). Build the real nested-ownership block (each element
+                // moved in, the recursive per-element drop registered), MOVED OUT as the return
+                // (NOT tracked → no scope-end drop; the caller owns it). Without this the literal
+                // fell through `try_lower_str_list_literal` (which returns None for these heap
+                // elements) to the Opaque alloc = an empty len-0 list (a silent miscompile).
+                if let Some(dst) = self.try_lower_record_list_literal_tail(tail) {
+                    return Ok(Some(dst));
+                }
+                // A `List[String]` literal RETURNED (`fn make() = [e0, e1]`) — build a real
+                // nested-ownership DynListStr (each element moved/Dup'd in), moved out as the
+                // return (NOT tracked, so no scope-end DropListStr — the caller owns it). Without
+                // this the literal fell to the Opaque alloc = an empty len-0 list.
+                if let Some(dst) = self.try_lower_str_list_literal(tail) {
+                    return Ok(Some(dst));
+                }
+                // A scalar `List[Int/Float/Bool]` literal RETURNED with computed elements —
+                // build + store each slot, moved out (an all-literal list is the Opaque/IntList
+                // path below). Without this a `[a, a]` of computed scalars returned an empty list.
+                if let Some(dst) = self.try_lower_scalar_list_construct(tail) {
+                    return Ok(Some(dst));
+                }
+                // A string concat RETURNED (`fn greet(n) = "Hi, " + n`) — a fresh owned String
+                // (via __str_concat), moved out as the return (cert CallFn-result i + ret m).
+                if let Some(dst) = self.try_lower_concat_str(tail) {
+                    return Ok(Some(dst));
+                }
+                // A SCALAR-element list concat RETURNED (`fn pair(xs) = xs + [7]`) — a fresh owned
+                // list (via __list_concat), moved out as the return (cert CallFn-result i + ret m).
+                // A heap-element list concat returns None and falls through to the deferred Opaque.
+                if let Some(dst) = self.try_lower_concat_list(tail) {
+                    return Ok(Some(dst));
+                }
+                // A STRING INTERPOLATION RETURNED (`fn greet(n) = "Hi, ${n}"`) over the
+                // executable subset — a fresh owned String (via the __str_concat chain),
+                // moved out as the return. A compound/call-operand interp falls through to
+                // the deferred Opaque below.
+                if let IrExprKind::StringInterp { parts } = &tail.kind {
+                    if let Some(dst) = self.try_lower_string_interp(parts) {
+                        return Ok(Some(dst));
+                    }
+                }
+                // A `Some(scalar)`/`None` RETURNED (`fn some_int(x) = Some(x)`) is
+                // MATERIALIZED so the caller receives a real 0-or-1-element-list
+                // Option (len-correct) it can `match` — the self-host Option fns
+                // (list.get/first/last) return through such helpers. Moved out (NOT
+                // pushed to live_heap_handles), cert = Alloc i + move-out m.
+                // `ok(Pair(_e0, _e1))` / `ok(Plain)` / `err(msg)` for `Result[<user variant>, String]`
+                // (derived variant decode) — materialize the variant Ok, recursive `$__drop_<V>` drop.
+                // BEFORE the generic `try_lower_option_ctor` heap-Ok path, which would emit a dangling
+                // `CallFn "Pair"` for the variant ctor.
+                if let Some(dst) = self.try_lower_result_variant_ctor(tail, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // `err(Overflow(msg))` RETURNED for `Result[T_scalar, <user variant>]`
+                // (the structured-error class): the len-as-tag Err wrapper, moved out.
+                if self.is_scalar_ok_variant_err_result(&tail.ty) {
+                    if let Some(dst) = self.try_lower_result_err_variant_ctor(tail, &tail.ty) {
+                        self.live_heap_handles.retain(|h| *h != dst);
+                        return Ok(Some(dst));
+                    }
+                }
+                if let Some(dst) = self.try_lower_option_ctor(tail, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // `fn f() -> String = opt ?? "d"` — a heap-String `??` RETURNED. Executes via the
+                // self-host `option.unwrap_or_str` call (try_lower_option_unwrap_or's heap branch),
+                // MOVED OUT as the return (track_result=false — the caller owns it; tracking it
+                // would double-free). Closes the tail-position heap-`??` silent-Opaque hole.
+                if let IrExprKind::UnwrapOr { expr, fallback } = &tail.kind {
+                    if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, false) {
+                        return Ok(Some(dst));
+                    }
+                }
+                // `ok({val, next})` / `err(msg)` RETURNED for a `Result[heap-record, String]` (porta
+                // read_valtype): materialize the record-Ok / String-Err block, MOVED OUT as the
+                // return (the recursive `Op::DropWrapperRec` frees it via `$__drop_<R>` at the
+                // caller's scope end). Checked before the generic ctor paths below.
+                if let Some(dst) = self.try_lower_result_record_ctor(tail, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // `ok(none)` / `ok(<Option[record]>)` / `err(msg)` RETURNED for `Result[Option[record],
+                // String]` (porta read_message): recursive `$__drop_opt_<R>` via `resrec:opt_<R>`.
+                if let Some(dst) = self.try_lower_result_option_ctor(tail, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // `ok(some(x))` / `ok(none)` / `err(msg)` RETURNED for `Result[Option[T], String]` with a
+                // STRING / SCALAR leaf (the derived-Codec `__decode_option_T`): flat `DropListStr` for a
+                // scalar Option, recursive `$__drop_opt_str` for a String Option. Checked AFTER the
+                // record ctor (which claims the record-Option shape) — the leaf gate keeps them disjoint.
+                if let Some(dst) = self.try_lower_result_option_scalar_str_ctor(tail, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // `ok(value.array(...))` / `err(msg)` RETURNED for a `Result[Value, String]` (csv
+                // `parse`): materialize the Value-Ok / String-Err Result block, MOVED OUT as the
+                // return (the recursive `Op::DropResultValue` frees it at the caller's scope end).
+                if let Some(dst) = self.try_lower_result_value_ctor(tail, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // `ok((slice, pos))` / `err(msg)` RETURNED for a `Result[(String, Int), String]`
+                // (toml `parse_key_part`): materialize the (String,Int)-Ok / String-Err block,
+                // MOVED OUT (the recursive `Op::DropResultStrInt` frees it at the caller's scope end).
+                if let Some(dst) = self.try_lower_result_str_int_ctor(tail, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // `ok((value.…, pos))` / `err(msg)` RETURNED for `Result[(Value, Int), String]`
+                // (toml parse_val): materialize the (Value,Int)-Ok / String-Err block, MOVED OUT
+                // (the recursive `Op::DropResultValueInt` frees it at the caller's scope end).
+                if let Some(dst) = self.try_lower_result_value_int_ctor(tail, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // `ok((keys, pos))` / `err(msg)` RETURNED for `Result[(List[String], Int), String]`
+                // (toml parse_key / parse_table_key): the recursive `Op::DropResultListStrInt`.
+                if let Some(dst) = self.try_lower_result_list_str_int_ctor(tail, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // `ok((items, np))` / `err` for `Result[(List[Value], Int), String]` (collect_array_items).
+                if let Some(dst) = self.try_lower_result_list_value_int_ctor(tail, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // `ok(())` / `ok(<scalar>)` RETURNED for a `Result[<non-heap>, String]` (porta
+                // `run_foreground` / `ensure_porta_dir` `ok(())`): materialize the flat len-0 Ok
+                // block, MOVED OUT as the return (its scope-end `DropListStr` frees just the block —
+                // no nested heap). The heap-Ok cases (record/value/tuple/String) were intercepted
+                // by the ctors above, so reaching here is exactly the scalar/Unit Ok the arm path
+                // already lowers — only the TAIL position was missing it (this closed that gap).
+                if let Some(dst) = self.try_lower_result_scalar_ok_ctor(tail, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // A SPREAD-record (`{ ...n, gap_main: v }` — ceangal's with_* rebuilders) or a
+                // plain RECORD literal RETURNED as the fn tail: the SAME construct machinery the
+                // heap-result ARM position already uses (base slots copied via Dup — a borrowed
+                // param base stays valid; overrides moved in), then MOVED OUT exactly per the arm
+                // precedent (`Consume` + per-frame temp drops; the caller frees the return by its
+                // type). A non-materialized base / out-of-subset field returns None → the honest
+                // Opaque wall below.
+                if matches!(&tail.kind, IrExprKind::SpreadRecord { .. }) {
                     let mark = self.live_heap_handles.len();
-                    let blk = self.closure_value_of(callee).unwrap();
-                    let lowered = self.lower_call_args(args)?;
-                    let dst = self.fresh_value();
-                    let repr = repr_of(&tail.ty)?;
-                    self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
-                    self.drop_arm_locals(mark);
-                    Ok(Some(dst))
+                    if let Some(dst) = self.try_lower_spread_record_construct(tail) {
+                        self.ops.push(Op::Consume { v: dst });
+                        self.drop_arm_locals(mark);
+                        return Ok(Some(dst));
+                    }
                 }
-                // `fn f(o) = o.method()` / `(g)()` returned — an UNRESOLVABLE
-                // `Method`/`Computed` callee (the `Named`/`Module` arms are above).
-                // Moving out a deferred Opaque EMPTY value the caller observes is a SILENT
-                // MISCOMPILE, so reject explicitly.
-                IrExprKind::Call { .. } => {
-                    Err(LowerError::Unsupported(
-                        "heap-result method/computed call cannot be faithfully returned in this \
-                         brick (would move out an empty deferred heap value)"
+                if matches!(&tail.kind, IrExprKind::Record { .. }) {
+                    let mark = self.live_heap_handles.len();
+                    if let Some(dst) = self
+                        .try_lower_record_construct(tail)
+                        .or_else(|| self.try_lower_scalar_record_construct(tail))
+                    {
+                        self.ops.push(Op::Consume { v: dst });
+                        self.drop_arm_locals(mark);
+                        return Ok(Some(dst));
+                    }
+                }
+                let repr = repr_of(&tail.ty)?;
+                let init = alloc_init(tail);
+                // `alloc_init` faithfully materializes a string literal and a scalar-
+                // literal list/tuple (handled together with the faithful attempts above);
+                // every other constructor (Map/Record/Result/Option/closure/range, a
+                // non-foldable list) yields `Init::Opaque` — an EMPTY heap value the caller
+                // would observe as the return = a SILENT MISCOMPILE. Reject the unfaithful
+                // case explicitly.
+                if matches!(init, Init::Opaque) {
+                    return Err(LowerError::Unsupported(format!(
+                        "heap-result {} cannot be faithfully returned in this brick \
+                         (would move out an empty deferred heap value)",
+                        kind_name(&tail.kind)
+                    )));
+                }
+                let dst = self.fresh_value();
+                self.ops.push(Op::Alloc { dst, repr, init });
+                self.record_elided_calls(tail);
+                Ok(Some(dst))
+            }
+            // A VARIANT CONSTRUCTOR call returned DIRECTLY (`fn make(x) -> Boxed =
+            // Wrap(x)` — a bare ctor with no enclosing `let`/match; also reached via
+            // `lift_lambda`'s body-lowering for a synthesized `(x) => Wrap(x)` wrapper,
+            // the `list.map(Wrap)` desugar's exact shape). A constructor is NOT a real
+            // top-level wasm function — it has no `Op::FuncRef` target, `try_lower_
+            // variant_ctor` inlines its block construction at each call site — so the
+            // GENERIC Named-call arm below (a plain `Op::CallFn` by name) would reference
+            // a symbol that is NEVER linked (an "unlinked call" render wall). Checked
+            // BEFORE the generic arm. `try_lower_variant_ctor` does not itself track its
+            // result in `live_heap_handles` (the caller decides) — returning it directly
+            // IS the move-out tail position needs, no extra bookkeeping.
+            IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+            {
+                match self.try_lower_variant_ctor(tail) {
+                    Some(dst) => Ok(Some(dst)),
+                    None => Err(LowerError::Unsupported(
+                        "variant constructor returned directly cannot be faithfully \
+                         materialized in this brick (a heap/recursive field outside the \
+                         executable subset)"
                             .into(),
-                    ))
+                    )),
                 }
-                other => Err(LowerError::Unsupported(format!(
-                    "heap move-out from {} (only a bound var, fresh literal, or call) not in this brick",
-                    kind_name(other)
-                ))),
-            };
-        }
+            }
+            // A function-call result returned directly (`fn f() = g(xs)`): the
+            // callee's heap result is a FRESH OWNED value (its return-mode
+            // signature), moved out — NOT added to live_heap_handles. Cert:
+            // CallFn-result + move-out, identical to the already-verified
+            // `var x = g(xs); x`, so the gate covers it by the same evidence
+            // (the runtime correspondence is exact — the callee returns rc 1).
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                let mark = self.live_heap_handles.len();
+                let lowered = self.lower_call_args(args)?;
+                let dst = self.fresh_value();
+                let repr = repr_of(&tail.ty)?;
+                self.ops.push(Op::CallFn {
+                    dst: Some(dst),
+                    name: name.as_str().to_string(),
+                    args: lowered,
+                    result: Some(repr),
+                });
+                // Free any OWNED-temp arg the call materialized (`f(string.replace(s,…), s)` — the
+                // yaml `parse_number(string.replace(s,"_",""), s)` shape). A heap-result tail returns
+                // `dst` directly (moved out, NOT in live_heap_handles), bypassing the function's
+                // scope-end drops — so the materialized arg temp would LEAK (a parse loop OOMs).
+                self.drop_arm_locals(mark);
+                Ok(Some(dst))
+            }
+            // `fn f() = string.trim(s)` — a stdlib MODULE call result returned
+            // directly. Admitted only when first-order + pure; the fresh owned
+            // result is moved out (NOT added to live_heap_handles), like the
+            // `Named` case above.
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+                let mark = self.live_heap_handles.len();
+                let dst = self.lower_pure_module_value_call(
+                    module.as_str(),
+                    func.as_str(),
+                    args,
+                    &tail.ty,
+                )?;
+                // Free any owned-temp arg materialized for the call — a heap-result tail moves out
+                // `dst` and bypasses scope-end drops (see the Named case above), so the temp leaks.
+                // `dst` is moved out (not in live_heap_handles) so it is never among the dropped.
+                self.live_heap_handles.retain(|h| *h != dst);
+                self.drop_arm_locals(mark);
+                Ok(Some(dst))
+            }
+            // `fn f(r) = r.x` — a HEAP extraction returned directly: alias the
+            // container (`Op::Dup`) and move it out (cert `a` + `m`). A non-var
+            // container (`f().x`, nested) cannot be aliased, so a failed extraction
+            // would move out a deferred Opaque EMPTY value the caller observes = a
+            // SILENT MISCOMPILE. Reject explicitly instead.
+            IrExprKind::Member { .. }
+            | IrExprKind::IndexAccess { .. }
+            | IrExprKind::MapAccess { .. }
+            | IrExprKind::TupleIndex { .. } => {
+                let dst = self.lower_heap_extraction(tail)?;
+                // A PRECISE field BORROW (`fn f(r) = r.name` over a materialized/param
+                // record — the loaded slot handle is in `param_values`, the CONTAINER still
+                // owns it) cannot be moved out as-is: the caller would drop it while the
+                // container also drops it = a double-free. AUTO-ACQUIRE an OWNED reference
+                // first (`Op::Dup` cert `a`, then move out cert `m` — exactly `let q = r.name;
+                // q`), so the returned `am` is independent of the container's reference. A
+                // container-grain `Dup` result (NOT a borrow — `lower_heap_extraction`'s
+                // fallback already acquired its own reference) is moved out directly.
+                if self.param_values.contains(&dst) {
+                    let owned = self.fresh_value();
+                    self.ops.push(Op::Dup { dst: owned, src: dst });
+                    return Ok(Some(owned)); // moved out, NOT tracked (no double-drop)
+                }
+                Ok(Some(dst))
+            }
+            // `fn f() = if c then "a" else "b"` — a heap-result branch RETURNED. A
+            // literal-armed `if` EXECUTES (only the taken arm allocates, returned rc=1)
+            // via per-arm Alloc+Consume balance; otherwise LINEARIZE the arms and move
+            // out ONE fresh `Alloc{Opaque}` (the deferred merged result slot, NOT added
+            // to live_heap_handles — it is the return value). See `lower_branch`.
+            IrExprKind::If { cond, then, else_ } => {
+                if let Some(dst) = self.try_lower_heap_result_if(cond, then, else_, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // Outside the executable heap-result-if subset, the arms would linearize
+                // and the RETURN value would be one deferred Opaque EMPTY heap object the
+                // caller observes = a SILENT MISCOMPILE. Reject explicitly.
+                Err(LowerError::Unsupported(
+                    "heap-result `if` outside the executable subset cannot be faithfully \
+                     returned in this brick (would move out an empty deferred heap value)"
+                        .into(),
+                ))
+            }
+            // A heap-result `match` over Int literal patterns with string-literal arms
+            // EXECUTES: desugar to a nested heap-result `if` and run only the matched
+            // arm; otherwise LINEARIZE to one deferred `Alloc{Opaque}`.
+            IrExprKind::Match { subject, arms } => {
+                // A single-arm tuple-destructure `match t { (offs, _) => offs }` extracting ONE
+                // component — semantically `t.<i>` (the wasm-bindgen post-`fold` extraction).
+                // Re-route through the proven `TupleIndex` tail extraction (a heap component is a
+                // borrow auto-acquired into an owned move-out; a scalar one a value read).
+                if let Some((idx, elem_ty)) = self.tuple_extract_match_index(subject, arms) {
+                    let synth = Self::synth_tuple_index(subject, idx, elem_ty);
+                    return self.lower_tail(Some(&synth));
+                }
+                // A CUSTOM variant (user ADT) subject with a HEAP result — tag@slot0 dispatch
+                // with heap-result arms (ADT brick 4, e.g. recursive `to_string`).
+                if let Some(dst) =
+                    self.try_lower_custom_variant_match(subject, arms, &tail.ty)
+                {
+                    return Ok(Some(dst));
+                }
+                // A heap-result VARIANT (Option/Result) match (`match scan_quote(..) {
+                // some(p) => "..", none => ".." }`) over a SCALAR payload — the
+                // subject-drop-before-arms desugar (cert-clean, scalar-payload only; a heap
+                // payload self-gates back to None here = the true Camp-4 frontier).
+                if is_variant_ty(&subject.ty) {
+                    if let Some(dst) =
+                        self.try_lower_variant_value_match(subject, arms, &tail.ty)
+                    {
+                        return Ok(Some(dst));
+                    }
+                }
+                // A len-as-tag RESULT subject with HEAP-result arms — the merge-based
+                // value match (the Camp-4 `compute` opener; borrowed payload binds, the
+                // subject temp freed by the scope epilogue after the merge move-out).
+                if let Some(dst) = self.try_lower_result_match_value(subject, arms, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // An `Option[<heap>]` subject with HEAP-result arms — the Option twin
+                // (is_balanced's fold step: `match acc { none => none, some(stack) => … }`).
+                if let Some(dst) = self.try_lower_option_match_value(subject, arms, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // A LIST subject (`match xs { [] => .., ys => .. }`) with HEAP-result
+                // arms — the len-tag twin of the Result opener (a bind-all arm aliases
+                // the owned subject temp; release parity covers an arm move-out).
+                if let Some(dst) = self.try_lower_list_match_value(subject, arms, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // `desugar_match_to_if` wraps its OUTPUT in a `Block` (hoisted `let`s
+                // preceding the `If`) whenever the subject isn't one of `subject_pure`'s
+                // freely-substitutable kinds (`Var`/`LitInt`/`LitBool`/`LitFloat` —
+                // notably missing `LitStr`: a single-use `let s = "hello world"` subject
+                // gets constant-propagated to a bare `LitStr` upstream, same gap B52
+                // fixed for the call-argument consumer in `calls_p2.rs`). Unwrap it
+                // generically here too — lower the hoisted `let`s via `self.lower_stmt`,
+                // then extract the inner `If` — rather than widening `subject_pure`
+                // itself (a general fix, not LitStr-specific: ANY subject needing the
+                // hoist now works in this tail position too).
+                let lifted = self.desugar_match_to_if(subject, arms, &tail.ty).and_then(|e| {
+                    let (stmts, if_expr) = match e.kind {
+                        IrExprKind::If { .. } => (Vec::new(), e),
+                        IrExprKind::Block { stmts, expr: Some(t) } => (stmts, *t),
+                        _ => return None,
+                    };
+                    let IrExprKind::If { cond, then, else_ } = &if_expr.kind else { return None };
+                    for s in &stmts {
+                        self.lower_stmt(s).ok()?;
+                    }
+                    self.try_lower_heap_result_if(cond, then, else_, &tail.ty)
+                });
+                if let Some(dst) = lifted {
+                    return Ok(Some(dst));
+                }
+                // Outside the executable heap-result-match subset, the RETURN value would
+                // be one deferred Opaque EMPTY heap object the caller observes = a SILENT
+                // MISCOMPILE. Reject explicitly.
+                Err(LowerError::Unsupported(
+                    "heap-result `match` outside the executable subset cannot be faithfully \
+                     returned in this brick (would move out an empty deferred heap value)"
+                        .into(),
+                ))
+            }
+            // `fn apply(g, x) = g(x)` — a heap-result call through a KNOWN funcref (a lifted
+            // lambda / a function-typed param bound to a table slot). EXECUTE it via
+            // `Op::CallIndirect` and move the fresh owned result out, exactly like the Named /
+            // Module arms above (its var-bind sibling is `binds_p2`'s heap-result CallIndirect).
+            // This opens higher-order functions RETURNING a heap value (Result/List/String) — the
+            // foundation for a self-hosted `fan.map` / traverse. An UNKNOWN callee stays walled.
+            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+                if self.closure_value_of(callee).is_some() =>
+            {
+                let mark = self.live_heap_handles.len();
+                let blk = self.closure_value_of(callee).unwrap();
+                let lowered = self.lower_call_args(args)?;
+                let dst = self.fresh_value();
+                let repr = repr_of(&tail.ty)?;
+                self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
+                self.drop_arm_locals(mark);
+                Ok(Some(dst))
+            }
+            // `fn f(o) = o.method()` / `(g)()` returned — an UNRESOLVABLE
+            // `Method`/`Computed` callee (the `Named`/`Module` arms are above).
+            // Moving out a deferred Opaque EMPTY value the caller observes is a SILENT
+            // MISCOMPILE, so reject explicitly.
+            IrExprKind::Call { .. } => {
+                Err(LowerError::Unsupported(
+                    "heap-result method/computed call cannot be faithfully returned in this \
+                     brick (would move out an empty deferred heap value)"
+                        .into(),
+                ))
+            }
+            other => Err(LowerError::Unsupported(format!(
+                "heap move-out from {} (only a bound var, fresh literal, or call) not in this brick",
+                kind_name(other)
+            ))),
+        };
+    }
+
+    /// The SCALAR tail of [`Self::lower_tail`] (Copy value, no ownership).
+    /// Verbatim text move.
+    fn lower_tail_scalar(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
         // Scalar return value (Copy — no ownership accounting). A scalar `BinOp`/
         // `UnOp` is a FRESH computed scalar (arithmetic / comparison / logic), so it
         // is a `Const` like a literal — its operands carry their own ownership.

@@ -53,7 +53,7 @@ run_one() { # repo entry
   local raw n_out n_rc w0_out w0_rc w1_out w1_rc
   raw="$(cd "$dir" && $TO "$ALMIDE" run "$(basename "$entry")" 2>&1)"; n_rc=$?
   n_out="$(printf '%s' "$raw" | norm)"
-  raw="$(cd "$dir" && $TO "$ALMIDE" run "$(basename "$entry")" --target wasm --no-verified 2>&1)"; w0_rc=$?
+  raw="$(cd "$dir" && $TO env ALMIDE_NO_VERIFIED_OK=1 "$ALMIDE" run "$(basename "$entry")" --target wasm --no-verified 2>&1)"; w0_rc=$?
   w0_out="$(printf '%s' "$raw" | norm)"
   raw="$(cd "$dir" && $TO "$ALMIDE" run "$(basename "$entry")" --target wasm --verified 2>&1)"; w1_rc=$?
   w1_out="$(printf '%s' "$raw" | norm)"
