@@ -1473,6 +1473,17 @@ impl LowerCtx {
             }
             return Some(obj);
         }
+        // `rs[i] == ok(v)` — an ELEMENT of a materialized heap-element list (the
+        // fan.settle results literal): BORROW the element handle (`$elem_addr` +
+        // `LoadHandle` — the list owns it and the eq only reads), the Var-borrow
+        // discipline element-precise. Nothing joins the cond frame — no drop, no
+        // ownership event; an untracked/deferred container declines inside the
+        // borrow and falls through to the materializer below.
+        if let IrExprKind::IndexAccess { .. } = &expr.kind {
+            if let Some(b) = self.try_lower_heap_field_borrow(expr) {
+                return Some(b);
+            }
+        }
         // Otherwise a heap-returning CALL / literal / concat — materialize a fresh OWNED block
         // (`lower_owned_heap_field` pushes it to `live_heap_handles`). The call path leaves the
         // block FLAT, so register the recursive drop set from the operand TYPE — else an

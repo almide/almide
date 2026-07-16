@@ -93,9 +93,12 @@ fi
 BASELINE="$ROOT/proofs/walled-real-baseline.txt"
 if [ "$CORPUS" = "$ROOT/spec" ] || [ "$CORPUS" = "spec" ]; then
   ACTUAL="$(mktemp)"; EXPECTED="$(mktemp)"
+  # `|| true`: at the wall=0 ENDGAME both greps match NOTHING and exit 1, which
+  # under `set -eo pipefail` silently killed the gate right here (the empty set
+  # is the TARGET state, not an error — comm handles empty files correctly).
   grep '^WALLED REAL ' "$REPORT" | sed "s|^WALLED REAL ||; s|^$ROOT/||" \
-    | awk -F' :: ' '{print $1" :: "$2}' | LC_ALL=C sort -u > "$ACTUAL"
-  grep -v '^#' "$BASELINE" | grep -v '^[[:space:]]*$' | LC_ALL=C sort -u > "$EXPECTED"
+    | awk -F' :: ' '{print $1" :: "$2}' | LC_ALL=C sort -u > "$ACTUAL" || true
+  grep -v '^#' "$BASELINE" | grep -v '^[[:space:]]*$' | LC_ALL=C sort -u > "$EXPECTED" || true
   NEW_WALLS="$(LC_ALL=C comm -23 "$ACTUAL" "$EXPECTED")"
   STALE="$(LC_ALL=C comm -13 "$ACTUAL" "$EXPECTED")"
   if [ -n "$NEW_WALLS" ]; then

@@ -1,10 +1,7 @@
-# WALLED-REAL BASELINE — the enumerated remainder of the 2026-07-16 test-fn
-# metric-surface expansion (217 exposed -> burned down to this set; see
-# proofs/corpus-wall.sh for the gate semantics: any wall NOT listed here fails,
-# any listed entry that stops walling must be pruned — the set only SHRINKS,
-# target = empty file). Every entry is a named feature-frontier class:
-#
-#   fan              — fan.* concurrency thunks (fan machinery not in v1)
-#
-spec/lang/fan_value_regression_test.almd :: __test_almd_fan.settle over capturing thunks preserves order and payloads
-spec/lang/fan_value_regression_test.almd :: __test_almd_fan.settle preserves ok and err payloads
+# WALLED-REAL BASELINE — EMPTY: the 2026-07-16 test-fn metric-surface expansion
+# (217 exposed walls) is fully burned down (217 -> 0, completed the same day; the
+# final classes were fan-settle eq operands, the optional-chain heap-field match,
+# the two-level record+field COW, closure chains, where-case unification, list.pop,
+# and the ProcessStatus erasure). The gate semantics (proofs/corpus-wall.sh): any
+# walled-real function fails — ship the lowering in the same change; this file is
+# the wall=0 ENDGAME claim restored over the FULL test-fn corpus.

@@ -506,7 +506,7 @@ impl LowerCtx {
         object: &IrExpr,
         field: almide_lang::intern::Sym,
     ) -> Option<()> {
-        use crate::{Init, IntOp, PrimKind};
+        use crate::{Init, PrimKind};
         let IrExprKind::Var { id } = &object.kind else { return None };
         let old = self.value_for(*id).ok()?;
         if self.param_values.contains(&old) || !self.materialized_aggregates.contains(&old) {
