@@ -1728,4 +1728,5 @@ since     = "0.31.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_relative_path.almd", class = "fixture" },
+  { path = "spec/stdlib/fs_stat_test.almd", class = "fixture" },
 ]

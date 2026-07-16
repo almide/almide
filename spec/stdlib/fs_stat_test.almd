@@ -1,3 +1,4 @@
+// @contract: C-137
 import fs
 
 test "fs.stat returns a FileStat record for an existing file" {

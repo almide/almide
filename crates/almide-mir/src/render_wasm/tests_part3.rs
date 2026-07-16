@@ -553,11 +553,18 @@
     // `$env_get` (`PrimKind::EnvGet`, Capability::CliArgs — the Env profile's cap) is the
     // environ_sizes_get/environ_get lookup + Option[String] build the self-hosted
     // `env.get` reaches (C-133) — the same host-call-boundary class as `$args_get_list`.
+    // `$path_norm` is the shared PATH-RESOLUTION bridge every fs floor fn calls first
+    // (C-137): an absolute path drops its leading '/' (fd-3-relative), a RELATIVE path
+    // is resolved against the host CWD by scanning the environ for PWD
+    // (environ_sizes_get/environ_get — the SAME host-call sequence as `$env_get`) and
+    // prepending it. It cannot be self-hosted: the fs floor fns that need it are
+    // themselves WAT (the link direction is self-host → floor, never floor → almd),
+    // and inlining it would duplicate one host-call sequence across all seven callers.
     const WASI_FLOOR_FNS: &[&str] = &[
         "$args_get_list", "$env_get", "$read_text_file", "$rtf_str", "$rtf_result", "$alloc8",
         "$read_dir", "$str_lt", "$is_dot_entry",
         "$write_text_file", "$make_dir", "$remove_all", "$remove_path", "$read_line",
-        "$read_n_bytes", "$path_exists", "$path_filestat_q",
+        "$read_n_bytes", "$path_exists", "$path_filestat_q", "$path_norm",
     ];
 
     // The §13 TERMINATION-CONVENTION floor: contract-mandated aborts (C-001/C-035
