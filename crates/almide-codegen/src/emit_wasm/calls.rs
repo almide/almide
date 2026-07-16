@@ -111,8 +111,15 @@ impl FuncCompiler<'_> {
         let mut hit: Option<u32> = None;
         for (k, &idx) in self.emitter.func_map.iter() {
             if k.ends_with(&needle) {
-                if hit.is_some() { return None; } // ambiguous — do not guess
-                hit = Some(idx);
+                match hit {
+                    // ONE function under several ALIAS keys (bare + qualified +
+                    // module-prefixed — a cross-module derived Codec fn carries
+                    // its module in the NAME, so `varlib.Pigment.decode` AND
+                    // `varlib.varlib.Pigment.decode` both match) is not
+                    // ambiguity; only two DIFFERENT functions are — do not guess.
+                    Some(h) if h != idx => return None,
+                    _ => hit = Some(idx),
+                }
             }
         }
         hit
