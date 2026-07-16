@@ -21,7 +21,6 @@
 spec/integration/codegen_functional_test.almd :: __test_almd_currying
 spec/integration/codegen_variant_record_test.almd :: __test_almd_extract fields from variant records
 spec/lang/default_fields_test.almd :: __test_almd_default fields - equality on shapes
-spec/lang/eq_protocol_test.almd :: __test_almd_nested containers are comparable
 spec/lang/eq_protocol_test.almd :: __test_almd_recursive variant types are comparable
 spec/lang/fan_value_regression_test.almd :: __test_almd_fan.settle over capturing thunks preserves order and payloads
 spec/lang/fan_value_regression_test.almd :: __test_almd_fan.settle preserves ok and err payloads

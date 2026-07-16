@@ -103,11 +103,17 @@ fn count_eq_calls_depth(
         let nested_list = matches!(&es[..],
             [Ty::Applied(TC::List, inner)]
                 if matches!(inner[..], [Ty::Int | Ty::Float | Ty::String]));
+        // List[Option[Int/Bool]] — ONE list.eq_opt_int CallFn (the engine's
+        // Option-element arm; Float payloads stay outside on both sides).
+        let opt_scalar_elem = matches!(&es[..],
+            [Ty::Applied(TC::Option, inner)]
+                if matches!(inner[..], [Ty::Int | Ty::Bool]));
         return usize::from(
             es.len() == 1
                 && (matches!(es[0], Ty::Int | Ty::String | Ty::Float | Ty::Bool)
                     || almide_mir::lower::is_value_ty(&es[0])
-                    || nested_list),
+                    || nested_list
+                    || opt_scalar_elem),
         );
     }
     // Map/Set `==` — the implemented repr variants lower to ONE synthetic eq CallFn

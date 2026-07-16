@@ -1122,6 +1122,15 @@ impl LowerCtx {
                     } else {
                         None
                     }
+                } else if let Ty::Applied(TC::Option, inner) = &es[0] {
+                    // List[Option[Int/Bool]] — element-wise len-as-tag + i64 payload
+                    // compare (value_core `list_eq_opt_int`). Scalar payloads only: a
+                    // Float payload's slot is f64 BITS (bit-eq ≠ `==` on -0.0/NaN).
+                    if inner.len() == 1 && matches!(inner[0], Ty::Int | Ty::Bool) {
+                        Some("list.eq_opt_int")
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }

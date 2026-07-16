@@ -174,8 +174,9 @@ pub fn render_wasm(func: &MirFunction) -> String {
     // byte-identical to before).
     let no_slots: BTreeMap<String, u32> = BTreeMap::new();
     let no_param_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let reprs = value_reprs_wasm(func);
     for op in &func.ops {
-        body.push_str(&render_op(op, &label_off, &no_slots, &no_param_counts, &func.heap_slot_masks));
+        body.push_str(&render_op(op, &label_off, &no_slots, &no_param_counts, &func.heap_slot_masks, &reprs));
     }
 
     format!(
@@ -701,7 +702,7 @@ pub fn render_wasm_fn(
                 let close = if dst.is_some() { "))\n" } else { ")\n" };
                 body.push_str(&format!("{}      ){close}", arm_val(val)));
             }
-            _ => body.push_str(&render_op(op, label_off, func_slots, param_counts, &func.heap_slot_masks)),
+            _ => body.push_str(&render_op(op, label_off, func_slots, param_counts, &func.heap_slot_masks, &reprs)),
         }
     }
     let tail = func.ret.map(|r| format!("    (local.get {})\n", local(r))).unwrap_or_default();
@@ -848,9 +849,22 @@ pub fn import_symbol(module: &str, name: &str) -> String {
 }
 
 
-fn render_arg_wasm(arg: &CallArg) -> String {
+fn render_arg_wasm(arg: &CallArg, reprs: &BTreeMap<ValueId, Repr>) -> String {
     match arg {
-        CallArg::Handle(v) | CallArg::Scalar(v) => format!("(local.get {})", local(*v)),
+        // A Handle arg names a heap BLOCK (i32 pointer param). The value may live
+        // in an i64 local when it came through `PrimKind::Handle` (the eq engine's
+        // slot model holds heap operands as i64 byte-ADDRESSES — `list.eq_list_*`
+        // over top-level vars emitted `(call $… (local.get $v:i64))` against an
+        // i32 param: invalid wasm that hid behind the v0 fallback). Wrap exactly
+        // those; a Ptr-repr'd local passes through unchanged (byte-identical).
+        CallArg::Handle(v) => {
+            if reprs.get(v).is_some_and(|r| !r.is_heap()) {
+                format!("(i32.wrap_i64 (local.get {}))", local(*v))
+            } else {
+                format!("(local.get {})", local(*v))
+            }
+        }
+        CallArg::Scalar(v) => format!("(local.get {})", local(*v)),
         CallArg::Imm(n) => format!("(i64.const {n})"),
         CallArg::Label(l) => panic!("label arg {l:?} not valid for a user call"),
     }
