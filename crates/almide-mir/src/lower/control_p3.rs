@@ -1497,7 +1497,7 @@ impl LowerCtx {
 
     /// Register the recursive drop set for a freshly materialized heap eq-operand block, mirroring
     /// the call-binding tracking in `lower_bind` so the cond-frame teardown frees nested ownership.
-    fn register_owned_heap_eq_drop(&mut self, obj: ValueId, ty: &Ty) {
+    pub(crate) fn register_owned_heap_eq_drop(&mut self, obj: ValueId, ty: &Ty) {
         if crate::lower::is_list_list_str_ty(ty) {
             self.list_list_str_lists.insert(obj);
         } else if crate::lower::is_list_str_str_ty(ty) {

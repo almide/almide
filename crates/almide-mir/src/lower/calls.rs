@@ -805,7 +805,32 @@ impl LowerCtx {
                     let mark = self.ops.len();
                     let lhh = self.live_heap_handles.len();
                     if let Ok(lowered) = self.lower_call_args(args) {
-                        self.emit_closure_call(blk, None, lowered, None);
+                        // The CallIndirect's declared RESULT selects the wasm func TYPE
+                        // (none/i64/i32 — render_wasm's sig classes), and the lifted
+                        // lambda's own table type comes from its RETURN repr. A
+                        // result-less dispatch to a VALUE-returning closure (`drain()`
+                        // where `drain = () => { list.pop(xs) }` returns Option[Int])
+                        // therefore declared the WRONG type — "indirect call type
+                        // mismatch" at runtime — and leaked the returned block. Derive
+                        // the result from the callee's Fn RETURN type: a discarded HEAP
+                        // result is a fresh owned value dropped at scope end (its
+                        // type-routed recursive drop registered); a discarded scalar
+                        // binds an unused dst; Unit keeps the result-less dispatch.
+                        let ret_ty = match &callee.ty {
+                            Ty::Fn { ret, .. } => (**ret).clone(),
+                            _ => Ty::Unit,
+                        };
+                        if matches!(ret_ty, Ty::Unit) {
+                            self.emit_closure_call(blk, None, lowered, None);
+                        } else {
+                            let repr = repr_of(&ret_ty)?;
+                            let dst = self.fresh_value();
+                            self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
+                            if is_heap_ty(&ret_ty) {
+                                self.live_heap_handles.push(dst);
+                                self.register_owned_heap_eq_drop(dst, &ret_ty);
+                            }
+                        }
                         return Ok(());
                     }
                     self.ops.truncate(mark);
