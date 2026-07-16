@@ -1,0 +1,44 @@
+// #617: Bytes/Matrix are RcCow value types on the Rust target (copies are O(1)
+// Rc bumps, mutation is make_mut copy-on-write). These tests pin the OBSERVABLE
+// value semantics that the COW must preserve: after `var b = a`, mutating one
+// side is never visible through the other — for a bare Bytes, a bare Matrix,
+// and a record field holding each.
+
+type Pack = { tag: String, buf: Bytes }
+
+test "bytes copy then mutate one side" {
+  var a: Bytes = bytes.from_list([1, 2, 3])
+  var b: Bytes = a
+  bytes.set_at(b, 0, 99)
+  assert_eq(bytes.read_u8(a, 0), 1)
+  assert_eq(bytes.read_u8(b, 0), 99)
+}
+
+test "matrix copy stays independent of derived result" {
+  var m = matrix.from_lists([[2.0]])
+  var m2 = m
+  let m3 = matrix.scale(m2, 5.0)
+  assert_eq(matrix.get(m, 0, 0), 2.0)
+  assert_eq(matrix.get(m3, 0, 0), 10.0)
+}
+
+test "record copy shields the original's bytes field" {
+  let p1 = Pack { tag: "p1", buf: bytes.from_list([7, 8]) }
+  var p2 = p1
+  bytes.set_at(p2.buf, 1, 42)
+  assert_eq(bytes.read_u8(p1.buf, 1), 8)
+  assert_eq(bytes.read_u8(p2.buf, 1), 42)
+}
+
+test "bytes passed to a fn keep caller value" {
+  let a: Bytes = bytes.from_list([5])
+  let n = poke(a)
+  assert_eq(n, 50)
+  assert_eq(bytes.read_u8(a, 0), 5)
+}
+
+fn poke(b: Bytes) -> Int = {
+  var mine: Bytes = b
+  bytes.set_at(mine, 0, 50)
+  bytes.read_u8(mine, 0)
+}

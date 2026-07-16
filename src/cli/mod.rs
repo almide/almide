@@ -117,6 +117,30 @@ lto = true
 codegen-units = 1
 "#;
 
+/// `--cfg almide_par` enables the rayon-backed parallel runtime paths. The cfg
+/// follows the DEPENDENCY: inject it only when the generated project's Cargo.toml
+/// declares rayon (e.g. via `[native-deps]` — the nn repos do) — the base template
+/// carries no external crates (#739), so an unconditional cfg would make ANY
+/// matrix-using program fail to resolve `rayon::prelude` (E0433). Without the cfg
+/// the runtime compiles its serial side, exactly like the raw-rustc test harness.
+fn inject_almide_par_if_rayon(cmd: &mut std::process::Command, project_dir: &std::path::Path) {
+    let has_rayon = std::fs::read_to_string(project_dir.join("Cargo.toml"))
+        .map(|t| {
+            t.lines().any(|l| {
+                l.trim_start()
+                    .strip_prefix("rayon")
+                    .is_some_and(|r| r.trim_start().starts_with('='))
+            })
+        })
+        .unwrap_or(false);
+    if has_rayon {
+        cmd.env(
+            "RUSTFLAGS",
+            format!("{} --cfg almide_par", std::env::var("RUSTFLAGS").unwrap_or_default()),
+        );
+    }
+}
+
 /// Build a Cargo.toml string by inserting native deps into the [dependencies] section.
 fn build_cargo_toml(base_toml: &str, native_deps: &[crate::project::NativeDep]) -> String {
     if native_deps.is_empty() {
@@ -305,9 +329,7 @@ codegen-units = 1
         .map_err(|e| format!("failed to write lib.rs: {}", e))?;
 
     let mut cmd = std::process::Command::new("cargo");
-    // almide_par: enables the rayon-backed parallel runtime paths (the raw
-    // rustc test harness has no rayon crate and compiles the serial side).
-    cmd.env("RUSTFLAGS", format!("{} --cfg almide_par", std::env::var("RUSTFLAGS").unwrap_or_default()));
+    inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("build").current_dir(project_dir).arg("--quiet");
     if release { cmd.arg("--release"); }
     let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
@@ -430,9 +452,7 @@ fn cargo_build_generated_with_native(
         .map_err(|e| format!("failed to write main.rs: {}", e))?;
 
     let mut cmd = std::process::Command::new("cargo");
-    // almide_par: enables the rayon-backed parallel runtime paths (the raw
-    // rustc test harness has no rayon crate and compiles the serial side).
-    cmd.env("RUSTFLAGS", format!("{} --cfg almide_par", std::env::var("RUSTFLAGS").unwrap_or_default()));
+    inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("build").current_dir(project_dir);
     if release {
         cmd.arg("--release");
@@ -665,9 +685,7 @@ fn cargo_build_test_with_native(
 
     // Use `cargo test --no-run` to build the test binary without running it
     let mut cmd = std::process::Command::new("cargo");
-    // almide_par: enables the rayon-backed parallel runtime paths (the raw
-    // rustc test harness has no rayon crate and compiles the serial side).
-    cmd.env("RUSTFLAGS", format!("{} --cfg almide_par", std::env::var("RUSTFLAGS").unwrap_or_default()));
+    inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("test").arg("--no-run").arg("--quiet").arg("--message-format=json")
         .current_dir(project_dir);
 

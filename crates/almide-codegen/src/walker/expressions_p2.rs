@@ -41,18 +41,23 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             ctx.templates.render_with("concat_expr", Some(ty_tag), &[], &[("left", lo.as_str()), ("right", ro.as_str())])
                 .unwrap_or_else(|| format!("concat(_, _)"))
         }
-        BinOp::MulMatrix => {
+        // #617: the matrix operators return a RAW AlmideMatrix from the runtime —
+        // wrap into the RcCow value shape like every runtime-call result.
+        BinOp::MulMatrix => rc_cow_result_glue(
             ctx.templates.render_with("matrix_mul", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
-                .unwrap_or_else(|| format!("almide_rt_matrix_mul(&{}, &{})", l, r))
-        }
-        BinOp::AddMatrix => {
+                .unwrap_or_else(|| format!("almide_rt_matrix_mul(&{}, &{})", l, r)),
+            &Ty::Matrix,
+        ),
+        BinOp::AddMatrix => rc_cow_result_glue(
             ctx.templates.render_with("matrix_add", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
-                .unwrap_or_else(|| format!("almide_rt_matrix_add(&{}, &{})", l, r))
-        }
-        BinOp::SubMatrix => {
+                .unwrap_or_else(|| format!("almide_rt_matrix_add(&{}, &{})", l, r)),
+            &Ty::Matrix,
+        ),
+        BinOp::SubMatrix => rc_cow_result_glue(
             ctx.templates.render_with("matrix_sub", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
-                .unwrap_or_else(|| format!("almide_rt_matrix_sub(&{}, &{})", l, r))
-        }
+                .unwrap_or_else(|| format!("almide_rt_matrix_sub(&{}, &{})", l, r)),
+            &Ty::Matrix,
+        ),
         BinOp::ScaleMatrix => {
             // Ensure matrix is first arg, scalar is second
             let (mat, scalar) = if matches!(&left.ty, Ty::Matrix) {
@@ -60,8 +65,11 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             } else {
                 (r.as_str(), l.as_str())
             };
-            ctx.templates.render_with("matrix_scale", None, &[], &[("left", mat), ("right", scalar)])
-                .unwrap_or_else(|| format!("almide_rt_matrix_scale(&{}, {})", mat, scalar))
+            rc_cow_result_glue(
+                ctx.templates.render_with("matrix_scale", None, &[], &[("left", mat), ("right", scalar)])
+                    .unwrap_or_else(|| format!("almide_rt_matrix_scale(&{}, {})", mat, scalar)),
+                &Ty::Matrix,
+            )
         }
         BinOp::Eq => {
             ctx.templates.render_with("eq_expr", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
@@ -420,6 +428,147 @@ fn coerce_to_owned_string(rendered: &str, expr: &IrExpr) -> String {
 
 // ── Extracted sub-functions (reduce render_expr complexity) ──
 
+/// #617: does this type reach a `Bytes`/`Matrix` anywhere a runtime boundary
+/// would hand back RAW values (`Vec<u8>` / `AlmideMatrix`) where the generated
+/// code stores the RcCow value type?
+pub(super) fn rc_cow_needs_glue(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ty {
+        Ty::Bytes | Ty::Matrix => true,
+        Ty::Applied(TC::Matrix, _) => true,
+        Ty::Applied(TC::List | TC::Option, args) => args.first().is_some_and(rc_cow_needs_glue),
+        Ty::Applied(TC::Result, args) => args.iter().any(rc_cow_needs_glue),
+        Ty::Tuple(ts) => ts.iter().any(rc_cow_needs_glue),
+        _ => false,
+    }
+}
+
+/// #617: conversion glue from a RAW runtime result to the RcCow-typed value the
+/// generated code stores — `Bytes`/`Matrix` map to `RcCow<…>` (rust.toml
+/// `type_bytes`/`type_matrix`), while the runtime keeps its raw signatures.
+/// Immutable/mutable ARG borrows need no glue (`&RcCow<T>` / `&mut RcCow<T>`
+/// deref-coerce; the `&mut` path IS the `make_mut` copy-on-write that preserves
+/// value semantics). Identity when no Bytes/Matrix is reachable in `ty`.
+pub(super) fn rc_cow_result_glue(expr_str: String, ty: &Ty) -> String {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    if !rc_cow_needs_glue(ty) {
+        return expr_str;
+    }
+    match ty {
+        Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _) => {
+            format!("RcCow::from({expr_str})")
+        }
+        Ty::Applied(TC::List, args) => {
+            let inner = rc_cow_result_glue("__e".to_string(), &args[0]);
+            format!("{expr_str}.into_iter().map(|__e| {inner}).collect::<Vec<_>>()")
+        }
+        Ty::Applied(TC::Option, args) => {
+            let inner = rc_cow_result_glue("__e".to_string(), &args[0]);
+            format!("{expr_str}.map(|__e| {inner})")
+        }
+        Ty::Applied(TC::Result, args) => {
+            let mut out = expr_str;
+            if rc_cow_needs_glue(&args[0]) {
+                let ok_g = rc_cow_result_glue("__e".to_string(), &args[0]);
+                out = format!("{out}.map(|__e| {ok_g})");
+            }
+            if args.len() > 1 && rc_cow_needs_glue(&args[1]) {
+                let err_g = rc_cow_result_glue("__e".to_string(), &args[1]);
+                out = format!("{out}.map_err(|__e| {err_g})");
+            }
+            out
+        }
+        Ty::Tuple(ts) => {
+            let names: Vec<String> = (0..ts.len()).map(|i| format!("__t{i}")).collect();
+            let parts: Vec<String> = ts
+                .iter()
+                .zip(&names)
+                .map(|(t, n)| rc_cow_result_glue(n.clone(), t))
+                .collect();
+            format!("{{ let ({}) = {expr_str}; ({}) }}", names.join(", "), parts.join(", "))
+        }
+        _ => expr_str,
+    }
+}
+
+/// #617: the reverse boundary — a runtime fn whose signature takes a CONCRETE
+/// container of raw elements (`&[AlmideMatrix]`), where deref coercion cannot
+/// see through the RcCow ELEMENTS. Element-cloned at the call site; the only
+/// such runtime family today is `matrix.concat_cols_many`.
+fn rc_cow_arg_needs_raw_elems(symbol: &str) -> bool {
+    symbol == "almide_rt_matrix_concat_cols_many"
+}
+
+/// #617: the inverse of [`rc_cow_result_glue`] — convert an RcCow-shaped value
+/// expression back to the RAW shape a shared STATIC stores (an `Rc` inside a
+/// static is not `Sync`, and fan threads read globals, so top-lets keep the raw
+/// `Vec<u8>` / `AlmideMatrix` layout; locals re-wrap at the read boundary).
+pub(super) fn rc_cow_unglue(expr_str: String, ty: &Ty) -> String {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    if !rc_cow_needs_glue(ty) {
+        return expr_str;
+    }
+    match ty {
+        Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _) => {
+            format!("RcCow::into_inner({expr_str})")
+        }
+        Ty::Applied(TC::List, args) => {
+            let inner = rc_cow_unglue("__e".to_string(), &args[0]);
+            format!("{expr_str}.into_iter().map(|__e| {inner}).collect::<Vec<_>>()")
+        }
+        Ty::Applied(TC::Option, args) => {
+            let inner = rc_cow_unglue("__e".to_string(), &args[0]);
+            format!("{expr_str}.map(|__e| {inner})")
+        }
+        Ty::Applied(TC::Result, args) => {
+            let mut out = expr_str;
+            if rc_cow_needs_glue(&args[0]) {
+                let ok_g = rc_cow_unglue("__e".to_string(), &args[0]);
+                out = format!("{out}.map(|__e| {ok_g})");
+            }
+            if args.len() > 1 && rc_cow_needs_glue(&args[1]) {
+                let err_g = rc_cow_unglue("__e".to_string(), &args[1]);
+                out = format!("{out}.map_err(|__e| {err_g})");
+            }
+            out
+        }
+        Ty::Tuple(ts) => {
+            let names: Vec<String> = (0..ts.len()).map(|i| format!("__t{i}")).collect();
+            let parts: Vec<String> = ts
+                .iter()
+                .zip(&names)
+                .map(|(t, n)| rc_cow_unglue(n.clone(), t))
+                .collect();
+            format!("{{ let ({}) = {expr_str}; ({}) }}", names.join(", "), parts.join(", "))
+        }
+        _ => expr_str,
+    }
+}
+
+/// #617: render a type for a shared STATIC — the RcCow value shape textually
+/// reverted to the raw storage shape (RcCow only ever wraps these two types,
+/// so the rewrite is total and unambiguous).
+pub(super) fn rc_cow_raw_type(ty_str: &str) -> String {
+    ty_str
+        .replace("RcCow<Vec<u8>>", "Vec<u8>")
+        .replace("RcCow<AlmideMatrix>", "AlmideMatrix")
+}
+
+/// #617: TRUE iff `symbol` names a NATIVE runtime fn (raw `Vec<u8>` /
+/// `AlmideMatrix` signatures) rather than a USER-module fn that received the
+/// same `almide_rt_<m>_` prefixing (whose generated signature already carries
+/// the mapped RcCow types — gluing it would double-wrap, the nn E0283).
+/// Decided against the runtime-module registry, the one source of truth for
+/// what ships raw native signatures.
+fn rc_cow_symbol_is_native_runtime(symbol: &str) -> bool {
+    let Some(rest) = symbol.strip_prefix("almide_rt_") else {
+        return false;
+    };
+    crate::generated::rust_runtime::RUST_RUNTIME_MODULES
+        .iter()
+        .any(|(m, _)| rest.strip_prefix(m).is_some_and(|r| r.starts_with('_')))
+}
+
 fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
     // Inline numeric casts
     match symbol.as_str() {
@@ -476,8 +625,31 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
         }
     }
     // Default: render all args as owned
-    let args_str = args.iter().map(|a| render_expr_owned(ctx, a))
-        .collect::<Vec<_>>().join(", ");
+    let args_str = args
+        .iter()
+        .map(|a| {
+            let r = render_expr_owned(ctx, a);
+            // #617: a concrete container-of-raw runtime param cannot deref-coerce
+            // through RcCow ELEMENTS — clone them out at this (rare) boundary. The
+            // closure param is EXPLICITLY typed: the producer side may itself be
+            // result glue ending in `collect::<Vec<_>>()`, whose `_` only resolves
+            // from this consumer.
+            if rc_cow_arg_needs_raw_elems(symbol.as_str()) && rc_cow_needs_glue(&a.ty) {
+                let elem = match &a.ty {
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, es)
+                        if es.len() == 1 =>
+                    {
+                        render_type(ctx, &es[0])
+                    }
+                    _ => "_".to_string(),
+                };
+                format!("{r}.iter().map(|__e: &{elem}| (**__e).clone()).collect::<Vec<_>>()")
+            } else {
+                r
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
     format!("{}({})", symbol.as_str(), args_str)
 }
 
