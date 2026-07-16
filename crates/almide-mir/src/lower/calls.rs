@@ -377,6 +377,40 @@ impl LowerCtx {
             self.lower_prim_call(func, args)?;
             return Ok(());
         }
+        // An IN-PLACE `&mut` BYTES mutator (set_*/write_*/fill/clear/copy_within/
+        // copy_from — the self-host bodies store through args[0]'s block). The
+        // native oracle's semantics (RcCow + borrow inference) split by receiver:
+        //   - a LOCAL var: `make_mut` COWs a SHARED block at the mutation — so
+        //     `var b = a; bytes.set_at(b, …)` must not write through `a` (#794;
+        //     this lowered as a silently-shared write). Emit `MakeUnique` first.
+        //   - a BORROWED PARAM: passed `&mut` through the call, so the write IS
+        //     caller-visible (var_in_if_skinning's blend writes its non-mut
+        //     `verts` param and the caller reads the results) — the bare
+        //     write-through CallFn is exactly right, no COW.
+        //   - anything else (a record FIELD needs the two-level record+field COW;
+        //     a mutable GLOBAL receiver would mutate a local copy): WALL — a
+        //     possibly-shared write is a silent aliasing miscompile, never emitted.
+        if module == "bytes"
+            && (func.starts_with("set_")
+                || func.starts_with("write_")
+                || matches!(func, "fill" | "clear" | "copy_within" | "copy_from"))
+        {
+            match args.first().map(|a| &a.kind) {
+                Some(IrExprKind::Var { id }) => {
+                    let v = self.value_for(*id)?;
+                    if !self.param_values.contains(&v) {
+                        self.ops.push(Op::MakeUnique { v });
+                    }
+                }
+                _ => {
+                    return Err(LowerError::Unsupported(format!(
+                        "in-place bytes mutator {module}.{func} over a non-var receiver \
+                         (a shared record field would alias the write — the two-level \
+                         record+field COW) not in this brick"
+                    )))
+                }
+            }
+        }
         let lowered = self.lower_pure_module_call_args(module, func, args)?;
         if is_heap_ty(result_ty) {
             let dst = self.fresh_value();

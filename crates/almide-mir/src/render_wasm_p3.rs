@@ -275,16 +275,23 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   (func $list_len (param $list i32) (result i32)
     (i32.load (i32.add (local.get $list) (i32.const {LIST_LEN_OFFSET}))))
 
+  ;; MakeUnique's clone: a RAW byte copy of the whole data region (cap*ELEM_SIZE
+  ;; bytes). Both COW'able layouts store cap@8 in ELEM_SIZE units — a DynList's
+  ;; data is len*8 <= cap*8, a DynStr/Bytes block's is len BYTES <= cap*8 — so the
+  ;; raw copy is exact for both. The old per-ELEMENT $list_get/$list_set loop read
+  ;; len (BYTES for a Bytes block) as an element count and trapped in $elem_addr
+  ;; the moment a shared Bytes was COW'd (`var b = a; bytes.set_at(b, …)`, #794).
   (func $list_copy (param $src i32) (result i32)
-    (local $len i32) (local $cap i32) (local $dst i32) (local $i i32)
+    (local $len i32) (local $cap i32) (local $dst i32) (local $i i32) (local $nbytes i32)
     (local.set $len (i32.load (i32.add (local.get $src) (i32.const {LIST_LEN_OFFSET}))))
     (local.set $cap (i32.load (i32.add (local.get $src) (i32.const {LIST_CAP_OFFSET}))))
     (local.set $dst (call $list_new (local.get $len) (local.get $cap)))
+    (local.set $nbytes (i32.mul (local.get $cap) (i32.const {ELEM_SIZE})))
     (local.set $i (i32.const 0))
     (block $done (loop $loop
-      (br_if $done (i32.ge_s (local.get $i) (local.get $len)))
-      (call $list_set (local.get $dst) (local.get $i)
-                      (call $list_get (local.get $src) (local.get $i)))
+      (br_if $done (i32.ge_s (local.get $i) (local.get $nbytes)))
+      (i32.store8 (i32.add (i32.add (local.get $dst) (i32.const {LIST_HEADER})) (local.get $i))
+                  (i32.load8_u (i32.add (i32.add (local.get $src) (i32.const {LIST_HEADER})) (local.get $i))))
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
       (br $loop)))
     (local.get $dst))
