@@ -366,16 +366,15 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         }
         eprintln!("{}", line);
     }
-    // v1 first; a RUN failure of the v1 module retries on the v0 emit before any
-    // verdict — a v1 runtime defect (a trap where v0 runs — the #790 vein) must
-    // surface as a v1 bug report, not as a false test failure, and the v0 retry
-    // keeps the file on the fast wasm leg instead of the rustc native fallback.
-    // A REAL failing test simply fails twice (rare; the native fallback then
-    // renders the authoritative diagnostics).
+    // v1 first, and where v1 RENDERS its verdict is FINAL: a v1 run failure routes
+    // to the authoritative NATIVE fallback, never to a v0 retry. The old v0 retry
+    // existed for the #790 vein (v1 runtime defects trapping where v0 ran) — that
+    // vein is closed, and the retry's real effect had inverted: v0 DCEs whole test
+    // bodies (#792 vacuous ok), so a GENUINELY failing test (v1 correctly aborting
+    // on `none!`) was overwritten by a hollow v0 "pass". v0 still carries the files
+    // v1 WALLS (no render) — the shrinking #782 remainder.
     if let Some(b) = v1_bytes {
-        if let WasmTestOutcome::Pass { file, count, bytes } = run_module(&b) {
-            return WasmTestOutcome::Pass { file, count, bytes };
-        }
+        return run_module(&b);
     }
     match v0_bytes(&mut ir_program) {
         Ok(b) => run_module(&b),
