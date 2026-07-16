@@ -215,6 +215,10 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 ty_str == "Vec<u8>"
                     || ty_str.starts_with("Vec<")
                     || ty_str.starts_with("HashMap<")
+                    // #617: Bytes/Matrix render as RcCow — their in-place mutators
+                    // (&mut deref-coerce = make_mut COW) still need a `mut` binding,
+                    // exactly like the raw spellings above.
+                    || ty_str.starts_with("RcCow<")
             };
             // Val-wrap: var of non-Copy type → RcCow<T> with RcCow::new(value) for COW
             if ctx.ann.is_rc_cow(var) {
@@ -271,6 +275,9 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             // immutable binding) — encoded as an ICE, not a silent arm.
             if let Some(info) = ctx.ann.global(*var) {
                 use almide_ir::top_let_storage::TopLetStorage as Tls;
+                // #617: the static stores the RAW Bytes/Matrix shape — un-wrap an
+                // RcCow-shaped value at the assign boundary (identity otherwise).
+                let value_s = super::expressions::rc_cow_unglue(value_s.clone(), &value.ty);
                 return match info.storage {
                     Tls::Cell => format!("{}.with(|c| c.set({}));", info.static_name, value_s),
                     Tls::RcRefCell => format!("{}.with(|c| *c.borrow_mut() = std::rc::Rc::new(({}).into()));", info.static_name, value_s),

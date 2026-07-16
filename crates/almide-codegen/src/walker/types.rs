@@ -26,8 +26,11 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::String => template_or(ctx, "type_string", &[], "String"),
         Ty::Bool => template_or(ctx, "type_bool", &[], "bool"),
         Ty::Unit => template_or(ctx, "type_unit", &[], "()"),
-        Ty::Bytes => template_or(ctx, "type_bytes", &[], "Vec<u8>"),
-        Ty::Matrix => template_or(ctx, "type_matrix", &[], "AlmideMatrix"),
+        // #617: Bytes/Matrix are RcCow VALUE types on the Rust target — copies
+        // are O(1) Rc bumps, mutation is make_mut copy-on-write (rust.toml
+        // templates + the rc_cow_result_glue boundary in the expression walker).
+        Ty::Bytes => template_or(ctx, "type_bytes", &[], "RcCow<Vec<u8>>"),
+        Ty::Matrix => template_or(ctx, "type_matrix", &[], "RcCow<AlmideMatrix>"),
         // Matrix[T] parametric form (Sized Numeric Types arc P4 kickoff):
         // runtime representation stays `AlmideMatrix` (a tagged enum that
         // dispatches to SmallF32 / Vec<Vec<f64>> backends). The `T`
@@ -35,7 +38,7 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         // mix `Matrix[Float32]` / `Matrix[Float64]` annotations without
         // a separate Rust type surface yet. Type-specialised layouts
         // will fold into this arm in a follow-up codegen arc.
-        Ty::Applied(TypeConstructorId::Matrix, _) => template_or(ctx, "type_matrix", &[], "AlmideMatrix"),
+        Ty::Applied(TypeConstructorId::Matrix, _) => template_or(ctx, "type_matrix", &[], "RcCow<AlmideMatrix>"),
         Ty::RawPtr => "*mut u8".to_string(),
         Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
             let inner = &args[0];

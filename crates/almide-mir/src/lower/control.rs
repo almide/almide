@@ -264,6 +264,35 @@ impl LowerCtx {
                             crate::purity::is_pure(module.as_str(), func.as_str()),
                         _ => false,
                     };
+                    // A user Named-call (or pure Module-call) subject returning OPTION
+                    // (`match get_profile(1) { some(p) => …, none => … }` — the
+                    // optional-chain desugar's shape after the let-bind continuation
+                    // transform): the callee builds a REAL same-layout Option block (the
+                    // v1 calling convention — `seed_variant_param`'s contract, the same
+                    // trust the let-bound Named-call path in binds_p2 already places).
+                    // Track its READ-shape so the match EXECUTES (len-as-tag) instead of
+                    // walling at the linearization gate. The DROP routes by payload: a
+                    // RICH record payload recurses through the option wrapper
+                    // (`optrec:<R>` → `$__drop_<R>` — checked BEFORE heap_elem_lists in
+                    // drop_op_for, the map.find precedent); the heap_elem_lists entry
+                    // additionally opens the Some-arm heap-payload borrow gate.
+                    if result_call_subject {
+                        if let Ty::Applied(
+                            almide_lang::types::constructor::TypeConstructorId::Option,
+                            a,
+                        ) = &subject.ty
+                        {
+                            if a.len() == 1 {
+                                self.materialized_options.insert(v);
+                                if let Some(rn) = self.record_or_anon_drop_type_name(&a[0]) {
+                                    self.variant_drop_handles.insert(v, format!("optrec:{rn}"));
+                                    self.heap_elem_lists.insert(v);
+                                } else if is_heap_ty(&a[0]) {
+                                    self.heap_elem_lists.insert(v);
+                                }
+                            }
+                        }
+                    }
                     if result_call_subject
                         && crate::lower::is_result_ty(&subject.ty)
                     {
@@ -1007,6 +1036,13 @@ impl LowerCtx {
                     } else if crate::lower::is_heap_elem_list_ty(&bind_ty) {
                         self.heap_elem_lists.insert(payload);
                     }
+                } else if self.aggregate_field_tys(&bind_ty).is_some() {
+                    // A RECORD/TUPLE payload (`some(p) => … p.name …` — the optional-chain
+                    // heap-field projection): seed its aggregate READ-shape so a field
+                    // access inside the arm loads the real slot (a borrowed handle of the
+                    // Option's owned payload block — no ownership event, exactly the
+                    // seed_variant_param aggregate discipline).
+                    self.materialized_aggregates.insert(payload);
                 }
             }
         }

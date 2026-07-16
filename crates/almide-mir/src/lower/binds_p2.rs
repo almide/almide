@@ -335,6 +335,14 @@ impl LowerCtx {
                 if self.materialized_lists.contains(&src) {
                     self.materialized_lists.insert(dst);
                 }
+                // An alias of a BORROWED param/slot handle (`v = __mp_buf` — the C-132
+                // write-back Assign, where `__mp_buf` is a destructured tuple slot in
+                // `param_values`) denotes the same GENUINE block the borrow does, so a
+                // scalar-element list alias is directly indexable. The Dup above is the
+                // new owned reference; only the read-shape knowledge is added here.
+                if self.param_values.contains(&src) && is_scalar_elem_list_ty(ty) {
+                    self.materialized_lists.insert(dst);
+                }
                 if self.heap_elem_lists.contains(&src) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -768,6 +776,15 @@ impl LowerCtx {
                     self.heap_elem_lists.insert(dst);
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
+                } else if is_scalar_elem_list_ty(ty) {
+                    // A user fn returning `List[scalar]` yields a REAL, POPULATED list
+                    // block (the v1 calling convention — the same argument as the
+                    // variant/record seeds below; a callee that cannot build one WALLS,
+                    // and the render rejects the program). Admit a direct `xs[i]`
+                    // bounds-checked load over the bound result — the C-132 move-mode
+                    // write-back binds the returned buffer exactly here (`__mp_buf =
+                    // add_item(data, 1)` then `data = __mp_buf; data[0]`).
+                    self.materialized_lists.insert(dst);
                 }
                 // A `Value` result from a user fn (`let v = parse_number(c, raw)`) drops via the
                 // runtime-tag-dispatched `DropValue` — the SAME marking the Module-call bind path does
@@ -1019,6 +1036,15 @@ impl LowerCtx {
                 self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
+                // A closure-RETURNING closure call (`let triple = make_multiplier(3)` where
+                // `make_multiplier` is a lifted lambda whose tail lifts a capturing lambda):
+                // the result IS a closure block the callee moved out — track it so a later
+                // `triple(4)` dispatches through it (`Op::CallIndirect`) AND its scope-end
+                // drop routes to the recursive `$__drop_closure` (a heap capture would leak
+                // under the default flat rc_dec).
+                if matches!(ty, Ty::Fn { .. }) {
+                    self.closure_values.insert(dst);
+                }
                 // The funcref returns its Result/Option in the SAME materialized layout an `ok()`/
                 // `err()` ctor builds (a lifted lambda's body goes through `materialize_result_*`), so
                 // SEED its read-shape — a later `match o { ok/err }` over the bound var then reads its

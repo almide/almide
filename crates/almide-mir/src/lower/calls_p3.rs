@@ -60,6 +60,55 @@ impl LowerCtx {
         None
     }
 
+    /// Resolve a COMPUTED callee to a dispatchable CLOSURE BLOCK value, MATERIALIZING
+    /// intermediate blocks as needed — the curry chain `curry_add(1)(2)(3)`, where the
+    /// outer callee is itself a call. Shapes:
+    ///   - a tracked closure Var / record-slot Fn member ([`Self::closure_block_of_mut`]);
+    ///   - a NAMED user call returning a `Fn` — the callee builds and moves out a
+    ///     closure block (the v1 calling convention; a callee that cannot walls itself,
+    ///     and an unlowered callee is rejected at render — never garbage dispatched);
+    ///   - a nested COMPUTED call returning a `Fn` — recursion (each link of the chain).
+    /// Every intermediate block is a fresh OWNED heap value: pushed to
+    /// `live_heap_handles` (freed at the enclosing frame/scope teardown via the
+    /// recursive `$__drop_closure` — `closure_values` routes the drop) and tracked in
+    /// `closure_values` (the CallIndirect dispatch gate). Returns `None` for any other
+    /// shape — the caller defers/walls; its ops/handles marks roll back anything
+    /// emitted here.
+    pub(crate) fn lower_closure_callee(&mut self, callee: &IrExpr) -> Option<ValueId> {
+        if let Some(v) = self.closure_block_of_mut(callee) {
+            return Some(v);
+        }
+        if !matches!(callee.ty, almide_lang::types::Ty::Fn { .. }) {
+            return None;
+        }
+        let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
+        match &callee.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                let lowered = self.lower_call_args(args).ok()?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::CallFn {
+                    dst: Some(dst),
+                    name: name.as_str().to_string(),
+                    args: lowered,
+                    result: Some(ptr),
+                });
+                self.live_heap_handles.push(dst);
+                self.closure_values.insert(dst);
+                Some(dst)
+            }
+            IrExprKind::Call { target: CallTarget::Computed { callee: inner }, args, .. } => {
+                let blk = self.lower_closure_callee(inner)?;
+                let lowered = self.lower_call_args(args).ok()?;
+                let dst = self.fresh_value();
+                self.emit_closure_call(blk, Some(dst), lowered, Some(ptr));
+                self.live_heap_handles.push(dst);
+                self.closure_values.insert(dst);
+                Some(dst)
+            }
+            _ => None,
+        }
+    }
+
     /// Load a closure block's table index (slot 0) — the scalar a `call_indirect`
     /// wraps to its i32 table offset. Rung-5 closures slab: the read goes through the
     /// TARGET-NEUTRAL `Op::ListGetScalar` (wasm: the bounds-checked element load;
@@ -115,7 +164,18 @@ impl LowerCtx {
                     self.ops.truncate(ops_mark);
                     self.live_heap_handles.truncate(lhh_mark);
                 }
-                let blk = self.closure_value_of(callee)?;
+                // The callee may itself be a chain link (`curry_add(1)(2)` as the callee
+                // of `(…)(3)`) — resolve it recursively to a dispatchable closure block,
+                // materializing the intermediate blocks (each an owned temp freed at the
+                // enclosing frame/scope teardown).
+                let blk = match self.lower_closure_callee(callee) {
+                    Some(b) => b,
+                    None => {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        return None;
+                    }
+                };
                 let repr = repr_of(ty).ok()?;
                 match self.lower_call_args(args) {
                     Ok(lowered) => {

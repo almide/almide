@@ -294,8 +294,11 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // static name decided once, in the attribute pass). The former
     // `lazy_vars` mid-emission write is gone — no reader remains.
     for tl in &program.top_lets {
-        let ty_str = render_type_fn(&ctx, &tl.ty);
-        let val_str = render_expr_fn(&ctx, &tl.value);
+        // #617: a shared static stores the RAW Bytes/Matrix shape (Rc is not Sync;
+        // fan threads read globals) — type and initializer un-wrap here, every
+        // READ site re-wraps into the RcCow value shape.
+        let ty_str = expressions::rc_cow_raw_type(&render_type_fn(&ctx, &tl.ty));
+        let val_str = expressions::rc_cow_unglue(render_expr_fn(&ctx, &tl.value), &tl.ty);
         let info = ctx.ann.globals.get(&tl.var).unwrap_or_else(|| panic!(
             "[COMPILER BUG] top-let `{}` missing from the storage attribute",
             ctx.var_table.get(tl.var).name.as_str()

@@ -174,7 +174,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // declaration/use render order.
             if let Some(info) = ctx.ann.global(*id) {
                 use almide_ir::top_let_storage::TopLetStorage as Tls;
-                return match info.storage {
+                let read = match info.storage {
                     Tls::Cell => format!("{}.with(|c| c.get())", info.static_name),
                     Tls::RcRefCell => format!("{}.with(|c| (**c.borrow()).clone())", info.static_name),
                     Tls::Lazy { .. } => ctx.templates
@@ -182,6 +182,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         .unwrap_or_else(|| info.static_name.clone()),
                     Tls::Const => info.static_name.clone(),
                 };
+                // #617: a STATIC stores the RAW Bytes/Matrix shape (an `Rc` inside a
+                // shared static is not Sync, and fan threads read globals). A BARE
+                // read stays raw — borrow positions coerce against the raw runtime
+                // signatures directly; OWNING positions go through `Clone{Var}` nodes
+                // (CloneInsertion), whose render re-wraps into the RcCow shape.
+                return read;
             }
             raw_name
         }
@@ -402,7 +408,18 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         // ── Pre-resolved runtime call (from @intrinsic / NormalizeRuntimeCalls) ──
-        IrExprKind::RuntimeCall { symbol, args } => render_runtime_call(ctx, symbol, args),
+        // #617: a raw NATIVE-runtime result whose type reaches Bytes/Matrix
+        // converts to the RcCow value shape at this boundary. A user-module fn
+        // normalized into the same RuntimeCall spelling already returns the
+        // mapped types — no glue (double-wrap otherwise).
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let call = render_runtime_call(ctx, symbol, args);
+            if rc_cow_symbol_is_native_runtime(symbol.as_str()) {
+                rc_cow_result_glue(call, &expr.ty)
+            } else {
+                call
+            }
+        }
 
         // ── Calls ──
         IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
@@ -412,10 +429,19 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     let args_str = args.iter().map(|a| render_expr_owned(ctx, a)).collect::<Vec<_>>().join(", ");
                     let mod_ident = module.replace('.', "_");
                     let func_ident = func.replace('.', "_");
-                    ctx.templates.render_with("module_call", None, &[], &[("module", mod_ident.as_str()), ("func", func_ident.as_str()), ("args", args_str.as_str())])
+                    let call = ctx.templates.render_with("module_call", None, &[], &[("module", mod_ident.as_str()), ("func", func_ident.as_str()), ("args", args_str.as_str())])
                         .unwrap_or_else(|| {
                             format!("almide_rt_{}_{}({})", mod_ident, func_ident, args_str)
-                        })
+                        });
+                    // #617: same raw-runtime-result → RcCow boundary as RuntimeCall —
+                    // but ONLY for STDLIB modules (native runtime signatures). A USER
+                    // module fn's generated signature already carries the mapped RcCow
+                    // types, so gluing it would double-wrap (E0283 in the nn repo).
+                    if almide_lang::stdlib_info::is_stdlib_module(module.as_str()) {
+                        rc_cow_result_glue(call, &expr.ty)
+                    } else {
+                        call
+                    }
                 }
                 _ => render_generic_call(ctx, target, args, &expr.ty)
             }
@@ -794,6 +820,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 if ctx.ann.is_rc_cow(id) {
                     let var_name = ctx.var_name(*id).to_string();
                     return format!("(*{}).clone()", var_name);
+                }
+                // #617: cloning a GLOBAL out of its raw static (Bytes/Matrix shapes)
+                // produces the raw value — re-wrap into the RcCow value shape the
+                // surrounding code stores. Locals are already RcCow (their clone is
+                // the O(1) Rc bump) — no glue.
+                if ctx.ann.global(*id).is_some() && rc_cow_needs_glue(&inner.ty) {
+                    let read = render_expr(ctx, inner);
+                    return rc_cow_result_glue(format!("{read}.clone()"), &inner.ty);
                 }
             }
             let expr_s = render_expr(ctx, inner);

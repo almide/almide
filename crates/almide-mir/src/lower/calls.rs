@@ -151,6 +151,12 @@ impl LowerCtx {
                 return Ok(dst);
             }
         }
+        // The in-place `list.pop` in a VALUE position (`let last = list.pop(xs)`):
+        // the same receiver discipline as the statement position — COW a local var,
+        // write through a borrowed param, wall anything else (#794).
+        if module == "list" && func == "pop" {
+            self.cow_inplace_receiver(module, func, args)?;
+        }
         let arg_tys: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
         let ops_mark = self.ops.len();
         let lowered = self.lower_pure_module_call_args(module, func, args)?;
@@ -377,13 +383,47 @@ impl LowerCtx {
             self.lower_prim_call(func, args)?;
             return Ok(());
         }
+        // An IN-PLACE `&mut` BYTES mutator (set_*/write_*/fill/clear/copy_within/
+        // copy_from — the self-host bodies store through args[0]'s block), or the
+        // in-place `list.pop` (the same &mut protocol over a list receiver). The
+        // native oracle's semantics (RcCow + borrow inference) split by receiver:
+        //   - a LOCAL var: `make_mut` COWs a SHARED block at the mutation — so
+        //     `var b = a; bytes.set_at(b, …)` must not write through `a` (#794;
+        //     this lowered as a silently-shared write). Emit `MakeUnique` first.
+        //   - a BORROWED PARAM: passed `&mut` through the call, so the write IS
+        //     caller-visible (var_in_if_skinning's blend writes its non-mut
+        //     `verts` param and the caller reads the results) — the bare
+        //     write-through CallFn is exactly right, no COW.
+        //   - anything else (a record FIELD needs the two-level record+field COW;
+        //     a mutable GLOBAL receiver would mutate a local copy): WALL — a
+        //     possibly-shared write is a silent aliasing miscompile, never emitted.
+        if (module == "bytes"
+            && (func.starts_with("set_")
+                || func.starts_with("write_")
+                || matches!(func, "fill" | "clear" | "copy_within" | "copy_from")))
+            || (module == "list" && func == "pop")
+        {
+            self.cow_inplace_receiver(module, func, args)?;
+        }
+        let arg_tys: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
         let lowered = self.lower_pure_module_call_args(module, func, args)?;
+        // `list.pop` keys its self-host on the ELEMENT type (scalar → the registered
+        // in-place impl; heap → the unregistered `_x`, walling at render) — route it
+        // through the SAME `list_heap_call_name` the value position uses, so a
+        // statement-position pop can never link the scalar impl over a heap element
+        // (which would leak the popped handle). Every other statement call keeps its
+        // raw dotted name, byte-identical to before.
+        let call_name = if module == "list" && func == "pop" {
+            list_heap_call_name(module, func, &arg_tys, result_ty)
+        } else {
+            format!("{module}.{func}")
+        };
         if is_heap_ty(result_ty) {
             let dst = self.fresh_value();
             let repr = repr_of(result_ty)?;
             self.ops.push(Op::CallFn {
                 dst: Some(dst),
-                name: format!("{module}.{func}"),
+                name: call_name,
                 args: lowered,
                 result: Some(repr),
             });
@@ -391,12 +431,187 @@ impl LowerCtx {
         } else {
             self.ops.push(Op::CallFn {
                 dst: None,
-                name: format!("{module}.{func}"),
+                name: call_name,
                 args: lowered,
                 result: None,
             });
         }
         Ok(())
+    }
+
+    /// The #794 in-place-mutator RECEIVER discipline shared by the bytes mutators and
+    /// `list.pop`: a LOCAL var receiver gets `Op::MakeUnique` (COW — an alias must keep
+    /// the pre-mutation value: `var b = a; list.pop(a)` leaves `b` intact), a BORROWED
+    /// PARAM writes through bare (the caller sees the mutation — the &mut protocol),
+    /// and any other receiver shape (a record field, a fresh temp) WALLS — the write
+    /// would land in a materialized copy and vanish, or alias a shared field.
+    pub(crate) fn cow_inplace_receiver(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<(), LowerError> {
+        match args.first().map(|a| &a.kind) {
+            Some(IrExprKind::Var { id }) => {
+                let v = self.value_for(*id)?;
+                if !self.param_values.contains(&v) {
+                    self.ops.push(Op::MakeUnique { v });
+                }
+                Ok(())
+            }
+            // A RECORD-FIELD receiver (`bytes.set_at(p2.buf, …)`) — the two-level
+            // record+field COW (#794).
+            Some(IrExprKind::Member { object, field }) => {
+                self.two_level_field_cow(object, *field).ok_or_else(|| {
+                    LowerError::Unsupported(format!(
+                        "in-place mutator {module}.{func} over a non-var receiver \
+                         (a shared record field would alias the write — the two-level \
+                         record+field COW) not in this brick"
+                    ))
+                })
+            }
+            _ => Err(LowerError::Unsupported(format!(
+                "in-place mutator {module}.{func} over a non-var receiver \
+                 (a shared record field would alias the write — the two-level \
+                 record+field COW) not in this brick"
+            ))),
+        }
+    }
+
+    /// The TWO-LEVEL record+field COW (#794): before an in-place mutator writes through
+    /// `r.f`, make BOTH levels uniquely owned so no alias observes the write.
+    ///
+    /// Level 1 — the RECORD: an UNCONDITIONAL spread-copy (the proven
+    /// `try_lower_spread_record_construct` discipline): a fresh block, each scalar slot
+    /// value-copied, each heap slot `Dup`'d (CO-OWNED — cert `a`) then moved in (cert
+    /// `m`). The var rebinds to the copy; the OLD block's owned reference is released
+    /// NOW by its type-routed drop (masked/recursive — at rc>1 it only decs, the alias
+    /// keeps its block; at rc=1 it frees the old block and each Dup'd child drops back
+    /// to one owner: the copy). Unconditional-copy is value-semantics-exact — an
+    /// unshared receiver pays a copy but observes nothing. NOTE `Op::MakeUnique` CANNOT
+    /// serve level 1: its `$list_copy` is a raw slot copy that aliases the children
+    /// WITHOUT co-owning them (sound only for flat blocks — the bare-var bytes/list
+    /// receivers it ships on).
+    ///
+    /// Level 2 — the FIELD: load the (possibly shared) field handle, `Op::MakeUnique`
+    /// it (flat Bytes/list block — exactly the raw-copy shape $list_copy handles), and
+    /// store the unique handle back into the record's slot. The mutator's own receiver
+    /// arg then borrows the slot and writes the uniquely-owned block.
+    ///
+    /// Returns None (nothing emitted — the ops are appended only after every gate
+    /// passes) when the receiver is not a LOCAL var bound to a materialized aggregate
+    /// with a resolvable layout — the caller walls, unchanged.
+    fn two_level_field_cow(
+        &mut self,
+        object: &IrExpr,
+        field: almide_lang::intern::Sym,
+    ) -> Option<()> {
+        use crate::{Init, PrimKind};
+        let IrExprKind::Var { id } = &object.kind else { return None };
+        let old = self.value_for(*id).ok()?;
+        if self.param_values.contains(&old) || !self.materialized_aggregates.contains(&old) {
+            return None;
+        }
+        let (names, tys) = self.aggregate_field_tys(&object.ty)?;
+        let fidx = names.iter().position(|n| n.as_str() == field.as_str())?;
+        if !is_heap_ty(&tys[fidx]) {
+            return None; // a scalar field is not an in-place heap receiver
+        }
+        // Level 1: the record spread-copy.
+        let n = tys.len();
+        let len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: len, value: n as i64 });
+        let new = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst: new,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: Init::DynList { len },
+        });
+        let old_h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(old_h), args: vec![old] });
+        let new_h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(new_h), args: vec![new] });
+        for (i, fty) in tys.iter().enumerate() {
+            let off = crate::lower::layout::slot_offset(i) as i64;
+            let src_addr = self.addr_at(old_h, off);
+            let dst_addr = self.addr_at(new_h, off);
+            if is_heap_ty(fty) {
+                let child = self.fresh_value();
+                self.ops.push(Op::Prim {
+                    kind: PrimKind::LoadHandle,
+                    dst: Some(child),
+                    args: vec![src_addr],
+                });
+                let owned = self.fresh_value();
+                self.ops.push(Op::Dup { dst: owned, src: child });
+                let handle = self.fresh_value();
+                self.ops.push(Op::Prim {
+                    kind: PrimKind::Handle,
+                    dst: Some(handle),
+                    args: vec![owned],
+                });
+                self.ops.push(Op::Prim {
+                    kind: PrimKind::Store { width: 8 },
+                    dst: None,
+                    args: vec![dst_addr, handle],
+                });
+                self.ops.push(Op::Consume { v: owned });
+            } else {
+                let val = self.fresh_value();
+                self.ops.push(Op::Prim {
+                    kind: PrimKind::Load { width: 8 },
+                    dst: Some(val),
+                    args: vec![src_addr],
+                });
+                self.ops.push(Op::Prim {
+                    kind: PrimKind::Store { width: 8 },
+                    dst: None,
+                    args: vec![dst_addr, val],
+                });
+            }
+        }
+        // Rebind the var to the copy; transfer the read-shape/drop tracking; release the
+        // old block's owned reference by its type route (masked/recursive).
+        self.value_of.insert(*id, new);
+        self.materialized_aggregates.insert(new);
+        if let Some(mask) = self.record_masks.get(&old).cloned() {
+            self.record_masks.insert(new, mask);
+        }
+        if let Some(route) = self.variant_drop_handles.get(&old).cloned() {
+            self.variant_drop_handles.insert(new, route);
+        }
+        if self.heap_elem_lists.contains(&old) {
+            self.heap_elem_lists.insert(new);
+        }
+        let old_drop = self.drop_op_for(old);
+        self.ops.push(old_drop);
+        self.live_heap_handles.retain(|h| *h != old);
+        self.live_heap_handles.push(new);
+        // Level 2: the FIELD COW — load the (possibly shared) child handle, make it
+        // unique (flat raw copy), store it back into the copied record's slot.
+        let foff = crate::lower::layout::slot_offset(fidx) as i64;
+        let faddr = self.addr_at(new_h, foff);
+        let buf = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(buf), args: vec![faddr] });
+        self.ops.push(Op::MakeUnique { v: buf });
+        let faddr2 = self.addr_at(new_h, foff);
+        let bh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(bh), args: vec![buf] });
+        self.ops.push(Op::Prim {
+            kind: PrimKind::Store { width: 8 },
+            dst: None,
+            args: vec![faddr2, bh],
+        });
+        Some(())
+    }
+
+    /// `base + off` as a fresh address value (a ConstInt + IntBinOp Add pair).
+    fn addr_at(&mut self, base: ValueId, off: i64) -> ValueId {
+        let o = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: o, value: off });
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: base, b: o });
+        addr
     }
 
     /// Make the CALLS hidden inside a value whose CONTENT is deferred to
@@ -590,7 +805,32 @@ impl LowerCtx {
                     let mark = self.ops.len();
                     let lhh = self.live_heap_handles.len();
                     if let Ok(lowered) = self.lower_call_args(args) {
-                        self.emit_closure_call(blk, None, lowered, None);
+                        // The CallIndirect's declared RESULT selects the wasm func TYPE
+                        // (none/i64/i32 — render_wasm's sig classes), and the lifted
+                        // lambda's own table type comes from its RETURN repr. A
+                        // result-less dispatch to a VALUE-returning closure (`drain()`
+                        // where `drain = () => { list.pop(xs) }` returns Option[Int])
+                        // therefore declared the WRONG type — "indirect call type
+                        // mismatch" at runtime — and leaked the returned block. Derive
+                        // the result from the callee's Fn RETURN type: a discarded HEAP
+                        // result is a fresh owned value dropped at scope end (its
+                        // type-routed recursive drop registered); a discarded scalar
+                        // binds an unused dst; Unit keeps the result-less dispatch.
+                        let ret_ty = match &callee.ty {
+                            Ty::Fn { ret, .. } => (**ret).clone(),
+                            _ => Ty::Unit,
+                        };
+                        if matches!(ret_ty, Ty::Unit) {
+                            self.emit_closure_call(blk, None, lowered, None);
+                        } else {
+                            let repr = repr_of(&ret_ty)?;
+                            let dst = self.fresh_value();
+                            self.emit_closure_call(blk, Some(dst), lowered, Some(repr));
+                            if is_heap_ty(&ret_ty) {
+                                self.live_heap_handles.push(dst);
+                                self.register_owned_heap_eq_drop(dst, &ret_ty);
+                            }
+                        }
                         return Ok(());
                     }
                     self.ops.truncate(mark);

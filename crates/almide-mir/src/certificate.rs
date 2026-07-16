@@ -894,13 +894,17 @@ fn loop_carried_slots(
             {
                 heap_objs.insert(*d);
             }
-            // A Dup of a heap object is a heap handle: the SWAP-CARRY rebind
-            // (`cur = merged` lowered as `Dup tmp = merged; Drop cur; SetLocal
-            // cur = tmp` since the whole-var alias-edge elision) feeds its slot
-            // through the Dup's dst. Without this the slot goes unrecognized and
-            // the in-loop drop-old + scope-end drop read flat (`idd`) — the
-            // loop_buffer_churn false double-free the Trust Spine gate caught.
-            Op::Dup { dst, src } if heap_objs.contains(src) => {
+            // A Dup is ALWAYS a heap handle (an alias acquire on an existing heap
+            // object — scalars are never Dup'd): the SWAP-CARRY rebind (`cur =
+            // merged` lowered as `Dup tmp = merged; Drop cur; SetLocal cur = tmp`
+            // since the whole-var alias-edge elision) feeds its slot through the
+            // Dup's dst. Without this the slot goes unrecognized and the in-loop
+            // drop-old + scope-end drop read flat (`idd`) — the loop_buffer_churn
+            // false double-free the Trust Spine gate caught. NO src gate: the
+            // C-132 write-back rebind (`t = __mp_buf` in a loop) Dups a BORROWED
+            // tuple-slot LoadHandle — not itself in `heap_objs` — and the src-gated
+            // form left that slot unrecognized (`idm` + a flat `a`, both rejected).
+            Op::Dup { dst, .. } => {
                 heap_objs.insert(*dst);
             }
             _ => {}

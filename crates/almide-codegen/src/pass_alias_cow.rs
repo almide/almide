@@ -337,8 +337,21 @@ impl IrVisitor for AliasAnalysis<'_> {
         // place — count it as a mutation of `x` so an aliased/param-reachable
         // target lands in needs_cow and VETOES that fast path (the general emit
         // then clones, mirroring native).
+        //
+        // The whole &mut bytes family (`set_at`/`push`/`fill`/`write_*`/…) can ALSO
+        // arrive in this MODULE-call spelling (the wasm dispatcher emits it
+        // directly), not just as a RuntimeCall — mark those through the same
+        // `is_inplace_mutator` truth the RuntimeCall arm uses, or an aliased
+        // `var b = a; bytes.set_at(b, …)` writes through `a` on wasm while native
+        // keeps value semantics (found by spec/lang/rccow_value_semantics_test).
         if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &expr.kind {
-            if module.as_str() == "bytes" && func.as_str() == "set" {
+            let mutates = (module.as_str() == "bytes" && func.as_str() == "set")
+                || is_inplace_mutator(&format!(
+                    "almide_rt_{}_{}",
+                    module.as_str(),
+                    func.as_str()
+                ));
+            if mutates {
                 if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
                     self.mark_mutated(*id);
                 }

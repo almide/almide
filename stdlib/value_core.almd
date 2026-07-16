@@ -298,6 +298,34 @@ fn list_eq_value(a: List[Value], b: List[Value]) -> Bool = {
   else __leq_val(ha, hb, 0, prim.load32(ha + 4))
 }
 
+// list.eq over List[Option[Int/Bool]] — elements are len-as-tag Option blocks
+// (None = len 0; Some = len 1, i64 payload @12), BORROWED for the read-only
+// compare. Two elements are equal iff their tags match and (both None, or the
+// payloads match). Scalar-payload only: a Float payload's i64 is f64 BITS, so a
+// bit compare would diverge from `==` on -0.0/NaN — Floats stay outside.
+fn __leq_opt_int(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let xa: Option[Int] = prim.load_handle(ah + 12 + i * 8)
+    let xb: Option[Int] = prim.load_handle(bh + 12 + i * 8)
+    let pa = prim.handle(xa)
+    let pb = prim.handle(xb)
+    let ta = prim.load32(pa + 4)
+    let tb = prim.load32(pb + 4)
+    let elem_eq =
+      if ta != tb then false
+      else if ta == 0 then true
+      else prim.load64(pa + 12) == prim.load64(pb + 12)
+    if elem_eq then __leq_opt_int(ah, bh, i + 1, n) else false
+  }
+
+fn list_eq_opt_int(a: List[Option[Int]], b: List[Option[Int]]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_opt_int(ha, hb, 0, prim.load32(ha + 4))
+}
+
 // list.eq over NESTED lists — List[List[Int/Float/String]]: same length + element-wise
 // recursion into the flat list eq. Elements are handle slots (the inner list blocks),
 // BORROWED for the read-only compare — no ownership event, same discipline as eq_str.

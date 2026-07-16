@@ -1204,6 +1204,141 @@ fn desugar_bytes_index_calls(body: &IrExpr) -> Option<IrExpr> {
     s.changed.then_some(out)
 }
 
+/// `xs[a..b]` over a SCALAR-element list: the frontend struck the range slice
+/// directly to `RuntimeCall{almide_rt_list_slice}` (expressions.rs), which the
+/// v1 bind path can only defer to an EMPTY Opaque — `sub[0]` then walls. But
+/// `almide_rt_list_slice` IS `list.slice`, and `list.slice` is SELF-HOSTED
+/// (list_take_drop.almd) — rewrite the RuntimeCall back to the Module call so
+/// it rides `lower_pure_module_value_call` and materializes a REAL list.
+/// Same desugar-before-both slot as `desugar_map_access_calls`. Gated to a
+/// `List[scalar]` result — the registered self-host is the scalar-element
+/// `list_slice`; a heap-element slice keeps the (walling) deferred path.
+fn desugar_list_slice_calls(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::intern::sym;
+    struct S {
+        changed: bool,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::RuntimeCall { symbol, args } = &e.kind else {
+                return;
+            };
+            if symbol.as_str() != "almide_rt_list_slice"
+                || args.len() != 3
+                || !crate::lower::is_scalar_elem_list_ty(&e.ty)
+            {
+                return;
+            }
+            *e = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: sym("list"),
+                        func: sym("slice"),
+                        def_id: None,
+                    },
+                    args: args.clone(),
+                    type_args: Vec::new(),
+                },
+                ty: e.ty.clone(),
+                span: e.span.clone(),
+                def_id: e.def_id,
+            };
+            self.changed = true;
+        }
+    }
+    let mut s = S { changed: false };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}
+
+/// `p?.f` → `match p { some(__x) => some(__x.f), none => none }` — a PURE desugar
+/// into the proven Option-match rails (variant-seeded subjects, payload binds,
+/// heap-result arms), replacing the deferred-Opaque the OptionalChain node fell
+/// to (its bound var then misread as `none`/garbage in any comparison — the
+/// unwrap_operators optional-chain walls). Same desugar-before-both slot as
+/// `desugar_map_access_calls`; the rewrite adds NO calls (Match/Member/Some are
+/// call-free), so both counters see the identical call multiset. Fresh payload
+/// vars mint past `max_var_id` (the desugar_unwrap discipline).
+fn desugar_optional_chain(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::types::constructor::TypeConstructorId;
+    struct S {
+        changed: bool,
+        next_var: u32,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::OptionalChain { expr, field } = &e.kind else {
+                return;
+            };
+            let Ty::Applied(TypeConstructorId::Option, a) = &expr.ty else {
+                return;
+            };
+            if a.len() != 1 {
+                return;
+            }
+            let payload_ty = a[0].clone();
+            let x = VarId(self.next_var);
+            self.next_var += 1;
+            let mk = |kind: IrExprKind, ty: Ty| IrExpr { kind, ty, span: e.span.clone(), def_id: None };
+            let field_ty = match &e.ty {
+                Ty::Applied(TypeConstructorId::Option, fa) if fa.len() == 1 => fa[0].clone(),
+                _ => return,
+            };
+            let x_read = mk(IrExprKind::Var { id: x }, payload_ty.clone());
+            let member =
+                mk(IrExprKind::Member { object: Box::new(x_read), field: *field }, field_ty);
+            let some_body = mk(IrExprKind::OptionSome { expr: Box::new(member) }, e.ty.clone());
+            let none_body = mk(IrExprKind::OptionNone, e.ty.clone());
+            let arms = vec![
+                almide_ir::IrMatchArm {
+                    pattern: almide_ir::IrPattern::Some {
+                        inner: Box::new(almide_ir::IrPattern::Bind { var: x, ty: payload_ty }),
+                    },
+                    guard: None,
+                    body: some_body,
+                },
+                almide_ir::IrMatchArm { pattern: almide_ir::IrPattern::None, guard: None, body: none_body },
+            ];
+            // ANF-lift a non-Var subject (`match f() {…}` → `{ let __s = f(); match __s {…} }`):
+            // the LET-BOUND Named call is what seeds the Option read-shape
+            // (`materialized_options`), so the match branches on a TRACKED subject.
+            let (stmts, subject) = if matches!(&expr.kind, IrExprKind::Var { .. }) {
+                (Vec::new(), expr.clone())
+            } else {
+                let s_var = VarId(self.next_var);
+                self.next_var += 1;
+                let bind = IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: s_var,
+                        mutability: almide_ir::Mutability::Let,
+                        ty: expr.ty.clone(),
+                        value: (**expr).clone(),
+                    },
+                    span: e.span.clone(),
+                };
+                let subj = mk(IrExprKind::Var { id: s_var }, expr.ty.clone());
+                (vec![bind], Box::new(subj))
+            };
+            let match_expr = mk(IrExprKind::Match { subject, arms }, e.ty.clone());
+            *e = if stmts.is_empty() {
+                match_expr
+            } else {
+                mk(IrExprKind::Block { stmts, expr: Some(Box::new(match_expr)) }, e.ty.clone())
+            };
+            self.changed = true;
+        }
+    }
+    let mut s = S { changed: false, next_var: crate::lower::max_var_id(body) + 1 };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}
+
 /// The `Result[Unit, E]` this fn's ABI promises when its body's effective TAIL is Unit-typed
 /// (descending Block chains; an absent tail is Unit) — `None` when the tail carries a real
 /// value or the fn is not Result-ABI. Declared `Result[Unit, E]` keeps its own `E`; a
@@ -1381,6 +1516,22 @@ fn lower_function_all_impl(
     } else {
         func_body
     };
+    // `xs[a..b]` slice RuntimeCall → `list.slice(xs, a, b)` (see `desugar_list_slice_calls`).
+    let list_slice_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_list_slice_calls(func_body) {
+        list_slice_body = rewritten;
+        &list_slice_body
+    } else {
+        func_body
+    };
+    // `p?.f` → the some/none match (see `desugar_optional_chain`).
+    let opt_chain_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_optional_chain(func_body) {
+        opt_chain_body = rewritten;
+        &opt_chain_body
+    } else {
+        func_body
+    };
     // A RESULT-ABI fn (declared `Result[Unit, E]`, or a declared-Unit AUTO_WRAP lift) whose
     // effective TAIL is Unit-typed produces NO value on the unit path — the never-err strips
     // reduce a lifted tail call to a raw Unit effect call, and a declared-Result effect fn can
@@ -1440,6 +1591,9 @@ fn lower_function_all_impl(
     };
     let mut all = vec![main];
     all.extend(lifted);
+    // The synthesized recursive-eq helpers ride the same rail as lifted lambdas
+    // (extra cluster functions; per-parent names, so no cross-fn collision).
+    all.extend(std::mem::take(&mut ctx.synth_eq_fns));
     Ok(all)
 }
 
@@ -1472,3 +1626,4 @@ include!("desugar_branch.rs");
 include!("desugar_fan.rs");
 include!("desugar_match.rs");
 include!("desugar_match_subject.rs");
+include!("synth_eq.rs");

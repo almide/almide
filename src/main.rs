@@ -548,19 +548,20 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
 }
 
 
-/// #782 retirement step 1: `--no-verified` (the legacy v0 escape hatch) is DEPRECATED —
-/// one release of this notice, then the flag hard-errors and the v0 emitters become
-/// build-only CI parity oracles. `ALMIDE_NO_VERIFIED_OK=1` suppresses the notice for
-/// the sanctioned oracle harnesses (org-byte-verify / frees-churn / the differential
-/// tests), whose v0 invocations are the parity gate itself, not user escapes.
+/// #782 retirement step 2: `--no-verified` (the legacy v0 escape hatch) is now a HARD
+/// ERROR — v0.30.0 shipped one release of the deprecation notice, and the v0 emitters
+/// are build-only CI parity oracles from here. `ALMIDE_NO_VERIFIED_OK=1` keeps the flag
+/// working for the sanctioned oracle harnesses (org-byte-verify / frees-churn / the
+/// differential tests), whose v0 invocations ARE the parity gate, not user escapes.
 fn warn_no_verified_deprecated(no_verified: bool) {
     if no_verified && std::env::var_os("ALMIDE_NO_VERIFIED_OK").is_none() {
         eprintln!(
-            "warning: --no-verified (the legacy v0 codegen path) is deprecated and will be \
-             removed in a future release; the verified renderer is byte-identical where it \
-             lowers and falls back to v0 automatically. If a program NEEDS this flag, please \
-             file an issue: https://github.com/almide/almide/issues"
+            "error: --no-verified (the legacy v0 codegen path) has been removed; the \
+             verified renderer is byte-identical where it lowers and falls back to v0 \
+             automatically, so the flag should never be needed. If a program genuinely \
+             needs it, file an issue: https://github.com/almide/almide/issues"
         );
+        std::process::exit(1);
     }
 }
 

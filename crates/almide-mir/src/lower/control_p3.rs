@@ -1122,6 +1122,30 @@ impl LowerCtx {
                     } else {
                         None
                     }
+                } else if let Ty::Applied(TC::Option, inner) = &es[0] {
+                    // List[Option[Int/Bool]] — element-wise len-as-tag + i64 payload
+                    // compare (value_core `list_eq_opt_int`). Scalar payloads only: a
+                    // Float payload's slot is f64 BITS (bit-eq ≠ `==` on -0.0/NaN).
+                    if inner.len() == 1 && matches!(inner[0], Ty::Int | Ty::Bool) {
+                        Some("list.eq_opt_int")
+                    } else {
+                        None
+                    }
+                } else if let Ty::Tuple(ts) = &es[0] {
+                    // List[Tuple[scalar…]] — a scalar tuple block is LAYOUT-IDENTICAL to a
+                    // same-arity List of its slot class (len@4 = arity, 8-byte slots @12),
+                    // so the nested-list eq of the matching class compares it exactly:
+                    // Int/Bool slots bit-compare (list.eq_list_int), all-Float slots
+                    // float-compare per slot (list.eq_list_float). A MIXED Int/Float
+                    // tuple has no matching flat class (a bit-compare on the Float slot
+                    // is wrong on -0.0/NaN) — decline, the eq site walls honestly.
+                    if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::Int | Ty::Bool)) {
+                        Some("list.eq_list_int")
+                    } else if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::Float)) {
+                        Some("list.eq_list_float")
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -1141,10 +1165,44 @@ impl LowerCtx {
             });
             return Some(dst);
         }
-        // A custom VARIANT — tag eq + tag-dispatched per-field recursion.
+        // A `List[<custom variant>]` — the synthesized loop helper (the element
+        // eq is the variant helper; a non-variant element stayed in the module
+        // table above). Generated once per parent fn, called at the site.
+        if let Ty::Applied(TC::List, es) = ty {
+            if es.len() == 1 {
+                if let Some(elem_name) = self.custom_variant_type_name(&es[0]) {
+                    if let Some(elem_layout) =
+                        self.variant_layouts.by_type.get(&elem_name).cloned()
+                    {
+                        let (elem_key, elem_inst) =
+                            instantiate_variant_layout(&elem_name, &elem_layout, &es[0]);
+                        if self.ensure_list_eq_helper(&elem_key, &elem_inst) {
+                            let name = self.list_eq_helper_name(&elem_key);
+                            return Some(self.emit_eq_helper_call(name, lv, rv));
+                        }
+                    }
+                    return None;
+                }
+            }
+        }
+        // A custom VARIANT — a RECURSIVE one (or one already being generated)
+        // routes through its synthesized helper (recursion-by-call; the static
+        // inline could never terminate); everything else keeps the proven
+        // inline tag-dispatch chain, byte-identical to before.
         if let Some(tyname) = self.custom_variant_type_name(ty) {
             let layout = self.variant_layouts.by_type.get(&tyname).cloned();
             if let Some(layout) = layout {
+                // A GENERIC variant instantiates per-use (`Tree[Int]`): the
+                // helper key carries the args and the layout's field types are
+                // substituted, so `Leaf(T)` compares as `Leaf(Int)`.
+                let (key, layout) = instantiate_variant_layout(&tyname, &layout, ty);
+                if self.synth_eq_types.contains(&key) || self.variant_needs_eq_helper(&tyname) {
+                    if self.ensure_variant_eq_helper(&key, &layout) {
+                        let name = self.eq_helper_name(&key);
+                        return Some(self.emit_eq_helper_call(name, lv, rv));
+                    }
+                    return None;
+                }
                 return self.variant_eq_from_handles(lv, rv, &layout, depth);
             }
         }
@@ -1216,7 +1274,7 @@ impl LowerCtx {
     /// recurse through the typed eq (ANDed), fieldless ctors compare true. All merge values are
     /// scalar Bools — the IfThen/Else/EndIf merges carry no ownership. A field whose typed eq
     /// cannot lower (e.g. a recursive `List[Self]` payload) propagates None → the caller walls.
-    fn variant_eq_from_handles(
+    pub(crate) fn variant_eq_from_handles(
         &mut self,
         hl: ValueId,
         hr: ValueId,
@@ -1351,7 +1409,7 @@ impl LowerCtx {
     }
 
     /// The byte-address (`Prim::Handle`) of a materialized block — the operand handed to an eq core.
-    fn handle_of(&mut self, block: ValueId) -> ValueId {
+    pub(crate) fn handle_of(&mut self, block: ValueId) -> ValueId {
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![block] });
         h
@@ -1415,6 +1473,17 @@ impl LowerCtx {
             }
             return Some(obj);
         }
+        // `rs[i] == ok(v)` — an ELEMENT of a materialized heap-element list (the
+        // fan.settle results literal): BORROW the element handle (`$elem_addr` +
+        // `LoadHandle` — the list owns it and the eq only reads), the Var-borrow
+        // discipline element-precise. Nothing joins the cond frame — no drop, no
+        // ownership event; an untracked/deferred container declines inside the
+        // borrow and falls through to the materializer below.
+        if let IrExprKind::IndexAccess { .. } = &expr.kind {
+            if let Some(b) = self.try_lower_heap_field_borrow(expr) {
+                return Some(b);
+            }
+        }
         // Otherwise a heap-returning CALL / literal / concat — materialize a fresh OWNED block
         // (`lower_owned_heap_field` pushes it to `live_heap_handles`). The call path leaves the
         // block FLAT, so register the recursive drop set from the operand TYPE — else an
@@ -1428,7 +1497,7 @@ impl LowerCtx {
 
     /// Register the recursive drop set for a freshly materialized heap eq-operand block, mirroring
     /// the call-binding tracking in `lower_bind` so the cond-frame teardown frees nested ownership.
-    fn register_owned_heap_eq_drop(&mut self, obj: ValueId, ty: &Ty) {
+    pub(crate) fn register_owned_heap_eq_drop(&mut self, obj: ValueId, ty: &Ty) {
         if crate::lower::is_list_list_str_ty(ty) {
             self.list_list_str_lists.insert(obj);
         } else if crate::lower::is_list_str_str_ty(ty) {

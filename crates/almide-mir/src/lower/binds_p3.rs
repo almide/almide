@@ -1106,6 +1106,11 @@ impl LowerCtx {
                 self.variant_drop_handles.insert(dst, "list_closure".to_string());
             }
         }
+        // The literal is a REAL, POPULATED nested-ownership block (every element built
+        // and moved in above) — admit the element-precise `xs[i]` borrow over the bound
+        // var (`try_lower_heap_field_borrow`'s materialized_lists gate; the fan.settle
+        // results literal's `rs[0] == ok(11)` eq reads exactly this).
+        self.materialized_lists.insert(dst);
         self.live_heap_handles.push(dst);
         Some(dst)
     }

@@ -556,3 +556,445 @@ pub fn almide_rt_matrix_qwen3_block_q1_0_kv(
     let h_out = almide_rt_matrix_add(&x_attn, &ffn_out);
     (h_out, k_full_kv, v_full_kv)
 }
+
+
+// ── f32 bytes-resident path (L2-2): weights stay in the source GGUF buffer ──
+//
+// Mirror of the Q1_0 path for plain f32 tensors: no decoded AlmideMatrix is
+// ever materialised for weights, so the model record (and its per-call deep
+// clones — measured at ~13 GB per generated token) disappears entirely.
+
+// Parallel sweep over output elements. Two implementations:
+// - `almide_par` (cargo builds, see cli/mod.rs): rayon's persistent pool.
+//   Per-call scoped threads measured 2.8 tok/s vs rayon's 4.9 — the spawn
+//   cost per GEMV region beats the work for the small projections.
+// - otherwise (raw-rustc test harness, no external crates): serial. Tests
+//   need correctness, not throughput.
+#[cfg(almide_par)]
+fn par_out_rows(out: &mut [f64], f: impl Fn(usize, &mut f64) + Sync) {
+    use rayon::prelude::*;
+    if out.len() < 256 {
+        for (j, o) in out.iter_mut().enumerate() {
+            f(j, o);
+        }
+        return;
+    }
+    const CHUNK: usize = 64;
+    out.par_chunks_mut(CHUNK).enumerate().for_each(|(ci, oc)| {
+        let j0 = ci * CHUNK;
+        for (dj, o) in oc.iter_mut().enumerate() {
+            f(j0 + dj, o);
+        }
+    });
+}
+
+#[cfg(not(almide_par))]
+fn par_out_rows(out: &mut [f64], f: impl Fn(usize, &mut f64) + Sync) {
+    for (j, o) in out.iter_mut().enumerate() {
+        f(j, o);
+    }
+}
+
+/// `y = x @ Wᵀ` where W is f32 row-major (out, in) still sitting in the
+/// source byte buffer at `w_offset`.
+pub fn almide_rt_matrix_linear_f32_row_no_bias(
+    x: &AlmideMatrix,
+    w_bytes: &Vec<u8>,
+    w_offset: i64,
+    w_rows: i64,
+    w_cols: i64,
+) -> AlmideMatrix {
+    let x_rows = x.rows;
+    let n_in = w_cols.max(0) as usize;
+    let out_cols = w_rows.max(0) as usize;
+    let off = w_offset.max(0) as usize;
+    if x_rows == 0 || out_cols == 0 || n_in == 0 {
+        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
+    }
+    let mut out = vec![0.0f64; x_rows * out_cols];
+    // Fast path: reinterpret the (4-byte-aligned, little-endian) weight bytes
+    // as &[f32] so the inner dot auto-vectorizes (cvtps2pd + fma), and split
+    // the output row across threads — GEMV is embarrassingly parallel over
+    // output elements. Falls back to per-element decode when misaligned.
+    let w_all = &w_bytes[off..off + out_cols * n_in * 4];
+    let (head, w_f32, _) = unsafe { w_all.align_to::<f32>() };
+    if head.is_empty() && w_f32.len() == out_cols * n_in {
+        for i in 0..x_rows {
+            let xi = &x.data[i * n_in..(i + 1) * n_in];
+            par_out_rows(&mut out[i * out_cols..(i + 1) * out_cols], |j, o| {
+                let wj = &w_f32[j * n_in..(j + 1) * n_in];
+                let mut acc = 0.0f64;
+                for k in 0..n_in {
+                    acc += xi[k] * wj[k] as f64;
+                }
+                *o = acc;
+            });
+        }
+    } else {
+        for j in 0..out_cols {
+            let row_off = off + j * n_in * 4;
+            let wj = &w_bytes[row_off..row_off + n_in * 4];
+            for i in 0..x_rows {
+                let xi = &x.data[i * n_in..(i + 1) * n_in];
+                let mut acc = 0.0f64;
+                for (k, c) in wj.chunks_exact(4).enumerate() {
+                    acc += xi[k] * f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64;
+                }
+                out[i * out_cols + j] = acc;
+            }
+        }
+    }
+    mk(x_rows, out_cols, out)
+}
+
+/// Gather rows from an f32 tensor still in the source byte buffer
+/// (embedding lookup without decoding the 600 MB table).
+pub fn almide_rt_matrix_select_rows_f32(
+    data: &Vec<u8>,
+    offset: i64,
+    cols: i64,
+    row_ids: &[i64],
+) -> AlmideMatrix {
+    let c = cols.max(0) as usize;
+    let off = offset.max(0) as usize;
+    let mut out = Vec::<f64>::with_capacity(row_ids.len() * c);
+    for &rid in row_ids {
+        let base = off + (rid.max(0) as usize) * c * 4;
+        for ch in data[base..base + c * 4].chunks_exact(4) {
+            out.push(f32::from_le_bytes([ch[0], ch[1], ch[2], ch[3]]) as f64);
+        }
+    }
+    mk(row_ids.len(), c, out)
+}
+
+/// NeoX / HF-convention RoPE: rotates pairs (j, j+half) within each head,
+/// angle = (start_pos + row) * theta^(-2j/head_dim). With this variant the
+/// loader-side weight-row permutation (NeoX → interleaved) is unnecessary —
+/// weights are consumed exactly as stored.
+pub fn almide_rt_matrix_rope_rotate_neox_at(
+    x: &AlmideMatrix,
+    n_heads: i64,
+    head_dim: i64,
+    theta_base: f64,
+    start_pos: i64,
+) -> AlmideMatrix {
+    let rows = x.len();
+    let cols = if rows == 0 { 0 } else { x[0].len() };
+    let n_heads_u = n_heads.max(0) as usize;
+    let head_dim_u = head_dim.max(0) as usize;
+    let start = start_pos.max(0) as usize;
+    let half = head_dim_u / 2;
+    let mut inv_freqs = Vec::<f64>::with_capacity(half);
+    for j in 0..half {
+        let exp = (2 * j) as f64 / head_dim_u as f64;
+        inv_freqs.push(1.0 / theta_base.powf(exp));
+    }
+    let mut out = Vec::<Vec<f64>>::with_capacity(rows);
+    for p in 0..rows {
+        let pos_f = (start + p) as f64;
+        let row = &x[p];
+        let mut new_row = vec![0.0f64; cols];
+        for h in 0..n_heads_u {
+            let head_start = h * head_dim_u;
+            for j in 0..half {
+                let j0 = head_start + j;
+                let j1 = head_start + half + j;
+                let x0 = row[j0];
+                let x1 = row[j1];
+                let angle = pos_f * inv_freqs[j];
+                let (s, c) = angle.sin_cos();
+                new_row[j0] = x0 * c - x1 * s;
+                new_row[j1] = x0 * s + x1 * c;
+            }
+        }
+        out.push(new_row);
+    }
+    out.into_iter().collect()
+}
+
+/// One Qwen3 decoder layer over f32 weights resident in the source buffer.
+/// Mirror of `qwen3_block_q1_0_kv` with two fixes for real Qwen3 checkpoints:
+/// hidden_size is taken from `h` (Qwen3-0.6B has hidden 1024 ≠ n_heads*head_dim
+/// = 2048), and RoPE uses the NeoX convention so weights need no permutation.
+/// Handles both prefill (multi-row h, causal mask) and decode (single row) —
+/// the masked-MHA offset rule `j > (sk - sq) + i` covers both.
+pub fn almide_rt_matrix_qwen3_block_f32_kv(
+    h: &AlmideMatrix,
+    k_cache: &AlmideMatrix,
+    v_cache: &AlmideMatrix,
+    w: &Vec<u8>,
+    gamma_offs: &[i64],   // [attn_norm, q_norm, k_norm, ffn_norm]
+    weight_offs: &[i64],  // [q, k, v, o, gate, up, down]
+    start_pos: i64,
+    n_q_heads: i64,
+    n_kv_heads: i64,
+    head_dim: i64,
+    ffn_hidden: i64,
+    rope_theta: f64,
+    eps: f64,
+) -> (AlmideMatrix, AlmideMatrix, AlmideMatrix) {
+    let hidden = if h.rows > 0 { h.cols } else { 0 };
+    let q_hidden = (n_q_heads * head_dim) as usize;
+    let kv_hidden = (n_kv_heads * head_dim) as usize;
+    let n_rep = n_q_heads / n_kv_heads;
+
+    let gamma_attn = load_f32_to_f64(w, gamma_offs[0].max(0) as usize, hidden);
+    let gamma_q = load_f32_to_f64(w, gamma_offs[1].max(0) as usize, head_dim.max(0) as usize);
+    let gamma_k = load_f32_to_f64(w, gamma_offs[2].max(0) as usize, head_dim.max(0) as usize);
+    let gamma_ffn = load_f32_to_f64(w, gamma_offs[3].max(0) as usize, hidden);
+
+    let h_normed = almide_rt_matrix_rms_norm_rows(h, &gamma_attn, eps);
+
+    let q_proj = almide_rt_matrix_linear_f32_row_no_bias(
+        &h_normed, w, weight_offs[0], q_hidden as i64, hidden as i64);
+    let k_proj = almide_rt_matrix_linear_f32_row_no_bias(
+        &h_normed, w, weight_offs[1], kv_hidden as i64, hidden as i64);
+    let v_proj = almide_rt_matrix_linear_f32_row_no_bias(
+        &h_normed, w, weight_offs[2], kv_hidden as i64, hidden as i64);
+
+    let q_normed = per_head_rms_norm(&q_proj, &gamma_q, n_q_heads, eps);
+    let k_normed = per_head_rms_norm(&k_proj, &gamma_k, n_kv_heads, eps);
+
+    let q_rot = almide_rt_matrix_rope_rotate_neox_at(&q_normed, n_q_heads, head_dim, rope_theta, start_pos);
+    let k_rot = almide_rt_matrix_rope_rotate_neox_at(&k_normed, n_kv_heads, head_dim, rope_theta, start_pos);
+
+    let k_full_kv = if k_cache.rows == 0 { k_rot } else { almide_rt_matrix_append_rows(k_cache, &k_rot) };
+    let v_full_kv = if v_cache.rows == 0 { v_proj } else { almide_rt_matrix_append_rows(v_cache, &v_proj) };
+
+    let k_full = repeat_kv(&k_full_kv, n_kv_heads, n_rep);
+    let v_full = repeat_kv(&v_full_kv, n_kv_heads, n_rep);
+
+    let attn_out = almide_rt_matrix_masked_multi_head_attention(&q_rot, &k_full, &v_full, n_q_heads);
+    let attn_proj = almide_rt_matrix_linear_f32_row_no_bias(
+        &attn_out, w, weight_offs[3], hidden as i64, q_hidden as i64);
+    let x_attn = almide_rt_matrix_add(h, &attn_proj);
+
+    let h2 = almide_rt_matrix_rms_norm_rows(&x_attn, &gamma_ffn, eps);
+    let gate = almide_rt_matrix_linear_f32_row_no_bias(
+        &h2, w, weight_offs[4], ffn_hidden, hidden as i64);
+    let up = almide_rt_matrix_linear_f32_row_no_bias(
+        &h2, w, weight_offs[5], ffn_hidden, hidden as i64);
+    let gated = almide_rt_matrix_silu_mul(&gate, &up);
+    let ffn_out = almide_rt_matrix_linear_f32_row_no_bias(
+        &gated, w, weight_offs[6], hidden as i64, ffn_hidden);
+
+    let h_out = almide_rt_matrix_add(&x_attn, &ffn_out);
+    (h_out, k_full_kv, v_full_kv)
+}
+
+// ── Q8_0 bytes-resident path: 4x less DRAM traffic than f32 ──
+//
+// llama.cpp Q8_0 layout: blocks of 32 values, each block = f16 scale (2
+// bytes LE) + 32 × i8 quants; value = scale * q. A row of `cols` values
+// occupies (cols/32) * 34 bytes. The f32 path measured at the DRAM
+// bandwidth floor (2.4 GB weights/token), so the win here is bandwidth,
+// not FLOPs.
+
+const Q8_BLOCK: usize = 32;
+const Q8_BLOCK_BYTES: usize = 34;
+
+// Quantize an activation row to Q8_0 blocks (llama.cpp's trick): the dot
+// then becomes i8×i8 integer MACs with two per-block scales, which the
+// autovectorizer turns into wide integer SIMD — the i8→f64 scalar convert
+// chain measured SLOWER than the f32 path despite 4x less DRAM traffic.
+fn quantize_row_q8(xi: &[f64]) -> (Vec<f32>, Vec<i8>) {
+    let n_blocks = xi.len() / Q8_BLOCK;
+    let mut scales = Vec::with_capacity(n_blocks);
+    let mut q = Vec::with_capacity(xi.len());
+    for b in 0..n_blocks {
+        let xb = &xi[b * Q8_BLOCK..(b + 1) * Q8_BLOCK];
+        let amax = xb.iter().fold(0.0f64, |m, &v| m.max(v.abs()));
+        let d = (amax / 127.0) as f32;
+        let inv = if d > 0.0 { 1.0 / d as f64 } else { 0.0 };
+        scales.push(d);
+        for &v in xb {
+            q.push((v * inv).round().clamp(-127.0, 127.0) as i8);
+        }
+    }
+    (scales, q)
+}
+
+#[inline]
+fn q8_0_row_dot_q8_scalar(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
+    let mut acc = 0.0f64;
+    for (b, blk) in row.chunks_exact(Q8_BLOCK_BYTES).enumerate() {
+        let d_w = fp16_bits_to_f32(u16::from_le_bytes([blk[0], blk[1]]));
+        let qs = &blk[2..2 + Q8_BLOCK];
+        let xb = &x_q[b * Q8_BLOCK..(b + 1) * Q8_BLOCK];
+        let mut s = 0i32;
+        for k in 0..Q8_BLOCK {
+            s += (qs[k] as i8) as i32 * xb[k] as i32;
+        }
+        acc += (d_w * x_scales[b]) as f64 * s as f64;
+    }
+    acc
+}
+
+// Explicit AVX2 i8×i8 dot (llama.cpp's vec_dot recipe): LLVM's autovec of
+// the scalar i8→i32 widening loop measured SLOWER than the f32 path, so
+// the bandwidth win of Q8_0 never landed. maddubs needs one unsigned
+// operand: |x| on one side, x's sign transferred onto w on the other —
+// products are exact i16 (|q|≤127 ⇒ pairwise sum ≤ 32258 < i16::MAX) and
+// the block sum is exact i32, so this is BIT-IDENTICAL to the scalar path.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn q8_0_row_dot_q8_avx2(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
+    use std::arch::x86_64::*;
+    let n_blocks = row.len() / Q8_BLOCK_BYTES;
+    let mut acc = 0.0f64;
+    for b in 0..n_blocks {
+        let blk = row.as_ptr().add(b * Q8_BLOCK_BYTES);
+        let d_w = fp16_bits_to_f32(u16::from_le_bytes([*blk, *blk.add(1)]));
+        let w = _mm256_loadu_si256(blk.add(2) as *const __m256i);
+        let x = _mm256_loadu_si256(x_q.as_ptr().add(b * Q8_BLOCK) as *const __m256i);
+        let ax = _mm256_sign_epi8(x, x); // |x| (unsigned operand)
+        let sw = _mm256_sign_epi8(w, x); // w with x's sign folded in
+        let p16 = _mm256_maddubs_epi16(ax, sw); // 16 × i16 pairwise products
+        let p32 = _mm256_madd_epi16(p16, _mm256_set1_epi16(1)); // 8 × i32
+        let hi = _mm256_extracti128_si256(p32, 1);
+        let lo = _mm256_castsi256_si128(p32);
+        let s4 = _mm_add_epi32(hi, lo);
+        let s2 = _mm_add_epi32(s4, _mm_shuffle_epi32(s4, 0b0000_1110));
+        let s1 = _mm_add_epi32(s2, _mm_shuffle_epi32(s2, 0b0000_0001));
+        let s = _mm_cvtsi128_si32(s1);
+        acc += (d_w * *x_scales.get_unchecked(b)) as f64 * s as f64;
+    }
+    acc
+}
+
+#[cfg(target_arch = "x86_64")]
+fn q8_avx2_available() -> bool {
+    static AVX2: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *AVX2.get_or_init(|| std::is_x86_feature_detected!("avx2"))
+}
+
+#[inline]
+fn q8_0_row_dot_q8(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if q8_avx2_available() {
+            return unsafe { q8_0_row_dot_q8_avx2(x_scales, x_q, row) };
+        }
+    }
+    q8_0_row_dot_q8_scalar(x_scales, x_q, row)
+}
+
+/// `y = x @ Wᵀ` with W in Q8_0 blocks at `w_offset` (row-major out × in).
+pub fn almide_rt_matrix_linear_q8_0_row_no_bias(
+    x: &AlmideMatrix,
+    w_bytes: &Vec<u8>,
+    w_offset: i64,
+    w_rows: i64,
+    w_cols: i64,
+) -> AlmideMatrix {
+    let x_rows = x.rows;
+    let n_in = w_cols.max(0) as usize;
+    let out_cols = w_rows.max(0) as usize;
+    let off = w_offset.max(0) as usize;
+    if x_rows == 0 || out_cols == 0 || n_in == 0 || n_in % Q8_BLOCK != 0 {
+        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
+    }
+    let row_bytes = n_in / Q8_BLOCK * Q8_BLOCK_BYTES;
+    let w_all = &w_bytes[off..off + out_cols * row_bytes];
+    let mut out = vec![0.0f64; x_rows * out_cols];
+    for i in 0..x_rows {
+        let xi = &x.data[i * n_in..(i + 1) * n_in];
+        let (x_scales, x_q) = quantize_row_q8(xi);
+        par_out_rows(&mut out[i * out_cols..(i + 1) * out_cols], |j, o| {
+            *o = q8_0_row_dot_q8(&x_scales, &x_q, &w_all[j * row_bytes..(j + 1) * row_bytes]);
+        });
+    }
+    mk(x_rows, out_cols, out)
+}
+
+/// Dequantize selected rows of a Q8_0 tensor (embedding lookup).
+pub fn almide_rt_matrix_select_rows_q8_0_dq(
+    data: &Vec<u8>,
+    offset: i64,
+    cols: i64,
+    row_ids: &[i64],
+) -> AlmideMatrix {
+    let c = cols.max(0) as usize;
+    let off = offset.max(0) as usize;
+    if c % Q8_BLOCK != 0 {
+        return mk(row_ids.len(), c, vec![0.0f64; row_ids.len() * c]);
+    }
+    let row_bytes = c / Q8_BLOCK * Q8_BLOCK_BYTES;
+    let mut out = Vec::<f64>::with_capacity(row_ids.len() * c);
+    for &rid in row_ids {
+        let base = off + (rid.max(0) as usize) * row_bytes;
+        for blk in data[base..base + row_bytes].chunks_exact(Q8_BLOCK_BYTES) {
+            let d = fp16_bits_to_f32(u16::from_le_bytes([blk[0], blk[1]])) as f64;
+            for k in 0..Q8_BLOCK {
+                out.push(d * (blk[2 + k] as i8) as f64);
+            }
+        }
+    }
+    mk(row_ids.len(), c, out)
+}
+
+/// One Qwen3 decoder layer over Q8_0 weights (norm gammas stay f32).
+/// Mirror of `qwen3_block_f32_kv`.
+pub fn almide_rt_matrix_qwen3_block_q8_0_kv(
+    h: &AlmideMatrix,
+    k_cache: &AlmideMatrix,
+    v_cache: &AlmideMatrix,
+    w: &Vec<u8>,
+    gamma_offs: &[i64],
+    weight_offs: &[i64],
+    start_pos: i64,
+    n_q_heads: i64,
+    n_kv_heads: i64,
+    head_dim: i64,
+    ffn_hidden: i64,
+    rope_theta: f64,
+    eps: f64,
+) -> (AlmideMatrix, AlmideMatrix, AlmideMatrix) {
+    let hidden = if h.rows > 0 { h.cols } else { 0 };
+    let q_hidden = (n_q_heads * head_dim) as usize;
+    let kv_hidden = (n_kv_heads * head_dim) as usize;
+    let n_rep = n_q_heads / n_kv_heads;
+
+    let gamma_attn = load_f32_to_f64(w, gamma_offs[0].max(0) as usize, hidden);
+    let gamma_q = load_f32_to_f64(w, gamma_offs[1].max(0) as usize, head_dim.max(0) as usize);
+    let gamma_k = load_f32_to_f64(w, gamma_offs[2].max(0) as usize, head_dim.max(0) as usize);
+    let gamma_ffn = load_f32_to_f64(w, gamma_offs[3].max(0) as usize, hidden);
+
+    let h_normed = almide_rt_matrix_rms_norm_rows(h, &gamma_attn, eps);
+
+    let q_proj = almide_rt_matrix_linear_q8_0_row_no_bias(
+        &h_normed, w, weight_offs[0], q_hidden as i64, hidden as i64);
+    let k_proj = almide_rt_matrix_linear_q8_0_row_no_bias(
+        &h_normed, w, weight_offs[1], kv_hidden as i64, hidden as i64);
+    let v_proj = almide_rt_matrix_linear_q8_0_row_no_bias(
+        &h_normed, w, weight_offs[2], kv_hidden as i64, hidden as i64);
+
+    let q_normed = per_head_rms_norm(&q_proj, &gamma_q, n_q_heads, eps);
+    let k_normed = per_head_rms_norm(&k_proj, &gamma_k, n_kv_heads, eps);
+
+    let q_rot = almide_rt_matrix_rope_rotate_neox_at(&q_normed, n_q_heads, head_dim, rope_theta, start_pos);
+    let k_rot = almide_rt_matrix_rope_rotate_neox_at(&k_normed, n_kv_heads, head_dim, rope_theta, start_pos);
+
+    let k_full_kv = if k_cache.rows == 0 { k_rot } else { almide_rt_matrix_append_rows(k_cache, &k_rot) };
+    let v_full_kv = if v_cache.rows == 0 { v_proj } else { almide_rt_matrix_append_rows(v_cache, &v_proj) };
+
+    let k_full = repeat_kv(&k_full_kv, n_kv_heads, n_rep);
+    let v_full = repeat_kv(&v_full_kv, n_kv_heads, n_rep);
+
+    let attn_out = almide_rt_matrix_masked_multi_head_attention(&q_rot, &k_full, &v_full, n_q_heads);
+    let attn_proj = almide_rt_matrix_linear_q8_0_row_no_bias(
+        &attn_out, w, weight_offs[3], hidden as i64, q_hidden as i64);
+    let x_attn = almide_rt_matrix_add(h, &attn_proj);
+
+    let h2 = almide_rt_matrix_rms_norm_rows(&x_attn, &gamma_ffn, eps);
+    let gate = almide_rt_matrix_linear_q8_0_row_no_bias(
+        &h2, w, weight_offs[4], ffn_hidden, hidden as i64);
+    let up = almide_rt_matrix_linear_q8_0_row_no_bias(
+        &h2, w, weight_offs[5], ffn_hidden, hidden as i64);
+    let gated = almide_rt_matrix_silu_mul(&gate, &up);
+    let ffn_out = almide_rt_matrix_linear_q8_0_row_no_bias(
+        &gated, w, weight_offs[6], hidden as i64, ffn_hidden);
+
+    let h_out = almide_rt_matrix_add(&x_attn, &ffn_out);
+    (h_out, k_full_kv, v_full_kv)
+}

@@ -783,7 +783,11 @@ impl Checker {
                 self.env.push_scope();
                 let prev_call = self.env.can_call_effect; self.env.can_call_effect = true;
                 let prev_test = self.env.in_test_block; self.env.in_test_block = true;
-                for wc in &wcs { self.infer_test_where_inner(wc); }
+                // ONE bind-type map across the whole clause list, so same-name
+                // bindings in DIFFERENT `where [...]` cases unify (see
+                // `infer_test_where_collect`'s Bind arm).
+                let mut seen_binds = std::collections::HashMap::new();
+                for wc in &wcs { self.infer_test_where_collect(wc, &mut seen_binds); }
                 self.infer_expr(body);
                 self.env.in_test_block = prev_test;
                 self.env.can_call_effect = prev_call;
@@ -844,6 +848,15 @@ impl Checker {
     // ── Exhaustiveness ──
 
     fn infer_test_where_inner(&mut self, wc: &ast::TestWhere) {
+        let mut seen = std::collections::HashMap::new();
+        self.infer_test_where_collect(wc, &mut seen);
+    }
+
+    fn infer_test_where_collect(
+        &mut self,
+        wc: &ast::TestWhere,
+        seen: &mut std::collections::HashMap<Sym, Ty>,
+    ) {
         match wc {
             ast::TestWhere::Bind { name, value } => {
                 let mut val = value.clone();
@@ -854,6 +867,21 @@ impl Checker {
                 // get pinned — otherwise they stay unbound and leak into the IR
                 // as Unknown, tripping the ConcretizeTypes postcondition.
                 self.unify_where_override_with_fn_sig(&[*name], &ty);
+                // A CASE-table binding (`"add" [op = (a,b) => a+b, …]` / `"mul"
+                // [op = …]`): each case re-binds the SAME name, but the test body
+                // is inferred ONCE — against the LAST binding only. Unify every
+                // same-name case binding with the first, so the body's call site
+                // pins ALL cases' lambda param tyvars through the union-find (the
+                // per-case lowering re-lowers the shared body, so the cases must
+                // agree on types anyway — a heterogeneous table was never
+                // lowerable). Without this, earlier cases' annotation-less lambda
+                // params stayed unbound and leaked into the IR as Unknown.
+                if let Some(prev) = seen.get(name) {
+                    let prev = prev.clone();
+                    self.unify_infer(&prev, &ty);
+                } else {
+                    seen.insert(*name, ty.clone());
+                }
                 let resolved = resolve_ty(&ty, &self.uf);
                 self.env.define_var(name.as_str(), resolved);
             }
@@ -888,7 +916,7 @@ impl Checker {
                 self.env.define_var(&override_name, fn_ty);
             }
             ast::TestWhere::Case { bindings, .. } => {
-                for b in bindings { self.infer_test_where_inner(b); }
+                for b in bindings { self.infer_test_where_collect(b, seen); }
             }
         }
     }

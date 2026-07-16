@@ -4,6 +4,7 @@ fn render_op(
     func_slots: &BTreeMap<String, u32>,
     param_counts: &BTreeMap<String, usize>,
     masks: &BTreeMap<ValueId, Vec<usize>>,
+    reprs: &BTreeMap<ValueId, Repr>,
 ) -> String {
     match op {
         // A STRING literal — a heap block `[rc][len][cap][utf8 bytes...]` (same header
@@ -244,8 +245,12 @@ fn render_op(
             let argstr = args
                 .iter()
                 .map(|a| match a {
-                    CallArg::Handle(v) => format!("(i64.extend_i32_u (local.get {}))", local(*v)),
-                    other => render_arg_wasm(other),
+                    // Widen only a genuinely-i32 Ptr local; an i64 (address-repr'd)
+                    // handle already matches the uniform closure ABI.
+                    CallArg::Handle(v) if reprs.get(v).map_or(true, |r| r.is_heap()) => {
+                        format!("(i64.extend_i32_u (local.get {}))", local(*v))
+                    }
+                    other => render_arg_wasm(other, reprs),
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
@@ -289,7 +294,8 @@ fn render_op(
             if is_elided_marker {
                 return String::new();
             }
-            let argstr = args.iter().map(render_arg_wasm).collect::<Vec<_>>().join(" ");
+            let argstr =
+                args.iter().map(|a| render_arg_wasm(a, reprs)).collect::<Vec<_>>().join(" ");
             match dst {
                 Some(d) => format!("    (local.set {} (call ${name} {argstr}))\n", local(*d)),
                 None => format!("    (call ${name} {argstr})\n"),

@@ -681,10 +681,22 @@ impl FuncCompiler<'_> {
                                     for arg in args { self.emit_expr(arg); }
                                     wasm!(self.func, { call(func_idx); });
                                 } else {
+                                    // Name the near-misses: every registered key
+                                    // mentioning the func makes the mangling gap
+                                    // visible in the ICE itself.
+                                    let near: Vec<&str> = self
+                                        .emitter
+                                        .func_map
+                                        .keys()
+                                        .filter(|k| k.contains(func.as_str()))
+                                        .map(|k| k.as_str())
+                                        .collect();
                                     panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
-                                 add an arm in emit_{}_call or resolve upstream",
-                                module.as_str(), func.as_str(), module.as_str()
+                                 add an arm in emit_{}_call or resolve upstream \
+                                 (registered keys containing `{}`: {:?})",
+                                module.as_str(), func.as_str(), module.as_str(),
+                                func.as_str(), near
                             );
                                 }
                             }
