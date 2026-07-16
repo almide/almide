@@ -848,6 +848,21 @@ impl LowerCtx {
                     | IrExprKind::OptionNone
                     | IrExprKind::ResultOk { .. }
                     | IrExprKind::ResultErr { .. } => self.try_lower_option_ctor(expr, &expr.ty)?,
+                    // `some(p.name)` — a HEAP FIELD projection payload (the optional-chain
+                    // `p?.f` desugar's Some arm over a record payload): BORROW the field's
+                    // slot handle from the materialized container, `Dup` into a fresh
+                    // CO-OWNED ref, and move THAT in — the container keeps its own
+                    // reference (freed once by its owner), the wrapper owns the Dup (the
+                    // borrowed-param discipline above). Gated to a String field so the
+                    // flat materialize_opt_str_some drop is exact.
+                    IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let borrow = self.try_lower_heap_field_borrow(expr)?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src: borrow });
+                        dup
+                    }
                     // A COMPUTED String Some payload (`some("v=" + s)` / `some("v=${x}")`) — the
                     // fresh-owned `__str_concat` chain, operand temps dropped here (the ok/err
                     // ConcatStr/StringInterp arms' Option sibling).

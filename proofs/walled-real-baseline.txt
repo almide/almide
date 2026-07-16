@@ -5,16 +5,6 @@
 # target = empty file). Every entry is a named feature-frontier class:
 #
 #   fan              — fan.* concurrency thunks (fan machinery not in v1)
-#   optional-chain   — `p?.f` desugars to the some/none match (2026-07-16), but a
-#                      HEAP-field projection's match still declines (Option[String]
-#                      arm bodies; the scalar-field chain lowers)
-#   bytes-field-cow  — an in-place bytes mutator over a RECORD-FIELD receiver
-#                      needs the two-level record+field COW (#794; this entry
-#                      REPLACED a silent shared-write miscompile with an honest
-#                      wall when the bare-var receiver COW shipped, 2026-07-16)
 #
 spec/lang/fan_value_regression_test.almd :: __test_almd_fan.settle over capturing thunks preserves order and payloads
 spec/lang/fan_value_regression_test.almd :: __test_almd_fan.settle preserves ok and err payloads
-spec/lang/rccow_value_semantics_test.almd :: __test_almd_record copy shields the original's bytes field
-spec/lang/unwrap_operators_test.almd :: __test_almd_optional chain none
-spec/lang/unwrap_operators_test.almd :: __test_almd_optional chain some
