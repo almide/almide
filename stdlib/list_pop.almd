@@ -1,0 +1,30 @@
+// list_pop — SELF-HOSTED in-place `list.pop` for v1 over the prim floor: read the last
+// element, shrink `len` by one IN PLACE (a store32 at LIST_LEN_OFFSET(4) — capacity and
+// data bytes untouched, no realloc, so the caller's handle stays valid), and return the
+// popped element as a materialized Option (the 0-or-1-element-list layout list_get.almd
+// documents). COW is the CALLER's: the v1 lowering emits `Op::MakeUnique` on the receiver
+// var before this call (the #794 bytes-mutator discipline), so a shared block is copied
+// first and an alias keeps the popped element (spec/lang/alias_cow_test.almd
+// "alias cow: list.pop in place").
+//
+// SCALAR (8-byte-slot) elements only — Int/Bool/Float all ride the i64 slot bit-exactly
+// (the value is moved, never interpreted, so Float bits round-trip). A HEAP element
+// (String/…) routes to the UNREGISTERED `list.pop_x` in `list_call_name` and walls at
+// render — popping an owned handle needs an ownership transfer this impl cannot express.
+
+fn __lp_none() -> Option[Int] = None
+
+fn __lp_take(h: Int, len: Int) -> Int = {
+  let v = prim.load64(h + 12 + (len - 1) * 8)
+  prim.store32(h + 4, len - 1)
+  v
+}
+
+fn __lp_some(h: Int, len: Int) -> Option[Int] = Some(__lp_take(h, len))
+
+fn list_pop(xs: List[Int]) -> Option[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then __lp_none()
+  else __lp_some(h, len)
+}

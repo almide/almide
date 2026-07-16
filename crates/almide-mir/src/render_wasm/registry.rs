@@ -729,6 +729,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("list_slice", "list.slice"),
             ],
         ),
+        (include_str!("../../../../stdlib/list_pop.almd"), &[("list_pop", "list.pop")]),
         (
             include_str!("../../../../stdlib/list_fold.almd"),
             &[

@@ -151,6 +151,12 @@ impl LowerCtx {
                 return Ok(dst);
             }
         }
+        // The in-place `list.pop` in a VALUE position (`let last = list.pop(xs)`):
+        // the same receiver discipline as the statement position — COW a local var,
+        // write through a borrowed param, wall anything else (#794).
+        if module == "list" && func == "pop" {
+            self.cow_inplace_receiver(module, func, args)?;
+        }
         let arg_tys: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
         let ops_mark = self.ops.len();
         let lowered = self.lower_pure_module_call_args(module, func, args)?;
@@ -378,7 +384,8 @@ impl LowerCtx {
             return Ok(());
         }
         // An IN-PLACE `&mut` BYTES mutator (set_*/write_*/fill/clear/copy_within/
-        // copy_from — the self-host bodies store through args[0]'s block). The
+        // copy_from — the self-host bodies store through args[0]'s block), or the
+        // in-place `list.pop` (the same &mut protocol over a list receiver). The
         // native oracle's semantics (RcCow + borrow inference) split by receiver:
         //   - a LOCAL var: `make_mut` COWs a SHARED block at the mutation — so
         //     `var b = a; bytes.set_at(b, …)` must not write through `a` (#794;
@@ -390,34 +397,33 @@ impl LowerCtx {
         //   - anything else (a record FIELD needs the two-level record+field COW;
         //     a mutable GLOBAL receiver would mutate a local copy): WALL — a
         //     possibly-shared write is a silent aliasing miscompile, never emitted.
-        if module == "bytes"
+        if (module == "bytes"
             && (func.starts_with("set_")
                 || func.starts_with("write_")
-                || matches!(func, "fill" | "clear" | "copy_within" | "copy_from"))
+                || matches!(func, "fill" | "clear" | "copy_within" | "copy_from")))
+            || (module == "list" && func == "pop")
         {
-            match args.first().map(|a| &a.kind) {
-                Some(IrExprKind::Var { id }) => {
-                    let v = self.value_for(*id)?;
-                    if !self.param_values.contains(&v) {
-                        self.ops.push(Op::MakeUnique { v });
-                    }
-                }
-                _ => {
-                    return Err(LowerError::Unsupported(format!(
-                        "in-place bytes mutator {module}.{func} over a non-var receiver \
-                         (a shared record field would alias the write — the two-level \
-                         record+field COW) not in this brick"
-                    )))
-                }
-            }
+            self.cow_inplace_receiver(module, func, args)?;
         }
+        let arg_tys: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
         let lowered = self.lower_pure_module_call_args(module, func, args)?;
+        // `list.pop` keys its self-host on the ELEMENT type (scalar → the registered
+        // in-place impl; heap → the unregistered `_x`, walling at render) — route it
+        // through the SAME `list_heap_call_name` the value position uses, so a
+        // statement-position pop can never link the scalar impl over a heap element
+        // (which would leak the popped handle). Every other statement call keeps its
+        // raw dotted name, byte-identical to before.
+        let call_name = if module == "list" && func == "pop" {
+            list_heap_call_name(module, func, &arg_tys, result_ty)
+        } else {
+            format!("{module}.{func}")
+        };
         if is_heap_ty(result_ty) {
             let dst = self.fresh_value();
             let repr = repr_of(result_ty)?;
             self.ops.push(Op::CallFn {
                 dst: Some(dst),
-                name: format!("{module}.{func}"),
+                name: call_name,
                 args: lowered,
                 result: Some(repr),
             });
@@ -425,12 +431,40 @@ impl LowerCtx {
         } else {
             self.ops.push(Op::CallFn {
                 dst: None,
-                name: format!("{module}.{func}"),
+                name: call_name,
                 args: lowered,
                 result: None,
             });
         }
         Ok(())
+    }
+
+    /// The #794 in-place-mutator RECEIVER discipline shared by the bytes mutators and
+    /// `list.pop`: a LOCAL var receiver gets `Op::MakeUnique` (COW — an alias must keep
+    /// the pre-mutation value: `var b = a; list.pop(a)` leaves `b` intact), a BORROWED
+    /// PARAM writes through bare (the caller sees the mutation — the &mut protocol),
+    /// and any other receiver shape (a record field, a fresh temp) WALLS — the write
+    /// would land in a materialized copy and vanish, or alias a shared field.
+    pub(crate) fn cow_inplace_receiver(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<(), LowerError> {
+        match args.first().map(|a| &a.kind) {
+            Some(IrExprKind::Var { id }) => {
+                let v = self.value_for(*id)?;
+                if !self.param_values.contains(&v) {
+                    self.ops.push(Op::MakeUnique { v });
+                }
+                Ok(())
+            }
+            _ => Err(LowerError::Unsupported(format!(
+                "in-place mutator {module}.{func} over a non-var receiver \
+                 (a shared record field would alias the write — the two-level \
+                 record+field COW) not in this brick"
+            ))),
+        }
     }
 
     /// Make the CALLS hidden inside a value whose CONTENT is deferred to

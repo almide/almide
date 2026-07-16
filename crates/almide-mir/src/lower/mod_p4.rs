@@ -191,7 +191,11 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
             // `fold` is here for the ONE Option-returning variant (`list.fold_ols`,
             // Option[List[String]] acc) — a scalar-acc fold subject never reaches the
             // variant-tracking sites (they gate on a heap/variant subject type first).
-            matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min" | "find" | "find_int_str" | "find_index" | "reduce" | "fold" | "get_str" | "first_str" | "last_str")
+            // `pop` — the in-place self-host (list_pop.almd) returns a real materialized
+            // Option built by the same Some/None ctor rails as `get`; a heap-element pop
+            // routes to the unregistered `list.pop_x` and walls at render, so tracking
+            // its bound result is never a misread.
+            matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min" | "find" | "find_int_str" | "find_index" | "reduce" | "fold" | "get_str" | "first_str" | "last_str" | "pop")
         }
         "string" => matches!(func, "index_of" | "last_index_of" | "codepoint" | "first" | "last" | "get" | "strip_prefix" | "strip_suffix"),
         "bytes" => matches!(func, "get" | "index_of"),
@@ -1418,6 +1422,18 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
                 return Some("list.enumerate_h".to_string());
             }
         }
+    }
+    // `list.pop` keys on its SOURCE element: a SCALAR (8-byte-slot) element rides the
+    // registered in-place self-host (`list_pop.almd` — Int/Bool/Float move bit-exactly);
+    // a HEAP element routes to the UNREGISTERED `_x` name and walls at render (popping
+    // an owned handle is an ownership transfer the flat impl cannot express).
+    if func == "pop" {
+        if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+            if a.len() == 1 && !is_heap_ty(&a[0]) {
+                return Some("list.pop".to_string());
+            }
+        }
+        return Some("list.pop_x".to_string());
     }
     // `list.zip` keys on BOTH sources: scalar/scalar → flat pairs; FLAT-heap/FLAT-heap
     // (String or List[scalar] each side — matrix rows) → the rc-share variant (the
