@@ -1718,3 +1718,14 @@ evidence  = [
   { path = "spec/wasm_cross/math_atan_tanh.almd", class = "fixture" },
   { path = "tests/libm_atan_tanh_cross_target_test.rs", name = "atan_tanh_cross_target_random_fuzz", class = "fuzz", n = 3000 },
 ]
+
+[[contract]]
+id        = "C-137"
+spec      = "ALS-R6"
+title     = "Relative fs paths resolve against the host CWD on wasm"
+statement = "Every fs operation given a RELATIVE path (`fs.read_text(\"Cargo.toml\")`, `fs.stat(\"spec/x.almd\")`, write/exists/list_dir/…) resolves it against the HOST current working directory on the wasm target, byte-identically to native std::fs. WASI has no cwd, so the wasm runtime normalizes the path first (`$path_norm`): an absolute path drops its leading '/' (fd-3-relative under the `/` preopen — the C-042 resolution), a relative path is prefixed with \"$PWD/\" (the PWD environment variable, inherited by every harness via `-S inherit-env=y`) and then resolved identically. Previously a relative path resolved against the preopen ROOT and failed (NOENT / \"stat failed\") while native succeeded — a silent native⇄wasm divergence that the native test fallback masked. fs.stat additionally stats into an 8-ALIGNED scratch buffer (WASI path_filestat_get demands alignment the self-host's Bytes scratch cannot guarantee) and copies the 64-byte filestat back."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_relative_path.almd", class = "fixture" },
+]

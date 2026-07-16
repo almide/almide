@@ -1,0 +1,37 @@
+// @contract: C-137
+// RELATIVE fs paths resolve against the HOST CWD on the wasm target, matching
+// native std::fs. WASI itself has no cwd: the v1 runtime's `$path_norm` prepends
+// "$PWD/" (inherited via the harness's `-S inherit-env=y`) to any path that does
+// not start with '/', then resolves it fd-3-relative exactly like an absolute
+// path. Previously every relative fs op on wasm resolved against the `/` preopen
+// root and failed (`fs.stat("spec/…")` → "stat failed", fs.read_text → NOENT)
+// while native succeeded — the fs_stat_test vein (#790).
+//
+// The gate (tests/wasm_runtime_test.rs::wasm_cross_target_spec) runs this on BOTH
+// targets from the same cargo-test cwd (the repo root), so the relative path
+// below names the same host file on both legs. `target/` is git-ignored and
+// always exists under the repo root when the gate runs.
+//
+// What this LOCKS:
+//   - fs.write / fs.read_text / fs.exists / fs.stat on a RELATIVE path all
+//     resolve to the same host file as native (write → read-back round-trip).
+//   - fs.stat's WASI filestat out-buffer is 8-ALIGNED via its own scratch
+//     (path_filestat_get demands alignment the self-host's `handle+12` Bytes
+//     scratch cannot guarantee) — the is_file/size reads below land on the
+//     copied-back fields.
+
+import fs
+
+effect fn main() -> Unit = {
+  let path = "target/almide_xt_fs_relative_path.txt"
+  let _ = fs.write(path, "RELATIVE-OK")!
+  let back = fs.read_text(path)!
+  println(back)
+  let e = fs.exists(path)
+  println(if e then "exists" else "missing")
+  let meta = fs.stat(path)!
+  println(if meta.is_file then "file" else "notfile")
+  println(if meta.size > 0 then "sized" else "empty")
+  let meta2 = fs.stat("target")!
+  println(if meta2.is_dir then "dir" else "notdir")
+}
