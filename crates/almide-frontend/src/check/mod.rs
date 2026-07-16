@@ -435,6 +435,31 @@ impl Checker {
     /// Type-check a program whose environment was pre-populated by `canonicalize_program`.
     /// Skips import table building and declaration registration — inference only.
     pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
+        // `main` takes NO parameters (#789): the parameter form typechecked but no
+        // codegen leg wires the argument — native emitted an uncallable driver
+        // ("codegen produced invalid Rust — this is an Almide bug") and the v1 wasm
+        // `_start` glue a structurally invalid module. Reject it HERE with the
+        // documented convention (`env.args()`) instead of blaming the compiler
+        // downstream.
+        for decl in &program.decls {
+            let ast::Decl::Fn { name, params, span, .. } = decl else { continue };
+            if name.as_str() != "main" || params.is_empty() {
+                continue;
+            }
+            let mut diag = err(
+                "main() takes no parameters",
+                "program arguments are read with `env.args()` inside the body \
+                 (add `import env`): `effect fn main() { let args = env.args() ... }`",
+                "fn main",
+            )
+            .with_code("E028");
+            if let Some(s) = span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+            }
+            self.diagnostics.push(diag);
+        }
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();

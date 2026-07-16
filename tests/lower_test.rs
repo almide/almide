@@ -30,7 +30,7 @@ fn lower_simple_fn() {
 
 #[test]
 fn lower_effect_fn() {
-    let ir = lower("effect fn main(args: List[String]) -> Result[Unit, String] = ok(())");
+    let ir = lower("effect fn main() -> Result[Unit, String] = ok(())");
     assert_eq!(ir.functions.len(), 1);
     assert!(ir.functions[0].is_effect);
     assert_eq!(ir.functions[0].name, "main");
@@ -290,7 +290,7 @@ fn lower_lambda() {
 
 #[test]
 fn lower_for_in() {
-    let ir = lower("effect fn main(_a: List[String]) -> Result[Unit, String] = {\n  for x in [1, 2, 3] {\n    println(int.to_string(x))\n  }\n  ok(())\n}");
+    let ir = lower("effect fn main() -> Result[Unit, String] = {\n  for x in [1, 2, 3] {\n    println(int.to_string(x))\n  }\n  ok(())\n}");
     // Body should be a block containing ForIn
     if let IrExprKind::Block { stmts, .. } = &ir.functions[0].body.kind {
         let has_for = stmts.iter().any(|s| matches!(s.kind, IrStmtKind::Expr { ref expr } if matches!(expr.kind, IrExprKind::ForIn { .. })));

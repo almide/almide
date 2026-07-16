@@ -1,0 +1,1 @@
+effect fn main(args: List[String]) -> Result[Unit, String] = ok(())

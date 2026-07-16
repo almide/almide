@@ -65,7 +65,7 @@ fn check_simple_fn() {
 
 #[test]
 fn check_effect_fn() {
-    has_no_errors("effect fn main(args: List[String]) -> Result[Unit, String] = ok(())");
+    has_no_errors("effect fn main() -> Result[Unit, String] = ok(())");
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn check_record_type() {
 #[test]
 fn check_for_in_loop() {
     has_no_errors(
-        "effect fn main(_a: List[String]) -> Result[Unit, String] = {\n  for x in [1, 2, 3] {\n    println(int.to_string(x))\n  }\n  ok(())\n}"
+        "effect fn main() -> Result[Unit, String] = {\n  for x in [1, 2, 3] {\n    println(int.to_string(x))\n  }\n  ok(())\n}"
     );
 }
 
@@ -298,7 +298,7 @@ fn check_match_with_wildcard() {
 
 #[test]
 fn check_for_in_range() {
-    has_no_errors("effect fn main(_a: List[String]) -> Result[Unit, String] = {\n  for i in 0..10 {\n    println(int.to_string(i))\n  }\n  ok(())\n}");
+    has_no_errors("effect fn main() -> Result[Unit, String] = {\n  for i in 0..10 {\n    println(int.to_string(i))\n  }\n  ok(())\n}");
 }
 
 #[test]
@@ -463,7 +463,7 @@ fn check_underscore_prefix_no_warning() {
 #[test]
 fn check_effect_block() {
     has_no_errors(
-        "effect fn read() -> Result[String, String] = ok(\"data\")\neffect fn main(_a: List[String]) -> Result[Unit, String] = {\n  let data = read()\n  println(data)\n  ok(())\n}"
+        "effect fn read() -> Result[String, String] = ok(\"data\")\neffect fn main() -> Result[Unit, String] = {\n  let data = read()\n  println(data)\n  ok(())\n}"
     );
 }
 
@@ -585,7 +585,7 @@ fn hint_bool_to_string_return() {
 
 #[test]
 fn hint_int_to_string_println() {
-    let hints = error_hints("effect fn main(_a: List[String]) -> Result[Unit, String] = {\n  println(42)\n  ok(())\n}");
+    let hints = error_hints("effect fn main() -> Result[Unit, String] = {\n  println(42)\n  ok(())\n}");
     assert!(!hints.is_empty(), "should have an error");
     assert!(hints[0].contains("int.to_string"), "hint should suggest int.to_string for println, got: {}", hints[0]);
 }
@@ -642,7 +642,7 @@ fn multi_error_across_functions() {
 #[test]
 fn multi_error_println_calls() {
     // Multiple statement-level errors should all be reported
-    let errs = errors("effect fn main(_a: List[String]) -> Result[Unit, String] = {\n  println(42)\n  println(true)\n  ok(())\n}");
+    let errs = errors("effect fn main() -> Result[Unit, String] = {\n  println(42)\n  println(true)\n  ok(())\n}");
     assert!(errs.len() >= 2, "should report errors for both println calls, got: {:?}", errs);
 }
 
@@ -669,3 +669,22 @@ fn multi_error_mixed_stmt_types() {
 }
 
 include!("checker_test_parts/p2.rs");
+
+// ---- main signature (#789) ----
+
+#[test]
+fn main_with_parameters_is_rejected() {
+    // No codegen leg wires a `main` parameter (native driver calls `__almide_main()`
+    // 0-ary; the v1 wasm `_start` glue likewise) — the checker rejects the signature
+    // with the documented convention instead of blaming the compiler downstream.
+    let errs = errors("effect fn main(args: List[String]) -> Result[Unit, String] = ok(())");
+    assert!(
+        errs.iter().any(|e| e.contains("main() takes no parameters")),
+        "expected the E028 main-signature error, got: {errs:?}"
+    );
+    let errs = errors("fn main(n: Int) -> Unit = ()");
+    assert!(
+        errs.iter().any(|e| e.contains("main() takes no parameters")),
+        "expected the E028 main-signature error, got: {errs:?}"
+    );
+}

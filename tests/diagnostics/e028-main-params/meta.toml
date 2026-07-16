@@ -1,0 +1,2 @@
+expects_code = "E028"
+expects_error = "main() takes no parameters"
