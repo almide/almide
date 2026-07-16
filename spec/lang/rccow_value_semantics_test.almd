@@ -1,6 +1,8 @@
-// wasm:skip: #794 — the wasm legs lack Bytes alias COW (v1 shares the Dup'd
-// block through in-place mutators; v0 record copies are field-pointer-shallow).
-// Remove this marker when the wasm legs converge.
+// #794 CLOSED on the live legs: v1 carries the full Bytes alias-COW discipline
+// (cow_inplace_receiver: local var → MakeUnique; record field → two-level
+// spread-copy + field COW), and the harness runs v1's verdict as final. The v0
+// wasm emitter's pointer-shallow record copy remains only in the retiring
+// fallback (#782) and is unreachable here — v1 renders this file.
 //
 // #617: Bytes/Matrix are RcCow value types on the Rust target (copies are O(1)
 // Rc bumps, mutation is make_mut copy-on-write). These tests pin the OBSERVABLE
