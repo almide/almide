@@ -80,6 +80,18 @@ pub fn is_heap_ty(ty: &Ty) -> bool {
     )
 }
 
+/// The i64-uniform bit pattern of a float literal: a `Float32`-typed literal carries the
+/// LOW-32 f32 pattern (the F32Demote/IntToF32 convention — see `PrimKind::F32Bin`),
+/// everything else the f64 bits. Emitting f64 bits for a Float32 made every downstream
+/// f32-family op (arith, compare, to_string) read garbage.
+pub(crate) fn float_lit_bits(value: f64, ty: &Ty) -> i64 {
+    if matches!(ty, Ty::Float32) {
+        (value as f32).to_bits() as i64
+    } else {
+        value.to_bits() as i64
+    }
+}
+
 /// A CONST-foldable module-global initializer → its direct `Init` (NO runtime call), else `None`.
 /// Admits exactly the compile-time-known heap constants the module-global materialization emits as
 /// data: a string literal, an all-int-literal `List[Int]`, and `bytes.from_list([int literals])`.
@@ -1204,6 +1216,68 @@ fn desugar_bytes_index_calls(body: &IrExpr) -> Option<IrExpr> {
     s.changed.then_some(out)
 }
 
+/// `buf[i] = v` over `Bytes` — the WRITE-side twin of `desugar_bytes_index_calls` —
+/// → statement `bytes.set_at(buf, i, v)`, the CHECKED packed-byte store self-host
+/// (whose receiver rides the #794 COW discipline: local var → MakeUnique, mut param
+/// → write-through). Without this rewrite `IndexAssign` lowers as a uniform 8-byte
+/// SLOT store (`+12+i*8` — never where `bytes.index` reads `+12+i`, and past a
+/// packed block's end for i>3): `buf[2] = 0x42` silently vanished on the verified
+/// default while corrupting the neighboring heap block. Bytes receivers are known
+/// by TYPE: `Bytes`-typed params plus `Bind`s with `ty: Bytes`, seen in statement
+/// order (VarIds are function-unique, so no scoping ambiguity).
+fn desugar_bytes_index_assign(body: &IrExpr, params: &[IrParam]) -> Option<IrExpr> {
+    use almide_ir::{walk_stmt_mut, IrMutVisitor};
+    use almide_lang::intern::sym;
+    struct S {
+        bytes_vars: HashSet<VarId>,
+        changed: bool,
+    }
+    impl IrMutVisitor for S {
+        fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
+            walk_stmt_mut(self, stmt);
+            if let IrStmtKind::Bind { var, ty: Ty::Bytes, .. } = &stmt.kind {
+                self.bytes_vars.insert(*var);
+                return;
+            }
+            let IrStmtKind::IndexAssign { target, index, value } = &stmt.kind else {
+                return;
+            };
+            if !self.bytes_vars.contains(target) {
+                return;
+            }
+            let recv = IrExpr {
+                kind: IrExprKind::Var { id: *target },
+                ty: Ty::Bytes,
+                span: index.span.clone(),
+                def_id: None,
+            };
+            let call = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: sym("bytes"),
+                        func: sym("set_at"),
+                        def_id: None,
+                    },
+                    args: vec![recv, index.clone(), value.clone()],
+                    type_args: Vec::new(),
+                },
+                ty: Ty::Unit,
+                span: index.span.clone(),
+                def_id: None,
+            };
+            stmt.kind = IrStmtKind::Expr { expr: call };
+            self.changed = true;
+        }
+    }
+    let mut s = S {
+        bytes_vars: params.iter().filter(|p| matches!(p.ty, Ty::Bytes)).map(|p| p.var).collect(),
+        changed: false,
+    };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}
+
 /// `xs[a..b]` over a SCALAR-element list: the frontend struck the range slice
 /// directly to `RuntimeCall{almide_rt_list_slice}` (expressions.rs), which the
 /// v1 bind path can only defer to an EMPTY Opaque — `sub[0]` then walls. But
@@ -1213,6 +1287,10 @@ fn desugar_bytes_index_calls(body: &IrExpr) -> Option<IrExpr> {
 /// Same desugar-before-both slot as `desugar_map_access_calls`. Gated to a
 /// `List[scalar]` result — the registered self-host is the scalar-element
 /// `list_slice`; a heap-element slice keeps the (walling) deferred path.
+/// `buf[a..b]` over `Bytes` (`RuntimeCall{almide_rt_bytes_slice}`) is the same
+/// deferred-Opaque hole with a WORSE failure (the empty defer READS as len 0 —
+/// `bytes.len(sub)` returned 0 silently) — rewrite to the self-hosted
+/// `bytes.slice(b, start, end)` (bytes_core.almd, v0-clamping semantics).
 fn desugar_list_slice_calls(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
     use almide_lang::intern::sym;
@@ -1225,17 +1303,21 @@ fn desugar_list_slice_calls(body: &IrExpr) -> Option<IrExpr> {
             let IrExprKind::RuntimeCall { symbol, args } = &e.kind else {
                 return;
             };
-            if symbol.as_str() != "almide_rt_list_slice"
-                || args.len() != 3
-                || !crate::lower::is_scalar_elem_list_ty(&e.ty)
-            {
+            if args.len() != 3 {
                 return;
             }
+            let (module, func) = match symbol.as_str() {
+                "almide_rt_list_slice" if crate::lower::is_scalar_elem_list_ty(&e.ty) => {
+                    ("list", "slice")
+                }
+                "almide_rt_bytes_slice" if matches!(e.ty, Ty::Bytes) => ("bytes", "slice"),
+                _ => return,
+            };
             *e = IrExpr {
                 kind: IrExprKind::Call {
                     target: CallTarget::Module {
-                        module: sym("list"),
-                        func: sym("slice"),
+                        module: sym(module),
+                        func: sym(func),
                         def_id: None,
                     },
                     args: args.clone(),
@@ -1516,6 +1598,16 @@ fn lower_function_all_impl(
     } else {
         func_body
     };
+    // `buf[i] = v` over Bytes → `bytes.set_at(buf, i, v)` (see
+    // `desugar_bytes_index_assign`) — same desugar-before-both slot.
+    let bytes_index_assign_body;
+    let func_body: &IrExpr =
+        if let Some(rewritten) = desugar_bytes_index_assign(func_body, &func.params) {
+            bytes_index_assign_body = rewritten;
+            &bytes_index_assign_body
+        } else {
+            func_body
+        };
     // `xs[a..b]` slice RuntimeCall → `list.slice(xs, a, b)` (see `desugar_list_slice_calls`).
     let list_slice_body;
     let func_body: &IrExpr = if let Some(rewritten) = desugar_list_slice_calls(func_body) {

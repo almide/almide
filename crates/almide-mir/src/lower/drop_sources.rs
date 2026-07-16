@@ -480,9 +480,69 @@ pub fn record_field_needs_recursive_drop(ty: &Ty) -> bool {
     is_heap_ty(ty)
 }
 
+/// Record decls WITH type params (`type Pair[A, B] = { fst: A, snd: B }`): name →
+/// (params, decl fields). A generic decl gets NO shared `$__drop_<R>` — each
+/// INSTANTIATION routes to a per-shape `__drop_anonrec_<hash>` (the anon-record
+/// machinery), because the heap MASK differs per instantiation: one `__drop_Pair`
+/// generated from the tyvar fields treated BOTH slots as heap, so dropping a
+/// `Pair[Int, String]` rc_dec'd the Int 1 as a pointer (trap) and a scalar-only
+/// `Pair[Int, Int]` would double-free garbage.
+pub(crate) type GenericRecordDecls =
+    std::collections::HashMap<String, (Vec<almide_lang::intern::Sym>, Vec<(almide_lang::intern::Sym, Ty)>)>;
+
+pub(crate) fn generic_record_decls(type_decls: &[almide_ir::IrTypeDecl]) -> GenericRecordDecls {
+    use almide_ir::IrTypeDeclKind;
+    type_decls
+        .iter()
+        .filter_map(|d| {
+            let IrTypeDeclKind::Record { fields } = &d.kind else { return None };
+            let gs = d.generics.as_ref()?;
+            if gs.is_empty() {
+                return None;
+            }
+            Some((
+                d.name.as_str().to_string(),
+                (
+                    gs.iter().map(|g| g.name).collect(),
+                    fields.iter().map(|f| (f.name, f.ty.clone())).collect(),
+                ),
+            ))
+        })
+        .collect()
+}
+
+/// The SUBSTITUTED field list of an INSTANTIATED generic record type
+/// (`Pair[Int, String]` → `[(fst, Int), (snd, String)]`), or `None` when `ty` is not
+/// an instantiation of a generic record decl. The (name, ty) pairs are exactly what
+/// `anon_record_drop_name` hashes — so routing and generation agree on the identity.
+pub(crate) fn instantiated_generic_record_fields(
+    ty: &Ty,
+    generic_decls: &GenericRecordDecls,
+) -> Option<Vec<(almide_lang::intern::Sym, Ty)>> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let (name, args) = match ty {
+        Ty::Named(n, args) if !args.is_empty() => (n.as_str().to_string(), args),
+        Ty::Applied(TypeConstructorId::UserDefined(n), args) if !args.is_empty() => {
+            (n.clone(), args)
+        }
+        _ => return None,
+    };
+    let keys: std::collections::HashSet<String> = generic_decls.keys().cloned().collect();
+    let key = crate::lower::canonical_name_in(&keys, &name)?.to_string();
+    let (gs, fields) = generic_decls.get(&key)?;
+    let mut subst: std::collections::HashMap<almide_lang::intern::Sym, Ty> =
+        std::collections::HashMap::new();
+    for (g, a) in gs.iter().zip(args.iter()) {
+        subst.insert(*g, a.clone());
+    }
+    Some(fields.iter().map(|(n, t)| (*n, calls::subst_type_var(t, &subst))).collect())
+}
+
 /// The set of RECORD type names whose drop must be the recursive `$__drop_<R>` (any field
 /// [`record_field_needs_recursive_drop`]). A scalar/String-only record keeps the flat masked
-/// `DropListStr`. Mirrors [`variant_needs_recursive_drop`] for records.
+/// `DropListStr`. Mirrors [`variant_needs_recursive_drop`] for records. GENERIC decls are
+/// EXCLUDED — their instantiations route to per-shape `__drop_anonrec_<hash>` drops (see
+/// [`generic_record_decls`]).
 pub fn recursive_record_drop_names(
     type_decls: &[almide_ir::IrTypeDecl],
 ) -> std::collections::HashSet<String> {
@@ -491,7 +551,8 @@ pub fn recursive_record_drop_names(
         .iter()
         .filter_map(|d| match &d.kind {
             IrTypeDeclKind::Record { fields }
-                if fields.iter().any(|f| record_field_needs_recursive_drop(&f.ty)) =>
+                if d.generics.as_ref().is_none_or(|g| g.is_empty())
+                    && fields.iter().any(|f| record_field_needs_recursive_drop(&f.ty)) =>
             {
                 Some(d.name.as_str().to_string())
             }
@@ -503,6 +564,28 @@ pub fn recursive_record_drop_names(
 /// `Some(name)` iff `ty` is a NAMED record/aggregate whose `$__drop_<name>` is generated (it is in
 /// `rec_names`) — so a field of that type recurses via `__drop_<name>`. A non-recursive (scalar-only)
 /// record is `None`: it is freed by a flat `rc_dec` of its block.
+/// Resolve a nested aggregate FIELD to its recursive-drop route: `(drop name, source
+/// binding type)`. An INSTANTIATED generic record resolves to its per-shape
+/// `anonrec_<hash>` + the STRUCTURAL `{ k: T, … }` binding type (its bare name would
+/// not re-instantiate in the generated source); everything else rides
+/// [`recursive_aggregate_name`] + [`aggregate_source_ty`].
+fn recursive_aggregate_route(
+    ty: &Ty,
+    rec_names: &std::collections::HashSet<String>,
+    generic_decls: &GenericRecordDecls,
+) -> Option<(String, String)> {
+    if let Some(pairs) = instantiated_generic_record_fields(ty, generic_decls) {
+        if anon_record_needs_recursive_drop(&pairs) {
+            return Some((anon_record_drop_name(&pairs), anon_record_source_ty(&pairs)));
+        }
+        return None;
+    }
+    recursive_aggregate_name(ty, rec_names).map(|rn| {
+        let src = aggregate_source_ty(ty);
+        (rn, src)
+    })
+}
+
 fn recursive_aggregate_name(ty: &Ty, rec_names: &std::collections::HashSet<String>) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
     let n = match ty {
@@ -598,6 +681,7 @@ fn record_drop_field_frees(
     rec_names: &std::collections::HashSet<String>,
     flat_variant_names: &std::collections::HashSet<String>,
     rec_variant_names: &std::collections::HashSet<String>,
+    generic_decls: &GenericRecordDecls,
     list_drops: &mut std::collections::BTreeSet<String>,
     need_map_ss: &mut bool,
     need_list_str: &mut bool,
@@ -613,15 +697,15 @@ fn record_drop_field_frees(
                 frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
             }
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-                if let Some(rn) = recursive_aggregate_name(&a[0], rec_names) {
+                if let Some((rn, src)) = recursive_aggregate_route(&a[0], rec_names, generic_decls) {
                     list_drops.insert(rn.clone());
                     let rn_fn = drop_fn_ident(&rn);
                     // The BINDING type must be valid Almide source: a NAMED element renders
-                    // its name, an ANONYMOUS element its STRUCTURAL `{ k: T, … }` form — the
-                    // synthesized `anonrec_<hash>` is a drop-fn identity, NOT a type name
-                    // (writing `List[anonrec_…]` type-errored the whole generated batch:
-                    // "undefined variable 'f0'" after the rejected let).
-                    let src = aggregate_source_ty(&a[0]);
+                    // its name, an ANONYMOUS element (or a generic INSTANTIATION) its
+                    // STRUCTURAL `{ k: T, … }` form — the synthesized `anonrec_<hash>` is a
+                    // drop-fn identity, NOT a type name (writing `List[anonrec_…]`
+                    // type-errored the whole generated batch: "undefined variable 'f0'"
+                    // after the rejected let).
                     frees.push_str(&format!(
                         "    let f{i}: List[{src}] = prim.load_handle(h + {off})\n    __drop_list_{rn_fn}(f{i})\n"
                     ));
@@ -703,8 +787,7 @@ fn record_drop_field_frees(
                 ));
             }
             t => {
-                if let Some(rn) = recursive_aggregate_name(t, rec_names) {
-                    let src = aggregate_source_ty(t);
+                if let Some((rn, src)) = recursive_aggregate_route(t, rec_names, generic_decls) {
                     let rn_fn = drop_fn_ident(&rn);
                     frees.push_str(&format!(
                         "    let f{i}: {src} = prim.load_handle(h + {off})\n    __drop_{rn_fn}(f{i})\n"
@@ -829,19 +912,35 @@ fn field_source_ty(ty: &Ty) -> String {
 pub fn collect_recursive_anon_records(
     program: &almide_ir::IrProgram,
 ) -> Vec<Vec<(almide_lang::intern::Sym, Ty)>> {
-    let mut all_decls: Vec<almide_ir::IrTypeDecl> = program.type_decls.clone();
+    let all_decls: Vec<almide_ir::IrTypeDecl> = program.type_decls.clone();
     // A visitor that inspects every expression's type (every IrExpr carries its `ty`), collecting
     // the distinct anon record shapes that need a synthesized recursive drop (deduped by drop name).
     // RECURSES into a qualifying anon record's own anon-record FIELDS so a nested anon shape
     // (`{ st: { iv: Bytes } }`) gets its inner `__drop_anonrec_<hash>` generated too (the outer drop
     // body `let f: { iv: Bytes } = …; __drop_anonrec_<inner>(f)` would otherwise call a missing fn).
+    // An INSTANTIATED GENERIC record (`Pair[Int, String]`) registers its SUBSTITUTED field
+    // shape the same way — its drop is the per-shape `__drop_anonrec_<hash>`, never a shared
+    // `__drop_<R>` (the heap mask differs per instantiation; see `generic_record_decls`).
     struct TyCollector {
         seen: std::collections::HashSet<String>,
         out: Vec<Vec<(almide_lang::intern::Sym, Ty)>>,
+        generic_decls: GenericRecordDecls,
     }
     impl TyCollector {
         fn consider(&mut self, ty: &Ty) {
             use almide_lang::types::constructor::TypeConstructorId;
+            if let Some(pairs) = instantiated_generic_record_fields(ty, &self.generic_decls) {
+                if anon_record_needs_recursive_drop(&pairs) {
+                    let name = anon_record_drop_name(&pairs);
+                    if self.seen.insert(name) {
+                        self.out.push(pairs.clone());
+                    }
+                    for (_, fty) in &pairs {
+                        self.consider(fty);
+                    }
+                }
+                return;
+            }
             match ty {
                 Ty::Record { fields } if anon_record_needs_recursive_drop(fields) => {
                     let name = anon_record_drop_name(fields);
@@ -871,7 +970,11 @@ pub fn collect_recursive_anon_records(
         }
     }
 
-    let mut collector = TyCollector { seen: std::collections::HashSet::new(), out: Vec::new() };
+    let mut collector = TyCollector {
+        seen: std::collections::HashSet::new(),
+        out: Vec::new(),
+        generic_decls: generic_record_decls(&all_decls),
+    };
     let funcs = program
         .functions
         .iter()
@@ -1211,6 +1314,7 @@ pub fn generate_record_drop_sources(
 ) -> String {
     use almide_ir::IrTypeDeclKind;
     let rec_names = recursive_record_drop_names(type_decls);
+    let generic_decls = generic_record_decls(type_decls);
     let flat_variant_names = flat_variant_type_names(type_decls);
     // The RICH variant names — a record `List[<rich variant>]` field (`Global.init: List[Instr]`) routes
     // to `$__drop_list_<V>` (generated by `generate_variant_drop_sources`, appended to the same program).
@@ -1247,6 +1351,7 @@ pub fn generate_record_drop_sources(
             &rec_names,
             &flat_variant_names,
             &rec_variant_names,
+            &generic_decls,
             &mut list_drops,
             &mut need_map_ss,
             &mut need_list_str,
@@ -1333,6 +1438,7 @@ pub fn generate_record_drop_sources(
             &rec_names,
             &flat_variant_names,
             &rec_variant_names,
+            &generic_decls,
             &mut list_drops,
             &mut need_map_ss,
             &mut need_list_str,

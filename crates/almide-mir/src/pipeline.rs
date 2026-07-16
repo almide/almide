@@ -627,9 +627,28 @@ fn try_render_wasm_source_impl(
     // caller agrees with the combined classification by construction (idempotent where the
     // main-only pass already fired; call TARGETS are never renamed, so the module-side name
     // resolution the original-bodies rule protects is untouched).
-    {
-        let wide_can_err = crate::lower::compute_can_err(&all_fns);
-        let wide_lifted = crate::lower::lifted_effect_fn_names(&all_fns);
+    //
+    // FIXPOINT (the #485 effect_assign shape): the strips consult AUTO_WRAP (an
+    // auto-wrapped callee's `!`/`??` must NOT strip) while AUTO_WRAP itself is derived
+    // from the bodies (has a stmt-position propagating unwrap). A strip can remove a
+    // callee's LAST propagating unwrap (`plain_assign`'s `x = step(x)` Try), after which
+    // its REAL lowered ABI is bare — but the stale registry still said "wrapped", so its
+    // own def lowered bare while every `plain_assign()!` site kept the Result-handle
+    // read: invalid wasm (def/callsite ABI split). Iterate populate → rewrite until the
+    // registries describe the rewritten bodies verbatim (monotone — strips only remove
+    // nodes, AUTO_WRAP only shrinks — so this terminates; the cap is a safety net).
+    let mut prev_auto_wrap: Option<std::collections::HashSet<String>> = None;
+    for _ in 0..8 {
+        let mut all_rewritten: Vec<almide_ir::IrFunction> = inlined_fns.clone();
+        all_rewritten.extend(module_fn_sibs.iter().cloned());
+        crate::lower::populate_abi_registries(&all_rewritten, &record_layouts);
+        let cur = crate::lower::auto_wrap_abi_snapshot();
+        if prev_auto_wrap.as_ref() == Some(&cur) {
+            break;
+        }
+        prev_auto_wrap = Some(cur);
+        let wide_can_err = crate::lower::compute_can_err(&all_rewritten);
+        let wide_lifted = crate::lower::lifted_effect_fn_names(&all_rewritten);
         for f in inlined_fns.iter_mut().chain(module_fn_sibs.iter_mut()) {
             let self_name = f.name.as_str().to_string();
             crate::lower::strip_never_err_unwraps(

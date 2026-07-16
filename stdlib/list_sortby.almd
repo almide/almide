@@ -49,3 +49,28 @@ fn list_sort_by(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
   let _b = __sb_insert(prim.handle(buf), prim.handle(keys), n, 0)
   buf
 }
+
+// HEAP-element variant (`sort_by(xs, (s) => string.len(s))` over a List[String]/List[R]):
+// identical sort, but each element handle copied into the result is ACQUIRED (rc_inc) —
+// the result list CO-OWNS every element, so both lists' recursive drops are balanced
+// (the raw-copy variant shares without acquiring and the two deep drops double-free:
+// rc_dec trap in the caller's epilogue). Mirrors list_sort_by_float_rc.
+fn __sbr_init(bh: Int, sh: Int, kh: Int, f: (Int) -> Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    let k = f(v)
+    prim.rc_inc(v)
+    prim.store64(bh + 12 + i * 8, v)
+    prim.store64(kh + 12 + i * 8, k)
+    __sbr_init(bh, sh, kh, f, n, i + 1)
+  }
+
+fn list_sort_by_rc(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list(n)
+  let keys = prim.alloc_list(n)
+  let _a = __sbr_init(prim.handle(buf), prim.handle(xs), prim.handle(keys), f, n, 0)
+  let _b = __sb_insert(prim.handle(buf), prim.handle(keys), n, 0)
+  buf
+}

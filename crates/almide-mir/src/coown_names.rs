@@ -40,6 +40,7 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__sort_copy_rc",     // list.sort_str — rc-copy each String element
     "__filterrc_fill",
     "__sbfr_init",
+    "__sbr_init",         // list.sort_by_rc — rc_inc each element handle copied into the result
     "__ivh_set_copy",
     "__hvl_set_copy",
     "__hvl_set_append",

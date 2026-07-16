@@ -1352,6 +1352,24 @@ fn unwrap_or_call_name(module: &str, arg_tys: &[Ty]) -> Option<String> {
             if a.len() == 2 && matches!(a[0], Ty::String) {
                 return Some("result.str_unwrap_or".to_string());
             }
+            // A FLAT scalar block payload — a scalar TUPLE (`result.zip`'s `(Int, Int)`),
+            // a List[<scalar>], or Bytes: the rc-correct flat variant over the
+            // cap-as-tag layout (tag @16).
+            if a.len() == 2
+                && (matches!(&a[0], Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|t| !is_heap_ty(t)))
+                    || matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+                        if e.len() == 1 && !is_heap_ty(&e[0]))
+                    || matches!(a[0], Ty::Bytes))
+            {
+                return Some("result.flat_unwrap_or".to_string());
+            }
+            // Any OTHER heap Ok payload has no registered rc-correct variant: the
+            // generic impl takes an i64 SCALAR default, so a handle payload/default
+            // repr-mismatches (invalid wasm). Route to an unregistered `_x` name —
+            // the caller WALLS honestly.
+            if a.len() == 2 && is_heap_ty(&a[0]) {
+                return Some("result.unwrap_or_hx".to_string());
+            }
         }
     }
     if module == "option" {
@@ -1381,11 +1399,20 @@ fn unwrap_or_call_name(module: &str, arg_tys: &[Ty]) -> Option<String> {
             }
             // A FLAT scalar-element list payload (`map.get(groups, "0") ?? []` —
             // Option[List[Int]], the group_by class): the rc-correct flat variant.
+            // A scalar TUPLE or Bytes payload is the SAME flat block shape (uniform
+            // slots / raw bytes @12, flat rc_dec drop) — bytes.chunks' element class.
             if a.len() == 1
-                && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
-                    if e.len() == 1 && !is_heap_ty(&e[0]))
+                && (matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+                        if e.len() == 1 && !is_heap_ty(&e[0]))
+                    || matches!(&a[0], Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|t| !is_heap_ty(t)))
+                    || matches!(a[0], Ty::Bytes))
             {
                 return Some("option.listint_unwrap_or".to_string());
+            }
+            // Any OTHER heap payload: no registered rc-correct variant — wall honestly
+            // (the generic impl's i64 scalar default repr-mismatches a handle).
+            if a.len() == 1 && is_heap_ty(&a[0]) {
+                return Some("option.unwrap_or_hx".to_string());
             }
         }
     }
@@ -1496,12 +1523,12 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
     }
     if func == "sort_by" {
         if let Some(Ty::Fn { ret, .. }) = arg_tys.get(1) {
+            // A HEAP element (List[String]/List[R]) must be CO-OWNED by the
+            // result list (rc_inc per copied handle) — the raw-copy variants
+            // share without acquiring and the two recursive drops double-free.
+            let heap_elem = matches!(arg_tys.first(),
+                Some(Ty::Applied(TypeConstructorId::List, a)) if a.len() == 1 && is_heap_ty(&a[0]));
             if **ret == Ty::Float {
-                // A HEAP element (List[R] of records) must be CO-OWNED by the
-                // result list (rc_inc per copied handle) — the raw-copy variant
-                // shares without acquiring and the two recursive drops double-free.
-                let heap_elem = matches!(arg_tys.first(),
-                    Some(Ty::Applied(TypeConstructorId::List, a)) if a.len() == 1 && is_heap_ty(&a[0]));
                 return Some(if heap_elem {
                     "list.sort_by_float_rc".to_string()
                 } else {
@@ -1515,6 +1542,9 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
             // honestly instead of trapping or handle-sorting.
             if **ret == Ty::String {
                 return Some("list.sort_by_str_key_x".to_string());
+            }
+            if heap_elem {
+                return Some("list.sort_by_rc".to_string());
             }
         }
     }

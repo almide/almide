@@ -542,19 +542,101 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   ;; path_open error we wrap the message "file not found" Err. The FOURTH sandbox exit
   ;; (Capability::FsRead) — the result is an owned heap handle the caller's scope-end
   ;; DropListStr balances (frees the @12 payload String + the block).
+  ;; Normalize a fs path for the WASI floor (preopen fd 3 = host "/"). An ABSOLUTE
+  ;; path drops its leading '/' (making it fd-3-relative — the existing convention).
+  ;; A RELATIVE path is resolved against the HOST CWD by prepending "$PWD/" (PWD
+  ;; arrives via the harness's `-S inherit-env=y`; WASI itself has no cwd, so an
+  ;; unprefixed relative path resolved against "/" — every relative fs op silently
+  ;; diverged from native, the fs_stat_test vein). No usable PWD (absent, empty, or
+  ;; not absolute) → the bytes pass through unchanged (the pre-fix behavior).
+  ;; Returns (pdata, plen) of the normalized byte range (multi-value).
+  (func $path_norm (param $path i32) (result i32 i32)
+    (local $pdata i32) (local $plen i32)
+    (local $cnt_ptr i32) (local $sz_ptr i32) (local $cnt i32) (local $bufsz i32)
+    (local $envp i32) (local $envbuf i32) (local $i i32) (local $entry i32)
+    (local $pwd i32) (local $pwdlen i32) (local $buf i32) (local $j i32) (local $w i32)
+    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
+    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
+    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
+                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
+      (then (return (i32.add (local.get $pdata) (i32.const 1))
+                    (i32.sub (local.get $plen) (i32.const 1)))))
+    ;; relative — snapshot the environ (the SAME lazy init as $env_get)
+    (if (i32.eqz (global.get $env_envp))
+      (then
+        (local.set $cnt_ptr (i32.and (i32.add (call $alloc (i32.const 8)) (i32.const 3)) (i32.const -4)))
+        (local.set $sz_ptr (i32.and (i32.add (call $alloc (i32.const 8)) (i32.const 3)) (i32.const -4)))
+        (drop (call $environ_sizes_get (local.get $cnt_ptr) (local.get $sz_ptr)))
+        (local.set $cnt (i32.load (local.get $cnt_ptr)))
+        (local.set $bufsz (i32.load (local.get $sz_ptr)))
+        (local.set $envp (i32.and (i32.add (call $alloc (i32.add (i32.mul (local.get $cnt) (i32.const 4)) (i32.const 8))) (i32.const 3)) (i32.const -4)))
+        (local.set $envbuf (call $alloc (i32.add (local.get $bufsz) (i32.const 4))))
+        (drop (call $environ_get (local.get $envp) (local.get $envbuf)))
+        (global.set $env_envp (local.get $envp))
+        (global.set $env_cnt (local.get $cnt))))
+    (local.set $envp (global.get $env_envp))
+    (local.set $cnt (global.get $env_cnt))
+    ;; scan for the "PWD=" entry
+    (local.set $pwd (i32.const 0))
+    (local.set $i (i32.const 0))
+    (block $done (loop $loop
+      (br_if $done (i32.ge_u (local.get $i) (local.get $cnt)))
+      (local.set $entry (i32.load (i32.add (local.get $envp) (i32.mul (local.get $i) (i32.const 4)))))
+      (if (i32.and
+            (i32.and (i32.eq (i32.load8_u (local.get $entry)) (i32.const 80))
+                     (i32.eq (i32.load8_u (i32.add (local.get $entry) (i32.const 1))) (i32.const 87)))
+            (i32.and (i32.eq (i32.load8_u (i32.add (local.get $entry) (i32.const 2))) (i32.const 68))
+                     (i32.eq (i32.load8_u (i32.add (local.get $entry) (i32.const 3))) (i32.const 61))))
+        (then
+          (local.set $pwd (i32.add (local.get $entry) (i32.const 4)))
+          (local.set $pwdlen (i32.const 0))
+          (block $sdone (loop $sloop
+            (br_if $sdone (i32.eqz (i32.load8_u (i32.add (local.get $pwd) (local.get $pwdlen)))))
+            (local.set $pwdlen (i32.add (local.get $pwdlen) (i32.const 1)))
+            (br $sloop)))))
+      (br_if $done (i32.ne (local.get $pwd) (i32.const 0)))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $loop)))
+    ;; no usable PWD → pass through; PWD == "/" → the join IS the raw path
+    (if (i32.or (i32.eqz (local.get $pwd))
+                (i32.eqz (local.get $pwdlen)))
+      (then (return (local.get $pdata) (local.get $plen))))
+    (if (i32.ne (i32.load8_u (local.get $pwd)) (i32.const {ASCII_SLASH}))
+      (then (return (local.get $pdata) (local.get $plen))))
+    (if (i32.eq (local.get $pwdlen) (i32.const 1))
+      (then (return (local.get $pdata) (local.get $plen))))
+    ;; buf = PWD[1..] + "/" + path  (total = pwdlen + plen bytes)
+    (local.set $buf (call $alloc8 (i32.add (local.get $pwdlen) (local.get $plen))))
+    (local.set $w (i32.const 0))
+    (local.set $j (i32.const 1))
+    (block $c1 (loop $l1
+      (br_if $c1 (i32.ge_u (local.get $j) (local.get $pwdlen)))
+      (i32.store8 (i32.add (local.get $buf) (local.get $w))
+                  (i32.load8_u (i32.add (local.get $pwd) (local.get $j))))
+      (local.set $w (i32.add (local.get $w) (i32.const 1)))
+      (local.set $j (i32.add (local.get $j) (i32.const 1)))
+      (br $l1)))
+    (i32.store8 (i32.add (local.get $buf) (local.get $w)) (i32.const {ASCII_SLASH}))
+    (local.set $w (i32.add (local.get $w) (i32.const 1)))
+    (local.set $j (i32.const 0))
+    (block $c2 (loop $l2
+      (br_if $c2 (i32.ge_u (local.get $j) (local.get $plen)))
+      (i32.store8 (i32.add (local.get $buf) (local.get $w))
+                  (i32.load8_u (i32.add (local.get $pdata) (local.get $j))))
+      (local.set $w (i32.add (local.get $w) (i32.const 1)))
+      (local.set $j (i32.add (local.get $j) (i32.const 1)))
+      (br $l2)))
+    (local.get $buf) (local.get $w))
+
   (func $read_text_file (param $path i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $fd_out i32) (local $errno i32)
     (local $fd i32) (local $stat i32) (local $fsize i32) (local $iov i32)
     (local $nread i32) (local $data i32) (local $str i32) (local $result i32)
     (local $j i32) (local $msg i32) (local $maddr i32) (local $mlen i32)
-    ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.
-    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
-    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
-    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
-                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
-      (then
-        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
-        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    ;; path bytes + length via $path_norm (absolute → fd-3-relative; relative → "$PWD/"-prefixed).
+    (call $path_norm (local.get $path))
+    (local.set $plen)
+    (local.set $pdata)
     ;; path_open(dirfd=3, dirflags=0, path_ptr, path_len, oflags=0,
     ;;   rights_base = fd_read(2) | fd_seek(4) = 6, rights_inheriting=0, fdflags=0, fd_out)
     (local.set $fd_out (call $alloc8 (i32.const 4)))
@@ -640,14 +722,10 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   (func $write_text_file (param $path i32) (param $content i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $fd_out i32) (local $errno i32)
     (local $fd i32) (local $iov i32) (local $nwritten i32) (local $obj i32) (local $msg i32)
-    ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.
-    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
-    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
-    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
-                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
-      (then
-        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
-        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    ;; path bytes + length via $path_norm (absolute → fd-3-relative; relative → "$PWD/"-prefixed).
+    (call $path_norm (local.get $path))
+    (local.set $plen)
+    (local.set $pdata)
     ;; path_open(dirfd=3, dirflags=0, path_ptr, path_len, oflags=O_CREAT|O_TRUNC=9,
     ;;   rights_base = fd_seek|fd_write|fd_filestat_set_size = 0x400044, rights_inheriting=0,
     ;;   fdflags=0, fd_out)
@@ -691,14 +769,10 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   (func $make_dir (param $path i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $seg i32) (local $errno i32)
     (local $obj i32) (local $msg i32)
-    ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.
-    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
-    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
-    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
-                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
-      (then
-        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
-        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    ;; path bytes + length via $path_norm (absolute → fd-3-relative; relative → "$PWD/"-prefixed).
+    (call $path_norm (local.get $path))
+    (local.set $plen)
+    (local.set $pdata)
     ;; Create each '/'-delimited prefix. Walk $seg; at each '/' (or the end) create
     ;; path[0..seg] and IGNORE its errno (a missing parent is made by an earlier iteration; an
     ;; existing one returns EEXIST). The full path is created here too (when $seg reaches $plen).
@@ -741,27 +815,33 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   ;; size@32, mtim@48); $path a BORROWED canonical String. Same resolution as $path_exists
   ;; (leading '/' stripped, preopen fd 3, symlink_follow). Returns the RAW errno (0 = ok).
   (func $path_filestat_q (param $buf i32) (param $path i32) (result i32)
-    (local $pdata i32) (local $plen i32)
-    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
-    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
-    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
-                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
-      (then
-        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
-        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
-    (call $path_filestat_get (i32.const 3) (i32.const 1) (local.get $pdata) (local.get $plen)
-                             (local.get $buf)))
+    (local $pdata i32) (local $plen i32) (local $scratch i32) (local $errno i32) (local $j i32)
+    (call $path_norm (local.get $path))
+    (local.set $plen)
+    (local.set $pdata)
+    ;; WASI demands an 8-ALIGNED 64-byte filestat out-buffer, but $buf is the
+    ;; self-host's own Bytes data (`handle+12` — 4-aligned at best; it happened to
+    ;; be 8-aligned until other rt allocs shifted the bump heap). Stat into an
+    ;; aligned scratch, then copy the 64 bytes into $buf.
+    (local.set $scratch (i32.and (i32.add (call $alloc8 (i32.const 72)) (i32.const 7)) (i32.const -8)))
+    (local.set $errno
+      (call $path_filestat_get (i32.const 3) (i32.const 1) (local.get $pdata) (local.get $plen)
+                               (local.get $scratch)))
+    (local.set $j (i32.const 0))
+    (block $cdone (loop $cloop
+      (br_if $cdone (i32.ge_u (local.get $j) (i32.const 64)))
+      (i32.store8 (i32.add (local.get $buf) (local.get $j))
+                  (i32.load8_u (i32.add (local.get $scratch) (local.get $j))))
+      (local.set $j (i32.add (local.get $j) (i32.const 1)))
+      (br $cloop)))
+    (local.get $errno))
 
   (func $path_exists (param $path i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $stat i32) (local $errno i32)
-    ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.
-    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
-    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
-    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
-                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
-      (then
-        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
-        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    ;; path bytes + length via $path_norm (absolute → fd-3-relative; relative → "$PWD/"-prefixed).
+    (call $path_norm (local.get $path))
+    (local.set $plen)
+    (local.set $pdata)
     (local.set $stat (call $alloc8 (i32.const 64)))
     (local.set $errno
       (call $path_filestat_get (i32.const 3) (i32.const 1) (local.get $pdata) (local.get $plen)
@@ -927,13 +1007,9 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   ;; result is an owned heap handle the caller's scope-end DropListStr balances.
   (func $remove_all (param $path i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $errno i32) (local $obj i32) (local $msg i32)
-    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
-    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
-    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
-                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
-      (then
-        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
-        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    (call $path_norm (local.get $path))
+    (local.set $plen)
+    (local.set $pdata)
     (local.set $errno (call $remove_path (local.get $pdata) (local.get $plen)))
     (if (result i32) (i32.eqz (local.get $errno))
       (then
@@ -983,14 +1059,10 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     (local $off i32) (local $namlen i32) (local $skip i32) (local $count i32)
     (local $list i32) (local $ci i32) (local $name i32) (local $msg i32)
     (local $namebase i32) (local $si i32) (local $sj i32) (local $hi i64) (local $hj i64)
-    ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.
-    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
-    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
-    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
-                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
-      (then
-        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
-        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    ;; path bytes + length via $path_norm (absolute → fd-3-relative; relative → "$PWD/"-prefixed).
+    (call $path_norm (local.get $path))
+    (local.set $plen)
+    (local.set $pdata)
     ;; path_open(dirfd=3, dirflags=1, path, plen, oflags=2 [O_DIRECTORY],
     ;;   rights_base = fd_readdir(0x4000), rights_inheriting=0, fdflags=0, fd_out)
     (local.set $fd_out (call $alloc8 (i32.const 4)))

@@ -448,6 +448,11 @@ impl LowerCtx {
                 Some((fields.iter().map(|(n, _)| *n).collect(), fields.iter().map(|(_, t)| t.clone()).collect()))
             }
             Ty::Tuple(elems) => Some((Vec::new(), elems.clone())),
+            // The Applied spelling of a user record (`Applied(UserDefined("Pair"), args)`)
+            // resolves exactly like `Named` — normalize and recurse.
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::UserDefined(n), args) => {
+                self.aggregate_field_tys(&Ty::Named(almide_lang::intern::sym(n), args.clone()))
+            }
             Ty::Named(name, args) => {
                 // A cross-module type may arrive with its BARE spelling (`Lin`) while the
                 // registry keys the QUALIFIED decl name (`types_mod.Lin`) — resolve through

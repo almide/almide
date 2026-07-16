@@ -247,7 +247,6 @@ pub fn strip_never_err_unwraps(
     struct S<'a> {
         can_err: &'a std::collections::HashSet<String>,
         lifted: &'a std::collections::HashSet<String>,
-        self_name: &'a str,
     }
     impl IrMutVisitor for S<'_> {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
@@ -265,10 +264,17 @@ pub fn strip_never_err_unwraps(
             // `Try` (the frontend auto-`?`) over the same never-err lifted callee is
             // the identical no-op — `x = step(x)` carries `Try{step(x)}`, which an
             // unstripped path lowered to a deferred Const-0 (effect_assign_unwrap).
+            // The SELF-call exception admits only a LIFTED self: a DECLARED-Result self
+            // (`effect fn eval_e(..) -> Result[Int, String]`) builds a REAL Result block,
+            // so stripping a BIND-position `eval_e(l)!` made the binder read the block
+            // handle as the raw payload (i64 local ← i32 call: invalid wasm — the
+            // box_deref_clone recursion). A lifted self keeps the strip everywhere (the
+            // yaml TCO shape); a declared-Result tail self-`!` is pass-through in the
+            // tail lowering without any strip.
             let never_err_named_call = |inner: &IrExpr| {
                 matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
                     if !self.can_err.contains(name.as_str())
-                        && (self.lifted.contains(name.as_str()) || name.as_str() == self.self_name)
+                        && self.lifted.contains(name.as_str())
                         && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str())))
             };
             let strip = matches!(&expr.kind,
@@ -312,7 +318,8 @@ pub fn strip_never_err_unwraps(
             }
         }
     }
-    S { can_err, lifted: lifted_effect_fns, self_name }.visit_expr_mut(body);
+    let _ = self_name; // kept in the signature: callers name the fn being stripped
+    S { can_err, lifted: lifted_effect_fns }.visit_expr_mut(body);
 }
 
 /// Rewrite `Try/Unwrap { fan.map(xs, (x) => ok(E)) }` → `list.map(xs, (x) => E)` — a PURE
@@ -727,6 +734,13 @@ pub fn lifted_effect_fn_names(fns: &[IrFunction]) -> std::collections::HashSet<S
 /// from `fns` — extracted from [`inline_mutual_tail_recursion`] so the pipeline can WIDEN the
 /// registries over the WHOLE program (main + mangled module siblings) without feeding module
 /// bodies through the main pre-pass rewrites (which regressed the intra-module tail-call shape).
+/// A snapshot of the AUTO_WRAP registry — the pipeline's populate→rewrite fixpoint
+/// compares successive snapshots to detect stability (the registry is thread-local
+/// and `pub(crate)`, so the pipeline reads it through this accessor).
+pub fn auto_wrap_abi_snapshot() -> std::collections::HashSet<String> {
+    AUTO_WRAP_ABI_FNS.with(|s| s.borrow().clone())
+}
+
 pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayouts) {
     let can_err = compute_can_err(fns);
     let lifted_effect_fns = lifted_effect_fn_names(fns);

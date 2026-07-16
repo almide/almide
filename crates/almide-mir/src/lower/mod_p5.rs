@@ -170,7 +170,7 @@ pub(crate) fn alloc_init(value: &IrExpr) -> Init {
             .iter()
             .map(|e| match &e.kind {
                 IrExprKind::LitInt { value } => Some(*value),
-                IrExprKind::LitFloat { value } => Some(value.to_bits() as i64),
+                IrExprKind::LitFloat { value } => Some(crate::lower::float_lit_bits(*value, &e.ty)),
                 // A Bool literal occupies its 8-byte slot as 0/1 (the i64-uniform Bool repr), so a
                 // `[true, false]` literal materializes exactly like an IntList of [1, 0] — read back
                 // via load64 as 0/1. (`${bool_list}` → list.to_string_b reads these slots.)

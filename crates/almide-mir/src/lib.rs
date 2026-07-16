@@ -746,6 +746,15 @@ pub enum PrimKind {
     /// bits in the low 32 of the i64 slot (high 32 zero, from F32Demote/IntToF32's zero-extend), so
     /// this is a type-only reinterpret (no-op pass-through), like FloatBits for f64.
     F32Bits,
+    /// A binary f32 op over two Float32 values (each the low-32 f32 pattern in its i64 slot):
+    /// unwrap → f32 op (per-op f32 rounding, matching native Rust f32 and v0's F32Add family) →
+    /// re-wrap. The f64 `FloatBin` on these bit patterns computed garbage (the low-32 f32 bits
+    /// reinterpreted as f64 are a denormal).
+    F32Bin(FBinOp),
+    /// A binary f32 comparison (`f32.eq`/`lt`/… over the low-32 patterns) → i64-uniform Bool.
+    F32Cmp(FCmpOp),
+    /// A unary f32 op (neg/abs/…) over the low-32 pattern.
+    F32Un(FUnOp),
 }
 
 /// A unary f64 op (the value is the f64 bits in an i64; render reinterprets around it).

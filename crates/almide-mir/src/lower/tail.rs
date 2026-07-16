@@ -992,7 +992,7 @@ impl LowerCtx {
             // for a LitFloat operand. (The frontend folds `{ let p = 3.14; p }` to this form.)
             IrExprKind::LitFloat { value } => {
                 let dst = self.fresh_value();
-                self.ops.push(Op::ConstInt { dst, value: value.to_bits() as i64 });
+                self.ops.push(Op::ConstInt { dst, value: crate::lower::float_lit_bits(*value, &tail.ty) });
                 Ok(Some(dst))
             }
             // A BOOL literal returned directly (`(x) => true` — a constant/param-ignoring predicate

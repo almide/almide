@@ -145,11 +145,11 @@ pub fn dump_desugared_ir(
 ) {
     if std::env::var("DBG_DESUGAR_FN").is_ok_and(|v| v == fn_name) {
         if std::env::var("DBG_DESUGAR_RAW").is_ok() {
-            eprintln!("=== RAW {fn_name} ===\n{:#?}", desugar_all(body, fn_name == "main", layouts, record_layouts));
+            eprintln!("=== RAW {fn_name} ===\n{:#?}", desugar_all(body, fn_name == "main", layouts, record_layouts, &[]));
         } else {
             eprintln!(
                 "=== DESUGARED {fn_name} ===\n{}",
-                dump_ir(&desugar_all(body, fn_name == "main", layouts, record_layouts))
+                dump_ir(&desugar_all(body, fn_name == "main", layouts, record_layouts, &[]))
             );
         }
     }
@@ -382,6 +382,7 @@ pub fn desugar_all(
     unit_main: bool,
     layouts: &crate::lower::VariantLayouts,
     record_layouts: &crate::lower::RecordLayouts,
+    params: &[almide_ir::IrParam],
 ) -> IrExpr {
     let mut cur = body.clone();
     loop {
@@ -406,6 +407,12 @@ pub fn desugar_all(
         }
         // `buf[i]` over Bytes → `bytes.index(buf, i)` — same contract.
         if let Some(r) = desugar_bytes_index_calls(&cur) {
+            cur = r;
+            continue;
+        }
+        // `buf[i] = v` over Bytes → `bytes.set_at(buf, i, v)` — same contract
+        // (the rewrite adds ONE counted Module call matching the lowering's CallFn).
+        if let Some(r) = desugar_bytes_index_assign(&cur, params) {
             cur = r;
             continue;
         }

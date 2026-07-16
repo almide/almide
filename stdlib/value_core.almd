@@ -665,6 +665,21 @@ fn option_listint_unwrap_or(o: Option[List[Int]], d: List[Int]) -> List[Int] = {
   }
 }
 
+// `result.unwrap_or(r, d)` over a Result[<flat scalar block>, String] — a scalar TUPLE
+// (`result.zip`'s `(Int, Int)`), a List[<scalar>], or a Bytes Ok payload. The heap-Ok
+// Result is the CAP-AS-TAG 1-slot block (tag @16: 0 = Ok, 1 = Err; payload handle @12) —
+// the Ok arm loads the @12 inner block and the bare-Var tail auto-acquires (Dup, freed by
+// the flat rc_dec — scalar slots own nothing), the Err arm returns the fallback.
+fn result_flat_unwrap_or(r: Result[List[Int], String], d: List[Int]) -> List[Int] = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  if tag != 0 then d
+  else {
+    let v: List[Int] = prim.load_handle(h + 12)
+    v
+  }
+}
+
 // `?? d` over an Option[List[String]] (`list.get_liststr(rows, i) ?? []`): the SAME len-as-tag prim
 // shape as option_value_unwrap_or, with a List[String] payload — the Some arm loads the @12 inner-list
 // handle and the bare-Var tail auto-acquires (Dup), the None arm returns the fallback.

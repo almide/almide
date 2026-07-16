@@ -1308,7 +1308,19 @@ impl LowerCtx {
         // generators name `$__drop_<R>` from the QUALIFIED decl.
         let canonical =
             crate::lower::canonical_record_key(&self.record_layouts, &name)?.to_string();
-        let (_, tys) = self.aggregate_field_tys(ty)?;
+        let (names, tys) = self.aggregate_field_tys(ty)?;
+        // A GENERIC decl has no shared `$__drop_<R>` (the heap mask differs per
+        // instantiation — `Pair[Int, String]` vs `Pair[String, Int]`): route to the
+        // per-shape `__drop_anonrec_<hash>` over the SUBSTITUTED fields, the same
+        // identity `collect_recursive_anon_records` registers for generation.
+        if self.record_layouts.get(canonical.as_str()).is_some_and(|(gs, _)| !gs.is_empty()) {
+            let pairs: Vec<(almide_lang::intern::Sym, Ty)> =
+                names.into_iter().zip(tys.iter().cloned()).collect();
+            if crate::lower::anon_record_needs_recursive_drop(&pairs) {
+                return Some(crate::lower::anon_record_drop_name(&pairs));
+            }
+            return None;
+        }
         tys.iter()
             .any(record_field_needs_recursive_drop)
             .then_some(canonical)

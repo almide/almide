@@ -1222,6 +1222,7 @@ fn classify_file(
                     func.name.as_str() == "main",
                     &variant_layouts,
                     &record_layouts,
+                    &func.params,
                 );
                 // INTERP COVERAGE (a): this function LOWERED, so its FULLY-LINKABLE
                 // interps (Lit/String/Int/Bool parts) fold to a registered __str_concat /
