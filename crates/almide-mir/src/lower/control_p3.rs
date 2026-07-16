@@ -1150,10 +1150,44 @@ impl LowerCtx {
             });
             return Some(dst);
         }
-        // A custom VARIANT — tag eq + tag-dispatched per-field recursion.
+        // A `List[<custom variant>]` — the synthesized loop helper (the element
+        // eq is the variant helper; a non-variant element stayed in the module
+        // table above). Generated once per parent fn, called at the site.
+        if let Ty::Applied(TC::List, es) = ty {
+            if es.len() == 1 {
+                if let Some(elem_name) = self.custom_variant_type_name(&es[0]) {
+                    if let Some(elem_layout) =
+                        self.variant_layouts.by_type.get(&elem_name).cloned()
+                    {
+                        let (elem_key, elem_inst) =
+                            instantiate_variant_layout(&elem_name, &elem_layout, &es[0]);
+                        if self.ensure_list_eq_helper(&elem_key, &elem_inst) {
+                            let name = self.list_eq_helper_name(&elem_key);
+                            return Some(self.emit_eq_helper_call(name, lv, rv));
+                        }
+                    }
+                    return None;
+                }
+            }
+        }
+        // A custom VARIANT — a RECURSIVE one (or one already being generated)
+        // routes through its synthesized helper (recursion-by-call; the static
+        // inline could never terminate); everything else keeps the proven
+        // inline tag-dispatch chain, byte-identical to before.
         if let Some(tyname) = self.custom_variant_type_name(ty) {
             let layout = self.variant_layouts.by_type.get(&tyname).cloned();
             if let Some(layout) = layout {
+                // A GENERIC variant instantiates per-use (`Tree[Int]`): the
+                // helper key carries the args and the layout's field types are
+                // substituted, so `Leaf(T)` compares as `Leaf(Int)`.
+                let (key, layout) = instantiate_variant_layout(&tyname, &layout, ty);
+                if self.synth_eq_types.contains(&key) || self.variant_needs_eq_helper(&tyname) {
+                    if self.ensure_variant_eq_helper(&key, &layout) {
+                        let name = self.eq_helper_name(&key);
+                        return Some(self.emit_eq_helper_call(name, lv, rv));
+                    }
+                    return None;
+                }
                 return self.variant_eq_from_handles(lv, rv, &layout, depth);
             }
         }
@@ -1225,7 +1259,7 @@ impl LowerCtx {
     /// recurse through the typed eq (ANDed), fieldless ctors compare true. All merge values are
     /// scalar Bools — the IfThen/Else/EndIf merges carry no ownership. A field whose typed eq
     /// cannot lower (e.g. a recursive `List[Self]` payload) propagates None → the caller walls.
-    fn variant_eq_from_handles(
+    pub(crate) fn variant_eq_from_handles(
         &mut self,
         hl: ValueId,
         hr: ValueId,
@@ -1360,7 +1394,7 @@ impl LowerCtx {
     }
 
     /// The byte-address (`Prim::Handle`) of a materialized block — the operand handed to an eq core.
-    fn handle_of(&mut self, block: ValueId) -> ValueId {
+    pub(crate) fn handle_of(&mut self, block: ValueId) -> ValueId {
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![block] });
         h

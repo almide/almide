@@ -5,8 +5,6 @@
 # target = empty file). Every entry is a named feature-frontier class:
 #
 #   fan              — fan.* concurrency thunks (fan machinery not in v1)
-#   recursive-eq     — `==` over a RECURSIVE variant/list-of-self payload
-#                      (needs a synthesized per-type eq fn)
 #   optional-chain   — `p?.f` desugars to the some/none match (2026-07-16), but a
 #                      HEAP-field projection's match still declines (Option[String]
 #                      arm bodies; the scalar-field chain lowers)
@@ -20,8 +18,6 @@
 #
 spec/integration/codegen_functional_test.almd :: __test_almd_currying
 spec/integration/codegen_variant_record_test.almd :: __test_almd_extract fields from variant records
-spec/lang/default_fields_test.almd :: __test_almd_default fields - equality on shapes
-spec/lang/eq_protocol_test.almd :: __test_almd_recursive variant types are comparable
 spec/lang/fan_value_regression_test.almd :: __test_almd_fan.settle over capturing thunks preserves order and payloads
 spec/lang/fan_value_regression_test.almd :: __test_almd_fan.settle preserves ok and err payloads
 spec/lang/rccow_value_semantics_test.almd :: __test_almd_record copy shields the original's bytes field
@@ -30,9 +26,6 @@ spec/lang/test_where_monkey_test.almd :: __test_almd_math operations / add 1+1
 spec/lang/test_where_monkey_test.almd :: __test_almd_math operations / mul 3*4
 spec/lang/unwrap_operators_test.almd :: __test_almd_optional chain none
 spec/lang/unwrap_operators_test.almd :: __test_almd_optional chain some
-spec/lang/variant_record_test.almd :: __test_almd_variant record empty variant
-spec/lang/variant_record_test.almd :: __test_almd_variant record equality
-spec/lang/variant_record_test.almd :: __test_almd_variant record inequality
 spec/stdlib/list_mutable_test.almd :: __test_almd_list.pop on empty returns none
 spec/stdlib/list_mutable_test.almd :: __test_almd_list.pop removes last element
 spec/stdlib/process_named_type_test.almd :: __test_almd_annotated literal shape matches

@@ -100,6 +100,23 @@ fn count_eq_calls_depth(
         return 1;
     }
     if let Ty::Applied(TC::List, es) = ty {
+        // List[<custom variant>] — the synthesized loop-helper route (engine's
+        // List-of-variant arm): the site's helper call + the generated bodies,
+        // via the shared count (see synth_eq.rs; the site/list-body calls swap
+        // roles vs a direct variant site, same total).
+        if es.len() == 1 {
+            let elem_variant = match &es[0] {
+                Ty::Named(n, _) => Some(n.as_str().to_string()),
+                Ty::Variant { name, .. } => Some(name.as_str().to_string()),
+                Ty::Applied(TC::UserDefined(n), _) => Some(n.clone()),
+                _ => None,
+            };
+            if let Some(n) = elem_variant {
+                if variant_layouts.by_type.contains_key(&n) {
+                    return almide_mir::lower::eq_helper_call_count(variant_layouts, &es[0]);
+                }
+            }
+        }
         let nested_list = matches!(&es[..],
             [Ty::Applied(TC::List, inner)]
                 if matches!(inner[..], [Ty::Int | Ty::Float | Ty::String]));
@@ -144,13 +161,22 @@ fn count_eq_calls_depth(
         Ty::Applied(TC::UserDefined(n), _) => Some(n.clone()),
         _ => None,
     };
-    if let Some(layout) = variant_name.and_then(|n| variant_layouts.by_type.get(&n)) {
-        return layout
-            .cases
-            .iter()
-            .flat_map(|c| c.fields.iter())
-            .map(|(_, t)| count_eq_calls_depth(t, registry, variant_layouts, depth + 1))
-            .sum();
+    if let Some(name) = variant_name {
+        if let Some(layout) = variant_layouts.by_type.get(&name) {
+            // A RECURSIVE variant routes through the synthesized helper family:
+            // ONE site call + every generated helper body's static calls — the
+            // SAME predicate + count the engine uses (synth_eq.rs), so mir == ir
+            // holds by construction.
+            if almide_mir::lower::variant_layout_recursive(variant_layouts, &name) {
+                return almide_mir::lower::eq_helper_call_count(variant_layouts, ty);
+            }
+            return layout
+                .cases
+                .iter()
+                .flat_map(|c| c.fields.iter())
+                .map(|(_, t)| count_eq_calls_depth(t, registry, variant_layouts, depth + 1))
+                .sum();
+        }
     }
     match ty {
         Ty::Tuple(elems) => elems

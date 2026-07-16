@@ -942,6 +942,12 @@ pub(crate) struct LowerCtx {
     /// not perform, so it is walled — never lowered to an unbacked cert event.
     param_values: HashSet<ValueId>,
     next_value: u32,
+    /// recursive-eq brick (synth_eq.rs): the variant types whose synthesized eq
+    /// helper exists / is being generated in THIS fn (a self-typed field inside
+    /// a generating body emits the helper CALL instead of re-inlining), and the
+    /// generated helper MirFunctions (returned with the cluster like `lifted`).
+    synth_eq_types: std::collections::BTreeSet<String>,
+    synth_eq_fns: Vec<MirFunction>,
     /// Depth of enclosing control-flow FRAMES (branch arms / loop bodies). A heap
     /// reassignment at depth > 0 must NOT rebind `value_of` — the new handle would
     /// be frame-local (dropped at the frame's end), yet the var is read on the next

@@ -1591,6 +1591,9 @@ fn lower_function_all_impl(
     };
     let mut all = vec![main];
     all.extend(lifted);
+    // The synthesized recursive-eq helpers ride the same rail as lifted lambdas
+    // (extra cluster functions; per-parent names, so no cross-fn collision).
+    all.extend(std::mem::take(&mut ctx.synth_eq_fns));
     Ok(all)
 }
 
@@ -1623,3 +1626,4 @@ include!("desugar_branch.rs");
 include!("desugar_fan.rs");
 include!("desugar_match.rs");
 include!("desugar_match_subject.rs");
+include!("synth_eq.rs");
