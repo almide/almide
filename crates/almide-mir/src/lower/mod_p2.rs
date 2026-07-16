@@ -265,16 +265,47 @@ pub fn strip_never_err_unwraps(
             // `Try` (the frontend auto-`?`) over the same never-err lifted callee is
             // the identical no-op — `x = step(x)` carries `Try{step(x)}`, which an
             // unstripped path lowered to a deferred Const-0 (effect_assign_unwrap).
-            let strip = matches!(&expr.kind,
-                IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }
-                if matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
+            let never_err_named_call = |inner: &IrExpr| {
+                matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
                     if !self.can_err.contains(name.as_str())
                         && (self.lifted.contains(name.as_str()) || name.as_str() == self.self_name)
-                        && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()))));
+                        && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str())))
+            };
+            let strip = matches!(&expr.kind,
+                IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }
+                if never_err_named_call(inner));
             if strip {
                 if let IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner } =
                     &expr.kind
                 {
+                    let inner = (**inner).clone();
+                    *expr = inner;
+                }
+            }
+            // `f() ?? d` over the same never-err lifted callee: the Err arm is
+            // unreachable, so the `??` IS the raw call — the identical
+            // representation argument as the `!`/`Try` strip above (the callee's
+            // v1 value is raw `T`, so no path can read it as a Result block; the
+            // #485 effect_assign test fns walled exactly here). Gated to a
+            // CALL-FREE fallback (a literal / bare var): v0 evaluates `??`
+            // operands eagerly, so a call-bearing fallback has observable
+            // effects (and its dropped calls would also skew the caps counter).
+            let strip_uo = matches!(&expr.kind,
+                IrExprKind::UnwrapOr { expr: inner, fallback }
+                if never_err_named_call(inner)
+                    && match &fallback.kind {
+                        IrExprKind::LitInt { .. }
+                        | IrExprKind::LitFloat { .. }
+                        | IrExprKind::LitBool { .. }
+                        | IrExprKind::LitStr { .. }
+                        | IrExprKind::Var { .. } => true,
+                        // A negated literal (`?? -1`) — still call-free.
+                        IrExprKind::UnOp { operand, .. } => matches!(&operand.kind,
+                            IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }),
+                        _ => false,
+                    });
+            if strip_uo {
+                if let IrExprKind::UnwrapOr { expr: inner, .. } = &expr.kind {
                     let inner = (**inner).clone();
                     *expr = inner;
                 }
@@ -705,6 +736,9 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
         *s.borrow_mut() =
             lifted_effect_fns.iter().filter(|n| !can_err.contains(*n)).cloned().collect();
     });
+    if std::env::var("ALMIDE_ABI_PROBE").is_ok() {
+        eprintln!("[abi] can_err={can_err:?} lifted={lifted_effect_fns:?}");
+    }
     AUTO_WRAP_ABI_FNS.with(|s| {
         *s.borrow_mut() = fns
             .iter()

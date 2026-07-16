@@ -335,6 +335,14 @@ impl LowerCtx {
                 if self.materialized_lists.contains(&src) {
                     self.materialized_lists.insert(dst);
                 }
+                // An alias of a BORROWED param/slot handle (`v = __mp_buf` — the C-132
+                // write-back Assign, where `__mp_buf` is a destructured tuple slot in
+                // `param_values`) denotes the same GENUINE block the borrow does, so a
+                // scalar-element list alias is directly indexable. The Dup above is the
+                // new owned reference; only the read-shape knowledge is added here.
+                if self.param_values.contains(&src) && is_scalar_elem_list_ty(ty) {
+                    self.materialized_lists.insert(dst);
+                }
                 if self.heap_elem_lists.contains(&src) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -768,6 +776,15 @@ impl LowerCtx {
                     self.heap_elem_lists.insert(dst);
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
+                } else if is_scalar_elem_list_ty(ty) {
+                    // A user fn returning `List[scalar]` yields a REAL, POPULATED list
+                    // block (the v1 calling convention — the same argument as the
+                    // variant/record seeds below; a callee that cannot build one WALLS,
+                    // and the render rejects the program). Admit a direct `xs[i]`
+                    // bounds-checked load over the bound result — the C-132 move-mode
+                    // write-back binds the returned buffer exactly here (`__mp_buf =
+                    // add_item(data, 1)` then `data = __mp_buf; data[0]`).
+                    self.materialized_lists.insert(dst);
                 }
                 // A `Value` result from a user fn (`let v = parse_number(c, raw)`) drops via the
                 // runtime-tag-dispatched `DropValue` — the SAME marking the Module-call bind path does

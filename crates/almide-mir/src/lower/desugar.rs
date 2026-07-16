@@ -409,6 +409,17 @@ pub fn desugar_all(
             cur = r;
             continue;
         }
+        // `xs[a..b]` slice RuntimeCall → `list.slice(xs, a, b)` — same contract
+        // (an elided RuntimeCall becomes ONE counted pure Module call, both sides).
+        if let Some(r) = desugar_list_slice_calls(&cur) {
+            cur = r;
+            continue;
+        }
+        // `p?.f` → the some/none match — same contract (adds no calls).
+        if let Some(r) = desugar_optional_chain(&cur) {
+            cur = r;
+            continue;
+        }
         if let Some(r) = desugar_guard(&cur) {
             cur = r;
             continue;
