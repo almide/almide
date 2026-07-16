@@ -24,6 +24,9 @@ on:
     paths:
       - 'proofs/**'
       - 'crates/almide-mir/**'
+      # The corpus classifier embeds stdlib sources (registry include_str!), so
+      # a stdlib change can move the wall set without touching almide-mir.
+      - 'stdlib/**'
       - 'Makefile'
       - '.github/workflows/trust-spine.yml'
   pull_request:
@@ -31,6 +34,7 @@ on:
     paths:
       - 'proofs/**'
       - 'crates/almide-mir/**'
+      - 'stdlib/**'
       - 'Makefile'
       - '.github/workflows/trust-spine.yml'
   workflow_dispatch:
