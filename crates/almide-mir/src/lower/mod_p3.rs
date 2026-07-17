@@ -1004,9 +1004,15 @@ impl LowerCtx {
                                 "append_u16_le" | "append_u16_be" | "append_i16_le"
                                 | "append_i16_be" | "append_u32_le" | "append_u32_be"
                                 | "append_i32_le" | "append_i32_be" | "append_i64_le"
-                                | "append_i64_be" | "append_f32_le" | "append_f64_le"
-                                | "append_f64_be"))
-                        && args.len() == 2
+                                | "append_i64_be" | "append_f32_le" | "append_f32_be"
+                                | "append_f64_le" | "append_f64_be")
+                            // the typed Endian-dispatch appends (bytes_typed.almd):
+                            // same in-place v0 form, functional twin + rebind here.
+                            // 3 args (buf, value, endian) — the receiver stays args[0].
+                            || matches!(func.as_str(),
+                                "write_uint16" | "write_uint32" | "write_int32"
+                                | "write_float32"))
+                        && matches!(args.len(), 2 | 3)
                         && matches!(&args[0].kind, IrExprKind::Var { .. }) =>
                 {
                     let IrExprKind::Var { id } = &args[0].kind else { unreachable!() };
@@ -1024,7 +1030,9 @@ impl LowerCtx {
                                 func: sym(&fname),
                                 def_id: None,
                             },
-                            args: vec![args[0].clone(), args[1].clone()],
+                            // ALL args ride through — the typed Endian writes carry a
+                            // third (endian) argument the functional twin dispatches on.
+                            args: args.clone(),
                             type_args: vec![],
                         },
                         ty: args[0].ty.clone(),
