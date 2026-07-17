@@ -897,6 +897,63 @@ impl LowerCtx {
                     };
                     self.lower_stmt(&assign)
                 }
+                // `map.insert(m, k, v)` / `map.delete(m, k)` — v0 in-place map mutations:
+                // same functional-rebind treatment as bytes.push (`m = map.set(m, k, v)` /
+                // `m = map.remove(m, k)`); the repr dispatch then suffixes the self-host
+                // (set_skv/msv/… , remove_skv/str) exactly like a source-level call.
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if module.as_str() == "map"
+                        && matches!(func.as_str(), "insert" | "delete")
+                        && matches!(&args[0].kind, IrExprKind::Var { .. }) =>
+                {
+                    let IrExprKind::Var { id } = &args[0].kind else { unreachable!() };
+                    let fname = if func.as_str() == "insert" { "set" } else { "remove" };
+                    let call = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("map"),
+                                func: sym(fname),
+                                def_id: None,
+                            },
+                            args: args.clone(),
+                            type_args: vec![],
+                        },
+                        ty: args[0].ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    let assign =
+                        IrStmt { kind: IrStmtKind::Assign { var: *id, value: call }, span: None };
+                    self.lower_stmt(&assign)
+                }
+                // `map.clear(m)` / `list.clear(xs)` — the in-place empty: rebind to the
+                // EMPTY literal of the receiver's own type (adds no call; mir <= ir holds).
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if func.as_str() == "clear"
+                        && matches!(module.as_str(), "map" | "list")
+                        && args.len() == 1
+                        && matches!(&args[0].kind, IrExprKind::Var { .. }) =>
+                {
+                    let IrExprKind::Var { id } = &args[0].kind else { unreachable!() };
+                    let empty = if module.as_str() == "map" {
+                        IrExpr {
+                            kind: IrExprKind::EmptyMap,
+                            ty: args[0].ty.clone(),
+                            span: None,
+                            def_id: None,
+                        }
+                    } else {
+                        IrExpr {
+                            kind: IrExprKind::List { elements: vec![] },
+                            ty: args[0].ty.clone(),
+                            span: None,
+                            def_id: None,
+                        }
+                    };
+                    let assign =
+                        IrStmt { kind: IrStmtKind::Assign { var: *id, value: empty }, span: None };
+                    self.lower_stmt(&assign)
+                }
                 // `list.push(entries, e)` — same treatment as bytes.push: v0's in-place
                 // mutation is observation-equal to the functional `entries = entries + [e]`
                 // under value semantics, and the ConcatList Assign path (the proven
