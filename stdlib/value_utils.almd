@@ -1,0 +1,176 @@
+// value_utils — SELF-HOSTED `value.pick` / `value.omit` / `value.to_camel_case` /
+// `value.to_snake_case`, byte-matching native runtime/rs/src/value.rs. All four are
+// SHALLOW (top-level keys only, nested Values untouched) and pass a non-Object
+// through unchanged (the borrowed param returned bare — auto-acquire, the
+// value_merge `else b` precedent). pick/omit CO-OWN each kept key+value into the
+// fresh Object (rc_inc — the __vmerge_fill_a discipline); the case transforms store
+// a FRESH transformed key (owned, moved via store_str) and co-own the value only.
+// Key transforms are ASCII-only (native's to_ascii_uppercase/lowercase): byte-level
+// processing is char-exact because UTF-8 continuation bytes never land in A-Z/a-z.
+
+// keys ∋ k — linear scan of the List[String] block (the __vobj_find shape).
+fn __vu_has(keys: List[String], k: String, i: Int, n: Int) -> Bool =
+  if i >= n then false
+  else {
+    let e: String = prim.load_handle(prim.handle(keys) + 12 + i * 8)
+    if e == k then true else __vu_has(keys, k, i + 1, n)
+  }
+
+// Count the pairs whose membership matches `want` (true = pick, false = omit).
+fn __vu_count(v: Value, keys: List[String], want: Bool, i: Int, n: Int, nk: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let k: String = prim.load_handle(prim.handle(v) + 12 + (2 * i) * 8)
+    let hit = __vu_has(keys, k, 0, nk)
+    if hit == want then __vu_count(v, keys, want, i + 1, n, nk, acc + 1)
+    else __vu_count(v, keys, want, i + 1, n, nk, acc)
+  }
+
+// Fill the kept pairs in object order, co-owning key AND value (rc_inc both).
+fn __vu_fill(v: Value, keys: List[String], dst: Value, want: Bool, i: Int, n: Int, nk: Int, w: Int) -> Int =
+  if i >= n then w
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let hit = __vu_has(keys, k, 0, nk)
+    if hit == want then {
+      let dh = prim.handle(dst)
+      let kh = prim.load64(h + 12 + (2 * i) * 8)
+      let vh = prim.load64(h + 12 + (2 * i + 1) * 8)
+      prim.rc_inc(kh)
+      prim.rc_inc(vh)
+      prim.store64(dh + 12 + (2 * w) * 8, kh)
+      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+      __vu_fill(v, keys, dst, want, i + 1, n, nk, w + 1)
+    } else __vu_fill(v, keys, dst, want, i + 1, n, nk, w)
+  }
+
+fn __vu_sel(v: Value, keys: List[String], want: Bool) -> Value = {
+  let h = prim.handle(v)
+  let n = prim.load32(h + 8) / 2
+  let nk = prim.load32(prim.handle(keys) + 4)
+  let cnt = __vu_count(v, keys, want, 0, n, nk, 0)
+  let dst = prim.alloc_value(2 * cnt)
+  let dh = prim.handle(dst)
+  prim.store32(dh + 4, 6)
+  prim.store32(dh + 8, 2 * cnt)
+  let _w = __vu_fill(v, keys, dst, want, 0, n, nk, 0)
+  dst
+}
+
+fn value_pick(v: Value, keys: List[String]) -> Value =
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(v, keys, true) else v
+
+fn value_omit(v: Value, keys: List[String]) -> Value =
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(v, keys, false) else v
+
+// snake_case → camelCase: '_' drops and capitalizes the NEXT ASCII lowercase
+// letter (consecutive/leading/trailing underscores follow native's flag walk).
+fn __vu_camel_fill(dst: Int, src: Int, n: Int, i: Int, w: Int, up: Bool) -> Int =
+  if i >= n then w
+  else {
+    let b = prim.load8(src + i)
+    if b == 95 then __vu_camel_fill(dst, src, n, i + 1, w, true)
+    else if up and b >= 97 and b <= 122 then {
+      prim.store8(dst + w, b - 32)
+      __vu_camel_fill(dst, src, n, i + 1, w + 1, false)
+    } else {
+      prim.store8(dst + w, b)
+      __vu_camel_fill(dst, src, n, i + 1, w + 1, false)
+    }
+  }
+
+fn __vu_camel(k: String) -> String = {
+  let sh = prim.handle(k)
+  let n = prim.load32(sh + 4)
+  let out = prim.alloc_str(n)
+  let w = __vu_camel_fill(prim.handle(out) + 12, sh + 12, n, 0, 0, false)
+  prim.store32(prim.handle(out) + 4, w)
+  out
+}
+
+// camelCase → snake_case: ASCII uppercase gains a '_' prefix (except at byte 0)
+// and lowers; everything else passes through. Worst case doubles → alloc 2n, shrink.
+fn __vu_snake_fill(dst: Int, src: Int, n: Int, i: Int, w: Int) -> Int =
+  if i >= n then w
+  else {
+    let b = prim.load8(src + i)
+    if b >= 65 and b <= 90 and i > 0 then {
+      prim.store8(dst + w, 95)
+      prim.store8(dst + w + 1, b + 32)
+      __vu_snake_fill(dst, src, n, i + 1, w + 2)
+    } else if b >= 65 and b <= 90 then {
+      prim.store8(dst + w, b + 32)
+      __vu_snake_fill(dst, src, n, i + 1, w + 1)
+    } else {
+      prim.store8(dst + w, b)
+      __vu_snake_fill(dst, src, n, i + 1, w + 1)
+    }
+  }
+
+fn __vu_snake(k: String) -> String = {
+  let sh = prim.handle(k)
+  let n = prim.load32(sh + 4)
+  let out = prim.alloc_str(2 * n)
+  let w = __vu_snake_fill(prim.handle(out) + 12, sh + 12, n, 0, 0)
+  prim.store32(prim.handle(out) + 4, w)
+  out
+}
+
+// Rename fills: fresh owned key MOVED into the slot (store_str), value CO-OWNED
+// (rc_inc). Split per transform — a heap-result `if` cannot pick the transform.
+fn __vu_ren_fill_c(v: Value, dst: Value, i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let nk = __vu_camel(k)
+    let dh = prim.handle(dst)
+    prim.store_str(dh + 12 + (2 * i) * 8, nk)
+    let vh = prim.load64(h + 12 + (2 * i + 1) * 8)
+    prim.rc_inc(vh)
+    prim.store64(dh + 12 + (2 * i + 1) * 8, vh)
+    __vu_ren_fill_c(v, dst, i + 1, n)
+  }
+
+fn __vu_ren_fill_s(v: Value, dst: Value, i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let nk = __vu_snake(k)
+    let dh = prim.handle(dst)
+    prim.store_str(dh + 12 + (2 * i) * 8, nk)
+    let vh = prim.load64(h + 12 + (2 * i + 1) * 8)
+    prim.rc_inc(vh)
+    prim.store64(dh + 12 + (2 * i + 1) * 8, vh)
+    __vu_ren_fill_s(v, dst, i + 1, n)
+  }
+
+fn __vu_ren_c(v: Value) -> Value = {
+  let h = prim.handle(v)
+  let n = prim.load32(h + 8) / 2
+  let dst = prim.alloc_value(2 * n)
+  let dh = prim.handle(dst)
+  prim.store32(dh + 4, 6)
+  prim.store32(dh + 8, 2 * n)
+  __vu_ren_fill_c(v, dst, 0, n)
+  dst
+}
+
+fn __vu_ren_s(v: Value) -> Value = {
+  let h = prim.handle(v)
+  let n = prim.load32(h + 8) / 2
+  let dst = prim.alloc_value(2 * n)
+  let dh = prim.handle(dst)
+  prim.store32(dh + 4, 6)
+  prim.store32(dh + 8, 2 * n)
+  __vu_ren_fill_s(v, dst, 0, n)
+  dst
+}
+
+fn value_to_camel_case(v: Value) -> Value =
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_c(v) else v
+
+fn value_to_snake_case(v: Value) -> Value =
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_s(v) else v

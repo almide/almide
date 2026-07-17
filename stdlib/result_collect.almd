@@ -42,3 +42,80 @@ fn result_collect(rs: List[Result[Int, String]]) -> Result[List[Int], List[Strin
     ok(obuf)
   }
 }
+
+// ── result.partition ── (oks, errs) in list order: both sides over-allocated to n
+// and SHRUNK via the len field (cap stays n — len <= cap, the list.pop precedent).
+// Ok payloads are scalar raw copies; Err strings DEEP-COPY (string.repeat ·1) so
+// both result lists are single-owned. Counts ride the packed `oi*2^20 + ei` Int.
+
+fn __rpar_go(oh: Int, eh: Int, sh: Int, n: Int, i: Int, packed: Int) -> Int =
+  if i >= n then packed
+  else {
+    let r = prim.load64(sh + 12 + i * 8)
+    let oi = packed / 1048576
+    let ei = prim.band(packed, 1048575)
+    if prim.load32(r + 4) == 1 then {
+      let s = prim.load_str(r + 12)
+      let copy = string.repeat(s, 1)
+      prim.store_str(eh + 12 + ei * 8, copy)
+      __rpar_go(oh, eh, sh, n, i + 1, oi * 1048576 + ei + 1)
+    } else {
+      prim.store64(oh + 12 + oi * 8, prim.load64(r + 12))
+      __rpar_go(oh, eh, sh, n, i + 1, (oi + 1) * 1048576 + ei)
+    }
+  }
+
+fn result_partition(rs: List[Result[Int, String]]) -> (List[Int], List[String]) = {
+  let sh = prim.handle(rs)
+  let n = prim.load32(sh + 4)
+  let obuf = prim.alloc_list(n)
+  let ebuf = prim.alloc_list_str(n)
+  let packed = __rpar_go(prim.handle(obuf), prim.handle(ebuf), sh, n, 0, 0)
+  prim.store32(prim.handle(obuf) + 4, packed / 1048576)
+  prim.store32(prim.handle(ebuf) + 4, prim.band(packed, 1048575))
+  (obuf, ebuf)
+}
+
+// ── result.collect_map ── maps `f` over `xs` and collects: every Err payload
+// gathers (in order) when any exists, else Ok([all mapped values]). `f` is called
+// exactly ONCE per element (the C-055 discipline — unlike option_collect_map's
+// pure-two-pass, `f` here can be a lifted effect fn): a single pass writes both
+// over-allocated sides, then the lens shrink. Each `f(x)` is a FRESH OWNED Result
+// dropped at the step helper's scope end (O(1) live Results); its Err string is
+// deep-copied before the drop. The element slot is FORWARDED to `f` untouched
+// (borrowed, any repr) — only the Ok payload (scalar) and Err (String) reprs are
+// pinned, and the router guards both.
+
+fn __rcm_step(oh: Int, eh: Int, xh: Int, f: (Int) -> Result[Int, String], i: Int, oi: Int, ei: Int) -> Int = {
+  let x = prim.load64(xh + 12 + i * 8)
+  let r = f(x)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 4) == 1 then {
+    let s = prim.load_str(rh + 12)
+    let copy = string.repeat(s, 1)
+    prim.store_str(eh + 12 + ei * 8, copy)
+    oi * 1048576 + ei + 1
+  } else {
+    prim.store64(oh + 12 + oi * 8, prim.load64(rh + 12))
+    (oi + 1) * 1048576 + ei
+  }
+}
+
+fn __rcm_go(oh: Int, eh: Int, xh: Int, f: (Int) -> Result[Int, String], n: Int, i: Int, packed: Int) -> Int =
+  if i >= n then packed
+  else {
+    let np = __rcm_step(oh, eh, xh, f, i, packed / 1048576, prim.band(packed, 1048575))
+    __rcm_go(oh, eh, xh, f, n, i + 1, np)
+  }
+
+fn result_collect_map(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[List[Int], List[String]] = {
+  let xh = prim.handle(xs)
+  let n = prim.load32(xh + 4)
+  let obuf = prim.alloc_list(n)
+  let ebuf = prim.alloc_list_str(n)
+  let packed = __rcm_go(prim.handle(obuf), prim.handle(ebuf), xh, f, n, 0, 0)
+  prim.store32(prim.handle(obuf) + 4, packed / 1048576)
+  prim.store32(prim.handle(ebuf) + 4, prim.band(packed, 1048575))
+  let ec = prim.band(packed, 1048575)
+  if ec > 0 then err(ebuf) else ok(obuf)
+}

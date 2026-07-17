@@ -65,6 +65,9 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__take_h_fill",      // list.take_hshare — rc_inc each shared element slot
     "__uh_acquire",       // list.unique_hshare / dedup_hshare — rc_inc each KEPT shared element
     "__skv_entries_fill", // map.entries_skv — rc_inc each key into its (k, v) pair
+    "__vu_fill",          // value.pick/omit — rc_inc each kept key+value into the fresh Object
+    "__vu_ren_fill_c",    // value.to_camel_case — rc_inc each value (keys are fresh owned strings)
+    "__vu_ren_fill_s",    // value.to_snake_case — rc_inc each value (keys are fresh owned strings)
 ];
 
 /// RECURSIVE-DROP CONSUMERS — rc_dec each element at the container's death (the `rec_drop` half of

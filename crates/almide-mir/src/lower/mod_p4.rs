@@ -1193,6 +1193,10 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
         "map" => map_call_name(func, arg_tys, result_ty),
         "result" | "option" if func == "unwrap_or" => unwrap_or_call_name(module, arg_tys),
         "option" => option_call_name(func, arg_tys, result_ty),
+        "result" => result_call_name(func, arg_tys, result_ty),
+        // `value.keys` IS `json.keys` (one impl, two stdlib names) — remap to the
+        // registered self-host; every other value.* rides its own dotted name.
+        "value" if func == "keys" => Some("json.keys".to_string()),
         _ => None,
     };
     routed.unwrap_or_else(|| format!("{module}.{func}"))
@@ -1257,6 +1261,41 @@ fn option_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
         }
         "unwrap_or_else" if is_heap_ty(result_ty) => {
             Some("option.unwrap_or_else_h".to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Route `result.partition` / `result.collect_map` by REPR: the self-host impls
+/// (result_collect.almd) pin the Ok payload to a SCALAR raw-copy slot and the Err
+/// to a deep-copied String. Any other repr routes to the UNLINKED `_x` suffix — a
+/// clean render wall, never a wrong-typed link (the random/fan `_x` discipline).
+/// The mapped-list ELEMENT (collect_map's `xs`) is unconstrained: its slot is
+/// forwarded to the closure untouched (borrowed, any repr).
+fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match func {
+        // partition: List[Result[scalar, String]] → (List[scalar], List[String])
+        "partition" => {
+            let ok = matches!(arg_tys.first(), Some(Ty::Applied(TC::List, e))
+                if e.len() == 1
+                    && matches!(&e[0], Ty::Applied(TC::Result, re)
+                        if re.len() == 2 && !is_heap_ty(&re[0]) && matches!(re[1], Ty::String)));
+            Some(if ok { "result.partition".to_string() } else { "result.partition_x".to_string() })
+        }
+        // collect_map: (List[T], (T) -> Result[U, E]) → Result[List[U], List[E]]
+        // with U scalar, E String (keyed on the RESULT type — the closure's own
+        // repr is heap-result `_h` by construction for every instantiation).
+        "collect_map" => {
+            let ok = matches!(result_ty, Ty::Applied(TC::Result, oe)
+                if oe.len() == 2
+                    && matches!(&oe[0], Ty::Applied(TC::List, u) if u.len() == 1 && !is_heap_ty(&u[0]))
+                    && matches!(&oe[1], Ty::Applied(TC::List, e) if e.len() == 1 && matches!(e[0], Ty::String)));
+            Some(if ok {
+                "result.collect_map".to_string()
+            } else {
+                "result.collect_map_x".to_string()
+            })
         }
         _ => None,
     }

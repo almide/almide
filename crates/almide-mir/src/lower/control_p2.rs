@@ -107,6 +107,7 @@ impl LowerCtx {
         }
         // tag = load32(handle(subj) + 4); if tag != 0 then Err-arm else Ok-arm (len 0 = Ok).
         let ops_mark = self.ops.len();
+        let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
@@ -123,6 +124,7 @@ impl LowerCtx {
         }
         if self.lower_branch_arm(None, err_body).is_err() {
             self.ops.truncate(ops_mark);
+            self.lifted.truncate(lifted_mark);
             self.live_heap_handles.truncate(lhh_mark);
             return false;
         }
@@ -163,6 +165,7 @@ impl LowerCtx {
         }
         if self.lower_branch_arm(None, ok_body).is_err() {
             self.ops.truncate(ops_mark);
+            self.lifted.truncate(lifted_mark);
             self.live_heap_handles.truncate(lhh_mark);
             return false;
         }
@@ -285,9 +288,11 @@ impl LowerCtx {
             arms
         };
         let ops_mark = self.ops.len();
+        let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
         let rollback = |s: &mut Self| {
             s.ops.truncate(ops_mark);
+            s.lifted.truncate(lifted_mark);
             s.live_heap_handles.truncate(lhh_mark);
             None
         };
@@ -565,8 +570,13 @@ impl LowerCtx {
         ops_mark: usize,
         lhh_mark: usize,
     ) -> Option<(ValueId, bool, bool, bool)> {
+        // Roll back PERSISTENT side effects too: a probed subject containing a lambda
+        // LIFTS it (self.lifted), and an abandoned probe would leave a dead lifted fn
+        // whose CallFn ops double-count the caps gate's mir tally (mir > ir breach).
+        let lifted_mark = self.lifted.len();
         let rollback = |s: &mut Self| {
             s.ops.truncate(ops_mark);
+            s.lifted.truncate(lifted_mark);
             s.live_heap_handles.truncate(lhh_mark);
             None
         };
@@ -619,13 +629,17 @@ impl LowerCtx {
                 self.heap_elem_lists.insert(subj);
             }
         }
-        if is_self_host_result_call(subject)
+        if (is_self_host_result_call(subject) && !Self::is_heap_ok_result(&subject.ty))
             || (is_named_call
                 && crate::lower::is_result_ty(&subject.ty)
                 && !Self::is_heap_ok_result(&subject.ty))
             // An EFFECT-result subject (process.kill / RuntimeCall) with a SCALAR-Ok / heap-Err
             // Result is tracked the SAME as a scalar self-host/Named result: len-as-tag @4, Err arm
             // binds slot-0 String, subject drops via DropListStr (the case-A heap_elem_lists below).
+            // The self-host list is guarded by TYPE too: `result.collect`/`result.map` are listed
+            // there but return a HEAP-Ok Result for heap payloads — cap-as-tag, NOT len-as-tag —
+            // which the str-result branch below now tracks (reading @4 misdispatched EVERY heap-Ok
+            // collect to the Err arm — the parse_all List[Int]-as-List[String] garbage join).
             || (used_effect_subj && !Self::is_heap_ok_result(&subject.ty))
         {
             self.materialized_results.insert(subj);
@@ -673,6 +687,12 @@ impl LowerCtx {
             // An EFFECT-result subject with a HEAP-Ok Result (String/Value/List[Value]/tuple-Ok —
             // `effect_unwrap_admitted` already excluded RECORD-Ok; the by-type dispatch below is exact).
             || (used_effect_subj && Self::is_heap_ok_result(&subject.ty))
+            // Any OTHER self-host Module call with a HEAP-Ok Result (`result.collect` /
+            // `result.map` over a heap payload — listed len-as-tag but cap-as-tag for these
+            // instantiations): TYPE decides the repr, not the list. Every heap-Ok Result is
+            // BUILT cap-as-tag (the ok()/err() ctors' materialize_result_str layout), so the
+            // read side must agree universally.
+            || (is_self_host_result_call(subject) && Self::is_heap_ok_result(&subject.ty))
         {
             self.materialized_results_str.insert(subj);
             if let Some(drop_fn) = self.result_ok_record_drop_fn(&subject.ty) {
@@ -806,9 +826,11 @@ impl LowerCtx {
     /// stays exact (the heap result backs one `i`).
     pub(crate) fn try_materialize_effect_result_subject(&mut self, subject: &IrExpr) -> Option<ValueId> {
         let ops_mark = self.ops.len();
+        let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
         let rollback = |s: &mut Self| {
             s.ops.truncate(ops_mark);
+            s.lifted.truncate(lifted_mark);
             s.live_heap_handles.truncate(lhh_mark);
             None
         };
@@ -947,6 +969,7 @@ impl LowerCtx {
             _ => return None,
         };
         let ops_mark = self.ops.len();
+        let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
         let subj = match self
             .lower_call_args(std::slice::from_ref(subject))
@@ -956,12 +979,14 @@ impl LowerCtx {
             Some(CallArg::Handle(v)) => v,
             _ => {
                 self.ops.truncate(ops_mark);
+                self.lifted.truncate(lifted_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 return None;
             }
         };
         if self.deferred_opaque_binds.contains(&subj) {
             self.ops.truncate(ops_mark);
+            self.lifted.truncate(lifted_mark);
             self.live_heap_handles.truncate(lhh_mark);
             return None;
         }
@@ -981,6 +1006,7 @@ impl LowerCtx {
             Some(v) => v,
             _ => {
                 self.ops.truncate(ops_mark);
+                self.lifted.truncate(lifted_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 return None;
             }
@@ -995,6 +1021,7 @@ impl LowerCtx {
             Some(v) => v,
             _ => {
                 self.ops.truncate(ops_mark);
+                self.lifted.truncate(lifted_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 return None;
             }
@@ -1042,13 +1069,20 @@ impl LowerCtx {
         if !is_heap_ty(result_ty) || arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
             return None;
         }
-        // len-as-tag subjects only: a SCALAR Ok payload (Err payload scalar or heap).
+        // A SCALAR-Ok subject reads len-as-tag (@4); a HEAP-Ok subject is the cap-as-tag
+        // 1-slot block (len@4 always 1, payload handle @12 low-32, tag @16) — the SAME
+        // uniform Err=then(tag≠0)/Ok=else(tag 0) skeleton, only the tag offset and the
+        // Ok-payload load differ (scalar copy vs borrowed LoadHandle — the statement-match
+        // twin's `materialized_results_str` discipline). Opens the desugared
+        // `let v = result.collect_map(..)!; ok(v)` tail (a heap-Ok match returned).
         let (ok_pay_ty, err_pay_ty) = match &subject.ty {
-            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && !is_heap_ty(&a[0]) => {
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
                 (a[0].clone(), a[1].clone())
             }
             _ => return None,
         };
+        let heap_ok = is_heap_ty(&ok_pay_ty);
+        let tag_off = if heap_ok { 16 } else { 4 };
         let mut ok_arm: Option<(&IrExpr, Option<VarId>)> = None;
         let mut err_arm: Option<(&IrExpr, Option<VarId>)> = None;
         for arm in arms {
@@ -1089,6 +1123,7 @@ impl LowerCtx {
             _ => return None,
         };
         let ops_mark = self.ops.len();
+        let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
         // Materialize the subject to an OWNED tracked temp (a call result is fresh-owned; a
         // Var is borrowed — Dup it so the scope-end drop discipline is uniform). The temp is
@@ -1101,18 +1136,28 @@ impl LowerCtx {
             Some(CallArg::Handle(v)) => v,
             _ => {
                 self.ops.truncate(ops_mark);
+                self.lifted.truncate(lifted_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 return None;
             }
         };
         if self.deferred_opaque_binds.contains(&subj) {
             self.ops.truncate(ops_mark);
+            self.lifted.truncate(lifted_mark);
             self.live_heap_handles.truncate(lhh_mark);
             return None;
         }
+        if heap_ok {
+            // The cap-as-tag wrapper's epilogue drop must release its @12 payload too:
+            // DropListStr rc_decs the single slot handle (len@4 is always 1) + frees the
+            // wrapper — the Ok arm's Dup keeps a returned payload alive, so the dec is the
+            // borrow's release, never a double-free. (A heap-ERR inner's own nested strings
+            // free flat — the statement twin's `else heap_elem_lists` leak-parity bucket.)
+            self.heap_elem_lists.insert(subj);
+        }
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
-        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        let tag = self.load_at_offset(h, tag_off, PrimKind::Load { width: 4 });
         let dst = self.fresh_value();
         self.ops.push(Op::IfThen { cond: tag, dst: Some(dst) });
         // THEN (tag != 0 = Err): payload = slot 0 (borrowed).
@@ -1131,6 +1176,7 @@ impl LowerCtx {
             Some(v) => v,
             _ => {
                 self.ops.truncate(ops_mark);
+                self.lifted.truncate(lifted_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 return None;
             }
@@ -1139,10 +1185,18 @@ impl LowerCtx {
             outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
         let else_marker_at = self.ops.len();
         self.ops.push(Op::Else { val: Some(err_obj) });
-        // ELSE (tag == 0 = Ok): scalar payload copy.
+        // ELSE (tag == 0 = Ok): a scalar payload copies; a HEAP payload (cap-as-tag
+        // subject) binds the @12 handle as a BORROW — the subject temp still owns it
+        // (freed by the epilogue), an arm that returns it acquires its own ref (Dup).
         if let Some(var) = ok_bind {
-            let _ = &ok_pay_ty;
-            let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+            let payload = if heap_ok {
+                let p = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                self.param_values.insert(p);
+                p
+            } else {
+                let _ = &ok_pay_ty;
+                self.load_at_offset(h, 12, PrimKind::Load { width: 8 })
+            };
             self.value_of.insert(var, payload);
         }
         let live_after_err: Vec<ValueId> = self.live_heap_handles.clone();
@@ -1150,6 +1204,7 @@ impl LowerCtx {
             Some(v) => v,
             _ => {
                 self.ops.truncate(ops_mark);
+                self.lifted.truncate(lifted_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 return None;
             }
@@ -1228,6 +1283,7 @@ impl LowerCtx {
             _ => return None,
         };
         let ops_mark = self.ops.len();
+        let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
         let subj = match self
             .lower_call_args(std::slice::from_ref(subject))
@@ -1237,12 +1293,14 @@ impl LowerCtx {
             Some(CallArg::Handle(v)) => v,
             _ => {
                 self.ops.truncate(ops_mark);
+                self.lifted.truncate(lifted_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 return None;
             }
         };
         if self.deferred_opaque_binds.contains(&subj) {
             self.ops.truncate(ops_mark);
+            self.lifted.truncate(lifted_mark);
             self.live_heap_handles.truncate(lhh_mark);
             return None;
         }
@@ -1260,6 +1318,7 @@ impl LowerCtx {
             Some(v) => v,
             _ => {
                 self.ops.truncate(ops_mark);
+                self.lifted.truncate(lifted_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 return None;
             }
@@ -1274,6 +1333,7 @@ impl LowerCtx {
             Some(v) => v,
             _ => {
                 self.ops.truncate(ops_mark);
+                self.lifted.truncate(lifted_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 return None;
             }
@@ -1372,6 +1432,7 @@ impl LowerCtx {
             return None;
         }
         let ops_mark = self.ops.len();
+        let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
         // Materialize/borrow the subject → a Handle (the variant block pointer).
         let subj = match self
@@ -1382,6 +1443,7 @@ impl LowerCtx {
             Some(CallArg::Handle(v)) => v,
             _ => {
                 self.ops.truncate(ops_mark);
+                self.lifted.truncate(lifted_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 return None;
             }
@@ -1390,6 +1452,7 @@ impl LowerCtx {
         // arm silently (the record-ctor mt2 miscompile) — decline (the tail walls honestly).
         if self.deferred_opaque_binds.contains(&subj) {
             self.ops.truncate(ops_mark);
+            self.lifted.truncate(lifted_mark);
             self.live_heap_handles.truncate(lhh_mark);
             return None;
         }
@@ -1398,6 +1461,7 @@ impl LowerCtx {
         // for now WALL it (a borrowed param/var subject, the recursive-to_string case, proceeds).
         if is_heap_ty(result_ty) && self.live_heap_handles.contains(&subj) {
             self.ops.truncate(ops_mark);
+            self.lifted.truncate(lifted_mark);
             self.live_heap_handles.truncate(lhh_mark);
             return None;
         }
@@ -1443,6 +1507,7 @@ impl LowerCtx {
             Some(dst) => Some(dst),
             None => {
                 self.ops.truncate(ops_mark);
+                self.lifted.truncate(lifted_mark);
                 self.live_heap_handles.truncate(lhh_mark);
                 None
             }

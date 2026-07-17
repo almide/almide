@@ -144,7 +144,12 @@ fn desugar_effect_unwrap_inner(
         };
         let cont =
             desugar_effect_unwrap_inner(&cont, next_var, unit_main, ret_is_result).unwrap_or(cont);
-        let m = build_unwrap_match(inner, ok_pat, cont, body, next_var, unit_main);
+        // `build_unwrap_match` declines a non-convertible err-type mismatch (the propagated
+        // Result's err differs from the fn's and is not the List[String]→String join class):
+        // leave the `!` bind in place so it walls honestly downstream, never a punned payload.
+        let Some(m) = build_unwrap_match(inner, ok_pat, cont, body, next_var, unit_main) else {
+            continue;
+        };
         return Some(IrExpr {
             kind: IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(m)) },
             ty: body.ty.clone(),
@@ -343,7 +348,7 @@ fn build_unwrap_match(
     body: &IrExpr,
     next_var: &mut u32,
     unit_main: bool,
-) -> IrExpr {
+) -> Option<IrExpr> {
     use almide_ir::{IrMatchArm, IrPattern};
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
@@ -385,51 +390,96 @@ fn build_unwrap_match(
             other => other,
         };
         let some_arm = IrMatchArm { pattern: some_pat, guard: None, body: cont };
-        return IrExpr {
+        return Some(IrExpr {
             kind: IrExprKind::Match { subject: Box::new(inner), arms: vec![none_arm, some_arm] },
             ty: body.ty.clone(),
             span: body.span.clone(),
             def_id: body.def_id,
-        };
+        });
     }
     let e_var = VarId(*next_var);
     *next_var += 1;
-    let err_body = if unit_main {
-        // main is void — build the full line (`let $m = "Error: " + e + "\n"`) then abort.
-        let e_ref = IrExpr {
-            kind: IrExprKind::Var { id: e_var },
+    // TYPE-DRIVEN err propagation (2026-07-17): bind the Err payload at ITS OWN type — the
+    // old unconditional `Ty::String` bind type-punned every non-String err. A same-type err
+    // passes through unchanged; a List[String] err into a String-err fn joins ", " (exactly
+    // v0's `.map_err(|errs| errs.join(", "))?` — `result.collect/collect_map(..)!`); any
+    // other mismatch DECLINES so the `!` walls honestly downstream. The SAME conversion
+    // lives in `desugar_let_unwrap` — the lowering chain reaches that one first (via
+    // `desugar_heap_branches`), this one first in the counted `desugar_all` order — so the
+    // call counts agree on both sides (mir == ir, the caps-gate contract).
+    let inner_err_ty = match &inner.ty {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[1].clone(),
+        _ => Ty::String,
+    };
+    let fn_err_ty = match &body.ty {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[1].clone(),
+        // main / a lifted effect body: the synthetic Result errs String.
+        _ => Ty::String,
+    };
+    let e_ref = IrExpr {
+        kind: IrExprKind::Var { id: e_var },
+        ty: inner_err_ty.clone(),
+        span: body.span.clone(),
+        def_id: None,
+    };
+    let payload = if inner_err_ty == fn_err_ty {
+        e_ref
+    } else if matches!(&inner_err_ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String))
+        && matches!(fn_err_ty, Ty::String)
+    {
+        IrExpr {
+            kind: IrExprKind::Call {
+                target: almide_ir::CallTarget::Module {
+                    module: almide_lang::intern::sym("list"),
+                    func: almide_lang::intern::sym("join"),
+                    def_id: None,
+                },
+                args: vec![
+                    e_ref,
+                    IrExpr {
+                        kind: IrExprKind::LitStr { value: ", ".into() },
+                        ty: Ty::String,
+                        span: body.span.clone(),
+                        def_id: None,
+                    },
+                ],
+                type_args: vec![],
+            },
             ty: Ty::String,
             span: body.span.clone(),
             def_id: None,
-        };
-        build_main_die_line(e_ref, body, next_var)
+        }
+    } else {
+        return None;
+    };
+    let err_body = if unit_main {
+        // main is void — build the full line (`let $m = "Error: " + e + "\n"`) then abort.
+        // `payload` is String here by construction (main's fn_err defaults String, so a
+        // same-type pass-through IS a String and the join class produces one).
+        build_main_die_line(payload, body, next_var)
     } else {
         IrExpr {
-            kind: IrExprKind::ResultErr {
-                expr: Box::new(IrExpr {
-                    kind: IrExprKind::Var { id: e_var },
-                    ty: Ty::String,
-                    span: body.span.clone(),
-                    def_id: None,
-                }),
-            },
+            kind: IrExprKind::ResultErr { expr: Box::new(payload) },
             ty: body.ty.clone(),
             span: body.span.clone(),
             def_id: body.def_id,
         }
     };
     let err_arm = IrMatchArm {
-        pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: e_var, ty: Ty::String }) },
+        pattern: IrPattern::Err {
+            inner: Box::new(IrPattern::Bind { var: e_var, ty: inner_err_ty }),
+        },
         guard: None,
         body: err_body,
     };
     let ok_arm = IrMatchArm { pattern: ok_pat, guard: None, body: cont };
-    IrExpr {
+    Some(IrExpr {
         kind: IrExprKind::Match { subject: Box::new(inner), arms: vec![err_arm, ok_arm] },
         ty: body.ty.clone(),
         span: body.span.clone(),
         def_id: body.def_id,
-    }
+    })
 }
 
 /// Recurse the effect-`!` desugar into RETURN/TAIL positions — an `if`/`match` arm body or a nested
@@ -840,8 +890,13 @@ pub fn desugar_unwrap_rewrap_identity(body: &IrExpr) -> Option<IrExpr> {
     let IrExprKind::Unwrap { expr: e } = &value.kind else {
         return None;
     };
-    // `e` must be `Result`-typed (`e!` then `ok(r)` is the identity only when `e` is the SAME `Result`).
-    if !e.ty.is_result() {
+    // `e` must be the SAME `Result` as the rewrap target — INCLUDING the err component. A
+    // mismatched err (`result.collect_map(..)!` = `Result[_, List[String]]` inside a
+    // `Result[_, String]` fn) is a REAL err conversion v0 renders as `.map_err(|errs|
+    // errs.join(", "))?`; collapsing it to a bare pass-through type-puns the err payload
+    // (the List[String] block read as a String — the collect_map! double-free, 2026-07-17).
+    // Declining here routes the shape to `desugar_let_unwrap`, which inserts the join.
+    if !e.ty.is_result() || e.ty != tail.ty {
         return None;
     }
     // `r` is bound at the last stmt and used only in the tail `ok(r)` — removing the bind + collapsing
@@ -1033,9 +1088,43 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
             ));
         }
     }
-    // err($x) => err($x)  (the propagated error IS the function result)
+    // err($x) => err($x)  (the propagated error IS the function result). Sound only when
+    // the propagated err TYPE is the fn's err type; v0 coerces a mismatch at the `?` site
+    // (walker/expressions.rs): List[String] → String joins ", " (`result.collect_map(..)!`
+    // in a String-err effect fn), any other mismatch Debug-formats. Mirror the join here
+    // (an executable list.join call the self-host registry links); decline the Debug class
+    // so it walls honestly instead of type-punning the err payload into the fn's err repr.
+    let fn_err = match &result_ty {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[1].clone(),
+        // A lifted effect fn's synthetic Result errs String.
+        _ => Ty::String,
+    };
     let err_var = mk(IrExprKind::Var { id: fresh }, err_ty.clone());
-    let err_body = mk(IrExprKind::ResultErr { expr: Box::new(err_var) }, result_ty.clone());
+    let err_payload = if err_ty == fn_err {
+        err_var
+    } else if matches!(&err_ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String))
+        && matches!(fn_err, Ty::String)
+    {
+        mk(
+            IrExprKind::Call {
+                target: almide_ir::CallTarget::Module {
+                    module: almide_lang::intern::sym("list"),
+                    func: almide_lang::intern::sym("join"),
+                    def_id: None,
+                },
+                args: vec![
+                    err_var,
+                    mk(IrExprKind::LitStr { value: ", ".into() }, Ty::String),
+                ],
+                type_args: vec![],
+            },
+            Ty::String,
+        )
+    } else {
+        return None;
+    };
+    let err_body = mk(IrExprKind::ResultErr { expr: Box::new(err_payload) }, result_ty.clone());
     let err_arm = almide_ir::IrMatchArm {
         pattern: almide_ir::IrPattern::Err {
             inner: Box::new(almide_ir::IrPattern::Bind { var: fresh, ty: err_ty }),

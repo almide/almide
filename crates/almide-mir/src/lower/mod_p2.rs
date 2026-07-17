@@ -1237,6 +1237,13 @@ pub(crate) struct LowerCtx {
     /// Option handle AS the Result — a confirmed silent wrong-value. Threaded as an explicit
     /// per-fn FACT (the `unit_main` pattern) so the desugar never trusts a tree-local `.ty`.
     ret_is_result_abi: bool,
+    /// This fn's effective ERR type: the declared `Result[_, E]`'s `E`, or `String` for a
+    /// lifted effect fn (the synthetic `Result[T, String]`); `None` when no Result ABI applies
+    /// (a declared `-> Option[..]` fn, a lifted lambda sub-ctx). Gates the tail-`!` pass-through
+    /// (tail.rs): `f() = g()!` returns g's Result AS f's, which is sound only when the err
+    /// components match — v0 coerces a mismatch with `.map_err(...)` at the `?` site, so the
+    /// unchecked pass-through type-punned the err payload (the collect_map! class, 2026-07-17).
+    decl_fn_err: Option<Ty>,
 }
 
 /// Type NAME → (generic param names, declaration-ordered fields) — the VALUE-MODEL

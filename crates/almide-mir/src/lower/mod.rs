@@ -1699,6 +1699,17 @@ fn lower_function_all_impl(
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)
         ) || crate::lower::AUTO_WRAP_ABI_FNS
             .with(|s| s.borrow().contains(func.name.as_str())),
+        // The fn's effective err type — declared `Result[_, E]`'s E, `String` for the lifted
+        // synthetic Result, None for a declared Option (its `!` pass-through is repr-identical).
+        decl_fn_err: match &func.ret_ty {
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                if a.len() == 2 =>
+            {
+                Some(a[1].clone())
+            }
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _) => None,
+            _ => Some(Ty::String),
+        },
         ..Default::default()
     };
     let params = ctx.bind_params(&func.params)?;

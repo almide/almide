@@ -8,6 +8,19 @@ use almide_ir::{
 use almide_lang::types::Ty;
 
 impl LowerCtx {
+    /// True when a tail `e!` pass-through would return a Result whose ERR component
+    /// differs from this fn's own err type ([`decl_fn_err`]) — a coercion v0 renders
+    /// with `.map_err(...)` at the `?` site, so stripping the `!` here would type-pun
+    /// the err payload (the `result.collect_map(..)!` List[String]-as-String class).
+    /// `None` (a declared-Option fn, a lambda sub-ctx) keeps the pass-through.
+    fn unwrap_tail_err_mismatch(&self, inner: &IrExpr) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        if let (Ty::Applied(TC::Result, a), Some(fe)) = (&inner.ty, &self.decl_fn_err) {
+            a.len() == 2 && &a[1] != fe
+        } else {
+            false
+        }
+    }
 
     /// Lower a HEAP field/element/tuple/map EXTRACTION (`r.x`, `xs[i]`, `t.0`,
     /// `m[k]` with a heap result) to an ALIAS of the CONTAINER: `Op::Dup{dst,
@@ -420,6 +433,14 @@ impl LowerCtx {
             // wrapper and lower the inner effect call — exactly the heap-`Unwrap`
             // tail rule (line below), but for a discarded-Unit result.
             IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
+                if self.unwrap_tail_err_mismatch(expr) {
+                    return Err(LowerError::Unsupported(
+                        "tail `!` propagates a Result whose err type differs from the fn's \
+                         (v0 map_err-coerces it) — the pass-through would type-pun the err \
+                         payload not in this brick"
+                            .into(),
+                    ));
+                }
                 self.lower_tail(Some(expr))
             }
             other => Err(LowerError::Unsupported(format!(
@@ -462,8 +483,20 @@ impl LowerCtx {
             // `f() = g()!` PROPAGATES g's Result unchanged (Ok→Ok, Err→Err), i.e. it IS
             // `f() = g()` at the effect-Result level. So strip the `!` and lower `e` as the
             // tail (return its Result directly). This unblocks the `parse_mapping =
-            // collect_map(..)!` shape (a tail call result propagated).
-            IrExprKind::Unwrap { expr } => return self.lower_tail(Some(expr)),
+            // collect_map(..)!` shape (a tail call result propagated). Sound ONLY when the
+            // err components match — a mismatch (v0 map_err-coerces at the `?` site) would
+            // type-pun the propagated err payload, so it walls (the collect_map! class).
+            IrExprKind::Unwrap { expr } => {
+                if self.unwrap_tail_err_mismatch(expr) {
+                    return Err(LowerError::Unsupported(
+                        "tail `!` propagates a Result whose err type differs from the fn's \
+                         (v0 map_err-coerces it) — the pass-through would type-pun the err \
+                         payload not in this brick"
+                            .into(),
+                    ));
+                }
+                return self.lower_tail(Some(expr));
+            }
             // A lambda RETURNED (`fn mk() -> (Int) -> Int = (x) => x + 1`, `fn adder(n)
             // = (x) => x + n`) — LIFT it to a CLOSURE BLOCK (fnidx + captured scalars)
             // and MOVE the block out as the return (a fresh owned heap value — removed
