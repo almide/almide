@@ -626,8 +626,11 @@
     }
 
     #[test]
-    fn map_insert_is_a_place_mutation() {
-        // var m = []; m[k] = v  — map insertion is in-place: MakeUnique (copy-on-write).
+    fn map_insert_is_a_functional_rebind() {
+        // var m = []; m[k] = v  — map insertion REBINDS through the self-host:
+        // `m = map.set(m, k, v)` (value semantics — the same treatment the
+        // `map.insert(m, k, v)` CALL form gets), NOT an in-place MakeUnique
+        // (the old elide-the-write model was a silent no-op on the v1 leg).
         let mi = stmt(IrStmtKind::MapInsert {
             target: VarId(0),
             key: ir_expr(IrExprKind::LitStr { value: "b".into() }, Ty::String),
@@ -638,7 +641,11 @@
             mi,
         ]);
         let mir = lower_body(&b, "main").expect("map insert lowers");
-        assert!(mir.ops.iter().any(|o| matches!(o, Op::MakeUnique { .. })), "map insert is MakeUnique: {:?}", mir.ops);
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name.starts_with("map.set"))),
+            "map insert rebinds through map.set: {:?}",
+            mir.ops
+        );
         assert_eq!(verify_ownership(&mir), Ok(()));
     }
 

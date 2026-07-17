@@ -562,6 +562,11 @@ impl LowerCtx {
         if self.try_lower_scalar_for_list(var, var_tuple, iterable, body) {
             return Ok(());
         }
+        // Then `for (k, v) in m` / `for k in m` over a self-hosted Map layout as a
+        // real entry loop.
+        if self.try_lower_scalar_for_map(var, var_tuple, iterable, body) {
+            return Ok(());
+        }
         // The iterable is evaluated ONCE before the loop. A heap iterable goes through
         // `lower_call_args` — an already-tracked `Var` is borrowed (no new ownership),
         // a fresh heap value is materialized into an owned temp dropped at the OUTER
@@ -659,6 +664,31 @@ impl LowerCtx {
     /// frame — the cert verifies ONE balanced iteration, sound for any N (the existing
     /// model-one-iteration argument), the markers only make wasm actually run it N times.
     /// Returns false (and rolls back) when out of subset; `lower_while` then falls back.
+    /// Pre-loop OWNED COPY for every borrowed-param slot the loop body HEAP-REASSIGNS
+    /// (the C-132 callee shape after the move-mode rewrite: `fn addc(mut s: String, n)
+    /// = { while k < n { s = s + "x"; … } … }` — the rebind arrives via the string.push
+    /// functional rewrite). The loop rebind's uniform drop-old would free the CALLER's
+    /// buffer on iteration 1 (the mut_heap_param rc-underflow trap); starting the slot
+    /// as a `Dup` (+1) of the borrowed param makes iteration 1 drop the copy (the
+    /// caller's reference stays live) and later iterations drop the owned
+    /// intermediates — the same accounting the TCO pre-copy proves. The Dup joins
+    /// `live_heap_handles` (scope-end drops the FINAL object through the same local);
+    /// its cert `a` is backed by the real `Op::Dup` (the borrow-by-default gate).
+    pub(crate) fn precopy_borrowed_reassign_slots(&mut self, body: &[IrStmt]) {
+        let mut vars: Vec<VarId> = Vec::new();
+        collect_heap_reassign_vars(body, &mut vars);
+        for var in vars {
+            if let Some(&val) = self.value_of.get(&var) {
+                if self.param_values.contains(&val) {
+                    let owned = self.fresh_value();
+                    self.ops.push(Op::Dup { dst: owned, src: val });
+                    self.value_of.insert(var, owned);
+                    self.live_heap_handles.push(owned);
+                }
+            }
+        }
+    }
+
     pub(crate) fn try_lower_scalar_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> bool {
         if !matches!(cond.ty, Ty::Int | Ty::Bool) {
             return false;
@@ -667,6 +697,7 @@ impl LowerCtx {
         let lhh_mark = self.live_heap_handles.len();
         let lifted_mark = self.lifted.len();
         let value_of_snapshot = self.value_of.clone();
+        self.precopy_borrowed_reassign_slots(body);
 
         self.ops.push(Op::LoopStart);
         let cond_v = match self.lower_scalar_value(cond) {

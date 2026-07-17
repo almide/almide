@@ -876,6 +876,8 @@ fn loop_carried_slots(
             heap_objs.insert(p.value);
         }
     }
+    // Open-branch stack for the merge-dst scan below: (IfThen dst, then-arm val was heap).
+    let mut if_stack: Vec<(Option<ValueId>, bool)> = Vec::new();
     for op in &func.ops {
         match op {
             // ListLit joins Alloc as an alloc-class introducer (rung 4/5: scalar
@@ -906,6 +908,34 @@ fn loop_carried_slots(
             // form left that slot unrecognized (`idm` + a flat `a`, both rejected).
             Op::Dup { dst, .. } => {
                 heap_objs.insert(*dst);
+            }
+            // A branch-MERGE dst whose arm value is heap (`acc = if c then acc + [x]
+            // else acc` — the arm's Else/EndIf val moves the arm's heap object into
+            // the merge) IS a heap object: the following `SetLocal { local, src: dst }`
+            // is the loop-carried rebind, and the slot goes unrecognized without this
+            // (the accumulator then reads flat `iamdm` — a false imbalance the kernel
+            // checker rejects while the strict render runs correctly). The stack pairs
+            // each EndIf with its IfThen so nesting resolves inner-first; `Else { val }`
+            // carries the then-arm value, `EndIf { val }` the else-arm value.
+            Op::IfThen { dst, .. } => {
+                if_stack.push((*dst, false));
+            }
+            Op::Else { val } => {
+                if let (Some(frame), Some(v)) = (if_stack.last_mut(), val) {
+                    if heap_objs.contains(v) {
+                        frame.1 = true;
+                    }
+                }
+            }
+            Op::EndIf { val } => {
+                if let Some((dst, then_heap)) = if_stack.pop() {
+                    let heap = then_heap || val.map_or(false, |v| heap_objs.contains(&v));
+                    if heap {
+                        if let Some(d) = dst {
+                            heap_objs.insert(d);
+                        }
+                    }
+                }
             }
             _ => {}
         }
@@ -1084,7 +1114,21 @@ impl CertScan {
             // outside either arm — so it is emitted before the region opens.
             Op::IfThen { dst, .. } => {
                 if let Some(d) = dst {
-                    if self.released_merge_dsts.contains(d) {
+                    if let Some(&slot) = self.feeder_to_slot.get(d) {
+                        // A merge dst that FEEDS a heap slot (`acc = if c then acc + [x]
+                        // else acc`): the arms move their value into the merge (+1
+                        // received), and the following SetLocal absorbs it into the
+                        // slot — route the merge's `i` into the SLOT stream exactly as
+                        // the Alloc/heap-call feeders route theirs, so the per-iteration
+                        // body folds rc-preserving (`i(iamd)m`) instead of the flat
+                        // `iamdm` false imbalance the kernel checker rejects.
+                        let so = self.s.object_of(slot);
+                        self.s.of.insert(*d, so);
+                        if self.line_slots.contains(&slot) {
+                            self.s.event(so, '(');
+                        }
+                        self.s.event(so, 'i');
+                    } else if self.released_merge_dsts.contains(d) {
                         self.s.of.insert(*d, *d);
                         self.s.event(*d, 'i');
                     }
@@ -1268,6 +1312,53 @@ impl CertScan {
             _ => {}
         }
     }
+}
+
+/// The number of `i` events [`ownership_certificate`] credits to branch-MERGE
+/// dsts: the RELEASED merges (the arm's moved-in reference, later Consumed/
+/// Dropped/val-flowed/returned) plus the slot-FEEDER merges (`acc = if c then
+/// acc + [x] else acc`, whose `i` routes into the loop-carried slot stream).
+/// Both are backed by the arm value's real producer — the merge is a reference
+/// changing hands (the wasm merge local.set), not a synthetic `+1`. classify's
+/// borrow-by-default backing gate uses THIS count so the gate and the emission
+/// stay in lockstep by construction (one credit per IfThen op occurrence,
+/// mirroring `CertScan::step`'s pre-region emission exactly).
+pub fn merge_dst_i_credits(func: &MirFunction) -> usize {
+    let (feeder_to_slot, _, _) = loop_carried_slots(func);
+    let mut merge_dsts: std::collections::HashSet<crate::ValueId> = std::collections::HashSet::new();
+    let mut released: std::collections::HashSet<crate::ValueId> = std::collections::HashSet::new();
+    for op in &func.ops {
+        match op {
+            Op::IfThen { dst: Some(d), .. } => {
+                merge_dsts.insert(*d);
+            }
+            Op::Consume { v } | Op::Drop { v } | Op::DropListStr { v } => {
+                if merge_dsts.contains(v) {
+                    released.insert(*v);
+                }
+            }
+            Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } => {
+                if merge_dsts.contains(v) {
+                    released.insert(*v);
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some(r) = func.ret {
+        if merge_dsts.contains(&r) {
+            released.insert(r);
+        }
+    }
+    func.ops
+        .iter()
+        .filter(|op| match op {
+            Op::IfThen { dst: Some(d), .. } => {
+                feeder_to_slot.contains_key(d) || released.contains(d)
+            }
+            _ => false,
+        })
+        .count()
 }
 
 pub fn ownership_certificate(func: &MirFunction) -> String {

@@ -28,6 +28,12 @@ impl LowerCtx {
         for p in params {
             let v = self.fresh_value();
             self.value_of.insert(p.var, v);
+            // The param's DECLARED ty, for the same type-directed rewrites a local
+            // bind gets (the FieldAssign/MapInsert functional rebinds need the record/
+            // map ty of a move-mode param target — the C-132 `list.push(b.xs, v)`
+            // write-back shape). The scalar-slot store path is unaffected: its
+            // borrowed-param wall (`lower_place_mutation`) fires before the read.
+            self.var_decl_tys.insert(p.var, p.ty.clone());
             // A FUNCTION-typed param (`f: (Int) -> Int`, the closures machinery) is a
             // CLOSURE BLOCK — the uniform heap representation: the caller passes the
             // block (borrowed, like every heap param) and it joins `closure_values` —
@@ -676,6 +682,44 @@ impl LowerCtx {
                          mutation through the global slot) is not in this brick"
                     )));
                 }
+                // A HEAP-typed field write takes the functional REBIND `r.f = v` ≡
+                // `r = { ...r, f: v }` — the same value-semantics treatment `m[k] = v`
+                // gets: the spread construct reads the old record (a borrow), and the
+                // Assign path owns the whole rebind protocol (drop-old + slot
+                // accounting). BOTH legs take this path (one shared rewrite — the
+                // permissive cert then witnesses the SAME ops the strict render emits;
+                // a strict-only rewrite walled the permissive leg's mut-param shapes
+                // and broke the walled-real ratchet). NO MakeUnique here — an aliased
+                // record must NOT be uniquified first (the manual COW guard composed
+                // with the Assign's drop-old into an rc-underflow trap: alias_cow
+                // test_6). On Err the whole fn WALLS (ctx discarded), so no rollback
+                // is needed.
+                if is_heap_ty(&value.ty) {
+                    if let Some(rec_ty) = self.var_decl_tys.get(target).cloned() {
+                        if self.aggregate_field_tys(&rec_ty).is_some() {
+                            let base = IrExpr {
+                                kind: IrExprKind::Var { id: *target },
+                                ty: rec_ty.clone(),
+                                span: None,
+                                def_id: None,
+                            };
+                            let spread = IrExpr {
+                                kind: IrExprKind::SpreadRecord {
+                                    base: Box::new(base),
+                                    fields: vec![(*field, value.clone())],
+                                },
+                                ty: rec_ty,
+                                span: None,
+                                def_id: None,
+                            };
+                            let assign = IrStmt {
+                                kind: IrStmtKind::Assign { var: *target, value: spread },
+                                span: None,
+                            };
+                            return self.lower_stmt(&assign);
+                        }
+                    }
+                }
                 // COW-guard the buffer, then ACTUALLY STORE the field: `r.f = v` →
                 // `ListSetScalar(block, slot(f), v)` on the uniform 8-byte-slot aggregate
                 // block (the rung-5 layout; `ListGetScalar` is the read side). WITHOUT the
@@ -713,7 +757,8 @@ impl LowerCtx {
                     self.live_heap_handles.truncate(lhh_mark);
                     // STRICT value mode (the real render path): an elided field write is an
                     // EXECUTABLE silent no-op — REFUSE, so the fn walls and v0 emits the
-                    // correct bytes. The permissive caps-counting classifier keeps the old
+                    // correct bytes. (The heap-typed value shape already took the spread
+                    // REBIND above.) The permissive caps-counting classifier keeps the old
                     // elision (its only consumer is call accounting).
                     if crate::lower::strict_values() {
                         return Err(LowerError::Unsupported(format!(
@@ -739,6 +784,39 @@ impl LowerCtx {
                         "map-insert to mutable module-level var {target:?} (in-place \
                          mutation through the global slot) is not in this brick"
                     )));
+                }
+                // Functional REBIND: `m[k] = v` ≡ `m = map.set(m, k, v)` (value
+                // semantics) — the SAME treatment the `map.insert(m, k, v)` CALL form
+                // already gets below; the repr dispatch suffixes the self-host
+                // (set_skv/str/…) exactly like a source-level call. Both legs take this
+                // path (one shared rewrite, mir==ir symmetric); classify credits the
+                // MapInsert node with the one synthetic call. Needs the declared map ty
+                // for the Var reference — a target without one (a param, not a local
+                // bind) keeps the historic wall below.
+                if let Some(map_ty) = self.var_decl_tys.get(target).cloned() {
+                    let m_ref = IrExpr {
+                        kind: IrExprKind::Var { id: *target },
+                        ty: map_ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    let call = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("map"),
+                                func: sym("set"),
+                                def_id: None,
+                            },
+                            args: vec![m_ref, key.clone(), value.clone()],
+                            type_args: vec![],
+                        },
+                        ty: map_ty,
+                        span: None,
+                        def_id: None,
+                    };
+                    let assign =
+                        IrStmt { kind: IrStmtKind::Assign { var: *target, value: call }, span: None };
+                    return self.lower_stmt(&assign);
                 }
                 self.lower_place_mutation(*target)?;
                 // STRICT value mode: the insert itself was ELIDED (only the MakeUnique
@@ -925,6 +1003,66 @@ impl LowerCtx {
                     let assign =
                         IrStmt { kind: IrStmtKind::Assign { var: *id, value: call }, span: None };
                     self.lower_stmt(&assign)
+                }
+                // `list.push(xs, v)` / `string.push(s, x)` — v0 in-place appends: the
+                // same functional-rebind treatment as bytes.push (`xs = xs + [v]` /
+                // `s = s + x`); the ConcatList/ConcatStr lowering then emits the ONE
+                // synthetic concat call the source Call node already credits (mir <= ir
+                // holds). A `Var` receiver rebinds via Assign; a FIELD receiver
+                // (`list.push(b.xs, v)` — the C-132 mut-param write-back shape) routes
+                // through FieldAssign, whose spread rebind owns the write-back.
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if func.as_str() == "push"
+                        && matches!(module.as_str(), "list" | "string")
+                        && args.len() == 2
+                        && (matches!(&args[0].kind, IrExprKind::Var { .. })
+                            || matches!(&args[0].kind, IrExprKind::Member { object, .. }
+                                if matches!(&object.kind, IrExprKind::Var { .. }))) =>
+                {
+                    let is_list = module.as_str() == "list";
+                    let recv = args[0].clone();
+                    let rhs = if is_list {
+                        IrExpr {
+                            kind: IrExprKind::List { elements: vec![args[1].clone()] },
+                            ty: recv.ty.clone(),
+                            span: None,
+                            def_id: None,
+                        }
+                    } else {
+                        args[1].clone()
+                    };
+                    let concat = IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: if is_list {
+                                almide_ir::BinOp::ConcatList
+                            } else {
+                                almide_ir::BinOp::ConcatStr
+                            },
+                            left: Box::new(recv.clone()),
+                            right: Box::new(rhs),
+                        },
+                        ty: recv.ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    let stmt = match &recv.kind {
+                        IrExprKind::Var { id } => {
+                            IrStmt { kind: IrStmtKind::Assign { var: *id, value: concat }, span: None }
+                        }
+                        IrExprKind::Member { object, field } => {
+                            let IrExprKind::Var { id } = &object.kind else { unreachable!() };
+                            IrStmt {
+                                kind: IrStmtKind::FieldAssign {
+                                    target: *id,
+                                    field: *field,
+                                    value: concat,
+                                },
+                                span: None,
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+                    self.lower_stmt(&stmt)
                 }
                 // `map.clear(m)` / `list.clear(xs)` — the in-place empty: rebind to the
                 // EMPTY literal of the receiver's own type (adds no call; mir <= ir holds).
