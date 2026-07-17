@@ -974,15 +974,18 @@ fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr
             if matches!(&expr.ty, Ty::Named(..))
                 && resolve_aggregate(&expr.ty, registry).is_none() =>
         {
-            let Ty::Named(name, _) = &expr.ty else { unreachable!() };
+            let Ty::Named(name, targs) = &expr.ty else { unreachable!() };
+            // A GENERIC-variant instance (`${l}` over `ReprEither[Int, String]`) takes
+            // the INSTANTIATION-KEYED repr — the exact key the generator derives
+            // (`repr_inst_ident`), so the call links iff the instantiation is emitted.
+            let rname = if targs.is_empty() {
+                format!("__repr_{}", crate::lower::drop_fn_ident(name.as_str()))
+            } else {
+                format!("__repr_{}", crate::lower::repr_inst_ident(name.as_str(), targs))
+            };
             Some(IrExpr {
                 kind: IrExprKind::Call {
-                    target: CallTarget::Named {
-                        name: sym(&format!(
-                            "__repr_{}",
-                            crate::lower::drop_fn_ident(name.as_str())
-                        )),
-                    },
+                    target: CallTarget::Named { name: sym(&rname) },
                     args: vec![expr.clone()],
                     type_args: Vec::new(),
                 },
