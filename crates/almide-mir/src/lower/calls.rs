@@ -259,6 +259,13 @@ impl LowerCtx {
             // cap_witness counts CliArgs. Returns Option[String] (heap Option block).
             || (module == "env" && func == "get")
             || (module == "env" && func == "unix_timestamp")
+            // `datetime.now` (Unix seconds) / `env.millis` (milliseconds) — the SAME WASI
+            // wall-clock floor as env.unix_timestamp (clock_now.almd → prim.clock_time_get,
+            // Capability::Clock). `random.float` — the SAME entropy floor as random.int
+            // (random_float.almd → prim.random_get, Capability::Entropy). All scalar returns.
+            || (module == "datetime" && func == "now")
+            || (module == "env" && func == "millis")
+            || (module == "random" && func == "float")
             || (module == "fs" && func == "read_text")
             || (module == "fs" && func == "read_bytes_raw")
             || (module == "fs" && func == "list_dir")

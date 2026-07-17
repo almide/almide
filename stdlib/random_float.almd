@@ -1,0 +1,17 @@
+// random_float — SELF-HOSTED `random.float()` over the WASI entropy floor
+// (prim.random_get), the same template as random_int: an 8-byte scratch Bytes filled
+// with host entropy, read as an i64, masked to the top 53 bits' worth of uniformity
+// (the double-precision mantissa width), divided by 2^53 → a uniform Float in [0, 1)
+// (the standard 53-bit construction; native rand's gen::<f64>() uses the same range).
+// The scratch Bytes drops at scope end. Reaching prim.random_get carries
+// Capability::Entropy — callers are caps-verified only when they declare it (an
+// `effect fn`). A PLAIN `fn` so the bare f64 scalar return is not Result-wrapped.
+// NON-DETERMINISTIC (host entropy): no byte-match across runs.
+fn random_float() -> Float = {
+  let buf = prim.alloc_bytes(8)
+  let p = prim.handle(buf) + 12
+  let _e = prim.random_get(p, 8)
+  let r = prim.load64(p)
+  let r53 = int.band(r, 0x1FFFFFFFFFFFFF)
+  int.to_float(r53) / 9007199254740992.0
+}

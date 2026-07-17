@@ -875,6 +875,7 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         // Guard → if restructure — the SAME pre-lowering pass the pipeline runs.
         almide_mir::lower::desugar_fn_body_guards(&mut ir);
         almide_mir::lower::normalize_tail_err_raise_ifs(&mut ir);
+        almide_mir::lower::hoist_block_call_args(&mut ir);
         Ok(ir)
     }));
     match result {

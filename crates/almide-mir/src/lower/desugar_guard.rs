@@ -288,3 +288,84 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
         rewrite_tail(&mut func.body, var_table);
     }
 }
+
+/// ARG-POSITION BLOCK HOIST (a pre-lowering program pass, shared chain like the
+/// guard passes above): a BLOCK expression as a call argument
+/// (`int.abs({ let a = -5; let b = -3; a + b })` — scope_test's "block expression
+/// as argument") has no faithful lowering as an operand. But the block can ABSORB
+/// the call:
+///
+///   f(p…, { stmts; e }, q…)  ≡  { stmts; f(p…, e, q…) }
+///
+/// — exact when every argument BEFORE the block is effect-free (a Var/literal;
+/// their evaluation now happens after `stmts`, which is unobservable for pure
+/// operands; arguments AFTER the block already evaluated after `stmts`). One
+/// block argument per call (two block args would interleave their stmts). No
+/// calls are added or removed — the caps `mir == ir` invariant holds.
+pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use almide_ir::{IrExpr, IrExprKind};
+
+    fn is_pure_operand(e: &IrExpr) -> bool {
+        matches!(
+            e.kind,
+            IrExprKind::Var { .. }
+                | IrExprKind::LitInt { .. }
+                | IrExprKind::LitFloat { .. }
+                | IrExprKind::LitBool { .. }
+                | IrExprKind::LitStr { .. }
+                | IrExprKind::Unit
+        )
+    }
+
+    struct H;
+    impl IrMutVisitor for H {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Call { args, .. } = &mut e.kind else { return };
+            // Exactly ONE non-empty Block argument, every earlier arg pure.
+            let blocks: Vec<usize> = args
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| {
+                    matches!(&a.kind,
+                        IrExprKind::Block { stmts, expr: Some(_) } if !stmts.is_empty())
+                })
+                .map(|(i, _)| i)
+                .collect();
+            let [bi] = blocks.as_slice() else { return };
+            let bi = *bi;
+            if !args[..bi].iter().all(is_pure_operand) {
+                return;
+            }
+            let IrExprKind::Block { stmts, expr: Some(tail) } = &mut args[bi].kind else {
+                return;
+            };
+            let hoisted = std::mem::take(stmts);
+            let tail = (**tail).clone();
+            args[bi] = tail;
+            let call = std::mem::replace(
+                e,
+                IrExpr {
+                    kind: IrExprKind::Unit,
+                    ty: almide_lang::types::Ty::Unit,
+                    span: None,
+                    def_id: None,
+                },
+            );
+            *e = IrExpr {
+                ty: call.ty.clone(),
+                span: call.span.clone(),
+                def_id: call.def_id,
+                kind: IrExprKind::Block { stmts: hoisted, expr: Some(Box::new(call)) },
+            };
+        }
+    }
+    for func in program
+        .functions
+        .iter_mut()
+        .chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
+    {
+        H.visit_expr_mut(&mut func.body);
+    }
+}

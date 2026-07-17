@@ -198,6 +198,8 @@ fn source_to_ir_with(
     // Tail err-raise ifs normalize to the proven bind-position `!` shape (fed by the
     // guard restructure above; shared with classify: desugar-before-both).
     crate::lower::normalize_tail_err_raise_ifs(&mut ir);
+    // Block call-arguments absorb their call (shared with classify: desugar-before-both).
+    crate::lower::hoist_block_call_args(&mut ir);
     // Debug aid: `ALMIDE_DUMP_IR=<substr>` dumps the post-chain body of matching fns.
     if let Ok(pat) = std::env::var("ALMIDE_DUMP_IR") {
         for f in ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter())) {
