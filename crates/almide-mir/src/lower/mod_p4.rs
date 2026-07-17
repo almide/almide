@@ -1482,6 +1482,19 @@ fn heap_fold_call_name(module: &str, arg_tys: &[Ty], result_ty: &Ty) -> String {
             }
         }
     }
+    // A RECORD/VARIANT accumulator over a `List[record/variant]` (`list.fold(counters,
+    // Counter.empty(), (acc, c) => Counter.merge(acc, c))` — the protocol-merge shape,
+    // and the cross-module `Loc` pick fold): every side is a uniform heap HANDLE, so the
+    // TYPE-ERASED `list.fold_hrec` (the fold_ols closure ABI) runs it faithfully — acc
+    // MOVES into f each step, elements are borrowed, the final acc is the owned result.
+    // A Named alias to a scalar fails `is_heap_ty` and keeps the wall.
+    let is_named_heap =
+        |t: &Ty| matches!(t, Ty::Named(..) | Ty::Record { .. }) && is_heap_ty(t);
+    let elem_is_named = matches!(arg_tys.first(),
+        Some(Ty::Applied(TypeConstructorId::List, e)) if e.len() == 1 && is_named_heap(&e[0]));
+    if module == "list" && elem_is_named && is_named_heap(result_ty) {
+        return "list.fold_hrec".to_string();
+    }
     format!("{module}.fold_hacc")
 }
 

@@ -1,0 +1,25 @@
+// list_fold_hrec — SELF-HOSTED heap-accumulator `list.fold` for a RECORD/VARIANT
+// accumulator over List[record/variant] elements (the protocol-merge shape:
+// `list.fold(counters, Counter.empty(), (acc, c) => Counter.merge(acc, c))`, and the
+// cross-module `Loc` pick fold). TYPE-ERASED: every side is a uniform heap HANDLE, so
+// the Value spelling serves any record/variant instantiation — the router
+// (mod_p4.rs `heap_fold_call_name`) only admits Named/Record heap accs + elements.
+// f : (acc, elem) -> acc via the (heap, heap) -> heap 2-arity CallIndirect
+// (`list_fold_ols`'s proven closure shape). OWNERSHIP: `acc` MOVES into f each
+// iteration (f consumes it and returns the next acc — this fn never frees it); each
+// element is read as a BORROW (the list keeps ownership); the final acc is the owned
+// result. Left fold in element order, matching v0's fold(xs, init, f).
+
+fn __fold_hrec_loop(h: Int, f: (Value, Value) -> Value, n: Int, i: Int, acc: Value) -> Value =
+  if i >= n then acc
+  else {
+    let x: Value = prim.load_handle(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __fold_hrec_loop(h, f, n, i + 1, nacc)
+  }
+
+fn list_fold_hrec(xs: List[Value], init: Value, f: (Value, Value) -> Value) -> Value = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  __fold_hrec_loop(h, f, n, 0, init)
+}
