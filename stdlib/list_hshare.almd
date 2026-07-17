@@ -145,3 +145,24 @@ fn list_index_of_hshare(xs: List[List[Int]], x: List[Int]) -> Option[Int] = {
   if idx < 0 then __lih_none()
   else __lih_some(idx)
 }
+
+// `list.get/first/last` over a FLAT heap element (List[scalar] / scalar tuple): the
+// Some payload SHARES the element (rc_inc via the Some-ctor Dup; the option's drop
+// releases it — balanced like get_or_hshare). OOB → none.
+fn list_get_hshare(xs: List[List[Int]], i: Int) -> Option[List[Int]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if i < 0 then none
+  else if i >= len then none
+  else {
+    let v: List[Int] = prim.load_handle(h + 12 + i * 8)
+    some(v)
+  }
+}
+
+fn list_first_hshare(xs: List[List[Int]]) -> Option[List[Int]] = list_get_hshare(xs, 0)
+
+fn list_last_hshare(xs: List[List[Int]]) -> Option[List[Int]] = {
+  let n = prim.load32(prim.handle(xs) + 4)
+  list_get_hshare(xs, n - 1)
+}

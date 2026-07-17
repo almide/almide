@@ -78,6 +78,53 @@ fn __zip_fill_rc(dh: Int, ha: Int, hb: Int, n: Int, i: Int) -> Int =
     __zip_fill_rc(dh, ha, hb, n, i + 1)
   }
 
+// MIXED-element zips (`list.zip([1, 2], ["a", "b"])`): co-own ONLY the heap side —
+// the scalar slot is a raw value (rc_inc'ing it would corrupt an integer as a
+// refcount address). `_sh` = scalar left / heap right, `_hs` = the mirror.
+fn __zip_fill_rcb(dh: Int, ha: Int, hb: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let ea = prim.load64(ha + 12 + i * 8)
+    let eb = prim.load64(hb + 12 + i * 8)
+    prim.rc_inc(eb)
+    let pair = __pair2(ea, eb)
+    prim.store_str(dh + 12 + i * 8, pair)
+    __zip_fill_rcb(dh, ha, hb, n, i + 1)
+  }
+
+fn __zip_fill_rca(dh: Int, ha: Int, hb: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let ea = prim.load64(ha + 12 + i * 8)
+    let eb = prim.load64(hb + 12 + i * 8)
+    prim.rc_inc(ea)
+    let pair = __pair2(ea, eb)
+    prim.store_str(dh + 12 + i * 8, pair)
+    __zip_fill_rca(dh, ha, hb, n, i + 1)
+  }
+
+fn list_zip_sh(a: List[Int], b: List[List[Int]]) -> List[(Int, List[Int])] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let n = if la < lb then la else lb
+  let out: List[(Int, List[Int])] = prim.alloc_list_str(n)
+  let _x = __zip_fill_rcb(prim.handle(out), ha, hb, n, 0)
+  out
+}
+
+fn list_zip_hs(a: List[List[Int]], b: List[Int]) -> List[(List[Int], Int)] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let n = if la < lb then la else lb
+  let out: List[(List[Int], Int)] = prim.alloc_list_str(n)
+  let _x = __zip_fill_rca(prim.handle(out), ha, hb, n, 0)
+  out
+}
+
 fn list_zip_rc(a: List[List[Int]], b: List[List[Int]]) -> List[(List[Int], List[Int])] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)

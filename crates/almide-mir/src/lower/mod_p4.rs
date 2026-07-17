@@ -1480,6 +1480,13 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
             if flat_heap(&ea) && flat_heap(&eb) {
                 return Some("list.zip_rc".to_string());
             }
+            // MIXED scalar/flat-heap: co-own only the heap side (`_sh`/`_hs`).
+            if !is_heap_ty(&ea) && flat_heap(&eb) {
+                return Some("list.zip_sh".to_string());
+            }
+            if flat_heap(&ea) && !is_heap_ty(&eb) {
+                return Some("list.zip_hs".to_string());
+            }
             return Some("list.zip_h".to_string());
         }
     }
@@ -1723,8 +1730,33 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
             // et al), which silently "succeeds" via raw i64-slot / pointer-identity comparison
             // instead of refusing to link (the fallthrough danger confirmed by probe elsewhere
             // in this dispatch — see the contains/index_of comment above).
+            // get/first/last over a FLAT scalar-slot block element (List[scalar] /
+            // all-scalar tuple): the handle-SHARING variant (Some payload rc_inc'd
+            // by the Some-ctor Dup) — the deep-copy `_str` corrupts these shapes.
+            if args.len() == 1
+                && matches!(func, "get" | "first" | "last")
+                && is_flat_scalar_block_ty(&args[0])
+            {
+                return Some(format!("list.{func}_hshare"));
+            }
             if args.len() == 1 && is_heap_ty(&args[0]) {
                 return Some(format!("list.{func}_x"));
+            }
+        }
+    }
+    // `list.partition` keys on its element: scalar → the raw-copy self-host; a FLAT
+    // heap element (String / List[scalar] / scalar tuple) → the co-owning `_rc`
+    // variant; any richer element walls (`_x` — no recursive-co-own variant yet).
+    if func == "partition" {
+        if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+            if a.len() == 1 {
+                if !is_heap_ty(&a[0]) {
+                    return Some("list.partition".to_string());
+                }
+                if matches!(a[0], Ty::String) || is_flat_scalar_block_ty(&a[0]) {
+                    return Some("list.partition_rc".to_string());
+                }
+                return Some("list.partition_x".to_string());
             }
         }
     }
