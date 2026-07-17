@@ -1079,13 +1079,49 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
     impl IrMutVisitor for S {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
-            if !matches!(e.ty, Ty::Unit) {
+            let is_panic = matches!(&e.kind,
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+                    if name.as_str() == "panic" && args.len() == 1
+                        && matches!(args[0].ty, Ty::String));
+            // `panic` types as the enclosing branch demands (Unit or Never) — it must
+            // bypass the Unit gate below.
+            if !is_panic && !matches!(e.ty, Ty::Unit) {
                 return;
             }
             let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind
             else {
                 return;
             };
+            // `panic(msg)` — an UNCONDITIONAL abort: die on "PANIC: " + msg (the v0
+            // wasm form: prefix + message, then halt). The message expr is evaluated
+            // only here (the abort path), like the computed assert message.
+            if name.as_str() == "panic" && args.len() == 1 && matches!(args[0].ty, Ty::String)
+            {
+                let msg = args[0].clone();
+                let text = match &msg.kind {
+                    IrExprKind::LitStr { value } => {
+                        die_expr(&format!("PANIC: {value}"))
+                    }
+                    _ => die_on(IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: almide_ir::BinOp::ConcatStr,
+                            left: Box::new(IrExpr {
+                                kind: IrExprKind::LitStr { value: "PANIC: ".to_string() },
+                                ty: Ty::String,
+                                span: None,
+                                def_id: None,
+                            }),
+                            right: Box::new(msg),
+                        },
+                        ty: Ty::String,
+                        span: None,
+                        def_id: None,
+                    }),
+                };
+                *e = text;
+                self.changed = true;
+                return;
+            }
             let (cond, msg) = match (name.as_str(), args.as_slice()) {
                 ("assert", [c]) if matches!(c.ty, Ty::Bool) => {
                     (c.clone(), None)
