@@ -342,10 +342,13 @@ pub enum Op {
     /// owned record uses — `record_drop_field_frees`), gated on the wrapper's last ref (rc==1), then
     /// `rc_dec`s the wrapper block. `is_result` selects the wrapper shape: `false` (Option) =
     /// 0-or-1-element DynListStr, recurse iff `len@4 > 0` (Some); `true` (Result) = cap-as-tag block,
-    /// recurse iff `tag@16 == 0` (Ok-record), else `rc_dec` the @12 Err String. Same single cert `d`
-    /// as [`Op::Drop`]; the recursion is the trusted generated routine (leak-loop verified). The
-    /// record-payload counterpart of `DropResultValue` (whose Ok payload is a `Value`, not a record).
-    DropWrapperRec { v: ValueId, drop_fn: String, is_result: bool },
+    /// recurse iff `tag@16 == 0` (Ok-record), else `rc_dec` the @12 Err String. `err_rec` (Result
+    /// only) INVERTS the tag dispatch for the heap-Ok × variant-Err class (`Result[String,
+    /// MathError]` — `reserr:<V>`): recurse iff `tag@16 == 1` (Err-variant, via `$__drop_<V>`),
+    /// else flat `rc_dec` the @12 Ok payload. Same single cert `d` as [`Op::Drop`]; the recursion
+    /// is the trusted generated routine (leak-loop verified). The record-payload counterpart of
+    /// `DropResultValue` (whose Ok payload is a `Value`, not a record).
+    DropWrapperRec { v: ValueId, drop_fn: String, is_result: bool, err_rec: bool },
     /// `consume v` — transfer v's reference OUT (into a container, a return, or
     /// a callee that takes ownership). v is dead here; the reference lives on
     /// elsewhere. Renders as a move (Rust) / ptr-transfer with no inc (wasm).

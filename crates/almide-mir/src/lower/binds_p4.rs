@@ -1161,6 +1161,19 @@ impl LowerCtx {
             IrExprKind::ResultErr { .. } if self.is_scalar_ok_variant_err_result(ty) => {
                 self.try_lower_result_err_variant_ctor(value, ty)
             }
+            // `err(<user-variant ctor>)` for `Result[T_heap, <user variant>]` — the HEAP-Ok
+            // structured-error class (`assert_eq(classify(-3), err(NegativeInput(-3)))`).
+            // Cap-as-tag wrapper; a rich payload routes to the Err-side recursion
+            // (`reserr:<V>`). MUST precede the generic both-heap Err arm below, whose
+            // Named-call fallback emitted the ctor as a dangling `(call $NegativeInput)`.
+            // A `err(<Var>)` payload keeps the generic route (owned-move / param-Dup).
+            IrExprKind::ResultErr { expr }
+                if is_heap_ty(&expr.ty)
+                    && !matches!(&expr.kind, IrExprKind::Var { .. })
+                    && self.is_heap_ok_variant_err_result(ty) =>
+            {
+                self.try_lower_result_err_variant_ctor_heap_ok(value, ty)
+            }
             // HEAP-Ok `Result[(Int,Int), String]` etc. — `Err(msg)` RETURNED / bound directly
             // (`fn __rzip_err(..) = Err(copy)`). The Err message goes into the SAME cap-as-tag 1-slot
             // DynListStr as the heap-Ok arm (payload @12, tag @16 = 1), so a `match` reading tag @16

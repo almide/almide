@@ -94,6 +94,21 @@ impl LowerCtx {
                         self.value_result_results.insert(v);
                     } else {
                         self.heap_elem_lists.insert(v);
+                        // A RICH custom-variant Err payload (`Result[String, MathError]` —
+                        // Overflow(String) owns nested heap): the flat DropListStr would
+                        // free the variant BLOCK but leak its fields. Route the drop to the
+                        // Err-side recursion (`reserr:` — DropWrapperRec `err_rec`); the
+                        // heap_elem_lists membership stays for the bind gates (drop_op_for
+                        // consults variant_drop_handles first). A PARAM is never dropped
+                        // (it stays in param_values), so the entry is read-inert there.
+                        if let Some(vn) = self.custom_variant_type_name(&a[1]) {
+                            if self.variant_layouts.needs_recursive_drop(&vn, &|rn| {
+                                crate::lower::canonical_record_key(&self.record_layouts, rn)
+                                    .is_some()
+                            }) {
+                                self.variant_drop_handles.insert(v, format!("reserr:{vn}"));
+                            }
+                        }
                     }
                 } else {
                     // Scalar Ok (`Result[Int, String]`) — len-as-tag, scalar Ok payload. A heap Err
@@ -1619,12 +1634,19 @@ impl LowerCtx {
                 // An Option WRAPPER holding a heap RECORD payload (`some({key, val})`): recurse into
                 // the @12 record via `$__drop_<drop_fn>` at the wrapper's last ref, then free the
                 // wrapper block. The `optrec:` prefix is injected by `materialize_opt_aggregate_some`.
-                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: false }
+                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: false, err_rec: false }
             } else if let Some(drop_fn) = ty.strip_prefix("resrec:") {
                 // A Result WRAPPER holding a heap RECORD Ok payload (`ok({val, next})`): recurse into
                 // the @12 record (tag@16==0) via `$__drop_<drop_fn>`, else `rc_dec` the @12 Err
                 // String, then free the wrapper. Injected by `materialize_result_aggregate`.
-                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: true }
+                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: true, err_rec: false }
+            } else if let Some(drop_fn) = ty.strip_prefix("reserr:") {
+                // The heap-Ok × variant-ERR wrapper (`Result[String, MathError]` — the
+                // `err(NegativeInput(x))` class): recurse into the @12 VARIANT (tag@16==1)
+                // via `$__drop_<drop_fn>`, else `rc_dec` the @12 Ok payload, then free the
+                // wrapper. Injected by `try_lower_result_err_variant_ctor_heap_ok` and the
+                // both-heap `seed_variant_param` branch (rich-variant Err types).
+                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: true, err_rec: true }
             } else {
                 Op::DropVariant { v, ty: ty.clone() }
             }

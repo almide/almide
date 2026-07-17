@@ -751,6 +751,23 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // HEAP-Ok `Result[H, <user variant>]` ERR CTOR arm (the heap-Ok structured-error
+            // class — classify's `err(NegativeInput(x))` in `Result[String, MathError]`):
+            // MUST precede the generic both-heap Err arm below, whose
+            // `lower_result_str_piece` Named-call fallback emitted the ctor as a dangling
+            // `(call $NegativeInput)` (unlinked at render). A `err(<Var>)` payload keeps
+            // the generic route (the ctor helper only takes ctor shapes).
+            IrExprKind::ResultErr { expr }
+                if is_heap_ty(&expr.ty)
+                    && !matches!(&expr.kind, IrExprKind::Var { .. })
+                    && self.is_heap_ok_variant_err_result(result_ty) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_result_err_variant_ctor_heap_ok(arm, result_ty)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             IrExprKind::ResultErr { expr }
                 if is_heap_ty(&expr.ty) && Self::is_heap_ok_result(result_ty) =>
             {

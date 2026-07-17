@@ -649,14 +649,18 @@ fn render_op(
         // (Ok-record, not an Err String — which is freed by a flat `rc_dec`). Dot-sanitized to match
         // `drop_fn_ident`. Cert = the final wrapper `call $rc_dec` (`d`); the recursion is the trusted
         // generated routine. Mirrors `DropResultValue` (Value payload) / the masked `DropListStr`.
-        Op::DropWrapperRec { v, drop_fn, is_result } => {
+        Op::DropWrapperRec { v, drop_fn, is_result, err_rec } => {
             let p = local(*v);
             let dn = drop_fn.replace('.', "_");
             if *is_result {
                 let payload = format!("(i32.load (i32.add (local.get {p}) (i32.const 12)))");
+                // The recursive arm rides the tag: Ok-record wrappers (`resrec:`) recurse on
+                // tag@16 == 0; the heap-Ok × variant-Err class (`reserr:` — err_rec) recurses
+                // on tag@16 == 1 and flat-frees the Ok payload.
+                let rec_tag = if *err_rec { 1 } else { 0 };
                 format!(
                     "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1)) (then\n\
-                     \x20     (if (i32.eq (i32.load (i32.add (local.get {p}) (i32.const 16))) (i32.const 0))\n\
+                     \x20     (if (i32.eq (i32.load (i32.add (local.get {p}) (i32.const 16))) (i32.const {rec_tag}))\n\
                      \x20       (then (call $__drop_{dn} {payload}))\n\
                      \x20       (else (call $rc_dec {payload})))))\n\
                      \x20   (call $rc_dec (local.get {p}))\n"

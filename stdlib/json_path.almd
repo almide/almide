@@ -1,4 +1,5 @@
-// json_path — SELF-HOSTED json path API (root/field/index/get_path). v0's JsonPath
+// json_path — SELF-HOSTED json path API (root/field/index/get_path/set_path/remove_path).
+// v0's JsonPath
 // is an opaque Rust enum (JpRoot/JpField/JpIndex) consumed ONLY by these fns, so the
 // v1 self-host owns the rep: a List[String] of segments, root-first — "f<name>" is a
 // field step, "i<int>" an index step (digits from int.to_string, so int.parse always
@@ -51,4 +52,150 @@ fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Option[
       }
     }
     err(_) => none
+  }
+
+// ── set_path / remove_path — byte-matching native set_at_steps / remove_at_steps ──
+// (runtime/rs/src/json.rs, the C-090 oracle). Both are INFALLIBLE (set_path's Result is
+// always ok). A Field step over an Object rewrites EVERY entry whose key matches — the
+// walks go by SLOT index (key @ h+12+(2i)*8, value @ +8), not by key lookup, so duplicate
+// keys transform each entry exactly like native's entries map. Over a non-object, set
+// AUTOVIVIFIES: the whole node is replaced by a fresh single-key object, and descents are
+// seeded with `{}` (__jp_empty_obj). An Index step normalizes a negative i from the end
+// (n + i); a non-array node or an out-of-range index is a NO-OP — the shared `j` returned
+// bare (auto-acquire, the value_pick `else v` precedent) stands in for native's clone,
+// byte-identical because Values are immutable. Rebuilds go through the PROVEN
+// value.object / value.array ctors: the entry walks Dup borrowed slot handles into
+// `acc + [(k, v)]` tuples (the __ment_build discipline); an owned recursive result
+// co-owns into its tuple/list and frees its own ref at scope end.
+
+// A fresh empty tag-6 Object — native's `Value::Object(vec![])` autoviv seed
+// (the value_object shape with n = 0).
+fn __jp_empty_obj() -> Value = {
+  let v = prim.alloc_value(0)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 6)
+  prim.store32(h + 8, 0)
+  v
+}
+
+// Object ∋ key — linear scan of the key slots (the __vu_has shape, but over the
+// Object's own slots so duplicate keys need no dedup pass).
+fn __jp_has(j: Value, key: String, i: Int, n: Int) -> Bool =
+  if i >= n then false
+  else {
+    let ek: String = prim.load_handle(prim.handle(j) + 12 + (2 * i) * 8)
+    if ek == key then true else __jp_has(j, key, i + 1, n)
+  }
+
+fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] =
+  ok(json_path_set_go(j, path, 0, nv))
+
+fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value =
+  if k >= list.len(path) then nv
+  else {
+    let seg = list.get(path, k) ?? ""
+    let rest = string.drop(seg, 1)
+    if string.take(seg, 1) == "f" then json_path_set_field(j, path, k, rest, nv)
+    else json_path_set_index(j, path, k, int.parse(rest) ?? 0, nv)
+  }
+
+fn json_path_set_field(j: Value, path: List[String], k: Int, key: String, nv: Value) -> Value =
+  if prim.load32(prim.handle(j) + 4) == 6 then {
+    let n = prim.load32(prim.handle(j) + 8) / 2
+    let pairs = __jps_pairs(j, path, k, key, nv, 0, n, [])
+    if __jp_has(j, key, 0, n) then value.object(pairs)
+    else {
+      let seed = __jp_empty_obj()
+      let sv = json_path_set_go(seed, path, k + 1, nv)
+      value.object(pairs + [(key, sv)])
+    }
+  } else {
+    let seed = __jp_empty_obj()
+    let sv = json_path_set_go(seed, path, k + 1, nv)
+    value.object([(key, sv)])
+  }
+
+fn __jps_pairs(j: Value, path: List[String], k: Int, key: String, nv: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(j)
+    let ek: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let ev: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    if ek == key then {
+      let sv = json_path_set_go(ev, path, k + 1, nv)
+      __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, sv)])
+    } else __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, ev)])
+  }
+
+fn json_path_set_index(j: Value, path: List[String], k: Int, i: Int, nv: Value) -> Value =
+  if prim.load32(prim.handle(j) + 4) == 5 then {
+    let n = prim.load32(prim.handle(j) + 8)
+    let idx = if i < 0 then n + i else i
+    if idx >= 0 and idx < n then value.array(__jps_items(j, path, k, nv, idx, 0, n, []))
+    else j
+  } else j
+
+fn __jps_items(j: Value, path: List[String], k: Int, nv: Value, tgt: Int, i: Int, n: Int, acc: List[Value]) -> List[Value] =
+  if i >= n then acc
+  else {
+    let ev: Value = prim.load_handle(prim.handle(j) + 12 + i * 8)
+    if i == tgt then {
+      let sv = json_path_set_go(ev, path, k + 1, nv)
+      __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [sv])
+    } else __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [ev])
+  }
+
+fn json_path_remove(j: Value, path: List[String]) -> Value =
+  json_path_rm_go(j, path, 0)
+
+fn json_path_rm_go(j: Value, path: List[String], k: Int) -> Value =
+  if k >= list.len(path) then value.null()
+  else {
+    let seg = list.get(path, k) ?? ""
+    let rest = string.drop(seg, 1)
+    let last = k + 1 >= list.len(path)
+    if string.take(seg, 1) == "f" then json_path_rm_field(j, path, k, rest, last)
+    else json_path_rm_index(j, path, k, int.parse(rest) ?? 0, last)
+  }
+
+fn json_path_rm_field(j: Value, path: List[String], k: Int, key: String, last: Bool) -> Value =
+  if prim.load32(prim.handle(j) + 4) == 6 then {
+    let n = prim.load32(prim.handle(j) + 8) / 2
+    value.object(__jpr_pairs(j, path, k, key, last, 0, n, []))
+  } else j
+
+fn __jpr_pairs(j: Value, path: List[String], k: Int, key: String, last: Bool, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(j)
+    let ek: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let ev: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    if ek == key then {
+      if last then __jpr_pairs(j, path, k, key, last, i + 1, n, acc)
+      else {
+        let rv = json_path_rm_go(ev, path, k + 1)
+        __jpr_pairs(j, path, k, key, last, i + 1, n, acc + [(ek, rv)])
+      }
+    } else __jpr_pairs(j, path, k, key, last, i + 1, n, acc + [(ek, ev)])
+  }
+
+fn json_path_rm_index(j: Value, path: List[String], k: Int, i: Int, last: Bool) -> Value =
+  if prim.load32(prim.handle(j) + 4) == 5 then {
+    let n = prim.load32(prim.handle(j) + 8)
+    let idx = if i < 0 then n + i else i
+    if idx >= 0 and idx < n then value.array(__jpr_items(j, path, k, idx, last, 0, n, []))
+    else j
+  } else j
+
+fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: Int, n: Int, acc: List[Value]) -> List[Value] =
+  if i >= n then acc
+  else {
+    let ev: Value = prim.load_handle(prim.handle(j) + 12 + i * 8)
+    if i == tgt then {
+      if last then __jpr_items(j, path, k, tgt, last, i + 1, n, acc)
+      else {
+        let rv = json_path_rm_go(ev, path, k + 1)
+        __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [rv])
+      }
+    } else __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [ev])
   }
