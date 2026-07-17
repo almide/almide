@@ -1,0 +1,33 @@
+// list_to_string_lsi — the `${List[(String, Int)]}` interp display: v0's compound repr
+// `[("é", 2), ("a", 1)]` (each pair as `("<escaped>", n)`, comma-space joined). The
+// String quotes via the almide_repr_str escapes (\\ \" \n \r \t — the __json_quote
+// set); elements read borrowed (pair slot 0 = the String handle, slot 1 = the count).
+
+fn __lsi_quote(s: String) -> String = {
+  let e1 = string.replace(s, "\\", "\\\\")
+  let e2 = string.replace(e1, "\"", "\\\"")
+  let e3 = string.replace(e2, "\n", "\\n")
+  let e4 = string.replace(e3, "\r", "\\r")
+  let e5 = string.replace(e4, "\t", "\\t")
+  "\"" + e5 + "\""
+}
+
+fn __lsi_sep(i: Int) -> String = {
+  let k = if i == 0 then 0 else 1
+  string.repeat(", ", k)
+}
+
+fn __lsi_go(lh: Int, n: Int, i: Int, acc: String) -> String =
+  if i >= n then acc
+  else {
+    let pair = prim.load64(lh + 12 + i * 8)
+    let s: String = prim.load_str(pair + 12)
+    let v = prim.load64(pair + 20)
+    let piece = __lsi_sep(i) + "(" + __lsi_quote(s) + ", " + int.to_string(v) + ")"
+    __lsi_go(lh, n, i + 1, acc + piece)
+  }
+
+fn list_to_string_lsi(xs: List[(String, Int)]) -> String = {
+  let lh = prim.handle(xs)
+  "[" + __lsi_go(lh, prim.load32(lh + 4), 0, "") + "]"
+}

@@ -1,0 +1,55 @@
+// string_rle — SELF-HOSTED `string.run_length_encode`: CHAR-level runs (Unicode —
+// "ééa" → [("é", 2), ("a", 1)]), transcribing native runtime/rs/src/string.rs (chars()
+// walk, adjacent-equal extends the last run). Built over `string.chars` (the registered
+// per-char list); each run's char is DEEP-COPIED into its (String, Int) pair (the
+// map.entries_skv pair-block discipline: 2-slot block, slot 0 owns the String, slot 1
+// the i64 count; the pair MOVES into the outer slot; the outer drops per-pair via the
+// type-driven List[(String, Int)] recursive drop).
+
+// Run count: adjacent-equal chars merge (scan from 1, seeded 1 for the first run).
+fn __rle_runs(ch: Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let cur: String = prim.load_handle(ch + 12 + i * 8)
+    let prev: String = prim.load_handle(ch + 12 + (i - 1) * 8)
+    if cur == prev then __rle_runs(ch, n, i + 1, acc)
+    else __rle_runs(ch, n, i + 1, acc + 1)
+  }
+
+// Length of the run starting at j-1's char c (j scans forward from the run's 2nd slot).
+fn __rle_runlen(ch: Int, n: Int, j: Int, c: String, acc: Int) -> Int =
+  if j >= n then acc
+  else {
+    let cur: String = prim.load_handle(ch + 12 + j * 8)
+    if cur == c then __rle_runlen(ch, n, j + 1, c, acc + 1)
+    else acc
+  }
+
+fn __rle_fill(dh: Int, ch: Int, n: Int, j: Int, w: Int) -> Int =
+  if j >= n then 0
+  else {
+    let c: String = prim.load_handle(ch + 12 + j * 8)
+    let cnt = __rle_runlen(ch, n, j + 1, c, 1)
+    let copy = string.repeat(c, 1)
+    let pair = prim.alloc_list(2)
+    let ph = prim.handle(pair)
+    prim.store_str(ph + 12, copy)
+    prim.store64(ph + 20, cnt)
+    prim.store_str(dh + 12 + w * 8, pair)
+    __rle_fill(dh, ch, n, j + cnt, w + 1)
+  }
+
+fn string_run_length_encode(s: String) -> List[(String, Int)] = {
+  let cs = string.chars(s)
+  let ch = prim.handle(cs)
+  let n = prim.load32(ch + 4)
+  if n == 0 then {
+    let out0: List[(String, Int)] = prim.alloc_list_str(0)
+    out0
+  } else {
+    let runs = __rle_runs(ch, n, 1, 1)
+    let out: List[(String, Int)] = prim.alloc_list_str(runs)
+    let _f = __rle_fill(prim.handle(out), ch, n, 0, 0)
+    out
+  }
+}

@@ -629,6 +629,13 @@ fn interp_list_to_string(inner: &Ty) -> (&'static str, &'static str) {
         {
             ("list", "to_string_lmh")
         }
+        // `${List[(String, Int)]}` → `[("é", 2), ("a", 1)]` — string.run_length_encode's
+        // pair list (stdlib/list_to_string_lsi.almd).
+        Ty::Tuple(ts)
+            if ts.len() == 2 && matches!(ts[0], Ty::String) && matches!(ts[1], Ty::Int) =>
+        {
+            ("list", "to_string_lsi")
+        }
         // Any other unsupported element type (`List[Map]`, deeper nesting, …) routes to an
         // UNLINKED variant name so the interp DESUGARS to a real `list.to_string_x` CallFn that
         // the render wall then REJECTS — the function walls cleanly. Returning `None` here would
@@ -1500,6 +1507,25 @@ fn unwrap_or_call_name(module: &str, arg_tys: &[Ty]) -> Option<String> {
 /// `None` = no typed variant applies → the caller falls to the plain name).
 fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
+    // `list.shuffle` / `list.choice` ARE `random.shuffle`/`random.choice` under a second
+    // stdlib name (the same almide_rt intrinsics) — delegate to the random element-repr
+    // router. The Entropy capability stays honest: the witness derives from the LINKED
+    // self-host body (prim.random_get), not the call-site module name.
+    if matches!(func, "shuffle" | "choice") {
+        return Some(random_call_name(func, arg_tys));
+    }
+    // `list.group_by` — the hval-map builder (scalar elements, String keys). Any other
+    // repr routes to the UNLINKED `_x` (a clean render wall, never a wrong-typed link).
+    if func == "group_by" {
+        let ok = matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::List, e))
+                if e.len() == 1 && !is_heap_ty(&e[0]))
+            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2
+                    && matches!(a[0], Ty::String)
+                    && matches!(&a[1], Ty::Applied(TypeConstructorId::List, b)
+                        if b.len() == 1 && !is_heap_ty(&b[0])));
+        return Some(if ok { "list.group_by".to_string() } else { "list.group_by_x".to_string() });
+    }
     // `list.enumerate` keys on its SOURCE element: scalar → the flat-pair self-host;
     // String → the rc-share pair variant (`DropListIntStr` at the call site frees each
     // pair's key ref); any other heap element routes to an UNREGISTERED name (walls
@@ -2041,8 +2067,12 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
         );
         let variant = match (key_heap, val_heap) {
             // `Map[String, List[scalar]]` — the implemented subset of the heap-value
-            // family (new/set/eq; other funcs keep the unregistered wall name).
-            (true, true) if val_is_flat_list && matches!(func, "new" | "set" | "eq") => {
+            // family (new/set/eq/len/contains/get; other funcs keep the unregistered
+            // wall name). `get`'s Some SHARES the stored list (the hshare discipline).
+            (true, true)
+                if val_is_flat_list
+                    && matches!(func, "new" | "set" | "eq" | "len" | "contains" | "get") =>
+            {
                 Some("_hval")
             }
             // `Map[String, List[Int]]` from_list / display (the map-of-lists literal):

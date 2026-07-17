@@ -184,3 +184,80 @@ fn __drop_list_map_hval(xs: List[Map[String, List[Int]]]) -> Unit = {
 // list_to_string_ll composed pattern).
 fn list_to_string_lmh(xs: List[Map[String, List[Int]]]) -> String =
   "[" + (xs |> list.map((m) => "${m}") |> list.join(", ")) + "]"
+
+// ── len / contains / get (hval) ── reads only; get's Some SHARES the stored list
+// (the Some-ctor auto-acquire — the list_get_hshare discipline).
+fn map_len_hval(m: Map[String, List[Int]]) -> Int = prim.load32(prim.handle(m) + 4)
+
+fn map_contains_hval(m: Map[String, List[Int]], k: String) -> Bool = {
+  let h = prim.handle(m)
+  __hvl_find(h, prim.load32(h + 4), k, 0) >= 0
+}
+
+fn __hvl_none() -> Option[List[Int]] = None
+fn __hvl_some(h: Int, n: Int, idx: Int) -> Option[List[Int]] = {
+  let v: List[Int] = prim.load_handle(h + 12 + (n + idx) * 8)
+  Some(v)
+}
+fn map_get_hval(m: Map[String, List[Int]], k: String) -> Option[List[Int]] = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let idx = __hvl_find(h, n, k, 0)
+  if idx < 0 then __hvl_none()
+  else __hvl_some(h, n, idx)
+}
+
+// ── list.group_by ── v0: fold in list order; a key's group keeps its FIRST-seen
+// position, each element appends to its group (native pushes to the entry's Vec).
+// The accumulator recursion is __hvf_at's exact shape (each step's map is a fresh
+// block, the previous drops by scope); the appended group value is a fresh flat
+// list (old slots + x), consumed by map_set_hval's replace-in-place.
+fn __gby_copy(dh: Int, sh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.store64(dh + 12 + i * 8, prim.load64(sh + 12 + i * 8))
+    __gby_copy(dh, sh, n, i + 1)
+  }
+
+fn __gby_extend(old: Int, x: Int) -> List[Int] = {
+  let n = prim.load32(old + 4)
+  let out = prim.alloc_list(n + 1)
+  let oh = prim.handle(out)
+  let _c = __gby_copy(oh, old, n, 0)
+  prim.store64(oh + 12 + n * 8, x)
+  out
+}
+
+fn __gby_single(x: Int) -> List[Int] = {
+  let out = prim.alloc_list(1)
+  prim.store64(prim.handle(out) + 12, x)
+  out
+}
+
+fn __gby_upd(m: Map[String, List[Int]], k: String, x: Int, idx: Int) -> Map[String, List[Int]] = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let nl = __gby_extend(prim.load64(h + 12 + (n + idx) * 8), x)
+  map_set_hval(m, k, nl)
+}
+
+fn __gby_add(m: Map[String, List[Int]], k: String, x: Int) -> Map[String, List[Int]] = {
+  let nl = __gby_single(x)
+  map_set_hval(m, k, nl)
+}
+
+fn __gby_step(xs: List[Int], f: (Int) -> String, n: Int, i: Int, m: Map[String, List[Int]]) -> Map[String, List[Int]] =
+  if i >= n then m
+  else {
+    let x = prim.load64(prim.handle(xs) + 12 + i * 8)
+    let k = f(x)
+    let h = prim.handle(m)
+    let idx = __hvl_find(h, prim.load32(h + 4), k, 0)
+    if idx >= 0 then __gby_step(xs, f, n, i + 1, __gby_upd(m, k, x, idx))
+    else __gby_step(xs, f, n, i + 1, __gby_add(m, k, x))
+  }
+
+fn list_group_by(xs: List[Int], f: (Int) -> String) -> Map[String, List[Int]] = {
+  let n = prim.load32(prim.handle(xs) + 4)
+  __gby_step(xs, f, n, 0, map_new_hval())
+}
