@@ -882,6 +882,7 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         // Transparent-newtype erasure LAST (post-link, pre-lowering) — the SAME pass the
         // pipeline runs, so the caps mir == ir count sees the erased tree on both sides.
         almide_mir::lower::erase_transparent_newtypes(&mut ir);
+        almide_mir::lower::fill_record_defaults(&mut ir);
         almide_mir::lower::inline_pure_call_globals(&mut ir);
         // C-132 move-mode write-back — the SAME pre-lowering rewrite the pipeline
         // runs (see source_to_ir_with), so mir == ir on both sides.

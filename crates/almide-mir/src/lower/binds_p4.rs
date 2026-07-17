@@ -423,21 +423,48 @@ impl LowerCtx {
     /// the container-grain `bind_pattern` (still memory-safe, just imprecise) so we never emit a
     /// dangling borrow. Returns `false` for any non-`Bind`/`Wildcard` sub-pattern (a nested tuple
     /// pattern in ONE statement is deferred — sz4 splits it into two statements, which works).
-    fn try_lower_tuple_destructure(&mut self, pats: &[IrPattern], subject: ValueId) -> bool {
+    fn try_lower_tuple_destructure(
+        &mut self,
+        pats: &[IrPattern],
+        subject: ValueId,
+        subject_ty: Option<&Ty>,
+    ) -> bool {
         use crate::{IntOp, PrimKind};
+        // A pattern component's recorded ty can be an UNSUBSTITUTED TypeVar after mono (the
+        // generic zip_with's `let (a, b) = p` — patterns lag value-side substitution): treating
+        // it as heap loaded an Int slot with i32 (LoadHandle) while the call site passed it
+        // scalar-raw — INVALID WASM (the zip_with__Int_String_String i64/i32 mismatch,
+        // 2026-07-17). Resolve each component from the SUBJECT's own Tuple ty; a component
+        // unresolved on BOTH sides DECLINES the precise destructure (the container-grain
+        // fallback is imprecise but never emits a wrong-width load).
+        let resolve = |i: usize, pty: &Ty| -> Option<Ty> {
+            if !matches!(pty, Ty::TypeVar(_) | Ty::Unknown) {
+                return Some(pty.clone());
+            }
+            if let Some(Ty::Tuple(ts)) = subject_ty {
+                if ts.len() == pats.len() && !matches!(ts[i], Ty::TypeVar(_) | Ty::Unknown) {
+                    return Some(ts[i].clone());
+                }
+            }
+            None
+        };
         // Does the subject OWN its heap slots (a tracked masked aggregate) OR is it a borrow whose
         // owner is elsewhere (a param / a borrowed element handle)? Either way a per-slot HEAP read
         // is a sound borrow. An untracked owned heap subject would leak the borrowed inner block, so
         // a heap field over it must defer to the container-grain alias.
         let heap_borrow_ok =
             self.materialized_aggregates.contains(&subject) || self.param_values.contains(&subject);
-        for p in pats {
+        let mut eff_tys: Vec<Option<Ty>> = vec![None; pats.len()];
+        for (i, p) in pats.iter().enumerate() {
             match p {
-                IrPattern::Bind { ty, .. } if !is_heap_ty(ty) => {}
-                IrPattern::Bind { .. } => {
-                    if !heap_borrow_ok {
+                IrPattern::Bind { ty, .. } => {
+                    let Some(eff) = resolve(i, ty) else {
+                        return false;
+                    };
+                    if is_heap_ty(&eff) && !heap_borrow_ok {
                         return false;
                     }
+                    eff_tys[i] = Some(eff);
                 }
                 IrPattern::Wildcard => {}
                 _ => return false,
@@ -446,7 +473,8 @@ impl LowerCtx {
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subject] });
         for (i, p) in pats.iter().enumerate() {
-            if let IrPattern::Bind { var, ty } = p {
+            if let IrPattern::Bind { var, ty: _ } = p {
+                let ty = eff_tys[i].as_ref().expect("validated above");
                 let off = self.fresh_value();
                 self.ops.push(Op::ConstInt { dst: off, value: 12 + (i as i64) * 8 });
                 let addr = self.fresh_value();
@@ -610,7 +638,7 @@ impl LowerCtx {
                 if let Some(subj) = subject {
                     if self.materialized_aggregates.contains(&subj) || self.param_values.contains(&subj)
                     {
-                        if self.try_lower_tuple_destructure(elements, subj) {
+                        if self.try_lower_tuple_destructure(elements, subj, None) {
                             return Ok(());
                         }
                     }

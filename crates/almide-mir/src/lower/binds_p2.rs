@@ -175,7 +175,7 @@ impl LowerCtx {
                         .lower_call_args(std::slice::from_ref(subject))
                         .map(|v| v.into_iter().next())
                     {
-                        if self.try_lower_tuple_destructure(elements, subj) {
+                        if self.try_lower_tuple_destructure(elements, subj, Some(&subject.ty)) {
                             if let Some(dst) = self.lower_scalar_value(&arms[0].body) {
                                 self.value_of.insert(var, dst);
                                 return Ok(());
@@ -1302,7 +1302,7 @@ impl LowerCtx {
                         }
                     }
                 }
-                if self.try_lower_tuple_destructure(elements, subj) {
+                if self.try_lower_tuple_destructure(elements, subj, Some(&value.ty)) {
                     return Ok(());
                 }
             }

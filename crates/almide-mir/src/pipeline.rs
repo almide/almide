@@ -178,6 +178,9 @@ fn source_to_ir_with(
     // Transparent-newtype erasure LAST (post-link, pre-lowering): `mod type X = String`
     // ctor calls/patterns/Ty tags become the inner type (see newtype_erase.rs).
     crate::lower::erase_transparent_newtypes(&mut ir);
+    // Record default-field fill (Opts {} materializes its declared defaults) — the
+    // SAME program-level pass classify runs (desugar-before-both).
+    crate::lower::fill_record_defaults(&mut ir);
     // Pure call-bearing GLOBAL inits inline at their use sites (the lazy-static value
     // semantics — see inline_pure_call_globals; shared with classify: desugar-before-both).
     crate::lower::inline_pure_call_globals(&mut ir);

@@ -1391,6 +1391,11 @@ fn heap_fold_call_name(module: &str, arg_tys: &[Ty], result_ty: &Ty) -> String {
     let is_msi_acc = matches!(result_ty,
         Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2
             && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
+    // `list.fold` over a Map[String, Int] acc with String elements — the frequencies
+    // shape (map_fold_hacc.almd's list_fold_str_msi; same closure ABI as fold_ols).
+    if module == "list" && is_msi_acc && src_is_list_str {
+        return "list.fold_str_msi".to_string();
+    }
     if module == "map" && is_msi_acc {
         if let Some(Ty::Applied(TypeConstructorId::Map, s)) = arg_tys.first() {
             if s.len() == 2 && matches!(s[0], Ty::String) {
