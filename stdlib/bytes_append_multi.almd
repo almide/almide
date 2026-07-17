@@ -1,0 +1,53 @@
+// bytes_append_multi — SELF-HOSTED functional forms of the MULTI-BYTE bytes appends
+// (`bytes.append_{u16,i16,u32,i32,i64,f32,f64}_{le,be}`), byte-matching native
+// runtime/rs/src/bytes.rs (`(val as uN/iN).to_le_bytes()/to_be_bytes()` — the
+// band/bshr_u byte extraction of the i64 two's-complement is exactly those bytes for
+// every width and sign; f32 demotes first via prim.f2f32, f64 uses prim.fbits).
+// v0's forms are IN-PLACE (`mut b -> Unit`); v1 has value semantics, so the statement
+// call `bytes.append_u32_le(buf, x)` is REWRITTEN to the rebind
+// `buf = bytes.append_u32_le(buf, x)` (mod_p3's bytes.push arm) and these functional
+// impls alloc n+k, copy, and store the k bytes.
+
+fn __bam_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else { prim.store8(dst + i, prim.load8(src + i)); __bam_copy(dst, src, n, i + 1) }
+
+// little-endian: byte i = bits >> (8*i)
+fn __bam_le(p: Int, bits: Int, k: Int, i: Int) -> Int =
+  if i >= k then 0
+  else {
+    prim.store8(p + i, prim.band(prim.bshr_u(bits, i * 8), 255))
+    __bam_le(p, bits, k, i + 1)
+  }
+
+// big-endian: byte i = bits >> (8*(k-1-i))
+fn __bam_be(p: Int, bits: Int, k: Int, i: Int) -> Int =
+  if i >= k then 0
+  else {
+    prim.store8(p + i, prim.band(prim.bshr_u(bits, (k - 1 - i) * 8), 255))
+    __bam_be(p, bits, k, i + 1)
+  }
+
+// fresh Bytes = b ++ k bytes of `bits` in the given order (le = true → little-endian).
+fn __bam(b: Bytes, bits: Int, k: Int, le: Bool) -> Bytes = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let out = prim.alloc_bytes(n + k)
+  let dst = prim.handle(out) + 12
+  let _c = __bam_copy(dst, prim.handle(b) + 12, n, 0)
+  let _w = if le then __bam_le(dst + n, bits, k, 0) else __bam_be(dst + n, bits, k, 0)
+  out
+}
+
+fn bytes_append_u16_le(b: Bytes, v: Int) -> Bytes = __bam(b, v, 2, true)
+fn bytes_append_u16_be(b: Bytes, v: Int) -> Bytes = __bam(b, v, 2, false)
+fn bytes_append_i16_le(b: Bytes, v: Int) -> Bytes = __bam(b, v, 2, true)
+fn bytes_append_i16_be(b: Bytes, v: Int) -> Bytes = __bam(b, v, 2, false)
+fn bytes_append_u32_le(b: Bytes, v: Int) -> Bytes = __bam(b, v, 4, true)
+fn bytes_append_u32_be(b: Bytes, v: Int) -> Bytes = __bam(b, v, 4, false)
+fn bytes_append_i32_le(b: Bytes, v: Int) -> Bytes = __bam(b, v, 4, true)
+fn bytes_append_i32_be(b: Bytes, v: Int) -> Bytes = __bam(b, v, 4, false)
+fn bytes_append_i64_le(b: Bytes, v: Int) -> Bytes = __bam(b, v, 8, true)
+fn bytes_append_i64_be(b: Bytes, v: Int) -> Bytes = __bam(b, v, 8, false)
+fn bytes_append_f32_le(b: Bytes, v: Float) -> Bytes = __bam(b, prim.f32bits(prim.f2f32(v)), 4, true)
+fn bytes_append_f64_le(b: Bytes, v: Float) -> Bytes = __bam(b, prim.fbits(v), 8, true)
+fn bytes_append_f64_be(b: Bytes, v: Float) -> Bytes = __bam(b, prim.fbits(v), 8, false)

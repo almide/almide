@@ -180,6 +180,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/math_tanh.almd"), &[("math_tanh", "math.tanh")]),
         (include_str!("../../../../stdlib/math_fpow.almd"), &[("math_fpow", "math.fpow")]),
         (include_str!("../../../../stdlib/math_lgamma.almd"), &[("math_log_gamma", "math.log_gamma")]),
+        (include_str!("../../../../stdlib/bytes_append_multi.almd"), &[("bytes_append_u16_le", "bytes.append_u16_le"), ("bytes_append_u16_be", "bytes.append_u16_be"), ("bytes_append_i16_le", "bytes.append_i16_le"), ("bytes_append_i16_be", "bytes.append_i16_be"), ("bytes_append_u32_le", "bytes.append_u32_le"), ("bytes_append_u32_be", "bytes.append_u32_be"), ("bytes_append_i32_le", "bytes.append_i32_le"), ("bytes_append_i32_be", "bytes.append_i32_be"), ("bytes_append_i64_le", "bytes.append_i64_le"), ("bytes_append_i64_be", "bytes.append_i64_be"), ("bytes_append_f32_le", "bytes.append_f32_le"), ("bytes_append_f64_le", "bytes.append_f64_le"), ("bytes_append_f64_be", "bytes.append_f64_be")]),
         (include_str!("../../../../stdlib/bytes_f16.almd"), &[("bytes_read_f16_le", "bytes.read_f16_le"), ("bytes_read_f16_le_array", "bytes.read_f16_le_array")]),
         (
             include_str!("../../../../stdlib/matrix_activations.almd"),

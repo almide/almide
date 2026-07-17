@@ -856,16 +856,32 @@ impl LowerCtx {
                 // name (`almide_rt_bytes_append_u8`) — identical rewrite.
                 IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
                     if module.as_str() == "bytes"
-                        && (func.as_str() == "push" || func.as_str() == "append_u8")
+                        && (func.as_str() == "push"
+                            || func.as_str() == "append_u8"
+                            // the MULTI-BYTE in-place appends: same rewrite, the
+                            // functional twins live in bytes_append_multi.almd
+                            || matches!(func.as_str(),
+                                "append_u16_le" | "append_u16_be" | "append_i16_le"
+                                | "append_i16_be" | "append_u32_le" | "append_u32_be"
+                                | "append_i32_le" | "append_i32_be" | "append_i64_le"
+                                | "append_i64_be" | "append_f32_le" | "append_f64_le"
+                                | "append_f64_be"))
                         && args.len() == 2
                         && matches!(&args[0].kind, IrExprKind::Var { .. }) =>
                 {
                     let IrExprKind::Var { id } = &args[0].kind else { unreachable!() };
+                    // push/append_u8 route to the 1-byte `bytes.append`; every
+                    // multi-byte variant keeps its own name (its functional twin).
+                    let fname = if matches!(func.as_str(), "push" | "append_u8") {
+                        "append".to_string()
+                    } else {
+                        func.as_str().to_string()
+                    };
                     let append = IrExpr {
                         kind: IrExprKind::Call {
                             target: CallTarget::Module {
                                 module: sym("bytes"),
-                                func: sym("append"),
+                                func: sym(&fname),
                                 def_id: None,
                             },
                             args: vec![args[0].clone(), args[1].clone()],
