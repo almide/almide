@@ -143,3 +143,6 @@ fn map_to_string_ivh(m: Map[Int, String]) -> String = {
   if n == 0 then "[:]"
   else "[" + __ivt_at(h, n, 0, "") + "]"
 }
+
+// map.len — the entry count (the len header IS it; reads only).
+fn map_len_ivh(m: Map[Int, String]) -> Int = prim.load32(prim.handle(m) + 4)

@@ -2224,7 +2224,7 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
                                 && matches!(a[1], Ty::String))
                     };
                     (arg_tys.first().is_some_and(is_ivh) || is_ivh(result_ty))
-                        && matches!(func, "new" | "set" | "eq" | "from_list")
+                        && matches!(func, "new" | "set" | "eq" | "from_list" | "len")
                 } =>
             {
                 Some("_ivh")
