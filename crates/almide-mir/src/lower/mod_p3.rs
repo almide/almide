@@ -523,6 +523,53 @@ impl LowerCtx {
                         }
                     }
                 }
+                // A HEAP reassignment inside an EXECUTING unit arm (`if let v = x {
+                // out = int.to_string(v) }` — the statement if-let / variant-match
+                // arms): the var already owns a stable scope-tracked heap local, so
+                // the write is drop-old + `SetLocal` IN PLACE — the same rebind unit
+                // the loop-carried slot proves (per-arm the `i` of the fresh value
+                // and the `d` of the old one balance; the slot's scope-end drop
+                // frees whichever object the taken arm left). A borrowed-param slot
+                // is excluded (its drop-old would release the caller's reference).
+                if self.unit_arm_depth > 0 && is_heap_ty(&value.ty) {
+                    if let Some(&local) = self.value_of.get(var) {
+                        if self.live_heap_handles.contains(&local)
+                            && !self.param_values.contains(&local)
+                        {
+                            let mark = self.ops.len();
+                            let lhh_mark = self.live_heap_handles.len();
+                            // A literal/concat/interp/Var value via the owned-field
+                            // helper; a heap-returning CALL (`out = int.to_string(v)`)
+                            // via the call-arg materialization (a fresh owned result).
+                            let new = self.lower_owned_heap_field(value).or_else(|| {
+                                if !matches!(&value.kind, IrExprKind::Call { .. }) {
+                                    return None;
+                                }
+                                match self.lower_call_args(std::slice::from_ref(value)) {
+                                    Ok(args) => match args.into_iter().next() {
+                                        Some(crate::CallArg::Handle(v)) => Some(v),
+                                        _ => None,
+                                    },
+                                    Err(_) => None,
+                                }
+                            });
+                            if let Some(new) = new {
+                                let drop_op = self.drop_op_for(local);
+                                self.ops.push(drop_op);
+                                self.ops.push(Op::SetLocal { local, src: new });
+                                // ONLY the rebound value leaves the scope-drop set (the
+                                // slot owns it; the local's own scope-end drop frees it).
+                                // Any arg temp the value lowering tracked stays — the
+                                // per-arm drop releases it (truncating it away left the
+                                // arm +1 → a grouped seg → the {i|} poison cascade).
+                                self.live_heap_handles.retain(|&v| v != new);
+                                return Ok(());
+                            }
+                            self.ops.truncate(mark);
+                            self.live_heap_handles.truncate(lhh_mark);
+                        }
+                    }
+                }
                 if self.in_frame > 0 && is_heap_ty(&value.ty) {
                     // STRICT value mode: this defer DROPS the write. In an EXECUTING frame
                     // (a `try_lower_unit_if` arm) that is a silent wrong value on the

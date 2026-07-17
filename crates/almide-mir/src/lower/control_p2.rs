@@ -122,7 +122,11 @@ impl LowerCtx {
             self.value_of.insert(bind_var, payload);
             self.param_values.insert(payload);
         }
+        // Exactly ONE arm runs (the unit-if discipline): outer-var reassignments
+        // inside an arm mutate the stable local IN PLACE — see `unit_arm_depth`.
+        self.unit_arm_depth += 1;
         if self.lower_branch_arm(None, err_body).is_err() {
+            self.unit_arm_depth -= 1;
             self.ops.truncate(ops_mark);
             self.lifted.truncate(lifted_mark);
             self.live_heap_handles.truncate(lhh_mark);
@@ -163,7 +167,9 @@ impl LowerCtx {
                 self.value_of.insert(bind_var, payload);
             }
         }
-        if self.lower_branch_arm(None, ok_body).is_err() {
+        let ok_ok = self.lower_branch_arm(None, ok_body).is_ok();
+        self.unit_arm_depth -= 1;
+        if !ok_ok {
             self.ops.truncate(ops_mark);
             self.lifted.truncate(lifted_mark);
             self.live_heap_handles.truncate(lhh_mark);

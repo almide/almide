@@ -1003,7 +1003,7 @@ impl CertScan {
                     // bytes_set_value_semantics::rotate REJECT, F8 residue).
                     let so = self.s.object_of(slot);
                     self.s.of.insert(*dst, so);
-                    if self.line_slots.contains(&slot) {
+                    if self.line_slots.contains(&slot) && self.s.frames.is_empty() {
                         self.s.event(so, '(');
                     }
                     self.s.event(so, 'i');
@@ -1024,7 +1024,7 @@ impl CertScan {
                 if let Some(&slot) = self.feeder_to_slot.get(dst) {
                     let so = self.s.object_of(slot);
                     self.s.of.insert(*dst, so);
-                    if self.line_slots.contains(&slot) {
+                    if self.line_slots.contains(&slot) && self.s.frames.is_empty() {
                         self.s.event(so, '(');
                     }
                     self.s.event(so, 'a');
@@ -1090,7 +1090,7 @@ impl CertScan {
                     let so = self.s.object_of(slot);
                     self.s.of.insert(*d, so);
                     // STRAIGHT-LINE slot: open its `(id)` CLoop body before the feeder'self.s `i`.
-                    if self.line_slots.contains(&slot) {
+                    if self.line_slots.contains(&slot) && self.s.frames.is_empty() {
                         self.s.event(so, '(');
                     }
                     self.s.event(so, 'i');
@@ -1103,7 +1103,11 @@ impl CertScan {
             // were already emitted; `)` here makes the per-reassign stream read `(id)` (rc-preserving).
             // A loop slot'self.s SetLocal carries no cert event (its parens are the LoopStart/LoopEnd
             // delimiters); a scalar SetLocal is cert-neutral. So this fires ONLY for a line slot.
-            Op::SetLocal { local, .. } if self.line_slots.contains(local) => {
+            // (Inside a BRANCH frame the line-slot rebind emits NO parens — the arm's
+            // flat `i…d` nets 0 and a delimiter in an arm buffer poisons the flush
+            // (`{i|}`); the fold is only needed for straight-line REPEATED reassigns.)
+            Op::SetLocal { local, .. }
+                if self.line_slots.contains(local) && self.s.frames.is_empty() => {
                 let so = self.s.object_of(*local);
                 self.s.event(so, ')');
             }
@@ -1124,7 +1128,7 @@ impl CertScan {
                         // `iamdm` false imbalance the kernel checker rejects.
                         let so = self.s.object_of(slot);
                         self.s.of.insert(*d, so);
-                        if self.line_slots.contains(&slot) {
+                        if self.line_slots.contains(&slot) && self.s.frames.is_empty() {
                             self.s.event(so, '(');
                         }
                         self.s.event(so, 'i');
