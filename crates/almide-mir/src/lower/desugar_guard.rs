@@ -361,11 +361,62 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
             };
         }
     }
+    // Pass 2 — STATEMENT-level interp-part hoist: a Block part inside a bind's
+    // StringInterp (`let s = "r: ${int.to_string({ let x = 10; x * 2 })}"` — the
+    // expr-level hoist above already absorbed the call into the block) splices its
+    // statements BEFORE the bind, leaving the tail as the part — the concat-tree
+    // interp lowering then sees only plain operands. Sound when every EARLIER Expr
+    // part is pure (a literal/Var); parts after the block already evaluate after it.
+    fn hoist_in_stmts(stmts: &mut Vec<almide_ir::IrStmt>) {
+        use almide_ir::{IrExprKind, IrStmtKind, IrStringPart};
+        let mut i = 0;
+        while i < stmts.len() {
+            let mut hoisted: Vec<almide_ir::IrStmt> = Vec::new();
+            if let IrStmtKind::Bind { value, .. } = &mut stmts[i].kind {
+                if let IrExprKind::StringInterp { parts } = &mut value.kind {
+                    let mut earlier_pure = true;
+                    for part in parts.iter_mut() {
+                        let IrStringPart::Expr { expr } = part else { continue };
+                        if let IrExprKind::Block { stmts: inner, expr: Some(tail) } = &mut expr.kind
+                        {
+                            if earlier_pure && !inner.is_empty() {
+                                hoisted = std::mem::take(inner);
+                                let t = (**tail).clone();
+                                *expr = t;
+                            }
+                            break;
+                        }
+                        if !is_pure_operand(expr) {
+                            earlier_pure = false;
+                        }
+                    }
+                }
+            }
+            if hoisted.is_empty() {
+                i += 1;
+            } else {
+                for (k, s) in hoisted.into_iter().enumerate() {
+                    stmts.insert(i + k, s);
+                }
+                // Re-examine the same bind: another block part may remain.
+            }
+        }
+    }
+    struct S2;
+    impl IrMutVisitor for S2 {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            if let IrExprKind::Block { stmts, .. } = &mut e.kind {
+                hoist_in_stmts(stmts);
+            }
+        }
+    }
     for func in program
         .functions
         .iter_mut()
         .chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
     {
         H.visit_expr_mut(&mut func.body);
+        S2.visit_expr_mut(&mut func.body);
     }
 }

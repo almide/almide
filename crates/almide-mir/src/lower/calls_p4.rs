@@ -1215,6 +1215,28 @@ impl LowerCtx {
                     lowered.push(dst);
                     continue;
                 }
+                // A COMPUTED String argument (`prim.die(prim.handle("assertion failed: "
+                // + msg))` — the 2-arg assert's computed-message die): materialize the
+                // concat/interp chain to an owned block (scope-tracked, dropped at the
+                // arm/scope end like the literal above) and hand the prim its handle.
+                // Without this the whole assert's unit-if rolled back and the wall
+                // (misleadingly) named the CONDITION.
+                if matches!(
+                    &a.kind,
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. }
+                        | IrExprKind::StringInterp { .. }
+                ) {
+                    let obj = match &a.kind {
+                        IrExprKind::BinOp { .. } => self.try_lower_concat_str(a),
+                        IrExprKind::StringInterp { parts } => self.try_lower_string_interp(parts),
+                        _ => unreachable!(),
+                    };
+                    if let Some(obj) = obj {
+                        self.live_heap_handles.push(obj);
+                        lowered.push(obj);
+                        continue;
+                    }
+                }
             }
             let v = self.lower_scalar_value(a).ok_or_else(|| {
                 LowerError::Unsupported(format!("prim.{func} argument is not a lowerable scalar/handle"))
