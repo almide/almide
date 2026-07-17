@@ -191,6 +191,10 @@ fn source_to_ir_with(
     // it); excluded shapes (multi-mut-param, same-name, non-Unit effect) keep it
     // and keep walling.
     almide_ir::mut_param::lower_mut_params_move_mode(&mut ir);
+    // Guard → if restructure at the fn-body tail chain (conditional early return
+    // expressed without early-return control flow — see desugar_guard.rs; shared
+    // with classify: desugar-before-both).
+    crate::lower::desugar_fn_body_guards(&mut ir);
     Ok(ir)
 }
 
