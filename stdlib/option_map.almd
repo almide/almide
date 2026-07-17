@@ -120,3 +120,83 @@ fn option_zip(a: Option[Int], b: Option[Int]) -> Option[(Int, Int)] = {
   else if blen == 0 then None
   else __opt_zip_some(av, bv)
 }
+
+// HEAP-payload twins (`option.map(some("hello"), (s) => string.to_upper(s))`): the
+// scalar impls declare `f: (Int) -> Int` (an i64-result CallIndirect type), but a
+// heap-mapping user closure uses the `_h` table type — the repr mismatch the router
+// walled. These twins declare the closure HEAP-typed, so the dispatch type matches.
+// The Some payload is a SHARED borrow into f (load_handle); f's result is fresh
+// owned and moves into the some(); a bare kept payload Dups (the hshare discipline).
+fn __opt_maph_some(x: String, f: (String) -> String) -> Option[String] = {
+  let y = f(x)
+  some(y)
+}
+
+fn option_map_h(o: Option[String], f: (String) -> String) -> Option[String] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  if len >= 1 then {
+    let x: String = prim.load_handle(h + 12)
+    __opt_maph_some(x, f)
+  } else none
+}
+
+fn __opt_unwrap_else_h(f: () -> String) -> String = f()
+
+fn option_unwrap_or_else_h(o: Option[String], f: () -> String) -> String = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  if len >= 1 then {
+    let x: String = prim.load_handle(h + 12)
+    x
+  } else __opt_unwrap_else_h(f)
+}
+
+// HEAP-payload `option.to_result` twin: the scalar impl built the len-as-tag Result
+// (Ok scalar convention), but a heap-Ok `Result[String, String]` is the CAP-AS-TAG
+// block (tag @16) — the eq/match consumers misread the scalar layout. Typed heap here
+// so the ok()/err() ctors build the right block. Some payload shares into ok() (Dup);
+// err copies the borrowed msg (v0's to_string copy).
+fn __otr_copy_str(s: String) -> String = string.repeat(s, 1)
+
+fn option_to_result_h(o: Option[String], msg: String) -> Result[String, String] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  if len >= 1 then {
+    let x: String = prim.load_handle(h + 12)
+    ok(x)
+  } else err(__otr_copy_str(msg))
+}
+
+// `option.filter` heap twin: the kept payload SHARES into some() (Dup) — the scalar
+// re-wrap raw-copied the handle un-owned.
+fn __opt_filterh_some(x: String, pred: (String) -> Bool) -> Option[String] = {
+  let p = pred(x)
+  if p then some(x) else none
+}
+
+fn option_filter_h(o: Option[String], pred: (String) -> Bool) -> Option[String] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  if len >= 1 then {
+    let x: String = prim.load_handle(h + 12)
+    __opt_filterh_some(x, pred)
+  } else none
+}
+
+// `option.flatten` heap twin (`some(some("s"))` → `some("s")`): the inner payload
+// SHARES into the rebuilt some() (Dup); the outer/inner blocks stay caller-owned.
+fn option_flatten_h(o: Option[Option[String]]) -> Option[String] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  if len == 0 then none
+  else {
+    let inner: Option[String] = prim.load_handle(h + 12)
+    let ih = prim.handle(inner)
+    let ilen = prim.load32(ih + 4)
+    if ilen >= 1 then {
+      let x: String = prim.load_handle(ih + 12)
+      some(x)
+    } else none
+  }
+}

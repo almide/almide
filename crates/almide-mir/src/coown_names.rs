@@ -59,6 +59,7 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__enum_fill_h",      // list.enumerate_str — rc_inc the element into its (i, x) pair
     "__zip_fill_rc",      // list.zip_rc — rc_inc both elements into each pair
     "__lpart_fill_rc",    // list.partition_rc — rc_inc each element into its side
+    "__otl_fill_rc",      // option.to_list_rc — rc_inc the Some payload into the list
     "__zip_fill_rcb",     // list.zip_sh — rc_inc the heap RIGHT element only
     "__zip_fill_rca",     // list.zip_hs — rc_inc the heap LEFT element only
     "__take_h_fill",      // list.take_hshare — rc_inc each shared element slot

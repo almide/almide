@@ -1209,7 +1209,19 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
 /// (the same honest-wall pattern as the map `_skv_wall` family).
 fn option_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId as TC;
-    let _ = arg_tys;
+    // `option.to_list` keys on the PAYLOAD: a flat heap payload (String /
+    // List[scalar] / scalar tuple) rides the co-owning `_rc` variant (the raw slot
+    // copy aliased the payload un-owned — double free); a richer payload walls.
+    if func == "to_list" {
+        if let Some(Ty::Applied(TC::Option, a)) = arg_tys.first() {
+            if a.len() == 1 && is_heap_ty(&a[0]) {
+                if matches!(a[0], Ty::String) || is_flat_scalar_block_ty(&a[0]) {
+                    return Some("option.to_list_rc".to_string());
+                }
+                return Some("option.to_list_x".to_string());
+            }
+        }
+    }
     // The mismatch axis is the CLOSURE's RESULT repr only: params always ride the
     // widened i64 slots, and an Option-returning closure uses the same `_h` table
     // type the impl declares (flat_map / or_else match by construction; filter's
@@ -1220,15 +1232,33 @@ fn option_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
     //   - `option.unwrap_or_else` with a HEAP payload (impl `f: () -> Int`)
     let heap_option =
         |t: &Ty| matches!(t, Ty::Applied(TC::Option, a) if a.len() == 1 && is_heap_ty(&a[0]));
-    let bad = match func {
-        "map" => heap_option(result_ty),
-        "unwrap_or_else" => is_heap_ty(result_ty),
-        _ => false,
-    };
-    if bad {
-        Some(format!("option.{func}_heap_wall"))
-    } else {
-        None
+    match func {
+        // The heap twins declare the closure heap-typed, so the `_h` CallIndirect
+        // table type matches by construction (option_map.almd's `_h` family).
+        "map" if heap_option(result_ty) => Some("option.map_h".to_string()),
+        // filter/flatten heap twins: the kept payload must SHARE (Dup) into the
+        // rebuilt some() — the scalar rewrap raw-copied the handle un-owned.
+        "filter" if heap_option(result_ty) => Some("option.filter_h".to_string()),
+        "flatten" if heap_option(result_ty) => Some("option.flatten_h".to_string()),
+        // `to_result` over a String payload: the heap twin builds the CAP-AS-TAG
+        // Result the consumers read (the scalar impl's len-as-tag misread); other
+        // heap payloads wall (`_x`).
+        "to_result"
+            if matches!(arg_tys.first(), Some(Ty::Applied(TC::Option, a))
+                if a.len() == 1 && matches!(a[0], Ty::String)) =>
+        {
+            Some("option.to_result_h".to_string())
+        }
+        "to_result"
+            if matches!(arg_tys.first(), Some(Ty::Applied(TC::Option, a))
+                if a.len() == 1 && is_heap_ty(&a[0])) =>
+        {
+            Some("option.to_result_x".to_string())
+        }
+        "unwrap_or_else" if is_heap_ty(result_ty) => {
+            Some("option.unwrap_or_else_h".to_string())
+        }
+        _ => None,
     }
 }
 
