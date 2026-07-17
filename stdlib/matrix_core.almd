@@ -720,3 +720,9 @@ fn __mx_cc_rows(ho: Int, hs: Int, k: Int, rows: Int, r: Int) -> Int =
     prim.store_str(ho + 12 + r * 8, row)
     __mx_cc_rows(ho, hs, k, rows, r + 1)
   }
+
+// `matrix.concat_cols_many` IS `matrix.concat_cols` (both stdlib names bind the same
+// intrinsic) — a REAL alias fn, because the registry rename can give one impl only
+// ONE call name (the double mapping left the second name unlinked).
+fn matrix_concat_cols_many(matrices: List[List[List[Float]]]) -> List[List[Float]] =
+  matrix_concat_cols(matrices)
