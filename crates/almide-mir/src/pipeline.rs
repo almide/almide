@@ -218,14 +218,33 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
     }
     // v0's `__test_runner` re-initializes module globals before EVERY test (native
     // thread-isolation parity). The v1 `_start` runs `__global_init`/`__mg_init` ONCE —
-    // equivalent only when there is no top-let state to leak between tests.
-    if !ir.top_lets.is_empty() || ir.modules.iter().any(|m| !m.top_lets.is_empty()) {
+    // so the runner main re-ASSIGNS every MUTABLE main-region top-let to its
+    // initializer before each test (the ordinary `lower_mutable_global_assign` path:
+    // take + drop-old + store — no leak, no new runtime). An IMMUTABLE top-let cannot
+    // change between tests and needs no re-init. MODULE top-lets stay walled: their
+    // VarIds live in a different numbering region than the main-region runner, so a
+    // synthesized Assign could collide with an unrelated main-side id (the per-region
+    // globals discipline) — that bridge is the remaining piece of this brick.
+    if ir.modules.iter().any(|m| !m.top_lets.is_empty()) {
+        // MODULE top-lets (mutable AND immutable) stay walled in test mode: the
+        // mutable ones need the re-init Assign across the VarId region bridge, and
+        // the immutable cross-module reads hit a residual test-runner stack bug
+        // (values-remaining-on-stack — cross_module_toplet_byvalue) once unwalled.
         return Err(LowerError::Unsupported(
-            "test mode: top-let globals need per-test re-init (the v0 runner's isolation \
-             semantics) not in this brick"
+            "test mode: MODULE top-lets need the per-test region bridge, not in \
+             this brick"
                 .into(),
         ));
     }
+    let reinit_stmts: Vec<IrStmt> = ir
+        .top_lets
+        .iter()
+        .filter(|tl| tl.mutable)
+        .map(|tl| IrStmt {
+            kind: IrStmtKind::Assign { var: tl.var, value: tl.value.clone() },
+            span: None,
+        })
+        .collect();
     let unit_expr =
         || IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
     let println_stmt = |text: String| IrStmt {
@@ -267,6 +286,9 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
         idx += 1;
         f.name = sym(&mangled);
         f.is_test = false;
+        // v0 isolation parity: reset every mutable top-let to its initializer
+        // before the test body runs (see the reinit_stmts derivation above).
+        stmts.extend(reinit_stmts.iter().cloned());
         stmts.push(println_stmt(format!("test: {display} ... ")));
         // The stmt-position effect call, in the SAME shape the frontend gives user
         // code: `Try { call }` with the LIFTED `Result[Unit, String]` call type — the
