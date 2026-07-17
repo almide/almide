@@ -37,6 +37,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/string_repeat.almd"), &[("string_repeat", "string.repeat")]),
         (include_str!("../../../../stdlib/string_is_empty.almd"), &[("string_is_empty", "string.is_empty")]),
         (include_str!("../../../../stdlib/string_eq.almd"), &[("string_eq", "string.eq")]),
+        (include_str!("../../../../stdlib/string_class.almd"), &[("string_is_alpha", "string.is_alpha"), ("string_is_upper", "string.is_upper"), ("string_is_lower", "string.is_lower"), ("string_is_alphanumeric_uni", "string.is_alphanumeric")]),
         (include_str!("../../../../stdlib/string_cmp.almd"), &[("string_cmp", "string.cmp")]),
         (
             include_str!("../../../../stdlib/math_int.almd"),
@@ -614,10 +615,6 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (
             include_str!("../../../../stdlib/string_is_digit.almd"),
             &[("string_is_digit", "string.is_digit")],
-        ),
-        (
-            include_str!("../../../../stdlib/string_is_alphanumeric.almd"),
-            &[("string_is_alphanumeric", "string.is_alphanumeric")],
         ),
         (
             include_str!("../../../../stdlib/string_from_codepoint.almd"),
