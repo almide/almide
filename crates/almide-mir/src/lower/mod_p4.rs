@@ -1275,6 +1275,14 @@ fn option_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
 fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId as TC;
     match func {
+        // is_ok/is_err over a HEAP-Ok Result: the block is cap-as-tag (tag @16, len@4
+        // always 1) — the len-as-tag base impls would call every heap-Ok value an Err.
+        "is_ok" | "is_err"
+            if matches!(arg_tys.first(), Some(Ty::Applied(TC::Result, a))
+                if a.len() == 2 && is_heap_ty(&a[0])) =>
+        {
+            Some(format!("result.{func}_h"))
+        }
         // partition: List[Result[scalar, String]] → (List[scalar], List[String])
         "partition" => {
             let ok = matches!(arg_tys.first(), Some(Ty::Applied(TC::List, e))
@@ -2137,12 +2145,23 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
                     "_str_wall"
                 },
             ),
+            // `map.map` transforms the VALUES — the skv impl is scalar-value in AND out, so
+            // it also needs the RESULT map's value scalar (a `(v) => int.to_string(v)` maps
+            // into the `_str` repr — no skv form; wall it rather than mislink).
+            (true, false)
+                if key_is_string
+                    && func == "map"
+                    && !matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                        if a.len() == 2 && !is_heap_ty(&a[1])) =>
+            {
+                Some("_skv_wall")
+            }
             (true, false) if key_is_string => Some(
                 if matches!(
                     func,
                     "new" | "set" | "remove" | "filter" | "get" | "get_or" | "keys" | "values"
                         | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
-                        | "eq" | "find"
+                        | "eq" | "find" | "update" | "merge" | "map"
                 ) {
                     "_skv"
                 } else {

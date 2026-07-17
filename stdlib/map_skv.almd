@@ -427,3 +427,99 @@ fn map_from_list_skv(pairs: List[(String, Int)]) -> Map[String, Int] = {
   prim.store32(rh + 4, entries)
   r
 }
+
+// ── map.update / map.merge / map.map (values) ── the three v0 combinators that were
+// `_skv_wall`-routed. All follow the set/remove discipline: source borrowed, result a
+// fresh owned map, keys DEEP-COPIED (__skv_store_key), values raw i64 slots.
+
+// map.update — copy every entry; the (unique) entry keyed `k` gets f(oldv). `f` is called
+// ONLY when the key matches (native: `if let Some(v) = get { insert(key, f(v)) }` — a
+// missing key returns the unchanged copy, f never runs).
+fn __skv_update_copy(sh: Int, rh: Int, entries: Int, k: String, f: (Int) -> Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __skv_store_key(rh + 12 + i * 8, kk)
+    let oldv = prim.load64(sh + 12 + (entries + i) * 8)
+    let putv = if __skv_eq(kk, k) then f(oldv) else oldv
+    prim.store64(rh + 12 + (entries + i) * 8, putv)
+    __skv_update_copy(sh, rh, entries, k, f, i + 1)
+  }
+
+fn map_update_skv(m: Map[String, Int], k: String, f: (Int) -> Int) -> Map[String, Int] = {
+  let sh = prim.handle(m)
+  let entries = prim.load32(sh + 4)
+  let r = prim.alloc_map_skv(entries * 2)
+  let rh = prim.handle(r)
+  let _c = __skv_update_copy(sh, rh, entries, k, f, 0)
+  prim.store32(rh + 4, entries)
+  r
+}
+
+// map.map — every value mapped through `f` (once per entry, in order), keys copied.
+fn __skv_map_copy(sh: Int, rh: Int, entries: Int, f: (Int) -> Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __skv_store_key(rh + 12 + i * 8, kk)
+    let nv = f(prim.load64(sh + 12 + (entries + i) * 8))
+    prim.store64(rh + 12 + (entries + i) * 8, nv)
+    __skv_map_copy(sh, rh, entries, f, i + 1)
+  }
+
+fn map_map_skv(m: Map[String, Int], f: (Int) -> Int) -> Map[String, Int] = {
+  let sh = prim.handle(m)
+  let entries = prim.load32(sh + 4)
+  let r = prim.alloc_map_skv(entries * 2)
+  let rh = prim.handle(r)
+  let _c = __skv_map_copy(sh, rh, entries, f, 0)
+  prim.store32(rh + 4, entries)
+  r
+}
+
+// map.merge — a.clone() then insert every b entry (native AlmideMap semantics: a key
+// already in `a` keeps its POSITION but takes b's value; new keys append in b's order).
+fn __skv_merge_bnew(ah: Int, bh: Int, an: Int, bn: Int, j: Int, acc: Int) -> Int =
+  if j >= bn then acc
+  else {
+    let kk = prim.load_str(bh + 12 + j * 8)
+    if __skv_find(ah, an, kk, 0) < 0 then __skv_merge_bnew(ah, bh, an, bn, j + 1, acc + 1)
+    else __skv_merge_bnew(ah, bh, an, bn, j + 1, acc)
+  }
+
+fn __skv_merge_acopy(ah: Int, bh: Int, rh: Int, an: Int, bn: Int, rn: Int, i: Int) -> Int =
+  if i >= an then 0
+  else {
+    let kk = prim.load_str(ah + 12 + i * 8)
+    let _kc = __skv_store_key(rh + 12 + i * 8, kk)
+    let bidx = __skv_find(bh, bn, kk, 0)
+    let v = if bidx < 0 then prim.load64(ah + 12 + (an + i) * 8)
+            else prim.load64(bh + 12 + (bn + bidx) * 8)
+    prim.store64(rh + 12 + (rn + i) * 8, v)
+    __skv_merge_acopy(ah, bh, rh, an, bn, rn, i + 1)
+  }
+
+fn __skv_merge_bapp(ah: Int, bh: Int, rh: Int, an: Int, bn: Int, rn: Int, j: Int, w: Int) -> Int =
+  if j >= bn then 0
+  else {
+    let kk = prim.load_str(bh + 12 + j * 8)
+    if __skv_find(ah, an, kk, 0) < 0 then {
+      let _kc = __skv_store_key(rh + 12 + w * 8, kk)
+      prim.store64(rh + 12 + (rn + w) * 8, prim.load64(bh + 12 + (bn + j) * 8))
+      __skv_merge_bapp(ah, bh, rh, an, bn, rn, j + 1, w + 1)
+    } else __skv_merge_bapp(ah, bh, rh, an, bn, rn, j + 1, w)
+  }
+
+fn map_merge_skv(a: Map[String, Int], b: Map[String, Int]) -> Map[String, Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let an = prim.load32(ah + 4)
+  let bn = prim.load32(bh + 4)
+  let rn = an + __skv_merge_bnew(ah, bh, an, bn, 0, 0)
+  let r = prim.alloc_map_skv(rn * 2)
+  let rh = prim.handle(r)
+  let _c = __skv_merge_acopy(ah, bh, rh, an, bn, rn, 0)
+  let _a2 = __skv_merge_bapp(ah, bh, rh, an, bn, rn, 0, an)
+  prim.store32(rh + 4, rn)
+  r
+}
