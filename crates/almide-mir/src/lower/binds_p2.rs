@@ -1144,6 +1144,27 @@ impl LowerCtx {
                 ))
             }
             IrExprKind::If { else_, .. } => {
+                // A VARIANT (Option/Result)-typed `if` RHS (`let $r = if c then ok(T)
+                // else err(e)` — the tail err-raise normalization's two-step bind, and
+                // the hand-written equivalent): EXECUTE via the proven heap-result-if
+                // machinery (each arm materializes + Consumes its value; the merge is
+                // the ONE owned rc=1 block), bind + scope-track it, and SEED its
+                // variant READ-shape so a following `$r!` / `match $r` takes the
+                // executing tag-read path — the same classification a call-result
+                // bind gets (seed_variant_param is read-shape only: no ownership
+                // change, the scope-end drop stays this binding's).
+                if is_variant_ty(ty) {
+                    if let IrExprKind::If { cond, then, else_ } = &value.kind {
+                        if let Some(obj) = self.try_lower_heap_result_if(cond, then, else_, ty) {
+                            self.value_of.insert(var, obj);
+                            if !self.live_heap_handles.contains(&obj) {
+                                self.live_heap_handles.push(obj);
+                            }
+                            self.seed_variant_param(obj, ty);
+                            return Ok(());
+                        }
+                    }
+                }
                 // STRAIGHT-LINE identity-else shadow rebind `let acc = if cond then acc + [x] else acc`
                 // (porta `serialize_opts`' 7 stacked optional-arg appends on one `args` slot). The ELSE
                 // arm is EXACTLY the accumulator var — the PROVEN loop-carried `i(id)m` append slot,

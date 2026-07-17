@@ -4,6 +4,36 @@ impl LowerCtx {
     /// NOT added to `live_heap_handles`, it is moved out as the result). A NESTED `if` (a
     /// desugared `match`'s else-if) recurses, its result dst being this arm's value.
     fn lower_heap_result_arm(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        // A HEAP-Ok PAYLOAD arm (`if age < 200 then "valid" else err(x)!` in a
+        // `Result[String, _]` fn — the guard-chain tail): the arm value is the Ok
+        // PAYLOAD, not the Result — returning it bare puts a raw String where the
+        // caller reads a cap-as-tag wrapper (the validate_age latent miscompile).
+        // Build the Ok wrapper (`lower_result_str_piece` + `materialize_result_str`),
+        // the heap twin of the scalar-Var `materialize_result_ok` arm below. Gated to
+        // VALUE-shaped arms (LitStr/Var/concat) whose ty IS the Ok payload — a
+        // Result-typed arm (Unwrap/ctor/nested if/block/call) keeps its own path.
+        if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) =
+            result_ty
+        {
+            if a.len() == 2
+                && a[0] == arm.ty
+                && is_heap_ty(&a[0])
+                && matches!(
+                    &arm.kind,
+                    IrExprKind::LitStr { .. }
+                        | IrExprKind::Var { .. }
+                        | IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. }
+                )
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let piece = self.lower_result_str_piece(arm)?;
+                let repr = repr_of(result_ty).ok()?;
+                let obj = self.materialize_result_str(piece, repr, false, false);
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                return Some(obj);
+            }
+        }
         match &arm.kind {
             // An `e!` arm (`if c then parse_sequence(..)! else ..`) — effect-fn error
             // propagation: `e!` returns e's Result unchanged (Ok→Ok, Err→Err), so strip the

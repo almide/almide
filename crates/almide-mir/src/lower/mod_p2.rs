@@ -140,11 +140,19 @@ fn has_result_err(body: &IrExpr) -> bool {
             // classified never-err, its callers' `!` got stripped, and the caller
             // read the REAL Result block as the raw payload (record fields off a
             // Result handle — the read_message `method=` garbage, 2026-07-03).
+            // …and the same blindness holds for `!`/`?` over ANY non-Named subject: a
+            // local Result var (`let r: Result[Int,String] = …; r!` — result_option_
+            // matrix's unwrap_result_ok), a field, an Option unwrap (raises on none) —
+            // all propagate an error channel the Named-call fixpoint cannot see.
+            // Classifying them never-err stripped the CALLERS' `!` (bare i64 read)
+            // while the def kept the Result-handle pass-through — the def/callsite
+            // ABI split = invalid wasm (i64/i32, latent until the file first rendered).
+            // Only a `Named` call stays out (the fixpoint tracks it precisely).
             if let IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner } = &e.kind {
-                if matches!(&inner.kind,
-                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
-                        | IrExprKind::RuntimeCall { .. })
-                {
+                if !matches!(
+                    &inner.kind,
+                    IrExprKind::Call { target: CallTarget::Named { .. }, .. }
+                ) {
                     self.0 = true;
                 }
             }

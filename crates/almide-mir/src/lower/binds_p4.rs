@@ -1319,6 +1319,12 @@ impl LowerCtx {
                     _ => return None,
                 };
                 let dst = self.materialize_opt_str_some(piece, repr);
+                // materialize_opt_str_some registers the OPTION read-shape; this value is
+                // a RESULT (len-as-tag, Err = len 1) — a reader that keeps both entries
+                // resolves it as an Option (`is_result = results ∧ ¬options`) and takes
+                // the Err payload as a Some payload (`err("x") ?? 0` returned the String
+                // HANDLE — result_option_matrix's "if with ??"). Result-only tracking.
+                self.materialized_options.remove(&dst);
                 self.materialized_results.insert(dst);
                 Some(dst)
             }
