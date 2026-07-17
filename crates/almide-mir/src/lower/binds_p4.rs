@@ -423,7 +423,7 @@ impl LowerCtx {
     /// the container-grain `bind_pattern` (still memory-safe, just imprecise) so we never emit a
     /// dangling borrow. Returns `false` for any non-`Bind`/`Wildcard` sub-pattern (a nested tuple
     /// pattern in ONE statement is deferred — sz4 splits it into two statements, which works).
-    fn try_lower_tuple_destructure(
+    pub(crate) fn try_lower_tuple_destructure(
         &mut self,
         pats: &[IrPattern],
         subject: ValueId,

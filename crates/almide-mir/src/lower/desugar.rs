@@ -677,12 +677,32 @@ pub fn desugar_flatten_let_block(body: &IrExpr) -> Option<IrExpr> {
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
         return None;
     };
-    let (i, var, ty, mutability, inner_stmts, inner_tail) =
+    // `let x = { inner…; t }` AND `let (a, b) = { inner…; t }` (the fan sequential
+    // rewrite's destructure-of-block) both splice the inner statements before a
+    // rebuilt bind of the inner tail — a block value binds nothing extra, so the
+    // lifetime extension is the same conservative one the Bind arm always took.
+    enum Target {
+        Bind { var: VarId, ty: Ty, mutability: almide_ir::Mutability },
+        Destructure { pattern: almide_ir::IrPattern },
+    }
+    let (i, target, inner_stmts, inner_tail) =
         stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
             IrStmtKind::Bind { var, ty, value, mutability } => match &value.kind {
-                IrExprKind::Block { stmts: inner, expr: Some(it) } => {
-                    Some((i, *var, ty.clone(), *mutability, inner.clone(), (**it).clone()))
-                }
+                IrExprKind::Block { stmts: inner, expr: Some(it) } => Some((
+                    i,
+                    Target::Bind { var: *var, ty: ty.clone(), mutability: *mutability },
+                    inner.clone(),
+                    (**it).clone(),
+                )),
+                _ => None,
+            },
+            IrStmtKind::BindDestructure { pattern, value } => match &value.kind {
+                IrExprKind::Block { stmts: inner, expr: Some(it) } => Some((
+                    i,
+                    Target::Destructure { pattern: pattern.clone() },
+                    inner.clone(),
+                    (**it).clone(),
+                )),
                 _ => None,
             },
             _ => None,
@@ -690,7 +710,14 @@ pub fn desugar_flatten_let_block(body: &IrExpr) -> Option<IrExpr> {
     let mut new_stmts = stmts[..i].to_vec();
     new_stmts.extend(inner_stmts);
     new_stmts.push(IrStmt {
-        kind: IrStmtKind::Bind { var, ty, value: inner_tail, mutability },
+        kind: match target {
+            Target::Bind { var, ty, mutability } => {
+                IrStmtKind::Bind { var, ty, value: inner_tail, mutability }
+            }
+            Target::Destructure { pattern } => {
+                IrStmtKind::BindDestructure { pattern, value: inner_tail }
+            }
+        },
         span: None,
     });
     new_stmts.extend_from_slice(&stmts[i + 1..]);

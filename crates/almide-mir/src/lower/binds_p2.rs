@@ -913,6 +913,17 @@ impl LowerCtx {
                 {
                     self.materialized_lists.insert(dst);
                 }
+                // A self-host returning a RECORD/TUPLE (`list.partition` → (List, List)):
+                // seed the READ-shape — without it a `.0`/`.1` projection falls to the
+                // container-grain Dup and a consumer reads the TUPLE header
+                // (list.len(result.0) returned the tuple's len 2, not the slot list's 5 —
+                // the pipe_chain partition miscompile, 2026-07-17). READ-shape ONLY: the
+                // drop stays the pre-existing flat one (re-routing it through record_masks
+                // here imbalanced the ownership cert — the callee's fills are opaque to
+                // the caller's witness; the Named arm's mask rides a different accounting).
+                if faithful && self.aggregate_field_tys(ty).is_some() {
+                    self.materialized_aggregates.insert(dst);
+                }
                 // A BORROW result (`prim.load_str` of a list slot — the list still owns it) is NOT
                 // added to the scope-end drop set; everything else is a fresh owned value.
                 if !self.param_values.contains(&dst) {

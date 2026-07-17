@@ -137,6 +137,11 @@ impl LowerCtx {
                 return false;
             }
         }
+        // A TUPLE-DESTRUCTURING loop (`for (k, v) in pairs`) DECLINES for now: the
+        // per-slot borrow composes with the loop-carried heap-if reassign into an
+        // ownership-cert double-drop (the pipe_chain "enumerate then collect evens"
+        // `iamdd` witness — a `[v]` temp consumed by the concat AND scope-dropped).
+        // The model path's honest wall stands until that loop-frame accounting lands.
         if var_tuple.is_some() {
             return false;
         }

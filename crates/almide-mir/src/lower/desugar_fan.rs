@@ -361,6 +361,7 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     struct V {
         changed: bool,
+        next_var: u32,
     }
     impl IrMutVisitor for V {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
@@ -387,25 +388,155 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
                                 }
                             ) =>
                     {
-                        Some(a[0].clone())
+                        // The Result type is PHANTOM (v1 value = raw T) ONLY for a
+                        // never-err LIFTED callee. A DECLARED-Result thunk (`effect fn
+                        // add(..) -> Result[Int, String] = ok(a + b)` — fan_test) builds
+                        // a REAL Result block; stripping its type made the callsite read
+                        // the i32 handle as a raw i64 — INVALID WASM (latent while the
+                        // file walled elsewhere; exposed by the single-expr arm,
+                        // 2026-07-17). Such a thunk needs the real fan unwrap + Err
+                        // propagation — a later brick — so it DECLINES (honest wall).
+                        let IrExprKind::Call {
+                            target: almide_ir::CallTarget::Named { name }, ..
+                        } = &x.kind
+                        else {
+                            return None;
+                        };
+                        let raw_abi = crate::lower::NEVER_ERR_LIFTED_FNS
+                            .with(|s| s.borrow().contains(name.as_str()))
+                            && !crate::lower::AUTO_WRAP_ABI_FNS
+                                .with(|s| s.borrow().contains(name.as_str()));
+                        if raw_abi {
+                            Some(a[0].clone())
+                        } else {
+                            None
+                        }
                     }
                     _ if !crate::lower::is_result_ty(&x.ty) => Some(x.ty.clone()),
                     _ => None,
                 }
             };
-            if exprs.len() < 2 || exprs.iter().any(|x| phantom_ok_ty(x).is_none()) {
+            // A REAL-Result thunk (a declared-Result / lifted-can-err / auto-wrapped
+            // NAMED call — its v1 value IS a Result block) takes the SEQUENTIAL
+            // `e!`-equivalent: `fan { e1; e2 } ≡ { let $f1 = e1!; let $f2 = e2!;
+            // ($f1, $f2) }` — v0 joins in list order and `?`-propagates the first Err,
+            // which is exactly the bind-`!` chain's semantics; the whole existing
+            // unwrap machinery (desugar_let_unwrap's ok/err match, the err-type join)
+            // then lowers it. Count-invariant: each thunk call appears exactly once.
+            let real_result_ok_ty = |x: &IrExpr| -> Option<Ty> {
+                match (&x.ty, &x.kind) {
+                    (
+                        Ty::Applied(TypeConstructorId::Result, a),
+                        IrExprKind::Call { target: almide_ir::CallTarget::Named { .. }, .. },
+                    ) if a.len() == 2 && phantom_ok_ty(x).is_none() => Some(a[0].clone()),
+                    _ => None,
+                }
+            };
+            // A SINGLE-expression fan (`let r = fan { add(10, 20) }`) IS its expression:
+            // there is nothing to run concurrently with, v0's sequential value is the bare
+            // result (no tuple; a real-Result thunk keeps its `!`). fan thunks cannot
+            // capture `var`s — the rewrite is observation-equal and count-invariant. It
+            // previously fell through to the scalar-bind deferred-Const wall (fan_test).
+            if exprs.len() == 1 {
+                if let Some(ok_ty) = phantom_ok_ty(&exprs[0]) {
+                    let mut nx = exprs[0].clone();
+                    nx.ty = ok_ty;
+                    *e = nx;
+                    self.changed = true;
+                } else if let Some(ok_ty) = real_result_ok_ty(&exprs[0]) {
+                    *e = IrExpr {
+                        kind: IrExprKind::Unwrap { expr: Box::new(exprs[0].clone()) },
+                        ty: ok_ty,
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    };
+                    self.changed = true;
+                }
                 return;
             }
-            let elements: Vec<IrExpr> = exprs
+            if exprs.len() < 2 {
+                return;
+            }
+            enum Elem {
+                Plain(Ty),
+                Unwrap(Ty),
+            }
+            let classes: Option<Vec<Elem>> = exprs
                 .iter()
                 .map(|x| {
-                    let mut nx = x.clone();
-                    nx.ty = phantom_ok_ty(x).expect("gated above");
-                    nx
+                    phantom_ok_ty(x)
+                        .map(Elem::Plain)
+                        .or_else(|| real_result_ok_ty(x).map(Elem::Unwrap))
                 })
                 .collect();
-            *e = IrExpr {
+            let Some(classes) = classes else { return };
+            if classes.iter().all(|c| matches!(c, Elem::Plain(_))) {
+                // Every element raw — the original direct-tuple rewrite (no binds).
+                let elements: Vec<IrExpr> = exprs
+                    .iter()
+                    .zip(&classes)
+                    .map(|(x, c)| {
+                        let Elem::Plain(t) = c else { unreachable!() };
+                        let mut nx = x.clone();
+                        nx.ty = t.clone();
+                        nx
+                    })
+                    .collect();
+                *e = IrExpr {
+                    kind: IrExprKind::Tuple { elements },
+                    ty: e.ty.clone(),
+                    span: e.span.clone(),
+                    def_id: e.def_id,
+                };
+                self.changed = true;
+                return;
+            }
+            // Mixed / real-Result elements: the sequential bind-`!` block.
+            let mut stmts: Vec<almide_ir::IrStmt> = Vec::with_capacity(exprs.len());
+            let mut elements: Vec<IrExpr> = Vec::with_capacity(exprs.len());
+            for (x, c) in exprs.iter().zip(&classes) {
+                let (val, vty) = match c {
+                    Elem::Plain(t) => {
+                        let mut nx = x.clone();
+                        nx.ty = t.clone();
+                        (nx, t.clone())
+                    }
+                    Elem::Unwrap(t) => (
+                        IrExpr {
+                            kind: IrExprKind::Unwrap { expr: Box::new(x.clone()) },
+                            ty: t.clone(),
+                            span: x.span.clone(),
+                            def_id: None,
+                        },
+                        t.clone(),
+                    ),
+                };
+                let var = almide_ir::VarId(self.next_var);
+                self.next_var += 1;
+                stmts.push(almide_ir::IrStmt {
+                    kind: almide_ir::IrStmtKind::Bind {
+                        var,
+                        mutability: almide_ir::Mutability::Let,
+                        ty: vty.clone(),
+                        value: val,
+                    },
+                    span: None,
+                });
+                elements.push(IrExpr {
+                    kind: IrExprKind::Var { id: var },
+                    ty: vty,
+                    span: None,
+                    def_id: None,
+                });
+            }
+            let tuple = IrExpr {
                 kind: IrExprKind::Tuple { elements },
+                ty: e.ty.clone(),
+                span: e.span.clone(),
+                def_id: e.def_id,
+            };
+            *e = IrExpr {
+                kind: IrExprKind::Block { stmts, expr: Some(Box::new(tuple)) },
                 ty: e.ty.clone(),
                 span: e.span.clone(),
                 def_id: e.def_id,
@@ -413,7 +544,7 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
             self.changed = true;
         }
     }
-    let mut v = V { changed: false };
+    let mut v = V { changed: false, next_var: crate::lower::max_var_id(body) + 1 };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     v.changed.then_some(out)
