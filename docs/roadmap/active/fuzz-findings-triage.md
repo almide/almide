@@ -30,10 +30,10 @@ needs its own look (job logs via `gh api /repos/almide/almide/actions/jobs/<id>/
 | C. String fn returns `""` | 323, 768, 904 | `ok(float.to_fixed(…))` → wasm `ok("")`; `result.map_err` on heap-Ok Result | **FIXED (2026-07-18)** — two root causes: (1) the ok/err ctor's stdlib-call payload fell to the deferred Opaque (binds_p4 Module-call String arms, C-138); (2) the result value combinators linked the len-as-tag scalar impls over the cap-as-tag heap-Ok block (`_h` twins + `_x` walls in result_call_name, C-139) |
 | D. Unicode predicate flips | 191 | `none` vs `some("Ǆ")` (titlecase) | **FIXED** — same root as C (the value flowed through a Result/Option ctor payload) |
 | E. i32-boundary tuple | 609 | `(true, -2147483648)` vs `(false, 2)` | **FIXED** — same root as C |
-| B. List collapses to `[]` | 198, 659 | `[1000000, 7, 256]` → `[]`, `[true,true,false,true]` → `[]` | open — next up |
-| F. Option flips | 858 | `some("5")` vs `none` | open |
-| A. Negative-zero display | 67, 655 | native `-0` / wasm `0` | open — display layer |
-| G. Build/run failures | 65 (wasm run fails), 96 (wasm build fails) | divergent failure | open |
+| A. Negative-zero display | 67, 655 | native `-0` / wasm `0` | **FIXED (2026-07-18)** — not display: the v1 self-host `float.round` branched on `x >= 0.0` (TRUE for -0.0 under IEEE) and lost the sign; copysign carries it (C-140) |
+| G. Build/run failures | 65 (wasm run fails), 96 (wasm build fails) | divergent failure | **FIXED** — 65: `list.zip_with` linked the Int-typed impl for every instantiation; String zips trapped on the scalar closure table type → element-repr routing + `_str` twin (C-141). 96: the v0 emitter's `result.unwrap_or_else` inline lacked the F64 case → invalid module; added, mirroring the option twin (C-142) |
+| B. List collapses to `[]` | 198, 659 | `[1000000, 7, 256]` → `[]`, `[true,true,false,true]` → `[]` | open — a nested combinator chain in a LIST-ELEMENT position declines → the whole list defers to Opaque and prints `[]` (bind position walls honestly; the element position doesn't). Also exposed: v0 `result.or_else` + capturing closure rc-traps after correct output |
+| F. Option flips | 858 | `some("5")` vs `none` | open — `some(<heap if>)` payload declines → Opaque option reads `none`. Same Opaque-reaches-display family as B |
 
 Lesson feeding #777/F3: BOTH C-class roots were "a deferred/mis-linked value
 reaching observed output without a wall" — (1) the deferred-Opaque ctor payload

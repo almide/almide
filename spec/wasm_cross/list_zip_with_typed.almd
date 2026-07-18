@@ -1,0 +1,25 @@
+// @contract: C-141
+// list.zip_with keyed on the RESULT element repr: a scalar result rides the base
+// impl (heap sources pass as borrowed handles), (String, String → String) rides
+// the _str twin (move-in fill), any other heap result walls (_x). Before: every
+// instantiation linked the Int-typed base impl, whose $closure_fn2 scalar table
+// type TRAPPED on a heap-result closure ("indirect call type mismatch",
+// fuzz G-65) — capturing and non-capturing alike.
+fn zw_str(a: List[String], b: List[String]) -> List[String] = list.zip_with(a, b, ((x, y) => x + y))
+fn zw_cap(a: List[String], k: String) -> List[String] = list.zip_with(a, a, ((x, y) => k))
+fn zw_int(a: List[Int]) -> List[Int] = list.zip_with(a, a, ((x, y) => x + y))
+fn zw_mixed(a: List[String]) -> List[Int] = list.zip_with(a, a, ((x, y) => string.len(x) + string.len(y)))
+
+fn main() -> Unit = {
+  println("s = ${zw_str(["a", "b"], ["c", "d", "e"])}")
+  println("c = ${zw_cap(["a", "b"], "z")}")
+  println("i = ${zw_int([1, 2, 3])}")
+  println("m = ${zw_mixed(["ab", "c"])}")
+}
+
+test "zip_with over each element repr" {
+  assert_eq(zw_str(["a", "b"], ["c", "d", "e"]), ["ac", "bd"])
+  assert_eq(zw_cap(["a", "b"], "z"), ["z", "z"])
+  assert_eq(zw_int([1, 2, 3]), [2, 4, 6])
+  assert_eq(zw_mixed(["ab", "c"]), [4, 2])
+}

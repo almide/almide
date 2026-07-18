@@ -153,8 +153,9 @@ Contracts: C-048。
 
 `float.sign` は `f64::signum`（NaN → NaN、±0 → ±1）。`float.min/max`・
 `math.min/max` は **NaN を無視**する（片方が NaN なら他方を返す — IEEE-754
-minNum/maxNum 系、Rust `f64::min/max` と一致）。
-Contracts: C-049。
+minNum/maxNum 系、Rust `f64::min/max` と一致）。`float.round` はゼロ結果の
+符号を保つ（round(-0.0) = -0.0、half away from zero は不変）。
+Contracts: C-049, C-140。
 
 ## ALS-T16 長さ・添字の i64 クランプ
 

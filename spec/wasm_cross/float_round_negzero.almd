@@ -1,0 +1,21 @@
+// @contract: C-140
+// float.round preserves the sign of a zero result, byte-identical to native
+// f64::round. Before: the self-host branched on `x >= 0.0`, which is TRUE for
+// -0.0 (IEEE), so round(-0.0) took the positive branch and printed `0` while
+// native keeps `-0` (fuzz A-67/655). copysign carries x's sign onto the
+// magnitude; every nonzero case is unchanged (half away from zero).
+fn main() -> Unit = {
+  println("a = ${float.round(-0.0)}")
+  println("b = ${float.round(-0.4)}")
+  println("c = ${float.round(0.4)}")
+  println("d = ${float.round(2.5)}")
+  println("e = ${float.round(-2.5)}")
+  println("f = ${float.round(0.0)}")
+}
+
+test "round keeps the zero sign" {
+  assert_eq(float.to_string(float.round(-0.0)), "-0")
+  assert_eq(float.to_string(float.round(-0.4)), "-0")
+  assert_eq(float.to_string(float.round(0.4)), "0")
+  assert_eq(float.to_string(float.round(-2.5)), "-3")
+}

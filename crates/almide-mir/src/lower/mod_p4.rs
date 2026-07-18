@@ -1670,6 +1670,33 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
                         if b.len() == 1 && !is_heap_ty(&b[0])));
         return Some(if ok { "list.group_by".to_string() } else { "list.group_by_x".to_string() });
     }
+    // `list.zip_with` keys on the RESULT element (= the closure's result repr, the
+    // only axis of the CallIndirect table type — params ride the widened i64 slots
+    // uniformly): a SCALAR result element rides the base impl (heap SOURCE elements
+    // are passed as borrowed handles, never copied into the flat result — sound);
+    // a (String, String → String) triple routes to the `_str` twin (move-in fill);
+    // any other heap result element routes to the UNLINKED `_x` — the scalar impl's
+    // $closure_fn2 table type TRAPS on a heap-result closure ("indirect call type
+    // mismatch", fuzz G-65) and its raw copies would alias handles un-owned.
+    if func == "zip_with" {
+        fn elem(t: Option<&Ty>) -> Option<&Ty> {
+            use almide_lang::types::constructor::TypeConstructorId;
+            match t {
+                Some(Ty::Applied(TypeConstructorId::List, e)) if e.len() == 1 => Some(&e[0]),
+                _ => None,
+            }
+        }
+        let a = elem(arg_tys.first());
+        let b = elem(arg_tys.get(1));
+        let c = elem(Some(result_ty));
+        return Some(match (a, b, c) {
+            (Some(_), Some(_), Some(z)) if !is_heap_ty(z) => "list.zip_with".to_string(),
+            (Some(Ty::String), Some(Ty::String), Some(Ty::String)) => {
+                "list.zip_with_str".to_string()
+            }
+            _ => "list.zip_with_x".to_string(),
+        });
+    }
     // `list.enumerate` keys on its SOURCE element: scalar → the flat-pair self-host;
     // String → the rc-share pair variant (`DropListIntStr` at the call site frees each
     // pair's key ref); any other heap element routes to an UNREGISTERED name (walls

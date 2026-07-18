@@ -661,6 +661,17 @@ impl FuncCompiler<'_> {
                         self.emit_closure_call(&err_ty, &ok_ty);
                         wasm!(self.func, { end; });
                     }
+                    ValType::F64 => {
+                        // A Float Ok payload: f64 block type + f64 payload load — the i32
+                        // fallback emitted `if i32` around an f64 closure result, a
+                        // structurally invalid module (fuzz G-96; the option twin above
+                        // already carried this case).
+                        wasm!(self.func, { local_get(result); i32_load(0); i32_eqz; if_f64; local_get(result); f64_load(4); else_; });
+                        wasm!(self.func, { local_get(closure); i32_load(4); local_get(result); i32_load(4); local_get(closure); i32_load(0); });
+                        let err_ty = self.result_err_ty(&args[0].ty);
+                        self.emit_closure_call(&err_ty, &ok_ty);
+                        wasm!(self.func, { end; });
+                    }
                     _ => {
                         wasm!(self.func, { local_get(result); i32_load(0); i32_eqz; if_i32; local_get(result); i32_load(4); else_; });
                         wasm!(self.func, { local_get(closure); i32_load(4); local_get(result); i32_load(4); local_get(closure); i32_load(0); });

@@ -1743,6 +1743,39 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-140"
+spec      = "ALS-T15"
+title     = "float.round preserves the sign of a zero result"
+statement = "`float.round` matches native `f64::round` bit-for-bit on the sign of a zero result: round(-0.0) and round(-0.4) are -0.0 (printed `-0`), round(0.4) is +0.0; every nonzero result keeps half-away-from-zero. Previously the v1 self-host branched on `x >= 0.0` — TRUE for -0.0 under IEEE — so round(-0.0) took the positive branch and printed `0` while native kept `-0` (differential-fuzz seed 1784352208133210990 index 67/655). copysign now carries x's sign onto the magnitude."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_round_negzero.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-141"
+spec      = "ALS-M12"
+title     = "list.zip_with routes by element repr — String zips work, no wrong-typed link"
+statement = "`list.zip_with` is routed by the RESULT element repr (the one axis of the closure's CallIndirect table type — params ride the widened i64 slots uniformly): a scalar result element rides the base impl (heap SOURCE elements pass as borrowed handles, never copied into the flat result), the (String, String → String) triple rides the `_str` twin (borrow the pair via load_str, MOVE the closure's fresh result in — the list_map_str discipline), and any other heap result element routes to the UNLINKED `_x` wall. Previously every instantiation linked the Int-typed base impl, whose scalar $closure_fn2 table type TRAPPED on a heap-result closure (\"indirect call type mismatch\", differential-fuzz index 65) — capturing and non-capturing alike — and whose raw slot copies would alias handles un-owned."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_zip_with_typed.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-142"
+spec      = "ALS-M5"
+title     = "result.unwrap_or_else is valid wasm at the Float instantiation on both legs"
+statement = "`result.unwrap_or_else` over a `Result[Float, String]` compiles to structurally valid wasm on BOTH legs and returns the exact payload/closure result. The v0 emitter's inline expansion carried I64 and i32-fallback cases only: a Float Ok payload emitted an `if i32` block around an f64 closure result and an i32 payload load — a structurally invalid module that the validator refused at build time while native ran (differential-fuzz index 96; surfaced when a heap-accumulator fold walled main off the v1 leg). The expansion now carries the F64 case (f64 block type + f64 payload load), mirroring the option twin that already had it."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_uoe_float.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-139"
 spec      = "ALS-I3"
 title     = "Heap-Ok Result value combinators keep tag and payload"

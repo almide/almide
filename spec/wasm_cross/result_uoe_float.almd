@@ -1,0 +1,22 @@
+// @contract: C-142
+// result.unwrap_or_else over a Float-payload Result is valid wasm on BOTH legs.
+// The v0 emitter's inline expansion had I64 and i32-fallback cases only: a Float
+// Ok payload emitted `if i32` around an f64 closure result — a structurally
+// invalid module (build-time refusal while native ran; fuzz G-96). The heap-acc
+// fold below walls main on the v1 leg, so this fixture exercises the v0 path;
+// the plain err case covers the closure leg.
+fn main() -> Unit = {
+  let tmp: Result[Float, String] = ok(1.5)
+  let r: Float = result.unwrap_or_else(list.fold([true, false], tmp, ((s, v) => ok(0.000001))), ((x) => 100.0))
+  let e: Result[Float, String] = err("bad")
+  let f: Float = result.unwrap_or_else(e, ((x) => 100.0))
+  println("r = ${r}")
+  println("f = ${f}")
+}
+
+test "unwrap_or_else over Float payloads" {
+  let e: Result[Float, String] = err("bad")
+  assert_eq(result.unwrap_or_else(e, ((x) => 100.0)), 100.0)
+  let m: Result[Float, String] = ok(1.5)
+  assert_eq(result.unwrap_or_else(m, ((x) => 100.0)), 1.5)
+}
