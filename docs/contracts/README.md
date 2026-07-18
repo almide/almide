@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-154 contracts
+155 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -182,4 +182,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-152 | An un-admitted heap call payload in a ctor walls, never zeroes | 0.31.0 | active | fixture | 1 |
 | C-153 | Non-test assert failures abort in the T6 form on both targets | 0.31.0 | active | fixture | 3 |
 | C-154 | clamp with an invalid range aborts in the T6 form | 0.31.0 | active | fixture | 2 |
+| C-155 | to_fixed with out-of-domain decimals aborts in the T6 form | 0.31.0 | active | fixture | 1 |
 

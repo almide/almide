@@ -1755,6 +1755,17 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-155"
+spec      = "ALS-T6"
+title     = "to_fixed with out-of-domain decimals aborts in the T6 form"
+statement = "`float.to_fixed(n, decimals)` with decimals outside 0..=1000000 aborts with `Error: to_fixed requires decimals in 0..=1000000` — one stderr line + exit 1, byte-identical on both targets. Previously a negative count reinterpreted as usize on native (the raw format! capacity panic, exit 101) while wasm printed the empty string for a small negative or trapped OOM for i64::MIN (differential-fuzz seed 20260718 index 49); a huge positive was the machine-dependent allocation abort on either leg. The same four consumers as C-154 carry the guard: the v1 self-host via prim.die, the native runtime wrapper, the v0 emit arm via the interned-message div_trap, and the interp bridge via Flow::Abort. In-domain decimals (up to 1e6 digits, ~1 MB) stay total and byte-identical."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/to_fixed_domain_abort.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-153"
 spec      = "ALS-T18"
 title     = "Non-test assert failures abort in the T6 form on both targets"

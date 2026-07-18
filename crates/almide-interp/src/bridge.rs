@@ -143,6 +143,10 @@ fn float_fn(func: &str, args: &[Value]) -> Option<Flow> {
         "to_fixed" => {
             let n = as_float(args.first())?;
             let d = as_int(args.get(1))?;
+            // ALS-T6: out-of-domain decimals abort (mirrors runtime/rs float.rs).
+            if !(0..=1_000_000).contains(&d) {
+                return Some(Flow::Abort("to_fixed requires decimals in 0..=1000000".to_string()));
+            }
             Flow::val(Value::str(format!("{:.1$}", n, d as usize)))
         }
         "parse" => {

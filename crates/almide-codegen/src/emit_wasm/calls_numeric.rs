@@ -231,9 +231,32 @@ impl FuncCompiler<'_> {
             }
             "to_fixed" => {
                 // float.to_fixed(n: Float, decimals: Int) → String
+                // ALS-T6: out-of-domain decimals abort in the T6 form on both
+                // targets — native reinterpreted a negative as usize (format!
+                // capacity panic, raw exit 101) while this leg printed "" or
+                // trapped OOM (fuzz seed-20260718 index 49); a huge positive is
+                // the machine-dependent allocation abort. Same 0..=1e6 domain
+                // as the native guard.
+                let d = self.scratch.alloc_i64();
+                let msg = self
+                    .emitter
+                    .intern_string("Error: to_fixed requires decimals in 0..=1000000\n")
+                    as i32;
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
-                wasm!(self.func, { call(self.emitter.rt.float_to_fixed); });
+                wasm!(self.func, {
+                    local_set(d);
+                    local_get(d); i64_const(0); i64_lt_s;
+                    local_get(d); i64_const(1000000); i64_gt_s;
+                    i32_or;
+                    if_empty;
+                      i32_const(msg);
+                      call(self.emitter.rt.div_trap);
+                    end;
+                    local_get(d);
+                    call(self.emitter.rt.float_to_fixed);
+                });
+                self.scratch.free_i64(d);
             }
             "to_bits" => {
                 // float.to_bits(f: Float) → Int: reinterpret f64 as i64
