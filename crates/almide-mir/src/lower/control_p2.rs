@@ -880,6 +880,43 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// Is the Map KEY type (of the first-arg/result Map) a NULLARY-ONLY variant
+    /// (every case fieldless — `Direction`)? Gates the `_vtag` tag-normalized map
+    /// family in `list_heap_call_name` (a free fn without layout access).
+    pub(crate) fn map_key_is_nullary_variant(&self, arg_tys: &[Ty], result_ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let probe = |t: &Ty| {
+            matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2
+                    && self
+                        .custom_variant_type_name(&a[0])
+                        .and_then(|n| self.variant_layouts.by_type.get(&n).cloned())
+                        .is_some_and(|l| {
+                            !l.cases.is_empty() && l.cases.iter().all(|c| c.fields.is_empty())
+                        }))
+        };
+        arg_tys.first().is_some_and(probe) || probe(result_ty)
+    }
+
+    /// Is the Map KEY type an ALL-Int/Bool-field record (`Color { r, g, b }`)?
+    /// Gates the `_srec` string-normalized map family (a Float field's
+    /// bits-to-string would split -0.0/NaN from native's f64 eq — excluded).
+    pub(crate) fn map_key_is_scalar_record(&self, arg_tys: &[Ty], result_ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let probe = |t: &Ty| {
+            matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2
+                    && self.custom_variant_type_name(&a[0]).is_none()
+                    && self
+                        .aggregate_field_tys(&a[0])
+                        .is_some_and(|(_, tys)| {
+                            !tys.is_empty()
+                                && tys.iter().all(|t| matches!(t, Ty::Int | Ty::Bool))
+                        }))
+        };
+        arg_tys.first().is_some_and(probe) || probe(result_ty)
+    }
+
     pub(crate) fn custom_variant_type_name(&self, ty: &Ty) -> Option<String> {
         use almide_lang::types::constructor::TypeConstructorId;
         let name = match ty {

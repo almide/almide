@@ -1254,7 +1254,18 @@ pub fn interp_str_desugarable(parts: &[IrStringPart], registry: &RecordLayouts) 
 /// → `list.map_str`, a DynListStr-result impl). The element repr (i64 vs i32 handle) demands a
 /// separate variant; the variant reads/writes via the heap-aware prim ops. Scalar-result lists keep
 /// the plain name. `module.func` is unchanged for everything else.
-pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], result_ty: &Ty) -> String {
+pub(crate) fn list_heap_call_name(
+    module: &str,
+    func: &str,
+    arg_tys: &[Ty],
+    result_ty: &Ty,
+    // Is the Map KEY type (of the first-arg/result Map) a NULLARY-ONLY variant?
+    // Computed by the caller (LowerCtx has the variant_layouts; this router is a
+    // free fn) — gates the `_vtag` tag-normalized map family. `map_key_scalar_rec`
+    // is the all-Int/Bool-field record-key twin, gating `_srec`.
+    map_key_nullary: bool,
+    map_key_scalar_rec: bool,
+) -> String {
     // #781: the monolithic 780-line dispatch (cog 324) is decomposed into
     // per-module routers. Routing ORDER is load-bearing and preserved: the
     // heap-accumulator `fold` guard fires BEFORE the per-module tables (a
@@ -1271,7 +1282,7 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
     let routed = match module {
         "list" => list_call_name(func, arg_tys, result_ty),
         "set" => set_call_name(func, arg_tys, result_ty),
-        "map" => map_call_name(func, arg_tys, result_ty),
+        "map" => map_call_name(func, arg_tys, result_ty, map_key_nullary, map_key_scalar_rec),
         "result" | "option" if func == "unwrap_or" => unwrap_or_call_name(module, arg_tys),
         "option" => option_call_name(func, arg_tys, result_ty),
         "result" => result_call_name(func, arg_tys, result_ty),
@@ -2084,7 +2095,7 @@ fn set_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
 
 /// Every `map.*` typed-variant route: the skv entries/from_list fast paths,
 /// then the (key, value) repr-family table (see the block comments).
-fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, map_key_nullary: bool, map_key_scalar_rec: bool) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
     // `map.entries` / `map.from_list` over the skv repr (`Map[String, scalar]` — the
     // tokenizer vocab): route to the skv self-hosts; the all-String repr keeps its
@@ -2243,6 +2254,23 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
             {
                 Some("_hobj")
             }
+            // An ALL-SCALAR record key with a String value (`Map[Color, String]` —
+            // the hash_protocol deriving-Hash shape): the key normalizes to the
+            // comma-joined decimal string of its slots (map_vkey.almd's _srec
+            // family — content identity ⇔ string identity for Int/Bool fields).
+            (true, true)
+                if map_key_scalar_rec
+                    && matches!(func, "from_list" | "get")
+                    && {
+                        let str_val = |t: &Ty| {
+                            matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+                                if a.len() == 2 && matches!(a[1], Ty::String))
+                        };
+                        arg_tys.first().is_some_and(str_val) || str_val(result_ty)
+                    } =>
+            {
+                Some("_srec")
+            }
             (true, true) if !val_is_string => Some("_hval_wall"),
             // A fn OUTSIDE the family's implemented list must fall to an UNREGISTERED
             // wall suffix, NEVER to `None`: a `None` here returns the BARE `map.{func}`
@@ -2290,6 +2318,25 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
                     "_skv_wall"
                 },
             ),
+            // A NULLARY-ONLY variant key with a SCALAR value (`Map[Direction, Int]` —
+            // the hash_protocol deriving-Hash shape): the key's identity IS its tag,
+            // so normalize to a raw i64 key (map_vkey.almd's from_list/get). Other
+            // funcs and heap values keep the honest wall below.
+            (true, false)
+                if map_key_nullary
+                    && matches!(func, "from_list" | "get")
+                    && {
+                        // from_list's FIRST arg is the pairs List — probe the
+                        // RESULT type too (the is_ivh OR discipline).
+                        let scalar_val = |t: &Ty| {
+                            matches!(t, Ty::Applied(TypeConstructorId::Map, a)
+                                if a.len() == 2 && !is_heap_ty(&a[1]))
+                        };
+                        arg_tys.first().is_some_and(scalar_val) || scalar_val(result_ty)
+                    } =>
+            {
+                Some("_vtag")
+            }
             // A non-String heap KEY (tuple/record/nested list) reaching here has no correct
             // variant — route to an explicit UNREGISTERED wall name rather than falling through
             // to the bare `map.{func}` name, which links against the scalar-key map_core generic
@@ -2309,14 +2356,16 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
                     // `from_list`'s FIRST arg is the pairs List, not the Map — key
                     // its admission on the RESULT type instead (either probe works
                     // for the Map-first fns).
+                    // A Bool key is the SAME raw i64 slot (0/1) — the ivh find's
+                    // i64 compare serves it verbatim, so admit it alongside Int.
                     let is_ivh = |t: &Ty| {
                         matches!(t, Ty::Applied(TypeConstructorId::Map, a)
                             if a.len() == 2
-                                && matches!(a[0], Ty::Int)
+                                && matches!(a[0], Ty::Int | Ty::Bool)
                                 && matches!(a[1], Ty::String))
                     };
                     (arg_tys.first().is_some_and(is_ivh) || is_ivh(result_ty))
-                        && matches!(func, "new" | "set" | "eq" | "from_list" | "len")
+                        && matches!(func, "new" | "set" | "eq" | "from_list" | "len" | "get")
                 } =>
             {
                 Some("_ivh")

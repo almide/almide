@@ -146,3 +146,18 @@ fn map_to_string_ivh(m: Map[Int, String]) -> String = {
 
 // map.len — the entry count (the len header IS it; reads only).
 fn map_len_ivh(m: Map[Int, String]) -> Int = prim.load32(prim.handle(m) + 4)
+
+// map.get — the Option-sharing read (the list_get_hshare discipline): a hit's Some
+// payload SHARES the value String (the Some-ctor Dup acquires a ref; the option's
+// drop releases it — the map keeps its own), a miss is none. Serves Bool keys too
+// (the router widens admission — a Bool key is the same raw i64 slot, 0/1).
+fn map_get_ivh(m: Map[Int, String], k: Int) -> Option[String] = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let idx = __ivh_find(h, n, k, 0)
+  if idx < 0 then none
+  else {
+    let v: String = prim.load_handle(h + 12 + (n + idx) * 8)
+    some(v)
+  }
+}

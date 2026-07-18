@@ -199,7 +199,9 @@ impl LowerCtx {
         let name = if module == "string" && func == "slice" && args.len() == 2 {
             "string.slice2".to_string()
         } else {
-            list_heap_call_name(module, func, &arg_tys, result_ty)
+            let key_nullary = self.map_key_is_nullary_variant(&arg_tys, result_ty);
+            let key_scalar_rec = self.map_key_is_scalar_record(&arg_tys, result_ty);
+            list_heap_call_name(module, func, &arg_tys, result_ty, key_nullary, key_scalar_rec)
         };
         self.ops.push(Op::CallFn {
             dst: Some(dst),
@@ -421,7 +423,7 @@ impl LowerCtx {
         // (which would leak the popped handle). Every other statement call keeps its
         // raw dotted name, byte-identical to before.
         let call_name = if module == "list" && func == "pop" {
-            list_heap_call_name(module, func, &arg_tys, result_ty)
+            list_heap_call_name(module, func, &arg_tys, result_ty, false, false)
         } else {
             format!("{module}.{func}")
         };
