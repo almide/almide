@@ -806,6 +806,51 @@ impl LowerCtx {
             // A discarded HEAP result is a fresh `Alloc{Opaque}` dropped at scope end;
             // a Unit/scalar result carries no ownership.
             CallTarget::Computed { callee } => {
+                // C1 UNIT DIRECT-CALL INLINE — the statement-position twin of
+                // `try_inline_direct_lambda_call`: `let inc = () => { count = count + 1 };
+                // inc()` (the escape_analysis counter shape). The body's statements lower
+                // AT THE CALL SITE — a MUTABLE capture is an ordinary in-scope Assign, so
+                // no closure object and no lift is needed. Zero-param calls only in this
+                // brick, and the body must not re-enter the same callee (a recursive
+                // lambda would inline forever); failure rolls back to the paths below.
+                if args.is_empty() {
+                    if let IrExprKind::Var { id } = &callee.kind {
+                        let id = *id;
+                        if let Some((params, body)) = self.lambda_bindings.get(&id).cloned() {
+                            let recurses = {
+                                struct R {
+                                    id: almide_ir::VarId,
+                                    found: bool,
+                                }
+                                impl almide_ir::visit::IrVisitor for R {
+                                    fn visit_expr(&mut self, e: &IrExpr) {
+                                        if matches!(&e.kind, IrExprKind::Var { id } if *id == self.id)
+                                        {
+                                            self.found = true;
+                                        }
+                                        almide_ir::visit::walk_expr(self, e);
+                                    }
+                                }
+                                let mut r = R { id, found: false };
+                                almide_ir::visit::IrVisitor::visit_expr(&mut r, &body);
+                                r.found
+                            };
+                            if params.is_empty() && !recurses {
+                                let ops_mark = self.ops.len();
+                                let lhh_mark = self.live_heap_handles.len();
+                                let stmt = almide_ir::IrStmt {
+                                    kind: almide_ir::IrStmtKind::Expr { expr: body },
+                                    span: None,
+                                };
+                                if self.lower_stmt(&stmt).is_ok() {
+                                    return Ok(());
+                                }
+                                self.ops.truncate(ops_mark);
+                                self.live_heap_handles.truncate(lhh_mark);
+                            }
+                        }
+                    }
+                }
                 // A Unit-result call THROUGH a lifted lambda value EXECUTES via CallIndirect
                 // (e.g. `let f = (x) => print_it(x); f(3)`). Otherwise — a dynamic closure
                 // value we cannot name — DEFER as before (calls captured, the Computed call
