@@ -35,3 +35,19 @@ fn list_drop_str(xs: List[String], n: Int) -> List[String] = {
   let _x = __copy_slice_str(h, prim.handle(buf), start, count, 0)
   buf
 }
+
+// list.slice(xs, start, end) over List[String] — same negative edges as the Int
+// twin (end<0 → len, start<0 → empty via s=len, start>=end → empty); each kept
+// element deep-copies into a fresh DynListStr. The Int twin's raw i64 copy
+// aliased the handles un-owned — correct output, then a scope-end double free
+// (fuzz seed-20260718 index 680, `list.slice(list.intersperse(...), 2, 4)`).
+fn list_slice_str(xs: List[String], start: Int, end: Int) -> List[String] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let e = if end < 0 then len else (if end > len then len else end)
+  let s = if start < 0 then len else start
+  let count = if s >= e then 0 else e - s
+  let buf = prim.alloc_list_str(count)
+  let _x = __copy_slice_str(h, prim.handle(buf), s, count, 0)
+  buf
+}

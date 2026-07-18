@@ -11,4 +11,12 @@ fn main() -> Unit = {
   println("[" + list.join(list.slice(xs, 10, 20) |> list.map((x) => int.to_string(x)), ",") + "]")
   // length of a clamped slice
   println(int.to_string(list.len(list.slice(xs, 2, 99))))
+  // String elements ride the v1 `slice_str` twin (deep copy, same clamp edges):
+  // the Int twin's raw i64 element copy aliased the handles un-owned — correct
+  // output, then a scope-end double free (fuzz seed-20260718 index 680, via
+  // `list.slice(list.intersperse(...), 2, 4)`).
+  let r1 = "sep"
+  let ss = list.slice(list.intersperse([r1, "a", "b"], r1), 2, 4)
+  println(list.join(ss, ","))
+  println(list.join(list.slice(["p", "q", "r"], 1, 99), ","))
 }

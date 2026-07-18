@@ -601,6 +601,20 @@ fn tco_rewrite(
             },
             Ty::Unit,
         ),
+        // The auto-`?`-wrapped tail self-call (`Try{Call self}` / `Unwrap{Call self}`):
+        // same-repr effect propagation is the identity on the self-call, and tco_collect's
+        // twin arm already classified it as a CALL — rewrite the wrapped call exactly like
+        // the bare one. Without this arm the leaf fell to the BASE fallthrough below, so
+        // the recursive arm of every err-CAPABLE effect fn compiled to "exit with the last
+        // base's kind": `checked(n - 0)` returned ok(0) where native spins (fuzz
+        // seed-20260718 index 946), and a carried accumulator delivered its INITIAL value.
+        IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }
+            if matches!(&expr.kind,
+                IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if name.as_str() == fn_name) =>
+        {
+            tco_rewrite(expr, fn_name, params, carried, rk, next_kind, idx, next_var, result)
+        }
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
             if name.as_str() == fn_name =>
         {

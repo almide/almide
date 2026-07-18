@@ -1965,7 +1965,9 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
         }
     }
     // The element-PRESERVING List[heap]-returning combinators (source elem == result elem).
-    if matches!(func, "filter" | "reverse" | "take" | "drop" | "unique" | "dedup" | "intersperse") {
+    // slice joined for the same reason take/drop did: the Int twin's raw i64 element copy
+    // aliased String handles un-owned — a scope-end double free (fuzz seed-20260718 index 680).
+    if matches!(func, "filter" | "reverse" | "take" | "drop" | "slice" | "unique" | "dedup" | "intersperse") {
         if let Ty::Applied(TypeConstructorId::List, args) = result_ty {
             // A List[List[String]] result element is itself a heap list — the `_str` deep-copy
             // (string.repeat) would read its length word as a byte count. take/drop SHARE the inner

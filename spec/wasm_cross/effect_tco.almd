@@ -16,8 +16,21 @@ effect fn checked(n: Int) -> Int =
 
 effect fn fail(msg: String) -> Int = err(msg)!
 
+// Err-CAPABLE accumulator: `carried` can genuinely err (boom is reachable), so
+// the auto-? wrapper on the tail self-call is NOT stripped by the never-errs
+// pass — the v1 tco_rewrite must recognize `Try{Call self}` as the RECURSIVE
+// arm, not a base. Before the fix it fell to the base fallthrough and the loop
+// exited on iteration 1 with the accumulator's INITIAL value (0, not 500500) —
+// masked in `checked` above because that function always returns 0 anyway
+// (fuzz seed-20260718 index 946 exposed it via a `n - 0` nontermination twin).
+effect fn carried(n: Int, acc: Int) -> Int =
+  if n < 0 then fail("negative")
+  else if n == 0 then acc
+  else carried(n - 1, acc + n)
+
 effect fn main() -> Unit = {
   let s = sum_to(1000000, 0)
   let c = checked(2000000)
-  println("${s} ${c}")
+  let a = carried(1000, 0)
+  println("${s} ${c} ${a}")
 }
