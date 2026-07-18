@@ -1068,3 +1068,45 @@ pub fn repair_member_field_tys(
     let mut r = R { layouts };
     r.visit_expr_mut(&mut func.body);
 }
+
+/// RECORD-LITERAL FIELD-TYPE REPAIR (per-fn): a cross-module-linked anon record
+/// literal (`{ top: 0.0, left: letlib.GAP }` — #785) reaches lowering with its
+/// node type carrying an UNKNOWN field (`Ty::Record { top: Float, left: Unknown }`
+/// — the ref-entry inference gap survives the v1 link), so the construct's
+/// `scalar_slots` declines and the bind defers to an Opaque (a runtime trap once
+/// passed by value). The literal's OWN field expressions are authoritative:
+/// replace each Unknown declared-field type with the same-named literal field's
+/// concrete type (and synthesize the whole Record type when the node is fully
+/// Unknown). Children first, so a repaired inner literal feeds its parent.
+pub fn repair_record_literal_field_tys(func: &mut almide_ir::IrFunction) {
+    use almide_ir::{walk_expr_mut, IrExpr, IrExprKind, IrMutVisitor};
+    use almide_lang::types::Ty;
+    struct R;
+    impl IrMutVisitor for R {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Record { name: None, fields } = &e.kind else { return };
+            if fields.iter().any(|(_, f)| matches!(f.ty, Ty::Unknown)) {
+                return;
+            }
+            match &mut e.ty {
+                t @ Ty::Unknown => {
+                    *t = Ty::Record {
+                        fields: fields.iter().map(|(n, f)| (*n, f.ty.clone())).collect(),
+                    };
+                }
+                Ty::Record { fields: tfs } => {
+                    for (tn, tt) in tfs.iter_mut() {
+                        if matches!(tt, Ty::Unknown) {
+                            if let Some((_, f)) = fields.iter().find(|(n, _)| n == tn) {
+                                *tt = f.ty.clone();
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    R.visit_expr_mut(&mut func.body);
+}

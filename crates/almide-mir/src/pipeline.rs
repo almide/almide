@@ -337,13 +337,12 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
                         n.visit_expr(&tl.value);
                         n.hit
                     };
-                    // PURE call inits stay walled STILL: the bind-form
-                    // substitution places the init call correctly, but the anon
-                    // record literal CARRYING the reference stays an Opaque defer
-                    // in the cross-module link (single-file probes pass — the
-                    // literal's ty resolution differs across the link; next key).
-                    let _ = (c.impure, named_effect);
-                    if !c.has_call {
+                    // PURE call inits PASS: the bind-form substitution places
+                    // the init at the fn top, and repair_record_literal_field_tys
+                    // heals the Unknown declared-field type the linked literal
+                    // carried (#785) — the full single-file-proven form. IMPURE
+                    // inits have no faithful route and stay walled.
+                    if !(c.has_call && (c.impure || named_effect)) {
                         return None;
                     }
                     m.var_table
@@ -361,7 +360,7 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
             })
         {
             return Err(LowerError::Unsupported(
-                "test mode: a referenced call-initialized module top-let \
+                "test mode: a referenced impure-call-initialized module top-let \
                  needs the slot-routed bridge, not in this brick"
                     .into(),
             ));
@@ -1075,6 +1074,11 @@ fn try_render_wasm_source_impl(
             // in-module reader class this path has always served.
             for f in module_fn_sibs.iter_mut() {
                 f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
+            }
+        }
+        if !subs.is_empty() {
+            for f in inlined_fns.iter_mut() {
+                crate::lower::repair_record_literal_field_tys(f);
             }
         }
     }
