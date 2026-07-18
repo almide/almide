@@ -338,7 +338,15 @@ pub fn desugar_sort_by_cached_keys(body: &IrExpr) -> Option<IrExpr> {
                     && matches!(&args[0].kind, IrExprKind::Var { .. } | IrExprKind::List { .. })
                     && matches!(&args[0].ty, Ty::Applied(TypeConstructorId::List, a)
                         if a.len() == 1 && matches!(a[0], Ty::Int))
-                    && matches!(&args[1].kind, IrExprKind::Lambda { params, .. } if params.len() == 1));
+                    && matches!(&args[1].kind, IrExprKind::Lambda { params, .. } if params.len() == 1)
+                    // The KEY type must be Int too — the synthesized keys list is typed
+                    // `xs.ty` (List[Int]) and sort_by_keys compares raw i64 slots, so a
+                    // String key linked the scalar list.map (indirect-call type mismatch
+                    // trap, fuzz seed-20260718 index 866) and a Float key would sort by
+                    // i64 BIT patterns (wrong order for negatives). Non-Int keys fall
+                    // through to the mod_p4 sort_by route: Float → sort_by_float,
+                    // String → the honest `sort_by_str_key_x` wall.
+                    && matches!(&args[1].ty, Ty::Fn { ret, .. } if **ret == Ty::Int));
             if !hit {
                 return;
             }

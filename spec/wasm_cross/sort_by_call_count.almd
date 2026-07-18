@@ -11,4 +11,13 @@ effect fn main() -> Unit = {
   let sorted = list.sort_by(xs, (x) => { calls = calls + 1; x })
   println("${sorted}")
   println("calls=${calls}")
+  // The v1 cached-keys desugar admits ONLY Int keys: a String key walls
+  // honestly (v0 leg) and a Float key rides the totalOrder route. The ungated
+  // desugar typed the synthesized keys list List[Int], linking the scalar
+  // list.map (indirect-call type mismatch trap, fuzz seed-20260718 index 866)
+  // and would bit-sort Float keys (wrong order for negatives).
+  let s = list.sort_by([3, 1, 2], (x) => "k${x}")
+  println("${s}")
+  let f = list.sort_by([3, 1, 2], (x) => 0.5 - int.to_float(x))
+  println("${f}")
 }
