@@ -1071,6 +1071,7 @@ name = "xtarget-fuzz"
 version = "0.0.0"
 dependencies = [
  "almide",
+ "libc",
  "serde_json",
 ]
 

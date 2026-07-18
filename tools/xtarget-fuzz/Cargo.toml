@@ -30,6 +30,10 @@ almide = { path = "../.." }
 # `ExprKind::Int` carries a `serde_json::Value`, so the AST-mutation and
 # minimizer paths need to build those literal values directly.
 serde_json = "1"
+# Process-GROUP kill for hung children: `almide run` executes the built
+# program as a grandchild, and Child::kill alone orphans it (see runner.rs).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [profile.release]
 opt-level = 2

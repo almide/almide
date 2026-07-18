@@ -103,6 +103,17 @@ impl Toolchain {
         cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        // Make the child its own process-GROUP leader, so a timeout kill can
+        // signal the whole tree. `almide run` executes the built program as a
+        // GRANDCHILD: killing only the parent orphaned a hung program, which
+        // kept the stdout pipe open — the reader threads below never saw EOF,
+        // wedging this worker AND the campaign's final join — and leaked the
+        // process forever.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -145,6 +156,13 @@ impl Toolchain {
                 Ok(Some(_status)) => break false,
                 Ok(None) => {
                     if Instant::now() >= deadline {
+                        // Kill the whole process GROUP (pgid == child pid via
+                        // process_group(0) above): the grandchild program dies
+                        // with the parent, closing every pipe writer.
+                        #[cfg(unix)]
+                        unsafe {
+                            libc::kill(-(child.id() as i32), libc::SIGKILL);
+                        }
                         let _ = child.kill();
                         let _ = child.wait();
                         break true;
