@@ -875,6 +875,14 @@ impl<'a> Interpreter<'a> {
                 Some(Value::Option(None)) => Flow::val(Value::list(vec![])),
                 _ => Flow::Abort("internal: option.to_list on non-option".into()),
             }),
+            // some(v) → ok(v), none → err(msg) (runtime/rs option.rs to_result)
+            ("option", "to_result") => Some(match (args.first(), args.get(1)) {
+                (Some(Value::Option(Some(v))), _) => Flow::val(Value::Result(Ok(v.clone()))),
+                (Some(Value::Option(None)), Some(msg)) => {
+                    Flow::val(Value::Result(Err(Box::new(msg.clone()))))
+                }
+                _ => Flow::Abort("internal: option.to_result bad args".into()),
+            }),
             // ok(v) → some(v), err(_) → none (runtime/rs result.rs to_option)
             ("result", "to_option") => Some(match args.first() {
                 Some(Value::Result(Ok(v))) => Flow::val(Value::Option(Some(v.clone()))),

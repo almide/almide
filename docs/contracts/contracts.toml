@@ -1793,12 +1793,13 @@ evidence  = [
 id        = "C-149"
 spec      = "ALS-I1"
 title     = "unwrap_or_else hands back a co-owned heap Ok payload"
-statement = "The unwrap family with a HEAP payload hands the caller a CO-OWNED (+1) reference — on BOTH wasm legs. v0: `result.unwrap_or_else`'s input Result temp's drop releases its payload at scope end, so handing back the bare `payload@4` was a use-after-free — `unwrap_or_else(result.collect([...]), f)` read the freed list as `[]` (differential-fuzz seed 20260718 index 590). `option.unwrap_or` / `result.unwrap_or`: BOTH branches — the kept payload (still owned by the input temp) and a Var default (a borrow) — rc_inc before returning; either un-inc'd double-freed at scope end (__rc_dec trap after correct output, fuzz index 149's `ok(result.unwrap_or(..))` chain). `option.to_list`: the new list CO-OWNS the payload the Option still owns — the un-inc'd alias double-freed on a nested-Option payload (fuzz index 338). v1: `option.or_else` with a heap payload routes to the `option.or_else_h` twin whose KEPT arm Dups the payload into the rebuilt some() — the scalar twin raw-copied the handle un-owned, the same double free (fuzz index 622). The option unwrap_or_else arm carried this share-+1 discipline first (#727 cluster 5)."
+statement = "The unwrap family with a HEAP payload hands the caller a CO-OWNED (+1) reference — on BOTH wasm legs. v0: `result.unwrap_or_else`'s input Result temp's drop releases its payload at scope end, so handing back the bare `payload@4` was a use-after-free — `unwrap_or_else(result.collect([...]), f)` read the freed list as `[]` (differential-fuzz seed 20260718 index 590). `option.unwrap_or` / `result.unwrap_or`: BOTH branches — the kept payload (still owned by the input temp) and a Var default (a borrow) — rc_inc before returning; either un-inc'd double-freed at scope end (__rc_dec trap after correct output, fuzz index 149's `ok(result.unwrap_or(..))` chain). `option.to_list`: the new list CO-OWNS the payload the Option still owns — the un-inc'd alias double-freed on a nested-Option payload (fuzz index 338). `option.to_result`: the ok() arm shares the kept payload the same way — un-inc'd it double-freed a nested-Result payload (fuzz index 937). v1: `option.or_else` with a heap payload routes to the `option.or_else_h` twin whose KEPT arm Dups the payload into the rebuilt some() — the scalar twin raw-copied the handle un-owned, the same double free (fuzz index 622). The option unwrap_or_else arm carried this share-+1 discipline first (#727 cluster 5)."
 since     = "0.31.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/uoe_heap_ok_share.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_unwrap_or_share.almd", class = "fixture" },
+  { path = "spec/wasm_cross/to_result_nested_share.almd", class = "fixture" },
 ]
 
 [[contract]]

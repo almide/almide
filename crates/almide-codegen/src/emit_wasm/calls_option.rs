@@ -276,6 +276,13 @@ impl FuncCompiler<'_> {
                       local_get(s);
                 });
                 self.emit_load_at(&inner_ty, 0);
+                // SHARE the kept payload: the Option temp still owns it, so the
+                // fresh ok() must CO-OWN (+1) — the un-inc'd alias double-freed a
+                // nested Result payload at scope end (#727 share family, fuzz
+                // seed-20260718 index 937's option.to_result(some(err(..)), ..)).
+                if Self::is_heap_type(&inner_ty) {
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&inner_ty, 4);
                 wasm!(self.func, {
                       local_get(s2);

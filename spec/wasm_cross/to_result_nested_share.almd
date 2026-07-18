@@ -1,0 +1,15 @@
+// @contract: C-149
+// option.to_result edition (fuzz index 937): the v0 ok() arm must CO-OWN (+1)
+// the kept payload the Option temp still owns — the un-inc'd alias double-freed
+// a NESTED Result payload at scope end (__rc_dec trap after correct output,
+// `result.flatten(option.to_result(map.fold(...), ...))`). The nested-Result
+// payload walls the v1 leg (to_result_x), so this fixture pins the v0 fallback.
+fn main() -> Unit = {
+  let x3: Result[Int, String] = err("inner")
+  let r: Result[Result[Int, String], String] = option.to_result(some(x3), "absent")
+  println("ok = ${result.is_ok(r)}")
+  let f: Result[Int, String] = result.flatten(option.to_result(some(x3), "absent"))
+  println("f = ${f}")
+  let e: Result[Result[Int, String], String] = option.to_result(none, "absent")
+  println("e = ${result.is_err(e)}")
+}
