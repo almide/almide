@@ -827,7 +827,29 @@ pub fn hoist_spread_call_bases(program: &mut almide_ir::IrProgram) {
 /// machinery and the call sees a materialized Var. Scoped EXACTLY to the walled
 /// set (Bind/Assign value = a Named call with a scalar type and ≥1 record-literal
 /// arg) so no already-lowering call path changes. Call-count-invariant.
+///
+/// `hoist_record_literal_args_in_fn` is the SINGLE-FUNCTION entry: the pipeline
+/// re-runs it AFTER the pure-call global substitution (the ceangal/`#785` bridge
+/// inlines `letlib.GAP` → `default_gap()` INTO record fields at that later stage
+/// — the program-pass run cannot see those calls yet).
+pub fn hoist_record_literal_args_in_fn(
+    body: &mut almide_ir::IrExpr,
+    vt: &mut almide_ir::VarTable,
+) {
+    hoist_rewrite_expr(body, vt);
+}
+
 pub fn hoist_record_literal_args(program: &mut almide_ir::IrProgram) {
+    let almide_ir::IrProgram { functions, modules, var_table, .. } = program;
+    for func in functions
+        .iter_mut()
+        .chain(modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
+    {
+        hoist_rewrite_expr(&mut func.body, var_table);
+    }
+}
+
+mod hoist_impl {
     use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind, Mutability, VarTable};
     use almide_lang::types::Ty;
 
@@ -927,11 +949,18 @@ pub fn hoist_record_literal_args(program: &mut almide_ir::IrProgram) {
                 IrStmtKind::Expr { expr } => rewrite_expr(expr, vt),
                 _ => {}
             }
-            let n = hoists.len();
+            let has_hoists = !hoists.is_empty();
             for (k, h) in hoists.into_iter().enumerate() {
                 stmts.insert(i + k, h);
             }
-            i += n + 1;
+            // Re-visit from the first inserted bind: a hoisted record-literal ARG
+            // bind may itself carry call FIELDS (`let __rec_arg = { left:
+            // default_gap() }` — the substituted #785 shape) that the field pass
+            // must hoist in turn. Already-rewritten stmts are no-ops on re-visit
+            // (their literals are Vars now), so this terminates.
+            if !has_hoists {
+                i += 1;
+            }
         }
     }
 
@@ -956,14 +985,12 @@ pub fn hoist_record_literal_args(program: &mut almide_ir::IrProgram) {
         }
     }
 
-    let almide_ir::IrProgram { functions, modules, var_table, .. } = program;
-    for func in functions
-        .iter_mut()
-        .chain(modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
-    {
-        rewrite_expr(&mut func.body, var_table);
+    pub(crate) fn rewrite_expr_entry(e: &mut IrExpr, vt: &mut VarTable) {
+        rewrite_expr(e, vt)
     }
 }
+
+pub(crate) use hoist_impl::rewrite_expr_entry as hoist_rewrite_expr;
 
 /// The small-int scalar classes, shared with the hoist above (calls_p4's
 /// int_eq_operand_ty is method-scoped; this free twin serves the desugar).

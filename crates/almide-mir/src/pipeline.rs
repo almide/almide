@@ -261,31 +261,89 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
                 .into(),
         ));
     }
-    // A CALL-INITIALIZED module top-let (`let GAP = default_gap()` — #785) that is
-    // actually REFERENCED walls the file: the const-bridge cannot inline a call
-    // init (a call in a record-field position emits a dst-less bare call — invalid
-    // wasm), and leaving the reference unbound TRAPS at runtime (index OOB) instead
-    // of walling. Referenced = a frontend-synthesized cross-module ref entry names
-    // it. An UNREFERENCED call-init is inert — the file lowers.
+    // A referenced IMPURE-call-initialized module top-let walls the file: the
+    // const-bridge drops a call init (mod.rs's expr_has_call), a PURE one is
+    // substituted into the reader bodies later (the ceangal/#785 substitution +
+    // the record-field hoist), but an IMPURE one has no faithful route — and an
+    // unbound reference TRAPS at runtime (index OOB) instead of walling.
+    // Referenced = a frontend-synthesized cross-module ref entry names it.
     {
         use almide_ir::visit::{walk_expr, IrVisitor};
-        struct C(bool);
+        struct C {
+            has_call: bool,
+            impure: bool,
+        }
         impl IrVisitor for C {
             fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
-                if matches!(e.kind, almide_ir::IrExprKind::Call { .. }) {
-                    self.0 = true;
+                match &e.kind {
+                    almide_ir::IrExprKind::RuntimeCall { .. } => {
+                        self.has_call = true;
+                        self.impure = true;
+                    }
+                    almide_ir::IrExprKind::Call { target, .. } => {
+                        self.has_call = true;
+                        match target {
+                            almide_ir::CallTarget::Module { module, func, .. } => {
+                                if !crate::purity::is_pure(module.as_str(), func.as_str()) {
+                                    self.impure = true;
+                                }
+                            }
+                            almide_ir::CallTarget::Named { .. } => {}
+                            _ => self.impure = true,
+                        }
+                    }
+                    _ => {}
                 }
                 walk_expr(self, e);
             }
         }
-        let call_inits: std::collections::HashSet<(String, String)> = ir
+        let effectish: std::collections::HashSet<&str> = ir
+            .functions
+            .iter()
+            .chain(ir.modules.iter().flat_map(|m| m.functions.iter()))
+            .filter(|f| f.is_effect)
+            .map(|f| f.name.as_str())
+            .collect();
+        let impure_call_inits: std::collections::HashSet<(String, String)> = ir
             .modules
             .iter()
             .flat_map(|m| {
-                m.top_lets.iter().filter_map(|tl| {
-                    let mut c = C(false);
+                let effectish = &effectish;
+                m.top_lets.iter().filter_map(move |tl| {
+                    let mut c = C { has_call: false, impure: false };
                     c.visit_expr(&tl.value);
-                    if !c.0 {
+                    // A Named callee that is an EFFECT fn is impure too.
+                    let named_effect = {
+                        use almide_ir::visit::{walk_expr, IrVisitor};
+                        struct N<'a> {
+                            hit: bool,
+                            effectish: &'a std::collections::HashSet<&'a str>,
+                        }
+                        impl IrVisitor for N<'_> {
+                            fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                                if let almide_ir::IrExprKind::Call {
+                                    target: almide_ir::CallTarget::Named { name },
+                                    ..
+                                } = &e.kind
+                                {
+                                    if self.effectish.contains(name.as_str()) {
+                                        self.hit = true;
+                                    }
+                                }
+                                walk_expr(self, e);
+                            }
+                        }
+                        let mut n = N { hit: false, effectish };
+                        n.visit_expr(&tl.value);
+                        n.hit
+                    };
+                    // PURE call inits stay walled here too for now: the
+                    // substitution + field hoist fixes the bare-call INVALID, but
+                    // the hoisted anon-record ARG bind still defers its construct
+                    // (an Opaque block reaches the callee — a runtime trap, not a
+                    // wall). Until that construct lands, referenced = walled.
+                    let _ = (c.impure, named_effect);
+                    if !c.has_call {
                         return None;
                     }
                     m.var_table
@@ -295,16 +353,16 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
                 })
             })
             .collect();
-        if !call_inits.is_empty()
+        if !impure_call_inits.is_empty()
             && ir.var_table.entries.iter().any(|e| {
                 e.module_origin.as_ref().is_some_and(|mo| {
-                    call_inits.contains(&(mo.clone(), e.name.as_str().to_uppercase()))
+                    impure_call_inits.contains(&(mo.clone(), e.name.as_str().to_uppercase()))
                 })
             })
         {
             return Err(LowerError::Unsupported(
-                "test mode: a referenced call-initialized module top-let needs the \
-                 slot-routed bridge, not in this brick"
+                "test mode: a referenced call-initialized module top-let \
+                 needs the slot-routed bridge, not in this brick"
                     .into(),
             ));
         }
@@ -960,6 +1018,19 @@ fn try_render_wasm_source_impl(
             }
             for f in module_fn_sibs.iter_mut() {
                 f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
+            }
+        }
+        // The substitution just placed pure CALLS in arbitrary expression positions
+        // (`left: letlib.GAP` → `left: default_gap()` INSIDE a record literal — the
+        // #785 shape, where a field-position call renders as a dst-less bare call:
+        // invalid wasm). Re-run the record-literal/field hoist on the substituted
+        // bodies so those calls move to their own binds (the chain's program-pass
+        // run happened BEFORE this substitution and could not see them). Main-region
+        // fns only: the hoist allocates fresh main-region VarIds, which must not
+        // leak into a module sibling's separate numbering region.
+        if !subs.is_empty() {
+            for f in inlined_fns.iter_mut() {
+                crate::lower::hoist_record_literal_args_in_fn(&mut f.body, &mut ir.var_table);
             }
         }
     }
