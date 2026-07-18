@@ -256,6 +256,60 @@ impl Checker {
         }
     }
 
+    /// E027: every `Ty::Named` mentioned in an ANNOTATION must be a declared
+    /// type. An undeclared name flowed through unification unconstrained
+    /// (`let xs: List[Inner] = []`) and compiled to a nonexistent Rust type
+    /// (E0412/E0425) — check accepted, build failed (the acceptance-parity
+    /// gap, differential-fuzz seed 20260718 index 940's mutated-away `type`
+    /// declaration). Generic params are immune: resolve_type_expr turns an
+    /// in-scope generic into `Ty::TypeVar` at annotation time, never `Named`.
+    fn validate_unknown_named_types(&mut self) {
+        use std::collections::HashSet;
+        fn collect_named(ty: &Ty, out: &mut Vec<Sym>) {
+            match ty {
+                Ty::Named(s, args) => {
+                    out.push(*s);
+                    for a in args { collect_named(a, out); }
+                }
+                Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) => {
+                    for a in args { collect_named(a, out); }
+                }
+                Ty::Fn { params, ret } => {
+                    for p in params { collect_named(p, out); }
+                    collect_named(ret, out);
+                }
+                Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                    for (_, f) in fields { collect_named(f, out); }
+                }
+                _ => {}
+            }
+        }
+        let mut reported: HashSet<Sym> = HashSet::new();
+        let checks = std::mem::take(&mut self.deferred_unknown_type_checks);
+        for (ty, span, ctx) in checks {
+            let resolved = resolve_ty(&ty, &self.uf);
+            let mut names = Vec::new();
+            collect_named(&resolved, &mut names);
+            for s in names {
+                // `Value` is the BUILT-IN dynamic type (json/codec surface) —
+                // nominal by name but never declared in env.types.
+                if s.as_str() == "Value" || self.env.types.contains_key(&s) || !reported.insert(s) {
+                    continue;
+                }
+                let mut diag = err(
+                    format!("unknown type '{}'", s),
+                    format!("no `type {}` is declared (or imported) in this program — declare it, or check the spelling", s),
+                    ctx.clone(),
+                ).with_code("E027");
+                if let Some(sp) = span {
+                    diag.line = Some(sp.line);
+                    diag.col = Some(sp.col);
+                }
+                self.diagnostics.push(diag);
+            }
+        }
+    }
+
     fn validate_map_key_types(&mut self) {
         use std::collections::HashSet;
         let mut reported: HashSet<String> = HashSet::new();

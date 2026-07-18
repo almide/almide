@@ -229,6 +229,20 @@ impl Checker {
                                     n, &self.env.types, self.current_module_prefix.as_deref(),
                                 ).unwrap_or_else(|| sym(n)),
                             };
+                            // E027: a record literal naming an UNDECLARED type
+                            // previously fell through with empty decl fields —
+                            // validation skipped, `Ty::Named(Inner)` flowed into
+                            // the IR, and codegen emitted a nonexistent Rust
+                            // struct (E0422 — check accepted, build failed; fuzz
+                            // seed-20260718 index 940's mutated-away decl).
+                            if !self.env.types.contains_key(&canon) && !self.env.types.contains_key(&sym(n)) {
+                                self.emit(super::err(
+                                    format!("unknown type '{}'", n),
+                                    format!("no `type {}` is declared (or imported) in this program — declare it, or check the spelling", n),
+                                    format!("record literal {}", n),
+                                ).with_code("E027"));
+                                return Ty::Unknown;
+                            }
                             let generic_args = self.instantiate_type_generics(n);
                             let named = Ty::Named(canon, generic_args);
                             let (decl, closed) = match self.env.resolve_named(&named) {
@@ -249,6 +263,13 @@ impl Checker {
                     }
                     for f in fields.iter() {
                         if let Some((_, ety)) = decl_fields.iter().find(|(fname, _)| fname.as_str() == f.name.as_str()) {
+                            // E024, record-field edition: pin a bare/negated int
+                            // literal to the DECLARED sized field type so the
+                            // post-solve range validator sees it — `Inner { x:
+                            // -4294967295 }` over `x: Int8` was check-accepted
+                            // while native rustc rejected the narrowed literal
+                            // (fuzz seed-20260718 index 940, the C-038 mutation).
+                            self.record_int_literal_context(&f.value, ety);
                             if let Some(vty) = self.type_map.get(&f.value.id).cloned() {
                                 self.constrain(ety.clone(), vty, format!("field {}", f.name));
                             }
