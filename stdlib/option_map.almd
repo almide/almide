@@ -184,6 +184,25 @@ fn option_filter_h(o: Option[String], pred: (String) -> Bool) -> Option[String] 
   } else none
 }
 
+// `option.or_else` heap twin: the closure type matches the scalar impl by
+// construction (`() -> Option[A]` is heap-result either way), but the KEPT
+// payload has the same share obligation as filter/flatten — the scalar rewrap
+// raw-copied the handle un-owned, a double free at scope end (fuzz
+// seed-20260718 index 622: correct output, then an __rc_dec trap).
+fn __opt_orelse_none_h(f: () -> Option[String]) -> Option[String] = {
+  let r = f()
+  r
+}
+
+fn option_or_else_h(o: Option[String], f: () -> Option[String]) -> Option[String] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  if len >= 1 then {
+    let x: String = prim.load_handle(h + 12)
+    some(x)
+  } else __opt_orelse_none_h(f)
+}
+
 // `option.flatten` heap twin (`some(some("s"))` → `some("s")`): the inner payload
 // SHARES into the rebuilt some() (Dup); the outer/inner blocks stay caller-owned.
 fn option_flatten_h(o: Option[Option[String]]) -> Option[String] = {

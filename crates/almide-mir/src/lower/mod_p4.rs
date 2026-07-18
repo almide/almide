@@ -1325,7 +1325,7 @@ fn option_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
             }
         }
     }
-    // The mismatch axis is the CLOSURE's RESULT repr only: params always ride the
+    // ONE mismatch axis is the CLOSURE's RESULT repr: params always ride the
     // widened i64 slots, and an Option-returning closure uses the same `_h` table
     // type the impl declares (flat_map / or_else match by construction; filter's
     // pred is scalar-result; flatten / zip take no closure at all). The two shapes
@@ -1339,10 +1339,13 @@ fn option_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
         // The heap twins declare the closure heap-typed, so the `_h` CallIndirect
         // table type matches by construction (option_map.almd's `_h` family).
         "map" if heap_option(result_ty) => Some("option.map_h".to_string()),
-        // filter/flatten heap twins: the kept payload must SHARE (Dup) into the
-        // rebuilt some() — the scalar rewrap raw-copied the handle un-owned.
+        // filter/flatten/or_else heap twins: the OTHER axis is OWNERSHIP — the
+        // kept payload must SHARE (Dup) into the rebuilt some(); the scalar
+        // rewrap raw-copied the handle un-owned (or_else: fuzz seed-20260718
+        // index 622, correct output then an __rc_dec trap at scope end).
         "filter" if heap_option(result_ty) => Some("option.filter_h".to_string()),
         "flatten" if heap_option(result_ty) => Some("option.flatten_h".to_string()),
+        "or_else" if heap_option(result_ty) => Some("option.or_else_h".to_string()),
         // `to_result` over a String payload: the heap twin builds the CAP-AS-TAG
         // Result the consumers read (the scalar impl's len-as-tag misread); other
         // heap payloads wall (`_x`).

@@ -22,4 +22,11 @@ fn main() -> Unit = {
   println("xs = ${xs}")
   let g: Option[Bool] = list.get_or(option.to_list(t), 5, none)
   println("g = ${g}")
+  // option.or_else kept edition (fuzz index 622), the v1-leg twin: the KEPT
+  // payload Dups into the rebuilt some() — the scalar twin raw-copied the
+  // handle un-owned, double-freeing it at scope end after correct output.
+  let k: Option[String] = option.or_else(some("kept"), (() => some("alt")))
+  println("k = ${k}")
+  let ke: Option[String] = option.or_else(none, (() => some("alt")))
+  println("ke = ${ke}")
 }
