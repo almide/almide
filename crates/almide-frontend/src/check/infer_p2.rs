@@ -126,6 +126,49 @@ impl Checker {
             ExprKind::Binary { op, left, right, .. } => {
                 let lt = self.infer_expr(left);
                 let rt = self.infer_expr(right);
+                // E024, binop-operand edition (fuzz seed-20260718 index 114): a
+                // bare int literal meeting a SIZED operand adopts its width at
+                // lowering — pin that width as the literal's range context so
+                // the post-solve check fires (`(x - x) - 256` with x: Int8 —
+                // native rustc rejected `256i8` while check passed). Every
+                // literal has a site now (the liberal enqueue), so this only
+                // sets context_ty.
+                if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "^") {
+                    let lit_id = |e: &ast::Expr| match &e.kind {
+                        ExprKind::Int { .. } => Some(e.id),
+                        ExprKind::Unary { op, operand, .. }
+                            if op.as_str() == "-"
+                                && matches!(&operand.kind, ExprKind::Int { .. }) =>
+                        {
+                            Some(operand.id)
+                        }
+                        ExprKind::Paren { expr }
+                            if matches!(&expr.kind, ExprKind::Int { .. }) =>
+                        {
+                            Some(expr.id)
+                        }
+                        _ => None,
+                    };
+                    let is_sized_int = |t: &Ty| matches!(
+                        t,
+                        Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                    );
+                    let lc0 = resolve_ty(&lt, &self.uf);
+                    let rc0 = resolve_ty(&rt, &self.uf);
+                    let l_lit = lit_id(left);
+                    let r_lit = lit_id(right);
+                    if is_sized_int(&lc0) {
+                        if let Some(id) = r_lit {
+                            self.pin_int_literal_context(id, &lc0);
+                        }
+                    }
+                    if is_sized_int(&rc0) {
+                        if let Some(id) = l_lit {
+                            self.pin_int_literal_context(id, &rc0);
+                        }
+                    }
+                }
                 match op.as_str() {
                     "+" => {
                         let lc = resolve_ty(&lt, &self.uf);

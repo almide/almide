@@ -209,6 +209,53 @@ impl Checker {
 
 impl Checker {
     /// Validate that all Map literal key types are hashable (post-solve).
+    /// ALS-C9 / E026: an order-sensitive combinator (`list.sort`/`min`/`max`,
+    /// `sort_by`'s key) needs an ORDERABLE element — the native runtime's
+    /// `T: Ord` bound. A bare Float element is fine (it routes to the `_float`
+    /// twins); a Map/Set/Fn element — or Float NESTED inside a compound — has
+    /// no order, and previously check accepted it while native rustc rejected
+    /// the monomorph ("AlmideMap: Ord is not satisfied" — the check-vs-build
+    /// gap, fuzz seed-20260718 index 629).
+    fn validate_ord_elem_types(&mut self) {
+        use std::collections::HashSet;
+        let mut reported: HashSet<String> = HashSet::new();
+        let checks = std::mem::take(&mut self.deferred_ord_elem_checks);
+        for (subject_ty, span, fn_name) in checks {
+            let resolved = resolve_ty(&subject_ty, &self.uf);
+            // list.sort/min/max enqueue the LIST subject; sort_by enqueues the
+            // key type directly. Extract the element when it is a List.
+            let elem = match &resolved {
+                Ty::Applied(almide_lang::types::TypeConstructorId::List, a) if a.len() == 1 => {
+                    a[0].clone()
+                }
+                _ => resolved.clone(),
+            };
+            // An unresolved slot is E025's business; a BARE Float rides the
+            // `_float` twins.
+            if matches!(elem, Ty::Unknown | Ty::TypeVar(_) | Ty::Float) {
+                continue;
+            }
+            if self.env.is_ord(&elem) {
+                continue;
+            }
+            let ty_name = Self::type_display_name(&elem);
+            if !reported.insert(format!("{fn_name}:{ty_name}")) {
+                continue;
+            }
+            let mut diag = err(
+                format!("type '{}' has no ordering — cannot be used with {}", ty_name, fn_name),
+                "Ordering needs Int, Bool, String, Float, or lists/tuples/records of those.                  Map, Set, and function values have no order; Float inside a compound                  element has none either (compare via an explicit key instead)."
+                    .to_string(),
+                format!("call to {}", fn_name),
+            ).with_code("E026");
+            if let Some(s) = span {
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
     fn validate_map_key_types(&mut self) {
         use std::collections::HashSet;
         let mut reported: HashSet<String> = HashSet::new();

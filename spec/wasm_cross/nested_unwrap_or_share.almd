@@ -15,4 +15,11 @@ fn main() -> Unit = {
   println("kept = ${option.unwrap_or(o, d)} default = ${option.unwrap_or(none, d)} d = ${d}")
   let fresh: List[Float] = result.unwrap_or(err("x"), [1.5])
   println("fresh = ${fresh}")
+  // option.to_list edition (fuzz index 338): the new list CO-OWNS the payload
+  // the Option still owns — un-inc'd it double-freed at scope end.
+  let t: Option[Option[Bool]] = some(some(true))
+  let xs: List[Option[Bool]] = option.to_list(t)
+  println("xs = ${xs}")
+  let g: Option[Bool] = list.get_or(option.to_list(t), 5, none)
+  println("g = ${g}")
 }

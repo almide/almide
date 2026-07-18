@@ -112,6 +112,9 @@ pub struct Checker {
     /// Map literal key types to validate after constraint solving.
     /// Each entry: (key_type, span) — checked via `is_hash()` once types are resolved.
     pub(crate) deferred_map_key_checks: Vec<(Ty, Option<crate::ast::Span>)>,
+    /// Order-sensitive combinator subjects/keys (list.sort/min/max, sort_by's
+    /// key) awaiting the post-solve ORDERABLE-element check (E026).
+    pub(crate) deferred_ord_elem_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
     /// Empty-collection producers whose element type must be inferable from
     /// context. Each entry is the producer's result `Ty` (carrying the fresh
     /// element type var), the construct kind (for the diagnostic's wording), and
@@ -277,6 +280,7 @@ impl Checker {
             deferred_tuple_indices: Vec::new(),
             deferred_field_accesses: Vec::new(),
             deferred_map_key_checks: Vec::new(),
+            deferred_ord_elem_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
@@ -465,6 +469,7 @@ impl Checker {
         self.resolve_deferred_tuple_indices();
         resolve_type_map(&mut self.type_map, &self.uf);
         self.validate_map_key_types();
+        self.validate_ord_elem_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
         self.validate_unresolved_binding_types();

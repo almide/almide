@@ -613,6 +613,18 @@ impl Checker {
     /// Pin the declared type onto an int-overflow candidate when the literal is
     /// the DIRECT value of an annotated binding (`let x: T = 5…` or `= -5…`), so
     /// a wider `T` (e.g. `UInt64`) makes a >i64 literal valid post-solve (#626).
+    /// Pin `ty` as an EXISTING literal site's range context (first pin wins —
+    /// a binding/arg annotation set earlier stays authoritative). Every int
+    /// literal has a site since the liberal enqueue, so a lookup miss is a
+    /// no-op by construction.
+    pub(crate) fn pin_int_literal_context(&mut self, id: almide_lang::ast::ExprId, ty: &Ty) {
+        if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == id) {
+            if site.context_ty.is_none() {
+                site.context_ty = Some(ty.clone());
+            }
+        }
+    }
+
     pub(crate) fn record_int_literal_context(&mut self, value: &ast::Expr, declared: &Ty) {
         let (lit_id, raw, negated) = match &value.kind {
             ExprKind::Int { raw, .. } => (Some(value.id), Some(raw.clone()), false),

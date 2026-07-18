@@ -736,6 +736,7 @@ impl<'a> Interpreter<'a> {
                 None => Flow::Abort("internal: list.last on non-list".into()),
             }),
             ("list", "get") => Some(self.list_get(args)),
+            ("list", "get_or") => Some(self.list_get_or(args)),
             ("list", "contains") => Some(match (args.first().and_then(|v| v.as_iter_items()), args.get(1)) {
                 (Some(items), Some(x)) => Flow::val(Value::Bool(items.contains(x))),
                 _ => Flow::Abort("internal: list.contains bad args".into()),
@@ -868,6 +869,12 @@ impl<'a> Interpreter<'a> {
                 (Some(Value::Result(Err(_))), Some(d)) => Flow::val(d.clone()),
                 _ => Flow::Abort("internal: result.unwrap_or bad args".into()),
             }),
+            // some(v) → [v], none → [] (runtime/rs option.rs to_list)
+            ("option", "to_list") => Some(match args.first() {
+                Some(Value::Option(Some(v))) => Flow::val(Value::list(vec![(**v).clone()])),
+                Some(Value::Option(None)) => Flow::val(Value::list(vec![])),
+                _ => Flow::Abort("internal: option.to_list on non-option".into()),
+            }),
             // ok(v) → some(v), err(_) → none (runtime/rs result.rs to_option)
             ("result", "to_option") => Some(match args.first() {
                 Some(Value::Result(Ok(v))) => Flow::val(Value::Option(Some(v.clone()))),
@@ -915,6 +922,22 @@ impl<'a> Interpreter<'a> {
             }),
 
             _ => None,
+        }
+    }
+
+    // get_or(xs, i, default) — the OOB/negative index yields the default
+    // (runtime/rs list.rs get_or; the Value-level twin of list_get's some/none).
+    pub(crate) fn list_get_or(&mut self, args: &[Value]) -> Flow {
+        match (args.first().and_then(|v| v.as_iter_items()), args.get(1), args.get(2)) {
+            (Some(items), Some(Value::Int(i)), Some(default)) => {
+                let i = *i;
+                if i < 0 || (i as usize) >= items.len() {
+                    Flow::val(default.clone())
+                } else {
+                    Flow::val(items[i as usize].clone())
+                }
+            }
+            _ => Flow::Abort("internal: list.get_or bad args".into()),
         }
     }
 

@@ -19,11 +19,19 @@ impl Checker {
         // `validate_int_overflow_literals`. Registering here (not in the Int arm)
         // keeps `expr.id` / `expr.span` in scope.
         if let ExprKind::Int { raw, .. } = &expr.kind {
-            if super::int_literal_overflows_i64(raw) {
-                self.deferred_int_overflow_checks.push(super::IntOverflowSite {
-                    expr_id: expr.id, raw: raw.clone(), negated: false, context_ty: None, span: expr.span,
-                });
-            }
+            // EVERY int literal gets a post-solve range site, not just the
+            // i64-overflowing ones: a SIZED context can overflow an i64-fitting
+            // literal in ANY position — `(x - x) - 256` with x: Int8 passed
+            // check while native rustc rejected `256i8` (fuzz seed-20260718
+            // index 114, the binop-operand edition of index 92). The validator
+            // resolves each site's effective type (context_ty, else the
+            // literal's own solved type) and plain-Int literals pass trivially,
+            // so the liberal enqueue costs one Vec push per literal. The Unary
+            // parent still flips `negated` (#626) and the binding/arg hooks
+            // still pin `context_ty`.
+            self.deferred_int_overflow_checks.push(super::IntOverflowSite {
+                expr_id: expr.id, raw: raw.clone(), negated: false, context_ty: None, span: expr.span,
+            });
         }
         let ity = self.infer_expr_inner(expr);
         self.type_map.insert(expr.id, ity.clone());

@@ -403,6 +403,13 @@ impl FuncCompiler<'_> {
                       local_get(s);
                 });
                 self.emit_load_at(&inner_ty, 0);
+                if Self::is_heap_type(&inner_ty) {
+                    // The new list CO-OWNS the payload the Option still owns —
+                    // an un-inc'd alias double-freed at scope end (__rc_dec
+                    // trap; the #727 share family, option.to_list edition —
+                    // fuzz seed-20260718 index 338's nested-Option payload).
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&inner_ty, self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32 as u32);
                 wasm!(self.func, {
                       local_get(s2);
@@ -642,6 +649,12 @@ impl FuncCompiler<'_> {
                       local_get(s);
                 });
                 self.emit_load_at(&ok_ty, 4);
+                if Self::is_heap_type(&ok_ty) {
+                    // The new Option CO-OWNS the payload the Result still owns —
+                    // un-inc'd it double-freed at scope end (the #727 share
+                    // family, to_option edition — fuzz seed-20260718 index 345).
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&ok_ty, 0);
                 wasm!(self.func, { local_get(s2); end; });
                 self.scratch.free_i32(s2);
@@ -664,6 +677,11 @@ impl FuncCompiler<'_> {
                       local_get(s);
                 });
                 self.emit_load_at(&err_ty, 4);
+                if Self::is_heap_type(&err_ty) {
+                    // Same share as to_option — the Err payload stays owned by
+                    // the input Result.
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&err_ty, 0);
                 wasm!(self.func, { local_get(s2); end; });
                 self.scratch.free_i32(s2);

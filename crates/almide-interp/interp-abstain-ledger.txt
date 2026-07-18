@@ -12,7 +12,6 @@
 
 alias_combinator_rc  out-of-interp-scope capability: option.flatten
 alias_cow  out-of-interp-scope capability: in-place container mutation `list.pop` (mut receiver; interp args are by-value so the binding cannot be written back)
-assign_alias_rc  out-of-interp-scope capability: list.get_or
 base64_encode  out-of-interp-scope capability: string.to_bytes
 block_line_collect  out-of-interp-scope capability: string.drop
 bytes_f16  out-of-interp-scope capability: bytes.from_list
@@ -26,7 +25,6 @@ codec_float_int  out-of-interp-scope capability: json.parse
 compound_eq  out-of-interp-scope capability: list.index_of
 compound_repr_interp  out-of-interp-scope capability: set.from_list
 compound_repr_records_interp  out-of-interp-scope capability: set.from_list
-container_alias_return  out-of-interp-scope capability: list.get_or
 cross_dep_accumulator  out-of-interp-scope capability: string.slice
 datetime_format  out-of-interp-scope capability: datetime.from_parts
 effect_tco  interp fuel/recursion budget exhausted
@@ -104,7 +102,6 @@ mut_map_param  out-of-interp-scope capability: in-place container mutation `map.
 mutual_append  out-of-interp-scope capability: string.get
 nested_hof_lambda_inference  out-of-interp-scope capability: list.zip
 nested_match_heap_arm  out-of-interp-scope capability: int.from_hex
-option_result  out-of-interp-scope capability: option.to_list
 place_mutation  out-of-interp-scope capability: map.new
 playground_default  out-of-interp-scope capability: string.drop
 process_args  out-of-interp-scope capability: process.args
