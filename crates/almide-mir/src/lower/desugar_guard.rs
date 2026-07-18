@@ -1009,3 +1009,62 @@ pub(crate) fn calls_p4_is_small_int(ty: &almide_lang::types::Ty) -> bool {
             | Ty::Float32
     )
 }
+
+/// MEMBER-CHAIN TYPE REPAIR (a pre-lowering per-fn pass): a monomorphized
+/// open-record reader (`fn get_port(app: { config: { port: Int, .. }, .. })` →
+/// `get_port__App`) leaves an INTERMEDIATE Member node mistyped — `app.config`
+/// carries `Named(App)` (the OUTER type) instead of the FIELD's declared type, so
+/// the next member (`__.port`) resolves against the wrong record and the scalar
+/// tail walls. The DECLARED field type is authoritative: repair every Member
+/// node whose object type resolves and whose field type disagrees. Children
+/// first (the object repairs before its member); a non-resolvable object type
+/// (a genuinely open record at a non-mono site) is left untouched.
+pub fn repair_member_field_tys(
+    func: &mut almide_ir::IrFunction,
+    layouts: &crate::lower::RecordLayouts,
+) {
+    use almide_ir::{walk_expr_mut, IrExpr, IrExprKind, IrMutVisitor};
+    use almide_lang::types::Ty;
+
+    fn field_ty_of(
+        layouts: &crate::lower::RecordLayouts,
+        ty: &Ty,
+        field: almide_lang::intern::Sym,
+    ) -> Option<Ty> {
+        match ty {
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                fields.iter().find(|(n, _)| *n == field).map(|(_, t)| t.clone())
+            }
+            Ty::Named(name, args) => {
+                let key = crate::lower::canonical_record_key(layouts, name.as_str())?;
+                let (generics, decl_fields) = layouts.get(key)?;
+                let mut subst: std::collections::HashMap<almide_lang::intern::Sym, Ty> =
+                    std::collections::HashMap::new();
+                for (g, a) in generics.iter().zip(args.iter()) {
+                    subst.insert(*g, a.clone());
+                }
+                decl_fields
+                    .iter()
+                    .find(|(n, _)| *n == field)
+                    .map(|(_, t)| calls::subst_type_var(t, &subst))
+            }
+            _ => None,
+        }
+    }
+
+    struct R<'a> {
+        layouts: &'a crate::lower::RecordLayouts,
+    }
+    impl IrMutVisitor for R<'_> {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Member { object, field } = &e.kind else { return };
+            let Some(fty) = field_ty_of(self.layouts, &object.ty, *field) else { return };
+            if e.ty != fty {
+                e.ty = fty;
+            }
+        }
+    }
+    let mut r = R { layouts };
+    r.visit_expr_mut(&mut func.body);
+}

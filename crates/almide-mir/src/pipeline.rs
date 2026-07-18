@@ -949,9 +949,11 @@ fn try_render_wasm_source_impl(
     // maps BEFORE lowering, or the AllTypesConcrete precondition walls the whole fn.
     for f in inlined_fns.iter_mut() {
         crate::lower::repair_unknown_global_ref_tys(f, &main_globals);
+        crate::lower::repair_member_field_tys(f, &record_layouts);
     }
     for f in module_fn_sibs.iter_mut() {
         crate::lower::repair_unknown_global_ref_tys(f, &globals);
+        crate::lower::repair_member_field_tys(f, &record_layouts);
     }
 
     // A BRIDGED cross-module ref whose module-side init is a PURE CALL (`v.black` →
