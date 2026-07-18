@@ -136,26 +136,52 @@ pub fn run_ladder(
         };
     }
     if native.timed_out {
-        return Outcome::Finding(Finding {
-            rung: Rung::Run,
-            kind: FindingKind::Hang,
-            summary: "native run hung".into(),
-            native: Some(RunEvidence::from(&native)),
-            wasm: None,
-        });
+        // A native hang is not, by itself, a cross-target finding: a mutation
+        // can synthesize a genuinely non-terminating program (`pos + 0` in a
+        // recursion step — seed 20260718 index 198), which hangs on both
+        // targets. Only a hang DIVERGENCE is evidence: build + run the wasm
+        // leg; if wasm CLEANLY SUCCEEDS while native hung, that IS a finding.
+        // A wasm failure exit is NOT termination evidence — an unbounded
+        // allocator loop traps at wasm's 4GB memory ceiling long before
+        // native's (the index-198 shape: both non-terminating, wasm merely
+        // OOMs first) — so it skips like a double hang.
+        let wasm_build = tc.build_wasm(file, wasm_out);
+        if wasm_build.success() {
+            let wasm_run = tc.run_wasm(wasm_out);
+            if native_hang_is_finding(true, wasm_run.timed_out, wasm_run.success()) {
+                return Outcome::Finding(Finding {
+                    rung: Rung::Run,
+                    kind: FindingKind::Hang,
+                    summary: "native run hung while wasm succeeded".into(),
+                    native: Some(RunEvidence::from(&native)),
+                    wasm: Some(RunEvidence::from(&wasm_run)),
+                });
+            }
+        }
+        return Outcome::Skipped {
+            reason: "native hung and wasm did not cleanly succeed (a non-terminating or \
+                     resource-unbounded program by construction) — no divergence oracle"
+                .into(),
+        };
     }
     if !native.success() {
-        // Distinguish a build/codegen failure from a legitimate runtime
-        // error. Both surface as non-zero exit; the generated programs
-        // never *intend* to error (no panics/asserts), so any non-zero
-        // exit at the native rung is a finding.
-        return Outcome::Finding(Finding {
-            rung: Rung::NativeBuild,
-            kind: FindingKind::NativeBuildFailure,
-            summary: "native build/run failed".into(),
-            native: Some(RunEvidence::from(&native)),
-            wasm: None,
-        });
+        // A COMPILE failure is an immediate finding: rung (a) accepted the
+        // program, so failing to build it is a check-vs-build gap. A RUNTIME
+        // error is NOT — a corpus MUTATION can synthesize a program that
+        // ABORTS BY DESIGN (a bounds/div-fixture variant in the mutation
+        // pool), and the abort form is itself a cross-target contract
+        // (ALS-T6): the ORACLE is the comparison below — wasm must reach the
+        // same observables, divergence surfaces there.
+        let stderr = String::from_utf8_lossy(&native.stderr);
+        if stderr.contains("Compile error") || stderr.contains("error[E") {
+            return Outcome::Finding(Finding {
+                rung: Rung::NativeBuild,
+                kind: FindingKind::NativeBuildFailure,
+                summary: "native build failed after check accepted".into(),
+                native: Some(RunEvidence::from(&native)),
+                wasm: None,
+            });
+        }
     }
 
     // ── Rung (d): wasm build ──
@@ -192,12 +218,19 @@ pub fn run_ladder(
     let nat_ev = RunEvidence::from(&native);
     let wasm_ev = RunEvidence::from(&wasm);
 
-    if !wasm.success() {
-        // Native ran cleanly but WASM did not — a run-failure divergence.
+    if native.success() != wasm.success() {
+        // One leg ran cleanly and the other did not — a run-failure
+        // divergence in either direction (native can non-zero-exit BY DESIGN
+        // now that intended-abort corpus mutants flow through to the compare).
+        let summary = if native.success() {
+            "wasm run failed while native succeeded"
+        } else {
+            "native run failed while wasm succeeded"
+        };
         return Outcome::Finding(Finding {
             rung: Rung::Run,
             kind: FindingKind::RunFailureDivergence,
-            summary: "wasm run failed while native succeeded".into(),
+            summary: summary.into(),
             native: Some(nat_ev),
             wasm: Some(wasm_ev),
         });
@@ -277,4 +310,41 @@ fn divergence_summary(native: &RunEvidence, wasm: &RunEvidence) -> String {
         native.stdout.len(),
         wasm.stdout.len()
     )
+}
+
+/// Pure classification for the native-hang rung: a HANG is a finding IFF the
+/// wasm leg built, did not itself time out, and CLEANLY SUCCEEDED — a wasm
+/// failure exit is not termination evidence (an unbounded allocator loop traps
+/// at wasm's 4GB ceiling long before native's; both are non-terminating).
+fn native_hang_is_finding(wasm_built: bool, wasm_timed_out: bool, wasm_succeeded: bool) -> bool {
+    wasm_built && !wasm_timed_out && wasm_succeeded
+}
+
+#[cfg(test)]
+mod hang_classification_tests {
+    use super::native_hang_is_finding;
+
+    #[test]
+    fn wasm_clean_success_is_a_finding() {
+        assert!(native_hang_is_finding(true, false, true));
+    }
+
+    #[test]
+    fn wasm_hang_is_a_skip() {
+        // Both targets hang — a non-terminating program by construction
+        // (seed 20260718 index 198's `pos + 0` mutation).
+        assert!(!native_hang_is_finding(true, true, false));
+    }
+
+    #[test]
+    fn wasm_failure_exit_is_a_skip() {
+        // wasm OOM-trapped at its 4GB ceiling while native was still
+        // allocating — resource race, not a semantic divergence.
+        assert!(!native_hang_is_finding(true, false, false));
+    }
+
+    #[test]
+    fn wasm_build_failure_is_a_skip() {
+        assert!(!native_hang_is_finding(false, false, false));
+    }
 }

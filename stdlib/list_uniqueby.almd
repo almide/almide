@@ -34,3 +34,59 @@ fn list_unique_by(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
   prim.store32(prim.handle(buf) + 4, cnt)
   buf
 }
+
+// STRING-key twin (scalar elements, `f: (Int) -> String`): the key closure's
+// heap-result CallIndirect table type — the scalar impl's `(Int) -> Int` type
+// TRAPPED on it ("indirect call type mismatch", fuzz seed-20260718 index 9, the
+// unique_by edition of the zip_with class C-141). Key equality is by CONTENT
+// (the prim byte compare — the __skv_eq discipline); each computed key is a
+// fresh owned String freed at its helper's scope end. Same O(n^2) first-kept
+// discipline as the scalar impl.
+fn __ubsk_eq_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else {
+    let ca = prim.load8(pa + i)
+    let cb = prim.load8(pb + i)
+    if ca == cb then __ubsk_eq_bytes(pa, pb, n, i + 1)
+    else false
+  }
+
+fn __ubsk_eq(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  if la != lb then false
+  else __ubsk_eq_bytes(ha + 12, hb + 12, la, 0)
+}
+
+fn __ubsk_count(sh: Int, f: (Int) -> String, k: String, j: Int, i: Int, acc: Int) -> Int =
+  if j >= i then acc
+  else {
+    let xj = prim.load64(sh + 12 + j * 8)
+    let kj = f(xj)
+    let same = __ubsk_eq(kj, k)
+    if same then __ubsk_count(sh, f, k, j + 1, i, acc + 1)
+    else __ubsk_count(sh, f, k, j + 1, i, acc)
+  }
+
+fn __ubsk_fill(dh: Int, sh: Int, f: (Int) -> String, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let k = f(x)
+    let c = __ubsk_count(sh, f, k, 0, i, 0)
+    if c > 0 then __ubsk_fill(dh, sh, f, n, i + 1, di)
+    else {
+      prim.store64(dh + 12 + di * 8, x)
+      __ubsk_fill(dh, sh, f, n, i + 1, di + 1)
+    }
+  }
+
+fn list_unique_by_sk(xs: List[Int], f: (Int) -> String) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list(n)
+  let cnt = __ubsk_fill(prim.handle(buf), prim.handle(xs), f, n, 0, 0)
+  prim.store32(prim.handle(buf) + 4, cnt)
+  buf
+}

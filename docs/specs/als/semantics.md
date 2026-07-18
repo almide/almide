@@ -46,7 +46,7 @@ Contracts: C-064, C-068, C-069, C-119, C-135。
 デフォルト引数は呼び出しごとに評価される。`unwrap_or` の payload 型は
 デフォルト側からも解決される。コンビネータは Float instantiation でも
 両ターゲットで有効なコードに落ちる。
-Contracts: C-080, C-081, C-082, C-089, C-094, C-097, C-126, C-127, C-142, C-145。
+Contracts: C-080, C-081, C-082, C-089, C-094, C-097, C-126, C-127, C-142, C-145, C-151。
 
 ## ALS-M6 蓄積ループの規範
 
@@ -92,7 +92,7 @@ Contracts: C-108。
 List[String]/List[Value] のパラメータ渡し・join/len/添字/反復・分類/変換
 ops（zip_with の要素型ルーティングを含む）は要素の所有を壊さず、native と
 観測一致する。
-Contracts: C-045, C-100, C-101, C-141。
+Contracts: C-045, C-100, C-101, C-141, C-147, C-148。
 
 ## ALS-M13 mut パラメータの in-place 変異
 

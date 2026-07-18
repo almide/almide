@@ -19,3 +19,26 @@ fn list_scan(xs: List[Int], init: Int, f: (Int, Int) -> Int) -> List[Int] = {
   let _x = __scan_fill(prim.handle(buf), prim.handle(xs), f, n, 0, init)
   buf
 }
+
+// STRING-accumulator twin (scalar elements, `f: (String, Int) -> String`): the
+// scalar impl's i64 init param / closure table type failed validation on a
+// String acc ("expected i64, found i32" — the v1 edition of fuzz seed-20260718
+// index 259). Each intermediate is f's fresh owned String MOVED into its slot
+// (the list_map_str discipline); the next step BORROWS it back from the dest
+// slot (load_str) so no handle is used after its move.
+fn __scan_str_fill(dh: Int, sh: Int, f: (String, Int) -> String, n: Int, i: Int, acc: String) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    prim.store_str(dh + 12 + i * 8, nacc)
+    let nb = prim.load_str(dh + 12 + i * 8)
+    __scan_str_fill(dh, sh, f, n, i + 1, nb)
+  }
+
+fn list_scan_str(xs: List[Int], init: String, f: (String, Int) -> String) -> List[String] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list_str(n)
+  let _x = __scan_str_fill(prim.handle(buf), prim.handle(xs), f, n, 0, init)
+  buf
+}

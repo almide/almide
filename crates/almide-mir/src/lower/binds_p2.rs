@@ -506,7 +506,10 @@ impl LowerCtx {
                 // below, which would read `none` / `ok([])` (the some(computed)/ok(computed) silent
                 // miscompile the adversarial fuzz surfaced). Wall instead — a wall is always safe, a
                 // wrong byte never is.
-                if let IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } = &value.kind {
+                if let IrExprKind::OptionSome { expr }
+                | IrExprKind::ResultOk { expr }
+                | IrExprKind::ResultErr { expr } = &value.kind
+                {
                     use almide_lang::types::constructor::TypeConstructorId;
                     if matches!(&expr.ty,
                         Ty::Applied(TypeConstructorId::List, _) | Ty::Applied(TypeConstructorId::Map, _))
@@ -515,6 +518,19 @@ impl LowerCtx {
                             "some/ok of a list or map payload outside the executable subset cannot be \
                              faithfully materialized in this brick (e.g. an empty `[:]` — would defer \
                              to an empty container)"
+                                .into(),
+                        ));
+                    }
+                    // A HEAP CALL payload the ctor materializer DECLINED (`ok(float.parse(s))`
+                    // — a Module call returning a nested Result, fuzz seed-20260718 index
+                    // 888): the deferred Opaque read `ok(0)` while native printed the err —
+                    // the C-138 family's un-admitted tail. WALL — admission with an exact
+                    // nested drop is a follow-up; a wall is always safe, a wrong byte never.
+                    if is_heap_ty(&expr.ty) && matches!(expr.kind, IrExprKind::Call { .. }) {
+                        return Err(LowerError::Unsupported(
+                            "some/ok/err of an un-admitted heap call payload cannot be \
+                             faithfully materialized in this brick (walled, not read as a \
+                             zeroed ctor)"
                                 .into(),
                         ));
                     }

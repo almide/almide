@@ -673,13 +673,69 @@ impl FuncCompiler<'_> {
                         wasm!(self.func, { end; });
                     }
                     _ => {
-                        wasm!(self.func, { local_get(result); i32_load(0); i32_eqz; if_i32; local_get(result); i32_load(4); else_; });
+                        if Self::is_heap_type(&ok_ty) {
+                            // A HEAP Ok payload (a List/String handle) must be CO-OWNED
+                            // (+1): the input Result temp's drop releases its payload at
+                            // scope end, so handing back the bare `payload@4` was a
+                            // use-after-free — `unwrap_or_else(collect(...), f)` read the
+                            // freed list as `[]` (fuzz seed-20260718 index 590). Same
+                            // share-+1 discipline as the OPTION unwrap_or_else arm above.
+                            wasm!(self.func, { local_get(result); i32_load(0); i32_eqz; if_i32; local_get(result); i32_load(4); call(self.emitter.rt.rc_inc); else_; });
+                        } else {
+                            wasm!(self.func, { local_get(result); i32_load(0); i32_eqz; if_i32; local_get(result); i32_load(4); else_; });
+                        }
                         wasm!(self.func, { local_get(closure); i32_load(4); local_get(result); i32_load(4); local_get(closure); i32_load(0); });
                         let err_ty = self.result_err_ty(&args[0].ty);
                         self.emit_closure_call(&err_ty, &ok_ty);
                         wasm!(self.func, { end; });
                     }
                 }
+                self.scratch.free_i32(closure);
+                self.scratch.free_i32(result);
+            }
+            "flatten" => {
+                // flatten(Result[Result[T,E],E]) → Result[T,E]: Ok(inner) → the INNER
+                // box (co-owned +1 — its own drop stays with the outer's payload slot),
+                // Err(e) → the OUTER box itself (co-owned +1; it already IS `err(e)`).
+                // Previously flatten had no arm and ICE'd on pipelines without the
+                // named-dispatch runtime fn (the determinism harness).
+                let result = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(result);
+                    local_get(result); i32_load(0); i32_eqz;
+                    if_i32;
+                      local_get(result); i32_load(4); call(self.emitter.rt.rc_inc);
+                    else_;
+                      local_get(result); call(self.emitter.rt.rc_inc);
+                    end;
+                });
+                self.scratch.free_i32(result);
+            }
+            "or_else" => {
+                // or_else(r, f) → Result: Ok kept (the INPUT box, co-owned +1 — the
+                // option or_else's #666 share discipline), Err(e) → f(e) (the recovery
+                // closure gets the err payload, its fresh Result moved out). Previously
+                // result.or_else had NO arm here and leaned on the named-dispatch
+                // fallback — a pipeline without the lowered runtime fn ICE'd
+                // ("no WASM dispatch for `result.or_else`", the determinism harness).
+                let result = self.scratch.alloc_i32();
+                let closure = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(result); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    local_set(closure);
+                    local_get(result); i32_load(0); i32_eqz;
+                    if_i32;
+                      local_get(result); call(self.emitter.rt.rc_inc);
+                    else_;
+                });
+                // f(err_payload) — closure gets the borrowed message handle.
+                wasm!(self.func, { local_get(closure); i32_load(4); local_get(result); i32_load(4); local_get(closure); i32_load(0); });
+                let err_ty = self.result_err_ty(&args[0].ty);
+                self.emit_closure_call(&err_ty, &args[0].ty);
+                wasm!(self.func, { end; });
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(result);
             }

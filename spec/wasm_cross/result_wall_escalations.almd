@@ -1,0 +1,23 @@
+// @contract: C-151, C-152
+// Two deterministic-wall escalations, byte-identical to native via the v0 leg:
+// (1) a result value combinator whose RESULT is heap-Ok while the input is
+// scalar-Ok (`result.map(r, (v) => some(v))`) routes to the UNLINKED `_x` — the
+// scalar impl's closure table type and len-as-tag rebuild are both wrong for it
+// (fuzz seed-20260718 index 647 printed `some(1791929075367945)` for `some(0)`);
+// (2) a ctor wrapping an UN-ADMITTED heap call payload (`ok(float.parse(s))` —
+// a nested Result) WALLS instead of deferring — the zeroed Opaque read `ok(0)`
+// while native printed the err (index 888).
+fn main() -> Unit = {
+  let r8: Result[Int, String] = ok(7)
+  let m: Result[Option[Int], String] = result.map(r8, ((v) => some(v)))
+  println("m = ${m}")
+  let acc2: Result[Result[Float, String], String] = ok(float.parse("not-a-float"))
+  let r3: Result[Float, String] = result.flatten(acc2)
+  println("r3 = ${r3}")
+}
+
+test "heap-result map and nested-result ctor stay value-faithful" {
+  let r8: Result[Int, String] = ok(7)
+  let m: Result[Option[Int], String] = result.map(r8, ((v) => some(v)))
+  assert_eq(m, ok(some(7)))
+}

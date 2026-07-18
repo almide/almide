@@ -1743,6 +1743,72 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-147"
+spec      = "ALS-M12"
+title     = "list.unique_by routes by key repr — String keys dedupe by content"
+statement = "`list.unique_by` is routed by the KEY closure's result repr (the CallIndirect table-type axis): a scalar key over scalar elements rides the base impl, a String key over scalar elements rides the `_sk` twin (content equality via string.eq, first-kept, O(n^2) recompute of the pure key), and any other repr routes to the UNLINKED `_x` wall. Previously every instantiation linked the Int-typed base impl whose scalar `(Int) -> Int` table type TRAPPED on a String-key closure (\"indirect call type mismatch\", differential-fuzz seed 20260718 index 9 — the unique_by edition of the zip_with class C-141)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_unique_by_str_key.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-148"
+spec      = "ALS-M12"
+title     = "list.scan stores each intermediate at the accumulator's own width"
+statement = "`list.scan` is routed by the ACC repr (the closure's result AND the output element): a scalar acc rides the base impl, a String acc over scalar elements rides the `_str` twin on the v1 leg (each intermediate is the closure's fresh owned String MOVED into its slot, borrowed back for the next step), and any other repr walls (`_x`). On the v0 leg the per-step acc store switches on the accumulator's valtype — the old fallback used i64_store for every non-F64 acc, so an i32 String handle failed validation (\"expected i64, found i32\", differential-fuzz seed 20260718 index 259) and would have smeared 8 bytes over a 4-byte-stride slot."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/scan_heap_acc.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-149"
+spec      = "ALS-I1"
+title     = "unwrap_or_else hands back a co-owned heap Ok payload"
+statement = "On the v0 leg, `result.unwrap_or_else` with a HEAP Ok payload (a List/String handle) rc_incs the payload before returning it: the input Result temp's drop releases its payload at scope end, so handing back the bare `payload@4` was a use-after-free — `unwrap_or_else(result.collect([...]), f)` read the freed list as `[]` (differential-fuzz seed 20260718 index 590). The option unwrap_or_else arm carried this share-+1 discipline already (#727 cluster 5); this is its result-side twin."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/uoe_heap_ok_share.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-150"
+spec      = "ALS-C5"
+title     = "Ctors over a heap var are value copies — the var stays live"
+statement = "A Result/Option ctor wrapping a heap VAR takes a CO-OWNED reference (Dup) on the v1 leg, never the var's own handle: `let a = ok(r0); let b = ok(r0)` yields two real values and r0 stays readable afterward — value semantics, byte-identical to native. Previously the first ctor MOVED the var's handle out of the live set, so a SECOND ctor over the same var found nothing and deferred to the zeroed Opaque, printing `ok(\"\")` (differential-fuzz seed 20260718 index 248). The borrow-then-Dup discipline the param-payload arm already used, extended to owned locals."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/ctor_var_copy_semantics.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-151"
+spec      = "ALS-M5"
+title     = "Result combinators with a heap-Ok RESULT never link the scalar impl"
+statement = "`result.map`/`map_err`/`flat_map` whose RESULT type is heap-Ok while the INPUT is scalar-Ok (`result.map(r, (v) => some(v))` — `Result[Int, String]` → `Result[Option[Int], String]`) route to the UNLINKED `_x` name — a deterministic render wall. The scalar impl's i64-result closure table type mismatches the heap-result closure AND its len-as-tag rebuild is the wrong OUTPUT layout: the un-routed link printed `some(1791929075367945)` for `some(0)` (differential-fuzz seed 20260718 index 647)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_wall_escalations.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-152"
+spec      = "ALS-I3"
+title     = "An un-admitted heap call payload in a ctor walls, never zeroes"
+statement = "A Result/Option ctor whose payload is a HEAP-typed call the materializer did not admit (`ok(float.parse(s))` — a Module call returning a nested Result) WALLS the function on the v1 leg instead of deferring to the flat Opaque: the zeroed block read `ok(0)` while native printed `err(\"invalid float literal\")` (differential-fuzz seed 20260718 index 888). The C-138 admission family's honest-wall tail — admission with an exact nested drop is a follow-up; the bind-net List/Map guard already existed, this extends it to every heap call payload and to the err() ctor."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_wall_escalations.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-143"
 spec      = "ALS-I3"
 title     = "Ctor if-payloads materialize the taken arm"

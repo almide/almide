@@ -1423,6 +1423,19 @@ fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
             };
             Some(if has_h { format!("result.{func}_h") } else { format!("result.{func}_x") })
         }
+        // The same combinators with a SCALAR-Ok INPUT but a HEAP-Ok RESULT
+        // (`result.map(r, (v) => some(v))` — `Result[Int, String]` →
+        // `Result[Option[Int], String]`, fuzz seed-20260718 index 647): the
+        // scalar impl's i64-result closure table type mismatches the
+        // heap-result closure AND its len-as-tag rebuild is the wrong OUTPUT
+        // layout. No twin exists — the UNLINKED `_x` walls it deterministically.
+        // (Reached only when the input arm above did not match.)
+        "map" | "map_err" | "flat_map"
+            if matches!(result_ty, Ty::Applied(TC::Result, a)
+                if a.len() == 2 && is_heap_ty(&a[0])) =>
+        {
+            Some(format!("result.{func}_x"))
+        }
         // partition: List[Result[scalar, String]] → (List[scalar], List[String])
         "partition" => {
             let ok = matches!(arg_tys.first(), Some(Ty::Applied(TC::List, e))
@@ -1702,6 +1715,40 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
                 "list.zip_with_str".to_string()
             }
             _ => "list.zip_with_x".to_string(),
+        });
+    }
+    // `list.scan` keys on (element, ACC) reprs — the ACC is the closure's result
+    // and the OUTPUT element (one table-type axis, one layout axis): scalar/scalar
+    // rides the base impl, scalar/String the `_str` twin (move-in fill, borrow-back
+    // threading), anything else the UNLINKED `_x` wall — the scalar impl's i64 init
+    // param failed validation on a String acc ("expected i64, found i32", the v1
+    // edition of fuzz seed-20260718 index 259).
+    if func == "scan" {
+        let elem_scalar = matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::List, e))
+            if e.len() == 1 && !is_heap_ty(&e[0]));
+        return Some(match (elem_scalar, arg_tys.get(1)) {
+            (true, Some(a)) if !is_heap_ty(a) => "list.scan".to_string(),
+            (true, Some(Ty::String)) => "list.scan_str".to_string(),
+            _ => "list.scan_x".to_string(),
+        });
+    }
+    // `list.unique_by` keys on (element, KEY) reprs — the KEY is the closure's
+    // result (the CallIndirect table-type axis): scalar/scalar rides the base
+    // impl, scalar/String the `_sk` twin (content equality via string.eq), and
+    // anything else the UNLINKED `_x` wall — the scalar `(Int) -> Int` table
+    // type TRAPPED on a String-key closure ("indirect call type mismatch",
+    // fuzz seed-20260718 index 9, the unique_by edition of the zip_with class).
+    if func == "unique_by" {
+        let elem_scalar = matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::List, e))
+            if e.len() == 1 && !is_heap_ty(&e[0]));
+        let key_ty = match arg_tys.get(1) {
+            Some(Ty::Fn { ret, .. }) => Some(ret.as_ref()),
+            _ => None,
+        };
+        return Some(match (elem_scalar, key_ty) {
+            (true, Some(k)) if !is_heap_ty(k) => "list.unique_by".to_string(),
+            (true, Some(Ty::String)) => "list.unique_by_sk".to_string(),
+            _ => "list.unique_by_x".to_string(),
         });
     }
     // `list.enumerate` keys on its SOURCE element: scalar → the flat-pair self-host;

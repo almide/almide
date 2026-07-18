@@ -830,7 +830,16 @@ impl LowerCtx {
                             .map(|v| self.live_heap_handles.contains(&v))
                             .unwrap_or(false) =>
                     {
-                        self.value_for(*id).ok()?
+                        // Dup, do NOT move: the ctor gets its OWN co-owned reference and
+                        // the var keeps its handle + its scope-end drop. Moving consumed
+                        // the var — a SECOND `ok(r0)` then found nothing and deferred to
+                        // the zeroed Opaque, printing `ok("")` (fuzz seed-20260718 index
+                        // 248); native value-semantics copies each time. The same
+                        // borrow-then-Dup discipline as the param arm below.
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
                     // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
@@ -1024,7 +1033,16 @@ impl LowerCtx {
                             .map(|v| self.live_heap_handles.contains(&v))
                             .unwrap_or(false) =>
                     {
-                        self.value_for(*id).ok()?
+                        // Dup, do NOT move: the ctor gets its OWN co-owned reference and
+                        // the var keeps its handle + its scope-end drop. Moving consumed
+                        // the var — a SECOND `ok(r0)` then found nothing and deferred to
+                        // the zeroed Opaque, printing `ok("")` (fuzz seed-20260718 index
+                        // 248); native value-semantics copies each time. The same
+                        // borrow-then-Dup discipline as the param arm below.
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
                     // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
@@ -1227,7 +1245,16 @@ impl LowerCtx {
                             .map(|v| self.live_heap_handles.contains(&v))
                             .unwrap_or(false) =>
                     {
-                        self.value_for(*id).ok()?
+                        // Dup, do NOT move: the ctor gets its OWN co-owned reference and
+                        // the var keeps its handle + its scope-end drop. Moving consumed
+                        // the var — a SECOND `ok(r0)` then found nothing and deferred to
+                        // the zeroed Opaque, printing `ok("")` (fuzz seed-20260718 index
+                        // 248); native value-semantics copies each time. The same
+                        // borrow-then-Dup discipline as the param arm below.
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
                     // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
@@ -1334,7 +1361,16 @@ impl LowerCtx {
                             .map(|v| self.live_heap_handles.contains(&v))
                             .unwrap_or(false) =>
                     {
-                        self.value_for(*id).ok()?
+                        // Dup, do NOT move: the ctor gets its OWN co-owned reference and
+                        // the var keeps its handle + its scope-end drop. Moving consumed
+                        // the var — a SECOND `ok(r0)` then found nothing and deferred to
+                        // the zeroed Opaque, printing `ok("")` (fuzz seed-20260718 index
+                        // 248); native value-semantics copies each time. The same
+                        // borrow-then-Dup discipline as the param arm below.
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
                     // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref

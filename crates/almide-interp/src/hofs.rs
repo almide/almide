@@ -65,6 +65,8 @@ impl<'a> Interpreter<'a> {
             ("list", "sort_by") => self.hof_sort_by(&evaled),
             ("list", "each") => self.hof_each(&evaled),
             ("list", "zip_with") => self.hof_zip_with(&evaled),
+            ("list", "unique_by") => self.hof_unique_by(&evaled),
+            ("list", "scan") => self.hof_scan(&evaled),
 
             // ── option HOFs ──
             ("option", "map") => self.hof_option_map(&evaled),
@@ -429,6 +431,52 @@ impl<'a> Interpreter<'a> {
         let mut out = Vec::new();
         for (x, y) in a.into_iter().zip(b.into_iter()) {
             out.push(val!(self.apply_closure(&clo, vec![x, y])));
+        }
+        Flow::val(Value::list(out))
+    }
+
+    // unique_by(xs, key) — keep the FIRST element of each distinct key (the
+    // native first-kept discipline; keys compared by Value equality).
+    fn hof_unique_by(&mut self, args: &[Value]) -> Flow {
+        let xs = match args.first().and_then(|v| v.as_iter_items()) {
+            Some(i) => i,
+            None => return Flow::Abort("internal: unique_by arg 0 not iterable".into()),
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut seen: Vec<Value> = Vec::new();
+        let mut out = Vec::new();
+        for x in xs {
+            let k = val!(self.apply_closure(&clo, vec![x.clone()]));
+            if !seen.iter().any(|s| s == &k) {
+                seen.push(k);
+                out.push(x);
+            }
+        }
+        Flow::val(Value::list(out))
+    }
+
+    // scan(xs, init, f) — a fold that collects every running accumulator
+    // (length n; the init itself is NOT emitted).
+    fn hof_scan(&mut self, args: &[Value]) -> Flow {
+        let xs = match args.first().and_then(|v| v.as_iter_items()) {
+            Some(i) => i,
+            None => return Flow::Abort("internal: scan arg 0 not iterable".into()),
+        };
+        let mut acc = match args.get(1) {
+            Some(v) => v.clone(),
+            None => return Flow::Abort("internal: scan missing init".into()),
+        };
+        let clo = match Self::recv_closure(args, 2) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = Vec::new();
+        for x in xs {
+            acc = val!(self.apply_closure(&clo, vec![acc.clone(), x]));
+            out.push(acc.clone());
         }
         Flow::val(Value::list(out))
     }
@@ -831,6 +879,39 @@ impl<'a> Interpreter<'a> {
                 Some(Value::Result(Ok(_))) => Flow::val(Value::Option(None)),
                 Some(Value::Result(Err(e))) => Flow::val(Value::Option(Some(e.clone()))),
                 _ => Flow::Abort("internal: result.to_err_option on non-result".into()),
+            }),
+            // ok(inner) → inner, err(e) → err(e) (runtime/rs result.rs flatten)
+            ("result", "flatten") => Some(match args.first() {
+                Some(Value::Result(Ok(inner))) => Flow::val((**inner).clone()),
+                Some(Value::Result(Err(e))) => {
+                    Flow::val(Value::Result(Err(e.clone())))
+                }
+                _ => Flow::Abort("internal: result.flatten on non-result".into()),
+            }),
+            // collect(List[Result[T,E]]) → all ok → ok(List[T]), else err(List[E])
+            // of EVERY err (the native runtime's partition-style collect).
+            ("result", "collect") => Some(match args.first().and_then(|v| v.as_iter_items()) {
+                Some(items) => {
+                    let mut oks = Vec::new();
+                    let mut errs = Vec::new();
+                    for it in items {
+                        match it {
+                            Value::Result(Ok(v)) => oks.push((*v).clone()),
+                            Value::Result(Err(e)) => errs.push((*e).clone()),
+                            _ => {
+                                return Some(Flow::Abort(
+                                    "internal: result.collect non-result element".into(),
+                                ))
+                            }
+                        }
+                    }
+                    if errs.is_empty() {
+                        Flow::val(Value::Result(Ok(Box::new(Value::list(oks)))))
+                    } else {
+                        Flow::val(Value::Result(Err(Box::new(Value::list(errs)))))
+                    }
+                }
+                None => Flow::Abort("internal: result.collect on non-list".into()),
             }),
 
             _ => None,
