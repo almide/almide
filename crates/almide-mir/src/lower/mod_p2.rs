@@ -80,7 +80,12 @@ pub fn resolve_derived_method_owner(name: String) -> String {
             let o = o.borrow();
             match o.get(ty) {
                 Some(m) if qualifier.is_none() || qualifier == Some(m.as_str()) => {
-                    Some(format!("almide_rt_{}_{}_{}", m.replace('.', "_"), ty, method))
+                    // The DEFINITION side mangles the QUALIFIED type name (`varlib.Pigment`
+                    // → `varlib_Pigment`) under the module prefix, so the derived fn is
+                    // `almide_rt_varlib_varlib_Pigment_encode` (module twice — observed in
+                    // the linked IR). Mirror that exactly or the call dangles unlinked.
+                    let mm = m.replace('.', "_");
+                    Some(format!("almide_rt_{mm}_{mm}_{ty}_{method}"))
                 }
                 _ => None,
             }
