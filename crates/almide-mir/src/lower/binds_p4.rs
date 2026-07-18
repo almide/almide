@@ -1116,6 +1116,20 @@ impl LowerCtx {
                         self.live_heap_handles.retain(|h| *h != p);
                         p
                     }
+                    // `ok(float.to_fixed(x, 4))` — a PURE Module call yielding a fresh owned STRING
+                    // Ok payload (fuzz C-class 323/768: the un-admitted stdlib call fell to the
+                    // deferred Opaque and the ZEROED block printed `ok("")` — a silent wrong value).
+                    // `lower_owned_heap_field` routes it via `lower_pure_module_value_call` (purity/
+                    // HOF gates apply there); MOVE it into the Ok slot (retain-remove — the
+                    // materialized Result is the sole owner, its flat DropListStr slot-0 free is
+                    // exact, the same discipline as the Named-call String piece above).
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     _ => return None,
                 };
                 let dst = self.materialize_result_str(piece, repr, false, false);
@@ -1259,6 +1273,17 @@ impl LowerCtx {
                         self.list_list_str_lists.insert(dst);
                         return Some(dst);
                     }
+                    // `err(float.to_fixed(x, 4))` — a PURE Module call yielding a fresh owned
+                    // STRING Err payload (fuzz C-class: fell to the deferred Opaque whose zeroed
+                    // block even flipped the TAG — printed `ok("")` for an err). Same piece as the
+                    // ok-side Module-call arm; the cap-as-tag Err slot owns the one String.
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     _ => return None,
                 };
                 Some(self.materialize_result_str(piece, repr, true, false))
@@ -1328,6 +1353,17 @@ impl LowerCtx {
                         let obj = self.try_lower_string_interp(parts)?;
                         self.drop_arm_locals(mark);
                         obj
+                    }
+                    // `err(float.to_fixed(x, 4))` for a SCALAR-Ok Result — a PURE Module call
+                    // yielding a fresh owned STRING Err payload (fuzz C-class, len-as-tag twin of
+                    // the heap-Ok Module-call arms): the deferred Opaque zeroed the block. Same
+                    // fresh-owned move-in as the Named-call piece above.
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
                     }
                     _ => return None,
                 };

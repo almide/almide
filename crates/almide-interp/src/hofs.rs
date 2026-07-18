@@ -803,6 +803,18 @@ impl<'a> Interpreter<'a> {
                 (Some(Value::Result(Err(_))), Some(d)) => Flow::val(d.clone()),
                 _ => Flow::Abort("internal: result.unwrap_or bad args".into()),
             }),
+            // ok(v) → some(v), err(_) → none (runtime/rs result.rs to_option)
+            ("result", "to_option") => Some(match args.first() {
+                Some(Value::Result(Ok(v))) => Flow::val(Value::Option(Some(v.clone()))),
+                Some(Value::Result(Err(_))) => Flow::val(Value::Option(None)),
+                _ => Flow::Abort("internal: result.to_option on non-result".into()),
+            }),
+            // ok(_) → none, err(e) → some(e) (runtime/rs result.rs to_err_option)
+            ("result", "to_err_option") => Some(match args.first() {
+                Some(Value::Result(Ok(_))) => Flow::val(Value::Option(None)),
+                Some(Value::Result(Err(e))) => Flow::val(Value::Option(Some(e.clone()))),
+                _ => Flow::Abort("internal: result.to_err_option on non-result".into()),
+            }),
 
             _ => None,
         }

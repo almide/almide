@@ -1375,6 +1375,47 @@ fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
         {
             Some(format!("result.{func}_h"))
         }
+        // The VALUE combinators over a HEAP-Ok Result — same cap-as-tag misread as
+        // is_ok/is_err, but the scalar impls also REBUILT the wrong layout: every
+        // `ok(x)` took the Err path and the result printed as a swapped/zeroed value
+        // (the fuzz C-904 silent `ok("")` class; unwrap_or_else even emitted invalid
+        // wasm — an i64-result CallFn bound to an i32 String local). The exact
+        // `Result[String, String]` instantiation routes to the `_h` twins
+        // (result_map.almd); any other heap-Ok instantiation routes to the UNLINKED
+        // `_x` — a deterministic render wall, never a wrong-typed link. `unwrap_or`
+        // needs no arm (unwrap_or_call_name already keys on the repr), and the
+        // display/eq families are chosen by type at the call site.
+        "map" | "map_err" | "flat_map" | "unwrap_or_else" | "to_option"
+        | "to_err_option" | "filter" | "or_else" | "flatten" | "to_list" | "zip"
+            if matches!(arg_tys.first(), Some(Ty::Applied(TC::Result, a))
+                if a.len() == 2 && is_heap_ty(&a[0])) =>
+        {
+            // `flatten`'s BASE impl already reads the heap-Ok OUTER (tag@16) and the
+            // len-as-tag scalar INNER — `Result[Result[scalar, String], String]` is
+            // its exact shape (option_result_symmetry); only other inners wall.
+            if func == "flatten" {
+                let base_ok = matches!(arg_tys.first(), Some(Ty::Applied(TC::Result, a))
+                    if matches!(&a[0], Ty::Applied(TC::Result, i)
+                        if i.len() == 2 && !is_heap_ty(&i[0]) && matches!(i[1], Ty::String))
+                        && matches!(a[1], Ty::String));
+                return Some(if base_ok {
+                    "result.flatten".to_string()
+                } else {
+                    "result.flatten_x".to_string()
+                });
+            }
+            let ss_in = matches!(arg_tys.first(), Some(Ty::Applied(TC::Result, a))
+                if matches!(a[0], Ty::String) && matches!(a[1], Ty::String));
+            let ss_res = matches!(result_ty, Ty::Applied(TC::Result, a)
+                if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String));
+            let has_h = match func {
+                "map" | "map_err" | "flat_map" => ss_in && ss_res,
+                "unwrap_or_else" => ss_in && matches!(result_ty, Ty::String),
+                "to_option" | "to_err_option" => ss_in,
+                _ => false,
+            };
+            Some(if has_h { format!("result.{func}_h") } else { format!("result.{func}_x") })
+        }
         // partition: List[Result[scalar, String]] → (List[scalar], List[String])
         "partition" => {
             let ok = matches!(arg_tys.first(), Some(Ty::Applied(TC::List, e))

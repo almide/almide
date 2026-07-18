@@ -1,0 +1,41 @@
+// @contract: C-139
+// The result VALUE combinators over a heap-Ok `Result[String, String]` (the
+// cap-as-tag block: payload @12, tag @16). Before: the len-as-tag scalar impls
+// took every ok() for an Err and rebuilt the WRONG layout — map/map_err/flat_map
+// swapped or replaced payloads, to_option/to_err_option flipped, unwrap_or_else
+// emitted invalid wasm. Fuzz seed 1784352208133210990 index 904 (via map_err).
+// Each combinator sits in its own fn so the v1 leg verifies it independently.
+fn c_map(r: Result[String, String]) -> Result[String, String] = result.map(r, ((y) => y + "?"))
+fn c_map_err(r: Result[String, String]) -> Result[String, String] = result.map_err(r, ((y) => y + "!"))
+fn c_flat_map(r: Result[String, String]) -> Result[String, String] = result.flat_map(r, ((y) => ok(y + "F")))
+fn c_uoe(r: Result[String, String]) -> String = result.unwrap_or_else(r, ((y) => "fb:" + y))
+fn c_to_opt(r: Result[String, String]) -> Option[String] = result.to_option(r)
+fn c_to_eopt(r: Result[String, String]) -> Option[String] = result.to_err_option(r)
+
+fn main() -> Unit = {
+  let s: Result[String, String] = ok("abc")
+  let e: Result[String, String] = err("bad")
+  println("map      ${c_map(s)} ${c_map(e)}")
+  println("map_err  ${c_map_err(s)} ${c_map_err(e)}")
+  println("flat_map ${c_flat_map(s)} ${c_flat_map(e)}")
+  println("uoe      ${c_uoe(s)} ${c_uoe(e)}")
+  println("to_opt   ${c_to_opt(s)} ${c_to_opt(e)}")
+  println("to_eopt  ${c_to_eopt(s)} ${c_to_eopt(e)}")
+}
+
+test "heap-Ok result combinators keep tag and payload" {
+  let s: Result[String, String] = ok("abc")
+  let e: Result[String, String] = err("bad")
+  assert_eq(result.map(s, ((y) => y + "?")), ok("abc?"))
+  assert_eq(result.map(e, ((y) => y + "?")), err("bad"))
+  assert_eq(result.map_err(s, ((y) => y + "!")), ok("abc"))
+  assert_eq(result.map_err(e, ((y) => y + "!")), err("bad!"))
+  assert_eq(result.flat_map(s, ((y) => ok(y + "F"))), ok("abcF"))
+  assert_eq(result.flat_map(e, ((y) => ok(y + "F"))), err("bad"))
+  assert_eq(result.unwrap_or_else(s, ((y) => "fb")), "abc")
+  assert_eq(result.unwrap_or_else(e, ((y) => "fb")), "fb")
+  assert_eq(result.to_option(s), some("abc"))
+  assert_eq(result.to_option(e), none)
+  assert_eq(result.to_err_option(s), none)
+  assert_eq(result.to_err_option(e), some("bad"))
+}

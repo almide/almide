@@ -1730,3 +1730,25 @@ evidence  = [
   { path = "spec/wasm_cross/fs_relative_path.almd", class = "fixture" },
   { path = "spec/stdlib/fs_stat_test.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-138"
+spec      = "ALS-I3"
+title     = "ok/err ctor with a stdlib-call payload materializes the real value"
+statement = "A Result ctor whose payload is a PURE stdlib Module call (`ok(float.to_fixed(x, 4))`, `err(string.to_upper(s))`, `ok(int.to_string(n))`) bound or returned directly materializes a REAL Result block on the v1 leg — the payload call executes and its fresh owned String moves into the ctor slot, for all three Result layouts (heap-Ok ok, heap-Ok err, scalar-Ok len-as-tag err). Previously the un-admitted Module-call payload fell to the deferred Opaque and the ZEROED block reached observed output as `ok(\"\")` — even for err(), whose tag zeroed too (the silent-wrong-value class; differential-fuzz seed 1784352208133210990 index 323/768/904)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_ctor_call_payload.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-139"
+spec      = "ALS-I3"
+title     = "Heap-Ok Result value combinators keep tag and payload"
+statement = "The result VALUE combinators (`map`, `map_err`, `flat_map`, `unwrap_or_else`, `to_option`, `to_err_option`) applied to a heap-Ok `Result[String, String]` (the cap-as-tag block: payload handle @12, tag @16) preserve the tag and payload byte-identically to native: the `Result[String, String]` instantiation routes to `_h` twins that read tag@16 and rebuild through the typed ctors, and every OTHER heap-Ok instantiation (including `filter`/`or_else`/`flatten`/`to_list`/`zip`) routes to an UNLINKED `_x` name — a deterministic render wall, never a wrong-typed link. Previously the len-as-tag scalar impls read len@4 (always 1 for a heap-Ok block), took every ok() for an Err, and rebuilt the WRONG layout: map/map_err/flat_map swapped or replaced payloads (`ok(\"abc\")` became the closure's constant), to_option/to_err_option flipped some/none, and unwrap_or_else emitted invalid wasm (fuzz index 904 via map_err)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_combinators_heap_ok.almd", class = "fixture" },
+]

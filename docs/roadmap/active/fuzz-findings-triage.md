@@ -25,15 +25,22 @@ needs its own look (job logs via `gh api /repos/almide/almide/actions/jobs/<id>/
 
 ## Findings (seed = 1784352208133210990)
 
-| Class | Index | Symptom | Severity |
+| Class | Index | Symptom | Status |
 |---|---|---|---|
-| C. String fn returns `""` | 323, 768, 904 | `ok("10.0000")` / `ok("0.000001")` (float fixed formatting) and a ZWJ emoji string → wasm `ok("")` | **Highest — a deferred Opaque is reaching OBSERVED output: a wall-coverage hole (the #777/F3 motivation), the silent-wrong-value class the v1 discipline exists to prevent** |
-| B. List collapses to `[]` | 198, 659 | `[1000000, 7, 256]` → `[]`, `[true,true,false,true]` → `[]` | High — wrong value |
-| E. i32-boundary tuple | 609 | `(true, -2147483648)` vs `(false, 2)` | High — wrong value |
-| F. Option flips | 858 | `some("5")` vs `none` | High |
-| D. Unicode predicate flips | 191 | `none` vs `some("Ǆ")` (titlecase) | Medium |
-| A. Negative-zero display | 67, 655 | native `-0` / wasm `0` | Medium — display layer |
-| G. Build/run failures | 65 (wasm run fails), 96 (wasm build fails) | divergent failure | Medium |
+| C. String fn returns `""` | 323, 768, 904 | `ok(float.to_fixed(…))` → wasm `ok("")`; `result.map_err` on heap-Ok Result | **FIXED (2026-07-18)** — two root causes: (1) the ok/err ctor's stdlib-call payload fell to the deferred Opaque (binds_p4 Module-call String arms, C-138); (2) the result value combinators linked the len-as-tag scalar impls over the cap-as-tag heap-Ok block (`_h` twins + `_x` walls in result_call_name, C-139) |
+| D. Unicode predicate flips | 191 | `none` vs `some("Ǆ")` (titlecase) | **FIXED** — same root as C (the value flowed through a Result/Option ctor payload) |
+| E. i32-boundary tuple | 609 | `(true, -2147483648)` vs `(false, 2)` | **FIXED** — same root as C |
+| B. List collapses to `[]` | 198, 659 | `[1000000, 7, 256]` → `[]`, `[true,true,false,true]` → `[]` | open — next up |
+| F. Option flips | 858 | `some("5")` vs `none` | open |
+| A. Negative-zero display | 67, 655 | native `-0` / wasm `0` | open — display layer |
+| G. Build/run failures | 65 (wasm run fails), 96 (wasm build fails) | divergent failure | open |
+
+Lesson feeding #777/F3: BOTH C-class roots were "a deferred/mis-linked value
+reaching observed output without a wall" — (1) the deferred-Opaque ctor payload
+printed as `ok("")`, (2) a name-keyed registry link ignored the layout the type
+implies. The F3 gate should make each structural: an Opaque that flows into a
+display/eq/observed op must wall the fn, and a self-host link must carry a
+repr-compatibility check (the `_h`/`_x` suffix discipline, mechanically).
 
 ## Definition of done
 

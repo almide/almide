@@ -24,5 +24,6 @@ Contracts: C-040, C-059。
 
 v1（MIR）経路特有の lowering エッジ — scalar 値の端形・tuple/list Ok payload
 の往復・自作 base64・条件 keep/skip の filter_map・借用パラメータの所有束縛
-クラスタ — は v0 と byte 一致する（v1 検証行脚の固定化契約群）。
-Contracts: C-075, C-107, C-109, C-116, C-120。
+クラスタ・stdlib 呼び出し payload の ctor 直束縛・heap-Ok Result の値系
+コンビネータ — は v0 と byte 一致する（v1 検証行脚の固定化契約群）。
+Contracts: C-075, C-107, C-109, C-116, C-120, C-138, C-139。
