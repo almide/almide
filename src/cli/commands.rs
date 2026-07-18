@@ -206,6 +206,24 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         }
         return WasmTestOutcome::Fail { file: test_file.to_string(), detail };
     }
+    // A file with BOTH `main` and `test` blocks: the v1 wasm test-mode renderer
+    // (almide_mir::pipeline::synthesize_test_runner_main) intentionally leaves
+    // `main`-bearing files on the ordinary `__main_runner` protocol and never
+    // synthesizes the `__test_runner` — so the wasm leg compiles and runs ONLY
+    // `main`, never the `test` blocks, and reports the whole file Pass as long
+    // as `main` exits cleanly. A file's tests can be silently unexecuted (not
+    // merely mis-scored) on this leg — the false-green class in
+    // feedback_wasm_test_parse_error_false_pass, a fresh trigger (runtime
+    // assertions, not parse errors). Skip straight to the authoritative native
+    // fallback rather than trust a Pass that never checked the tests at all.
+    let has_main = program
+        .decls
+        .iter()
+        .any(|d| matches!(d, almide_lang::ast::Decl::Fn { name, .. } if name.as_str() == "main"));
+    let has_test = program.decls.iter().any(|d| matches!(d, almide_lang::ast::Decl::Test { .. }));
+    if has_main && has_test {
+        return skip("main + test blocks: wasm test-mode runs main only, not the tests".to_string());
+    }
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> =
         if std::path::Path::new("almide.toml").exists() {
