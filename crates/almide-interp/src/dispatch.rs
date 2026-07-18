@@ -378,6 +378,7 @@ pub(crate) fn is_hof(module: &str, func: &str) -> bool {
             | ("result", "map_err")
             | ("result", "flat_map")
             | ("result", "unwrap_or_else")
+            | ("result", "or_else")
             | ("bytes", "map_each")
     )
 }

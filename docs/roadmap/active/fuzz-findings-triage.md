@@ -32,8 +32,14 @@ needs its own look (job logs via `gh api /repos/almide/almide/actions/jobs/<id>/
 | E. i32-boundary tuple | 609 | `(true, -2147483648)` vs `(false, 2)` | **FIXED** — same root as C |
 | A. Negative-zero display | 67, 655 | native `-0` / wasm `0` | **FIXED (2026-07-18)** — not display: the v1 self-host `float.round` branched on `x >= 0.0` (TRUE for -0.0 under IEEE) and lost the sign; copysign carries it (C-140) |
 | G. Build/run failures | 65 (wasm run fails), 96 (wasm build fails) | divergent failure | **FIXED** — 65: `list.zip_with` linked the Int-typed impl for every instantiation; String zips trapped on the scalar closure table type → element-repr routing + `_str` twin (C-141). 96: the v0 emitter's `result.unwrap_or_else` inline lacked the F64 case → invalid module; added, mirroring the option twin (C-142) |
-| B. List collapses to `[]` | 198, 659 | `[1000000, 7, 256]` → `[]`, `[true,true,false,true]` → `[]` | open — a nested combinator chain in a LIST-ELEMENT position declines → the whole list defers to Opaque and prints `[]` (bind position walls honestly; the element position doesn't). Also exposed: v0 `result.or_else` + capturing closure rc-traps after correct output |
-| F. Option flips | 858 | `some("5")` vs `none` | open — `some(<heap if>)` payload declines → Opaque option reads `none`. Same Opaque-reaches-display family as B |
+| F. Option flips | 858 | `some("5")` vs `none` | **FIXED (2026-07-18)** — `some/ok/err(<heap if>)` payload fell to the deferred Opaque and read `none`; the ctor piece matches now route If/Match String payloads through the heap-result-if machinery (C-143) |
+| B. List collapses to `[]` | 198, 659 | `[1000000, 7, 256]` → `[]`, `[true,true,false,true]` → `[]` | **FIXED** — four mechanisms: (1) a non-literal scalar-list bind now WALLS instead of deferring to the silent-`[]` Opaque (C-144); (2) mono-suffixed stdlib names (`or_else__Int_String_String`) route by base name (C-145); (3) String-err Result captures are admitted to the closure env (the `__drop_list_str`-exact layout family) so the capturing or_else chain runs v1-verified; (4) the v0 lifted closure returning a captured alias now hands out a co-owned +1 (C-146) |
+
+**Seed 1784352208133210990: 12/12 findings CLEAN (2026-07-18).** The stream is
+now in the loop-until-dry phase: fresh-seed campaigns (`run --seed N --count
+1000`) still surface findings (a first probe showed RunFailureDivergence /
+NativeBuildFailure shapes on seed 1784367061711317000), so the DoD's
+findings-free 1000-campaign is not yet met.
 
 Lesson feeding #777/F3: BOTH C-class roots were "a deferred/mis-linked value
 reaching observed output without a wall" — (1) the deferred-Opaque ctor payload

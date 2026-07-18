@@ -1743,6 +1743,50 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-143"
+spec      = "ALS-I3"
+title     = "Ctor if-payloads materialize the taken arm"
+statement = "A Result/Option ctor whose String payload is a heap-result IF/MATCH (`some((if b then r0 else r0))`, `ok((if c then a else b))`, err twin, len-as-tag err twin) EXECUTES the taken arm on the v1 leg and moves the one owned result into the ctor slot. Previously the un-admitted if-payload fell to the deferred Opaque: the zeroed option READ `none` while native printed `some(\"5\")` — a silent flip (differential-fuzz seed 1784352208133210990 index 858)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/ctor_if_payload.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-144"
+spec      = "ALS-I3"
+title     = "A scalar-list literal never observes as a silent empty list"
+statement = "A NON-EMPTY scalar-element list literal bound to a let either MATERIALIZES a real populated block on the v1 leg or WALLS the function (v0 emits it) — it never defers to the flat Opaque whose every observation reads `[]`. Previously an element outside the executable subset (a nested inadmissible-HOF chain) deferred the WHOLE list: `${r4}` printed `[]` while native printed the values (differential-fuzz index 198/659), while the same chain in BIND position walled honestly — the element position now matches the bind position's honesty. The heap-element twin gate (non-empty List[heap] literal) already existed; this is its scalar twin."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_element_hof_chain.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-145"
+spec      = "ALS-M5"
+title     = "Mono-suffixed stdlib combinator names route by their base name"
+statement = "A stdlib Module call whose name the monomorphizer suffixed with its instantiation (`result.or_else__Int_String_String`) routes through the self-host registry by its BASE name — the suffix carries no information the router needs (the instantiation's types are already in the arg/result types, which the repr-keyed gates consult). Previously the suffixed form fell through every router arm to an UNLINKED dotted name and walled the using function at render — `result.or_else` walled at EVERY instantiation, capturing and non-capturing alike (differential-fuzz index 198's recovery chain)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_element_hof_chain.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-146"
+spec      = "ALS-I1"
+title     = "A lifted closure returning a captured alias hands out a co-owned reference"
+statement = "On the v0 leg, a lifted closure (`__closure_N`) whose body RETURNS a bare CAPTURED heap var (`(v) => s1` — the or_else recovery shape, chased through the conversion's nested bind blocks) rc_incs the env handle before returning: every consumer treats a closure result as OWNED, so handing out the borrowed alias un-inc'd double-freed the block at scope end with the still-owning binding — a __rc_dec trap AFTER correct output (differential-fuzz index 198: wasm run failed while native succeeded). The #666/#668 share discipline, closure-return edition; a param or computed tail keeps its existing balance."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_element_hof_chain.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-140"
 spec      = "ALS-T15"
 title     = "float.round preserves the sign of a zero result"

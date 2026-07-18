@@ -14,8 +14,8 @@ fn main() -> Unit = {
 }
 
 test "round keeps the zero sign" {
-  assert_eq(float.to_string(float.round(-0.0)), "-0")
-  assert_eq(float.to_string(float.round(-0.4)), "-0")
-  assert_eq(float.to_string(float.round(0.4)), "0")
-  assert_eq(float.to_string(float.round(-2.5)), "-3")
+  assert_eq(float.to_string(float.round(-0.0)), "-0.0")
+  assert_eq(float.to_string(float.round(-0.4)), "-0.0")
+  assert_eq(float.to_string(float.round(0.4)), "0.0")
+  assert_eq(float.to_string(float.round(-2.5)), "-3.0")
 }

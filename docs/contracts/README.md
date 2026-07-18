@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-142 contracts
+146 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -170,4 +170,8 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-140 | float.round preserves the sign of a zero result | 0.31.0 | active | fixture | 1 |
 | C-141 | list.zip_with routes by element repr — String zips work, no wrong-typed link | 0.31.0 | active | fixture | 1 |
 | C-142 | result.unwrap_or_else is valid wasm at the Float instantiation on both legs | 0.31.0 | active | fixture | 1 |
+| C-143 | Ctor if-payloads materialize the taken arm | 0.31.0 | active | fixture | 1 |
+| C-144 | A scalar-list literal never observes as a silent empty list | 0.31.0 | active | fixture | 1 |
+| C-145 | Mono-suffixed stdlib combinator names route by their base name | 0.31.0 | active | fixture | 1 |
+| C-146 | A lifted closure returning a captured alias hands out a co-owned reference | 0.31.0 | active | fixture | 1 |
 

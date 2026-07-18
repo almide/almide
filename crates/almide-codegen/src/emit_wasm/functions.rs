@@ -168,6 +168,45 @@ fn compile_function_inner(
 
     compiler.emit_expr(&func.body);
 
+    // A LIFTED closure (`__closure_N`) whose whole body RETURNS a bare CAPTURED
+    // heap var (`(v) => s1` — the fuzz B-198 or_else recovery shape; after
+    // closure conversion the body is `EnvLoad` or `{ let x = EnvLoad; x }`): the
+    // tail left the BORROWED env handle, but every consumer treats a closure
+    // result as OWNED — the un-inc'd alias double-freed at scope end with the
+    // still-owning binding (__rc_dec trap after correct output). Hand out a
+    // co-owned +1 (rc_inc is (ptr) -> ptr, the #666/#668 share discipline).
+    // EnvLoad exists only inside lifted closures, so the check cannot fire
+    // elsewhere; a param or computed tail keeps its existing balance.
+    fn tail_is_env_alias(body: &almide_ir::IrExpr) -> bool {
+        use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
+        use std::collections::HashMap;
+        // Is `e` an ALIAS of a captured env slot? Chases Var → bind chains and
+        // nested Blocks (the conversion emits `{ let a = { let b = EnvLoad; b }; a }`).
+        fn expr_alias<'a>(e: &'a IrExpr, binds: &HashMap<u32, &'a IrExpr>) -> bool {
+            match &e.kind {
+                IrExprKind::EnvLoad { .. } => true,
+                IrExprKind::Var { id } => {
+                    binds.get(&id.0).is_some_and(|v| expr_alias(v, binds))
+                }
+                IrExprKind::Block { stmts, expr: Some(tail) } => {
+                    let mut scoped = binds.clone();
+                    for s in stmts {
+                        if let IrStmtKind::Bind { var, value, .. } = &s.kind {
+                            scoped.insert(var.0, value);
+                        }
+                    }
+                    expr_alias(tail, &scoped)
+                }
+                _ => false,
+            }
+        }
+        expr_alias(body, &HashMap::new())
+    }
+    if tail_is_env_alias(&func.body) && FuncCompiler::is_heap_type(&func.body.ty) {
+        let rc_inc = compiler.emitter.rt.rc_inc;
+        wasm!(compiler.func, { call(rc_inc); });
+    }
+
     // Perceus function-exit rc_dec is now handled by PerceusPass (IR-level RcDec nodes)
 
     // If function returns a value but body produces Unit (e.g., while loop with guard returns),

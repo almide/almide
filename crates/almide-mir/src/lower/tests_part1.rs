@@ -480,12 +480,19 @@
                 list_int(),
             )
         };
-        // var xs = [helper(), other()]  — the list literal lowers to ONE Opaque
-        // `Alloc`, ELIDING its element calls. `record_elided_calls` surfaces each as
-        // a bare EFFECT MARKER `CallFn{dst:None, args:[], result:None}` so the caps
-        // fold can see them, while the value content stays deferred.
-        let elements = vec![named("helper", vec![]), named("other", vec![])];
-        let b = body(vec![bind(0, list_int(), ir_expr(IrExprKind::List { elements }, list_int()))]);
+        // var r = helper()..other()  — a Range bind lowers to ONE Opaque `Alloc`,
+        // ELIDING its operand calls. `record_elided_calls` surfaces each as a bare
+        // EFFECT MARKER `CallFn{dst:None, args:[], result:None}` so the caps fold
+        // can see them, while the value content stays deferred. (The original
+        // vehicle — a scalar list literal with call elements — now WALLS instead of
+        // deferring (C-144: never a silent `[]`), so the Range shape carries the
+        // marker contract.)
+        let range = IrExprKind::Range {
+            start: Box::new(named("helper", vec![])),
+            end: Box::new(named("other", vec![])),
+            inclusive: false,
+        };
+        let b = body(vec![bind(0, list_int(), ir_expr(range, list_int()))]);
         let mir = lower_body(&b, "main").expect("lowers");
 
         let markers: Vec<&str> = mir
@@ -516,11 +523,13 @@
             1,
             list_int(),
             ir_expr(
-                IrExprKind::List {
-                    elements: vec![named(
+                IrExprKind::Range {
+                    start: Box::new(named(
                         "apply",
                         vec![ir_expr(IrExprKind::Var { id: VarId(2) }, fn_ty)],
-                    )],
+                    )),
+                    end: Box::new(ir_expr(IrExprKind::Var { id: VarId(3) }, Ty::Int)),
+                    inclusive: false,
                 },
                 list_int(),
             ),

@@ -78,6 +78,7 @@ impl<'a> Interpreter<'a> {
             ("result", "map_err") => self.hof_result_map(&evaled, true),
             ("result", "flat_map") => self.hof_result_flat_map(&evaled),
             ("result", "unwrap_or_else") => self.hof_result_unwrap_or_else(&evaled),
+            ("result", "or_else") => self.hof_result_or_else(&evaled),
 
             // ── set HOFs (operate on the ordered backing vec) ──
             ("set", "map") => self.hof_set_map(&evaled),
@@ -548,6 +549,22 @@ impl<'a> Interpreter<'a> {
                 Flow::val(Value::Result(Err(e.clone())))
             }
             _ => Flow::Abort("internal: result.flat_map on non-Result".into()),
+        }
+    }
+
+    // Ok(v) kept; Err(e) → f(e), the recovery closure's Result returned as-is
+    // (runtime/rs result.rs or_else — flat_map's Err-side twin).
+    fn hof_result_or_else(&mut self, args: &[Value]) -> Flow {
+        match args.first() {
+            Some(Value::Result(Ok(v))) => Flow::val(Value::Result(Ok(v.clone()))),
+            Some(Value::Result(Err(e))) => {
+                let clo = match Self::recv_closure(args, 1) {
+                    Ok(c) => c,
+                    Err(f) => return f,
+                };
+                self.apply_closure(&clo, vec![(**e).clone()])
+            }
+            _ => Flow::Abort("internal: result.or_else on non-Result".into()),
         }
     }
 

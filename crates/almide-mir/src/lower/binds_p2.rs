@@ -646,6 +646,25 @@ impl LowerCtx {
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
                 let init = alloc_init(value);
+                // A NON-EMPTY SCALAR-element List literal that did NOT fold to a real
+                // `Init::IntList` (a computed element the builders above declined — e.g. a
+                // nested inadmissible-HOF chain, fuzz B-198/659): the flat Opaque reads as
+                // an EMPTY list at any observation (`${r4}` printed `[]` while native
+                // printed the values — the silent-wrong-value class). WALL instead — the
+                // heap-element twin at the gate above already does; this is its scalar twin.
+                if let IrExprKind::List { elements } = &value.kind {
+                    use almide_lang::types::constructor::TypeConstructorId;
+                    let scalar_elem_list = matches!(ty,
+                        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
+                    if scalar_elem_list && !elements.is_empty() && matches!(init, Init::Opaque) {
+                        return Err(LowerError::Unsupported(
+                            "non-empty scalar-element list literal with an element outside \
+                             the executable subset cannot be faithfully materialized in this \
+                             brick (walled, not emitted empty)"
+                                .into(),
+                        ));
+                    }
+                }
                 // An all-literal `Init::IntList` is a REAL, POPULATED block (every slot a constant) —
                 // admit a direct `xs[i]` bounds-checked load over it. An `Init::Opaque` (a deferred /
                 // unsupported value) is NOT tracked: indexing it would trap on cap 0.

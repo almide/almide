@@ -943,6 +943,19 @@ impl LowerCtx {
                         self.live_heap_handles.retain(|h| *h != p);
                         p
                     }
+                    // `some((if c then a else b))` — a heap-result IF/MATCH String payload
+                    // (fuzz F-858: the un-admitted if fell to the deferred Opaque and the
+                    // zeroed option READ `none` — a silent flip). EXECUTE it via the proven
+                    // heap-result-if machinery (lower_owned_heap_field's If/Match arms), MOVE
+                    // the one owned result into the Some slot. Gated to a String payload so
+                    // the flat drop is exact.
+                    IrExprKind::If { .. } | IrExprKind::Match { .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     // A `Map[String, Int]` (map_skv) Some payload (`some(["a": 1])` → `some(map.from_list
                     // (…))`) — lower the map (a Module call) and MOVE it into the Some slot. The map's own
                     // block is freed by the flat heap_elem_lists drop, exactly as a bare `let m = […]`
@@ -1130,6 +1143,16 @@ impl LowerCtx {
                         self.live_heap_handles.retain(|h| *h != p);
                         p
                     }
+                    // `ok((if c then a else b))` — a heap-result IF/MATCH String Ok payload
+                    // (the fuzz F-858 family's Result sibling): the heap-result-if machinery
+                    // yields the one owned result, moved into the Ok slot.
+                    IrExprKind::If { .. } | IrExprKind::Match { .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     _ => return None,
                 };
                 let dst = self.materialize_result_str(piece, repr, false, false);
@@ -1284,6 +1307,15 @@ impl LowerCtx {
                         self.live_heap_handles.retain(|h| *h != p);
                         p
                     }
+                    // `err((if c then a else b))` — a heap-result IF/MATCH String Err payload
+                    // (the F-858 family): the one owned result moves into the Err slot.
+                    IrExprKind::If { .. } | IrExprKind::Match { .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     _ => return None,
                 };
                 Some(self.materialize_result_str(piece, repr, true, false))
@@ -1359,6 +1391,15 @@ impl LowerCtx {
                     // the heap-Ok Module-call arms): the deferred Opaque zeroed the block. Same
                     // fresh-owned move-in as the Named-call piece above.
                     IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
+                    // `err((if c then a else b))` for a SCALAR-Ok Result — the heap-result
+                    // IF/MATCH String Err payload (the F-858 family, len-as-tag twin).
+                    IrExprKind::If { .. } | IrExprKind::Match { .. }
                         if matches!(expr.ty, Ty::String) =>
                     {
                         let p = self.lower_owned_heap_field(expr)?;

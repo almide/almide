@@ -1266,6 +1266,13 @@ pub(crate) fn list_heap_call_name(
     map_key_nullary: bool,
     map_key_scalar_rec: bool,
 ) -> String {
+    // A MONO-SPECIALIZED stdlib call name (`result.or_else__Int_String_String` —
+    // the optimizer suffixes a generic intrinsic's instantiation) must route by
+    // its BASE name: the registry links base names only, so the suffixed form
+    // fell through every router arm to an UNLINKED dotted name and walled the fn
+    // (fuzz B-198's or_else). The instantiation's types are already in
+    // `arg_tys`/`result_ty` — the suffix carries no information the router needs.
+    let func = func.split_once("__").map_or(func, |(base, _)| base);
     // #781: the monolithic 780-line dispatch (cog 324) is decomposed into
     // per-module routers. Routing ORDER is load-bearing and preserved: the
     // heap-accumulator `fold` guard fires BEFORE the per-module tables (a
