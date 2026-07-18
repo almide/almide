@@ -200,6 +200,7 @@ fn source_to_ir_with(
     crate::lower::normalize_tail_err_raise_ifs(&mut ir);
     // Block call-arguments absorb their call (shared with classify: desugar-before-both).
     crate::lower::hoist_block_call_args(&mut ir);
+    crate::lower::desugar_loop_early_returns(&mut ir);
     // Debug aid: `ALMIDE_DUMP_IR=<substr>` dumps the post-chain body of matching fns.
     if let Ok(pat) = std::env::var("ALMIDE_DUMP_IR") {
         for f in ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter())) {

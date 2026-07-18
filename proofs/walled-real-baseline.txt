@@ -6,16 +6,9 @@
 # walled-real function fails — ship the lowering in the same change; this file is
 # the wall=0 ENDGAME claim restored over the FULL test-fn corpus.
 # 2026-07-17: guard-else-VALUE inside a loop (a function-level early return from a
-# loop body). These five previously classified "lowered" but were SILENT MISCOMPILES:
-# the loop-body guard rewrite dropped the returned value and looped forever
-# (binary_search hung at v == target — found when the 2-arg assert desugar first made
-# error_test.almd executable on v1). The wall IS the fix until loop early-return
-# support lands; v0/native carry these files correctly meanwhile.
-spec/integration/codegen_effect_fn_test.almd :: find_first_even
-spec/lang/control_flow_test.almd :: find_first_negative
-spec/lang/control_flow_test.almd :: find_index_of
-spec/lang/control_flow_test.almd :: sum_until_threshold
-spec/lang/error_test.almd :: binary_search
-spec/lang/error_test.almd :: first_duplicate
+# loop body) walled 6 fns here — previously classified "lowered" but SILENT
+# MISCOMPILES (binary_search hung at v == target). 2026-07-18: the
+# desugar_loop_early_returns pass (flag+result rewrite, desugar-before-both)
+# lowers them faithfully — all 6 removed, wall=0 restored.
 # (2026-07-17 second pass: the computed-message die materialization — prim.handle over
 # a ConcatStr/StringInterp — cleared the assert-exposed json_path/matrix_arith walls.)
