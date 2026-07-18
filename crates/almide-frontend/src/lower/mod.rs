@@ -57,6 +57,10 @@ pub struct LowerCtx<'a> {
     /// program. Used to pin a struct-literal constructor to its qualified
     /// canonical name `mod.Type` (#433), mirroring `lower_type_decl`.
     pub current_module: Option<Sym>,
+    /// True while lowering a `test` block body. The assert family desugars to
+    /// the ALS-T18 abort form OUTSIDE tests only — test blocks keep the
+    /// harness assertion forms (cargo / the wasm test runner report them).
+    pub in_test: bool,
     /// Vars whose binding carried an EXPLICIT `Result[..]` annotation
     /// (`let r: Result[Int, String] = step()`). auto_try keeps these as
     /// Result instead of inserting `?`. Only the annotation distinguishes
@@ -81,6 +85,7 @@ impl<'a> LowerCtx<'a> {
             def_table: env.def_table.clone(),
             def_map: env.def_map.iter().map(|(k, v)| (*k, *v)).collect(),
             current_module: None,
+            in_test: false,
             annotated_result_vars: std::collections::HashSet::new(),
         }
     }

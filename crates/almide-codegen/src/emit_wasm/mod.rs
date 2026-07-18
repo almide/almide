@@ -88,6 +88,14 @@ use almide_ir::IrProgram;
 use almide_lang::types::Ty;
 
 // Memory layout constants
+/// WASI fd_write scratch (below SCRATCH_ITOA): ONE iovec `{ buf @0, len @4 }`
+/// and the nwritten out-slot @8 — the layout every fd_write caller shares.
+const IOVEC_BUF_ADDR: u32 = 0;
+const IOVEC_LEN_ADDR: u32 = 4;
+const NWRITTEN_ADDR: u32 = 8;
+/// WASI file descriptors.
+const FD_STDOUT: i32 = 1;
+const FD_STDERR: i32 = 2;
 const SCRATCH_ITOA: u32 = 16;
 /// String pool base address. Must be above ASCII range (0-127) so that
 /// data section DCE can distinguish string offsets from character codes.
@@ -314,6 +322,7 @@ pub struct RuntimeFuncs {
     /// Pointers below this are in the data section and must NOT be rc_dec'd.
     pub heap_start_global: u32,
     pub println_str: u32,
+    pub eprintln_str: u32,
     pub int_to_string: u32,
     pub println_int: u32,
     pub concat_str: u32,

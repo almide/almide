@@ -1,0 +1,10 @@
+// @contract: C-153
+// ALS-T18: a failing 2-arg `assert(cond, msg)` outside a test block — `Error:
+// assertion failed: <msg>` + exit 1, byte-identical across targets. The
+// passing assert before it is a no-op.
+fn main() -> Unit = {
+  assert(2 > 1, "sanity")
+  println("before")
+  assert(1 > 2, "one exceeds two")
+  println("unreachable")
+}

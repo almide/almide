@@ -72,12 +72,29 @@ impl FuncCompiler<'_> {
                             if_i32;
                         });
                         self.emit_expr(&args[1]);
-                        wasm!(self.func, {
-                            else_;
-                              local_get(s);
-                              i32_load(0);
-                            end;
-                        });
+                        if Self::is_heap_type(&inner_ty) {
+                            // BOTH branches hand out a value the caller will own:
+                            // the kept payload is still owned by the Option temp
+                            // (its drop frees it) and a Var default is a borrow —
+                            // un-inc'd either way was a double-free at scope end
+                            // (__rc_dec trap; the #727 unwrap_or_else share family,
+                            // unwrap_or edition — fuzz seed-20260718 index 149).
+                            wasm!(self.func, {
+                                call(self.emitter.rt.rc_inc);
+                                else_;
+                                  local_get(s);
+                                  i32_load(0);
+                                  call(self.emitter.rt.rc_inc);
+                                end;
+                            });
+                        } else {
+                            wasm!(self.func, {
+                                else_;
+                                  local_get(s);
+                                  i32_load(0);
+                                end;
+                            });
+                        }
                     }
                 }
                 self.scratch.free_i32(s);
@@ -486,9 +503,20 @@ impl FuncCompiler<'_> {
                         wasm!(self.func, { end; });
                     }
                     _ => {
-                        wasm!(self.func, { local_set(s); local_get(s); i32_load(0); i32_eqz; if_i32; local_get(s); i32_load(4); else_; });
-                        self.emit_expr(&args[1]);
-                        wasm!(self.func, { end; });
+                        if Self::is_heap_type(&inner_ty) {
+                            // The kept Ok payload AND a Var default are both
+                            // borrowed here — hand out co-owned +1 refs (the #727
+                            // share family, result.unwrap_or edition — fuzz
+                            // seed-20260718 index 149's ok(unwrap_or(..)) chain
+                            // double-freed at scope end).
+                            wasm!(self.func, { local_set(s); local_get(s); i32_load(0); i32_eqz; if_i32; local_get(s); i32_load(4); call(self.emitter.rt.rc_inc); else_; });
+                            self.emit_expr(&args[1]);
+                            wasm!(self.func, { call(self.emitter.rt.rc_inc); end; });
+                        } else {
+                            wasm!(self.func, { local_set(s); local_get(s); i32_load(0); i32_eqz; if_i32; local_get(s); i32_load(4); else_; });
+                            self.emit_expr(&args[1]);
+                            wasm!(self.func, { end; });
+                        }
                     }
                 }
                 self.scratch.free_i32(s);

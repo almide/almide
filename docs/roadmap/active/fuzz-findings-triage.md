@@ -65,13 +65,21 @@ class the old "any native non-zero = NativeBuildFailure" rule hid:
 
 | Index | Shape | Class |
 |---|---|---|
-| 10 | corpus mutant: `assert_eq(sql, "hello")` in main | **native raw panic (exit 101) vs wasm exit 1** — the assert abort form is un-normalized outside test blocks (ALS-T6 family) |
+| 10 | corpus mutant: `assert_eq(sql, "hello")` in main | **FIXED (2026-07-18)** — ALS-T18: non-test assert failures now desugar ONCE in frontend lowering (if + eprintln + process.exit(1)) so all four consumers inherit `Error: assertion failed…` + exit 1, operands once-evaluated (C-153, 3 fixtures). In passing: the bare `eprintln` builtin was unlinked on v1 / an ICE on v0 — now a registered self-host (fd-2 print_str twin) + a shared parametrized v0 runtime fn |
 | 49 | C-138 fixture mutant | native 101 vs wasm 134 — BOTH legs leak raw abort forms |
 | 119 | C-062 RawPtr fixture mutant | native 1 vs wasm 134 (trap) — the unsafe-bridge OOB form needs adjudication |
-| 5 | `int.clamp(4, 3, 1)` (min > max) | native panics (Rust clamp assert), wasm returns a value — the clamp domain edge needs a T6 adjudication |
-| 98 | C-002 Int8-overflow mutant | native build failed AFTER check accepted (check-vs-build gap) |
-| 145 | `or_else(ok(..), (a) => ok(..))` | an UNCONSTRAINED err-type var (`Result[String, Unknown]`) reaches codegen: native tolerates, wasm refuses — an ACCEPTANCE-PARITY gap (check should adjudicate, not the emitters) |
-| 149 | `ok(result.unwrap_or(.., none))` over `Result[Option[Float], ..]` | wasm run fails while native succeeds — nested Option-in-Result payload |
+| 5 | `int.clamp(4, 3, 1)` (min > max) | **FIXED** — ALS-T6 adjudication: `Error: clamp requires min <= max` + exit 1 on all four consumers; float's `!(lo <= hi)` folds NaN bounds into the same line (C-154, 2 fixtures) |
+| 145 | `or_else(ok(..), (a) => ok(..))` | **FIXED** — the E025 undecidable-slot validator now sees INTERMEDIATE call results (every call-result ty enqueued at inference; the post-solve check fires only on genuinely unpinned slots). Both targets now reject at check with span + hint — acceptance parity restored; the fuzzer classifies GeneratorReject |
+| 149 | `ok(result.unwrap_or(.., none))` over `Result[Option[Float], ..]` | **FIXED** — option/result `unwrap_or`'s heap arms hand out CO-OWNED (+1) refs on BOTH branches (kept payload + Var default), the #727 share family's unwrap_or edition (C-149 extended, new fixture) |
+| 98/92 | C-002 Int8-overflow mutant (`neg_one_i8(128)`) | **FIXED** — E024's call-arg edition: a bare int literal flowing into a SIZED param is range-checked at check time (the context-recording hook now CREATES sites for i64-fitting literals under sized contexts and is wired at the call-arg inference point). check now rejects what native rustc rejected — the check-vs-build gap closed; the fuzzer classifies GeneratorReject |
+
+Also fixed in passing: the **coverage-ratchet job's red** (the other #795 job) was
+`find -perm +111` — BSD syntax GNU find rejects; now the portable `/111`
+(proofs/coverage.sh). Wave-3 tail (campaign vs the batch-5 binary, 1000
+programs): index 92 (check-vs-build), 995 (a JSON nbsp/emsp key DISPLAY
+divergence — new shape), 998 (native exit 1 vs wasm trap 134 — an abort-form
+leak). Interp gained Flow::Exit (process.exit) so the assert desugar evaluates
+in the 3-way oracle.
 
 Wave 3 is a different arc from waves 1–2 (instance lowering bugs): it is
 mostly ABORT-FORM NORMALIZATION (raw 101 panics and 134 traps leaking where

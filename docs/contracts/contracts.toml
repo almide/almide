@@ -1743,6 +1743,31 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-154"
+spec      = "ALS-T6"
+title     = "clamp with an invalid range aborts in the T6 form"
+statement = "`int.clamp(n, lo, hi)` with lo > hi, and `float.clamp` with lo > hi OR a NaN bound (`!(lo <= hi)` covers both in one IEEE comparison), abort with `Error: clamp requires min <= max` — one stderr line + exit 1, byte-identical on both targets. Previously native leaked the raw Rust clamp panic (exit 101, the \"min > max\" banner) while wasm's un-checked min/max chain SILENTLY returned a value (differential-fuzz seed 20260718 index 5). All four consumers carry the check: the v1 self-hosts via prim.die, the native runtime wrappers, the v0 emit arms via the interned-message div_trap, and the interp bridge via Flow::Abort."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_clamp_inverted.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_clamp_invalid.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-153"
+spec      = "ALS-T18"
+title     = "Non-test assert failures abort in the T6 form on both targets"
+statement = "A failing `assert` / `assert_eq` / `assert_ne` OUTSIDE a test block aborts with ONE stderr line + exit code 1, byte-identical across targets: `Error: assertion failed: left = <l>, right = <r>` (eq), `Error: assertion failed: both = <l>` (ne), `Error: assertion failed[: <msg>]` (assert), operand display per ALS-R2, operands evaluated exactly once (the failure line re-references bound temps). Implemented as ONE frontend-lowering desugar (if + eprintln + process.exit(1)) that native, v0-wasm, v1-wasm, and the interp all inherit. Previously native leaked the raw Rust panic (exit 101 + the panic banner) while wasm printed a value-less line with exit 1 for assert_eq and a BARE TRAP (exit 134) for assert/assert_ne (differential-fuzz seed 20260718 index 10). In passing: the bare `eprintln` builtin — which the desugar rides — was UNLINKED on the v1 leg and ICE'd the v0 emitter; it is now a registered self-host (fd-2 print_str twin) and a shared parametrized v0 runtime fn."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/assert_abort_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/assert_abort_ne.almd", class = "fixture" },
+  { path = "spec/wasm_cross/assert_abort_msg.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-147"
 spec      = "ALS-M12"
 title     = "list.unique_by routes by key repr — String keys dedupe by content"
@@ -1768,11 +1793,12 @@ evidence  = [
 id        = "C-149"
 spec      = "ALS-I1"
 title     = "unwrap_or_else hands back a co-owned heap Ok payload"
-statement = "On the v0 leg, `result.unwrap_or_else` with a HEAP Ok payload (a List/String handle) rc_incs the payload before returning it: the input Result temp's drop releases its payload at scope end, so handing back the bare `payload@4` was a use-after-free — `unwrap_or_else(result.collect([...]), f)` read the freed list as `[]` (differential-fuzz seed 20260718 index 590). The option unwrap_or_else arm carried this share-+1 discipline already (#727 cluster 5); this is its result-side twin."
+statement = "On the v0 leg, the unwrap family with a HEAP payload hands the caller a CO-OWNED (+1) reference. `result.unwrap_or_else`: the input Result temp's drop releases its payload at scope end, so handing back the bare `payload@4` was a use-after-free — `unwrap_or_else(result.collect([...]), f)` read the freed list as `[]` (differential-fuzz seed 20260718 index 590). `option.unwrap_or` / `result.unwrap_or`: BOTH branches — the kept payload (still owned by the input temp) and a Var default (a borrow) — rc_inc before returning; either un-inc'd double-freed at scope end (__rc_dec trap after correct output, fuzz index 149's `ok(result.unwrap_or(..))` chain). The option unwrap_or_else arm carried this share-+1 discipline first (#727 cluster 5)."
 since     = "0.31.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/uoe_heap_ok_share.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_unwrap_or_share.almd", class = "fixture" },
 ]
 
 [[contract]]

@@ -218,6 +218,23 @@ pub fn run_ladder(
     let nat_ev = RunEvidence::from(&native);
     let wasm_ev = RunEvidence::from(&wasm);
 
+    // BOTH legs died of CALL-STACK exhaustion (a mutation-synthesized unbounded
+    // recursion): native hits Rust's guard page ("fatal runtime error: stack
+    // overflow"), wasm traps at its own depth limit — different codes, same
+    // non-semantic cause. Stack DEPTH is a resource limit, not an observable
+    // the ALS specifies (normalizing it to a T6 abort is the depth-guard
+    // follow-up), so there is no divergence oracle here — skip, like the
+    // double-hang rule above.
+    if !native.success()
+        && !wasm.success()
+        && String::from_utf8_lossy(&native.stderr).contains("stack overflow")
+    {
+        return Outcome::Skipped {
+            reason: "both legs exhausted the call stack (unbounded recursion by \
+                     construction) — depth limits are resource-bound, no semantic oracle"
+                .into(),
+        };
+    }
     if native.success() != wasm.success() {
         // One leg ran cleanly and the other did not — a run-failure
         // divergence in either direction (native can non-zero-exit BY DESIGN

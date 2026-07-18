@@ -74,6 +74,11 @@ fn int_fn(func: &str, args: &[Value]) -> Option<Flow> {
             let n = as_int(args.first())?;
             let lo = as_int(args.get(1))?;
             let hi = as_int(args.get(2))?;
+            // ALS-T6: an inverted range is the abort form (a raw Rust clamp
+            // here would panic the harness instead of voting).
+            if lo > hi {
+                return Some(Flow::Abort("clamp requires min <= max".to_string()));
+            }
             Flow::val(Value::Int(n.clamp(lo, hi)))
         }
         "to_hex" => Flow::val(Value::str(format!("{:x}", as_int(args.first())?))),
@@ -120,6 +125,17 @@ fn float_fn(func: &str, args: &[Value]) -> Option<Flow> {
         "max" => {
             let (a, b) = (as_float(args.first())?, as_float(args.get(1))?);
             Flow::val(Value::Float(if a.is_nan() { b } else if b.is_nan() { a } else if a < b { b } else { a }))
+        }
+        "clamp" => {
+            let n = as_float(args.first())?;
+            let lo = as_float(args.get(1))?;
+            let hi = as_float(args.get(2))?;
+            // ALS-T6: lo > hi OR a NaN bound is the abort form — `!(lo <= hi)`
+            // covers both (a raw f64::clamp here would panic the harness).
+            if !(lo <= hi) {
+                return Some(Flow::Abort("clamp requires min <= max".to_string()));
+            }
+            Flow::val(Value::Float(n.clamp(lo, hi)))
         }
         "sign" => Flow::val(Value::Float(as_float(args.first())?.signum())),
         "is_nan" => Flow::val(Value::Bool(as_float(args.first())?.is_nan())),

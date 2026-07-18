@@ -20,3 +20,7 @@
 # Result) — must wall until the nested `Result[Result[..],..]` drop ships (the F2
 # admission follow-up); the fixture pins the byte-identical v0 output meanwhile.
 spec/wasm_cross/result_wall_escalations.almd :: main
+# C-149 (unwrap_or edition): the fixture's `ok(result.unwrap_or(..))` payload IS
+# the C-152 wall shape — main walls by design so the v0 leg's share discipline
+# is the one exercised (that is the contract under test).
+spec/wasm_cross/nested_unwrap_or_share.almd :: main

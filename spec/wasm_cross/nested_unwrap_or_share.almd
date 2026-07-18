@@ -1,0 +1,18 @@
+// @contract: C-149
+// The unwrap family's share discipline, `unwrap_or` edition: BOTH branches hand
+// the caller a CO-OWNED (+1) reference on the v0 leg — the kept payload is still
+// owned by the input temp and a Var default is a borrow, so either un-inc'd was
+// a double-free at scope end (__rc_dec trap AFTER correct output — fuzz
+// seed-20260718 index 149's `ok(result.unwrap_or(..))` chain).
+fn main() -> Unit = {
+  let x1: Result[Option[Float], String] = ok(some(-1.0))
+  let y2: Option[Float] = none
+  let v3: Result[Option[Float], String] = ok(result.unwrap_or((if true then x1 else x1), y2))
+  let r5: Option[Float] = option.unwrap_or(result.to_option(v3), none)
+  println("r5 = ${r5}")
+  let o: Option[String] = some("v")
+  let d: String = "fallback"
+  println("kept = ${option.unwrap_or(o, d)} default = ${option.unwrap_or(none, d)} d = ${d}")
+  let fresh: List[Float] = result.unwrap_or(err("x"), [1.5])
+  println("fresh = ${fresh}")
+}

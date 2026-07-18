@@ -23,7 +23,12 @@ pub fn almide_rt_float_min(a: f64, b: f64) -> f64 {
 pub fn almide_rt_float_max(a: f64, b: f64) -> f64 {
     if a.is_nan() { b } else if b.is_nan() { a } else if a < b { b } else { a }
 }
-pub fn almide_rt_float_clamp(n: f64, lo: f64, hi: f64) -> f64 { n.clamp(lo, hi) }
+// ALS-T6: lo > hi OR a NaN bound aborts in the T6 form — `!(lo <= hi)` covers
+// both (f64::clamp panics raw on either).
+pub fn almide_rt_float_clamp(n: f64, lo: f64, hi: f64) -> f64 {
+    if !(lo <= hi) { eprintln!("Error: clamp requires min <= max"); std::process::exit(1); }
+    n.clamp(lo, hi)
+}
 pub fn almide_rt_float_sign(n: f64) -> f64 { n.signum() }
 pub fn almide_rt_float_to_int(n: f64) -> i64 { n as i64 }
 pub fn almide_rt_float_from_int(n: i64) -> f64 { n as f64 }

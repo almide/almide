@@ -21,7 +21,7 @@ impl WasmEmitter {
             rt: RuntimeFuncs {
                 fd_write: 0, alloc: 0, rc_inc: 0, rc_dec: 0, cow_check: 0,
                 heap_save: 0, heap_restore: 0, alloc_pinned: 0, heap_start_global: 0,
-                println_str: 0, println_int: 0,
+                println_str: 0, eprintln_str: 0, println_int: 0,
                 int_to_string: 0, float_to_string: 0,
                 float_parse: 0, float_to_fixed: 0, float_pow: 0,
                 math_sin: 0, math_cos: 0, math_tan: 0,

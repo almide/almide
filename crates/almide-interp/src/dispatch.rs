@@ -215,6 +215,15 @@ impl<'a> Interpreter<'a> {
         func: Sym,
         args: Vec<Value>,
     ) -> Flow {
+        // `process.exit(n)` — terminate with code n, printing nothing extra
+        // (the ALS-T18 assert desugar eprintlns its own line first).
+        if module.as_str() == "process" && func.as_str() == "exit" {
+            let code = match args.first() {
+                Some(Value::Int(n)) => *n,
+                _ => 1,
+            };
+            return Flow::Exit(code);
+        }
         // Interp-native container ops (non-HOF: structural transforms).
         if let Some(result) = self.eval_container_op(module.as_str(), func.as_str(), &args) {
             return result;

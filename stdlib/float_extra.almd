@@ -2,7 +2,12 @@
 // fmin(fmax(n,lo),hi) = n.clamp(lo,hi) (assuming lo<=hi); is_nan(n) = n != n (only NaN is
 // unequal to itself). Pure scalar — cert untouched. Matches v0's f64 semantics.
 
+// ALS-T6: an INVALID range — lo > hi OR a NaN bound — is a domain error
+// aborting with one stderr line + exit 1 (native f64::clamp panics on both
+// conditions; `!(lo <= hi)` covers both in one IEEE comparison, since a NaN
+// operand makes `<=` false).
 fn float_clamp(n: Float, lo: Float, hi: Float) -> Float = {
+  if prim.fle(lo, hi) then () else prim.die(prim.handle("Error: clamp requires min <= max\n"))
   let m = prim.fmax(n, lo)
   prim.fmin(m, hi)
 }

@@ -371,54 +371,68 @@ fn compile_alloc_pinned(emitter: &mut WasmEmitter) {
 
 /// __println_str(ptr: i32)
 /// Prints string at ptr ([len:i32][cap:i32][data@8]) followed by newline via WASI fd_write.
-fn compile_println_str(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.println_str];
+/// The shared `__println_str` / `__eprintln_str` body: write the string's
+/// bytes + a trailing newline to `fd` as two single-iovec fd_writes over the
+/// shared scratch (`IOVEC_BUF_ADDR`/`IOVEC_LEN_ADDR`/`NWRITTEN_ADDR`). The
+/// two runtime fns differ ONLY in the target fd — one parametrized builder,
+/// never two drifting copies.
+fn compile_fd_println_str(emitter: &mut WasmEmitter, func_idx: u32, fd: i32) {
+    let type_idx = emitter.func_type_indices[&func_idx];
     let mut f = Function::new([]);
 
-    // --- Write the string ---
-    // iov[0].buf = ptr + string_data_off()  (skip len+cap header)
+    // iov.buf = ptr + string DATA offset (skip the len+cap header)
     wasm!(f, {
-        i32_const(0);
+        i32_const(IOVEC_BUF_ADDR as i32);
         local_get(0);
         i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
         i32_add;
         i32_store(0);
     });
-    // iov[0].len = *ptr  (load length)
+    // iov.len = *ptr (the header length)
     wasm!(f, {
-        i32_const(4);
+        i32_const(IOVEC_LEN_ADDR as i32);
         local_get(0);
         i32_load(0);
         i32_store(0);
     });
-    // fd_write(stdout=1, iovs=0, iovs_len=1, nwritten=8)
+    // fd_write(fd, iovs, 1, nwritten)
     wasm!(f, {
+        i32_const(fd);
+        i32_const(IOVEC_BUF_ADDR as i32);
         i32_const(1);
-        i32_const(0);
-        i32_const(1);
-        i32_const(8);
+        i32_const(NWRITTEN_ADDR as i32);
         call(emitter.rt.fd_write);
         drop;
     });
-
-    // --- Write newline ---
+    // The trailing newline: point the iovec at the interned "\n" and repeat.
     wasm!(f, {
-        i32_const(0);
+        i32_const(IOVEC_BUF_ADDR as i32);
         i32_const(NEWLINE_OFFSET as i32);
         i32_store(0);
-        i32_const(4);
+        i32_const(IOVEC_LEN_ADDR as i32);
         i32_const(1);
         i32_store(0);
+        i32_const(fd);
+        i32_const(IOVEC_BUF_ADDR as i32);
         i32_const(1);
-        i32_const(0);
-        i32_const(1);
-        i32_const(8);
+        i32_const(NWRITTEN_ADDR as i32);
         call(emitter.rt.fd_write);
         drop;
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.println_str, type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(func_idx, type_idx, f));
+}
+
+fn compile_println_str(emitter: &mut WasmEmitter) {
+    compile_fd_println_str(emitter, emitter.rt.println_str, FD_STDOUT);
+}
+
+/// __eprintln_str(ptr: i32) -> () — println_str's STDERR twin. The ALS-T18
+/// assert-abort desugar's `Error: assertion failed…` line and user `eprintln`
+/// both ride it.
+fn compile_eprintln_str(emitter: &mut WasmEmitter) {
+    compile_fd_println_str(emitter, emitter.rt.eprintln_str, FD_STDERR);
 }
 
 /// __int_to_string(n: i64) -> i32

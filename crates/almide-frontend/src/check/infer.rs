@@ -27,6 +27,22 @@ impl Checker {
         }
         let ity = self.infer_expr_inner(expr);
         self.type_map.insert(expr.id, ity.clone());
+        // #662 extension (fuzz seed-20260718 index 145): a CALL's instantiated
+        // result can carry an unconstrained phantom slot even when no binding
+        // sees it — `let r: Bool = result.is_ok(result.or_else(n, f))` leaves
+        // or_else's F forever unpinned, and the un-annotated-binding hook never
+        // fires (r IS annotated, the slot lives in the INTERMEDIATE expr).
+        // Native tolerated the Unknown while the wasm leg refused the build —
+        // an acceptance-parity split. Enqueue every call-result type; the
+        // post-solve validator (E025) fires only on the genuinely undecidable
+        // ones, so the liberal enqueue costs one Vec push per call.
+        if matches!(expr.kind, ExprKind::Call { .. }) {
+            self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                ty: ity.clone(),
+                name: None,
+                span: expr.span,
+            });
+        }
         ity
     }
 

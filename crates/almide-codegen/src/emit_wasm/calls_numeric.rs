@@ -179,8 +179,19 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { local_set(lo); });
                 self.emit_expr(&args[2]);
+                // ALS-T6: lo > hi OR a NaN bound aborts in the T6 form —
+                // `!(lo <= hi)` covers both in one IEEE comparison (native
+                // f64::clamp panics raw on either; the un-checked chain here
+                // silently returned a value — fuzz seed-20260718 index 5's
+                // float twin).
+                let clamp_msg = self.emitter.intern_string("Error: clamp requires min <= max\n") as i32;
                 wasm!(self.func, {
                     local_set(hi);
+                    local_get(lo); local_get(hi); f64_le; i32_eqz;
+                    if_empty;
+                      i32_const(clamp_msg);
+                      call(self.emitter.rt.div_trap);
+                    end;
                     local_get(n); local_get(lo); f64_lt;
                     if_f64;
                       local_get(lo);
@@ -293,10 +304,19 @@ impl FuncCompiler<'_> {
                 let hi = self.scratch.alloc_i64();
                 let lo = self.scratch.alloc_i64();
                 let n = self.scratch.alloc_i64();
+                // ALS-T6: an inverted range (lo > hi) aborts in the T6 form —
+                // native i64::clamp leaked the raw Rust panic while this chain
+                // silently returned a value (fuzz seed-20260718 index 5).
+                let clamp_msg = self.emitter.intern_string("Error: clamp requires min <= max\n") as i32;
                 wasm!(self.func, {
                     local_set(hi);       // hi
                     local_set(lo);   // lo
                     local_set(n);   // n
+                    local_get(lo); local_get(hi); i64_gt_s;
+                    if_empty;
+                      i32_const(clamp_msg);
+                      call(self.emitter.rt.div_trap);
+                    end;
                     // min(n, hi)
                     local_get(n); local_get(hi); i64_lt_s;
                     if_i64; local_get(n); else_; local_get(hi); end;
