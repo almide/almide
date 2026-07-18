@@ -337,11 +337,11 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
                         n.visit_expr(&tl.value);
                         n.hit
                     };
-                    // PURE call inits stay walled here too for now: the
-                    // substitution + field hoist fixes the bare-call INVALID, but
-                    // the hoisted anon-record ARG bind still defers its construct
-                    // (an Opaque block reaches the callee — a runtime trap, not a
-                    // wall). Until that construct lands, referenced = walled.
+                    // PURE call inits stay walled STILL: the bind-form
+                    // substitution places the init call correctly, but the anon
+                    // record literal CARRYING the reference stays an Opaque defer
+                    // in the cross-module link (single-file probes pass — the
+                    // literal's ty resolution differs across the link; next key).
                     let _ = (c.impure, named_effect);
                     if !c.has_call {
                         return None;
@@ -1015,24 +1015,66 @@ fn try_render_wasm_source_impl(
             }
         }
         for (id, init) in &subs {
+            // MAIN-region readers take the BIND form instead of the raw expression
+            // substitution: `let __g_init = default_gap(); …Var(__g_init)…` — a call
+            // spliced into an arbitrary position (a record FIELD — the #785 shape)
+            // rendered as a dst-less bare call (invalid wasm), while a call in BIND
+            // position plus a Var reference is the proven single-file form. The bind
+            // goes at the fn-body top (the init is pure, so hoisting its evaluation
+            // is unobservable); fns that never reference the global are untouched.
             for f in inlined_fns.iter_mut() {
-                f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
+                fn references(e: &almide_ir::IrExpr, id: almide_ir::VarId) -> bool {
+                    use almide_ir::visit::{walk_expr, IrVisitor};
+                    struct V(almide_ir::VarId, bool);
+                    impl IrVisitor for V {
+                        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                            if matches!(&e.kind, almide_ir::IrExprKind::Var { id } if *id == self.0)
+                            {
+                                self.1 = true;
+                            }
+                            walk_expr(self, e);
+                        }
+                    }
+                    let mut v = V(id, false);
+                    v.visit_expr(e);
+                    v.1
+                }
+                if !references(&f.body, *id) {
+                    continue;
+                }
+                let nv = ir.var_table.alloc(
+                    almide_lang::intern::sym("__g_init"),
+                    init.ty.clone(),
+                    almide_ir::Mutability::Let,
+                    None,
+                );
+                let nv_ref = almide_ir::IrExpr {
+                    kind: almide_ir::IrExprKind::Var { id: nv },
+                    ty: init.ty.clone(),
+                    span: None,
+                    def_id: None,
+                };
+                f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, &nv_ref);
+                if let almide_ir::IrExprKind::Block { stmts, .. } = &mut f.body.kind {
+                    stmts.insert(
+                        0,
+                        almide_ir::IrStmt {
+                            kind: almide_ir::IrStmtKind::Bind {
+                                var: nv,
+                                mutability: almide_ir::Mutability::Let,
+                                ty: init.ty.clone(),
+                                value: init.clone(),
+                            },
+                            span: None,
+                        },
+                    );
+                }
             }
+            // Module siblings keep the raw substitution (their separate VarId
+            // numbering region cannot carry a main-region bind id) — the ceangal
+            // in-module reader class this path has always served.
             for f in module_fn_sibs.iter_mut() {
                 f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
-            }
-        }
-        // The substitution just placed pure CALLS in arbitrary expression positions
-        // (`left: letlib.GAP` → `left: default_gap()` INSIDE a record literal — the
-        // #785 shape, where a field-position call renders as a dst-less bare call:
-        // invalid wasm). Re-run the record-literal/field hoist on the substituted
-        // bodies so those calls move to their own binds (the chain's program-pass
-        // run happened BEFORE this substitution and could not see them). Main-region
-        // fns only: the hoist allocates fresh main-region VarIds, which must not
-        // leak into a module sibling's separate numbering region.
-        if !subs.is_empty() {
-            for f in inlined_fns.iter_mut() {
-                crate::lower::hoist_record_literal_args_in_fn(&mut f.body, &mut ir.var_table);
             }
         }
     }
