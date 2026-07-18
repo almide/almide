@@ -717,3 +717,268 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
         rewrite_fn(&mut func.body, &ret_ty, var_table);
     }
 }
+
+/// SPREAD-BASE HOIST (a pre-lowering program pass, shared chain like the passes
+/// above): a record spread whose BASE is a fn CALL (`let c = { ...toplib.mk(),
+/// name: "w" }` — #502) had no faithful inline lowering: the strict path emitted
+/// the callee as a dst-less bare call (its i32 result REMAINED ON THE WASM STACK
+/// — invalid wasm) and deferred `c` to an Opaque. Hoist the base to its own bind
+/// — `let __sb = toplib.mk(); let c = { ...__sb, … }` — so the call result is a
+/// MATERIALIZED record (the binds_p2 aggregate seeding) and the spread takes the
+/// proven spread-of-var path. Bind/Assign statement positions, every block depth;
+/// call-count-invariant (the call node MOVES, never duplicates).
+pub fn hoist_spread_call_bases(program: &mut almide_ir::IrProgram) {
+    use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, Mutability, VarTable};
+
+    fn rewrite_block(stmts: &mut Vec<IrStmt>, vt: &mut VarTable) {
+        let mut i = 0;
+        while i < stmts.len() {
+            let hoist = match &mut stmts[i].kind {
+                IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
+                    // recurse into nested blocks first
+                    rewrite_expr(value, vt);
+                    if let IrExprKind::SpreadRecord { base, .. } = &mut value.kind {
+                        if matches!(base.kind, IrExprKind::Call { .. }) {
+                            let bty = base.ty.clone();
+                            let sb = vt.alloc(
+                                almide_lang::intern::sym("__spread_base"),
+                                bty.clone(),
+                                Mutability::Let,
+                                None,
+                            );
+                            let call = std::mem::replace(
+                                &mut **base,
+                                IrExpr {
+                                    kind: IrExprKind::Var { id: sb },
+                                    ty: bty.clone(),
+                                    span: None,
+                                    def_id: None,
+                                },
+                            );
+                            Some((sb, bty, call))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                IrStmtKind::Expr { expr } => {
+                    rewrite_expr(expr, vt);
+                    None
+                }
+                _ => None,
+            };
+            if let Some((sb, bty, call)) = hoist {
+                stmts.insert(
+                    i,
+                    IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: sb,
+                            mutability: Mutability::Let,
+                            ty: bty,
+                            value: call,
+                        },
+                        span: None,
+                    },
+                );
+                i += 1; // skip the inserted bind; the rewritten stmt is next
+            }
+            i += 1;
+        }
+    }
+
+    fn rewrite_expr(e: &mut IrExpr, vt: &mut VarTable) {
+        match &mut e.kind {
+            IrExprKind::Block { stmts, expr } => {
+                rewrite_block(stmts, vt);
+                if let Some(t) = expr.as_deref_mut() {
+                    rewrite_expr(t, vt);
+                }
+            }
+            IrExprKind::If { cond, then, else_ } => {
+                rewrite_expr(cond, vt);
+                rewrite_expr(then, vt);
+                rewrite_expr(else_, vt);
+            }
+            IrExprKind::While { cond, body } => {
+                rewrite_expr(cond, vt);
+                rewrite_block(body, vt);
+            }
+            _ => {}
+        }
+    }
+
+    let almide_ir::IrProgram { functions, modules, var_table, .. } = program;
+    for func in functions
+        .iter_mut()
+        .chain(modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
+    {
+        rewrite_expr(&mut func.body, var_table);
+    }
+}
+
+/// RECORD-LITERAL ARG HOIST (a pre-lowering program pass, shared chain): a
+/// SCALAR-result call carrying a RECORD-LITERAL argument (`10.0 |>
+/// letlib.box_left({ top: 0.0, left: letlib.GAP })` — #785's shape) walls in the
+/// scalar-bind route (the literal needs aggregate materialization the scalar
+/// path cannot do). Hoist the literal to its own bind — `let __arg = { … };
+/// letlib.box_left(__arg, 10.0)` — so it builds through the PROVEN record-bind
+/// machinery and the call sees a materialized Var. Scoped EXACTLY to the walled
+/// set (Bind/Assign value = a Named call with a scalar type and ≥1 record-literal
+/// arg) so no already-lowering call path changes. Call-count-invariant.
+pub fn hoist_record_literal_args(program: &mut almide_ir::IrProgram) {
+    use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind, Mutability, VarTable};
+    use almide_lang::types::Ty;
+
+    fn is_scalar_ty(ty: &Ty) -> bool {
+        matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit)
+            || crate::lower::calls_p4_is_small_int(ty)
+    }
+
+    fn rewrite_block(stmts: &mut Vec<IrStmt>, vt: &mut VarTable) {
+        let mut i = 0;
+        while i < stmts.len() {
+            let mut hoists: Vec<IrStmt> = Vec::new();
+            match &mut stmts[i].kind {
+                IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
+                    rewrite_expr(value, vt);
+                    if is_scalar_ty(&value.ty) {
+                        if let IrExprKind::Call {
+                            target: CallTarget::Named { .. } | CallTarget::Module { .. },
+                            args,
+                            ..
+                        } = &mut value.kind
+                        {
+                            for a in args.iter_mut() {
+                                if matches!(
+                                    a.kind,
+                                    IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
+                                ) {
+                                    let aty = a.ty.clone();
+                                    let av = vt.alloc(
+                                        almide_lang::intern::sym("__rec_arg"),
+                                        aty.clone(),
+                                        Mutability::Let,
+                                        None,
+                                    );
+                                    let lit = std::mem::replace(
+                                        a,
+                                        IrExpr {
+                                            kind: IrExprKind::Var { id: av },
+                                            ty: aty.clone(),
+                                            span: None,
+                                            def_id: None,
+                                        },
+                                    );
+                                    hoists.push(IrStmt {
+                                        kind: IrStmtKind::Bind {
+                                            var: av,
+                                            mutability: Mutability::Let,
+                                            ty: aty,
+                                            value: lit,
+                                        },
+                                        span: None,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    // A record-literal BIND whose FIELD is a scalar CALL (`left:
+                    // letlib.GAP` — a call-initialized module top-let read reaches
+                    // the IR as its init call): the field-position call emitted a
+                    // dst-less bare call (result on the stack — invalid wasm).
+                    // Hoist each scalar call field to its own bind, declaration
+                    // order preserved (= v0's field evaluation order).
+                    if let IrExprKind::Record { fields, .. } = &mut value.kind {
+                        for (_, fe) in fields.iter_mut() {
+                            if is_scalar_ty(&fe.ty)
+                                && matches!(fe.kind, IrExprKind::Call { .. })
+                            {
+                                let fty = fe.ty.clone();
+                                let fv = vt.alloc(
+                                    almide_lang::intern::sym("__rec_fld"),
+                                    fty.clone(),
+                                    Mutability::Let,
+                                    None,
+                                );
+                                let call = std::mem::replace(
+                                    fe,
+                                    IrExpr {
+                                        kind: IrExprKind::Var { id: fv },
+                                        ty: fty.clone(),
+                                        span: None,
+                                        def_id: None,
+                                    },
+                                );
+                                hoists.push(IrStmt {
+                                    kind: IrStmtKind::Bind {
+                                        var: fv,
+                                        mutability: Mutability::Let,
+                                        ty: fty,
+                                        value: call,
+                                    },
+                                    span: None,
+                                });
+                            }
+                        }
+                    }
+                }
+                IrStmtKind::Expr { expr } => rewrite_expr(expr, vt),
+                _ => {}
+            }
+            let n = hoists.len();
+            for (k, h) in hoists.into_iter().enumerate() {
+                stmts.insert(i + k, h);
+            }
+            i += n + 1;
+        }
+    }
+
+    fn rewrite_expr(e: &mut IrExpr, vt: &mut VarTable) {
+        match &mut e.kind {
+            IrExprKind::Block { stmts, expr } => {
+                rewrite_block(stmts, vt);
+                if let Some(t) = expr.as_deref_mut() {
+                    rewrite_expr(t, vt);
+                }
+            }
+            IrExprKind::If { cond, then, else_ } => {
+                rewrite_expr(cond, vt);
+                rewrite_expr(then, vt);
+                rewrite_expr(else_, vt);
+            }
+            IrExprKind::While { cond, body } => {
+                rewrite_expr(cond, vt);
+                rewrite_block(body, vt);
+            }
+            _ => {}
+        }
+    }
+
+    let almide_ir::IrProgram { functions, modules, var_table, .. } = program;
+    for func in functions
+        .iter_mut()
+        .chain(modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
+    {
+        rewrite_expr(&mut func.body, var_table);
+    }
+}
+
+/// The small-int scalar classes, shared with the hoist above (calls_p4's
+/// int_eq_operand_ty is method-scoped; this free twin serves the desugar).
+pub(crate) fn calls_p4_is_small_int(ty: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::Ty;
+    matches!(
+        ty,
+        Ty::Int8
+            | Ty::Int16
+            | Ty::Int32
+            | Ty::Int64
+            | Ty::UInt8
+            | Ty::UInt16
+            | Ty::UInt32
+            | Ty::UInt64
+            | Ty::Float32
+    )
+}

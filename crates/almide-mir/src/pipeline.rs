@@ -201,6 +201,8 @@ fn source_to_ir_with(
     // Block call-arguments absorb their call (shared with classify: desugar-before-both).
     crate::lower::hoist_block_call_args(&mut ir);
     crate::lower::desugar_loop_early_returns(&mut ir);
+    crate::lower::hoist_spread_call_bases(&mut ir);
+    crate::lower::hoist_record_literal_args(&mut ir);
     // Debug aid: `ALMIDE_DUMP_IR=<substr>` dumps the post-chain body of matching fns.
     if let Ok(pat) = std::env::var("ALMIDE_DUMP_IR") {
         for f in ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter())) {
@@ -246,16 +248,66 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
     // VarIds live in a different numbering region than the main-region runner, so a
     // synthesized Assign could collide with an unrelated main-side id (the per-region
     // globals discipline) — that bridge is the remaining piece of this brick.
-    if ir.modules.iter().any(|m| !m.top_lets.is_empty()) {
-        // MODULE top-lets (mutable AND immutable) stay walled in test mode: the
-        // mutable ones need the re-init Assign across the VarId region bridge, and
-        // the immutable cross-module reads hit a residual test-runner stack bug
-        // (values-remaining-on-stack — cross_module_toplet_byvalue) once unwalled.
+    if ir.modules.iter().any(|m| m.top_lets.iter().any(|tl| tl.mutable)) {
+        // MUTABLE module top-lets stay walled in test mode: the per-test re-init
+        // Assign would have to cross the VarId numbering-region bridge (a
+        // synthesized main-region Assign could collide with an unrelated module
+        // id — the per-region globals discipline). IMMUTABLE literal-init
+        // top-lets cannot change between tests and need no re-init — they lower
+        // through the const-bridge.
         return Err(LowerError::Unsupported(
-            "test mode: MODULE top-lets need the per-test region bridge, not in \
-             this brick"
+            "test mode: MUTABLE module top-lets need the per-test region bridge, \
+             not in this brick"
                 .into(),
         ));
+    }
+    // A CALL-INITIALIZED module top-let (`let GAP = default_gap()` — #785) that is
+    // actually REFERENCED walls the file: the const-bridge cannot inline a call
+    // init (a call in a record-field position emits a dst-less bare call — invalid
+    // wasm), and leaving the reference unbound TRAPS at runtime (index OOB) instead
+    // of walling. Referenced = a frontend-synthesized cross-module ref entry names
+    // it. An UNREFERENCED call-init is inert — the file lowers.
+    {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct C(bool);
+        impl IrVisitor for C {
+            fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                if matches!(e.kind, almide_ir::IrExprKind::Call { .. }) {
+                    self.0 = true;
+                }
+                walk_expr(self, e);
+            }
+        }
+        let call_inits: std::collections::HashSet<(String, String)> = ir
+            .modules
+            .iter()
+            .flat_map(|m| {
+                m.top_lets.iter().filter_map(|tl| {
+                    let mut c = C(false);
+                    c.visit_expr(&tl.value);
+                    if !c.0 {
+                        return None;
+                    }
+                    m.var_table
+                        .entries
+                        .get(tl.var.0 as usize)
+                        .map(|e| (m.name.as_str().to_string(), e.name.as_str().to_uppercase()))
+                })
+            })
+            .collect();
+        if !call_inits.is_empty()
+            && ir.var_table.entries.iter().any(|e| {
+                e.module_origin.as_ref().is_some_and(|mo| {
+                    call_inits.contains(&(mo.clone(), e.name.as_str().to_uppercase()))
+                })
+            })
+        {
+            return Err(LowerError::Unsupported(
+                "test mode: a referenced call-initialized module top-let needs the \
+                 slot-routed bridge, not in this brick"
+                    .into(),
+            ));
+        }
     }
     let reinit_stmts: Vec<IrStmt> = ir
         .top_lets

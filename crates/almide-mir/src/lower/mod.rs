@@ -599,7 +599,26 @@ pub fn bridge_cross_module_toplets(
                 v.visit_expr(e);
                 v.0
             }
-            let entry = if expr_has_var(init) {
+            // A CALL-INITIALIZED top-let (`let GAP = default_gap()` — #785) must not
+            // const-bridge either: the init expr inlines at every reference site, and
+            // a call in a non-call position (a record FIELD) emits a dst-less bare
+            // call — invalid wasm. Unbound (honest per-fn wall) until the slot route.
+            fn expr_has_call(e: &almide_ir::IrExpr) -> bool {
+                use almide_ir::visit::{walk_expr, IrVisitor};
+                struct V(bool);
+                impl IrVisitor for V {
+                    fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                        if matches!(e.kind, almide_ir::IrExprKind::Call { .. }) {
+                            self.0 = true;
+                        }
+                        walk_expr(self, e);
+                    }
+                }
+                let mut v = V(false);
+                v.visit_expr(e);
+                v.0
+            }
+            let entry = if expr_has_var(init) || expr_has_call(init) {
                 Option::None
             } else {
                 Some((ty.clone(), init, mutable))
