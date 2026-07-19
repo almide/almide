@@ -664,13 +664,20 @@ fn try_render_wasm_source_impl(
     // Top-level `let` globals (VarId -> Ty) + their INITIALIZER exprs, union of program + modules.
     let mut globals: HashMap<almide_ir::VarId, almide_lang::types::Ty> = HashMap::new();
     let mut global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr> = HashMap::new();
+    // An UNANNOTATED option-ctor top-let (`let MAYBE = some(Cfg { .. })`) leaves
+    // tl.ty Unknown(-payload) — refine it from the ctor's payload type so the
+    // reference site materializes a REAL tracked Option (see
+    // `refine_option_toplet_ty`; the same repair the crossmod bridge applies).
+    let toplet_ty = |tl: &almide_ir::IrTopLet| {
+        crate::lower::refine_option_toplet_ty(&tl.ty, &tl.value).unwrap_or_else(|| tl.ty.clone())
+    };
     for tl in &ir.top_lets {
-        globals.insert(tl.var, tl.ty.clone());
+        globals.insert(tl.var, toplet_ty(tl));
         global_inits.insert(tl.var, tl.value.clone());
     }
     for m in &ir.modules {
         for tl in &m.top_lets {
-            globals.insert(tl.var, tl.ty.clone());
+            globals.insert(tl.var, toplet_ty(tl));
             global_inits.insert(tl.var, tl.value.clone());
         }
     }
@@ -686,7 +693,7 @@ fn try_render_wasm_source_impl(
         std::collections::HashMap::new();
     crate::lower::bridge_cross_module_toplets(&ir, &mut main_globals, &mut main_global_inits, &mut mutable_toplet_aliases);
     for tl in &ir.top_lets {
-        main_globals.insert(tl.var, tl.ty.clone());
+        main_globals.insert(tl.var, toplet_ty(tl));
         main_global_inits.insert(tl.var, tl.value.clone());
     }
 

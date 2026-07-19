@@ -591,6 +591,14 @@ pub fn bridge_cross_module_toplets(
             if matches!(ty, Ty::Unknown) && !matches!(init.ty, Ty::Unknown) {
                 ty = &init.ty;
             }
+            // An OPTION-ctor init whose OWN node ty is also un-inferred (`let MAYBE =
+            // some(Cfg { .. })` — the crossmod option_record_toplet): synthesize
+            // `Option[payload.ty]` from the payload's inferred type.
+            let refined_opt;
+            if let Some(r) = refine_option_toplet_ty(ty, init) {
+                refined_opt = r;
+                ty = &refined_opt;
+            }
             // A chased init that STILL references region-local vars (a call init
             // over a sibling const, a nested alias past the hop bound) must NOT
             // cross: the ids would misresolve in the main region. Drop the name
@@ -648,7 +656,7 @@ pub fn bridge_cross_module_toplets(
             // unique (the ambiguity arm below dropped collisions), so the module
             // top-let IS the referent. A concretely-typed ref still must agree.
             Some(Some((ty, init, mutable, _mod_id)))
-                if !mutable && (*ty == info.ty || matches!(info.ty, Ty::Unknown)) =>
+                if !mutable && bridged_ref_ty_agrees(ty, &info.ty) =>
             {
                 globals.insert(id, ty.clone());
                 global_inits.insert(id, (*init).clone());
@@ -659,7 +667,7 @@ pub fn bridge_cross_module_toplets(
             // slot identity — so the const-fold hazard that justified the old
             // exclusion cannot occur.
             Some(Some((ty, _init, true, mod_id)))
-                if *ty == info.ty || matches!(info.ty, Ty::Unknown) =>
+                if bridged_ref_ty_agrees(ty, &info.ty) =>
             {
                 mutable_aliases.insert(id, *mod_id);
                 globals.remove(&id);
@@ -674,6 +682,48 @@ pub fn bridge_cross_module_toplets(
             }
         }
     }
+}
+
+/// Does the BRIDGED module-side type agree with the main-side REFERENCE entry's
+/// type, treating the reference side's `Unknown` as a wildcard STRUCTURALLY
+/// (`Option[Unknown]` agrees with `Option[Cfg]` — the un-inferred synthesized
+/// ref vs the refined module truth)? A concrete mismatch still refuses (the
+/// honest unbound wall, never a wrong-typed alias).
+fn bridged_ref_ty_agrees(bridged: &Ty, reference: &Ty) -> bool {
+    match (bridged, reference) {
+        (_, Ty::Unknown) => true,
+        (Ty::Applied(a, xs), Ty::Applied(b, ys)) if a == b && xs.len() == ys.len() => {
+            xs.iter().zip(ys).all(|(x, y)| bridged_ref_ty_agrees(x, y))
+        }
+        _ => bridged == reference,
+    }
+}
+
+/// Refine an UNANNOTATED top-let's Unknown(-payload) type from its OPTION-ctor
+/// initializer: `let MAYBE = some(Cfg { .. })` leaves the declared ty `Unknown`
+/// (or the checker's partial `Option[Unknown]`) while the ctor's PAYLOAD expr
+/// carries its real inferred type — `Option[payload.ty]` is the structural
+/// truth, never a guess. Any other shape returns `None` (untouched).
+pub fn refine_option_toplet_ty(ty: &Ty, init: &almide_ir::IrExpr) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let unknown_payload = match ty {
+        Ty::Unknown => true,
+        Ty::Applied(TypeConstructorId::Option, a)
+            if a.len() == 1 && matches!(a[0], Ty::Unknown) =>
+        {
+            true
+        }
+        _ => false,
+    };
+    if !unknown_payload {
+        return None;
+    }
+    if let almide_ir::IrExprKind::OptionSome { expr } = &init.kind {
+        if !matches!(expr.ty, Ty::Unknown) {
+            return Some(Ty::option(expr.ty.clone()));
+        }
+    }
+    None
 }
 
 /// Repair UNKNOWN expression types the frontend leaves on CROSS-MODULE global
