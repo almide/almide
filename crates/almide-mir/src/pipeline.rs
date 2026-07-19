@@ -184,6 +184,9 @@ fn source_to_ir_with(
     // Pure call-bearing GLOBAL inits inline at their use sites (the lazy-static value
     // semantics — see inline_pure_call_globals; shared with classify: desugar-before-both).
     crate::lower::inline_pure_call_globals(&mut ir);
+    // #806 step 2: small pure-scalar fns inline as reduced expressions at their
+    // call sites (shared with classify: desugar-before-both).
+    crate::lower::inline_small_scalar_fns(&mut ir);
     // C-132 move-mode write-back: `mut` param fns return their mutated buffer and
     // call sites assign it back — the SAME rewrite the v0 wasm pipeline runs
     // (almide_ir::mut_param), applied pre-lowering so both v1 legs and the caps

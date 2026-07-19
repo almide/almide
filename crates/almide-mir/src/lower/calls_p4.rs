@@ -211,6 +211,22 @@ impl LowerCtx {
                 let operand = crate::lower::identity_int_widening_call(expr)?;
                 self.lower_scalar_value(operand)
             }
+            // `float.from_int(x)` — the single-instruction sitofp floor (#806 step 2):
+            // one `PrimKind::F64FromInt`, no call, no ownership. The caps counter
+            // skips the node by the same predicate, so `mir == ir` by construction.
+            IrExprKind::Call { .. }
+                if crate::lower::float_from_int_prim_call(expr).is_some() =>
+            {
+                let operand = crate::lower::float_from_int_prim_call(expr)?;
+                let v = self.lower_scalar_value(operand)?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::Prim {
+                    kind: crate::PrimKind::F64FromInt,
+                    dst: Some(dst),
+                    args: vec![v],
+                });
+                Some(dst)
+            }
             // A scalar `if`/`match` as an OPERAND (`a + (if c then 1 else 2)`,
             // `n + match k { 0 => x, _ => y }`): EXECUTE it to a scalar via the same
             // `try_lower_scalar_if` the let-bind path uses — only the taken arm runs. The

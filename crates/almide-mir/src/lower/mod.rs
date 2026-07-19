@@ -277,6 +277,23 @@ pub fn identity_int_widening_call(e: &IrExpr) -> Option<&IrExpr> {
     arg_int.then(|| &args[0])
 }
 
+/// A `float.from_int(x)` call over an `Int` — the sitofp floor (#806 step 2):
+/// the lowering emits ONE `PrimKind::F64FromInt` (a `f64.convert_i64_s` in the
+/// render, `as f64` natively) instead of the self-host runtime CALL, and
+/// `count_ir_calls` skips the node by this SAME predicate (`mir == ir` by
+/// construction). Returns the operand expr when the shape applies.
+pub fn float_from_int_prim_call(e: &IrExpr) -> Option<&IrExpr> {
+    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
+    else {
+        return None;
+    };
+    (module.as_str() == "float"
+        && func.as_str() == "from_int"
+        && args.len() == 1
+        && matches!(args[0].ty, Ty::Int))
+    .then(|| &args[0])
+}
+
 /// The `@extern(wasm, module, name)` attribute on a function, iff present (the
 /// browser-import case — a `rust`/`rs` target keeps walling: there is no wasm host
 /// for it, so emitting an import would be a hollow lie). Returns `(module, name)`.
@@ -1972,6 +1989,7 @@ include!("newtype_erase.rs");
 include!("record_defaults.rs");
 include!("desugar_guard.rs");
 include!("cells.rs");
+include!("inline_scalar_fns.rs");
 include!("mod_p2.rs");
 include!("mod_p3.rs");
 include!("mod_p4.rs");

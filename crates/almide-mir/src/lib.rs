@@ -735,6 +735,12 @@ pub enum PrimKind {
     /// f64 category for self-host over `prim.fabs` / `prim.fadd` / `prim.f2i` / etc.
     FloatUn(FUnOp),
     FloatBin(FBinOp),
+    /// `float.from_int(x)` — the sitofp floor (#806 step 2): ONE
+    /// `f64.convert_i64_s` (bits-reinterpreted into the i64-uniform float
+    /// slot), replacing the self-host runtime CALL that dominated inlined hot
+    /// loops. `args = [int_value]`, dst = the f64 BITS. A pure scalar
+    /// conversion — no ownership event, no capability.
+    F64FromInt,
     FloatCmp(FCmpOp),
     /// `i64.trunc_sat_f64_s(reinterpret(x))` — Float → Int (saturating truncate, v0's `as i64`).
     FloatToInt,

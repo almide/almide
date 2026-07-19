@@ -225,16 +225,34 @@ fn render_op(
         Op::Call { dst, func, args, .. } => render_call(*dst, func, args, label_off),
         Op::IntBinOp { dst, op, a, b } => {
             let args = format!("(local.get {}) (local.get {})", local(*a), local(*b));
+            // CHECKED division/remainder: divisor 0 / MIN÷-1 abort via $__div_trap
+            // with the native-identical stderr line + exit 1 (C-001/C-035) — never a
+            // bare i64.div_s hard trap (exit 134, no message). The checks + op are
+            // INLINE-EXPANDED (#806): the old `call $__chk_div` put a function call
+            // in every hot-loop `/`/`%` (wasmtime does not inline across wasm
+            // calls); the expansion is instruction-for-instruction the SAME
+            // semantics as `$__chk_div`/`$__chk_rem`. Operands are locals, so the
+            // re-evaluations cost nothing and no scratch local is needed.
+            if matches!(op, IntOp::Div | IntOp::Mod) {
+                let instr = if matches!(op, IntOp::Div) { "i64.div_s" } else { "i64.rem_s" };
+                return format!(
+                    "    (if (i64.eqz (local.get {b}))\n\
+                     \x20     (then (call $__div_trap (i32.const {DIVZERO_MSG_ADDR}) (i32.const 24))))\n\
+                     \x20   (if (i32.and (i64.eq (local.get {a}) (i64.const -9223372036854775808))\n\
+                     \x20                (i64.eq (local.get {b}) (i64.const -1)))\n\
+                     \x20     (then (call $__div_trap (i32.const {OVERFLOW_MSG_ADDR}) (i32.const 24))))\n\
+                     \x20   (local.set {d} ({instr} {args}))\n",
+                    a = local(*a),
+                    b = local(*b),
+                    d = local(*dst),
+                );
+            }
             // A comparison yields an i32 0/1 → zero-extend to the i64 scalar model.
             let expr = match op {
                 IntOp::Add => format!("(i64.add {args})"),
                 IntOp::Sub => format!("(i64.sub {args})"),
                 IntOp::Mul => format!("(i64.mul {args})"),
-                // CHECKED: divisor 0 / MIN÷-1 abort via $__div_trap with the
-                // native-identical stderr line + exit 1 (C-001/C-035) — never a
-                // bare i64.div_s hard trap (exit 134, no message).
-                IntOp::Div => format!("(call $__chk_div {args})"),
-                IntOp::Mod => format!("(call $__chk_rem {args})"),
+                IntOp::Div | IntOp::Mod => unreachable!("inline-expanded above"),
                 IntOp::Lt => format!("(i64.extend_i32_u (i64.lt_s {args}))"),
                 IntOp::Le => format!("(i64.extend_i32_u (i64.le_s {args}))"),
                 IntOp::Gt => format!("(i64.extend_i32_u (i64.gt_s {args}))"),
@@ -858,6 +876,11 @@ fn render_op(
                 // emits the call as a STATEMENT (no local.set).
                 PrimKind::RcDec => format!("(call $rc_dec {})", w(0)),
                 PrimKind::RcInc => format!("(call $rc_inc {})", w(0)),
+                // `float.from_int` — the single-instruction sitofp floor (#806).
+                PrimKind::F64FromInt => format!(
+                    "(i64.reinterpret_f64 (f64.convert_i64_s (local.get {})))",
+                    local(args[0])
+                ),
                 // FLOAT floor: the i64 value holds the f64 bits — reinterpret around the op.
                 PrimKind::FloatUn(op) => {
                     let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));

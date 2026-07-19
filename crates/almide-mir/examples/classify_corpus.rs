@@ -266,6 +266,9 @@ fn count_ir_calls(
                 // uses, so `mir == ir` holds by construction (its operand's own calls
                 // are counted by the descent as usual).
                 && almide_mir::lower::identity_int_widening_call(e).is_none()
+                // `float.from_int` lowers to ONE F64FromInt prim (no call) — skip by
+                // the SAME predicate the lowering uses (#806 step 2).
+                && almide_mir::lower::float_from_int_prim_call(e).is_none()
             {
                 self.n += 1;
             }
@@ -882,6 +885,8 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         almide_mir::lower::erase_transparent_newtypes(&mut ir);
         almide_mir::lower::fill_record_defaults(&mut ir);
         almide_mir::lower::inline_pure_call_globals(&mut ir);
+        // #806 step 2 — the SAME small-scalar-fn inline the pipeline runs.
+        almide_mir::lower::inline_small_scalar_fns(&mut ir);
         // C-132 move-mode write-back — the SAME pre-lowering rewrite the pipeline
         // runs (see source_to_ir_with), so mir == ir on both sides.
         almide_ir::mut_param::lower_mut_params_move_mode(&mut ir);
