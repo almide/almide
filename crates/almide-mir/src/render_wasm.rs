@@ -308,12 +308,71 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
     };
     let missing = unlinked_call_names(prog);
     if !missing.is_empty() {
-        let names = missing.into_iter().collect::<Vec<_>>().join(", ");
-        return Err(crate::lower::LowerError::Unsupported(format!(
-            "unlinked stdlib/runtime call(s) with no wasm definition: {names} — \
-             rendering them would emit a dangling `(call $…)` (invalid wasm). \
-             Add the callee to the self-host registry or wall the using function."
-        )));
+        // DEAD-FUNCTION PRUNE (#782): an UNREACHABLE function carrying an unlinked call
+        // (`local fn dead(..) = matrix.qwen3_…(..)` — a native-only intrinsic in a fn
+        // main never calls) must not fail the whole module: v0 simply never emitted it.
+        // Drop every function that is (a) not a root — `main` / a declared export —
+        // AND (b) not REFERENCED by any surviving function (a `CallFn`/`FuncRef` edge,
+        // or a `$__drop_<ty>` walker named by a `DropVariant`) AND (c) itself carrying
+        // an unlinked call. Iterated to a fixpoint (a dead fn referenced only by
+        // another dead fn prunes in a later round). A REACHABLE unlinked call keeps
+        // the loud reject below — never a dangling `(call $…)`.
+        let mut kept: Vec<MirFunction> = prog.functions.clone();
+        loop {
+            let resolvable = {
+                let mut names: BTreeSet<String> =
+                    kept.iter().map(|f| f.name.clone()).collect();
+                names.extend(preamble_func_names());
+                names.insert("__mg_take".to_string());
+                names
+            };
+            let mut referenced: BTreeSet<String> = BTreeSet::new();
+            for f in &kept {
+                for op in &f.ops {
+                    match op {
+                        Op::CallFn { name, .. } => {
+                            referenced.insert(name.clone());
+                        }
+                        Op::FuncRef { name, .. } => {
+                            referenced.insert(name.clone());
+                        }
+                        Op::DropVariant { ty, .. } => {
+                            referenced.insert(format!("__drop_{ty}"));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            let roots: BTreeSet<&str> = std::iter::once("main")
+                .chain(prog.exports.iter().map(|(_, internal, _, _)| internal.as_str()))
+                .collect();
+            let before = kept.len();
+            kept.retain(|f| {
+                roots.contains(f.name.as_str())
+                    || referenced.contains(&f.name)
+                    || f.ops.iter().all(|op| {
+                        !matches!(op, Op::CallFn { name, .. } if !resolvable.contains(name))
+                    })
+            });
+            if kept.len() == before {
+                break;
+            }
+        }
+        let pruned_prog = MirProgram {
+            functions: kept,
+            exports: prog.exports.clone(),
+            mutable_global_count: prog.mutable_global_count,
+        };
+        let still_missing = unlinked_call_names(&pruned_prog);
+        if !still_missing.is_empty() {
+            let names = still_missing.into_iter().collect::<Vec<_>>().join(", ");
+            return Err(crate::lower::LowerError::Unsupported(format!(
+                "unlinked stdlib/runtime call(s) with no wasm definition: {names} — \
+                 rendering them would emit a dangling `(call $…)` (invalid wasm). \
+                 Add the callee to the self-host registry or wall the using function."
+            )));
+        }
+        return Ok(render_wasm_program(&pruned_prog));
     }
     Ok(render_wasm_program(prog))
 }

@@ -1342,16 +1342,18 @@ fn __drop_closure(c: List[Int]) -> Unit = {
   let h = prim.handle(c)
   if prim.load32(h + 0) == 1 then {
     let hdr = prim.load64(h + 20)
-    let nc = hdr / 4294967296
-    let rem1 = hdr - nc * 4294967296
+    let ncm = hdr / 281474976710656
+    let rem0 = hdr - ncm * 281474976710656
+    let nc = rem0 / 4294967296
+    let rem1 = rem0 - nc * 4294967296
     let nnh = rem1 / 65536
     let nh = rem1 - nnh * 65536
-    __drop_closure_loop(h, nc, nnh, nh, 0)
+    __drop_closure_loop(h, nc, nnh, nh, ncm, 0)
   } else ()
   prim.rc_dec(h)
 }
-fn __drop_closure_loop(h: Int, nc: Int, nnh: Int, nh: Int, i: Int) -> Unit =
-  if i >= nc + nnh + nh then ()
+fn __drop_closure_loop(h: Int, nc: Int, nnh: Int, nh: Int, ncm: Int, i: Int) -> Unit =
+  if i >= nc + nnh + nh + ncm then ()
   else {
     if i < nc then {
       let q: List[Int] = prim.load_handle(h + 28 + i * 8)
@@ -1359,11 +1361,21 @@ fn __drop_closure_loop(h: Int, nc: Int, nnh: Int, nh: Int, i: Int) -> Unit =
     } else if i < nc + nnh then {
       let ls: List[String] = prim.load_handle(h + 28 + i * 8)
       __drop_list_str(ls)
-    } else {
+    } else if i < nc + nnh + nh then {
       prim.rc_dec(prim.load64(h + 28 + i * 8))
+    } else {
+      __drop_cellmap(prim.load64(h + 28 + i * 8))
     }
-    __drop_closure_loop(h, nc, nnh, nh, i + 1)
+    __drop_closure_loop(h, nc, nnh, nh, ncm, i + 1)
   }
+fn __drop_cellmap(ch: Int) -> Unit = {
+  if prim.load32(ch + 0) == 1 then {
+    let mm: List[String] = prim.load_handle(ch + 12)
+    __drop_list_str(mm)
+  }
+  else ()
+  prim.rc_dec(ch)
+}
 ";
 
 /// Generate the ALMIDE SOURCE for each RECORD type's recursive drop `$__drop_<R>` (the records

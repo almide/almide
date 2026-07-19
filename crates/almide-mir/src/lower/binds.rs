@@ -176,6 +176,7 @@ impl LowerCtx {
         let mut closure_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut heap_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut nested_heap_caps: Vec<(VarId, Ty)> = Vec::new();
+        let mut cellmap_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut scalar_caps: Vec<(VarId, Ty)> = Vec::new();
         for (v, ty) in cc.out {
             // A SHARED-CELL capture (cells.rs): the env slot holds the CELL handle,
@@ -184,12 +185,21 @@ impl LowerCtx {
             // rides the existing self-describing header: a SCALAR-inner cell is a
             // FLAT block (one rc_dec frees it; the raw inner slot is untouched); a
             // FLAT-HEAP-inner cell is physically a 1-slot DynListStr (the nested
-            // walk decs slot 0 — a full free for a flat inner — then frees the cell).
+            // walk decs slot 0 — a full free for a flat inner — then frees the cell);
+            // a MAP-inner cell (`Map[String, scalar]`) takes the 4th header class
+            // (`$__drop_closure` sweeps the inner map's key slots, then the map, then
+            // the cell — a flat/nested dec would leak every key String).
             if self.cell_of.contains_key(&v) {
                 match cell_class_of(&ty) {
                     Some(CellClass::Scalar) => heap_caps.push((v, ty)),
                     Some(CellClass::FlatHeap) => nested_heap_caps.push((v, ty)),
-                    None => return None,
+                    Some(CellClass::MapSkv) => cellmap_caps.push((v, ty)),
+                    None => {
+                        if std::env::var("ALMIDE_DBG_ANF").is_ok() {
+                            eprintln!("[lift] {}: cell capture {v:?} class unadmitted ({ty:?})", self.fn_name);
+                        }
+                        return None;
+                    }
                 }
                 continue;
             }
@@ -202,16 +212,29 @@ impl LowerCtx {
             } else if matches!(ty, Ty::Int | Ty::Bool) {
                 scalar_caps.push((v, ty));
             } else {
+                if std::env::var("ALMIDE_DBG_ANF").is_ok() {
+                    eprintln!("[lift] {}: capture {v:?} outside the class slice ({ty:?})", self.fn_name);
+                }
                 return None;
             }
         }
         let n_closure = closure_caps.len();
         let n_heap = heap_caps.len();
         let n_nested_heap = nested_heap_caps.len();
+        let n_cellmap = cellmap_caps.len();
+        // ENV LAYOUT ORDER must match `$__drop_closure`'s class walk EXACTLY:
+        // [closures][NESTED][FLAT][cell-map][scalars]. The chain previously placed
+        // FLAT before NESTED while the walker frees NESTED before FLAT — a LATENT
+        // mis-free whenever one closure captured BOTH classes at once (the nested
+        // walk over a flat block reads raw i64 slots as handles; the flat dec of a
+        // nested block leaks its elements). No corpus shape co-captured both until
+        // the cell classes made it reachable (`var count` + `var acc` mutated
+        // through one stored closure).
         let captures: Vec<(VarId, Ty)> = closure_caps
             .into_iter()
-            .chain(heap_caps)
             .chain(nested_heap_caps)
+            .chain(heap_caps)
+            .chain(cellmap_caps)
             .chain(scalar_caps)
             .collect();
         // Every capture must resolve to a lowered local value HERE (a capture of a
@@ -304,7 +327,7 @@ impl LowerCtx {
         // Prim reads — no ownership events (the block is the caller's).
         for (i, (v, ty)) in captures.iter().enumerate() {
             let val = sub.fresh_value();
-            if i < n_closure + n_heap + n_nested_heap {
+            if i < n_closure + n_heap + n_nested_heap + n_cellmap {
                 let h = sub.fresh_value();
                 sub.ops
                     .push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![env_pv] });
@@ -377,7 +400,7 @@ impl LowerCtx {
         // builds it on both legs — same cert `i`, same block bytes on wasm, a
         // `Vec<i64>` on native. Heap/closure captures keep the prim path below
         // (their Dup/Consume co-own dance needs the address stores).
-        if n_closure == 0 && n_heap == 0 && n_nested_heap == 0 {
+        if n_closure == 0 && n_heap == 0 && n_nested_heap == 0 && n_cellmap == 0 {
             let fr = self.fresh_value();
             self.ops.push(Op::FuncRef { dst: fr, name });
             let hdr = self.fresh_value();
@@ -406,7 +429,10 @@ impl LowerCtx {
         let hdr = self.fresh_value();
         self.ops.push(Op::ConstInt {
             dst: hdr,
-            value: (n_heap as i64) | ((n_nested_heap as i64) << 16) | ((n_closure as i64) << 32),
+            value: (n_heap as i64)
+                | ((n_nested_heap as i64) << 16)
+                | ((n_closure as i64) << 32)
+                | ((n_cellmap as i64) << 48),
         });
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![blk] });
@@ -421,7 +447,7 @@ impl LowerCtx {
             // the block (cert `a` + `m`; the original var's scope-end drop is untouched).
             // The fnidx/header/scalar slots store the raw value.
             let cap_index = i as i64 - 2; // captures start at slot 2
-            if cap_index >= 0 && (cap_index as usize) < n_closure + n_heap + n_nested_heap {
+            if cap_index >= 0 && (cap_index as usize) < n_closure + n_heap + n_nested_heap + n_cellmap {
                 let owned = self.fresh_value();
                 self.ops.push(Op::Dup { dst: owned, src: v });
                 let handle = self.fresh_value();

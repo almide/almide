@@ -443,7 +443,6 @@ fn successful_main_exits_zero_both_targets() {
 /// so the build succeeds instead of ICEing/refusing. `local` is required because
 /// Almide functions are PUBLIC by default — an exported root that is never pruned.
 #[test]
-    #[ignore = "#782 v1 gap (v1 reachability prune of a dead native-only intrinsic) — native (almide run/test) works via fallback; only the direct wasm-build path walls. Tracked for the next lowering wave."]
 fn dead_local_native_only_intrinsic_does_not_break_wasm_build() {
     let bin = almide_bin();
     if Command::new(&bin).arg("--version").output().is_err() {

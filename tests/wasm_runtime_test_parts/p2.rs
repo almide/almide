@@ -559,7 +559,6 @@ fn wasm_closures_stored_in_map() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_typed_param_closure_capturing_mutable() {
     // A closure with a TYPED param `(k: String) => …` that captures a mutated var
     // (so it stays a raw, capture-clone-wrapped closure) dropped the param type in

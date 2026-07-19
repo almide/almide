@@ -135,6 +135,12 @@ pub(crate) fn collect_cell_vars(
 pub(crate) enum CellClass {
     Scalar,
     FlatHeap,
+    /// `Map[String, <scalar>]` inner (the word-count `bump` closure class): the
+    /// map owns its key Strings, so neither the flat nor the nested env class
+    /// frees it exactly — the cell's scope-end drop is the `DropListListStr`
+    /// walk (cell slot → key-slot sweep → map block → cell block) and its env
+    /// capture takes `$__drop_closure`'s dedicated 4th header class.
+    MapSkv,
 }
 
 pub(crate) fn cell_class_of(ty: &Ty) -> Option<CellClass> {
@@ -146,6 +152,11 @@ pub(crate) fn cell_class_of(ty: &Ty) -> Option<CellClass> {
             if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Float) =>
         {
             Some(CellClass::FlatHeap)
+        }
+        Ty::Applied(TypeConstructorId::Map, a)
+            if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]) =>
+        {
+            Some(CellClass::MapSkv)
         }
         _ => None,
     }
@@ -185,11 +196,13 @@ impl LowerCtx {
                         "cell var {var:?} scalar initializer outside the value subset"
                     ))
                 })?,
-            CellClass::FlatHeap => self.lower_owned_heap_field(value).ok_or_else(|| {
-                LowerError::Unsupported(format!(
-                    "cell var {var:?} heap initializer outside the value subset"
-                ))
-            })?,
+            CellClass::FlatHeap | CellClass::MapSkv => {
+                self.lower_owned_heap_field(value).ok_or_else(|| {
+                    LowerError::Unsupported(format!(
+                        "cell var {var:?} heap initializer outside the value subset"
+                    ))
+                })?
+            }
         };
         let len_c = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: len_c, value: 1 });
@@ -208,7 +221,7 @@ impl LowerCtx {
                     args: vec![addr, inner],
                 });
             }
-            CellClass::FlatHeap => {
+            CellClass::FlatHeap | CellClass::MapSkv => {
                 let handle = self.fresh_value();
                 self.ops
                     .push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(handle), args: vec![inner] });
@@ -219,7 +232,15 @@ impl LowerCtx {
                 });
                 self.ops.push(Op::Consume { v: inner });
                 self.live_heap_handles.retain(|x| *x != inner);
-                self.heap_elem_lists.insert(cell);
+                if class == CellClass::MapSkv {
+                    // The inner map owns its key Strings: the cell's scope-end drop is
+                    // the NESTED DropListListStr walk (cell slot -> key-slot sweep ->
+                    // map block -> cell block); the flat heap_elem_lists sweep would
+                    // dec only the map handle and leak every key.
+                    self.list_list_str_lists.insert(cell);
+                } else {
+                    self.heap_elem_lists.insert(cell);
+                }
             }
         }
         self.live_heap_handles.push(cell);
@@ -252,7 +273,7 @@ impl LowerCtx {
                 });
                 Ok(dst)
             }
-            CellClass::FlatHeap => {
+            CellClass::FlatHeap | CellClass::MapSkv => {
                 let repr = repr_of(&ty)?;
                 let borrowed = self.fresh_value();
                 self.ops.push(Op::Prim {
@@ -314,7 +335,7 @@ impl LowerCtx {
                 });
                 Ok(())
             }
-            CellClass::FlatHeap => {
+            CellClass::FlatHeap | CellClass::MapSkv => {
                 let new = self.lower_owned_heap_field(value).ok_or_else(|| {
                     LowerError::Unsupported(format!(
                         "heap value assigned to cell var {var:?} outside the executable subset"
