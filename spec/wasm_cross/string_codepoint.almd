@@ -21,6 +21,10 @@ fn report(s: String) -> Unit = {
   println("slice14=${string.slice(s, 1, 4)}")
   println("pad_start8=${string.pad_start(s, 8, "·")}")
   println("pad_end8=${string.pad_end(s, 8, "·")}")
+  // EMPTY pad falls back to a single SPACE — the native oracle is
+  // `pad.chars().next().unwrap_or(' ')`. The v0 arm returned a width-0 unit,
+  // silently making the pad a no-op (fuzz seed-1784416403485348966, 3 findings).
+  println("pad_empty=[${string.pad_start("Ⅷ", 5, "")}][${string.pad_end("İ", 2, "")}]")
   println("codepoint=${int.to_string(string.codepoint(s) ?? -1)}")
 }
 

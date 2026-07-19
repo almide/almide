@@ -395,16 +395,19 @@ fn compile_count(emitter: &mut WasmEmitter) {
 
 // ── Padding / trimming ──
 
-/// Build a 1-codepoint String holding the FIRST codepoint of `pad`. Empty
-/// `pad` degenerates to a width-0 string (native uses `' '`, but pad is never
-/// empty in practice for the padding ops; an empty pad simply pads with
-/// nothing on both targets — kept consistent here).
+/// Build a 1-codepoint String holding the FIRST codepoint of `pad`. The native
+/// oracle is `pad.chars().next().unwrap_or(' ')` — an EMPTY pad falls back to a
+/// single SPACE. The previous arm returned a width-0 unit, silently making
+/// pad_start/pad_end a no-op while native space-padded (differential-fuzz
+/// seed 1784416403485348966, 3 findings).
 fn emit_pad_first_cp(emitter: &mut WasmEmitter, f: &mut Function, pad_local: u32, out_local: u32) {
-    // width of first codepoint (0 if pad empty)
+    let space = emitter.intern_string(" ") as i32;
     wasm!(*f, {
         local_get(pad_local); i32_load(0); i32_eqz;
         if_i32;
-          i32_const(0); call(emitter.rt.string_alloc);
+          // unit = the interned static " " (never rc-dec'd here, same as the
+          // sliced temp below — the repeat result is the only escaping value).
+          i32_const(space);
         else_;
           // unit = slice(pad, 0, width(pad, 0))
           local_get(pad_local); i32_const(0);

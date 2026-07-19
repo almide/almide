@@ -265,7 +265,7 @@ evidence  = [
 id        = "C-016"
 spec      = "ALS-S1"
 title     = "UTF-8 codepoint-aware string ops are byte-identical"
-statement = "Codepoint-aware string ops (chars/reverse/slice/take/drop/first/last/get/codepoint/from_codepoint/pad) operate on Unicode scalars and are byte-identical native == wasm on ASCII and multibyte input (Latin-1 accent, CJK, 4-byte emoji, 3-byte currency). Native (Rust char-based) is the oracle; the wasm runtime must byte-match it for every scalar."
+statement = "Codepoint-aware string ops (chars/reverse/slice/take/drop/first/last/get/codepoint/from_codepoint/pad) operate on Unicode scalars and are byte-identical native == wasm on ASCII and multibyte input (Latin-1 accent, CJK, 4-byte emoji, 3-byte currency). An EMPTY pad string falls back to a single SPACE (`pad.chars().next().unwrap_or(' ')` — the v0 arm returned a width-0 unit, silently making pad_start/pad_end a no-op; differential-fuzz seed 1784416403485348966). Native (Rust char-based) is the oracle; the wasm runtime must byte-match it for every scalar."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -388,7 +388,7 @@ evidence  = [
 id        = "C-026"
 spec      = "ALS-T10"
 title     = "Vendored-libm trig / exp / log / pow are byte-identical cross-target"
-statement = "`math.sin/cos/tan`, `math.exp/log/log2/log10`, and float `**` / `math.fpow` route through the SAME vendored musl-libm reference on both targets (native runtime/rs/src/libm.rs, wasm rt_libm.rs), so every result is byte-identical — printed via the (itself byte-identical) Dragon4 `float.to_string`. Special cases match libm: `log(0) = -inf`, `log(neg) = NaN`, `exp(-745) = 5e-324`, `fpow(-2,0.5) = NaN`, `fpow(-2,3) = -8`, `fpow(2,inf)` does not trap. Differential fuzz suites certify the continuous input space."
+statement = "`math.sin/cos/tan`, `math.exp/log/log2/log10`, and float `**` / `math.fpow` route through the SAME vendored musl-libm reference on both targets (native runtime/rs/src/libm.rs, wasm rt_libm.rs), so every result is byte-identical — printed via the (itself byte-identical) Dragon4 `float.to_string`. Special cases match libm: `log(0) = -inf` AND `log(-0.0) = -inf` for all three log variants (the v1 self-host dropped the sign-bit half of musl's `hx < 0x00100000 || hx>>31` gate, sending -0.0 to the NaN reject — differential-fuzz seed 1784416403485348966), `log(neg) = NaN`, `exp(-745) = 5e-324`, `fpow(-2,0.5) = NaN`, `fpow(-2,3) = -8`, `fpow(2,inf)` does not trap. Differential fuzz suites certify the continuous input space."
 since     = "0.24.0"
 status    = "active"
 evidence  = [

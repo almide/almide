@@ -68,4 +68,12 @@ fn main() -> Unit = {
   p10(0.5)
   p10(0.0)           // -inf
   p10(1.0e-10)
+
+  // NEGATIVE zero: log(±0) = -inf for ALL THREE (IEEE/musl). The v1 self-host
+  // dropped the sign-bit half of musl's gate (`hx < 0x00100000 || hx>>31`), so
+  // -0.0 skipped the ±0 arm and hit the blanket NaN reject (differential-fuzz
+  // seed 1784416403485348966, 5 findings).
+  pl(-0.0)
+  p2(-0.0)
+  p10(-0.0)
 }

@@ -54,13 +54,16 @@ fn __log_sub(x: Float) -> Float = {
 fn math_log(x: Float) -> Float = {
   let bits = prim.fbits(x)
   let hx = __log_u32(bits)
-  if hx < 1048576 then {
+  // musl e_log.c gate: `hx < 0x00100000 || hx>>31` — the sign-bit HALF must be
+  // part of the FIRST branch so ±0 is tested BEFORE the negative reject.
+  // Dropping it sent -0.0 (hx = 0x80000000) to the blanket NaN arm where
+  // native/IEEE want log(±0) = -inf (fuzz seed-1784416403485348966, 5 findings).
+  if hx < 1048576 or hx >= 2147483648 then {
     let shifted = prim.bshl(bits, 1)
     if shifted == 0 then __log_zero(x)
     else if hx >= 2147483648 then __log_nan(x)
     else __log_sub(x)
   }
-  else if hx >= 2147483648 then __log_nan(x)
   else if hx >= 2146435072 then x
   else {
     let low = prim.band(bits, 4294967295)
@@ -116,13 +119,13 @@ fn __log2_sub(x: Float) -> Float = {
 fn math_log2(x: Float) -> Float = {
   let bits = prim.fbits(x)
   let hx = __log_u32(bits)
-  if hx < 1048576 then {
+  // Same musl gate as math_log: the sign-bit half keeps ±0 ahead of the reject.
+  if hx < 1048576 or hx >= 2147483648 then {
     let shifted = prim.bshl(bits, 1)
     if shifted == 0 then __log_zero(x)
     else if hx >= 2147483648 then __log_nan(x)
     else __log2_sub(x)
   }
-  else if hx >= 2147483648 then __log_nan(x)
   else if hx >= 2146435072 then x
   else {
     let low = prim.band(bits, 4294967295)
@@ -181,13 +184,13 @@ fn __log10_sub(x: Float) -> Float = {
 fn math_log10(x: Float) -> Float = {
   let bits = prim.fbits(x)
   let hx = __log_u32(bits)
-  if hx < 1048576 then {
+  // Same musl gate as math_log: the sign-bit half keeps ±0 ahead of the reject.
+  if hx < 1048576 or hx >= 2147483648 then {
     let shifted = prim.bshl(bits, 1)
     if shifted == 0 then __log_zero(x)
     else if hx >= 2147483648 then __log_nan(x)
     else __log10_sub(x)
   }
-  else if hx >= 2147483648 then __log_nan(x)
   else if hx >= 2146435072 then x
   else {
     let low = prim.band(bits, 4294967295)
