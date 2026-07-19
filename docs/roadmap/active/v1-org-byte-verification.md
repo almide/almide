@@ -1,6 +1,10 @@
 <!-- description: Org-wide v0==wasm byte-verification sweep and the wasm bug classes it flushed out -->
 # Org byte-verification — every repo's own vectors on both targets
 
+> This is a historical session log, not a live dashboard — for current org-repo wall status, run
+> `scripts/org-trust-status.sh` (it exists and regenerates `docs/org-trust-status.md`), or check the
+> most recent commits touching this file.
+
 Session record (2026-07-02, continuing `v1-porta-read-message-handoff.md`). Goal: the
 handoff's steps 1–3 — unblock porta's native build, then widen the byte-match
 verification from `wall=0` (lowers) to **the repo's own test vectors running

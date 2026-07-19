@@ -112,3 +112,7 @@ just the rc subset. A multi-week library port — proofs flag it "the deferred h
 The PRACTICAL byte-binding (emitted rc bytes ↔ real encode ↔ real execute) is closed + grounded;
 WasmIsa.v now gives the rc subset a spec-relation-backed semantics, the architectural foundation
 a full port would extend.
+
+**Since this doc's scope was written**, the spine has grown further: `proofs/check.sh`'s
+`coqc`/`coqchk` module list now also includes `CoownLoop`, `CoownCompose`, `CallModes`,
+`WasmDecode`, `CowSafety`, and `FreeList` (verified: `grep -n "coqchk\|\.vo" proofs/check.sh`).

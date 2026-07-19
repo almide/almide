@@ -39,17 +39,20 @@ parity is PROVEN (translation-validation, the #570 pattern, applied to the desug
 first, bet on the desugar" is FORBIDDEN — never delete the oracle before its formal replacement.
 Until then, the v1-only desugar delivers the trust-spine benefit with ZERO v0 risk.
 
-### BUDGET: two independent hard sub-problems (don't underestimate — clean framework ≠ done)
-The desugar framework is clean, but byte-matching v0 has two independent known-hard formatting walls.
-Until each lands, its interp part **cleanly WALLs** (verified: Float `${f}` → Unsupported naming
-`float.to_string`) — never a silent miscompile.
-- **`float.to_string` = dtoa (task #63)** — must byte-match v0's `f64` Display to 1 byte: correct
-  shortest round-trip rounding, integer-valued `.0` suffix, NaN / Inf / -0.0, and the
-  scientific-notation threshold. (history: float native↔wasm display drift.) The salvaged dtoa WIP
-  reproducing v0's formatter EXACTLY is the body of step 4, not a footnote.
-- **compound repr (`${list}` / `${record}` / `${tuple}`) = task #64** — must reproduce v0's observed
-  format exactly: brackets, separators, string-element quoting, nesting, and the empty case. The
-  self-hosted `emit_repr_value` must mirror v0's observed output, not a plausible-looking one.
+### BUDGET: two independent hard sub-problems — BOTH SHIPPED (2026-06-17 / 2026-06-18)
+The desugar framework was clean from the start; the two known-hard formatting walls below have
+since landed, v1-self-hosted and byte-matching v0.
+- **`float.to_string` = dtoa (task #63) — SHIPPED (commit a873a6b4, 2026-06-17).**
+  `stdlib/float_to_string.almd` self-hosts a Dragon4 dtoa that byte-matches v0's `f64` Display:
+  correct shortest round-trip rounding, integer-valued `.0` suffix, NaN / Inf / -0.0, and the
+  scientific-notation threshold.
+- **compound repr (`${list}` / `${record}` / `${tuple}`) = task #64 — SHIPPED (commit df1de340,
+  2026-06-18).** `stdlib/float_to_string_compound.almd` (+ `string.quote`) self-hosts
+  layout-driven recursive Display, reproducing v0's observed format exactly: brackets, separators,
+  string-element quoting, nesting, and the empty case.
+
+The remaining work is purely **layer 1** (below): moving the desugar itself from v1-only into the
+shared frontend.
 
 ## What it reveals: the real work is TOTAL `to_string` (Display)
 
@@ -61,9 +64,9 @@ The 385/460 "broken" corpus interps are broken ONLY because the type's `to_strin
 | `${n}` Int | `int.to_string` ✓ (done) |
 | `${s}` String | identity ✓ |
 | `${list.len(xs)}` | materialize the call → wrap the Int in `int.to_string` |
-| `${b}` Bool | `bool.to_string` (an `if` → "true"/"false") — EASY, missing |
-| `${f}` Float | `float.to_string` = **dtoa** — HARD, missing |
-| `${xs}` `${rec}` | `List.to_string` / record Debug-repr (`emit_repr_value` self-host) — missing |
+| `${b}` Bool | `bool.to_string` (an `if` → "true"/"false") — SHIPPED (`stdlib/bool.almd`) |
+| `${f}` Float | `float.to_string` = **dtoa** — SHIPPED (commit a873a6b4, `stdlib/float_to_string.almd`) |
+| `${xs}` `${rec}` | `List.to_string` / record Debug-repr — SHIPPED (commit df1de340, `stdlib/float_to_string_compound.almd`) |
 
 **So "StringInterp" is really the "total `to_string` (Display)" problem.** When `to_string` is total,
 interp works for free, everywhere.
@@ -74,11 +77,11 @@ interp works for free, everywhere.
   AND `print`/`println` both go through it; it is reused everywhere.
 - **Transcendentals (sin/cos/tan/log_gamma) are the TRUE tail** — interp and print never reach them.
 
-**Consequence: `float_dtoa` was NOT tail drift.** It is the *prerequisite for `float.to_string`* =
+**Consequence: `float_dtoa` was NOT tail drift.** It was the *prerequisite for `float.to_string`* =
 essential. It only looked like a motiveless tail because the "interp = `to_string`" framing wasn't in
-place. With the framing, **dtoa is a priority essential** (salvaged at `/Users/o6lvl4/cctmp/float_dtoa.almd.salvage`,
-revive it). trig, by contrast, genuinely was tail (correctly low priority — but it was done, and
-that's fine).
+place. With the framing, **dtoa was a priority essential** — self-hosted as
+`stdlib/float_to_string.almd` (commit a873a6b4, 2026-06-17), superseding the salvaged WIP. trig, by
+contrast, genuinely was tail (correctly low priority — but it was done, and that's fine).
 
 ## Verification becomes COMPOSITIONAL
 
@@ -111,11 +114,15 @@ INVALID WASM, loud, which the corpus-wall does not catch — the desugar removes
    (Or: the frontend desugar itself rejects when no `to_string` is available for the type — but that
    would also reject it for v0, a v0 regression unless v0 has the `to_string`. Since v0 HAS Display for
    every type, the desugar should always succeed for v0; the v1 wall is the unlinked-call → Unsupported.)
-4. Then **fill in `to_string` per type** (each automatically enables its interps, compositionally):
-   Bool (easy) → revive Float=dtoa (the salvaged WIP, essential) → compound repr (List/record Display).
+4. **Fill in `to_string` per type — DONE.** Bool (`stdlib/bool.almd`), Float=dtoa (commit a873a6b4),
+   compound repr / List/record Display (commit df1de340) are all self-hosted and byte-match v0.
 
 ## Build order
-1. v1: unlinked stdlib call → `Unsupported` (structural wall prerequisite). 2. Frontend desugar
-StringInterp → concat+to_string, dual-oracle byte-match v0 (retire `interp_str_lowerable` + the
-per-position handling). 3. `bool.to_string`. 4. revive `float.to_string` (dtoa). 5. compound Display.
+1. v1: unlinked stdlib call → `Unsupported` (structural wall prerequisite) — DONE. 2. **Frontend
+desugar StringInterp → concat+to_string, dual-oracle byte-match v0 (retire `interp_str_lowerable` +
+the per-position handling) — the SOLE remaining open item.** `desugar_string_interp` is still
+v1-only (`crates/almide-mir/src/lower/mod_p4.rs`); `emit_string_interp` still lives in
+`crates/almide-codegen/src/emit_wasm/calls_string.rs` (~line 689) and per the oracle-preservation
+law above MUST NOT be deleted until the frontend desugar is dual-oracle proven. 3. `bool.to_string`
+— DONE. 4. `float.to_string` (dtoa) — DONE. 5. compound Display — DONE.
 Each step's detector is the per-TYPE `to_string` byte-match — not per-position interp.

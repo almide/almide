@@ -201,3 +201,21 @@ So the next TCO brick is HEAP-LOOP-CARRIED: a scalar loop carrying a heap accumu
 accumulator merged across the back-edge (rebind the heap local each iteration, freed once) — the
 hard case the scalar-while explicitly rejects today. Plus match-leaf + mutual-rec support. Each is a
 further focused extension; the scalar-arg subset (this commit) is the clean foundation.
+
+## SUPERSEDED (for oct_rec/bin_rec) — verified 2026-07-19
+
+This doc's own conclusion above (oct_rec/bin_rec need the "HARDER extension... a heap back-edge
+merge" — a new MIR primitive + cert extension, last commit 7b402d6e, 2026-06-19) is **NOT what
+actually happened**. [v1-value-model.md](v1-value-model.md)'s "list-iterator TCO" section
+(commit 338ff9a5, same day ~4h later, "Add list-iterator TCO: rewrite a shrinking-list heap
+recursion to an invariant list plus scalar index (yaml 13 to 11)") shows oct_rec/bin_rec were
+cleared via a **DIFFERENT, cert-clean lowering rewrite** (invariant-list + synthetic scalar
+index) needing **no cert/checker extension and no new MIR primitive** — verified still present:
+`fn try_list_iter_rewrite` in `crates/almide-mir/src/lower/desugar_loop.rs`.
+
+So: this doc's REMAINING section (the "HARDER extension" / heap-loop-carried / new
+`Op::LoopBreak`-style primitive) is **closed/superseded for oct_rec/bin_rec** by that mechanism,
+not by the primitive this doc concluded was required. The **general** self-recursive-TCO
+question this doc raises for OTHER cases (a heap accumulator that genuinely can't be reframed as
+an invariant list + scalar index, e.g. `flow_rec`/`flow_step`'s mutual recursion + `acc:
+List[String]` accumulator) may still be open — don't overclaim full closure from this note alone.

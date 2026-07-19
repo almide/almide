@@ -189,7 +189,7 @@ flowchart LR
     G3["G3 資格化級<br/>⬜ 機械語検証・公理清浄・frees の翻訳検証"] --> G4
     G4["G4 認証準備<br/>⬜ DO-330 + dossier → 航空"]
 
-    NOW["現在地: G0 済 / G1 を登攀中<br/>(指標① 実プログラム = 0 が次の山)"]
+    NOW["現在地: G0 済 / G1 を登攀中<br/>(指標① 実プログラム: もはや 0 ではない —<br/>13/28 repos 完全 resolved-render・多数 byte-verified、<br/>docs/org-trust-status.md 2026-07-15 時点)"]
     NOW -.-> G1
 
     MOUNT["本丸の山: frees レンダラの翻訳検証<br/>(v0 が出血した所・ここを越えて初めて v0 超え)"]

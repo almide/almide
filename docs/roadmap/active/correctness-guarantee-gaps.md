@@ -26,11 +26,11 @@ Hand-written WASM instruction emission. Hundreds of `wasm!()` macro calls whose 
 
 **Current state**: WasmBuilder + WasmIR + LayoutRegistry infrastructure exists in `emit_wasm/engine/`. Partial migration done (list_layout.rs uses WasmBuilder). Most of `expressions.rs` and `rt_*.rs` still use raw `wasm!()`.
 
-### 2. ANF pass — heap alloc visibility unproven
+### 2. ANF pass — heap alloc visibility ✅ COMPLETE (2026-07-19 re-audit)
 
-ANF must lift every heap intermediate to a VDecl so Perceus can track it. `needs_lift()` covers known cases but there is no proof it covers ALL cases. A miss = heap leak.
+ANF must lift every heap intermediate to a VDecl so Perceus can track it. This section originally described `needs_lift()` as an ALLOW-list (Call, RuntimeCall, BinOp, If, Match, Block matched, everything else silently un-lifted = leak risk). That is no longer the design.
 
-**Current state**: `needs_lift()` covers Call, RuntimeCall, BinOp, If, Match, Block. **Known gaps**: Fan, List/MapLiteral/Record/Tuple literals, StringInterp, IterChain, ForIn, While, UnwrapOr, OptionalChain, Member, IndexAccess, ClosureCreate are NOT matched. No dedicated ANF test exists.
+**Current state**: `needs_lift()` (`crates/almide-codegen/src/pass_anf.rs` lines ~26-67) is now an inverted DENY-list: any heap-typed expression is lifted UNLESS it is one of the deliberately-excluded kinds — simple values/references (`Var`, `EnvLoad`, `FnRef`, literals, `Unit`, `OptionNone`, `EmptyMap`, `Hole`, `Todo`, `Break`, `Continue`), read/borrow operations that don't allocate (`Member`, `TupleIndex`, `IndexAccess`, `MapAccess`, `UnOp`, `Deref`, `Borrow`), and `Lambda`/`ClosureCreate` (excluded on purpose — they must stay in argument position for the WASM closure-table pre-scan, per the 5cae928d regression guard). New `IrExprKind` variants are therefore lifted BY DEFAULT (safe) unless explicitly deny-listed, closing exactly the "miss = leak" failure mode this gap described. No dedicated `spec/lang/anf_lift_test.almd` exists yet, but the design itself is no longer the risk.
 
 ### 3. Closure conversion — env layout correctness
 
@@ -82,11 +82,11 @@ Tracked in: [wasm-engine-redesign.md](wasm-engine-redesign.md)
 
 | Step | Description | Deliverable | Depends on |
 |------|-------------|-------------|------------|
-| 2a | Add missing IrExprKind variants to `needs_lift()` | Fan, List, MapLiteral, Record, Tuple, StringInterp, IterChain, ForIn, While, UnwrapOr, OptionalChain, Member, IndexAccess, ClosureCreate | — |
+| 2a | ~~Add missing IrExprKind variants to `needs_lift()`~~ | ✅ **COMPLETE** — `needs_lift()` is a deny-list (lift by default); `Member`/`IndexAccess`/`MapAccess`/`UnOp`/`Deref`/`Borrow` are deliberately excluded (read-only, no new alloc), only `ClosureCreate`/`Lambda` remain excluded by design (must stay in argument position for closure-table pre-scan). Not a gap. | — |
 | 2b | Add postcondition assert: after ANF, walk all Call/RuntimeCall/BinOp args and assert each heap-typed arg is `IrExprKind::Var` | Debug-mode panic on violation | 2a |
 | 2c | Add ANF-specific spec test: nested heap expressions in every position | `spec/lang/anf_lift_test.almd` | 2a |
 
-**Gate**: after 2b, a missed case triggers a debug-mode panic instead of a silent leak.
+**Gate**: after 2b, a missed case triggers a debug-mode panic instead of a silent leak. (2a itself no longer needs a gate — the deny-list design makes a missed variant impossible by construction.)
 
 ### Gap 3: Closure env offset verification
 
@@ -247,13 +247,21 @@ Quick wins first (small effort, high leverage):
   equivalence の rank 1 force-multiplier）が本筋。`tests/wasm_runtime_test.rs` の spec/wasm_cross
   stdout 比較ハーネスがその部分実装（stdout のみ。stderr/exit 比較は本節の 2 テストで先行）。
 
-  # 14. Cross-target divergence burndown map (2026-06-04) — 面的ハントの結果
+  # 14. Cross-target divergence burndown map — SUPERSEDED (2026-07-19)
+
+  **この節がかつて所有していた burndown queue はもう存在しない。** 現状は
+  [cross-target-completeness.md](cross-target-completeness.md) を見よ — 元の8クラスタ
+  カタログ（46件、A〜H + A-case）は **完全に drain 済み（#363–#385）** と明記されている。
+  `tests/wasm_runtime_test.rs::wasm_cross_target_spec` の `@xt-allow` 件数も現状 **0**
+  （`grep -r '// @xt-allow:' spec/wasm_cross/*.almd | wc -l` = 0、fan.timeout は 0.29.0 で
+  言語から削除済み）。本節はもうこのバーンダウンを所有しない — 以下は歴史的記録として残す。
+
+  <details>
+  <summary>歴史的記録（2026-06-04 時点、以後は cross-target-completeness.md が正）</summary>
 
   **ゲートは既に存在する**（#352）。`tests/wasm_runtime_test.rs::wasm_cross_target_spec` が
   `spec/wasm_cross/*.almd` を native+wasm 両方で走らせ **(exit, stdout, stderr) を byte 比較**、
-  `// @xt-allow: <理由>` で tracked 乖離を管理（現状 1 件 = float 最短往復）。native がオラクル。
-  よって本丸は「ゲートを建てる」ではなく **`@xt-allow` 債務の burn down**（traversal-totality の
-  LEGACY_DEBT と同型の ratchet）。
+  `// @xt-allow: <理由>` で tracked 乖離を管理（当時 1 件 = float 最短往復）。native がオラクル。
 
   **面的ハント（並列 61 エージェント・169 プローブ・各乖離を独立再現）で native↔WASM の実バグ
   46 件を検出。fan だけではない。** dedup すると **8 つの根本原因クラスタ**:
@@ -272,17 +280,7 @@ Quick wins first (small effort, high leverage):
 
   §13（termination）も §12（fan）も、この 8（+A-case）クラスタの一部分。
 
-  **進捗（burndown, 2026-06-04）**: ✅ **E**（#363 マージ, OOB 境界チェック）、✅ **B-int**（#364 マージ, parse オーバーフロー/符号/trim + 4 エラー文字列）、✅ **A**（文字列コードポイント化: 4 UTF-8 ヘルパー + 全 op 変換、負 n は i32::MAX クランプ、2-arg slice の i64::MAX デフォルトは i64 クランプで修正）。残: D / C+B-float / H / F / G(fan) / A-case。
+  **全クラスタ drain 済み**（#363–#385、cross-target-completeness.md で確認）。fan(G) の契約は
+  「決定論的 list-order-first」で決着。
 
-  **fan(G) は契約の決定が前提**（§12 の深掘り）。native/wasm のどちらも今は仕様逸脱（native race は
-  Ok のみ拾う＝実質 any、wasm は fns[0] のみ）。推奨契約は **「決定論的 list-order-first」**: 両 target
-  で全 thunk 実行 → リスト順で最初の OK を勝者 → 全失敗は統一 Err を main-error 終了パス（§13）へ。
-  これで並行非決定性が消え native==wasm が自明に成立し差分ゲートに乗る。代替「true Promise.race
-  （最初に完了、Ok/Err 問わず）」は wall-clock 依存で決定論にならずゲートに乗らない。
-
-  **burndown 手順**（LEGACY_DEBT と同じ grandfather→drain）: 各クラスタの決定論 repro を
-  `spec/wasm_cross/` に追加 → 根本修正 → `@xt-allow` を外す。fan の勝者は非決定的なので raw race は
-  byte ゲートに不適 — 全失敗 / 副作用集合 / 順序保証のある fan.settle で枠組む。
-  **推奨順（価値×着手容易さ）**: **E（セキュリティ）→ B（parse）→ A（文字列）→ D（等価）→
-  C（float）→ H（div/mod）→ F（closure）→ G（fan、契約決定後）**。各クラスタ = 1 PR。
-  [determinism-belt.md](determinism-belt.md) の枠と接続。
+  </details>

@@ -1,9 +1,39 @@
 <!-- description: Capability-based effect system for sandboxed AI agent containers -->
 # Capability-Based Effect System
 
-> **Active scope: Phase 1** — capability annotation + compiler checking。
-> **Exit criteria**: porta の全テストが `almide check --capabilities` を通過。
-> Phase 2-5 (WASM pruning, per-dep restriction, type-level, MCP) は on-hold。
+> **更新 (2026-07-19)**: Phase 1 の**実質**は既に出荷済み — 2026-03-19、commit f096a607
+> ("Integrate permissions check into normal almide check") + 49f121fb ("Security Layer 2:
+> almide.toml [permissions] + StreamFusion let-chain detection")。ただし本書が当初提案した
+> 設計とは**別の、より粗い設計**で着地している。差分は §Phase 1 実装差分 を見よ。
+> 元の "Active scope: Phase 1" / `--capabilities` exit criteria は**そのままでは成立しない**
+> (下記参照) — Phase 2-5 (WASM pruning, per-dep restriction, type-level, MCP) は依然 on-hold
+> で、この部分の記述は正しいまま。
+>
+> **Active scope: Phase 1 (SHIPPED-WITH-CAVEATS)** — capability annotation + compiler checking。
+> ~~**Exit criteria**: porta の全テストが `almide check --capabilities` を通過。~~
+> **実際の exit**: `[permissions]` が almide.toml にあれば **プレーンな `almide check`(フラグ
+> 不要)が自動で** capability 違反を検出する。`--capabilities` フラグは存在しない
+> (`src/main.rs`/CLI 引数パースに該当ヒットなし)。
+> Phase 2-5 (WASM pruning, per-dep restriction, type-level, MCP) は on-hold(確認済み: `grep -rn
+> "manifest.json\|wasi_imports" src/cli crates/almide-codegen/src/emit_wasm` は無ヒット)。
+
+## Phase 1 実装差分 (本書の原設計 vs 実際に出荷されたもの)
+
+| | 本書の原設計 | 実際に出荷されたもの |
+|---|---|---|
+| カテゴリ数 | 13 (`FS.read`/`FS.write`/`Net.fetch`/`Net.listen`/`Env.read`/`Env.write`/`Proc`/`Time`/`Rand`/`Fan`/`IO.stderr`/`IO.stdin`/`IO.stdout`) | **6**: `IO`/`Net`/`Env`/`Time`/`Rand`/`Fan`(`crates/almide-ir/src/effect.rs` の `enum Effect`)— FS と IO の分離、stdin/stdout/stderr の分離、Proc の独立カテゴリ化は無い |
+| CLI 起動 | `almide check --capabilities` | プレーンな `almide check` に自動統合(`src/cli/check.rs:78-83`, `221-262`)。フラグ不要・フラグ自体が存在しない |
+| エラーコード | `error[E010]: capability violation: ...`(構造化診断) | プレーンな `eprintln!("error: capability violation in \`{}\`", name)` (`src/cli/mod.rs:33-70`)。E010 は無関係な別の既存コード(non-exhaustive match)に使用済みのため付番されていない |
+| per-stdlib-fn 注釈テーブル | `stdlib/defs/*.toml` に `capability = "FS.read"` 等を個別付与 | 無し。代わりにモジュール名ベースの粗い静的マップ(`pass_effect_inference.rs`: `"fs"\|"path" => IO`, `"http"\|"url" => Net`, `"env"\|"process" => Env`, `"time"\|"datetime" => Time`, `"fan" => Fan`) |
+| `CapabilitySet`(u16 bitset) | 提案あり | 未実装(`grep -rn "CapabilitySet"` 無ヒット)。代わりに `HashSet<Effect>` |
+
+**結論**: Phase 1 の**目標**(「宣言外の効果を使うコードはコンパイルエラーになる」)は
+**達成済み**。だが**実装の粒度**は本書が設計した「13カテゴリ・per-fn 注釈・専用フラグ・
+専用エラーコード」ではなく、「6カテゴリ・モジュール粒度推論・`check` に統合・汎用エラー
+文言」という、より軽量で粗い形。**和解の方向**: 本書の 13 カテゴリ taxonomy は将来
+FS/IO 分離や Proc 独立が必要になった時の拡張先として残すが、"Phase 1 は 13 カテゴリで
+出荷される" という前提の記述は削除し、以下 §Capability Taxonomy は「将来の拡張候補」と
+再スコープする。
 
 Compile-time enforcement of least privilege for AI agent containers. The compiler proves that an agent's code never exceeds its declared capabilities. WASM output contains only the WASI imports the manifest permits.
 
@@ -35,7 +65,13 @@ effect fn agent(cmd: String) -> String = {
 
 The compiler rejects the binary. The WASM file is never produced. No runtime check needed.
 
-## Capability Taxonomy (13 categories)
+## Capability Taxonomy (13 categories — ORIGINAL DESIGN, NOT what shipped)
+
+> **2026-07-19 note**: the 13-category taxonomy below is the design this doc originally
+> proposed. What actually shipped (2026-03-19) is a coarser **6**-category `enum Effect`
+> (`IO`/`Net`/`Env`/`Time`/`Rand`/`Fan` in `crates/almide-ir/src/effect.rs`) with
+> module-granularity inference, not per-function annotation. See "Phase 1 実装差分" above.
+> This table is kept as the future-extension target if FS/IO or Proc need to split out.
 
 | Category | Stdlib functions | WASI imports |
 |----------|-----------------|-------------|
@@ -298,11 +334,11 @@ wasmtime run --dir /workspace agent.wasm
 
 | Phase | Impact | Effort | Ship independently? |
 |-------|--------|--------|---------------------|
-| **Phase 1** | Compile-time capability checking | M | ✅ Yes — immediate value |
-| **Phase 2** | WASM import pruning + manifest | S | ✅ Yes — binary-level proof |
-| **Phase 3** | Per-dependency restriction | S | ✅ Yes — supply chain safety |
-| **Phase 4** | Type-level effects (HOF) | L | ✅ Yes — precision |
-| **Phase 5** | Agent stdlib module | S | ✅ Yes — stdlib only, no language changes |
+| **Phase 1** | Compile-time capability checking | M | ✅ **SHIPPED (2026-03-19)** — coarser design, see "Phase 1 実装差分" above |
+| **Phase 2** | WASM import pruning + manifest | S | ⬜ NOT started (verified: no `manifest.json`/`wasi_imports` in `src/cli` or `emit_wasm`) |
+| **Phase 3** | Per-dependency restriction | S | ⬜ NOT started |
+| **Phase 4** | Type-level effects (HOF) | L | ⬜ NOT started |
+| **Phase 5** | Agent stdlib module | S | ⬜ NOT started |
 
 Phase 1 alone is enough to claim "compile-time sandboxed AI agent containers."
 

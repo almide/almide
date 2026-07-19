@@ -1,5 +1,12 @@
 <!-- description: Route almide build --target rust through the same v1 Perceus MIR as the wasm leg, certified per build by verify_ownership (#764) -->
+<!-- done: 2026-07-16 -->
 # Native Trust Spine — Perceus as the single memory model (#764)
+
+> **DONE, but the ladder's "NEXT frontier" notes (heap-capture closures,
+> heap-param/-ret lambdas, `Bytes` params, Map/String-heavy stdlib surfaces,
+> the per-function native classifier) are substantial open follow-on work —
+> track them in a fresh `docs/roadmap/active/` doc rather than reopening this
+> one.**
 
 > Goal: `almide build --target rust` flows through the SAME v1 Perceus MIR as the
 > wasm leg, rendered to ownership-idiomatic Rust — `Dup` → `.clone()`, `Drop`
@@ -56,7 +63,7 @@
       list_index_math / list_set. Scope: `List[Int]`/`List[Bool]` signatures
       (Float lists ride rung 5's f64 convention); `list.len` stays the
       self-host CallFn (already target-neutral — 4b decides whether to op it).
-- [ ] Rung 4 residue (original design note kept for the record):
+- [x] Rung 4 residue (original design note kept for the record):
       the v1 lower materializes list literals as `Alloc{DynList}` + inline
       `Prim` stores and admits direct `xs[i]` prim loads over materialized
       lists — the list world is BELOW the prim floor by design, so no
@@ -67,7 +74,7 @@
       guarded by the existing gates) and the native leg maps to `Vec` ops. This
       touches the same `lower/binds*` bricks the ceangal/module-var workstream
       is actively editing — do it WITH that workstream, not alongside it.
-- [ ] Rung 5: records/variants (native structs/enums), closures.
+- [x] Rung 5: records/variants (native structs/enums), closures.
       **Records slab SHIPPED (2026-07-15 late)**: scalar-record literals lower
       through `Op::ListLit` (declaration-ordered slots, zero-filled defaults —
       `try_lower_scalar_record_construct` keeps `materialized_aggregates`);

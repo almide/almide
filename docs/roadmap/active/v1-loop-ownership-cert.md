@@ -1289,3 +1289,12 @@ render for `PrimKind::ReadNBytes` (a WASI `fd_read` of N bytes from fd 0 into a 
 runtime work, adapt the `ReadLine` render); (5) Capability::Stdin accounting (reuse). This is the
 effectful-WASI-floor workstream (task #61), a DIFFERENT kind of work from the now-solved read_message lowering —
 a clean boundary. Once io.read_n_bytes has a floor, read_message lowers (its structure is proven by rdcore3*).
+
+## RESOLVED 2026-06-30
+
+`io.read_n_bytes` shipped the SAME DAY as the blocker above was pinned (commit 949cd0cb, "Add
+io.read_n_bytes WASI stdin-N-bytes floor to the v1 MIR trust-spine"). A same-day follow-up
+(commit 7a9b94f0, "Regenerate org-trust-status: 17/17 repos at lowering wall=0 (porta
+read_message resolved)") confirms porta reached lowering-wall=0, superseding this doc's own
+"ABSOLUTE floor... v2-scale program" framing for the 3 remaining porta walls. See
+[v1-org-byte-verification.md](v1-org-byte-verification.md) for the current closing narrative.

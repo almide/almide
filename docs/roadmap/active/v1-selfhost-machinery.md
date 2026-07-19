@@ -8,6 +8,19 @@ the materialized-Option layout.** Goal `/goal`: run until ALL ~381 v0 stdlib fns
 byte-for-byte. This records the de-risked designs so harder slices are implemented from a
 settled plan.
 
+> **NEEDS REFRESH (verified 2026-07-19)**: the "~28 functions" headline is far out of date.
+> `crates/almide-mir/src/render_wasm/registry.rs`'s `self_host_runtime()` registry — the exact
+> mechanism this doc's own "Registry groups by file" paragraph describes — now wires **232 of
+> the 273 `stdlib/*.almd` files** (`ls stdlib/*.almd | wc -l` = 273) and registers **993 unique
+> `(impl_fn, call_name)` self-host entries** (994 total tuple registrations; `list.enumerate_str`
+> is the one duplicate alias, registered from both `list_pairs.almd` and `list_enumerate.almd`).
+> Counted via: `grep -c '^\s*(include_str!' registry.rs` = 171 source-block lines, and a full
+> parse of the `("impl_fn", "call_name")` tuples across both single-line and multi-line block
+> forms. This is the self-host REGISTRATION surface, not necessarily "executes byte-for-byte
+> for every entry" in the strict sense this doc's machinery sections track — but it shows the
+> campaign is dramatically further along than "~28"; the doc's per-machinery sections below
+> (Option/List-building/Closures) need a fresh status pass against current `git log`.
+
 ## Done (self-hosted + executing = v0) — ~28 fns
 - **core**: int.to_string, print_str(println)
 - **string**: len, repeat, is_empty, slice, trim, starts_with, ends_with, contains, count,
@@ -99,12 +112,30 @@ construction and List[String] aliasing are admissible.
 Count substrings first (2-pass) or grow. Cert-touching (nested owned heap) → adversarial.
 
 ## Machinery 3 — Closures (unblocks map/filter/fold/reduce/scan/find/each/sort_by …) — HARDEST
+
+> **STALE (verified 2026-07-19)**: the "no function table / call_indirect at all" finding below
+> describes the state as of this doc's writing, but closures are NO LONGER walled/undesigned.
+> `Op::CallIndirect` shipped commit 436222c2 (2026-06-15, "Add Op::CallIndirect with the
+> conservative caps taint (closures foundation)") and is now a real op used throughout
+> `render_native.rs`, `render_rust.rs`, `render_wasm.rs`, `certificate.rs`, and the `lower/`
+> pass tree. Subsequent commits (`git log --oneline --grep="closure" --since=2026-06-15`) show
+> substantial follow-on build-out: scalar-capture closure envs dispatched via generated arity
+> tables (b252bef6), closure env full mode with heap and Fn captures + self-describing recursive
+> drop (a3c3d5e7), capturing closures materialized as uniform closure blocks (8e2b2293),
+> `List[Closure]` construction/capture support (48ca228b, dc799c73, 5fb0ea95), closures stored in
+> record slots end to end (fbbf8691), and certificate-format-v1 full mode covering closure-
+> dispatch signatures (a8c67d1d). **The section below is historical context for HOW the surface
+> was bootstrapped, not the current state.** For current closure status, see
+> [v1-v0-parity.md](v1-v0-parity.md)'s Phase C (動的ディスパッチ / first-class クロージャ) and
+> [closure-architecture-v2.md](closure-architecture-v2.md).
+
 Self-host must INVOKE the closure `f` on each element (`f(x)` where f is a fn-value param).
-**KEY FINDING (investigated): v1's wasm render has NO function table / `call_indirect` /
-`elem` at all** — so this is a from-scratch build of the entire indirect-call surface, the
-largest remaining slice. Current state: `IrExprKind::Lambda { params, body, lambda_id }`
+**KEY FINDING (investigated at the time): v1's wasm render had NO function table / `call_indirect` /
+`elem` at all** — so this was a from-scratch build of the entire indirect-call surface, the
+largest remaining slice at the time. Original state: `IrExprKind::Lambda { params, body, lambda_id }`
 lowers to `Alloc{Opaque}` (not a real function); a `Computed { callee }` call (`(g)(x)`)
-is WALLED by `is_higher_order` (calls.rs:193) → deferred. Required pieces, in order:
+was WALLED by `is_higher_order` (calls.rs:193) → deferred. Required pieces, in order (as
+originally planned — now largely built, see the stale-note above for current status):
 1. **Lambda → a real MirFunction + a table slot.** Each lambda body becomes its own wasm
    `func` (lower its body like any fn); register it in a new wasm `(table funcref)` + `(elem)`
    indexed by `lambda_id`. The closure VALUE = the table index (a scalar i64) for a NON-

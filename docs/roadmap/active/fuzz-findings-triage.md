@@ -66,7 +66,7 @@ class the old "any native non-zero = NativeBuildFailure" rule hid:
 | Index | Shape | Class |
 |---|---|---|
 | 10 | corpus mutant: `assert_eq(sql, "hello")` in main | **FIXED (2026-07-18)** — ALS-T18: non-test assert failures now desugar ONCE in frontend lowering (if + eprintln + process.exit(1)) so all four consumers inherit `Error: assertion failed…` + exit 1, operands once-evaluated (C-153, 3 fixtures). In passing: the bare `eprintln` builtin was unlinked on v1 / an ICE on v0 — now a registered self-host (fd-2 print_str twin) + a shared parametrized v0 runtime fn |
-| 49 | C-138 fixture mutant | native 101 vs wasm 134 — BOTH legs leak raw abort forms |
+| 49 | C-138 fixture mutant | **FIXED (2026-07-18)** — same ALS-T6 normalization as index 5: `float.to_fixed(n, decimals)` outside `0..=1000000` now aborts `Error: to_fixed requires decimals in 0..=1000000` + exit 1 on all four consumers, replacing the native `format!` capacity panic (101) / wasm OOM-trap or empty-string leak (134) (C-155, `spec/wasm_cross/to_fixed_domain_abort.almd`) |
 | 119 | C-062 RawPtr fixture mutant | native 1 vs wasm 134 (trap) — the unsafe-bridge OOB form needs adjudication |
 | 5 | `int.clamp(4, 3, 1)` (min > max) | **FIXED** — ALS-T6 adjudication: `Error: clamp requires min <= max` + exit 1 on all four consumers; float's `!(lo <= hi)` folds NaN bounds into the same line (C-154, 2 fixtures) |
 | 145 | `or_else(ok(..), (a) => ok(..))` | **FIXED** — the E025 undecidable-slot validator now sees INTERMEDIATE call results (every call-result ty enqueued at inference; the post-solve check fires only on genuinely unpinned slots). Both targets now reject at check with span + hint — acceptance parity restored; the fuzzer classifies GeneratorReject |
@@ -87,8 +87,17 @@ ALS-T6 promises `Error: …` + exit 1) and ACCEPTANCE PARITY (unresolved type
 vars reaching codegen). The clamp/RawPtr edges need normative adjudications
 in the ALS before fixes.
 
-Loop-until-dry status: wave-3 triage open. Remaining DoD: findings-free
-1000-run + coverage-ratchet job diagnosis + two consecutive green nightlies.
+Loop-until-dry status: wave-3 triage open, but progressing — the 2026-07-18
+`ff2b7b9b` landing (index 10/5/49/145/149/98·92 fixes above) took the
+`Generative differential fuzz` job green for the first time (run 29664698089,
+2026-07-18T23:08 UTC), on a manual `workflow_dispatch` rather than the
+scheduled nightly trigger; every prior scheduled run (07-15 through 07-18
+05:18 UTC) was red. The workflow's sibling `Compiler structural coverage
+ratchet (#566)` job is still red on that same run — a separate, still-open
+failure (DoD item 3). Remaining DoD: index 119 (RawPtr OOB) still needs
+adjudication, findings-free 1000-run, coverage-ratchet job diagnosis, and the
+differential-fuzz job going green on back-to-back SCHEDULED nightlies (not
+just a manual dispatch).
 
 Lesson feeding #777/F3: BOTH C-class roots were "a deferred/mis-linked value
 reaching observed output without a wall" — (1) the deferred-Opaque ctor payload
@@ -106,8 +115,11 @@ repr-compatibility check (the `_h`/`_x` suffix discipline, mechanically).
    into the #777 tracking-set/wall-consistency gate design.
 3. The coverage-ratchet job failure diagnosed and fixed (or the floor
    re-justified in its own commit, per the #566 discipline).
-4. A local `xtarget-fuzz run --count 1000` campaign is findings-free, then
-   Fuzz (nightly) is green two consecutive nights.
+4. A local `xtarget-fuzz run --count 1000` campaign is findings-free, then the
+   `Generative differential fuzz` job is green on two consecutive SCHEDULED
+   nightlies. Status as of 2026-07-18: 1 green run total, and it was a manual
+   `workflow_dispatch` (29664698089) — zero scheduled nightlies have gone
+   green yet, so the streak has not started.
 
 ## Ownership boundary
 

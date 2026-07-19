@@ -25,6 +25,13 @@
 3. **spine は置き換えの日に**（第3波）: MIR spine の還流は「emit_wasm を retire して
    render path を生産経路にする」決定と一体。それまで develop-v1 が本籍。
 
+> **RESOLVED 2026-07-05 (commit 0cd01517)** — the v1 spine shipped as an opt-in `--verified` /
+> `--native-verified` flag directly on develop (`src/cli/build.rs`, `src/cli/run.rs`), not via a
+> develop-v1 branch merge (0cd01517 is a single-parent, non-merge commit). The `develop-v1` branch
+> itself is now stale/abandoned: `git log origin/develop-v1 -3` shows its last commit on 2026-07-06,
+> and it is only 2 commits ahead of its merge-base with develop while develop has moved 432 commits
+> past that same point — confirmed stale, not an active parallel line.
+
 ## 未解決の判断（ユーザー入力待ち）
 
 - 第1波の実行時期（いつでも可能 — CI 追加のみ）

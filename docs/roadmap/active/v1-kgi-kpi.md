@@ -1,6 +1,11 @@
 <!-- description: v1 KGI/KPI scoreboard — the terminal goal indicators (trust + writability), the guard invariants that must never degrade (checker size, TB purity, axiom cleanliness, zero claim-drift), and the progress KPIs toward each gap. Weekly fill-in. -->
 # v1 KGI / KPI スコアボード
 
+> **STALE (last entry 2026-06-21)** — corpus-wall/ownership-coverage figures have moved
+> substantially since (143+ commits mention "corpus"/"ownership coverage" after 2026-06-21 per
+> `git log --oneline --since=2026-06-21 --grep="corpus\|ownership coverage"`); needs a fresh
+> weekly entry before use.
+
 > **これは何か**: v1 の終局指標(KGI)と、それを守る/攻める指標(KPI)を週次で
 > 埋めるスコアボード。このプロジェクトは構造が特殊で ―― **KPI が「攻める系
 > (伸ばす)」と「守る系(絶対に劣化させない不変条件)」の2種に割れ、守る系を破った

@@ -18,7 +18,7 @@ v1 の核（honest wall）は既に成立：受理プログラムは必ず正し
 ### 位置づけ B —「v0 の完全な置き換え」v1.0.0 → 下の #1〜4 が致命的ブロッカー
 | # | ブロッカー | 状態 |
 |---|---|---|
-| **B-1** | **動的ディスパッチ（Phase C）** — first-class クロージャ + `.method()`（method/computed ~79 + heap-result match tail 74 の大半）。「普通に書いたコードがコンパイルできるか」を決める実用の本丸。**最大ブロッカー**。 | 未着手 |
+| **B-1** | **動的ディスパッチ（Phase C）** — first-class クロージャ + `.method()`（method/computed ~79 + heap-result match tail 74 の大半）。「普通に書いたコードがコンパイルできるか」を決める実用の本丸。**最大ブロッカー**。 | 未着手 ⚠️ **要再検証（2026-07-19）**: `Op::CallIndirect` は commit 436222c2（2026-06-15、"closures foundation"）で既に SHIP 済み — この doc 自身の起票日 2026-07-04 より**前**。つまりこの行はドキュメント作成時点で既に古かった（stale-since-day-1）。書いた後の劣化ではなく、書いた時点の誤り。current closure-env commits（`git log --oneline --grep="closure" --since=2026-06-15`、[v1-selfhost-machinery.md](v1-selfhost-machinery.md)の Machinery 3 参照）に照らして「未着手」を再確認/再記述してから使うこと。 |
 | **B-2** | **derived Codec `.decode()`**（Camp-4 heap-Ok `?`-bind）。**進行中 — 精密診断まで完了、次セッション用の handoff あり**。詳細は下の「B-2 handoff」参照。 | value.field 済 / desugar 残 |
 | **B-3** | **nn end-to-end（fast-exp 族）**。wasm oracle は SIMD ではなく scalar libm exp（= self-host 済み math.exp）と判明。**7/7 全て開通・byte一致**（softmax_rows / gelu / swiglu_gate / rope_rotate / multi_head_attention / masked_multi_head_attention / from_q1_0_bytes）。nn の matrix スタックは完全 self-host・byte 検証済み。**✅ 実質クローズ**（残る nn unlinked は fft の enumerate_h/zip_h の 4 補助サイトのみ、非推論経路）。 | ✅ 7/7 |
 | **B-4** | **native ターゲット** — v0-native matrix codegen 破損（引き継ぎ）。native を出荷対象にする場合のみ。 | 外部ブロック |
@@ -42,6 +42,19 @@ v1 が v0 相当とは、次を**同時に**満たす状態を指す（すべて
    全 org リポジトリで native + wasm 両方 pass。
 6. **native ターゲット復旧**: `almide run`（v0-native）が matrix 系を含め全 spec で通る。
 
+> ⚠️ **STALE — needs refresh (flagged 2026-07-19)**: this dashboard is dated
+> "2026-07-04 セッション後" and the figures below (spec in-profile 4374/4556, real walls 469,
+> stdlib 211/171 in Phase D) are almost certainly out of date — `crates/almide-mir` alone had
+> **283 commits** in the two weeks since (`git log --oneline --since=2026-07-05 -- crates/almide-mir`,
+> counted 2026-07-19). Verified fresh: `ls stdlib/*.almd | wc -l` = **273** files today (vs the
+> "211 `.almd`" cited in Phase D below) — the stdlib surface has grown by ~62 files since this
+> doc was written; the "171 登録" self-host-registration count is very likely stale too (see
+> [v1-selfhost-machinery.md](v1-selfhost-machinery.md)'s 2026-07-19 refresh: the registry now
+> wires 232 stdlib files / 993 unique self-host entries — a different counting method than
+> Phase D's "211/171" but confirms the same magnitude of drift). None of the other dashboard
+> numbers (walls/parity/PCC counts) were independently re-verified here — treat them as stale
+> until re-run through `classify_corpus`/`output-parity.sh`/`corpus-wall.sh`.
+>
 > 現在地（2026-07-04 セッション後）: spec in-profile **4374/4556（96%）**、実 walls
 > **469**、nn walls **0**、parity baseline 180、PCC ACCEPT（3プロパティ）、3-way green。
 > miscompile は既知ゼロ（honest wall のみ）。

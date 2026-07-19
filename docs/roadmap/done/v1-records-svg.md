@@ -1,4 +1,5 @@
 <!-- description: v1 records feature: full conquest of the svg org repo on the WASM trust spine (construct, field read, spread, recursive nested ownership) -->
+<!-- done: 2026-06-21 -->
 # v1 — records feature: svg FULL CONQUEST (goal prompt)
 
 ## BIG-PICTURE GOAL

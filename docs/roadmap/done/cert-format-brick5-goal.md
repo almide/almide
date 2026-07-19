@@ -27,7 +27,7 @@
 > bricks 1–2 shipped, 3a/3b + 4a/4b shipped), `proofs/OwnershipChecker.v`
 > (exec / CertItem / UnrollsL — the architecture you will extend),
 > `proofs/CallModes.v` (brick 2c — the composition-law house style to follow).
-> Sibling context: [v1-heap-result-control-flow](../active/v1-heap-result-control-flow.md).
+> Sibling context: [v1-heap-result-control-flow](v1-heap-result-control-flow.md).
 
 ## Context — where the ladder stands (2026-07-08, commit `c485bef9`)
 

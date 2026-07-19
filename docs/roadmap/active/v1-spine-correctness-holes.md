@@ -1,4 +1,24 @@
 <!-- description: v1 trust-spine correctness holes found by an adversarial sweep of render_program vs native (30 confirmed holes) -->
+> **STATUS UPDATE (verified 2026-07-19): 29/30 holes closed same-day 2026-06-27.** The 30 holes
+> were clustered into 13 root causes (A, B, C, D, E1-E5, F, G, H, plus one distinct unlabeled
+> cluster for #22) and closed across five commits, all 2026-06-27:
+> - `5b20a777` — cluster **A** (#2,3,4,5 — filter_map/map heap-result source-element load width)
+> - `ce4a2827` — clusters **E1+E4** (#13-18 string subscript elision on let-bound List[heap] +
+>   #8 nested/payload-bound Option match)
+> - `33b3e255` — clusters **B+C+D** (#1 arm-local heap-temp drop trap + #6,7 tuple pattern slot
+>   loads + #9,12,26,27,30 record pattern slot loads / record-ctor Option field)
+> - `9d5d0403` — clusters **E2+E3+E5** (#23,24,25 short-circuit and/or + #29 IndexAssign store +
+>   #21 scalar value-position Unwrap)
+> - `a5db6b47` — clusters **F+G+H** (#10 tuple-of-heap ctor + #11,28 DropListIntStr helper +
+>   #19,20 memory.grow allocator)
+>
+> **The one hole still open: #22** ("recursion / miscompile" below) — a recursive
+> effect-call-in-block-tail elision, explicitly called out as a DISTINCT pre-existing cluster in
+> both the `9d5d0403` and `a5db6b47` commit messages ("a recursive effect-call-in-block-tail
+> elision — is a DISTINCT pre-existing cluster, not fixed here... tracked separately"), and not
+> closed by any commit found since. Tracked in `docs/org-trust-status.md`'s 06345e0a update (a
+> since-superseded/rewritten section of that rolling doc — the historical content is only visible
+> via `git show 06345e0a -- docs/org-trust-status.md`).
 # v1 trust-spine correctness holes (adversarial sweep 2026-06-27)
 
 Found by a systematic adversarial sweep of render_program (v1 spine) vs native, probing shape-space the v0 corpus does NOT cover. All **verified reproducing in render_program** (not legacy emit_wasm). The corpus-wall (checks certs, not wat-validity) + output-parity (124 files) structurally miss these. Root hints below are the SWEEP agents' guesses (several cite legacy paths — the real site is the v1 spine crates/almide-mir/render_wasm\*; re-derive when fixing).

@@ -1,4 +1,5 @@
 <!-- description: v1: design for heap-result if/match execution — de-risked, no Coq change required -->
+<!-- done: 2026-06-15 -->
 # v1 heap-result `if`/`match` execution — design (DE-RISKED: no Coq change)
 
 Status: **`if` with literal arms IMPLEMENTED (commit 126921e6), adversarially
@@ -116,3 +117,13 @@ were found. That demands the adversarial pass with fresh focus, not an
 end-of-long-session implementation. Recording the de-risked design here is the
 advance; the implementation + adversarial verification is the next session's
 first move.
+
+## Follow-on work
+
+This design's execution slice (heap-result `if`/`match`) shipped and became the
+foundation for two later efforts: [v1-loop-ownership-cert.md](../active/v1-loop-ownership-cert.md)
+(loop-body match execution and the porta org-repo conquest built on top of
+per-arm-balanced heap-result branches) and
+[v1-parser-tco-lever.md](../active/v1-parser-tco-lever.md) (TCO over a match
+returning heap-result, which required this slice's per-arm balance argument as
+a precondition).

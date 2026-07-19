@@ -145,15 +145,31 @@ Lean 4 で Perceus ルールの正しさを機械証明し、lean4-rust-backend 
 - A + B: 証明済みロジックが型で強制される = AlmidePerceusBelt 完全体
 
 
-## Post-v0.27.0 proof-coverage gap (2026-06-11)
+## Post-v0.27.0 proof-coverage gap (2026-06-11) — CLOSED, in a different proof system (2026-07)
 
 The belt's Lean theorems certify the IR-level Inc/Dec balance. v0.27.0 made
 the runtime side REAL (free-list push/reuse, the rc==0 double-free sentinel,
-the rc_inc resurrection trap, region resets that clear the free list) — none
-of which is in the proof surface. Candidate next phase: model the allocator
-state machine (alloc/dec/reuse/reset) and prove the sentinel invariants
-("a block on the free list has rc=0", "reuse restores rc=1", "a region reset
-empties the list"), mirroring how ClosureRc.lean grew out of the closure-env
-work. Until then the churn + byte gates are the only guards on the runtime
-half, and emitter-level rc operations (stored-field dups, in-runtime incs)
-remain invisible to the IR verifier by construction.
+the rc_inc resurrection trap, region resets that clear the free list). At
+the time this was written, none of that was in any proof surface, and the
+candidate next phase proposed modeling the allocator state machine
+(alloc/dec/reuse/reset) and proving the sentinel invariants ("a block on the
+free list has rc=0", "reuse restores rc=1", "a region reset empties the
+list"), mirroring how `ClosureRc.lean` grew out of the closure-env work.
+
+**That candidate phase shipped** — not as an extension of this Lean belt, but
+via the separate v1 trust-spine (Rocq/Coq) proof effort: `proofs/RuntimeModel.v`
+models the runtime heap as a linear-memory state machine (refcount in a cell
+at `base + RC_OFFSET`) and proves it tracks the abstract RC semantics exactly,
+faulting on double-free in lockstep (`mrun_tracks_exec`); `proofs/FreeList.v`
+proves the free-list allocator is reuse-safe — a valid allocation is never a
+currently-live block (`FreeList.alloc_not_live`, no reuse-after-free); and
+`proofs/WasmDecode.v` closes the raw-byte → ISA "last mile", proving the
+actual rendered `$rc_dec`/`$rc_inc` wasm bytes trap on double-free and
+free-list-link on unique release. See
+[certificate-format-v1](certificate-format-v1.md) — bricks 3b (`RuntimeModel.v`),
+3c (`WasmDecode.v`), and 4a (`FreeList.v`, A1.2) — for the full theorem list
+and the residual honest trusted base (the wasm engine's ISA fidelity, the
+assembler grounding, the kernel). Emitter-level rc operations (stored-field
+dups, in-runtime incs) are still outside *this* IR-level belt by construction,
+but are no longer outside *all* proof — the v1 spine now covers the runtime
+half this section used to flag as open.

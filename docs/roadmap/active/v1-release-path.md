@@ -21,9 +21,15 @@
 
 ## 4案のメリデメ（意思決定の記録）
 
-### ① opt-in 検証 codegen（v0 fallback）★採用・進行中
+### ① opt-in 検証 codegen（v0 fallback）★採用・進行中 — 現在 wasm + native 両ターゲットに拡張済み
 `almide build/run --target wasm --verified` で v1 を試行 → 通れば PCC 検証済み v1 出力、
 壁なら v0 に自動 fallback。default(flag 無し)は v0 のまま。
+
+> **更新（このドキュメント最終コミット 36f31a4d, 2026-07-05 以降）**: commit 519b67df
+> (2026-07-14)「Ship the native trust-spine rung 1 behind --verified with Drop-erasure
+> rendering and a v0 differential gate」で **NATIVE 側にも検証 rung が出荷された**。
+> つまり ① は now もう wasm 限定ではなく、**wasm と native の両ターゲットにまたがる**
+> beachhead になっている — 上のステータス行はその分だけ更新が必要。
 
 - **メリット**: 今すぐ出せる（統合＋flag、研究不要）／リスク0（壁は v0＝今日と同じ）／
   v1 が実際に使える製品機能になる／opt-in で既存ユーザー無影響／byte-binding 証明(Gap 1)が
