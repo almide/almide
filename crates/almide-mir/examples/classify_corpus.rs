@@ -235,6 +235,19 @@ fn count_ir_calls(
             if matches!(s.kind, almide_ir::IrStmtKind::MapInsert { .. }) {
                 self.n += 1;
             }
+            // A HEAP-element index-assign STATEMENT `xs[i] = "Z"` (String/Value
+            // element — mod_p3's C-136 admission, mirrored exactly) rewrites to ONE
+            // synthetic `list.set` CallFn (the functional rebind). Credit the
+            // statement so the synthetic call has a matching ir_call and
+            // `mir_calls <= ir_calls` holds BY CONSTRUCTION (the place_mutation
+            // mir 19 > ir 18 breach). An un-admitted element class walls (no MIR
+            // ops), where the extra credit only taints conservatively.
+            if matches!(&s.kind, almide_ir::IrStmtKind::IndexAssign { value, .. }
+                if matches!(value.ty, almide_lang::types::Ty::String)
+                    || almide_mir::lower::is_value_ty(&value.ty))
+            {
+                self.n += 1;
+            }
             almide_ir::visit::walk_stmt(self, s);
         }
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
