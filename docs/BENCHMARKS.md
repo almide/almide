@@ -2,17 +2,17 @@
 
 ## WASM Binary Size
 
-Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency. Aggressive DCE strips unused runtime functions and data automatically.
+Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency. Since the verified (PCC) pipeline became the sole wasm path, **the shipped binary is the exact module the certificate was checked against**: it carries the full audited runtime preamble and the debug-name section, and no post-hoc optimizer touches it.
 
-| Program | Size |
-|---------|-----:|
-| Hello World | **467 B** |
-| FizzBuzz | **809 B** |
-| Fibonacci (recursive) | **682 B** |
-| Closure + call_indirect | **812 B** |
-| Variant (match + float) | **1,105 B** |
+| Program | Verified, as shipped | After `wasm-opt -Oz --all-features` |
+|---------|-----:|-----:|
+| Hello World | **8,713 B** | **874 B** |
+| FizzBuzz 1–100 | **10,515 B** | **1,580 B** |
+| Fibonacci (recursive) | **10,044 B** | **1,139 B** |
+| Closure + call_indirect | **11,414 B** | **1,898 B** |
+| Variant (match + float) | **34,407 B** | **6,460 B** |
 
-These are raw `almide build --target wasm` output — no post-processing. `wasm-opt -O3` saves only 1–5 more bytes because the compiler's built-in dead code and dead data elimination already strips everything unused.
+The "as shipped" column is raw `almide build --target wasm` output (measured 2026-07-20). Running `wasm-opt` is an explicit opt-in that leaves the verified envelope — its DCE strips the unused runtime helpers and the name section. The float row is dominated by the self-hosted Dragon4 shortest-round-trip printer that `float.to_string` demand-links; programs that never display a Float never pay for it. Full dissection: [WASM-OUTPUT.md](./WASM-OUTPUT.md).
 
 ## Native Performance
 
