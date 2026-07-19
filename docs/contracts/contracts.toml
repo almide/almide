@@ -1924,3 +1924,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_combinators_heap_ok.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-156"
+spec      = "ALS-I3"
+title     = "An if-merged some((String, String)) ctor is a real tracked Option"
+statement = "A `some((s1, s2))` constructor over a `(String, String)` tuple payload — including the if-merged form `if c then some((a, b)) else some((c, d))` in bind, call-argument, and arm position — materializes a REAL 1-element Option block whose payload tuple owns both Strings, and `option.unwrap_or_else` over it takes the Some payload. The scope-end drop routes to the generated `$__drop_opt_str_str` (both tuple slots, the tuple block, then the wrapper). Previously the un-admitted payload left the bind a deferred Opaque (len 0) that the unwrap twin misread as None — the fallback closure ran on a Some (differential-fuzz seed 20260721 index 374, a silent wrong value)."
+since     = "0.32.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/opt_str_str_ctor.almd", class = "fixture" },
+]

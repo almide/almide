@@ -794,6 +794,27 @@ impl LowerCtx {
                 let piece = self.try_lower_scalar_tuple_construct(&elements)?;
                 Some(self.materialize_opt_str_some(piece, repr))
             }
+            // `some((s1, s2))` — a `(String, String)` tuple literal payload (the
+            // if-merged Option ctor the fuzz index-374 divergence exposed: an
+            // un-admitted payload left the bind Opaque and `option.unwrap_or_else`
+            // misread len 0 as None — the fallback ran on a Some). Build the tuple
+            // (both slots owned Strings), move it into the 1-element Option, and
+            // route the drop to `$__drop_opt_str_str` (both slots + tuple + wrapper
+            // — the flat default would leak both Strings).
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind, IrExprKind::Tuple { .. })
+                    && matches!(&expr.ty,
+                        Ty::Tuple(tys) if tys.len() == 2
+                            && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let IrExprKind::Tuple { elements } = &expr.kind else { return None };
+                let elements = elements.clone();
+                let piece = self.try_lower_tuple_construct(&elements)?;
+                let obj = self.materialize_opt_str_some(piece, repr);
+                self.variant_drop_handles.insert(obj, "opt_str_str".to_string());
+                Some(obj)
+            }
             // `Some((k, v))` — a `(String, <scalar>)` tuple literal payload (`map.find`'s
             // `__skv_find_some(k, v) = Some((kc, v))`). Build the tuple (`try_lower_tuple_
             // construct`, one heap slot: the String), move it into the 1-element Option. The

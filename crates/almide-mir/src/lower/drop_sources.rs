@@ -1330,6 +1330,30 @@ fn __drop_opt_str_int(o: List[Int]) -> Unit = {
 }
 ";
 
+/// The ALMIDE SOURCE of `__drop_opt_str_str` — the recursive release of an
+/// `Option[(String, String)]` (the if-merged `some((s1, s2))` ctor the fuzz
+/// index-374 divergence exposed): at the wrapper's last ref, IFF Some the @12
+/// payload tuple owns TWO Strings (@12 and @20 — both rc_dec'd at the tuple's
+/// last ref), then the tuple block, then the wrapper. The `__drop_opt_str_int`
+/// twin with the second slot's dec added.
+pub const OPT_STR_STR_DROP_SRC: &str = "\
+fn __drop_opt_str_str(o: List[Int]) -> Unit = {
+  let h = prim.handle(o)
+  if prim.load32(h + 0) == 1 then {
+    if prim.load32(h + 4) == 1 then {
+      let th = prim.load64(h + 12)
+      if prim.load32(th + 0) == 1 then {
+        prim.rc_dec(prim.load64(th + 12))
+        prim.rc_dec(prim.load64(th + 20))
+      }
+      else ()
+      prim.rc_dec(th)
+    } else ()
+  } else ()
+  prim.rc_dec(h)
+}
+";
+
 /// Header layout: `n_heap | (n_nested_heap << 16) | (n_closure << 32)` — three
 /// 16-bit counts (ample for any realistic capture count). Widened from the
 /// original 2-field `n_heap | (n_closure << 16)` to add the `n_nested_heap`

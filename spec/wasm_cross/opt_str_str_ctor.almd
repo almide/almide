@@ -1,0 +1,13 @@
+// @contract: C-156
+// An if-merged `some((String, String))` ctor must materialize a REAL tracked
+// Option on the v1 leg: `option.unwrap_or_else` over it takes the Some payload,
+// never the fallback (fuzz seed 20260721 index 374 — the deferred-Opaque bind
+// misread len 0 as None and ran the fallback closure on a Some).
+fn main() -> Unit = {
+  let r2: String = "x"
+  let o: Option[(String, String)] = if string.is_empty(r2) then some((r2, "H")) else some(("A", "B"))
+  let r6: (String, String) = option.unwrap_or_else(o, (() => ("C", r2)))
+  println("r6 = ${r6}")
+  let direct: (String, String) = option.unwrap_or_else((if string.is_empty(r2) then some((r2, "H")) else some(("A", "B"))), (() => ("D", r2)))
+  println("direct = ${direct}")
+}
