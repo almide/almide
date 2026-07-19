@@ -7,6 +7,28 @@ use std::fmt::Write;
 use almide_lang::ast::*;
 use almide_base::intern::Sym;
 
+// Escapes a raw string for emission inside a double-quoted literal. `Decl::Test`
+// names are stored (post-parse) as the raw, already-unescaped description text —
+// unlike `ExprKind::String` (see fmt_p2.rs), which fmt_expr escapes correctly,
+// this had no escaping at all, so a test name containing a literal `"` (e.g.
+// `test "decide_pick(\"big\") ..."`) round-tripped through fmt into a broken,
+// prematurely-closed string literal — not idempotent, and not even valid on
+// the first pass. Same rule set as fmt_expr's ExprKind::String double-quote arm.
+pub(crate) fn escape_dquoted(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 fn join_syms(syms: &[Sym], sep: &str) -> String {
     syms.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(sep)
 }
@@ -447,8 +469,8 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             out.push_str(" = "); fmt_expr(out, value, depth);
         }
         Decl::Fn { name, effect, r#async, visibility, params, return_type, body, extern_attrs, export_attrs, attrs, generics, .. } => {
-            for a in extern_attrs { wln!(out, "{i}@extern({}, \"{}\", \"{}\")", a.target, a.module, a.function); }
-            for a in export_attrs { wln!(out, "{i}@export({}, \"{}\")", a.target, a.symbol); }
+            for a in extern_attrs { wln!(out, "{i}@extern({}, \"{}\", \"{}\")", a.target, escape_dquoted(a.module.as_str()), escape_dquoted(a.function.as_str())); }
+            for a in export_attrs { wln!(out, "{i}@export({}, \"{}\")", a.target, escape_dquoted(a.symbol.as_str())); }
             for a in attrs { wln!(out, "{i}{}", format_attribute(a)); }
             out.push_str(&i); fmt_vis(out, visibility);
             if matches!(effect, Some(true)) { out.push_str("effect "); }
@@ -469,7 +491,7 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
         Decl::Test { name, body, where_clauses, .. } => {
             // `where` clauses are the test's data — dropping them deleted
             // the bindings the body reads (E003 after formatting).
-            w!(out, "{i}test \"{name}\"");
+            w!(out, "{i}test \"{}\"", escape_dquoted(name));
             let cases: Vec<&TestWhere> = where_clauses.iter()
                 .filter(|wc| matches!(wc, TestWhere::Case { .. })).collect();
             let binds: Vec<&TestWhere> = where_clauses.iter()
@@ -579,7 +601,7 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
 /// wire key), and silently deleting them broke round-tripped sources.
 fn fmt_field_type(out: &mut String, f: &FieldType, depth: usize) {
     w!(out, "{}", f.name);
-    if let Some(alias) = &f.alias { w!(out, " as \"{}\"", alias); }
+    if let Some(alias) = &f.alias { w!(out, " as \"{}\"", escape_dquoted(alias.as_str())); }
     out.push_str(": ");
     fmt_type(out, &f.ty, depth);
     if let Some(d) = &f.default { out.push_str(" = "); fmt_expr(out, d, depth); }
