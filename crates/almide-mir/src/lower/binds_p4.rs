@@ -758,6 +758,25 @@ impl LowerCtx {
                     self.materialize_opt_str_some(piece, repr)
                 })
             }
+            // `some(Cfg { name: "opt" })` — Some wrapping a RECORD-literal payload (the
+            // crossmod option_record_toplet global): build the record block (the same
+            // builders a `let c = Cfg{..}` uses), move it into the 1-element Option.
+            // A RECURSIVE-drop record routes "optrec:<R>" (the payload's fields freed
+            // via `$__drop_<R>`, then the blocks); a scalar-only record's flat slot-0
+            // free is exact (the Some(string) shape).
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind, IrExprKind::Record { .. })
+                    && self.aggregate_field_tys(&expr.ty).is_some() =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let piece = self
+                    .try_lower_record_construct(expr)
+                    .or_else(|| self.try_lower_scalar_record_construct(expr))?;
+                Some(match self.record_or_anon_drop_type_name(&expr.ty) {
+                    Some(rname) => self.materialize_opt_aggregate_some(piece, repr, rname),
+                    None => self.materialize_opt_str_some(piece, repr),
+                })
+            }
             // `Some((1, 2))` — an ALL-SCALAR tuple literal payload (`match x { some((a, b))
             // => a + b, … }` — the nested-some-tuple pattern shape). Build the flat tuple
             // block, move it into the 1-element Option: the payload block owns NO inner

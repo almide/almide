@@ -976,7 +976,15 @@ impl LowerCtx {
                                     // `Option[List[String]]` (the heap-acc fold value) — routed
                                     // to the nested DropListListStr set; the payload-borrow
                                     // discipline is identical.
-                                    || self.list_list_str_lists.contains(&subj)) =>
+                                    || self.list_list_str_lists.contains(&subj)
+                                    // An `Option[record]` subject (the materialized option
+                                    // toplet — its drop routes "optrec:<R>" via
+                                    // DropWrapperRec): the record payload binds as the SAME
+                                    // borrow; the option's recursive drop keeps ownership.
+                                    || self
+                                        .variant_drop_handles
+                                        .get(&subj)
+                                        .is_some_and(|d| d.starts_with("optrec:"))) =>
                         {
                             Some((*var, true, ty.clone()))
                         }

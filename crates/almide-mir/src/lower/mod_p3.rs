@@ -1581,6 +1581,25 @@ impl LowerCtx {
                         return Ok(dst);
                     }
                 }
+                // An OPTION-ctor heap global (`let MAYBE = some(Cfg { name: "opt" })` —
+                // the crossmod option_record_toplet): a call-free `some(...)`/`none`
+                // initializer builds through the SAME ctor builder a local `let o =
+                // some(..)` uses (allocs + stores only, zero `CallFn` — the count gate
+                // stays exact), which registers the Option's own drop route. Tracked in
+                // `materialized_options` so a `match m.MAYBE { some(c) => … }` over the
+                // fresh copy EXECUTES (reads the real len-as-tag).
+                if matches!(init.kind, IrExprKind::OptionSome { .. } | IrExprKind::OptionNone)
+                    && !crate::lower::expr_contains_call(&init)
+                {
+                    if let Some(dst) = self.try_lower_option_ctor(&init, &ty) {
+                        if !self.live_heap_handles.contains(&dst) {
+                            self.live_heap_handles.push(dst);
+                        }
+                        self.materialized_options.insert(dst);
+                        self.value_of.insert(var, dst);
+                        return Ok(dst);
+                    }
+                }
                 // A LIST-OF-RECORDS heap global (`let CFGS = [Cfg { name: "a" }, Cfg { name:
                 // "b" }]` — cross_module_toplet_byvalue's #486 list-of-records shape): a
                 // call-free `List` initializer whose elements are all record ctors builds
