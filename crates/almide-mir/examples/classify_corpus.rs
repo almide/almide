@@ -1125,7 +1125,7 @@ fn classify_file(
     // init_order shapes), the cross-module NAME bridge OVERRIDES a colliding module-raw
     // key (the byvalue shapes), and main's own top-lets (re-inserted last) win where the
     // name bridge would misfire — composition order: module union → bridge → main.
-    almide_mir::lower::bridge_cross_module_toplets(&ir, &mut globals, &mut global_inits);
+    almide_mir::lower::bridge_cross_module_toplets(&ir, &mut globals, &mut global_inits, &mut std::collections::HashMap::new());
     for tl in &ir.top_lets {
         globals.insert(tl.var, tl.ty.clone());
         global_inits.insert(tl.var, tl.value.clone());

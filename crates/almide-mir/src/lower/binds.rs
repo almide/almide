@@ -279,7 +279,15 @@ impl LowerCtx {
             }
             sub.value_of.insert(*v, val);
         }
-        let ret = sub.lower_body_into(body).ok()?;
+        let ret = match sub.lower_body_into(body) {
+            Ok(r) => r,
+            Err(e) => {
+                if std::env::var("ALMIDE_DBG_ANF").is_ok() {
+                    eprintln!("[lift] body lower failed for {name}: {e:?}");
+                }
+                return None;
+            }
+        };
         let mut nested = std::mem::take(&mut sub.lifted);
         // A lifted lambda is pure-by-default (declared ∅): an effectful one is NOT silently
         // accepted — its own caps witness (Stdout used ⊄ ∅ declared) faults the subset

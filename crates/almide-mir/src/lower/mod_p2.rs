@@ -1702,13 +1702,15 @@ pub(crate) fn is_opt_list_str_ty(ty: &Ty) -> bool {
 /// OOMs). Checked BEFORE `is_heap_elem_list_ty` (which also matches this List type).
 pub(crate) fn is_list_str_str_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
-    // BOTH pair sides must be single FLAT blocks — a String or a List[scalar] row
-    // (list.zip_rc over matrix rows) — so DropListStrStr's two per-slot rc_decs are each
+    // BOTH pair sides must be single FLAT blocks — a String, a List[scalar] row
+    // (list.zip_rc over matrix rows), or an all-scalar TUPLE (map.entries over the
+    // hval-tuple flavor, C-039) — so DropListStrStr's two per-slot rc_decs are each
     // a FULL free. A rich payload (List[heap], record, Value) stays out (would leak).
     let flat = |t: &Ty| {
         matches!(t, Ty::String)
             || matches!(t, Ty::Applied(TypeConstructorId::List, b)
                 if b.len() == 1 && !is_heap_ty(&b[0]))
+            || matches!(t, Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c)))
     };
     matches!(ty,
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
@@ -1731,10 +1733,16 @@ pub fn is_map_ivh_ty(ty: &Ty) -> bool {
 /// map_hval; a flat value block's rc_dec is its full free).
 pub fn is_map_hval_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
+    // A FLAT heap value: a List[scalar] row OR an all-scalar tuple (`map.map(mi,
+    // (v) => (v, v*v))` — C-039). Either way `$__drop_map_hval`'s rc_dec of all
+    // 2n slots is the exact free (both value classes are single flat blocks).
     matches!(ty,
         Ty::Applied(TypeConstructorId::Map, a)
-            if a.len() == 2 && matches!(a[0], Ty::String) && matches!(&a[1],
-                Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && !is_heap_ty(&e[0])))
+            if a.len() == 2 && matches!(a[0], Ty::String)
+                && (matches!(&a[1],
+                        Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && !is_heap_ty(&e[0]))
+                    || matches!(&a[1],
+                        Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c)))))
 }
 
 /// `Map[String, Map[String, String]]` — the msv family (String keys, MAP values;

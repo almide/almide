@@ -724,6 +724,9 @@ fn render_op(
                     format!("(i64.extend_i32_u (call $elem_addr_chk {} {}))", w(0), w(1))
                 }
                 PrimKind::Die => format!("(call $__die {})", w(0)),
+                // proc_exit(code): the i64 user code wraps to the WASI i32. Never
+                // returns — nothing follows on this path at runtime.
+                PrimKind::ProcExit => format!("(call $proc_exit {})", w(0)),
                 PrimKind::FdWrite => {
                     format!("(i64.extend_i32_u (call $fd_write {} {} {} {}))", w(0), w(1), w(2), w(3))
                 }

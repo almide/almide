@@ -18,6 +18,17 @@
 # The composite key is file::routine (two routines share the bare names compile_cmp /
 # compile_helpers across files, so the bare name alone is not unique).
 set -uo pipefail
+
+# #782: the v0 wasm emitter (crates/almide-codegen/src/emit_wasm/) is RETIRED —
+# there are no hand-written wasm runtime routines left to pair against the
+# native oracle. The v1 trust-spine's stdlib self-hosts are differential-gated
+# by spec/wasm_cross (the cross-target byte gate) and the interp 3-way oracle
+# instead. This gate is kept as a tombstone so CI/lefthook wiring stays intact;
+# it re-arms automatically if emit_wasm/ ever reappears.
+if [ ! -d "crates/almide-codegen/src/emit_wasm" ]; then
+  echo "rt-oracle-registry: RETIRED with the v0 wasm emitter (#782) — v1 self-hosts are gated by spec/wasm_cross + the interp oracle."
+  exit 0
+fi
 cd "$(dirname "$0")/.." || { echo "::error::cannot cd to repo root"; exit 2; }
 
 EMIT_DIR="crates/almide-codegen/src/emit_wasm"

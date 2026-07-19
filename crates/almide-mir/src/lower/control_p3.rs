@@ -62,6 +62,11 @@ impl LowerCtx {
                         && !self.materialized_options.contains(&v)
                 })
                 .unwrap_or(false),
+            // A Result-typed FIELD/TUPLE-SLOT (`h.r ?? -1` / `t.0 ?? -1` — C-068):
+            // the borrowed block reads its tag INVERSELY like any Result.
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
+                is_result_ty(&expr.ty)
+            }
             // A USER function returning Result — read its tag INVERSELY (Ok = tag 0).
             _ if is_named_variant_call => is_result_ty(&expr.ty),
             _ => is_self_host_result_call(expr),
@@ -92,22 +97,33 @@ impl LowerCtx {
                 }
                 _ => return None,
             }
-        } else if let IrExprKind::Member { object, field } = &expr.kind {
+        } else if let IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } = &expr.kind {
             // `r.opt ?? d` — an `Option[scalar/String]` FIELD of a materialized record: BORROW the
             // field's Option block handle (`LoadHandle` at the field offset; the record keeps
             // ownership, the `??` only READS the tag + scalar/String payload — no transfer, no drop).
             // Gated to a scalar/String Option leaf so the scalar-payload / `option.unwrap_or_str` read
             // below is over a real 0-or-1 block. Exposed by derived-Codec Option decode (the
             // codec_float_int `r.opt ?? -1.0` consumer): without it the `??` fell to a silent Const-0.
+            // A `Result[scalar, _]` field/tuple-slot (`h.r ?? -1` / `t.0 ?? -1` — the
+            // C-068 autotry construction class) is the SAME len-as-tag block, read
+            // INVERSELY via `is_result` above.
             let leaf_ok = matches!(&expr.ty,
                 Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
-                    if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Float | Ty::Bool | Ty::String));
+                    if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Float | Ty::Bool | Ty::String))
+                || matches!(&expr.ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                        if a.len() == 2 && matches!(a[0], Ty::Int | Ty::Float | Ty::Bool));
             if !leaf_ok {
                 return None;
             }
-            let offset = match self.aggregate_field_offset_any(&object.ty, field.as_str()) {
-                Some(o) => o,
-                None => return None,
+            let (object, offset) = match &expr.kind {
+                IrExprKind::Member { object, field } => {
+                    (object, self.aggregate_field_offset_any(&object.ty, field.as_str())?)
+                }
+                IrExprKind::TupleIndex { object, index } => {
+                    (object, self.aggregate_index_offset_any(&object.ty, *index)?)
+                }
+                _ => unreachable!(),
             };
             let ch = match self.resolve_aggregate_container_handle(object) {
                 Some(c) => c,
@@ -478,6 +494,13 @@ impl LowerCtx {
                 if self.custom_variant_type_name(&subject.ty).is_some() =>
             {
                 self.try_lower_custom_variant_match(subject, arms, &t.ty)
+            }
+            // A TUPLE-of-bound-vars subject (the frontend's factored form of a
+            // multi-arm nested-ctor match — C-070): per-element refinement chain.
+            IrExprKind::Match { subject, arms }
+                if matches!(subject.kind, IrExprKind::Tuple { .. }) =>
+            {
+                self.try_lower_tuple_refinement_match(subject, arms, &t.ty)
             }
             IrExprKind::Match { subject, arms } if is_variant_ty(&subject.ty) => {
                 self.try_lower_variant_value_match(subject, arms, &t.ty)

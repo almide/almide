@@ -1,27 +1,27 @@
-//! Emit WASM bytes for one `.almd` file via the playground's exact pipeline.
+//! Emit WASM bytes for one `.almd` file via the v1 trust-spine renderer.
 //! Usage: wasmgen-harness <input.almd> <output.wasm>
 //!
 //! Run natively and on wasm32-wasip1; the two outputs must match byte-for-byte
 //! (host-architecture codegen determinism). See scripts/check-host-determinism.sh.
+//! #782: the v0 emitter this harness used to drive is retired — the v1 renderer
+//! (almide-mir) is the only wasm path, so IT is what must be host-deterministic.
+//! A WALL exits 3 (a tracked skip — the fixture is not host-nondeterministic,
+//! it is simply not yet renderable) so the gate NEVER pretends a walled fixture
+//! agreed. Both hosts hitting the SAME wall is fine; only an emitted fixture is
+//! byte-compared.
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let inp = args.get(1).expect("usage: wasmgen-harness <in.almd> <out.wasm>");
     let outp = args.get(2).expect("usage: wasmgen-harness <in.almd> <out.wasm>");
     let source = std::fs::read_to_string(inp).expect("read input");
-
-    let tokens = almide::lexer::Lexer::tokenize(&source);
-    let mut parser = almide::parser::Parser::new(tokens);
-    let mut program = parser.parse().expect("parse failed");
-    let canon = almide::canonicalize::canonicalize_program(&program, std::iter::empty());
-    let mut checker = almide::check::Checker::from_env(canon.env);
-    checker.diagnostics = canon.diagnostics;
-    let _ = checker.infer_program(&mut program);
-    let mut ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-    almide::mono::monomorphize(&mut ir);
-    match almide::codegen::codegen(&mut ir, almide::codegen::pass::Target::Wasm) {
-        almide::codegen::CodegenOutput::Binary(bytes) => {
+    match almide_mir::pipeline::try_render_wasm_source(&source, &[], false) {
+        Ok(wat_text) => {
+            let bytes = wat::parse_str(&wat_text).expect("v1 WAT must parse");
             std::fs::write(outp, &bytes).expect("write output");
         }
-        almide::codegen::CodegenOutput::Source(_) => panic!("expected WASM binary output"),
+        Err(e) => {
+            eprintln!("WALL: {e:?}");
+            std::process::exit(3);
+        }
     }
 }

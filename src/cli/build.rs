@@ -283,11 +283,9 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // v1 `--verified`: capture the FRESH (un-inferred) cross-module siblings now, before the loop
     // below mutates them in place — the v1 pipeline re-runs its own canonicalize/infer/lower from
     // raw programs (exactly the render_program example's `discover_self_modules` input).
-    let v1_self_modules: Vec<(String, almide_lang::ast::Program, bool)> = if verified {
-        resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect()
-    } else {
-        Vec::new()
-    };
+    // #782: always collected — the v1 renderer is the only wasm path.
+    let v1_self_modules: Vec<(String, almide_lang::ast::Program, bool)> =
+        resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect();
 
     // Type check
     let canon = canonicalize::canonicalize_program(
@@ -389,39 +387,44 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // identical to v0 where it lowers and WALLS (`Err`) otherwise — on a wall we fall through to
     // v0 codegen below. Honest-wall: a v1 module is never wrong; a walled program builds via v0
     // exactly as without `--verified`.
-    if verified {
-        match almide_mir::pipeline::try_render_wasm_source(&source_text, &v1_self_modules, false) {
-            Ok(wat) => {
-                if let Ok(bytes) = wat::parse_str(&wat) {
-                    if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-                        eprintln!(
-                            "[almide] --verified: v1 trust-spine emitted the module ({} bytes)",
-                            bytes.len()
-                        );
-                    }
-                    return Ok((bytes, true));
+    // #782: the v0 wasm emitter is RETIRED — the v1 PCC-verified trust-spine
+    // renderer is the ONLY wasm path. A v1 wall is an honest, diagnosed hard
+    // error, never a silent fallback into unverified codegen: a program that
+    // compiles is verified, a program the renderer cannot verify is refused
+    // with the wall reason (refusal over risk — the medical-grade bar).
+    let _ = (&mut ir_program, allow_unverified, verified);
+    match almide_mir::pipeline::try_render_wasm_source(
+        &source_text,
+        &v1_self_modules,
+        std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok(),
+    ) {
+        Ok(wat) => match wat::parse_str(&wat) {
+            Ok(bytes) => {
+                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+                    eprintln!(
+                        "[almide] v1 trust-spine emitted the module ({} bytes)",
+                        bytes.len()
+                    );
                 }
+                Ok((bytes, true))
             }
             Err(e) => {
-                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-                    // Name WHICH wall fired — the burn-down (and any user staring at a
-                    // fallback) needs the reason, exactly like the native leg's message.
-                    eprintln!("[almide] --verified: v1 walled ({e:?}) — falling back to v0 codegen");
-                }
+                eprintln!("error: the v1 renderer produced unparsable WAT — this is an Almide bug: {e}");
+                Err(())
             }
+        },
+        Err(e) => {
+            eprintln!(
+                "error: this program shape is not yet supported by the verified wasm renderer\n  \
+                 wall: {e:?}\n  \
+                 The unverified v0 wasm emitter was retired (#782): a wall is now an honest\n  \
+                 error instead of a silent fallback. Please file an issue with the wall reason\n  \
+                 above and the source shape that triggered it:\n  \
+                 https://github.com/almide/almide/issues"
+            );
+            Err(())
         }
     }
-
-    // Codegen (nanopass pipeline + WASM binary emit). The Perceus RC gate
-    // (`Verified::verify`) runs inside this path; `allow_unverified` selects
-    // hard-error (default) vs the `--emit-unverified` waiver. It does not change
-    // emitted bytes, so the build/run cross-target byte-identity still holds.
-    let opts = almide::codegen::CodegenOptions { repr_c: false, allow_unverified };
-    let bytes = match almide::codegen::codegen_with(&mut ir_program, almide::codegen::pass::Target::Wasm, &opts) {
-        almide::codegen::CodegenOutput::Binary(b) => b,
-        almide::codegen::CodegenOutput::Source(_) => unreachable!(),
-    };
-    Ok((bytes, false))
 }
 
 /// Run `wasm-opt -O3 --enable-simd` on the output file, in-place.

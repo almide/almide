@@ -228,6 +228,11 @@ impl LowerCtx {
                 if let Some(dst) = self.try_lower_custom_variant_match(subject, arms, &expr.ty) {
                     return Some(dst);
                 }
+                // A TUPLE-of-bound-vars subject (the frontend's factored form of a
+                // multi-arm nested-ctor match — C-070): per-element refinement chain.
+                if let Some(dst) = self.try_lower_tuple_refinement_match(subject, arms, &expr.ty) {
+                    return Some(dst);
+                }
                 // A VARIANT (Option/Result) subject — execute via the tag-read value-match
                 // (ctor patterns are not `subj == lit`, so `desugar_match_to_if` can't reach
                 // them; the result would stay an unset 0 = a silent miscompile).
@@ -1150,7 +1155,12 @@ impl LowerCtx {
             // (crate::coown_names) grounded in proofs/CoownLoop.v + CoownCompose.v — see that module.
             "rc_dec" | "rc_inc"
                 if crate::coown_names::is_coown_rc_routine(self.fn_name.as_str())
-                    || self.fn_name.starts_with("__drop_") =>
+                    || self.fn_name.starts_with("__drop_")
+                    // `__krec_uniqfill_<R>` — the GENERATED list.unique fill over a
+                    // String-field-record element (C-015): rc_inc each KEPT element
+                    // into the result (the __uh_acquire pattern, per-type generated
+                    // like __drop_*; drop_sources.rs is the single emitter).
+                    || self.fn_name.starts_with("__krec_uniqfill_") =>
             {
                 // `__drop_*` also covers the GENERATED per-type custom-variant recursive drops
                 // (`__drop_Expr`, ADT brick 5b) — the same trusted prim-only free routine.
@@ -1243,7 +1253,7 @@ impl LowerCtx {
             })?;
             lowered.push(v);
         }
-        let dst = if matches!(kind, PrimKind::Store { .. } | PrimKind::RcDec | PrimKind::RcInc | PrimKind::Die) {
+        let dst = if matches!(kind, PrimKind::Store { .. } | PrimKind::RcDec | PrimKind::RcInc | PrimKind::Die | PrimKind::ProcExit) {
             None
         } else {
             Some(self.fresh_value())

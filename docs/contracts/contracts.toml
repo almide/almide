@@ -71,7 +71,6 @@ evidence  = [
   { path = "spec/wasm_cross/int_div_by_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_mod_by_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_div_by_zero_literal.almd", class = "fixture" },
-  { path = "crates/almide-codegen/rt-oracle-registry.toml", name = "compile_div_trap", class = "doc-only" },
 ]
 
 [[contract]]
@@ -179,7 +178,6 @@ doc       = "C-008-009-010-repr.md"
 evidence  = [
   { path = "spec/wasm_cross/compound_repr_records_interp.almd", class = "fixture" },
   { path = "spec/wasm_cross/compound_repr_recursive_interp.almd", class = "fixture" },
-  { path = "crates/almide-codegen/rt-oracle-registry.toml", name = "compile_repr_funcs", class = "doc-only" },
 ]
 
 [[contract]]
@@ -293,10 +291,6 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_predicates.almd", class = "fixture" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs", name = "alphabetic_table_matches_char_method", class = "exhaustive" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs", name = "alphanumeric_table_matches_char_method", class = "exhaustive" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs", name = "uppercase_table_matches_char_method", class = "exhaustive" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs", name = "lowercase_table_matches_char_method", class = "exhaustive" },
 ]
 
 [[contract]]
@@ -320,8 +314,6 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_case_unicode.almd", class = "fixture" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs", name = "tables_reproduce_char_methods", class = "exhaustive" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs", name = "final_sigma_via_serialized_sets", class = "exhaustive" },
 ]
 
 [[contract]]
@@ -344,7 +336,6 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_from_bytes.almd", class = "fixture" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_string.rs", name = "derived_classification_matches_from_utf8_lossy", class = "fuzz", n = 300000 },
 ]
 
 # ── FLOAT FORMATTING / PARSING (Dragon4 / dec2flt) ──────────────────

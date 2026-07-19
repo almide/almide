@@ -917,6 +917,108 @@ impl LowerCtx {
         arg_tys.first().is_some_and(probe) || probe(result_ty)
     }
 
+    /// The C-015 STRING-FIELD-record key/element intercept: `Map[P, <scalar|String>]`
+    /// / `Set[P]` / `list.unique(List[P])` where P is a declared record of String +
+    /// Int/Bool fields (≥1 String — the all-scalar case is the `_srec` family's) —
+    /// routed to the GENERATED `__krec_*` twins (drop_sources.rs): the key normalizes
+    /// INJECTIVELY into a String (length-prefixed content), and the backing container
+    /// is the proven `_str`/`_skv` family. Lookup/build fns only — an
+    /// iteration-returning fn would surface the normalized strings and keeps its wall.
+    pub(crate) fn krec_call_name(
+        &self,
+        module: &str,
+        func: &str,
+        arg_tys: &[Ty],
+        result_ty: &Ty,
+    ) -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let strrec = |t: &Ty| -> Option<String> {
+            let Ty::Named(n, _) = t else { return None };
+            if self.custom_variant_type_name(t).is_some() {
+                return None;
+            }
+            let (_, tys) = self.aggregate_field_tys(t)?;
+            (!tys.is_empty()
+                && tys.iter().all(|f| matches!(f, Ty::Int | Ty::Bool | Ty::String))
+                && tys.iter().any(|f| matches!(f, Ty::String)))
+            .then(|| n.as_str().to_string())
+        };
+        match module {
+            "map" => {
+                let probe = |t: &Ty| -> Option<(String, Ty)> {
+                    let Ty::Applied(TypeConstructorId::Map, a) = t else { return None };
+                    if a.len() != 2 {
+                        return None;
+                    }
+                    Some((strrec(&a[0])?, a[1].clone()))
+                };
+                let (rname, vty) =
+                    arg_tys.first().and_then(&probe).or_else(|| probe(result_ty))?;
+                let vclass = match vty {
+                    Ty::Int | Ty::Bool => "iv",
+                    Ty::String => "sv",
+                    _ => return None,
+                };
+                match func {
+                    "from_list" | "set" | "get" | "contains" => {
+                        Some(format!("__krec_map_{func}_{rname}_{vclass}"))
+                    }
+                    // len reads the BACKING flavor's header directly.
+                    "len" => Some(if vclass == "iv" {
+                        "map.len_skv".to_string()
+                    } else {
+                        "map.len_str".to_string()
+                    }),
+                    _ => None,
+                }
+            }
+            "set" => {
+                let probe = |t: &Ty| -> Option<String> {
+                    let Ty::Applied(TypeConstructorId::Set, a) = t else { return None };
+                    if a.len() != 1 {
+                        return None;
+                    }
+                    strrec(&a[0])
+                };
+                let rname = arg_tys.first().and_then(&probe).or_else(|| probe(result_ty))?;
+                match func {
+                    "from_list" | "contains" | "insert" => {
+                        Some(format!("__krec_set_{func}_{rname}"))
+                    }
+                    _ => None,
+                }
+            }
+            "list" if func == "unique" => {
+                let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() else {
+                    return None;
+                };
+                if a.len() != 1 {
+                    return None;
+                }
+                // An UNANNOTATED record literal keeps its STRUCTURAL type (the r5
+                // lesson) — its block lays fields in SOURCE order, so the norm is
+                // generated against the structural shape, keyed by the anon hash.
+                if let Ty::Record { fields } = &a[0] {
+                    if !fields.is_empty()
+                        && fields
+                            .iter()
+                            .all(|(_, t)| matches!(t, Ty::Int | Ty::Bool | Ty::String))
+                        && fields.iter().any(|(_, t)| matches!(t, Ty::String))
+                    {
+                        return Some(format!(
+                            "__krec_list_unique_{}",
+                            crate::lower::anon_record_drop_name(fields)
+                        ));
+                    }
+                    return None;
+                }
+                let rname = strrec(&a[0])?;
+                Some(format!("__krec_list_unique_{rname}"))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn custom_variant_type_name(&self, ty: &Ty) -> Option<String> {
         use almide_lang::types::constructor::TypeConstructorId;
         let name = match ty {
@@ -1403,6 +1505,317 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// Is `pat` structurally valid for the NESTED-refinement chain over variant
+    /// `tyname` — every ctor resolves in the layout with matching arity, every
+    /// nested arg a wildcard / Int-Bool literal (over a scalar field) / a ctor
+    /// over a variant-typed field (recursively)? A Bind or any other shape → false
+    /// (the chain has no arm-scope payload binds).
+    fn nested_refinement_pat_valid(&self, pat: &IrPattern, tyname: &str) -> bool {
+        let IrPattern::Constructor { name, args } = pat else { return false };
+        let Some(layout) = self.variant_layouts.by_type.get(tyname) else { return false };
+        let Some(case) = layout.cases.iter().find(|c| c.ctor.as_str() == name.as_str()) else {
+            return false;
+        };
+        if args.len() != case.fields.len() && !args.is_empty() {
+            return false;
+        }
+        args.iter().zip(case.fields.iter()).all(|(a, (_, fty))| match a {
+            IrPattern::Wildcard => true,
+            IrPattern::Literal { expr } => {
+                !is_heap_ty(fty)
+                    && matches!(expr.kind, IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. })
+            }
+            IrPattern::Constructor { .. } => self
+                .custom_variant_type_name(fty)
+                .is_some_and(|inner| self.nested_refinement_pat_valid(a, &inner)),
+            _ => false,
+        })
+    }
+
+    /// Emit the SHORT-CIRCUIT refinement condition for `pat` over the (borrowed)
+    /// variant block `block` of type `tyname`: outer tag equality, and — ONLY when
+    /// it holds (a FLAT-MARKER if, so an out-of-case slot is never dereferenced) —
+    /// the conjunction (0/1 multiply) of every nested tag/literal refinement.
+    /// All reads are borrows (Handle/Load/LoadHandle — no ownership event).
+    /// Caller guarantees [`Self::nested_refinement_pat_valid`].
+    fn nested_refinement_cond(
+        &mut self,
+        block: ValueId,
+        pat: &IrPattern,
+        tyname: &str,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        let IrPattern::Constructor { name, args } = pat else { return None };
+        let layout = self.variant_layouts.by_type.get(tyname)?.clone();
+        let case = layout.cases.iter().find(|c| c.ctor.as_str() == name.as_str())?.clone();
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![block] });
+        let tagv = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+        let want = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: want, value: case.tag as i64 });
+        let eq = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: eq, op: IntOp::Eq, a: tagv, b: want });
+        let refut: Vec<(usize, &IrPattern)> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| matches!(a, IrPattern::Constructor { .. } | IrPattern::Literal { .. }))
+            .collect();
+        if refut.is_empty() {
+            return Some(eq);
+        }
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: eq, dst: Some(dst) });
+        let mut conj: Option<ValueId> = None;
+        for (i, sub) in refut {
+            let off = (12 + 8 * (i + 1)) as i64;
+            let ci = match sub {
+                IrPattern::Literal { expr } => {
+                    let fv = self.load_at_offset(h, off, PrimKind::Load { width: 8 });
+                    let lit = self.fresh_value();
+                    let value = match &expr.kind {
+                        IrExprKind::LitInt { value } => *value,
+                        IrExprKind::LitBool { value } => *value as i64,
+                        _ => return None,
+                    };
+                    self.ops.push(Op::ConstInt { dst: lit, value });
+                    let c = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: c, op: IntOp::Eq, a: fv, b: lit });
+                    c
+                }
+                IrPattern::Constructor { .. } => {
+                    let fblock = self.load_at_offset(h, off, PrimKind::LoadHandle);
+                    let inner = self.custom_variant_type_name(&case.fields[i].1)?;
+                    self.nested_refinement_cond(fblock, sub, &inner)?
+                }
+                _ => unreachable!("filtered above"),
+            };
+            conj = Some(match conj {
+                None => ci,
+                Some(prev) => {
+                    let c = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: c, op: IntOp::Mul, a: prev, b: ci });
+                    c
+                }
+            });
+        }
+        self.ops.push(Op::Else { val: Some(conj?) });
+        let zero = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+        self.ops.push(Op::EndIf { val: Some(zero) });
+        Some(dst)
+    }
+
+    /// The ordered arm chain of the nested-refinement match: `if cond1 then body1
+    /// else if cond2 then body2 … else <irrefutable body>` over the flat markers.
+    fn nested_refinement_chain(
+        &mut self,
+        subj: ValueId,
+        arms: &[IrMatchArm],
+        tyname: &str,
+    ) -> Option<ValueId> {
+        let arm = arms.first()?;
+        if matches!(arm.pattern, IrPattern::Wildcard) {
+            return self.lower_scalar_arm(&arm.body);
+        }
+        let cond = self.nested_refinement_cond(subj, &arm.pattern, tyname)?;
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond, dst: Some(dst) });
+        let then_v = self.lower_scalar_arm(&arm.body)?;
+        self.ops.push(Op::Else { val: Some(then_v) });
+        let rest_v = self.nested_refinement_chain(subj, &arms[1..], tyname)?;
+        self.ops.push(Op::EndIf { val: Some(rest_v) });
+        Some(dst)
+    }
+
+    /// EXECUTE a `match` over a custom variant with NESTED refutable constructor
+    /// patterns (`Node(Red, Node(_, _, 5, _), _, _)` — the C-070 boxed-refinement
+    /// class) as an ORDERED refinement chain: each arm's condition is the outer tag
+    /// equality plus every inner tag/literal constraint, evaluated SHORT-CIRCUIT
+    /// (inner slots read only under their ctor's matching tag — no out-of-case
+    /// dereference), then dispatched first-match-wins via the flat-marker if chain.
+    /// ADMITTED: ctor/wildcard/Int-Bool-literal args (a BINDER would need arm-scope
+    /// payload binds — declined), a SCALAR result, no guards, a trailing wildcard,
+    /// and a Var subject that is a real block (param / materialized). Every payload
+    /// read is a BORROW; the whole attempt rolls back on any miss.
+    fn try_lower_nested_refinement_match(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        if is_heap_ty(result_ty) {
+            return None;
+        }
+        let type_name = self.custom_variant_type_name(&subject.ty)?;
+        // Only fire when some arm actually NESTS a refutable arg — the flat
+        // tag-switch machinery owns every other shape.
+        let has_nested = |p: &IrPattern| {
+            matches!(p, IrPattern::Constructor { args, .. }
+                if args.iter().any(|a| matches!(a,
+                    IrPattern::Constructor { .. } | IrPattern::Literal { .. })))
+        };
+        if !arms.iter().any(|a| has_nested(&a.pattern)) {
+            return None;
+        }
+        if !matches!(arms.last()?.pattern, IrPattern::Wildcard) {
+            return None;
+        }
+        if !arms[..arms.len() - 1]
+            .iter()
+            .all(|a| self.nested_refinement_pat_valid(&a.pattern, &type_name))
+        {
+            return None;
+        }
+        // The subject must be a REAL block: a borrowed variant param or a locally
+        // materialized value (a deferred Opaque's tag read would be garbage).
+        let IrExprKind::Var { id } = &subject.kind else { return None };
+        let subj = self.value_for(*id).ok()?;
+        if !self.param_values.contains(&subj) && !self.materialized_aggregates.contains(&subj) {
+            return None;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        match self.nested_refinement_chain(subj, arms, &type_name) {
+            Some(dst) => Some(dst),
+            None => {
+                if std::env::var("ALMIDE_DBG_NESTED_MATCH").is_ok() {
+                    eprintln!("[nested-match] chain declined for {}", self.fn_name);
+                }
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                None
+            }
+        }
+    }
+
+    /// EXECUTE a `match (a, b, …) { (P1, P2, …) => …, _ => … }` over a TUPLE of
+    /// BOUND VARS — the frontend's factored form of a multi-arm nested-ctor match
+    /// (`match t { Node(Red, Node(...), _, _) => …, Node(...) => …, … }` desugars
+    /// to ONE outer `Node(a,b,c,d)` arm whose body re-matches `(a,b,c,d)` — the
+    /// C-070 class). Each arm's condition is the CONJUNCTION of per-element
+    /// refinements (a variant element via [`Self::nested_refinement_cond`], a
+    /// scalar element via literal equality; wildcards free), dispatched
+    /// first-match-wins on the flat-marker chain. Scalar result, no guards, a
+    /// trailing wildcard, all elements plain Vars.
+    pub(crate) fn try_lower_tuple_refinement_match(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let dbg = std::env::var("ALMIDE_DBG_NESTED_MATCH").is_ok();
+        if dbg {
+            eprintln!("[tuple-match] entry: subj={:?} arms={}", std::mem::discriminant(&subject.kind), arms.len());
+        }
+        if is_heap_ty(result_ty) || arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
+            return None;
+        }
+        let IrExprKind::Tuple { elements } = &subject.kind else { return None };
+        if !matches!(arms.last()?.pattern, IrPattern::Wildcard) {
+            if dbg {
+                eprintln!("[tuple-match] last arm not wildcard");
+            }
+            return None;
+        }
+        // Elements: plain Vars, each a variant (block) or scalar.
+        let mut elems: Vec<(ValueId, Ty)> = Vec::with_capacity(elements.len());
+        for e in elements {
+            let IrExprKind::Var { id } = &e.kind else { return None };
+            let v = self.value_for(*id).ok()?;
+            elems.push((v, e.ty.clone()));
+        }
+        // Validate every refutable arm up front (no mid-emission decline).
+        for a in &arms[..arms.len() - 1] {
+            let IrPattern::Tuple { elements: pats } = &a.pattern else { return None };
+            if pats.len() != elems.len() {
+                return None;
+            }
+            for (p, (_, ty)) in pats.iter().zip(elems.iter()) {
+                let ok = match p {
+                    IrPattern::Wildcard => true,
+                    IrPattern::Literal { expr } => {
+                        !is_heap_ty(ty)
+                            && matches!(
+                                expr.kind,
+                                IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. }
+                            )
+                    }
+                    IrPattern::Constructor { .. } => self
+                        .custom_variant_type_name(ty)
+                        .is_some_and(|n| self.nested_refinement_pat_valid(p, &n)),
+                    _ => false,
+                };
+                if !ok {
+                    return None;
+                }
+            }
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        match self.tuple_refinement_chain(&elems, arms) {
+            Some(dst) => Some(dst),
+            None => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                None
+            }
+        }
+    }
+
+    fn tuple_refinement_chain(
+        &mut self,
+        elems: &[(ValueId, Ty)],
+        arms: &[IrMatchArm],
+    ) -> Option<ValueId> {
+        let arm = arms.first()?;
+        if matches!(arm.pattern, IrPattern::Wildcard) {
+            return self.lower_scalar_arm(&arm.body);
+        }
+        let IrPattern::Tuple { elements: pats } = &arm.pattern else { return None };
+        let mut conj: Option<ValueId> = None;
+        for (p, (v, ty)) in pats.iter().zip(elems.iter()) {
+            let ci = match p {
+                IrPattern::Wildcard => continue,
+                IrPattern::Literal { expr } => {
+                    let lit = self.fresh_value();
+                    let value = match &expr.kind {
+                        IrExprKind::LitInt { value } => *value,
+                        IrExprKind::LitBool { value } => *value as i64,
+                        _ => return None,
+                    };
+                    self.ops.push(Op::ConstInt { dst: lit, value });
+                    let c = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: c, op: IntOp::Eq, a: *v, b: lit });
+                    c
+                }
+                IrPattern::Constructor { .. } => {
+                    let vname = self.custom_variant_type_name(ty)?;
+                    self.nested_refinement_cond(*v, p, &vname)?
+                }
+                _ => return None,
+            };
+            conj = Some(match conj {
+                None => ci,
+                Some(prev) => {
+                    let c = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: c, op: IntOp::Mul, a: prev, b: ci });
+                    c
+                }
+            });
+        }
+        // An all-wildcard tuple arm is irrefutable — its body IS the rest.
+        let Some(cond) = conj else {
+            return self.lower_scalar_arm(&arm.body);
+        };
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond, dst: Some(dst) });
+        let then_v = self.lower_scalar_arm(&arm.body)?;
+        self.ops.push(Op::Else { val: Some(then_v) });
+        let rest_v = self.tuple_refinement_chain(elems, &arms[1..])?;
+        self.ops.push(Op::EndIf { val: Some(rest_v) });
+        Some(dst)
+    }
+
     pub(crate) fn try_lower_custom_variant_match(
         &mut self,
         subject: &IrExpr,
@@ -1412,6 +1825,11 @@ impl LowerCtx {
         use crate::PrimKind;
         if arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
             return None;
+        }
+        // C-070: nested refutable ctor/literal patterns — the ordered refinement
+        // chain (declines untouched shapes; the tag-switch below owns the rest).
+        if let Some(dst) = self.try_lower_nested_refinement_match(subject, arms, result_ty) {
+            return Some(dst);
         }
         // The subject must be a registered custom variant; clone its layout out of the borrow.
         let type_name = self.custom_variant_type_name(&subject.ty)?;

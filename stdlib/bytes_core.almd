@@ -915,3 +915,12 @@ fn bytes_map_each(b: Bytes, f: (Int) -> Int) -> Bytes = {
   let _x = __bme_fill(prim.handle(out) + 12, h + 12, f, n, 0)
   out
 }
+
+// bytes.heap_save / heap_restore — the C-041 arena-checkpoint CONTRACT surface.
+// v0's wasm leg saved/reset a bump pointer; v1's RC discipline reclaims scratch
+// deterministically at scope end, so — exactly like native (runtime/rs bytes.rs:
+// heap_save() = 0, heap_restore() = no-op, the allocator manages memory) — the
+// trivial implementation satisfies the observable contract: the checkpoint is
+// OPAQUE (never printed) and post-restore results are identical by construction.
+fn bytes_heap_save() -> Int = 0
+fn bytes_heap_restore(cp: Int) -> Unit = ()

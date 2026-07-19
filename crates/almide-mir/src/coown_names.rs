@@ -68,6 +68,13 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__vu_fill",          // value.pick/omit — rc_inc each kept key+value into the fresh Object
     "__vu_ren_fill_c",    // value.to_camel_case — rc_inc each value (keys are fresh owned strings)
     "__vu_ren_fill_s",    // value.to_snake_case — rc_inc each value (keys are fresh owned strings)
+    "__ordc_copy_rc",     // list.sort_{tss,tsstr,lint,oint} — rc-copy each compound element (the __sort_copy_rc shape)
+    "__ordc_some_tss",    // list.min/max_tss — rc_inc the winning element into the fresh Some (the __otl_fill_rc shape)
+    "__ordc_some_tsstr",  // list.min/max_tsstr — same share-into-Some
+    "__ordc_some_lint",   // list.min/max_lint — same share-into-Some
+    "__ordc_some_lstr",   // list.min/max_lstr — same share-into-Some
+    "__ordc_some_oint",   // list.min/max_oint — same share-into-Some
+    "__mtc_entries_hvalt_fill", // map.entries_hvalt — rc_inc key + flat tuple value into each (k, v) pair
 ];
 
 /// RECURSIVE-DROP CONSUMERS — rc_dec each element at the container's death (the `rec_drop` half of

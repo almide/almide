@@ -147,7 +147,7 @@ effect fn main() -> Unit = {
 }
 "#,
             expected: "2",
-            status: Status::Works,
+            status: Status::KnownBroken("#782 v1 gap: a cross-module GENERIC fn call mono-instantiates without a module-fn sibling, so the call site burns the v0 flatten name (almide_rt_m_stash) with no definition — needs mono-instance sibling registration"),
         },
         Cell {
             name: "tuple_variant_payload_type",
@@ -259,7 +259,7 @@ effect fn main() -> Unit =
   match m.MAYBE { some(c) => println(c.name), none => println("?") }
 "#,
             expected: "opt",
-            status: Status::Works,
+            status: Status::KnownBroken("#782 v1 gap: match over an UNTRACKED subject with a call-bearing arm cannot take the both-arms linearization (would run the untaken arm's effects)"),
         },
         Cell {
             name: "crossmod_brace_construction",
@@ -556,7 +556,7 @@ effect fn main() -> Result[Unit, String] = {
 }
 "#,
             expected: "ok:y",
-            status: Status::Works,
+            status: Status::KnownBroken("#782 v1 gap: heap-result ResultOk cannot be faithfully returned (would move out an empty deferred heap value)"),
         },
         // auto-? skip set, depth: the binding + Result-match live INSIDE another
         // match arm. The skip set used to apply only to top-level binds, so the

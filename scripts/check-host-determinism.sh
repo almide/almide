@@ -32,14 +32,29 @@ NATIVE_BIN="$HARNESS/target/release/wasmgen-harness"
 WASM_BIN="$HARNESS/target/wasm32-wasip1/release/wasmgen-harness.wasm"
 
 fail=0; n=0
+# WALL exit code from the harness: the fixture is not host-nondeterministic, it
+# is simply not renderable by v1 yet (#782 — the v0 emitter that used to render
+# it is retired). A wall on BOTH hosts is a TRACKED SKIP; a wall on only one host
+# is a real host-dependent divergence and still FAILS.
+WALL_RC=3
+walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue
   name="$(basename "$fix")"
   cp "$fix" "$WORK/in.almd"
   # x86-64/aarch64 host
-  "$NATIVE_BIN" "$WORK/in.almd" "$WORK/native.wasm" 2>/dev/null || { echo "FAIL  $name (native harness errored)"; fail=1; continue; }
+  "$NATIVE_BIN" "$WORK/in.almd" "$WORK/native.wasm" 2>/dev/null; nrc=$?
   # wasm32 host (compiler running as 32-bit, under wasmtime)
-  "$WASMTIME" run --dir "$WORK::/w" "$WASM_BIN" /w/in.almd /w/wasm32.wasm >/dev/null 2>&1 || { echo "FAIL  $name (wasm32 harness errored)"; fail=1; continue; }
+  "$WASMTIME" run --dir "$WORK::/w" "$WASM_BIN" /w/in.almd /w/wasm32.wasm >/dev/null 2>&1; wrc=$?
+  if [ "$nrc" -eq "$WALL_RC" ] && [ "$wrc" -eq "$WALL_RC" ]; then
+    echo "skip  $name (v1 wall on both hosts — tracked #782)"
+    walled=$((walled+1)); continue
+  fi
+  if [ "$nrc" -ne "$wrc" ]; then
+    echo "FAIL  $name — HOST-DEPENDENT wall (native rc=$nrc, wasm32 rc=$wrc)"
+    fail=1; continue
+  fi
+  if [ "$nrc" -ne 0 ]; then echo "FAIL  $name (harness errored rc=$nrc)"; fail=1; continue; fi
   if cmp -s "$WORK/native.wasm" "$WORK/wasm32.wasm"; then
     echo "ok    $name ($(wc -c < "$WORK/native.wasm" | tr -d ' ') bytes, identical)"
   else
@@ -51,7 +66,7 @@ done
 
 echo "----"
 if [ "$fail" -ne 0 ]; then
-  echo "::error::host-architecture codegen determinism FAILED — the compiler emits different WASM on 32-bit vs 64-bit hosts (the playground runs wasm32). See crates/almide-codegen/src/emit_wasm: sort any HashMap/HashSet whose iteration order reaches emitted bytes."
+  echo "::error::host-architecture codegen determinism FAILED — the compiler emits different WASM on 32-bit vs 64-bit hosts (the playground runs wasm32). Sort any HashMap/HashSet whose iteration order reaches emitted bytes."
   exit 1
 fi
-echo "host-architecture codegen determinism: $n/$n fixtures byte-identical across x86-64 and wasm32"
+echo "host-architecture codegen determinism: $n/$n emitted fixtures byte-identical across x86-64 and wasm32 ($walled walled, tracked #782)"

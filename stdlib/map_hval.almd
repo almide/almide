@@ -261,3 +261,22 @@ fn list_group_by(xs: List[Int], f: (Int) -> String) -> Map[String, List[Int]] = 
   let n = prim.load32(prim.handle(xs) + 4)
   __gby_step(xs, f, n, 0, map_new_hval())
 }
+
+// map.keys — each entry's key into a fresh List[String], deep-copied so the list
+// owns them independently of the map (the skv walk — hval mirrors its layout).
+fn __hvl_keys_fill(sh: Int, oh: Int, entries: Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let _c = __hvl_store_key(oh + 12 + i * 8, k)
+    __hvl_keys_fill(sh, oh, entries, i + 1)
+  }
+
+fn map_keys_hval(m: Map[String, List[Int]]) -> List[String] = {
+  let h = prim.handle(m)
+  let entries = prim.load32(h + 4)
+  let out = prim.alloc_list_str(entries)
+  let oh = prim.handle(out)
+  let _x = __hvl_keys_fill(h, oh, entries, 0)
+  out
+}

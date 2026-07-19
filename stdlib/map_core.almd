@@ -278,3 +278,22 @@ fn map_fold(m: Map[Int, Int], init: Int, f: (Int, Int, Int) -> Int) -> Int = {
   let len = prim.load32(sh + 4)
   __map_fold_loop(sh, f, len, 0, init)
 }
+
+// map.from_list — build a scalar-KV map from a pairs list via the generic map.set
+// (the map_if composition; FIRST position with LAST value = set's replace-in-place).
+// Wide scalar keys (Int64/UInt64 — map_wide_int_key) are i64 slots like Int, so the
+// one twin serves every scalar-key/scalar-value instantiation.
+fn __map_from_list_at(pairs: List[(Int, Int)], i: Int, m: Map[Int, Int]) -> Map[Int, Int] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __map_from_list_at(pairs, i + 1, map.set(m, k, v))
+    },
+    none => m,
+  }
+
+fn map_from_list(pairs: List[(Int, Int)]) -> Map[Int, Int] = {
+  let m: Map[Int, Int] = map.new()
+  __map_from_list_at(pairs, 0, m)
+}

@@ -49,6 +49,10 @@ pub fn is_flat_scalar_block_ty(ty: &Ty) -> bool {
     match ty {
         Ty::Tuple(tys) => !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t)),
         Ty::Applied(TypeConstructorId::List, b) => b.len() == 1 && !is_heap_ty(&b[0]),
+        // An `Option[<scalar>]` is the SAME flat physics: len-as-tag (0 = none)
+        // + one raw scalar slot — rc_dec is its full free and a slot-wise
+        // content compare is exact (the C-149 nested-Option class).
+        Ty::Applied(TypeConstructorId::Option, b) => b.len() == 1 && !is_heap_ty(&b[0]),
         _ => false,
     }
 }
@@ -527,6 +531,13 @@ pub fn bridge_cross_module_toplets(
     ir: &almide_ir::IrProgram,
     globals: &mut std::collections::HashMap<almide_ir::VarId, Ty>,
     global_inits: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    // #782: main-side synthesized ref VarId → module-side MUTABLE var VarId.
+    // With the v0 fallback retired, a mutable cross-module reference must LOWER
+    // instead of walling: the caller aliases the main-side id onto the module
+    // var's linear-memory slot, so reads and assigns route through the SAME
+    // storage the owning module's fns use (no const-fold hazard — the slot is
+    // real storage, not an init alias).
+    mutable_aliases: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
 ) {
     use std::collections::HashMap;
     // The main-side reference entry is SYNTHESIZED by the frontend with an UPPERCASED
@@ -546,9 +557,9 @@ pub fn bridge_cross_module_toplets(
     // and layout.ROW — the ceangal zip class) resolves per-module instead of
     // dropping as ambiguous. A bare-name fallback map keeps the pre-existing
     // behavior for refs whose module_origin the frontend left unset.
-    let mut by_name: HashMap<(String, String), Option<(Ty, &almide_ir::IrExpr, bool)>> =
+    let mut by_name: HashMap<(String, String), Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>> =
         HashMap::new();
-    let mut by_bare: HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool)>> = HashMap::new();
+    let mut by_bare: HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>> = HashMap::new();
     for m in &ir.modules {
         // In-module alias chains (`let white = _white`) leave the alias tl's ty
         // UN-INFERRED — chase to the referent so the bridge carries the REAL
@@ -599,10 +610,10 @@ pub fn bridge_cross_module_toplets(
                 v.visit_expr(e);
                 v.0
             }
-            let entry = if expr_has_var(init) {
+            let entry = if !mutable && expr_has_var(init) {
                 Option::None
             } else {
-                Some((ty.clone(), init, mutable))
+                Some((ty.clone(), init, mutable, tl.var))
             };
             by_name
                 .entry((m.name.as_str().to_string(), info.name.as_str().to_uppercase()))
@@ -636,16 +647,28 @@ pub fn bridge_cross_module_toplets(
             // the ceangal theme class) takes the MODULE side's type: the name is
             // unique (the ambiguity arm below dropped collisions), so the module
             // top-let IS the referent. A concretely-typed ref still must agree.
-            Some(Some((ty, init, mutable)))
+            Some(Some((ty, init, mutable, _mod_id)))
                 if !mutable && (*ty == info.ty || matches!(info.ty, Ty::Unknown)) =>
             {
                 globals.insert(id, ty.clone());
                 global_inits.insert(id, (*init).clone());
             }
+            // #782: a MUTABLE cross-module reference aliases onto the module
+            // var's storage slot instead of walling (the v0 fallback that used
+            // to absorb it is retired). The init is never shipped — only the
+            // slot identity — so the const-fold hazard that justified the old
+            // exclusion cannot occur.
+            Some(Some((ty, _init, true, mod_id)))
+                if *ty == info.ty || matches!(info.ty, Ty::Unknown) =>
+            {
+                mutable_aliases.insert(id, *mod_id);
+                globals.remove(&id);
+                global_inits.remove(&id);
+            }
             _ => {
-                // Unmatched or MUTABLE cross-module reference: purge any raw
-                // module-id numeric collision so the reference is honestly
-                // unbound (wall → v0 fallback), never an unrelated init.
+                // Unmatched reference: purge any raw module-id numeric collision
+                // so the reference is honestly unbound (a diagnosed wall), never
+                // an unrelated init.
                 globals.remove(&id);
                 global_inits.remove(&id);
             }
@@ -1767,6 +1790,16 @@ fn lower_function_all_impl(
     let func_body: &IrExpr = if let Some(rewritten) = desugar_matrix_binops(func_body) {
         matrix_binop_body = rewritten;
         &matrix_binop_body
+    } else {
+        func_body
+    };
+    // The C-127 piped HOF chain (`… |> option.map(λ) |> option.unwrap_or(d)`) →
+    // its source-`let` decomposed form (see `desugar_hof_chain_anf`) — same
+    // desugar-before-both slot.
+    let hof_chain_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_hof_chain_anf(func_body) {
+        hof_chain_body = rewritten;
+        &hof_chain_body
     } else {
         func_body
     };

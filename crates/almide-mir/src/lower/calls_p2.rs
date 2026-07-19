@@ -83,6 +83,14 @@ impl LowerCtx {
         let list_str_elem = matches!(&elem_ty,
             Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && matches!(a[0], Ty::String));
+        // A `List[scalar]` ELEMENT (so `value` is `List[List[Int]]` — the memory_stress
+        // `outer + [[i*100, …]]` nested-accumulator shape). The inner block is FLAT
+        // (header + i64 slots, no inner handles), so per-element `rc_dec` IS its full
+        // free — the SAME physics as a String element: `__list_concat_rc` co-owns each
+        // inner-list handle and the scope-end `DropListStr` frees each + the outer.
+        let flat_list_elem = matches!(&elem_ty,
+            Ty::Applied(TypeConstructorId::List, a)
+                if a.len() == 1 && !is_heap_ty(&a[0]));
         // A RECORD element (`parent.children + [child]` — the svg `add_child` shape): `__list_concat_rc`
         // rc-incs each record handle (the new list co-owns each), freed recursively by the generated
         // `$__drop_list_<R>` (each element → `$__drop_<R>`). Gated to a recursive-drop record so that fn
@@ -138,9 +146,9 @@ impl LowerCtx {
         let rich_variant_elem = self.variant_layouts.is_rich_variant_ty(&elem_ty, &|rn| {
             crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
         });
-        if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && !str_str_elem
-            && !int_str_elem && !str_int_elem && !scalar_aggregate_elem && !flat_variant_elem
-            && rich_variant_elem.is_none() && record_elem.is_none()
+        if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && !flat_list_elem
+            && !str_str_elem && !int_str_elem && !str_int_elem && !scalar_aggregate_elem
+            && !flat_variant_elem && rich_variant_elem.is_none() && record_elem.is_none()
         {
             return None;
         }
@@ -215,6 +223,9 @@ impl LowerCtx {
             self.heap_elem_lists.insert(dst);
         } else if list_str_elem {
             self.list_list_str_lists.insert(dst);
+        } else if flat_list_elem {
+            // Flat inner blocks: per-slot rc_dec is each element's FULL free.
+            self.heap_elem_lists.insert(dst);
         } else if let Some(vname) = rich_variant_elem {
             // RECURSIVE per-element drop via `$__drop_list_<V>` (the generated variant list drop).
             self.variant_drop_handles.insert(dst, format!("list_{vname}"));

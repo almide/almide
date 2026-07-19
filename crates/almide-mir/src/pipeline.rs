@@ -541,6 +541,13 @@ fn try_render_wasm_source_impl(
             &generic_variant_list_insts,
             &pre_relower_variant_layouts,
         );
+    // The SHADOW decls exist only to hang `$__drop_<inst>` on — they must NOT reach the
+    // REPR generator: their synthetic ctor names (`C__Either_Int_String_0`) would render
+    // into `${…}` output (native prints the REAL `Left(…)`), and their emitted
+    // `__repr_<inst>` would collide with the instantiation-keyed repr of the same name
+    // that the interp section generates from the REAL generic decl. Snapshot the
+    // shadow-free list for the repr call below.
+    let repr_type_decls = all_type_decls.clone();
     all_type_decls.extend(generic_variant_synthetic_decls);
     let uses_result_opt_str = crate::lower::program_uses_result_option_str(&ir);
     // First-class function values need the UNIFORM closure-block release
@@ -598,11 +605,12 @@ fn try_render_wasm_source_impl(
         ""
     };
     let drops = format!(
-        "{}{}{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}{}{}",
         generic_variant_type_decl_src,
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
-        crate::lower::generate_variant_repr_sources(&all_type_decls, &crate::lower::collect_interp_anon_records(&ir), &crate::lower::collect_interp_repr_containers(&ir)),
+        crate::lower::generate_variant_repr_sources(&repr_type_decls, &crate::lower::collect_interp_anon_records(&ir), &crate::lower::collect_interp_repr_containers(&ir)),
+        crate::lower::generate_krec_sources(&ir, &all_type_decls),
         closure_drop,
         res_ilsl_drop,
         lenlist_drop,
@@ -612,12 +620,19 @@ fn try_render_wasm_source_impl(
     );
     // The generated drops free a `Value` field via value_core's INTERNAL `__drop_value` — bring
     // value_core's source into scope for the re-lower's type check; the auto-link dedups it.
-    let needs_value_core = drops.contains("__drop_value") || drops.contains("__drop_list_value");
+    let needs_value_core = drops.contains("__drop_value")
+        || drops.contains("__drop_list_value")
+        // A generated repr calls value_core's JSON serializer by its IMPL name
+        // (`value_stringify` — the `${Value}` / Value-field C-060 reprs).
+        || drops.contains("value_stringify");
     let value_core_src: &str = if needs_value_core {
         include_str!("../../../stdlib/value_core.almd")
     } else {
         ""
     };
+    if std::env::var("ALMIDE_DUMP_DROPS").is_ok() {
+        eprintln!("=== ALMIDE_DUMP_DROPS ===\n{drops}\n=== end ===");
+    }
     let mut ir = if drops.trim().is_empty() {
         ir
     } else {
@@ -648,7 +663,9 @@ fn try_render_wasm_source_impl(
     // the module-entries-win union (their region, as today).
     let mut main_globals = globals.clone();
     let mut main_global_inits = global_inits.clone();
-    crate::lower::bridge_cross_module_toplets(&ir, &mut main_globals, &mut main_global_inits);
+    let mut mutable_toplet_aliases: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId> =
+        std::collections::HashMap::new();
+    crate::lower::bridge_cross_module_toplets(&ir, &mut main_globals, &mut main_global_inits, &mut mutable_toplet_aliases);
     for tl in &ir.top_lets {
         main_globals.insert(tl.var, tl.ty.clone());
         main_global_inits.insert(tl.var, tl.value.clone());
@@ -935,13 +952,20 @@ fn try_render_wasm_source_impl(
         }
     }
     let mutable_global_count = mutable_tls.len() as u32;
-    crate::lower::set_mutable_global_vars(
-        mutable_tls
-            .iter()
-            .enumerate()
-            .map(|(i, tl)| (tl.var.0, (i as u32, tl.ty.clone())))
-            .collect(),
-    );
+    let mut mutable_global_map: std::collections::HashMap<u32, (u32, almide_lang::types::Ty)> = mutable_tls
+        .iter()
+        .enumerate()
+        .map(|(i, tl)| (tl.var.0, (i as u32, tl.ty.clone())))
+        .collect();
+    // #782: alias each main-side synthesized ref onto its module var's slot —
+    // the retired v0 fallback used to absorb these as walls; now `m.count`
+    // reads and assigns route through the SAME storage the owning module uses.
+    for (main_id, mod_id) in &mutable_toplet_aliases {
+        if let Some(entry) = mutable_global_map.get(&mod_id.0).cloned() {
+            mutable_global_map.insert(main_id.0, entry);
+        }
+    }
+    crate::lower::set_mutable_global_vars(mutable_global_map);
 
     // CROSS-MODULE global refs carry UNKNOWN expr types the frontend never infers
     // (`v.white` — the ceangal theme class): repair them from the bridged globals
@@ -1004,7 +1028,19 @@ fn try_render_wasm_source_impl(
             }
             let id = almide_ir::VarId(i as u32);
             let Some(init) = main_global_inits.get(&id) else { continue };
-            if !crate::lower::expr_contains_call(init) {
+            // #782: with the v0 fallback retired, a HEAP toplet whose init is a
+            // CTOR form (tuple/record/variant/some/ok — `let PAIR = ("a", 1)`,
+            // `let MOOD = Happy`) must ALSO substitute: value_or_global's CONST
+            // path only materializes flat literals (LitStr / all-literal List),
+            // and the old "computed init" wall used to fall back to v0. The
+            // bind-form substitution evaluates the pure ctor at fn-top — same
+            // discipline as the pure-call inits below.
+            let heap_ctor_init = crate::lower::is_heap_ty(&init.ty)
+                && !matches!(
+                    &init.kind,
+                    almide_ir::IrExprKind::LitStr { .. } | almide_ir::IrExprKind::List { .. }
+                );
+            if !crate::lower::expr_contains_call(init) && !heap_ctor_init {
                 continue;
             }
             let mut h = HasImpure { impure: false, effectish: &effectish };
@@ -1054,19 +1090,43 @@ fn try_render_wasm_source_impl(
                     def_id: None,
                 };
                 f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, &nv_ref);
+                let bind_stmt = almide_ir::IrStmt {
+                    kind: almide_ir::IrStmtKind::Bind {
+                        var: nv,
+                        mutability: almide_ir::Mutability::Let,
+                        ty: init.ty.clone(),
+                        value: init.clone(),
+                    },
+                    span: None,
+                };
                 if let almide_ir::IrExprKind::Block { stmts, .. } = &mut f.body.kind {
-                    stmts.insert(
-                        0,
-                        almide_ir::IrStmt {
-                            kind: almide_ir::IrStmtKind::Bind {
-                                var: nv,
-                                mutability: almide_ir::Mutability::Let,
-                                ty: init.ty.clone(),
-                                value: init.clone(),
-                            },
+                    stmts.insert(0, bind_stmt);
+                } else {
+                    // An EXPRESSION-form body (`effect fn main() -> Unit =
+                    // println(m.CFG.name)`) has no statement list — wrap it in a
+                    // Block so the fn-top bind exists. Without this the
+                    // substitution left `Var(__g_init)` UNBOUND (#782, the
+                    // record/variant toplet matrix cells).
+                    let old_ty = f.body.ty.clone();
+                    let old_span = f.body.span.clone();
+                    let old = std::mem::replace(
+                        &mut f.body,
+                        almide_ir::IrExpr {
+                            kind: almide_ir::IrExprKind::Unit,
+                            ty: almide_lang::types::Ty::Unit,
                             span: None,
+                            def_id: None,
                         },
                     );
+                    f.body = almide_ir::IrExpr {
+                        kind: almide_ir::IrExprKind::Block {
+                            stmts: vec![bind_stmt],
+                            expr: Some(Box::new(old)),
+                        },
+                        ty: old_ty,
+                        span: old_span,
+                        def_id: None,
+                    };
                 }
             }
             // Module siblings keep the raw substitution (their separate VarId
@@ -1220,6 +1280,17 @@ fn try_render_wasm_source_impl(
                                     | crate::Op::DropResultListValue { .. }
                             )
                         })
+                    });
+            }
+            // A `Map[String, <flat heap>]` drop renders `(call $__drop_map_hval …)` — a
+            // map_hval helper that is NOT a registered call name, so force map_hval when
+            // the DropVariant is present (the C-039 typechange twins build hval-flavor
+            // maps without calling any registered map_hval fn — the value_core pattern).
+            if entries.iter().any(|(impl_fn, _)| *impl_fn == "map_new_hval") {
+                any_called = any_called
+                    || functions.iter().any(|f| {
+                        f.ops.iter().any(|op| matches!(op,
+                            crate::Op::DropVariant { ty, .. } if ty == "map_hval"))
                     });
             }
             let any_defined =

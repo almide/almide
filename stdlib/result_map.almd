@@ -262,3 +262,20 @@ fn result_to_err_option_h(r: Result[String, String]) -> Option[String] = {
     __rmh_some_share(e)
   } else none
 }
+
+// result.map with a SCALAR-Ok input and a HEAP-Ok result (`result.map(r, (v) =>
+// some(v))` — C-151): the closure returns a heap handle ((i64) -> i32 table type,
+// which the scalar impl's i64-result type traps on), and `ok(y)` builds the
+// CAP-AS-TAG heap-Ok Result (the _h family layout). Value-erased payload; the
+// Err message deep-copies as in result.map.
+fn __res_map_s2h_ok(x: Int, f: (Int) -> Value) -> Result[Value, String] = {
+  let y = f(x)
+  ok(y)
+}
+
+fn result_map_s2h(r: Result[Int, String], f: (Int) -> Value) -> Result[Value, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then __res_map_s2h_ok(x, f) else err(__rcopy_at(x))
+}

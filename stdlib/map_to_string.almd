@@ -193,3 +193,71 @@ fn map_to_string_ss(m: Map[String, String]) -> String = {
     buf
   }
 }
+
+// ── `${Map[String, Bool]}` ── quoted keys, `true`/`false` values (the skv repr:
+// map.keys → List[String], map.values → List[Bool] as 0/1 i64 slots). Same
+// two-pass walk as the ss display with the value leg swapped to the bool words.
+fn __mts_bool_width(v: Int) -> Int = if v == 0 then 5 else 4
+
+fn __mts_fill_bool(v: Int, pos: Int) -> Int =
+  if v == 0 then {
+    prim.store8(pos, 102)
+    prim.store8(pos + 1, 97)
+    prim.store8(pos + 2, 108)
+    prim.store8(pos + 3, 115)
+    prim.store8(pos + 4, 101)
+    pos + 5
+  } else {
+    prim.store8(pos, 116)
+    prim.store8(pos + 1, 114)
+    prim.store8(pos + 2, 117)
+    prim.store8(pos + 3, 101)
+    pos + 4
+  }
+
+fn __mts_body_len_sb(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let velem = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __mts_key_width(kelem) + 2 + __mts_bool_width(velem)
+    __mts_body_len_sb(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
+
+fn __mts_fill_body_sb(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __mts_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)
+    prim.store8(pos2 + 1, 32)
+    let velem = prim.load64(vaddr + i * 8)
+    let pos3 = __mts_fill_bool(velem, pos2 + 2)
+    __mts_fill_body_sb(kaddr, vaddr, count, i + 1, pos3)
+  }
+
+fn map_to_string_sb(m: Map[String, Bool]) -> String = {
+  let ks = map.keys(m)
+  let vs = map.values(m)
+  let hk = prim.handle(ks)
+  let hv = prim.handle(vs)
+  let count = prim.load32(hk + 4)
+  if count == 0 then "[:]"
+  else {
+    let kaddr = hk + 12
+    let vaddr = hv + 12
+    let body = __mts_body_len_sb(kaddr, vaddr, count, 0, 0)
+    let buf = prim.alloc_str(body + 2)
+    let base = prim.handle(buf) + 12
+    prim.store8(base, 91)
+    let after = __mts_fill_body_sb(kaddr, vaddr, count, 0, base + 1)
+    prim.store8(after, 93)
+    buf
+  }
+}

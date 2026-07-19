@@ -67,7 +67,7 @@ pub mod pass_ir_link_flatten;
 pub mod template;
 pub mod target;
 pub mod walker;
-pub mod emit_wasm;
+pub mod reachability;
 pub mod emit_wgsl;
 
 use almide_ir::*;
@@ -195,9 +195,9 @@ pub fn program_uses_native_only_matrix_on_wasm(program: &IrProgram) -> Option<&'
     // (e.g. in an imported module's unused fn) is pruned by the WASM emitter, so it
     // must not fail the build. Uses the SAME reachability the emitter prunes by, so
     // the pre-check and the emit agree (#644).
-    let reachable = emit_wasm::reachability::reachable_fn_names(program);
+    let reachable = reachability::reachable_fn_names(program);
     let is_reachable = |module: Option<&str>, name: &str| {
-        emit_wasm::reachability::registered_keys(module, name)
+        reachability::registered_keys(module, name)
             .iter()
             .any(|k| reachable.contains(k))
     };
@@ -368,11 +368,12 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
             //               (browser) compiler can't diverge from native.
             // `CanonicalizePass` (terminal pipeline pass) establishes the order;
             // `Canonical::certify` consumes `Verified` and asserts it.
-            let verified = Verified::verify(program, options.allow_unverified);
-            let canonical = Canonical::certify(verified);
-            let out = emit_wasm::emit_certified(canonical);
-            if let Some(et) = &et { eprintln!("[prof:codegen] wasm_emit={:.3}s", et.elapsed_secs()); }
-            CodegenOutput::Binary(out)
+            // #782: the v0 wasm emitter is RETIRED. The v1 trust-spine renderer
+            // (almide-mir) is the only wasm path; a v1 wall is a hard error at
+            // the CLI layer, never a fallback into unverified codegen.
+            unreachable!(
+                "Target::Wasm reached the retired v0 emitter — the CLI must route                  wasm builds through the v1 trust-spine renderer (#782)"
+            );
         }
         Target::Wgsl => CodegenOutput::Source(emit_wgsl::emit(program)),
         _ => CodegenOutput::Source(emit_source(program, target, &config, options)),

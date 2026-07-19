@@ -521,12 +521,46 @@ impl LowerCtx {
                                 .into(),
                         ));
                     }
-                    // A HEAP CALL payload the ctor materializer DECLINED (`ok(float.parse(s))`
-                    // — a Module call returning a nested Result, fuzz seed-20260718 index
-                    // 888): the deferred Opaque read `ok(0)` while native printed the err —
-                    // the C-138 family's un-admitted tail. WALL — admission with an exact
-                    // nested drop is a follow-up; a wall is always safe, a wrong byte never.
+                    // A HEAP CALL payload (`ok(result.unwrap_or(…))` — the C-149
+                    // nested-share chain): ANF-materialize the call into a synth temp via
+                    // the SAME `lower_bind` path a `let tmp = call` takes (tracked, typed
+                    // drop, read shapes seeded — the lower_heap_extraction Call-container
+                    // discipline), then rebuild the ctor over the temp VAR and retry the
+                    // ctor materializer — its Var arms admit the payload with the share
+                    // (Dup) discipline. A payload the Var arms still decline WALLS (the
+                    // deferred Opaque would read `ok(0)` while native printed the err —
+                    // the C-138 family; a wall is always safe, a wrong byte never).
                     if is_heap_ty(&expr.ty) && matches!(expr.kind, IrExprKind::Call { .. }) {
+                        let payload_ty = expr.ty.clone();
+                        let payload = (**expr).clone();
+                        let tmp = self.fresh_synth_var();
+                        self.lower_bind(tmp, &payload_ty, &payload)?;
+                        let synth = IrExpr {
+                            kind: IrExprKind::Var { id: tmp },
+                            ty: payload_ty,
+                            span: payload.span,
+                            def_id: None,
+                        };
+                        let rebuilt_kind = match &value.kind {
+                            IrExprKind::OptionSome { .. } => {
+                                IrExprKind::OptionSome { expr: Box::new(synth) }
+                            }
+                            IrExprKind::ResultOk { .. } => {
+                                IrExprKind::ResultOk { expr: Box::new(synth) }
+                            }
+                            _ => IrExprKind::ResultErr { expr: Box::new(synth) },
+                        };
+                        let rebuilt = IrExpr {
+                            kind: rebuilt_kind,
+                            ty: value.ty.clone(),
+                            span: value.span,
+                            def_id: value.def_id,
+                        };
+                        if let Some(dst) = self.try_lower_option_ctor(&rebuilt, ty) {
+                            self.value_of.insert(var, dst);
+                            self.live_heap_handles.push(dst);
+                            return Ok(());
+                        }
                         return Err(LowerError::Unsupported(
                             "some/ok/err of an un-admitted heap call payload cannot be \
                              faithfully materialized in this brick (walled, not read as a \
@@ -819,6 +853,20 @@ impl LowerCtx {
                     // bounds-checked load over the bound result — the C-132 move-mode
                     // write-back binds the returned buffer exactly here (`__mp_buf =
                     // add_item(data, 1)` then `data = __mp_buf; data[0]`).
+                    self.materialized_lists.insert(dst);
+                }
+                // A user fn returning `List[heap]` (`build_nested() -> List[List[Int]]`) is
+                // likewise a REAL, POPULATED nested-ownership block, so admit the element
+                // borrow `nested[i]` (LoadHandle at `$elem_addr`) over the bound var — the
+                // exact mirror of the Module-call bind's `string.split` registration. Without
+                // it, `nested[10]` fell to the container-grain Dup of the WHOLE list and a
+                // consumer read the outer block (`list.len(mid)` = the OUTER len — the
+                // rc_alloc_stress silent miscompile). Narrowed to `List[heap]` (NOT the
+                // broader Option/Result/Map `is_heap_elem_list_ty` also matches) — only a
+                // real list is `[i]`-indexable here.
+                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                        if a.len() == 1 && is_heap_ty(&a[0]))
+                {
                     self.materialized_lists.insert(dst);
                 }
                 // A `Value` result from a user fn (`let v = parse_number(c, raw)`) drops via the

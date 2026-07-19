@@ -427,7 +427,10 @@ pub fn generate_generic_variant_instantiation_type_decls(
             if !ok {
                 break;
             }
-            let ctor_name = format!("__{inst_name}_c{}", c.tag);
+            // MUST start uppercase — the parser rejects a lowercase/underscore ctor name
+            // ("Expected type name"), which silently killed the whole shadow `type` line
+            // and cascaded to "unknown type '<inst>'" at every generated reference.
+            let ctor_name = format!("C__{inst_name}_{}", c.tag);
             case_src_parts.push(if field_src_parts.is_empty() {
                 ctor_name.clone()
             } else {
@@ -1591,5 +1594,267 @@ pub fn generate_record_drop_sources(
     // is still computed above (by `record_drop_field_frees`) purely to preserve that
     // function's shared signature with the anon-record caller; its value is unused here.
     let _ = need_list_str;
+    out
+}
+
+/// The C-015 STRING-FIELD-record key/element twins (`__krec_*`) — generated per
+/// record shape used as a Map key / Set element / `list.unique` element anywhere
+/// in the program. The key normalizes INJECTIVELY into a String (each String
+/// field length-prefixed `<len>:<bytes>,`, each scalar field `<digits>,` — the
+/// netstring discipline, so distinct field values can never collide), and the
+/// backing container is the proven `_str`/`_skv` family; `krec_call_name`
+/// (control_p2.rs) routes the call sites to these names. Over-generation is
+/// harmless (a shape whose call never fires leaves inert fns); a record with a
+/// non-String/scalar field is never collected (its calls keep their wall).
+pub fn generate_krec_sources(
+    program: &almide_ir::IrProgram,
+    type_decls: &[almide_ir::IrTypeDecl],
+) -> String {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    use almide_lang::types::constructor::TypeConstructorId;
+
+    // Admissible record decls: name -> declaration-ordered field types.
+    let recs: std::collections::HashMap<String, Vec<Ty>> = type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            almide_ir::IrTypeDeclKind::Record { fields } => {
+                let tys: Vec<Ty> = fields.iter().map(|f| f.ty.clone()).collect();
+                (!tys.is_empty()
+                    && tys.iter().all(|t| matches!(t, Ty::Int | Ty::Bool | Ty::String))
+                    && tys.iter().any(|t| matches!(t, Ty::String)))
+                .then(|| (d.name.as_str().to_string(), tys))
+            }
+            _ => None,
+        })
+        .collect();
+    if recs.is_empty() {
+        return String::new();
+    }
+
+    #[derive(Default)]
+    struct Uses {
+        map_iv: std::collections::BTreeSet<String>,
+        map_sv: std::collections::BTreeSet<String>,
+        sets: std::collections::BTreeSet<String>,
+        uniques: std::collections::BTreeSet<String>,
+        /// STRUCTURAL record element shapes (anon hash -> field types, SOURCE order).
+        uniq_structs: std::collections::BTreeMap<String, Vec<Ty>>,
+    }
+    struct Scan<'a> {
+        recs: &'a std::collections::HashMap<String, Vec<Ty>>,
+        uses: Uses,
+    }
+    impl Scan<'_> {
+        fn note(&mut self, ty: &Ty) {
+            match ty {
+                Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 => {
+                    if let Ty::Named(n, _) = &a[0] {
+                        if self.recs.contains_key(n.as_str()) {
+                            match &a[1] {
+                                Ty::Int | Ty::Bool => {
+                                    self.uses.map_iv.insert(n.as_str().to_string());
+                                }
+                                Ty::String => {
+                                    self.uses.map_sv.insert(n.as_str().to_string());
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 => {
+                    if let Ty::Named(n, _) = &a[0] {
+                        if self.recs.contains_key(n.as_str()) {
+                            self.uses.sets.insert(n.as_str().to_string());
+                        }
+                    }
+                }
+                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+                    if let Ty::Named(n, _) = &a[0] {
+                        if self.recs.contains_key(n.as_str()) {
+                            self.uses.uniques.insert(n.as_str().to_string());
+                        }
+                    }
+                    // An UNANNOTATED literal's STRUCTURAL record element — keyed by
+                    // the anon hash, fields in the block's SOURCE order (r5 lesson).
+                    if let Ty::Record { fields } = &a[0] {
+                        if !fields.is_empty()
+                            && fields
+                                .iter()
+                                .all(|(_, t)| matches!(t, Ty::Int | Ty::Bool | Ty::String))
+                            && fields.iter().any(|(_, t)| matches!(t, Ty::String))
+                        {
+                            self.uses.uniq_structs.insert(
+                                crate::lower::anon_record_drop_name(fields),
+                                fields.iter().map(|(_, t)| t.clone()).collect(),
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    impl IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            self.note(&e.ty);
+            walk_expr(self, e);
+        }
+    }
+    let mut scan = Scan { recs: &recs, uses: Uses::default() };
+    for f in program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()))
+    {
+        for p in &f.params {
+            scan.note(&p.ty);
+        }
+        scan.note(&f.ret_ty);
+        almide_ir::visit::IrVisitor::visit_expr(&mut scan, &f.body);
+    }
+    let uses = scan.uses;
+    if uses.map_iv.is_empty()
+        && uses.map_sv.is_empty()
+        && uses.sets.is_empty()
+        && uses.uniques.is_empty()
+        && uses.uniq_structs.is_empty()
+    {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    let mut norm_emitted: std::collections::BTreeSet<String> = Default::default();
+    let mut emit_norm_tys = |out: &mut String, r: &str, tys: &[Ty]| {
+        if !norm_emitted.insert(r.to_string()) {
+            return;
+        }
+        out.push_str(&format!("fn __krec_norm_{r}(k: Value) -> String = {{\n"));
+        out.push_str("  let h = prim.handle(k)\n");
+        out.push_str("  let a0 = \"\"\n");
+        for (i, t) in tys.iter().enumerate() {
+            let off = 12 + 8 * i;
+            let prev = format!("a{i}");
+            let cur = format!("a{}", i + 1);
+            if matches!(t, Ty::String) {
+                out.push_str(&format!(
+                    "  let s{i}: String = prim.load_str(h + {off})\n  \
+                     let {cur} = {prev} + int.to_string(string.len(s{i})) + \":\" + s{i} + \",\"\n"
+                ));
+            } else {
+                out.push_str(&format!(
+                    "  let {cur} = {prev} + int.to_string(prim.load64(h + {off})) + \",\"\n"
+                ));
+            }
+        }
+        out.push_str(&format!("  a{}\n}}\n", tys.len()));
+    };
+
+    for r in uses.map_iv.iter() {
+        emit_norm_tys(&mut out, r, &recs[r]);
+        out.push_str(&format!(
+            "fn __krec_mfl_{r}_iv_at(pairs: List[(Value, Int)], i: Int, m: Map[String, Int]) -> Map[String, Int] =\n  \
+               if i >= list.len(pairs) then m\n  \
+               else match list.get(pairs, i) {{\n    \
+                 some(p) => {{\n      \
+                   let (k, v) = p\n      \
+                   __krec_mfl_{r}_iv_at(pairs, i + 1, map.set(m, __krec_norm_{r}(k), v))\n    }},\n    \
+                 none => m,\n  }}\n\
+             fn __krec_map_from_list_{r}_iv(pairs: List[(Value, Int)]) -> Map[String, Int] = {{\n  \
+               let m: Map[String, Int] = map.new()\n  \
+               __krec_mfl_{r}_iv_at(pairs, 0, m)\n}}\n\
+             fn __krec_map_set_{r}_iv(m: Map[String, Int], k: Value, v: Int) -> Map[String, Int] =\n  \
+               map.set(m, __krec_norm_{r}(k), v)\n\
+             fn __krec_map_get_{r}_iv(m: Map[String, Int], k: Value) -> Option[Int] =\n  \
+               map.get(m, __krec_norm_{r}(k))\n\
+             fn __krec_map_contains_{r}_iv(m: Map[String, Int], k: Value) -> Bool =\n  \
+               map.contains(m, __krec_norm_{r}(k))\n"
+        ));
+    }
+    for r in uses.map_sv.iter() {
+        emit_norm_tys(&mut out, r, &recs[r]);
+        out.push_str(&format!(
+            "fn __krec_mfl_{r}_sv_at(pairs: List[(Value, String)], i: Int, m: Map[String, String]) -> Map[String, String] =\n  \
+               if i >= list.len(pairs) then m\n  \
+               else match list.get(pairs, i) {{\n    \
+                 some(p) => {{\n      \
+                   let (k, v) = p\n      \
+                   __krec_mfl_{r}_sv_at(pairs, i + 1, map.set(m, __krec_norm_{r}(k), v))\n    }},\n    \
+                 none => m,\n  }}\n\
+             fn __krec_map_from_list_{r}_sv(pairs: List[(Value, String)]) -> Map[String, String] = {{\n  \
+               let m: Map[String, String] = map.new()\n  \
+               __krec_mfl_{r}_sv_at(pairs, 0, m)\n}}\n\
+             fn __krec_map_set_{r}_sv(m: Map[String, String], k: Value, v: String) -> Map[String, String] =\n  \
+               map.set(m, __krec_norm_{r}(k), v)\n\
+             fn __krec_map_get_{r}_sv(m: Map[String, String], k: Value) -> Option[String] =\n  \
+               map.get(m, __krec_norm_{r}(k))\n\
+             fn __krec_map_contains_{r}_sv(m: Map[String, String], k: Value) -> Bool =\n  \
+               map.contains(m, __krec_norm_{r}(k))\n"
+        ));
+    }
+    for r in uses.sets.iter() {
+        emit_norm_tys(&mut out, r, &recs[r]);
+        out.push_str(&format!(
+            "fn __krec_sfl_{r}_at(xs: List[Value], i: Int, acc: Set[String]) -> Set[String] =\n  \
+               if i >= list.len(xs) then acc\n  \
+               else match list.get(xs, i) {{\n    \
+                 some(x) => __krec_sfl_{r}_at(xs, i + 1, set.insert(acc, __krec_norm_{r}(x))),\n    \
+                 none => acc,\n  }}\n\
+             fn __krec_set_from_list_{r}(xs: List[Value]) -> Set[String] = {{\n  \
+               let acc: Set[String] = set.new()\n  \
+               __krec_sfl_{r}_at(xs, 0, acc)\n}}\n\
+             fn __krec_set_insert_{r}(s: Set[String], x: Value) -> Set[String] = set.insert(s, __krec_norm_{r}(x))\n\
+             fn __krec_set_contains_{r}(s: Set[String], x: Value) -> Bool = set.contains(s, __krec_norm_{r}(x))\n"
+        ));
+    }
+    for (hash, tys) in uses.uniq_structs.iter() {
+        emit_norm_tys(&mut out, hash, tys);
+        let r = hash;
+        out.push_str(&format!(
+            "fn __krec_uniqfill_{r}(h: Int, oh: Int, n: Int, i: Int, cnt: Int, seen: Set[String]) -> Int =\n  \
+               if i >= n then cnt\n  \
+               else {{\n    \
+                 let x: Value = prim.load_handle(h + 12 + i * 8)\n    \
+                 let key = __krec_norm_{r}(x)\n    \
+                 if set.contains(seen, key) then __krec_uniqfill_{r}(h, oh, n, i + 1, cnt, seen)\n    \
+                 else {{\n      \
+                   let e = prim.load64(h + 12 + i * 8)\n      \
+                   prim.rc_inc(e)\n      \
+                   prim.store64(oh + 12 + cnt * 8, e)\n      \
+                   __krec_uniqfill_{r}(h, oh, n, i + 1, cnt + 1, set.insert(seen, key))\n    }}\n  }}\n\
+             fn __krec_list_unique_{r}(xs: List[Value]) -> List[Value] = {{\n  \
+               let h = prim.handle(xs)\n  \
+               let n = prim.load32(h + 4)\n  \
+               let out: List[Value] = prim.alloc_list_str(n)\n  \
+               let seen: Set[String] = set.new()\n  \
+               let cnt = __krec_uniqfill_{r}(h, prim.handle(out), n, 0, 0, seen)\n  \
+               prim.store32(prim.handle(out) + 4, cnt)\n  \
+               out\n}}\n"
+        ));
+    }
+    for r in uses.uniques.iter() {
+        emit_norm_tys(&mut out, r, &recs[r]);
+        out.push_str(&format!(
+            "fn __krec_uniqfill_{r}(h: Int, oh: Int, n: Int, i: Int, cnt: Int, seen: Set[String]) -> Int =\n  \
+               if i >= n then cnt\n  \
+               else {{\n    \
+                 let x: Value = prim.load_handle(h + 12 + i * 8)\n    \
+                 let key = __krec_norm_{r}(x)\n    \
+                 if set.contains(seen, key) then __krec_uniqfill_{r}(h, oh, n, i + 1, cnt, seen)\n    \
+                 else {{\n      \
+                   let e = prim.load64(h + 12 + i * 8)\n      \
+                   prim.rc_inc(e)\n      \
+                   prim.store64(oh + 12 + cnt * 8, e)\n      \
+                   __krec_uniqfill_{r}(h, oh, n, i + 1, cnt + 1, set.insert(seen, key))\n    }}\n  }}\n\
+             fn __krec_list_unique_{r}(xs: List[Value]) -> List[Value] = {{\n  \
+               let h = prim.handle(xs)\n  \
+               let n = prim.load32(h + 4)\n  \
+               let out: List[Value] = prim.alloc_list_str(n)\n  \
+               let seen: Set[String] = set.new()\n  \
+               let cnt = __krec_uniqfill_{r}(h, prim.handle(out), n, 0, 0, seen)\n  \
+               prim.store32(prim.handle(out) + 4, cnt)\n  \
+               out\n}}\n"
+        ));
+    }
     out
 }

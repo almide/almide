@@ -344,6 +344,32 @@ impl LowerCtx {
             }
             return self.lower_tail(expr.as_deref());
         }
+        // C-127: a `match` tail whose RESULT spelling is an UNRESOLVED generic
+        // (`Unknown` / a bare type param left by an under-constrained chain link)
+        // is judged HEAP and routed down the heap-match leg — but when EVERY arm
+        // body's own type is a resolved SCALAR, the arms are the ground truth
+        // (native sizes the value the same way): retype the tail from the arms
+        // and take the scalar leg.
+        if is_heap_ty(&tail.ty) {
+            if let IrExprKind::Match { subject, arms } = &tail.kind {
+                let arm_tys_scalar = !arms.is_empty()
+                    && arms.iter().all(|a| {
+                        !is_heap_ty(&a.body.ty) && !matches!(a.body.ty, Ty::Unknown)
+                    });
+                if arm_tys_scalar {
+                    let retyped = IrExpr {
+                        kind: IrExprKind::Match {
+                            subject: subject.clone(),
+                            arms: arms.clone(),
+                        },
+                        ty: arms[0].body.ty.clone(),
+                        span: tail.span.clone(),
+                        def_id: tail.def_id,
+                    };
+                    return self.lower_tail_scalar(&retyped);
+                }
+            }
+        }
         // Decomposed (#781, cog 232): the UNIT / HEAP / SCALAR tails are verbatim
         // text moves into lower_tail_unit / lower_tail_heap / lower_tail_scalar —
         // behavior proven by the classify wall-list + cert byte-identity ladder.

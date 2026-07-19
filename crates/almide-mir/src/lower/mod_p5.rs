@@ -338,6 +338,15 @@ pub(crate) fn max_var_id(body: &IrExpr) -> u32 {
                     pat_max(&arm.pattern, &mut self.0);
                 }
             }
+            // LAMBDA PARAMS are binders too (`(entry) => …` — `entry` has a VarId
+            // no Var/Bind/pattern hook sees). A fresh synthetic var colliding with
+            // one poisons the lift's capture analysis (the C-127 ANF desugar hit
+            // exactly this: its let-var collided with the map lambda's param).
+            if let IrExprKind::Lambda { params, .. } = &e.kind {
+                for (v, _) in params {
+                    self.0 = self.0.max(v.0);
+                }
+            }
             almide_ir::visit::walk_expr(self, e);
         }
         fn visit_stmt(&mut self, s: &IrStmt) {

@@ -60,3 +60,33 @@ fn map_from_list_srec(pairs: List[(Value, String)]) -> Map[String, String] = {
 }
 
 fn map_get_srec(m: Map[String, String], k: Value) -> Option[String] = map.get(m, __srec_key(k))
+
+// ── FLAT all-scalar TUPLE key (`Map[(Int, Int), String]` — the C-015 compound-eq
+// class) ── the tuple block is [len@4] + raw i64 slots, physically identical to
+// the all-scalar record __srec_key walks, so the SAME normalizer + _str family
+// serve it. set/contains complete the fn set the fixture exercises; len routes
+// straight to map.len_str (the backing map IS the str flavor).
+fn map_set_srec(m: Map[String, String], k: Value, v: String) -> Map[String, String] =
+  map.set(m, __srec_key(k), v)
+
+fn map_contains_srec(m: Map[String, String], k: Value) -> Bool =
+  map.contains(m, __srec_key(k))
+
+// ── Set of flat all-scalar tuples (`Set[(Int, Int)]`) ── normalize each element
+// into a Set[String] (content dedup via the _str family). Iteration-returning fns
+// (to_list) are NOT admitted by the router — the normalized form is lookup-only.
+fn __sfl_srec_at(xs: List[Value], i: Int, acc: Set[String]) -> Set[String] =
+  if i >= list.len(xs) then acc
+  else match list.get(xs, i) {
+    some(x) => __sfl_srec_at(xs, i + 1, set.insert(acc, __srec_key(x))),
+    none => acc,
+  }
+
+fn set_from_list_srec(xs: List[Value]) -> Set[String] = {
+  let acc: Set[String] = set.new()
+  __sfl_srec_at(xs, 0, acc)
+}
+
+fn set_insert_srec(s: Set[String], x: Value) -> Set[String] = set.insert(s, __srec_key(x))
+
+fn set_contains_srec(s: Set[String], x: Value) -> Bool = set.contains(s, __srec_key(x))
