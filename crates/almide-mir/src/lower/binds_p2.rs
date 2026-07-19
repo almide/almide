@@ -839,6 +839,20 @@ impl LowerCtx {
                     // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
                     // last-ref value list's Option slots (a flat rc_dec would leak them).
                     self.variant_drop_handles.insert(dst, "map_mlo".to_string());
+                } else if let Some(rname) = (match ty {
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                        if a.len() == 1 =>
+                    {
+                        self.record_or_anon_drop_type_name(&a[0])
+                    }
+                    _ => None,
+                }) {
+                    // A `List[<recursive-drop record>]` result (`list.unique` over a
+                    // String-field record via the `__krec_*` twins): route to the generated
+                    // `$__drop_list_<R>` (emitted for EVERY recursive-drop record) — the
+                    // flat per-slot dec freed each element block but LEAKED its String
+                    // fields (the krec-unique residue).
+                    self.variant_drop_handles.insert(dst, format!("list_{rname}"));
                 } else if crate::lower::is_lenlist_list_ty(ty) {
                     // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
                     // flat DropListStr would leak each element's owned payload slots.
@@ -1112,6 +1126,20 @@ impl LowerCtx {
                     // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
                     // last-ref value list's Option slots (a flat rc_dec would leak them).
                     self.variant_drop_handles.insert(dst, "map_mlo".to_string());
+                } else if let Some(rname) = (match ty {
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                        if a.len() == 1 =>
+                    {
+                        self.record_or_anon_drop_type_name(&a[0])
+                    }
+                    _ => None,
+                }) {
+                    // A `List[<recursive-drop record>]` result (`list.unique` over a
+                    // String-field record via the `__krec_*` twins): route to the generated
+                    // `$__drop_list_<R>` (emitted for EVERY recursive-drop record) — the
+                    // flat per-slot dec freed each element block but LEAKED its String
+                    // fields (the krec-unique residue).
+                    self.variant_drop_handles.insert(dst, format!("list_{rname}"));
                 } else if crate::lower::is_lenlist_list_ty(ty) {
                     // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
                     // flat DropListStr would leak each element's owned payload slots.

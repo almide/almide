@@ -1317,6 +1317,18 @@ impl LowerCtx {
                 // `Map[String, List[Option[Int]]]` arg temp — `$__drop_map_mlo` (the
                 // bind-site route, mirrored; the flat fallback would leak the value lists).
                 self.variant_drop_handles.insert(dst, "map_mlo".to_string());
+            } else if let Some(rname) = (match ty {
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                    if a.len() == 1 =>
+                {
+                    self.record_or_anon_drop_type_name(&a[0])
+                }
+                _ => None,
+            }) {
+                // A `List[<recursive-drop record>]` arg temp — `$__drop_list_<R>` (the
+                // bind-site route, mirrored; the flat fallback leaked each element's
+                // String fields — the krec-unique residue).
+                self.variant_drop_handles.insert(dst, format!("list_{rname}"));
             } else if matches!(ty,
                 Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
                     if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
