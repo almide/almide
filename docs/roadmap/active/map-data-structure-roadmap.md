@@ -1,3 +1,4 @@
+<!-- description: Design decision and roadmap for Map[K,V]/Set[T]: an O(1) insertion-ordered hash map (compact-ordered-dict) -->
 # Map / Set data-structure roadmap
 
 How `Map[K,V]` (and `Set[T]`) are represented, and where they should go.

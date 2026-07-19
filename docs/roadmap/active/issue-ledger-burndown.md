@@ -1,3 +1,4 @@
+<!-- description: Issue-ledger burn-down tracker for the completeness campaign — GitHub open-issue count as the completeness residual -->
 # Issue Ledger Burn-down — 完全性キャンペーンの残量計
 
 > 2026-06-11 時点。台帳→tracker の単射は完成済み: **GitHub の open issue 数 =

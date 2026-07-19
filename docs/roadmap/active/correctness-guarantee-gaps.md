@@ -1,3 +1,4 @@
+<!-- description: Audit of the well-typed-source-to-correct-binary chain — which layers have mechanical/mathematical proof and which don't, with per-layer milestones -->
 # Correctness Guarantee Gaps
 
 > "well-typed source -> correct binary" chain: layers that lack mechanical/mathematical proof

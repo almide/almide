@@ -1,3 +1,4 @@
+<!-- description: Complete redesign of the hand-written WASM emitter into a type-aware, layout-safe, stack-verified compiler (WASM 3.0/Component Model ready) -->
 # Almide WASM Engine — Complete Redesign
 
 > **Status**: Design phase — foundation (LayoutRegistry + WasmIR + WasmBuilder) exists, full recreate planned

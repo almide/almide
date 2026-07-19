@@ -1,4 +1,5 @@
 <!-- description: SSE runtime functions missing in cross-crate codegen — http module needs sse dependency -->
+<!-- done: 2026-05-25 -->
 # Cross-crate SSE runtime functions
 
 > **Priority: high** — blocks almai from being used as a dependency.

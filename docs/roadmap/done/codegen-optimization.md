@@ -88,7 +88,7 @@ A calls B with param `x`. Whether `x` escapes in A depends on B's classification
 
 ### Next: Phase 4
 
-Remaining clone reduction opportunities identified in [clone-reduction.md](../active/clone-reduction.md):
+Remaining clone reduction opportunities identified in [clone-reduction.md](../done/clone-reduction.md):
 - For-in unconditional clone
 - List/tuple element clone (use-count aware)
 - Member access clone (single-use awareness)
@@ -96,7 +96,7 @@ Remaining clone reduction opportunities identified in [clone-reduction.md](../ac
 - Record spread clone (single-use move)
 - Field-level borrow analysis
 
-Additional codegen refinements in [codegen-refinement.md](../active/codegen-refinement.md):
+Additional codegen refinements in [codegen-refinement.md](../done/codegen-refinement.md):
 - let mut → let refinement
 - `#[inline]` hints
 - Constant folding

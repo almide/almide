@@ -1,4 +1,5 @@
 <!-- description: Elm-grade compiler error experience — hospitality, not hostility -->
+<!-- done: 2026-03-14 -->
 # Elm-Grade Error Experience
 
 > **Status: Done** — Phase 1-2 shipped. Phase 3-4 (tone/teaching) deferred — current style is accurate, LLM-friendly, and sufficient.

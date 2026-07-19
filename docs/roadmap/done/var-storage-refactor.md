@@ -1,3 +1,5 @@
+<!-- description: Unify module-var / local-COW variable classification into a single VarStorage model, removing duplicated if-else mutation chains -->
+<!-- done: 2026-05-15 -->
 # VarStorage Refactor — Unified Variable Classification
 
 ## Status: Complete

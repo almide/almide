@@ -1,3 +1,4 @@
+<!-- description: Design blueprint for making the ~27 effectful/raw-pointer stdlib functions FUNCTIONAL on v1, tiered by verification ceiling -->
 # Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1
 
 Design-only (the PLAN, not a build). Produced by a 6-agent design fan-out + adversarial

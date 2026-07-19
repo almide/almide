@@ -1,3 +1,4 @@
+<!-- description: Mechanize the WASM ownership emit layer to structurally contain Perceus drift (#643) -->
 # WASM 所有権 emit 層の機械化 (Perceus drift の構造的封じ込め)
 
 Status: active — 提案 + #643 の精密分析

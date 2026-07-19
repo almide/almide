@@ -1,4 +1,5 @@
 <!-- description: Auto-hoist reads from mut args to avoid Rust borrow conflicts -->
+<!-- done: 2026-05-22 -->
 # Borrow Read Hoisting
 
 > **Target: v0.22**

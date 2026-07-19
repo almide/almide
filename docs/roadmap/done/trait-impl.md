@@ -2,7 +2,7 @@
 <!-- done: 2026-03-18 -->
 # Built-in Protocols
 
-> **Note**: Eq and Hash are implemented. Repr is still pending. The overall type system design has moved to [Type System Extensions](../active/type-system.md), which covers container protocols (Mappable, Chainable, etc.) and `deriving`-based conformance. This document records the initial design limited to the Eq/Hash/Repr built-in protocols.
+> **Note**: Eq and Hash are implemented. Repr is still pending. The overall type system design has moved to [Type System Extensions](../done/type-system.md), which covers container protocols (Mappable, Chainable, etc.) and `deriving`-based conformance. This document records the initial design limited to the Eq/Hash/Repr built-in protocols.
 
 ## Design Principle
 

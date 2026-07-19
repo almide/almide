@@ -926,7 +926,7 @@ regex:   new, is_match, find, find_all, replace, split, captures
 
 - [Stdlib Strategy](stdlib-strategy.md) Strategy 1 (TOML + runtime) and Strategy 2 (@extern)
   - Strategy 3 (self-host) and Strategy 4 (x/ packages) remain valid
-- [Stdlib Architecture: 3-Layer Design](../on-hold/stdlib-architecture-3-layer-design.md) internal implementation approach
+- [Stdlib Architecture: 3-Layer Design](../done/stdlib-architecture-3-layer-design.md) internal implementation approach
 
 ## Files
 ```

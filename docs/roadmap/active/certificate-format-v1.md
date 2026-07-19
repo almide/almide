@@ -1,3 +1,4 @@
+<!-- description: v1 trust-spine certificate format design — ownership alphabet (i/a/d/m), per-call-site caps, branch-agreement encoding, and the kernel-as-oracle gate -->
 # Certificate Format v1 — design
 
 > Status: **design accepted; bricks 1–2 and 5 shipped** (ownership alphabet

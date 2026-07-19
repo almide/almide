@@ -1,3 +1,4 @@
+<!-- description: Drain the WASM reference-count-frees ownership discipline gap toward the two-gate green -->
 # WASM Reference-Count Frees: the Ownership-Discipline Drain
 
 **Status:** in progress (2026-06-07). Branch `perceus-belt-hard-error`, worktree

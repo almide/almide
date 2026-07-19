@@ -1,3 +1,4 @@
+<!-- description: v1: design for heap-result if/match execution — de-risked, no Coq change required -->
 # v1 heap-result `if`/`match` execution — design (DE-RISKED: no Coq change)
 
 Status: **`if` with literal arms IMPLEMENTED (commit 126921e6), adversarially

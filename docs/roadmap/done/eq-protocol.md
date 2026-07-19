@@ -22,4 +22,4 @@ fn same_color(a: Color, b: Color) -> Bool = a == b  // just works
 - **Rust**: `almide_eq!` macro for deep structural equality
 - **TS**: `__deep_eq` runtime function
 
-See [Built-in Protocols](../on-hold/trait-impl.md) for remaining protocols (Show, Hash).
+See [Built-in Protocols](../done/trait-impl.md) for remaining protocols (Show, Hash).

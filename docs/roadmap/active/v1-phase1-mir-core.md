@@ -1,3 +1,4 @@
+<!-- description: Almide v1 Phase 1: MIR core + dual renderer — implementation design following the Phase 0 decision gate -->
 # Almide v1 Phase 1: MIR コア + 二レンダラ — 実装設計
 
 Status: active — 設計(design-first)。Phase 0 決定ゲート合格(5/5)を受けた本体設計。実装着手前のレビュー対象。

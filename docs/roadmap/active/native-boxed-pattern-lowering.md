@@ -1,3 +1,4 @@
+<!-- description: Fix native (Rust) codegen for nested ctor/literal patterns on a Box'd recursive-variant field (#610) -->
 # native: nested ctor/literal pattern at a Box'd (recursive-variant) field
 
 Status: active — analyzed, ready to implement (#610)

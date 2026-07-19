@@ -1,3 +1,4 @@
+<!-- description: Generalize let bindings to type schemes (Algorithm W) instead of monomorphic let inference -->
 <!-- done: 2026-03-16 -->
 # Let-Polymorphism (Algorithm W)
 

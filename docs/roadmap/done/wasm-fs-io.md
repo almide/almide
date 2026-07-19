@@ -27,4 +27,4 @@ Implemented file I/O for the WASM target via WASI preview1.
 - Implemented `env.unix_timestamp()`, `env.millis()` via WASI `clock_time_get`
 - Implemented `env.args()` via WASI `args_sizes_get`/`args_get`
 
-## Remaining → [active/wasm-remaining-fs.md](../active/wasm-remaining-fs.md)
+## Remaining → [done/wasm-remaining-fs.md](../done/wasm-remaining-fs.md)

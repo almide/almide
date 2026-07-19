@@ -1,4 +1,5 @@
 <!-- description: First-class @inline_rust for packages, remove bundled-only walls -->
+<!-- done: 2026-05-22 -->
 # Package Native Dispatch
 
 > **Shipped: v0.22.1**

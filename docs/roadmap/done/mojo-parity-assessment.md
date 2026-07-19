@@ -1,4 +1,5 @@
 <!-- description: Almide vs Mojo capability parity assessment (Mojo = 100) -->
+<!-- done: 2026-05-11 -->
 # Almide vs Mojo: Capability Parity Assessment
 
 > Mojo = 100 as baseline. Scored per axis based on feature completeness,
