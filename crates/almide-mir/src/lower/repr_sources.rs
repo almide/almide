@@ -1408,6 +1408,48 @@ pub fn program_uses_closure_list(program: &almide_ir::IrProgram) -> bool {
     false
 }
 
+/// Does the program carry a `List[(String, <Fn>)]` anywhere — gates
+/// `LIST_STR_CLO_DROP_SRC`'s injection (the closure-valued map's from_list
+/// pairs-list drop), the exact sibling of [`program_uses_closure_list`]'s gate.
+pub fn program_uses_str_clo_pairs(program: &almide_ir::IrProgram) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let is_pairs = |ty: &Ty| {
+        matches!(ty, Ty::Applied(TypeConstructorId::List, a)
+            if a.len() == 1
+                && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+                    && matches!(ts[0], Ty::String) && matches!(ts[1], Ty::Fn { .. })))
+    };
+    struct Finder<'a> {
+        found: bool,
+        pred: &'a dyn Fn(&Ty) -> bool,
+    }
+    impl almide_ir::visit::IrVisitor for Finder<'_> {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if (self.pred)(&expr.ty) {
+                self.found = true;
+            }
+            if !self.found {
+                almide_ir::visit::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut finder = Finder { found: false, pred: &is_pairs };
+    let funcs = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in funcs {
+        if is_pairs(&f.ret_ty) || f.params.iter().any(|p| is_pairs(&p.ty)) {
+            return true;
+        }
+        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
+        if finder.found {
+            return true;
+        }
+    }
+    false
+}
+
 /// Does the program carry a `Map[String, <Fn>]` anywhere (a bind/return/call-arg type) —
 /// gates `MAP_MCLO_DROP_SRC`'s injection (the closure-valued map's recursive drop), the
 /// exact sibling of [`program_uses_closure_list`]'s gate.

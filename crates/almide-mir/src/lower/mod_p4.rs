@@ -2579,6 +2579,19 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, map_key_nullary: bo
             {
                 Some("_hval")
             }
+            // `Map[String, <Fn>]` from_list (keyed on the RESULT — the arg is the pairs
+            // List): the hval pair-walk is handle-level (each value rc-shared in via
+            // `map_set_hval`), so a closure block rides it unchanged; the RESULT's
+            // type-driven drop routing (`is_map_fn_ty` → map_mclo) frees the values via
+            // `__drop_closure`.
+            (true, true)
+                if func == "from_list"
+                    && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                        if a.len() == 2 && matches!(a[0], Ty::String)
+                            && matches!(a[1], Ty::Fn { .. })) =>
+            {
+                Some("_hval")
+            }
             // `Map[String, List[Int]]` from_list / display (the map-of-lists literal):
             // keyed on the RESULT/first-arg map; to_string_hval passes through
             // verbatim (the B22 suffix guard).

@@ -1246,6 +1246,33 @@ fn __drop_list_closure_loop(h: Int, n: Int, i: Int) -> Unit =
   }
 ";
 
+/// The ALMIDE SOURCE of `__drop_list_str_clo` — the per-element release of a
+/// `List[(String, <Fn>)]` (the closure-valued map's from_list pairs list): each
+/// element tuple owns a String @12 (flat `rc_dec`) and a CLOSURE BLOCK @20
+/// (freed via `__drop_closure` — a flat rc_dec would leak its captured env),
+/// then the tuple block, then the list block. Requires `CLOSURE_DROP_SRC` in
+/// scope (a closure-bearing pairs list implies the program creates closures).
+pub const LIST_STR_CLO_DROP_SRC: &str = "\
+fn __drop_list_str_clo(xs: List[Int]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __drop_list_str_clo_loop(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+fn __drop_list_str_clo_loop(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let th = prim.load64(h + 12 + i * 8)
+    if prim.load32(th + 0) == 1 then {
+      prim.rc_dec(prim.load64(th + 12))
+      let f: List[Int] = prim.load_handle(th + 20)
+      __drop_closure(f)
+    }
+    else ()
+    prim.rc_dec(th)
+    __drop_list_str_clo_loop(h, n, i + 1)
+  }
+";
+
 /// The ALMIDE SOURCE of `__drop_map_mclo` — the recursive release of a
 /// `Map[String, <Fn>]` (the closure-valued map, mclo class). The map is the
 /// hval/skv SPLIT layout ([rc][n@4][cap], keys @ slots 0..n-1, values @ slots

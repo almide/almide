@@ -91,7 +91,6 @@ fn wasm_closure_selected_by_match_arm() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_closure_in_map_from_list() {
     // A closure as the value of a `map.from_list([(k, closure)])` literal. The old
     // boxing covered `map.insert`/`get_or` only; from_list's closures live inside a
@@ -309,7 +308,6 @@ fn wasm_closure_returning_closure_in_list() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_closure_map_from_hof_then_coalesce() {
     // Closures collected into a map by a HOF (`map.from_list(list.map(...))`),
     // then read with `??`. The map values were a CONCRETE closure type (the

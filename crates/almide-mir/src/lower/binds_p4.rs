@@ -192,6 +192,22 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
+            // A `(String, <Fn>)` TUPLE literal (`("a", () => …)` — the closure-valued
+            // map's from_list pair): String slot 0, closure-block slot 1 (the Lambda
+            // element lifts via this fn's own Lambda arm inside
+            // `try_lower_tuple_construct`). The enclosing pairs list frees it via
+            // `$__drop_list_str_clo` (key rc_dec + `__drop_closure` per value).
+            IrExprKind::Tuple { elements }
+                if matches!(&expr.ty,
+                    Ty::Tuple(tys) if tys.len() == 2
+                        && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::Fn { .. })) =>
+            {
+                let obj = self.try_lower_tuple_construct(elements)?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
             // A `(<flat heap>, <scalar>)` TUPLE literal (`("a", 1)` — the deep_eq tuple-eq
             // operand / the gguf (key, pos) accumulator element / `[East: 90]`'s pairs):
             // flat-heap slot 0 (@12), scalar slot 1 (@20). try_lower_tuple_construct builds
