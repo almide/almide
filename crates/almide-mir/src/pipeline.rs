@@ -178,6 +178,9 @@ fn source_to_ir_with(
     // Transparent-newtype erasure LAST (post-link, pre-lowering): `mod type X = String`
     // ctor calls/patterns/Ty tags become the inner type (see newtype_erase.rs).
     crate::lower::erase_transparent_newtypes(&mut ir);
+    // Record default-field fill (Opts {} materializes its declared defaults) — the
+    // SAME program-level pass classify runs (desugar-before-both).
+    crate::lower::fill_record_defaults(&mut ir);
     // Pure call-bearing GLOBAL inits inline at their use sites (the lazy-static value
     // semantics — see inline_pure_call_globals; shared with classify: desugar-before-both).
     crate::lower::inline_pure_call_globals(&mut ir);
@@ -188,6 +191,26 @@ fn source_to_ir_with(
     // it); excluded shapes (multi-mut-param, same-name, non-Unit effect) keep it
     // and keep walling.
     almide_ir::mut_param::lower_mut_params_move_mode(&mut ir);
+    // Guard → if restructure at the fn-body tail chain (conditional early return
+    // expressed without early-return control flow — see desugar_guard.rs; shared
+    // with classify: desugar-before-both).
+    crate::lower::desugar_fn_body_guards(&mut ir);
+    // Tail err-raise ifs normalize to the proven bind-position `!` shape (fed by the
+    // guard restructure above; shared with classify: desugar-before-both).
+    crate::lower::normalize_tail_err_raise_ifs(&mut ir);
+    // Block call-arguments absorb their call (shared with classify: desugar-before-both).
+    crate::lower::hoist_block_call_args(&mut ir);
+    crate::lower::desugar_loop_early_returns(&mut ir);
+    crate::lower::hoist_spread_call_bases(&mut ir);
+    crate::lower::hoist_record_literal_args(&mut ir);
+    // Debug aid: `ALMIDE_DUMP_IR=<substr>` dumps the post-chain body of matching fns.
+    if let Ok(pat) = std::env::var("ALMIDE_DUMP_IR") {
+        for f in ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter())) {
+            if f.name.as_str().contains(&pat) {
+                eprintln!("=== ALMIDE_DUMP_IR {} ===\n{:#?}", f.name.as_str(), f.body);
+            }
+        }
+    }
     Ok(ir)
 }
 
@@ -218,14 +241,140 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
     }
     // v0's `__test_runner` re-initializes module globals before EVERY test (native
     // thread-isolation parity). The v1 `_start` runs `__global_init`/`__mg_init` ONCE —
-    // equivalent only when there is no top-let state to leak between tests.
-    if !ir.top_lets.is_empty() || ir.modules.iter().any(|m| !m.top_lets.is_empty()) {
+    // so the runner main re-ASSIGNS every MUTABLE main-region top-let to its
+    // initializer before each test (the ordinary `lower_mutable_global_assign` path:
+    // take + drop-old + store — no leak, no new runtime). An IMMUTABLE top-let cannot
+    // change between tests and needs no re-init. MODULE top-lets stay walled: their
+    // VarIds live in a different numbering region than the main-region runner, so a
+    // synthesized Assign could collide with an unrelated main-side id (the per-region
+    // globals discipline) — that bridge is the remaining piece of this brick.
+    if ir.modules.iter().any(|m| m.top_lets.iter().any(|tl| tl.mutable)) {
+        // MUTABLE module top-lets stay walled in test mode: the per-test re-init
+        // Assign would have to cross the VarId numbering-region bridge (a
+        // synthesized main-region Assign could collide with an unrelated module
+        // id — the per-region globals discipline). IMMUTABLE literal-init
+        // top-lets cannot change between tests and need no re-init — they lower
+        // through the const-bridge.
         return Err(LowerError::Unsupported(
-            "test mode: top-let globals need per-test re-init (the v0 runner's isolation \
-             semantics) not in this brick"
+            "test mode: MUTABLE module top-lets need the per-test region bridge, \
+             not in this brick"
                 .into(),
         ));
     }
+    // A referenced IMPURE-call-initialized module top-let walls the file: the
+    // const-bridge drops a call init (mod.rs's expr_has_call), a PURE one is
+    // substituted into the reader bodies later (the ceangal/#785 substitution +
+    // the record-field hoist), but an IMPURE one has no faithful route — and an
+    // unbound reference TRAPS at runtime (index OOB) instead of walling.
+    // Referenced = a frontend-synthesized cross-module ref entry names it.
+    {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct C {
+            has_call: bool,
+            impure: bool,
+        }
+        impl IrVisitor for C {
+            fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                match &e.kind {
+                    almide_ir::IrExprKind::RuntimeCall { .. } => {
+                        self.has_call = true;
+                        self.impure = true;
+                    }
+                    almide_ir::IrExprKind::Call { target, .. } => {
+                        self.has_call = true;
+                        match target {
+                            almide_ir::CallTarget::Module { module, func, .. } => {
+                                if !crate::purity::is_pure(module.as_str(), func.as_str()) {
+                                    self.impure = true;
+                                }
+                            }
+                            almide_ir::CallTarget::Named { .. } => {}
+                            _ => self.impure = true,
+                        }
+                    }
+                    _ => {}
+                }
+                walk_expr(self, e);
+            }
+        }
+        let effectish: std::collections::HashSet<&str> = ir
+            .functions
+            .iter()
+            .chain(ir.modules.iter().flat_map(|m| m.functions.iter()))
+            .filter(|f| f.is_effect)
+            .map(|f| f.name.as_str())
+            .collect();
+        let impure_call_inits: std::collections::HashSet<(String, String)> = ir
+            .modules
+            .iter()
+            .flat_map(|m| {
+                let effectish = &effectish;
+                m.top_lets.iter().filter_map(move |tl| {
+                    let mut c = C { has_call: false, impure: false };
+                    c.visit_expr(&tl.value);
+                    // A Named callee that is an EFFECT fn is impure too.
+                    let named_effect = {
+                        use almide_ir::visit::{walk_expr, IrVisitor};
+                        struct N<'a> {
+                            hit: bool,
+                            effectish: &'a std::collections::HashSet<&'a str>,
+                        }
+                        impl IrVisitor for N<'_> {
+                            fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                                if let almide_ir::IrExprKind::Call {
+                                    target: almide_ir::CallTarget::Named { name },
+                                    ..
+                                } = &e.kind
+                                {
+                                    if self.effectish.contains(name.as_str()) {
+                                        self.hit = true;
+                                    }
+                                }
+                                walk_expr(self, e);
+                            }
+                        }
+                        let mut n = N { hit: false, effectish };
+                        n.visit_expr(&tl.value);
+                        n.hit
+                    };
+                    // PURE call inits PASS: the bind-form substitution places
+                    // the init at the fn top, and repair_record_literal_field_tys
+                    // heals the Unknown declared-field type the linked literal
+                    // carried (#785) — the full single-file-proven form. IMPURE
+                    // inits have no faithful route and stay walled.
+                    if !(c.has_call && (c.impure || named_effect)) {
+                        return None;
+                    }
+                    m.var_table
+                        .entries
+                        .get(tl.var.0 as usize)
+                        .map(|e| (m.name.as_str().to_string(), e.name.as_str().to_uppercase()))
+                })
+            })
+            .collect();
+        if !impure_call_inits.is_empty()
+            && ir.var_table.entries.iter().any(|e| {
+                e.module_origin.as_ref().is_some_and(|mo| {
+                    impure_call_inits.contains(&(mo.clone(), e.name.as_str().to_uppercase()))
+                })
+            })
+        {
+            return Err(LowerError::Unsupported(
+                "test mode: a referenced impure-call-initialized module top-let \
+                 needs the slot-routed bridge, not in this brick"
+                    .into(),
+            ));
+        }
+    }
+    let reinit_stmts: Vec<IrStmt> = ir
+        .top_lets
+        .iter()
+        .filter(|tl| tl.mutable)
+        .map(|tl| IrStmt {
+            kind: IrStmtKind::Assign { var: tl.var, value: tl.value.clone() },
+            span: None,
+        })
+        .collect();
     let unit_expr =
         || IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
     let println_stmt = |text: String| IrStmt {
@@ -267,6 +416,9 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
         idx += 1;
         f.name = sym(&mangled);
         f.is_test = false;
+        // v0 isolation parity: reset every mutable top-let to its initializer
+        // before the test body runs (see the reinit_stmts derivation above).
+        stmts.extend(reinit_stmts.iter().cloned());
         stmts.push(println_stmt(format!("test: {display} ... ")));
         // The stmt-position effect call, in the SAME shape the frontend gives user
         // code: `Try { call }` with the LIFTED `Result[Unit, String]` call type — the
@@ -627,9 +779,28 @@ fn try_render_wasm_source_impl(
     // caller agrees with the combined classification by construction (idempotent where the
     // main-only pass already fired; call TARGETS are never renamed, so the module-side name
     // resolution the original-bodies rule protects is untouched).
-    {
-        let wide_can_err = crate::lower::compute_can_err(&all_fns);
-        let wide_lifted = crate::lower::lifted_effect_fn_names(&all_fns);
+    //
+    // FIXPOINT (the #485 effect_assign shape): the strips consult AUTO_WRAP (an
+    // auto-wrapped callee's `!`/`??` must NOT strip) while AUTO_WRAP itself is derived
+    // from the bodies (has a stmt-position propagating unwrap). A strip can remove a
+    // callee's LAST propagating unwrap (`plain_assign`'s `x = step(x)` Try), after which
+    // its REAL lowered ABI is bare — but the stale registry still said "wrapped", so its
+    // own def lowered bare while every `plain_assign()!` site kept the Result-handle
+    // read: invalid wasm (def/callsite ABI split). Iterate populate → rewrite until the
+    // registries describe the rewritten bodies verbatim (monotone — strips only remove
+    // nodes, AUTO_WRAP only shrinks — so this terminates; the cap is a safety net).
+    let mut prev_auto_wrap: Option<std::collections::HashSet<String>> = None;
+    for _ in 0..8 {
+        let mut all_rewritten: Vec<almide_ir::IrFunction> = inlined_fns.clone();
+        all_rewritten.extend(module_fn_sibs.iter().cloned());
+        crate::lower::populate_abi_registries(&all_rewritten, &record_layouts);
+        let cur = crate::lower::auto_wrap_abi_snapshot();
+        if prev_auto_wrap.as_ref() == Some(&cur) {
+            break;
+        }
+        prev_auto_wrap = Some(cur);
+        let wide_can_err = crate::lower::compute_can_err(&all_rewritten);
+        let wide_lifted = crate::lower::lifted_effect_fn_names(&all_rewritten);
         for f in inlined_fns.iter_mut().chain(module_fn_sibs.iter_mut()) {
             let self_name = f.name.as_str().to_string();
             crate::lower::strip_never_err_unwraps(
@@ -777,9 +948,11 @@ fn try_render_wasm_source_impl(
     // maps BEFORE lowering, or the AllTypesConcrete precondition walls the whole fn.
     for f in inlined_fns.iter_mut() {
         crate::lower::repair_unknown_global_ref_tys(f, &main_globals);
+        crate::lower::repair_member_field_tys(f, &record_layouts);
     }
     for f in module_fn_sibs.iter_mut() {
         crate::lower::repair_unknown_global_ref_tys(f, &globals);
+        crate::lower::repair_member_field_tys(f, &record_layouts);
     }
 
     // A BRIDGED cross-module ref whose module-side init is a PURE CALL (`v.black` →
@@ -841,11 +1014,71 @@ fn try_render_wasm_source_impl(
             }
         }
         for (id, init) in &subs {
+            // MAIN-region readers take the BIND form instead of the raw expression
+            // substitution: `let __g_init = default_gap(); …Var(__g_init)…` — a call
+            // spliced into an arbitrary position (a record FIELD — the #785 shape)
+            // rendered as a dst-less bare call (invalid wasm), while a call in BIND
+            // position plus a Var reference is the proven single-file form. The bind
+            // goes at the fn-body top (the init is pure, so hoisting its evaluation
+            // is unobservable); fns that never reference the global are untouched.
             for f in inlined_fns.iter_mut() {
-                f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
+                fn references(e: &almide_ir::IrExpr, id: almide_ir::VarId) -> bool {
+                    use almide_ir::visit::{walk_expr, IrVisitor};
+                    struct V(almide_ir::VarId, bool);
+                    impl IrVisitor for V {
+                        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+                            if matches!(&e.kind, almide_ir::IrExprKind::Var { id } if *id == self.0)
+                            {
+                                self.1 = true;
+                            }
+                            walk_expr(self, e);
+                        }
+                    }
+                    let mut v = V(id, false);
+                    v.visit_expr(e);
+                    v.1
+                }
+                if !references(&f.body, *id) {
+                    continue;
+                }
+                let nv = ir.var_table.alloc(
+                    almide_lang::intern::sym("__g_init"),
+                    init.ty.clone(),
+                    almide_ir::Mutability::Let,
+                    None,
+                );
+                let nv_ref = almide_ir::IrExpr {
+                    kind: almide_ir::IrExprKind::Var { id: nv },
+                    ty: init.ty.clone(),
+                    span: None,
+                    def_id: None,
+                };
+                f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, &nv_ref);
+                if let almide_ir::IrExprKind::Block { stmts, .. } = &mut f.body.kind {
+                    stmts.insert(
+                        0,
+                        almide_ir::IrStmt {
+                            kind: almide_ir::IrStmtKind::Bind {
+                                var: nv,
+                                mutability: almide_ir::Mutability::Let,
+                                ty: init.ty.clone(),
+                                value: init.clone(),
+                            },
+                            span: None,
+                        },
+                    );
+                }
             }
+            // Module siblings keep the raw substitution (their separate VarId
+            // numbering region cannot carry a main-region bind id) — the ceangal
+            // in-module reader class this path has always served.
             for f in module_fn_sibs.iter_mut() {
                 f.body = almide_ir::substitute::substitute_var_in_expr(&f.body, *id, init);
+            }
+        }
+        if !subs.is_empty() {
+            for f in inlined_fns.iter_mut() {
+                crate::lower::repair_record_literal_field_tys(f);
             }
         }
     }

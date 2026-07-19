@@ -79,3 +79,17 @@ fn result_zip(a: Result[Int, String], b: Result[Int, String]) -> Result[(Int, In
   else if blen >= 1 then __rzip_err(bh)
   else __rzip_ok(av, bv)
 }
+
+// ── heap-Ok (cap-as-tag) twins ── a HEAP-Ok Result is the 1-slot block whose len@4 is
+// ALWAYS 1 (the payload handle lives in slot 0's low 32 bits) and whose Ok/Err TAG is
+// slot 0's HIGH 32 bits (@16: 0=Ok, 1=Err). The len-as-tag reads above would call every
+// heap-Ok value an Err — the router keys on the Ok payload's heap-ness.
+fn result_is_ok_h(r: Result[String, String]) -> Bool = {
+  let tag = prim.load32(prim.handle(r) + 16)
+  tag == 0
+}
+
+fn result_is_err_h(r: Result[String, String]) -> Bool = {
+  let tag = prim.load32(prim.handle(r) + 16)
+  tag >= 1
+}

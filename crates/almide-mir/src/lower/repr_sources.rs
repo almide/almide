@@ -61,6 +61,10 @@ pub struct InterpReprContainers {
     pub var_lists: std::collections::BTreeSet<String>,
     pub rec_maps: std::collections::BTreeSet<String>,
     pub var_maps: std::collections::BTreeSet<String>,
+    /// GENERIC-variant interp instantiations (`${l}` over `ReprEither[Int, String]`)
+    /// — the (name, args) pairs the generator emits an instantiation-keyed
+    /// `__repr_<key>` for (deduped + sorted at generation).
+    pub var_insts: Vec<(String, Vec<Ty>)>,
 }
 pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpReprContainers {
     use almide_ir::visit::{walk_expr, IrVisitor};
@@ -103,6 +107,14 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
                                 }
                             }
                         }
+                        // A GENERIC-variant instance part (`${l}` over
+                        // `ReprEither[Int, String]`) — record the instantiation so the
+                        // generator emits its keyed repr.
+                        Ty::Named(n, args)
+                            if !args.is_empty() && self.var_names.contains(n.as_str()) =>
+                        {
+                            self.out.var_insts.push((n.as_str().to_string(), args.clone()));
+                        }
                         _ => {}
                     }
                 }
@@ -132,6 +144,176 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
     c.out
 }
 
+/// The instantiation-keyed repr ident (`ReprEither[Int, String]` →
+/// `ReprEither_Int_String`) — derived IDENTICALLY at the interp call site
+/// (mod_p4's variant part) and in the generator, so the call links by
+/// construction. Args spell via their `Debug` form, sanitized to identifier
+/// chars (the `instantiate_variant_layout` key discipline).
+pub(crate) fn repr_inst_ident(name: &str, args: &[Ty]) -> String {
+    let sane = |s: String| -> String {
+        s.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect()
+    };
+    format!(
+        "{}_{}",
+        drop_fn_ident(name),
+        args.iter().map(|a| sane(format!("{a:?}"))).collect::<Vec<_>>().join("_")
+    )
+}
+
+/// The Almide SPELLING of a generic-instantiation arg admitted by the
+/// instantiation brick — scalar/String leaves only, so the generated fn's param
+/// annotation (`e: ReprEither[Int, String]`) type-checks.
+fn repr_ty_spelling(ty: &Ty) -> Option<String> {
+    Some(match ty {
+        Ty::Int => "Int".to_string(),
+        Ty::Bool => "Bool".to_string(),
+        Ty::String => "String".to_string(),
+        Ty::Float => "Float".to_string(),
+        _ => return None,
+    })
+}
+
+/// Flatten decl cases to `(ctor name, (field-name?, ty))` rows — a record-kind
+/// case carries `Some(name)` so the emitter picks the brace form. `subst`
+/// (generic instantiation) substitutes each field type via the value model's
+/// `subst_type_var` (bare `Named(T, [])` params included).
+fn flatten_variant_cases(
+    cases: &[almide_ir::IrVariantDecl],
+    subst: Option<&std::collections::HashMap<almide_lang::intern::Sym, Ty>>,
+) -> Vec<(String, Vec<(Option<String>, Ty)>)> {
+    use almide_ir::IrVariantKind;
+    let apply = |t: &Ty| -> Ty {
+        match subst {
+            Some(s) => calls::subst_type_var(t, s),
+            None => t.clone(),
+        }
+    };
+    cases
+        .iter()
+        .map(|case| match &case.kind {
+            IrVariantKind::Unit => (case.name.as_str().to_string(), vec![]),
+            IrVariantKind::Tuple { fields } => (
+                case.name.as_str().to_string(),
+                fields.iter().map(|t| (None, apply(t))).collect(),
+            ),
+            IrVariantKind::Record { fields } => (
+                case.name.as_str().to_string(),
+                fields
+                    .iter()
+                    .map(|f| (Some(f.name.as_str().to_string()), apply(&f.ty)))
+                    .collect(),
+            ),
+        })
+        .collect()
+}
+
+/// Emit ONE `fn __repr_<fname>(e: <tspell>) -> String` body over pre-flattened
+/// cases — shared by the DECL loop (raw fields) and the INSTANTIATION loop
+/// (type-param fields substituted with the use-site args). A RECORD-variant case
+/// renders v0's `Tag { name: "hi", n: 3 }` (field names, brace form); a tuple
+/// case renders `Pair(3, true)`; a nullary case its bare name.
+fn emit_variant_repr_body(
+    out: &mut String,
+    fname: &str,
+    tspell: &str,
+    cases: &[(String, Vec<(Option<String>, Ty)>)],
+    scalar_rec_names: &std::collections::HashSet<String>,
+    names: &std::collections::HashSet<String>,
+) {
+    out.push_str(&format!("fn __repr_{fname}(e: {tspell}) -> String = {{\n"));
+    out.push_str("  let h = prim.handle(e)\n");
+    out.push_str(&format!("  let t = prim.load64(h + {})\n", layout::slot_offset(0)));
+    let mut first = true;
+    for (tag, (cname, fields)) in cases.iter().enumerate() {
+        let is_record = fields.iter().any(|(n, _)| n.is_some());
+        let tys: Vec<Ty> = fields.iter().map(|(_, t)| t.clone()).collect();
+        let kw = if first { "if" } else { "  else if" };
+        first = false;
+        if tys.is_empty() {
+            out.push_str(&format!("  {kw} t == {tag} then \"{cname}\"\n"));
+            continue;
+        }
+        out.push_str(&format!("  {kw} t == {tag} then {{\n"));
+        let mut concat = if is_record {
+            format!("\"{cname} {{ \"")
+        } else {
+            format!("\"{cname}(\"")
+        };
+        for (i, ty) in tys.iter().enumerate() {
+            let off = layout::slot_offset(1 + i);
+            if i > 0 {
+                concat.push_str(" + \", \"");
+            }
+            if let Some(fld) = &fields[i].0 {
+                concat.push_str(&format!(" + \"{fld}: \""));
+            }
+            match ty {
+                t if repr_int_field(t) => {
+                    out.push_str(&format!(
+                        "    let f{i} = int.to_string(prim.load64(h + {off}))\n"
+                    ));
+                }
+                Ty::Bool => {
+                    out.push_str(&format!(
+                        "    let f{i} = if prim.load64(h + {off}) == 1 then \"true\" else \"false\"\n"
+                    ));
+                }
+                Ty::String => {
+                    out.push_str(&format!(
+                        "    let f{i} = __repr_quote(prim.load_str(h + {off}))\n"
+                    ));
+                }
+                Ty::Float => {
+                    // The slot holds the f64 BIT pattern (the scalar ctor stored raw bits);
+                    // reinterpret then render with the compound Display (drops integral `.0`).
+                    out.push_str(&format!(
+                        "    let f{i} = __repr_float(prim.ffrombits(prim.load64(h + {off})))\n"
+                    ));
+                }
+                Ty::Named(rn, _) if scalar_rec_names.contains(rn.as_str()) => {
+                    // A scalar-record ctor field — compose the record's own generated repr.
+                    let rn_s = rn.as_str();
+                    let rn_fn = drop_fn_ident(rn_s);
+                    out.push_str(&format!(
+                        "    let v{i}: {rn_s} = prim.load_handle(h + {off})\n    let f{i} = __repr_rec_{rn_fn}(v{i})\n"
+                    ));
+                }
+                _ => {
+                    // an emittable nested variant (the fixpoint admitted it)
+                    let fv = variant_field_name(ty, names).expect("fixpoint-admitted");
+                    let fv_fn = drop_fn_ident(&fv);
+                    out.push_str(&format!(
+                        "    let v{i}: {fv} = prim.load_handle(h + {off})\n    let f{i} = __repr_{fv_fn}(v{i})\n"
+                    ));
+                }
+            }
+            concat.push_str(&format!(" + f{i}"));
+        }
+        concat.push_str(if is_record { " + \" }\"" } else { " + \")\"" });
+        out.push_str(&format!("    {concat}\n  }}\n"));
+    }
+    out.push_str("  else \"\"\n}\n");
+}
+
+/// A ctor/record field whose slot renders as a plain signed decimal via
+/// `int.to_string` of the i64-uniform slot value: `Int` and every SMALL-INT
+/// class (the value model stores them sign/zero-extended, so the widened value
+/// IS the display — v0's per-width Display prints the same digits). `UInt64`
+/// is excluded: a value above i64::MAX would print negative (the honest wall).
+fn repr_int_field(ty: &Ty) -> bool {
+    matches!(
+        ty,
+        Ty::Int
+            | Ty::Int8
+            | Ty::Int16
+            | Ty::Int32
+            | Ty::Int64
+            | Ty::UInt8
+            | Ty::UInt16
+            | Ty::UInt32
+    )
+}
+
 pub fn generate_variant_repr_sources(
     type_decls: &[almide_ir::IrTypeDecl],
     interp_anon_recs: &[Vec<(almide_lang::intern::Sym, Ty)>],
@@ -147,7 +329,9 @@ pub fn generate_variant_repr_sources(
         .iter()
         .filter_map(|d| match &d.kind {
             IrTypeDeclKind::Record { fields }
-                if fields.iter().all(|f| matches!(f.ty, Ty::Int | Ty::Bool | Ty::String)) =>
+                if fields
+                    .iter()
+                    .all(|f| repr_int_field(&f.ty) || matches!(f.ty, Ty::Bool | Ty::String)) =>
             {
                 Some(d.name.as_str().to_string())
             }
@@ -178,7 +362,8 @@ pub fn generate_variant_repr_sources(
                     }
                 };
                 tys.iter().all(|ty| {
-                    matches!(ty, Ty::Int | Ty::Bool | Ty::String)
+                    repr_int_field(ty)
+                        || matches!(ty, Ty::Bool | Ty::String)
                         // A Float ctor field renders via the compound Display
                         // (`float.to_string_compound` — integral drops the `.0`).
                         || matches!(ty, Ty::Float)
@@ -280,95 +465,48 @@ pub fn generate_variant_repr_sources(
         let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else { continue };
         let tname = decl.name.as_str();
         let fname = drop_fn_ident(tname);
-        out.push_str(&format!("fn __repr_{fname}(e: {tname}) -> String = {{\n"));
-        out.push_str("  let h = prim.handle(e)\n");
-        out.push_str(&format!("  let t = prim.load64(h + {})\n", layout::slot_offset(0)));
-        let mut first = true;
-        for (tag, case) in cases.iter().enumerate() {
-            // A RECORD-variant case renders v0's `Tag {{ name: "hi", n: 3 }}` (field names,
-            // brace form); a tuple case renders `Pair(3, true)`. Field names ride as
-            // `Some(name)` so the concat seed/separators/closer pick the right form.
-            let (cname, fields): (&str, Vec<(Option<String>, Ty)>) = match &case.kind {
-                IrVariantKind::Unit => (case.name.as_str(), vec![]),
-                IrVariantKind::Tuple { fields } => {
-                    (case.name.as_str(), fields.iter().map(|t| (None, t.clone())).collect())
-                }
-                IrVariantKind::Record { fields } => (
-                    case.name.as_str(),
-                    fields
-                        .iter()
-                        .map(|f| (Some(f.name.as_str().to_string()), f.ty.clone()))
-                        .collect(),
-                ),
-            };
-            let is_record = fields.iter().any(|(n, _)| n.is_some());
-            let tys: Vec<Ty> = fields.iter().map(|(_, t)| t.clone()).collect();
-            let kw = if first { "if" } else { "  else if" };
-            first = false;
-            if tys.is_empty() {
-                out.push_str(&format!("  {kw} t == {tag} then \"{cname}\"\n"));
-                continue;
-            }
-            out.push_str(&format!("  {kw} t == {tag} then {{\n"));
-            let mut concat = if is_record {
-                format!("\"{cname} {{ \"")
-            } else {
-                format!("\"{cname}(\"")
-            };
-            for (i, ty) in tys.iter().enumerate() {
-                let off = layout::slot_offset(1 + i);
-                if i > 0 {
-                    concat.push_str(" + \", \"");
-                }
-                if let Some(fname) = &fields[i].0 {
-                    concat.push_str(&format!(" + \"{fname}: \""));
-                }
-                match ty {
-                    Ty::Int => {
-                        out.push_str(&format!(
-                            "    let f{i} = int.to_string(prim.load64(h + {off}))\n"
-                        ));
-                    }
-                    Ty::Bool => {
-                        out.push_str(&format!(
-                            "    let f{i} = if prim.load64(h + {off}) == 1 then \"true\" else \"false\"\n"
-                        ));
-                    }
-                    Ty::String => {
-                        out.push_str(&format!(
-                            "    let f{i} = __repr_quote(prim.load_str(h + {off}))\n"
-                        ));
-                    }
-                    Ty::Float => {
-                        // The slot holds the f64 BIT pattern (the scalar ctor stored raw bits);
-                        // reinterpret then render with the compound Display (drops integral `.0`).
-                        out.push_str(&format!(
-                            "    let f{i} = __repr_float(prim.ffrombits(prim.load64(h + {off})))\n"
-                        ));
-                    }
-                    Ty::Named(rn, _) if scalar_rec_names.contains(rn.as_str()) => {
-                        // A scalar-record ctor field — compose the record's own generated repr.
-                        let rn_s = rn.as_str();
-                        let rn_fn = drop_fn_ident(rn_s);
-                        out.push_str(&format!(
-                            "    let v{i}: {rn_s} = prim.load_handle(h + {off})\n    let f{i} = __repr_rec_{rn_fn}(v{i})\n"
-                        ));
-                    }
-                    _ => {
-                        // an emittable nested variant (the fixpoint admitted it)
-                        let fv = variant_field_name(ty, &names).expect("fixpoint-admitted");
-                        let fv_fn = drop_fn_ident(&fv);
-                        out.push_str(&format!(
-                            "    let v{i}: {fv} = prim.load_handle(h + {off})\n    let f{i} = __repr_{fv_fn}(v{i})\n"
-                        ));
-                    }
-                }
-                concat.push_str(&format!(" + f{i}"));
-            }
-            concat.push_str(if is_record { " + \" }\"" } else { " + \")\"" });
-            out.push_str(&format!("    {concat}\n  }}\n"));
+        let flat = flatten_variant_cases(cases, None);
+        emit_variant_repr_body(&mut out, &fname, tname, &flat, &scalar_rec_names, &names);
+    }
+    // ── GENERIC-variant INSTANTIATION reprs (`__repr_ReprEither_Int_String`) ──
+    // A `${l}` over `ReprEither[Int, String]` calls the INSTANTIATION-KEYED repr
+    // (the interp call site derives the same key via `repr_inst_ident`): the
+    // decl's type-param fields (bare `Named(L, [])` — the frontend's spelling of
+    // an uninstantiated param) are substituted with the use-site args and the
+    // body emitted like any variant. SCALAR/String args + fields only in this
+    // brick (a nested/heap payload keeps the honest unlinked wall). Sorted +
+    // deduped by key for host-determinism.
+    let mut inst_sorted: Vec<&(String, Vec<Ty>)> = interp_containers.var_insts.iter().collect();
+    inst_sorted.sort_by_key(|(n, a)| repr_inst_ident(n, a));
+    inst_sorted.dedup_by_key(|(n, a)| repr_inst_ident(n, a));
+    for (iname, iargs) in inst_sorted {
+        let Some(decl) = type_decls.iter().find(|d| {
+            d.name.as_str() == iname.as_str() && matches!(&d.kind, IrTypeDeclKind::Variant { .. })
+        }) else {
+            continue;
+        };
+        let Some(gps) = decl.generics.as_ref() else { continue };
+        if gps.is_empty() || gps.len() != iargs.len() {
+            continue;
         }
-        out.push_str("  else \"\"\n}\n");
+        let Some(spells) = iargs.iter().map(repr_ty_spelling).collect::<Option<Vec<String>>>()
+        else {
+            continue;
+        };
+        let subst: std::collections::HashMap<almide_lang::intern::Sym, Ty> =
+            gps.iter().map(|g| g.name).zip(iargs.iter().cloned()).collect();
+        let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else { continue };
+        let flat = flatten_variant_cases(cases, Some(&subst));
+        // Admissibility: every INSTANTIATED field a plain int/Bool/String leaf (no
+        // Float/nested composition in this brick — those keep the unlinked wall).
+        if !flat.iter().all(|(_, fs)| {
+            fs.iter().all(|(_, t)| repr_int_field(t) || matches!(t, Ty::Bool | Ty::String))
+        }) {
+            continue;
+        }
+        let key = repr_inst_ident(iname, iargs);
+        let tspell = format!("{}[{}]", iname, spells.join(", "));
+        emit_variant_repr_body(&mut out, &key, &tspell, &flat, &scalar_rec_names, &names);
     }
     // Decomposed (#781, cog 137): the NAMED-RECORD repr generation is a verbatim
     // text move into `generate_record_repr_sources_into`.
@@ -444,7 +582,8 @@ fn generate_record_repr_sources_into(
                 continue;
             }
             let ok = fields.iter().all(|(_, ty)| {
-                matches!(ty, Ty::Int | Ty::Bool | Ty::String)
+                repr_int_field(ty)
+                    || matches!(ty, Ty::Bool | Ty::String)
                     || variant_field_name(ty, &names)
                         .map(|fv| emittable.contains(&fv))
                         .unwrap_or(false)
@@ -502,7 +641,7 @@ fn generate_record_repr_sources_into(
             }
             concat.push_str(&format!(" + \"{fld}: \""));
             match ty {
-                Ty::Int => out.push_str(&format!(
+                t if repr_int_field(t) => out.push_str(&format!(
                     "  let f{i} = int.to_string(prim.load64(h + {off}))
 "
                 )),
@@ -653,7 +792,9 @@ fn generate_record_repr_sources_into(
     anon_sorted.dedup_by_key(|f| anon_record_drop_name(f));
     for fields in anon_sorted {
         if fields.is_empty()
-            || !fields.iter().all(|(_, ty)| matches!(ty, Ty::Int | Ty::Bool | Ty::String))
+            || !fields
+                .iter()
+                .all(|(_, ty)| repr_int_field(ty) || matches!(ty, Ty::Bool | Ty::String))
         {
             continue;
         }
@@ -664,7 +805,7 @@ fn generate_record_repr_sources_into(
         for (i, (_, ty)) in fields.iter().enumerate() {
             let off = layout::slot_offset(i);
             match ty {
-                Ty::Int => out.push_str(&format!(
+                t if repr_int_field(t) => out.push_str(&format!(
                     "  let f{i} = int.to_string(prim.load64(h + {off}))\n"
                 )),
                 Ty::Bool => out.push_str(&format!(

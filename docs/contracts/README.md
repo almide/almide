@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-136 contracts
+155 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -164,4 +164,23 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-134 | Vendored-libm atan / tanh are byte-identical cross-target | 0.30.0 | active | fuzz(3000) | 1 |
 | C-135 | Declared-Unit effect fn ABI agrees between def and every call site | 0.30.0 | active | fixture | 1 |
 | C-136 | In-place place mutations persist to the subsequent read on both targets | 0.30.0 | active | fixture | 1 |
+| C-137 | Relative fs paths resolve against the host CWD on wasm | 0.31.0 | active | fixture | 1 |
+| C-138 | ok/err ctor with a stdlib-call payload materializes the real value | 0.31.0 | active | fixture | 1 |
+| C-139 | Heap-Ok Result value combinators keep tag and payload | 0.31.0 | active | fixture | 1 |
+| C-140 | float.round preserves the sign of a zero result | 0.31.0 | active | fixture | 1 |
+| C-141 | list.zip_with routes by element repr — String zips work, no wrong-typed link | 0.31.0 | active | fixture | 1 |
+| C-142 | result.unwrap_or_else is valid wasm at the Float instantiation on both legs | 0.31.0 | active | fixture | 1 |
+| C-143 | Ctor if-payloads materialize the taken arm | 0.31.0 | active | fixture | 1 |
+| C-144 | A scalar-list literal never observes as a silent empty list | 0.31.0 | active | fixture | 1 |
+| C-145 | Mono-suffixed stdlib combinator names route by their base name | 0.31.0 | active | fixture | 1 |
+| C-146 | A lifted closure returning a captured alias hands out a co-owned reference | 0.31.0 | active | fixture | 1 |
+| C-147 | list.unique_by routes by key repr — String keys dedupe by content | 0.31.0 | active | fixture | 1 |
+| C-148 | list.scan stores each intermediate at the accumulator's own width | 0.31.0 | active | fixture | 1 |
+| C-149 | unwrap_or_else hands back a co-owned heap Ok payload | 0.31.0 | active | fixture | 3 |
+| C-150 | Ctors over a heap var are value copies — the var stays live | 0.31.0 | active | fixture | 1 |
+| C-151 | Result combinators with a heap-Ok RESULT never link the scalar impl | 0.31.0 | active | fixture | 1 |
+| C-152 | An un-admitted heap call payload in a ctor walls, never zeroes | 0.31.0 | active | fixture | 1 |
+| C-153 | Non-test assert failures abort in the T6 form on both targets | 0.31.0 | active | fixture | 3 |
+| C-154 | clamp with an invalid range aborts in the T6 form | 0.31.0 | active | fixture | 2 |
+| C-155 | to_fixed with out-of-domain decimals aborts in the T6 form | 0.31.0 | active | fixture | 1 |
 

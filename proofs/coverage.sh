@@ -41,8 +41,8 @@ cargo build --release -p almide-mir --example render_program --target-dir "$COVD
 cargo build --release --bin almide --target-dir "$COVDIR/t" 2>&1 | tail -1
 
 echo "== 2/4 run the test suites =="
-TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm +111 ! -name '*.d' ! -name '*.dylib' | grep -E '/(almide_mir|almide_codegen|integration|lower|render)[^/]*$' || true)"
-[ -n "$TESTBINS" ] || TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm +111 ! -name '*.d' ! -name '*.dylib')"
+TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm /111 ! -name '*.d' ! -name '*.dylib' | grep -E '/(almide_mir|almide_codegen|integration|lower|render)[^/]*$' || true)"
+[ -n "$TESTBINS" ] || TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm /111 ! -name '*.d' ! -name '*.dylib')"
 i=0
 for tb in $TESTBINS; do
     i=$((i+1))

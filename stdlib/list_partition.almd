@@ -1,0 +1,54 @@
+// list_partition — SELF-HOSTED `list.partition(xs, pred)` for v1: ONE predicate call
+// per element (native runs pred once per element — the C-055 discipline), two result
+// lists over-allocated to n and SHRUNK via the len field afterwards (cap stays n —
+// len <= cap invariant, the list.pop precedent). Scalar elements raw-copy; the `_rc`
+// variant CO-OWNS each flat heap element into whichever side takes it (rc_inc — the
+// zip_rc/filter_rc discipline). Result is the (yes, no) tuple block (two owned lists).
+
+fn __lpart_fill(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int =
+  if i >= n then yi * 1048576 + ni
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    if f(v) then {
+      prim.store64(yh + 12 + yi * 8, v)
+      __lpart_fill(yh, nh, sh, f, n, i + 1, yi + 1, ni)
+    } else {
+      prim.store64(nh + 12 + ni * 8, v)
+      __lpart_fill(yh, nh, sh, f, n, i + 1, yi, ni + 1)
+    }
+  }
+
+fn list_partition(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) = {
+  let n = list.len(xs)
+  let yes = prim.alloc_list(n)
+  let no = prim.alloc_list(n)
+  let packed = __lpart_fill(prim.handle(yes), prim.handle(no), prim.handle(xs), f, n, 0, 0, 0)
+  prim.store32(prim.handle(yes) + 4, packed / 1048576)
+  prim.store32(prim.handle(no) + 4, prim.band(packed, 1048575))
+  (yes, no)
+}
+
+fn __lpart_fill_rc(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int =
+  if i >= n then yi * 1048576 + ni
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    if f(v) then {
+      prim.rc_inc(v)
+      prim.store64(yh + 12 + yi * 8, v)
+      __lpart_fill_rc(yh, nh, sh, f, n, i + 1, yi + 1, ni)
+    } else {
+      prim.rc_inc(v)
+      prim.store64(nh + 12 + ni * 8, v)
+      __lpart_fill_rc(yh, nh, sh, f, n, i + 1, yi, ni + 1)
+    }
+  }
+
+fn list_partition_rc(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) = {
+  let n = list.len(xs)
+  let yes = prim.alloc_list(n)
+  let no = prim.alloc_list(n)
+  let packed = __lpart_fill_rc(prim.handle(yes), prim.handle(no), prim.handle(xs), f, n, 0, 0, 0)
+  prim.store32(prim.handle(yes) + 4, packed / 1048576)
+  prim.store32(prim.handle(no) + 4, prim.band(packed, 1048575))
+  (yes, no)
+}

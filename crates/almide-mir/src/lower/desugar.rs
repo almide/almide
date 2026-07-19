@@ -145,11 +145,11 @@ pub fn dump_desugared_ir(
 ) {
     if std::env::var("DBG_DESUGAR_FN").is_ok_and(|v| v == fn_name) {
         if std::env::var("DBG_DESUGAR_RAW").is_ok() {
-            eprintln!("=== RAW {fn_name} ===\n{:#?}", desugar_all(body, fn_name == "main", layouts, record_layouts));
+            eprintln!("=== RAW {fn_name} ===\n{:#?}", desugar_all(body, fn_name == "main", layouts, record_layouts, &[]));
         } else {
             eprintln!(
                 "=== DESUGARED {fn_name} ===\n{}",
-                dump_ir(&desugar_all(body, fn_name == "main", layouts, record_layouts))
+                dump_ir(&desugar_all(body, fn_name == "main", layouts, record_layouts, &[]))
             );
         }
     }
@@ -338,7 +338,15 @@ pub fn desugar_sort_by_cached_keys(body: &IrExpr) -> Option<IrExpr> {
                     && matches!(&args[0].kind, IrExprKind::Var { .. } | IrExprKind::List { .. })
                     && matches!(&args[0].ty, Ty::Applied(TypeConstructorId::List, a)
                         if a.len() == 1 && matches!(a[0], Ty::Int))
-                    && matches!(&args[1].kind, IrExprKind::Lambda { params, .. } if params.len() == 1));
+                    && matches!(&args[1].kind, IrExprKind::Lambda { params, .. } if params.len() == 1)
+                    // The KEY type must be Int too — the synthesized keys list is typed
+                    // `xs.ty` (List[Int]) and sort_by_keys compares raw i64 slots, so a
+                    // String key linked the scalar list.map (indirect-call type mismatch
+                    // trap, fuzz seed-20260718 index 866) and a Float key would sort by
+                    // i64 BIT patterns (wrong order for negatives). Non-Int keys fall
+                    // through to the mod_p4 sort_by route: Float → sort_by_float,
+                    // String → the honest `sort_by_str_key_x` wall.
+                    && matches!(&args[1].ty, Ty::Fn { ret, .. } if **ret == Ty::Int));
             if !hit {
                 return;
             }
@@ -382,6 +390,7 @@ pub fn desugar_all(
     unit_main: bool,
     layouts: &crate::lower::VariantLayouts,
     record_layouts: &crate::lower::RecordLayouts,
+    params: &[almide_ir::IrParam],
 ) -> IrExpr {
     let mut cur = body.clone();
     loop {
@@ -406,6 +415,17 @@ pub fn desugar_all(
         }
         // `buf[i]` over Bytes → `bytes.index(buf, i)` — same contract.
         if let Some(r) = desugar_bytes_index_calls(&cur) {
+            cur = r;
+            continue;
+        }
+        // Matrix BinOps → matrix.mul/add/sub — same contract.
+        if let Some(r) = desugar_matrix_binops(&cur) {
+            cur = r;
+            continue;
+        }
+        // `buf[i] = v` over Bytes → `bytes.set_at(buf, i, v)` — same contract
+        // (the rewrite adds ONE counted Module call matching the lowering's CallFn).
+        if let Some(r) = desugar_bytes_index_assign(&cur, params) {
             cur = r;
             continue;
         }
@@ -515,6 +535,17 @@ fn rewrite_guard_stmt_list(
     else {
         return body;
     };
+    // ONLY `continue` (→ `()`) and `break` (verbatim) are sound inside a loop body.
+    // A VALUE else (`guard v != t else ok(mid)` — a function-level EARLY RETURN from
+    // inside the loop) has no loop-exit channel here: rewriting it to
+    // `if cond then { rest } else ok(mid)` in the Unit loop body silently DROPPED the
+    // return and looped forever (binary_search hung at v == target). Leave the Guard
+    // un-rewritten — the loop lowering declines a Guard body and walls honestly.
+    if let IrStmtKind::Guard { else_, .. } = &body[i].kind {
+        if !matches!(else_.kind, IrExprKind::Continue | IrExprKind::Break) {
+            return body;
+        }
+    }
     *changed = true;
     let mut pre = body;
     let rest = pre.split_off(i + 1);
@@ -654,12 +685,32 @@ pub fn desugar_flatten_let_block(body: &IrExpr) -> Option<IrExpr> {
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
         return None;
     };
-    let (i, var, ty, mutability, inner_stmts, inner_tail) =
+    // `let x = { inner…; t }` AND `let (a, b) = { inner…; t }` (the fan sequential
+    // rewrite's destructure-of-block) both splice the inner statements before a
+    // rebuilt bind of the inner tail — a block value binds nothing extra, so the
+    // lifetime extension is the same conservative one the Bind arm always took.
+    enum Target {
+        Bind { var: VarId, ty: Ty, mutability: almide_ir::Mutability },
+        Destructure { pattern: almide_ir::IrPattern },
+    }
+    let (i, target, inner_stmts, inner_tail) =
         stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
             IrStmtKind::Bind { var, ty, value, mutability } => match &value.kind {
-                IrExprKind::Block { stmts: inner, expr: Some(it) } => {
-                    Some((i, *var, ty.clone(), *mutability, inner.clone(), (**it).clone()))
-                }
+                IrExprKind::Block { stmts: inner, expr: Some(it) } => Some((
+                    i,
+                    Target::Bind { var: *var, ty: ty.clone(), mutability: *mutability },
+                    inner.clone(),
+                    (**it).clone(),
+                )),
+                _ => None,
+            },
+            IrStmtKind::BindDestructure { pattern, value } => match &value.kind {
+                IrExprKind::Block { stmts: inner, expr: Some(it) } => Some((
+                    i,
+                    Target::Destructure { pattern: pattern.clone() },
+                    inner.clone(),
+                    (**it).clone(),
+                )),
                 _ => None,
             },
             _ => None,
@@ -667,7 +718,14 @@ pub fn desugar_flatten_let_block(body: &IrExpr) -> Option<IrExpr> {
     let mut new_stmts = stmts[..i].to_vec();
     new_stmts.extend(inner_stmts);
     new_stmts.push(IrStmt {
-        kind: IrStmtKind::Bind { var, ty, value: inner_tail, mutability },
+        kind: match target {
+            Target::Bind { var, ty, mutability } => {
+                IrStmtKind::Bind { var, ty, value: inner_tail, mutability }
+            }
+            Target::Destructure { pattern } => {
+                IrStmtKind::BindDestructure { pattern, value: inner_tail }
+            }
+        },
         span: None,
     });
     new_stmts.extend_from_slice(&stmts[i + 1..]);

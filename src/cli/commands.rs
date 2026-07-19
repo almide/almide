@@ -206,6 +206,24 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         }
         return WasmTestOutcome::Fail { file: test_file.to_string(), detail };
     }
+    // A file with BOTH `main` and `test` blocks: the v1 wasm test-mode renderer
+    // (almide_mir::pipeline::synthesize_test_runner_main) intentionally leaves
+    // `main`-bearing files on the ordinary `__main_runner` protocol and never
+    // synthesizes the `__test_runner` — so the wasm leg compiles and runs ONLY
+    // `main`, never the `test` blocks, and reports the whole file Pass as long
+    // as `main` exits cleanly. A file's tests can be silently unexecuted (not
+    // merely mis-scored) on this leg — the false-green class in
+    // feedback_wasm_test_parse_error_false_pass, a fresh trigger (runtime
+    // assertions, not parse errors). Skip straight to the authoritative native
+    // fallback rather than trust a Pass that never checked the tests at all.
+    let has_main = program
+        .decls
+        .iter()
+        .any(|d| matches!(d, almide_lang::ast::Decl::Fn { name, .. } if name.as_str() == "main"));
+    let has_test = program.decls.iter().any(|d| matches!(d, almide_lang::ast::Decl::Test { .. }));
+    if has_main && has_test {
+        return skip("main + test blocks: wasm test-mode runs main only, not the tests".to_string());
+    }
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> =
         if std::path::Path::new("almide.toml").exists() {
@@ -366,16 +384,15 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         }
         eprintln!("{}", line);
     }
-    // v1 first; a RUN failure of the v1 module retries on the v0 emit before any
-    // verdict — a v1 runtime defect (a trap where v0 runs — the #790 vein) must
-    // surface as a v1 bug report, not as a false test failure, and the v0 retry
-    // keeps the file on the fast wasm leg instead of the rustc native fallback.
-    // A REAL failing test simply fails twice (rare; the native fallback then
-    // renders the authoritative diagnostics).
+    // v1 first, and where v1 RENDERS its verdict is FINAL: a v1 run failure routes
+    // to the authoritative NATIVE fallback, never to a v0 retry. The old v0 retry
+    // existed for the #790 vein (v1 runtime defects trapping where v0 ran) — that
+    // vein is closed, and the retry's real effect had inverted: v0 DCEs whole test
+    // bodies (#792 vacuous ok), so a GENUINELY failing test (v1 correctly aborting
+    // on `none!`) was overwritten by a hollow v0 "pass". v0 still carries the files
+    // v1 WALLS (no render) — the shrinking #782 remainder.
     if let Some(b) = v1_bytes {
-        if let WasmTestOutcome::Pass { file, count, bytes } = run_module(&b) {
-            return WasmTestOutcome::Pass { file, count, bytes };
-        }
+        return run_module(&b);
     }
     match v0_bytes(&mut ir_program) {
         Ok(b) => run_module(&b),

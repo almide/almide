@@ -159,6 +159,11 @@ pub(crate) enum Flow {
     /// A runtime abort (`Error: <msg>` → stderr, exit 1). Propagates straight
     /// to the top.
     Abort(String),
+    /// An explicit `process.exit(n)` — terminate with code n, printing NOTHING
+    /// extra (the ALS-T18 assert desugar eprintlns its own line first).
+    /// Modeled as Ok for n == 0, Aborted (exit 1) otherwise — the two codes
+    /// the deterministic corpus uses.
+    Exit(i64),
     /// Out of fuel / too deep. Propagates straight to the top.
     Fuel,
     /// An out-of-scope capability. Propagates straight to the top.
@@ -404,6 +409,11 @@ impl<'a> Interpreter<'a> {
                     stderr,
                 }
             }
+            Flow::Exit(code) => RunOutcome {
+                status: if code == 0 { RunStatus::Ok } else { RunStatus::Aborted },
+                stdout: self.stdout.clone(),
+                stderr: self.stderr.clone(),
+            },
             Flow::Fuel => RunOutcome {
                 status: RunStatus::FuelExhausted,
                 stdout: self.stdout.clone(),

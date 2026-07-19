@@ -86,36 +86,6 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
         rs_code
     };
 
-    // Scratch dir. A per-call `project_dir_override` (one dir per test file)
-    // gives each parallel worker its own `src/main.rs`, so cold rustc builds
-    // run truly in parallel instead of serializing on the shared dir's
-    // `BUILD_LOCK`. Otherwise: `ALMIDE_RUN_PROJECT_DIR`, else a shared default.
-    let project_dir = project_dir_override.map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("ALMIDE_RUN_PROJECT_DIR").map(std::path::PathBuf::from))
-        .unwrap_or_else(|| std::env::temp_dir().join("almide-run"));
-    std::fs::create_dir_all(&project_dir)
-        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
-
-    let use_test_harness = test_mode || (!rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main("));
-
-    let hash_input = format!("{}:test={}:release={}", &rs_code, use_test_harness, release);
-    let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
-    let cache = super::incremental_cache_dir();
-    let hash_file = cache.join(format!("{}.hash", file.replace('/', "_").replace('.', "_")));
-
-    // Per-file binary: use file hash as name to avoid collisions during parallel test runs
-    let bin_name = format!("almide-{}", &code_hash[..12]);
-    let profile_dir = if release { "release" } else { "debug" };
-    let bin_path = project_dir.join("target").join(profile_dir).join(&bin_name);
-
-    let cache_hit = hash_file.exists()
-        && bin_path.exists()
-        && std::fs::read_to_string(&hash_file).ok().as_deref() == Some(&code_hash);
-
-    if cache_hit {
-        return Ok(bin_path);
-    }
-
     // Load native deps from almide.toml (search in input file's directory, then CWD).
     // source_root is the directory containing almide.toml (where native/ lives).
     let file_dir = std::path::Path::new(file).parent()
@@ -142,6 +112,57 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
     let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
     let source_root = if !native_deps.is_empty() || has_deps { Some(toml_dir.as_path()) } else { None };
 
+    let use_test_harness = test_mode || (!rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main("));
+    build_native_cached(&rs_code, use_test_harness, release, project_dir_override, native_deps, source_root)
+}
+
+/// Build a native binary from GENERATED Rust source through a content-addressed
+/// cache: the key is the generated code itself (+ harness/profile/deps), never
+/// the caller's source path. Identical generated code from ANY entry point —
+/// `almide run`, `almide build`, a test harness compiling from a fresh tempdir —
+/// reuses one cached binary and skips cargo entirely. (The hit test was
+/// previously gated on a per-source-path side file, so path-unstable callers
+/// like the 268-fixture cross-target gate paid a full rustc per fixture per
+/// run even when the generated code was byte-identical.)
+pub(crate) fn build_native_cached(
+    rs_code: &str,
+    use_test_harness: bool,
+    release: bool,
+    project_dir_override: Option<&std::path::Path>,
+    native_deps: &[crate::project::NativeDep],
+    source_root: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, String> {
+    // Scratch dir. A per-call `project_dir_override` (one dir per test file)
+    // gives each parallel worker its own `src/main.rs`, so cold rustc builds
+    // run truly in parallel instead of serializing on the shared dir's
+    // `BUILD_LOCK`. Otherwise: `ALMIDE_RUN_PROJECT_DIR`, else a shared default.
+    let project_dir = project_dir_override.map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("ALMIDE_RUN_PROJECT_DIR").map(std::path::PathBuf::from))
+        .unwrap_or_else(|| std::env::temp_dir().join("almide-run"));
+    std::fs::create_dir_all(&project_dir)
+        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+
+    // Deps and source_root shape the generated Cargo.toml (and thus the built
+    // binary), so they are part of the key: the same rs_code built against
+    // different [native-deps] must not collide on one cache entry.
+    let dep_key = native_deps.iter()
+        .map(|d| format!("{}={}", d.name, d.spec))
+        .collect::<Vec<_>>()
+        .join(",");
+    let hash_input = format!(
+        "{}:test={}:release={}:deps={}:root={:?}",
+        &rs_code, use_test_harness, release, dep_key, source_root
+    );
+    let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
+    let profile_dir = if release { "release" } else { "debug" };
+    let bin_path = project_dir.join("target").join(profile_dir).join(format!("almide-{}", code_hash));
+
+    // The binary's NAME is its full content key and it lands via atomic rename
+    // (below), so bare existence is a complete, lock-free cache hit.
+    if bin_path.exists() {
+        return Ok(bin_path);
+    }
+
     // Serialize cargo builds: the shared project dir has a single src/main.rs
     // and one generated binary, overwritten per compilation. Parallel writes
     // corrupt them. `BUILD_LOCK` serializes threads in this process; the
@@ -158,10 +179,7 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
 
     // Re-check the cache under the lock: another process/thread may have built
     // this exact binary while we waited, making a rebuild redundant.
-    if hash_file.exists()
-        && bin_path.exists()
-        && std::fs::read_to_string(&hash_file).ok().as_deref() == Some(&code_hash)
-    {
+    if bin_path.exists() {
         return Ok(bin_path);
     }
 
@@ -173,10 +191,11 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
 
     match result {
         Ok(built_path) => {
-            // Copy built binary to per-file cached path. The bare-rustc fast
-            // path doesn't create a cargo `target/<profile>/` dir, so ensure
-            // bin_path's parent exists, and surface a copy failure instead of
-            // silently leaving bin_path missing (→ "Failed to execute" at run).
+            // Copy the built binary to its content-keyed cached path. The
+            // bare-rustc fast path doesn't create a cargo `target/<profile>/`
+            // dir, so ensure bin_path's parent exists, and surface a copy
+            // failure instead of silently leaving bin_path missing (→ "Failed
+            // to execute" at run).
             if let Some(parent) = bin_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
@@ -196,8 +215,6 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
                 return Err(format!("failed to stage built binary {} -> {}: {}",
                     built_path.display(), bin_path.display(), e));
             }
-            let _ = std::fs::create_dir_all(&cache);
-            let _ = std::fs::write(&hash_file, &code_hash);
             Ok(bin_path)
         }
         Err(e) => Err(e),

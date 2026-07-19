@@ -649,14 +649,18 @@ fn render_op(
         // (Ok-record, not an Err String — which is freed by a flat `rc_dec`). Dot-sanitized to match
         // `drop_fn_ident`. Cert = the final wrapper `call $rc_dec` (`d`); the recursion is the trusted
         // generated routine. Mirrors `DropResultValue` (Value payload) / the masked `DropListStr`.
-        Op::DropWrapperRec { v, drop_fn, is_result } => {
+        Op::DropWrapperRec { v, drop_fn, is_result, err_rec } => {
             let p = local(*v);
             let dn = drop_fn.replace('.', "_");
             if *is_result {
                 let payload = format!("(i32.load (i32.add (local.get {p}) (i32.const 12)))");
+                // The recursive arm rides the tag: Ok-record wrappers (`resrec:`) recurse on
+                // tag@16 == 0; the heap-Ok × variant-Err class (`reserr:` — err_rec) recurses
+                // on tag@16 == 1 and flat-frees the Ok payload.
+                let rec_tag = if *err_rec { 1 } else { 0 };
                 format!(
                     "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1)) (then\n\
-                     \x20     (if (i32.eq (i32.load (i32.add (local.get {p}) (i32.const 16))) (i32.const 0))\n\
+                     \x20     (if (i32.eq (i32.load (i32.add (local.get {p}) (i32.const 16))) (i32.const {rec_tag}))\n\
                      \x20       (then (call $__drop_{dn} {payload}))\n\
                      \x20       (else (call $rc_dec {payload})))))\n\
                      \x20   (call $rc_dec (local.get {p}))\n"
@@ -902,6 +906,53 @@ fn render_op(
                 ),
                 // Float32 → its 32-bit pattern as Int: identity (the value IS the low-32 bits).
                 PrimKind::F32Bits => format!("(local.get {})", local(args[0])),
+                // f32 arithmetic over two low-32 patterns: unwrap → f32 op → re-wrap. Per-op
+                // f32 rounding matches native Rust f32 and v0's F32Add family.
+                PrimKind::F32Bin(op) => {
+                    let f = |a: usize| {
+                        format!("(f32.reinterpret_i32 (i32.wrap_i64 (local.get {})))", local(args[a]))
+                    };
+                    let instr = match op {
+                        FBinOp::Add => "f32.add",
+                        FBinOp::Sub => "f32.sub",
+                        FBinOp::Mul => "f32.mul",
+                        FBinOp::Div => "f32.div",
+                        FBinOp::Min => "f32.min",
+                        FBinOp::Max => "f32.max",
+                        FBinOp::CopySign => "f32.copysign",
+                    };
+                    format!(
+                        "(i64.extend_i32_u (i32.reinterpret_f32 ({instr} {} {})))",
+                        f(0),
+                        f(1)
+                    )
+                }
+                PrimKind::F32Cmp(op) => {
+                    let f = |a: usize| {
+                        format!("(f32.reinterpret_i32 (i32.wrap_i64 (local.get {})))", local(args[a]))
+                    };
+                    let instr = match op {
+                        FCmpOp::Lt => "f32.lt",
+                        FCmpOp::Le => "f32.le",
+                        FCmpOp::Gt => "f32.gt",
+                        FCmpOp::Ge => "f32.ge",
+                        FCmpOp::Eq => "f32.eq",
+                        FCmpOp::Ne => "f32.ne",
+                    };
+                    format!("(i64.extend_i32_u ({instr} {} {}))", f(0), f(1))
+                }
+                PrimKind::F32Un(op) => {
+                    let x =
+                        format!("(f32.reinterpret_i32 (i32.wrap_i64 (local.get {})))", local(args[0]));
+                    let inner = match op {
+                        FUnOp::Abs => format!("(f32.abs {x})"),
+                        FUnOp::Sqrt => format!("(f32.sqrt {x})"),
+                        FUnOp::Floor => format!("(f32.floor {x})"),
+                        FUnOp::Ceil => format!("(f32.ceil {x})"),
+                        FUnOp::Neg => format!("(f32.neg {x})"),
+                    };
+                    format!("(i64.extend_i32_u (i32.reinterpret_f32 {inner}))")
+                }
             };
             match dst {
                 Some(d) => format!("    (local.set {} {body})\n", local(*d)),

@@ -423,21 +423,48 @@ impl LowerCtx {
     /// the container-grain `bind_pattern` (still memory-safe, just imprecise) so we never emit a
     /// dangling borrow. Returns `false` for any non-`Bind`/`Wildcard` sub-pattern (a nested tuple
     /// pattern in ONE statement is deferred — sz4 splits it into two statements, which works).
-    fn try_lower_tuple_destructure(&mut self, pats: &[IrPattern], subject: ValueId) -> bool {
+    pub(crate) fn try_lower_tuple_destructure(
+        &mut self,
+        pats: &[IrPattern],
+        subject: ValueId,
+        subject_ty: Option<&Ty>,
+    ) -> bool {
         use crate::{IntOp, PrimKind};
+        // A pattern component's recorded ty can be an UNSUBSTITUTED TypeVar after mono (the
+        // generic zip_with's `let (a, b) = p` — patterns lag value-side substitution): treating
+        // it as heap loaded an Int slot with i32 (LoadHandle) while the call site passed it
+        // scalar-raw — INVALID WASM (the zip_with__Int_String_String i64/i32 mismatch,
+        // 2026-07-17). Resolve each component from the SUBJECT's own Tuple ty; a component
+        // unresolved on BOTH sides DECLINES the precise destructure (the container-grain
+        // fallback is imprecise but never emits a wrong-width load).
+        let resolve = |i: usize, pty: &Ty| -> Option<Ty> {
+            if !matches!(pty, Ty::TypeVar(_) | Ty::Unknown) {
+                return Some(pty.clone());
+            }
+            if let Some(Ty::Tuple(ts)) = subject_ty {
+                if ts.len() == pats.len() && !matches!(ts[i], Ty::TypeVar(_) | Ty::Unknown) {
+                    return Some(ts[i].clone());
+                }
+            }
+            None
+        };
         // Does the subject OWN its heap slots (a tracked masked aggregate) OR is it a borrow whose
         // owner is elsewhere (a param / a borrowed element handle)? Either way a per-slot HEAP read
         // is a sound borrow. An untracked owned heap subject would leak the borrowed inner block, so
         // a heap field over it must defer to the container-grain alias.
         let heap_borrow_ok =
             self.materialized_aggregates.contains(&subject) || self.param_values.contains(&subject);
-        for p in pats {
+        let mut eff_tys: Vec<Option<Ty>> = vec![None; pats.len()];
+        for (i, p) in pats.iter().enumerate() {
             match p {
-                IrPattern::Bind { ty, .. } if !is_heap_ty(ty) => {}
-                IrPattern::Bind { .. } => {
-                    if !heap_borrow_ok {
+                IrPattern::Bind { ty, .. } => {
+                    let Some(eff) = resolve(i, ty) else {
+                        return false;
+                    };
+                    if is_heap_ty(&eff) && !heap_borrow_ok {
                         return false;
                     }
+                    eff_tys[i] = Some(eff);
                 }
                 IrPattern::Wildcard => {}
                 _ => return false,
@@ -446,7 +473,8 @@ impl LowerCtx {
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subject] });
         for (i, p) in pats.iter().enumerate() {
-            if let IrPattern::Bind { var, ty } = p {
+            if let IrPattern::Bind { var, ty: _ } = p {
+                let ty = eff_tys[i].as_ref().expect("validated above");
                 let off = self.fresh_value();
                 self.ops.push(Op::ConstInt { dst: off, value: 12 + (i as i64) * 8 });
                 let addr = self.fresh_value();
@@ -610,7 +638,7 @@ impl LowerCtx {
                 if let Some(subj) = subject {
                     if self.materialized_aggregates.contains(&subj) || self.param_values.contains(&subj)
                     {
-                        if self.try_lower_tuple_destructure(elements, subj) {
+                        if self.try_lower_tuple_destructure(elements, subj, None) {
                             return Ok(());
                         }
                     }
@@ -802,7 +830,16 @@ impl LowerCtx {
                             .map(|v| self.live_heap_handles.contains(&v))
                             .unwrap_or(false) =>
                     {
-                        self.value_for(*id).ok()?
+                        // Dup, do NOT move: the ctor gets its OWN co-owned reference and
+                        // the var keeps its handle + its scope-end drop. Moving consumed
+                        // the var — a SECOND `ok(r0)` then found nothing and deferred to
+                        // the zeroed Opaque, printing `ok("")` (fuzz seed-20260718 index
+                        // 248); native value-semantics copies each time. The same
+                        // borrow-then-Dup discipline as the param arm below.
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
                     // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
@@ -915,6 +952,19 @@ impl LowerCtx {
                         self.live_heap_handles.retain(|h| *h != p);
                         p
                     }
+                    // `some((if c then a else b))` — a heap-result IF/MATCH String payload
+                    // (fuzz F-858: the un-admitted if fell to the deferred Opaque and the
+                    // zeroed option READ `none` — a silent flip). EXECUTE it via the proven
+                    // heap-result-if machinery (lower_owned_heap_field's If/Match arms), MOVE
+                    // the one owned result into the Some slot. Gated to a String payload so
+                    // the flat drop is exact.
+                    IrExprKind::If { .. } | IrExprKind::Match { .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     // A `Map[String, Int]` (map_skv) Some payload (`some(["a": 1])` → `some(map.from_list
                     // (…))`) — lower the map (a Module call) and MOVE it into the Some slot. The map's own
                     // block is freed by the flat heap_elem_lists drop, exactly as a bare `let m = […]`
@@ -983,7 +1033,16 @@ impl LowerCtx {
                             .map(|v| self.live_heap_handles.contains(&v))
                             .unwrap_or(false) =>
                     {
-                        self.value_for(*id).ok()?
+                        // Dup, do NOT move: the ctor gets its OWN co-owned reference and
+                        // the var keeps its handle + its scope-end drop. Moving consumed
+                        // the var — a SECOND `ok(r0)` then found nothing and deferred to
+                        // the zeroed Opaque, printing `ok("")` (fuzz seed-20260718 index
+                        // 248); native value-semantics copies each time. The same
+                        // borrow-then-Dup discipline as the param arm below.
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
                     // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
@@ -1088,6 +1147,30 @@ impl LowerCtx {
                         self.live_heap_handles.retain(|h| *h != p);
                         p
                     }
+                    // `ok(float.to_fixed(x, 4))` — a PURE Module call yielding a fresh owned STRING
+                    // Ok payload (fuzz C-class 323/768: the un-admitted stdlib call fell to the
+                    // deferred Opaque and the ZEROED block printed `ok("")` — a silent wrong value).
+                    // `lower_owned_heap_field` routes it via `lower_pure_module_value_call` (purity/
+                    // HOF gates apply there); MOVE it into the Ok slot (retain-remove — the
+                    // materialized Result is the sole owner, its flat DropListStr slot-0 free is
+                    // exact, the same discipline as the Named-call String piece above).
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
+                    // `ok((if c then a else b))` — a heap-result IF/MATCH String Ok payload
+                    // (the fuzz F-858 family's Result sibling): the heap-result-if machinery
+                    // yields the one owned result, moved into the Ok slot.
+                    IrExprKind::If { .. } | IrExprKind::Match { .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     _ => return None,
                 };
                 let dst = self.materialize_result_str(piece, repr, false, false);
@@ -1133,6 +1216,19 @@ impl LowerCtx {
             IrExprKind::ResultErr { .. } if self.is_scalar_ok_variant_err_result(ty) => {
                 self.try_lower_result_err_variant_ctor(value, ty)
             }
+            // `err(<user-variant ctor>)` for `Result[T_heap, <user variant>]` — the HEAP-Ok
+            // structured-error class (`assert_eq(classify(-3), err(NegativeInput(-3)))`).
+            // Cap-as-tag wrapper; a rich payload routes to the Err-side recursion
+            // (`reserr:<V>`). MUST precede the generic both-heap Err arm below, whose
+            // Named-call fallback emitted the ctor as a dangling `(call $NegativeInput)`.
+            // A `err(<Var>)` payload keeps the generic route (owned-move / param-Dup).
+            IrExprKind::ResultErr { expr }
+                if is_heap_ty(&expr.ty)
+                    && !matches!(&expr.kind, IrExprKind::Var { .. })
+                    && self.is_heap_ok_variant_err_result(ty) =>
+            {
+                self.try_lower_result_err_variant_ctor_heap_ok(value, ty)
+            }
             // HEAP-Ok `Result[(Int,Int), String]` etc. — `Err(msg)` RETURNED / bound directly
             // (`fn __rzip_err(..) = Err(copy)`). The Err message goes into the SAME cap-as-tag 1-slot
             // DynListStr as the heap-Ok arm (payload @12, tag @16 = 1), so a `match` reading tag @16
@@ -1149,7 +1245,16 @@ impl LowerCtx {
                             .map(|v| self.live_heap_handles.contains(&v))
                             .unwrap_or(false) =>
                     {
-                        self.value_for(*id).ok()?
+                        // Dup, do NOT move: the ctor gets its OWN co-owned reference and
+                        // the var keeps its handle + its scope-end drop. Moving consumed
+                        // the var — a SECOND `ok(r0)` then found nothing and deferred to
+                        // the zeroed Opaque, printing `ok("")` (fuzz seed-20260718 index
+                        // 248); native value-semantics copies each time. The same
+                        // borrow-then-Dup discipline as the param arm below.
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
                     // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
@@ -1218,6 +1323,26 @@ impl LowerCtx {
                         self.list_list_str_lists.insert(dst);
                         return Some(dst);
                     }
+                    // `err(float.to_fixed(x, 4))` — a PURE Module call yielding a fresh owned
+                    // STRING Err payload (fuzz C-class: fell to the deferred Opaque whose zeroed
+                    // block even flipped the TAG — printed `ok("")` for an err). Same piece as the
+                    // ok-side Module-call arm; the cap-as-tag Err slot owns the one String.
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
+                    // `err((if c then a else b))` — a heap-result IF/MATCH String Err payload
+                    // (the F-858 family): the one owned result moves into the Err slot.
+                    IrExprKind::If { .. } | IrExprKind::Match { .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     _ => return None,
                 };
                 Some(self.materialize_result_str(piece, repr, true, false))
@@ -1236,7 +1361,16 @@ impl LowerCtx {
                             .map(|v| self.live_heap_handles.contains(&v))
                             .unwrap_or(false) =>
                     {
-                        self.value_for(*id).ok()?
+                        // Dup, do NOT move: the ctor gets its OWN co-owned reference and
+                        // the var keeps its handle + its scope-end drop. Moving consumed
+                        // the var — a SECOND `ok(r0)` then found nothing and deferred to
+                        // the zeroed Opaque, printing `ok("")` (fuzz seed-20260718 index
+                        // 248); native value-semantics copies each time. The same
+                        // borrow-then-Dup discipline as the param arm below.
+                        let src = self.value_for(*id).ok()?;
+                        let dup = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: dup, src });
+                        dup
                     }
                     // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
                     // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
@@ -1288,9 +1422,35 @@ impl LowerCtx {
                         self.drop_arm_locals(mark);
                         obj
                     }
+                    // `err(float.to_fixed(x, 4))` for a SCALAR-Ok Result — a PURE Module call
+                    // yielding a fresh owned STRING Err payload (fuzz C-class, len-as-tag twin of
+                    // the heap-Ok Module-call arms): the deferred Opaque zeroed the block. Same
+                    // fresh-owned move-in as the Named-call piece above.
+                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
+                    // `err((if c then a else b))` for a SCALAR-Ok Result — the heap-result
+                    // IF/MATCH String Err payload (the F-858 family, len-as-tag twin).
+                    IrExprKind::If { .. } | IrExprKind::Match { .. }
+                        if matches!(expr.ty, Ty::String) =>
+                    {
+                        let p = self.lower_owned_heap_field(expr)?;
+                        self.live_heap_handles.retain(|h| *h != p);
+                        p
+                    }
                     _ => return None,
                 };
                 let dst = self.materialize_opt_str_some(piece, repr);
+                // materialize_opt_str_some registers the OPTION read-shape; this value is
+                // a RESULT (len-as-tag, Err = len 1) — a reader that keeps both entries
+                // resolves it as an Option (`is_result = results ∧ ¬options`) and takes
+                // the Err payload as a Some payload (`err("x") ?? 0` returned the String
+                // HANDLE — result_option_matrix's "if with ??"). Result-only tracking.
+                self.materialized_options.remove(&dst);
                 self.materialized_results.insert(dst);
                 Some(dst)
             }

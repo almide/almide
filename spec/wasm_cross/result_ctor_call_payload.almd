@@ -1,0 +1,23 @@
+// @contract: C-138
+// `ok(<pure stdlib String call>)` / `err(<...>)` bound directly: the Module-call
+// payload materializes a REAL Result block on the v1 leg. Before: the un-admitted
+// stdlib call fell to the deferred Opaque and the ZEROED block printed `ok("")` —
+// even for err() (the tag zeroed too). Fuzz seed 1784352208133210990 index
+// 323/768/904 (the C class).
+fn main() -> Unit = {
+  let a: Result[String, String] = ok(float.to_fixed(math.sqrt(100.0), 4))
+  let b: Result[String, String] = err(float.to_fixed(0.0000009, 6))
+  let c: Result[String, String] = ok(int.to_string(42))
+  let d: Result[Int, String] = err(string.to_upper("bad"))
+  println("a = ${a}")
+  println("b = ${b}")
+  println("c = ${c}")
+  println("d = ${d}")
+}
+
+test "ok/err ctor with a stdlib-call payload materializes the real value" {
+  let a: Result[String, String] = ok(float.to_fixed(math.sqrt(100.0), 4))
+  let b: Result[String, String] = err(float.to_fixed(0.0000009, 6))
+  assert_eq(a, ok("10.0000"))
+  assert_eq(b, err("0.000001"))
+}

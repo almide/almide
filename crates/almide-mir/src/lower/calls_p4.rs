@@ -58,8 +58,8 @@ impl LowerCtx {
         let dst = self.fresh_value();
         self.ops.push(Op::IfThen { cond: both_some, dst: Some(dst) });
         // THEN (both Some): the heap payload eq — only here is data[0] dereferenced.
-        let pay_l = self.load_at_offset(hl, 12, crate::PrimKind::LoadHandle);
-        let pay_r = self.load_at_offset(hr, 12, crate::PrimKind::LoadHandle);
+        let pay_l = self.load_payload_addr(hl, 12);
+        let pay_r = self.load_payload_addr(hr, 12);
         let pay_eq = self.typed_slot_eq(pay_l, pay_r, elem_ty, depth + 1)?;
         self.ops.push(Op::Else { val: Some(pay_eq) });
         // ELSE: both-None → equal, one-Some-one-None → not equal (== of the tags).
@@ -109,8 +109,8 @@ impl LowerCtx {
         let dst = self.fresh_value();
         self.ops.push(Op::IfThen { cond: both_err, dst: Some(dst) });
         // THEN (both Err): the heap String eq — only here is @12 read as a handle.
-        let pay_err_l = self.load_at_offset(hl, 12, crate::PrimKind::LoadHandle);
-        let pay_err_r = self.load_at_offset(hr, 12, crate::PrimKind::LoadHandle);
+        let pay_err_l = self.load_payload_addr(hl, 12);
+        let pay_err_r = self.load_payload_addr(hr, 12);
         let err_eq = self.fresh_value();
         self.ops.push(Op::CallFn {
             dst: Some(err_eq),
@@ -171,11 +171,12 @@ impl LowerCtx {
                 self.ops.push(Op::ConstInt { dst, value: if *value { 1 } else { 0 } });
                 Some(dst)
             }
-            // A FLOAT literal: the i64-uniform value holds the f64 BITS, so `3.5` materializes
-            // as `ConstInt(3.5_f64.to_bits())`. The render's float prims reinterpret it back.
+            // A FLOAT literal: the i64-uniform value holds the f64 BITS (LOW-32 f32 bits for a
+            // Float32-typed literal), so `3.5` materializes as `ConstInt(float_lit_bits(3.5))`.
+            // The render's float prims reinterpret it back.
             IrExprKind::LitFloat { value } => {
                 let dst = self.fresh_value();
-                self.ops.push(Op::ConstInt { dst, value: value.to_bits() as i64 });
+                self.ops.push(Op::ConstInt { dst, value: crate::lower::float_lit_bits(*value, &expr.ty) });
                 Some(dst)
             }
             // Decomposed (#781): the 340-line operator dispatch is a verbatim
@@ -286,11 +287,12 @@ impl LowerCtx {
                     // holds the f64 bits; the prim reinterprets around `f64.neg` — sign-bit
                     // flip, so `-0.0` and NaN behave exactly as v0's `f64::neg`).
                     UnOp::NegFloat => {
-                        self.ops.push(Op::Prim {
-                            kind: crate::PrimKind::FloatUn(crate::FUnOp::Neg),
-                            dst: Some(dst),
-                            args: vec![x],
-                        });
+                        let kind = if matches!(operand.ty, Ty::Float32) {
+                            crate::PrimKind::F32Un(crate::FUnOp::Neg)
+                        } else {
+                            crate::PrimKind::FloatUn(crate::FUnOp::Neg)
+                        };
+                        self.ops.push(Op::Prim { kind, dst: Some(dst), args: vec![x] });
                         Some(dst)
                     }
                     // Boolean `not`: a Bool is an i64 0/1, so `1 - b` flips it (b∈{0,1} →
@@ -437,11 +439,26 @@ impl LowerCtx {
         // operands are Float (the i64-uniform f64 bits); the prim reinterprets around the
         // wasm f64 op. Pure scalar — no ownership (cert untouched). This makes float-heavy
         // self-host (libm / dtoa) write `a * b` instead of `prim.fmul(a, b)`.
+        // A Float32 operand carries the LOW-32 f32 pattern (the F32Demote/IntToF32
+        // convention), so it routes to the F32 prim family: the f64 ops on those bits
+        // computed a denormal-garbage sum, and per-op f32 rounding is the native/v0
+        // semantics anyway.
+        let is_f32 = matches!(left.ty, Ty::Float32);
         let fkind = match op {
+            BinOp::AddFloat if is_f32 => Some(crate::PrimKind::F32Bin(crate::FBinOp::Add)),
+            BinOp::SubFloat if is_f32 => Some(crate::PrimKind::F32Bin(crate::FBinOp::Sub)),
+            BinOp::MulFloat if is_f32 => Some(crate::PrimKind::F32Bin(crate::FBinOp::Mul)),
+            BinOp::DivFloat if is_f32 => Some(crate::PrimKind::F32Bin(crate::FBinOp::Div)),
             BinOp::AddFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Add)),
             BinOp::SubFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Sub)),
             BinOp::MulFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Mul)),
             BinOp::DivFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Div)),
+            BinOp::Lt if is_f32 => Some(crate::PrimKind::F32Cmp(crate::FCmpOp::Lt)),
+            BinOp::Lte if is_f32 => Some(crate::PrimKind::F32Cmp(crate::FCmpOp::Le)),
+            BinOp::Gt if is_f32 => Some(crate::PrimKind::F32Cmp(crate::FCmpOp::Gt)),
+            BinOp::Gte if is_f32 => Some(crate::PrimKind::F32Cmp(crate::FCmpOp::Ge)),
+            BinOp::Eq if is_f32 => Some(crate::PrimKind::F32Cmp(crate::FCmpOp::Eq)),
+            BinOp::Neq if is_f32 => Some(crate::PrimKind::F32Cmp(crate::FCmpOp::Ne)),
             BinOp::Lt if Self::float_operand_ty(&left.ty) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Lt)),
             BinOp::Lte if Self::float_operand_ty(&left.ty) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Le)),
             BinOp::Gt if Self::float_operand_ty(&left.ty) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Gt)),
@@ -1197,6 +1214,28 @@ impl LowerCtx {
                     self.live_heap_handles.push(dst);
                     lowered.push(dst);
                     continue;
+                }
+                // A COMPUTED String argument (`prim.die(prim.handle("assertion failed: "
+                // + msg))` — the 2-arg assert's computed-message die): materialize the
+                // concat/interp chain to an owned block (scope-tracked, dropped at the
+                // arm/scope end like the literal above) and hand the prim its handle.
+                // Without this the whole assert's unit-if rolled back and the wall
+                // (misleadingly) named the CONDITION.
+                if matches!(
+                    &a.kind,
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. }
+                        | IrExprKind::StringInterp { .. }
+                ) {
+                    let obj = match &a.kind {
+                        IrExprKind::BinOp { .. } => self.try_lower_concat_str(a),
+                        IrExprKind::StringInterp { parts } => self.try_lower_string_interp(parts),
+                        _ => unreachable!(),
+                    };
+                    if let Some(obj) = obj {
+                        self.live_heap_handles.push(obj);
+                        lowered.push(obj);
+                        continue;
+                    }
                 }
             }
             let v = self.lower_scalar_value(a).ok_or_else(|| {

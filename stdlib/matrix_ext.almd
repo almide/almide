@@ -1,0 +1,275 @@
+// matrix_ext — SELF-HOSTED prim-level matrix extensions for v1 (silu_mul,
+// broadcast_add_row, row_dot, conv1d, byte codecs). Faithful
+// transcriptions of runtime/rs/src/matrix.rs + matrix_p2.rs over the sane domain;
+// silu_mul uses libm-exact exp (the kernel's fast-exp is within ~1e-7 — inside
+// every fixture tolerance). LAYOUT + OWNERSHIP: matrix_core's — outer DynListStr
+// of row handles, rows flat f64 blocks; args BORROWED, results fresh OWNED, fresh
+// rows MOVED in via prim.store_str. This file is List-typed like matrix_core (the
+// v1 Matrix IS a List[List[Float]]), so it makes NO matrix.* module calls — the
+// zeros edges build their blocks locally (__mxe_empty/__mxe_zeros).
+
+// Fresh empty outer block (rows = 0) / all-zero matrix — the matrix.zeros edges,
+// built locally (a module call would type against the nominal stdlib Matrix).
+fn __mxe_zero_row(rh: Int, c: Int, i: Int) -> Int =
+  if i >= c then 0
+  else {
+    prim.store64(rh + 12 + i * 8, prim.fbits(0.0))
+    __mxe_zero_row(rh, c, i + 1)
+  }
+
+fn __mxe_zeros_rows(ho: Int, n: Int, c: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let row = prim.alloc_list_f64(c)
+    let _f = __mxe_zero_row(prim.handle(row), c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mxe_zeros_rows(ho, n, c, i + 1)
+  }
+
+fn __mxe_zeros(rows: Int, cols: Int) -> List[List[Float]] = {
+  let out: List[List[Float]] = prim.alloc_list_str(rows)
+  let _x = __mxe_zeros_rows(prim.handle(out), rows, cols, 0)
+  out
+}
+
+// ── silu_mul: out[i][j] = a * sigmoid(a) * b, cols zip-truncated per row ──
+
+fn __silu_row(dh: Int, ah: Int, bh: Int, n: Int, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(ah + 12 + j * 8))
+    let y = prim.ffrombits(prim.load64(bh + 12 + j * 8))
+    let sig = 1.0 / (1.0 + math.exp(0.0 - x))
+    prim.store64(dh + 12 + j * 8, prim.fbits(x * sig * y))
+    __silu_row(dh, ah, bh, n, j + 1)
+  }
+
+fn __silu_rows(ho: Int, ha: Int, hb: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let ar = prim.load64(ha + 12 + i * 8)
+    let br = prim.load64(hb + 12 + i * 8)
+    let ca = prim.load32(ar + 4)
+    let cb = prim.load32(br + 4)
+    let c = if ca < cb then ca else cb
+    let row = prim.alloc_list_f64(c)
+    let _f = __silu_row(prim.handle(row), ar, br, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __silu_rows(ho, ha, hb, n, i + 1)
+  }
+
+fn matrix_silu_mul(a: List[List[Float]], b: List[List[Float]]) -> List[List[Float]] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let n = if la < lb then la else lb
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __silu_rows(prim.handle(out), ha, hb, n, 0)
+  out
+}
+
+// ── broadcast_add_row: every row + bias, cols zip-truncated to min(row, bias) ──
+
+fn __bar_row(dh: Int, sh: Int, bh: Int, n: Int, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(sh + 12 + j * 8))
+    let bv = prim.ffrombits(prim.load64(bh + 12 + j * 8))
+    prim.store64(dh + 12 + j * 8, prim.fbits(x + bv))
+    __bar_row(dh, sh, bh, n, j + 1)
+  }
+
+fn __bar_rows(ho: Int, hm: Int, hb: Int, blen: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let sr = prim.load64(hm + 12 + i * 8)
+    let cs = prim.load32(sr + 4)
+    let c = if cs < blen then cs else blen
+    let row = prim.alloc_list_f64(c)
+    let _f = __bar_row(prim.handle(row), sr, hb, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __bar_rows(ho, hm, hb, blen, n, i + 1)
+  }
+
+fn matrix_broadcast_add_row(m: List[List[Float]], bias: List[Float]) -> List[List[Float]] = {
+  let hm = prim.handle(m)
+  let hb = prim.handle(bias)
+  let n = prim.load32(hm + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __bar_rows(prim.handle(out), hm, hb, prim.load32(hb + 4), n, 0)
+  out
+}
+
+// ── row_dot: m[r] · vec over min length; 0.0 when r is out of bounds ──
+
+fn __rd_sum(rh: Int, vh: Int, n: Int, k: Int, acc: Float) -> Float =
+  if k >= n then acc
+  else {
+    let x = prim.ffrombits(prim.load64(rh + 12 + k * 8))
+    let y = prim.ffrombits(prim.load64(vh + 12 + k * 8))
+    __rd_sum(rh, vh, n, k + 1, acc + x * y)
+  }
+
+fn matrix_row_dot(m: List[List[Float]], r: Int, vec: List[Float]) -> Float = {
+  let hm = prim.handle(m)
+  let rows = prim.load32(hm + 4)
+  if r < 0 or r >= rows then 0.0
+  else {
+    let rh = prim.load64(hm + 12 + r * 8)
+    let vh = prim.handle(vec)
+    let cr = prim.load32(rh + 4)
+    let cv = prim.load32(vh + 4)
+    let n = if cr < cv then cr else cv
+    __rd_sum(rh, vh, n, 0, 0.0)
+  }
+}
+
+// ── conv1d: input (T, in_ch), weight (out_ch, in_ch*kernel), bias (out_ch,) →
+//    (T_out, out_ch), T_out = (T + 2P - K)/S + 1; zero padding outside [0, T) ──
+
+fn __cv_tap(hin: Int, wo: Int, t_in: Int, in_ch: Int, k: Int, p: Int, base: Int, c: Int, ki: Int, acc: Float) -> Float =
+  if ki >= k then acc
+  else {
+    let tp = base + ki
+    if tp >= p and tp < p + t_in then {
+      let tc = tp - p
+      let w = prim.ffrombits(prim.load64(wo + 12 + (c * k + ki) * 8))
+      let irow = prim.load64(hin + 12 + tc * 8)
+      let x = prim.ffrombits(prim.load64(irow + 12 + c * 8))
+      __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, ki + 1, acc + w * x)
+    } else __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, ki + 1, acc)
+  }
+
+fn __cv_chans(hin: Int, wo: Int, t_in: Int, in_ch: Int, k: Int, p: Int, base: Int, c: Int, acc: Float) -> Float =
+  if c >= in_ch then acc
+  else {
+    let acc2 = __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, 0, acc)
+    __cv_chans(hin, wo, t_in, in_ch, k, p, base, c + 1, acc2)
+  }
+
+fn __cv_outs(dh: Int, hin: Int, hw: Int, hbias: Int, t_in: Int, in_ch: Int, out_ch: Int, k: Int, p: Int, base: Int, o: Int) -> Int =
+  if o >= out_ch then 0
+  else {
+    let wo = prim.load64(hw + 12 + o * 8)
+    let b0 = prim.ffrombits(prim.load64(hbias + 12 + o * 8))
+    let sum = __cv_chans(hin, wo, t_in, in_ch, k, p, base, 0, b0)
+    prim.store64(dh + 12 + o * 8, prim.fbits(sum))
+    __cv_outs(dh, hin, hw, hbias, t_in, in_ch, out_ch, k, p, base, o + 1)
+  }
+
+fn __cv_rows(ho: Int, hin: Int, hw: Int, hbias: Int, t_in: Int, in_ch: Int, out_ch: Int, k: Int, s: Int, p: Int, t_out: Int, t: Int) -> Int =
+  if t >= t_out then 0
+  else {
+    let row = prim.alloc_list_f64(out_ch)
+    let _f = __cv_outs(prim.handle(row), hin, hw, hbias, t_in, in_ch, out_ch, k, p, t * s, 0)
+    prim.store_str(ho + 12 + t * 8, row)
+    __cv_rows(ho, hin, hw, hbias, t_in, in_ch, out_ch, k, s, p, t_out, t + 1)
+  }
+
+fn matrix_conv1d(input: List[List[Float]], weight: List[List[Float]], bias: List[Float], kernel: Int, stride: Int, padding: Int) -> List[List[Float]] = {
+  let hin = prim.handle(input)
+  let hw = prim.handle(weight)
+  let t_in = prim.load32(hin + 4)
+  let out_ch = prim.load32(hw + 4)
+  if t_in == 0 or out_ch == 0 then __mxe_zeros(0, 0)
+  else {
+    let irow0 = prim.load64(hin + 12)
+    let in_ch = prim.load32(irow0 + 4)
+    let t_padded = t_in + 2 * padding
+    if t_padded < kernel then __mxe_zeros(0, 0)
+    else {
+      let t_out = (t_padded - kernel) / stride + 1
+      let out: List[List[Float]] = prim.alloc_list_str(t_out)
+      let _x = __cv_rows(prim.handle(out), hin, hw, prim.handle(bias), t_in, in_ch, out_ch, kernel, stride, padding, t_out, 0)
+      out
+    }
+  }
+}
+
+// ── byte codecs (LE — wasm memory is little-endian, so an 8/4-byte store IS the
+//    to_le_bytes sequence) ──
+
+fn __tb64_row(bh: Int, rh: Int, c: Int, pos: Int, j: Int) -> Int =
+  if j >= c then pos + c * 8
+  else {
+    prim.store64(bh + 12 + pos + j * 8, prim.load64(rh + 12 + j * 8))
+    __tb64_row(bh, rh, c, pos, j + 1)
+  }
+
+fn __tb64_rows(bh: Int, hm: Int, n: Int, i: Int, pos: Int) -> Int =
+  if i >= n then pos
+  else {
+    let rh = prim.load64(hm + 12 + i * 8)
+    let np = __tb64_row(bh, rh, prim.load32(rh + 4), pos, 0)
+    __tb64_rows(bh, hm, n, i + 1, np)
+  }
+
+fn __mx_total_cells(hm: Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let rh = prim.load64(hm + 12 + i * 8)
+    __mx_total_cells(hm, n, i + 1, acc + prim.load32(rh + 4))
+  }
+
+fn matrix_to_bytes_f64_le(m: List[List[Float]]) -> Bytes = {
+  let hm = prim.handle(m)
+  let n = prim.load32(hm + 4)
+  let cells = __mx_total_cells(hm, n, 0, 0)
+  let out = prim.alloc_bytes(cells * 8)
+  let _x = __tb64_rows(prim.handle(out), hm, n, 0, 0)
+  out
+}
+
+fn __tb32_row(bh: Int, rh: Int, c: Int, pos: Int, j: Int) -> Int =
+  if j >= c then pos + c * 4
+  else {
+    let v = prim.ffrombits(prim.load64(rh + 12 + j * 8))
+    prim.store32(bh + 12 + pos + j * 4, prim.f32bits(prim.f2f32(v)))
+    __tb32_row(bh, rh, c, pos, j + 1)
+  }
+
+fn __tb32_rows(bh: Int, hm: Int, n: Int, i: Int, pos: Int) -> Int =
+  if i >= n then pos
+  else {
+    let rh = prim.load64(hm + 12 + i * 8)
+    let np = __tb32_row(bh, rh, prim.load32(rh + 4), pos, 0)
+    __tb32_rows(bh, hm, n, i + 1, np)
+  }
+
+fn matrix_to_bytes_f32_le(m: List[List[Float]]) -> Bytes = {
+  let hm = prim.handle(m)
+  let n = prim.load32(hm + 4)
+  let cells = __mx_total_cells(hm, n, 0, 0)
+  let out = prim.alloc_bytes(cells * 4)
+  let _x = __tb32_rows(prim.handle(out), hm, n, 0, 0)
+  out
+}
+
+// from_bytes_f64_le: out-of-range (offset + rows*cols*8 > len) → zeros(rows, cols).
+fn __fb64_row(dh: Int, src: Int, c: Int, j: Int) -> Int =
+  if j >= c then 0
+  else {
+    prim.store64(dh + 12 + j * 8, prim.load64(src + j * 8))
+    __fb64_row(dh, src, c, j + 1)
+  }
+
+fn __fb64_rows(ho: Int, base: Int, r: Int, c: Int, i: Int) -> Int =
+  if i >= r then 0
+  else {
+    let row = prim.alloc_list_f64(c)
+    let _f = __fb64_row(prim.handle(row), base + i * c * 8, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __fb64_rows(ho, base, r, c, i + 1)
+  }
+
+fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+  let bh = prim.handle(data)
+  let len = prim.load32(bh + 4)
+  if offset + rows * cols * 8 > len then __mxe_zeros(rows, cols)
+  else {
+    let out: List[List[Float]] = prim.alloc_list_str(rows)
+    let _x = __fb64_rows(prim.handle(out), bh + 12 + offset, rows, cols, 0)
+    out
+  }
+}

@@ -1046,14 +1046,21 @@ impl LowerCtx {
                 }
             }
         }
+        // Exactly ONE arm runs at runtime (the unit-if discipline): an outer var's
+        // reassignment inside an arm mutates the stable local IN PLACE — scalar via
+        // SetLocal, heap via the drop-old + SetLocal rebind — see `unit_arm_depth`.
+        self.unit_arm_depth += 1;
         let some_ok = self.lower_branch_arm(None, some_body).is_ok();
         if !some_ok {
+            self.unit_arm_depth -= 1;
             self.ops.truncate(ops_mark);
             self.live_heap_handles.truncate(lhh_mark);
             return false;
         }
         self.ops.push(Op::Else { val: None });
-        if self.lower_branch_arm(None, none_body).is_err() {
+        let none_ok = self.lower_branch_arm(None, none_body).is_ok();
+        self.unit_arm_depth -= 1;
+        if !none_ok {
             self.ops.truncate(ops_mark);
             self.live_heap_handles.truncate(lhh_mark);
             return false;

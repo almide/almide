@@ -186,6 +186,22 @@ status = "verified"
 class = "fixture"
 oracle = "native println! to stdout"
 test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
+
+[[routine]]
+file = "runtime_p2.rs"
+routine = "compile_fd_println_str"
+status = "verified"
+class = "fixture"
+oracle = "native println!/eprintln! (the shared fd-parametrized body both wrappers call)"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
+
+[[routine]]
+file = "runtime_p2.rs"
+routine = "compile_eprintln_str"
+status = "verified"
+class = "fixture"
+oracle = "native eprintln! to stderr (the ALS-T18 assert-abort line rides it)"
+test = "tests/wasm_runtime_test_parts/p2.rs::wasm_cross_target_spec"
 note = "Every spec/wasm_cross fixture prints via println; the gate compares stdout bytes, so string println is verified across all of them (e.g. string_ops.almd)."
 
 [[routine]]

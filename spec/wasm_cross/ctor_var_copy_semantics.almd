@@ -1,0 +1,27 @@
+// @contract: C-150
+// A Result/Option ctor wrapping a heap VAR takes a CO-OWNED copy (Dup), never
+// the var's own handle: `let a = ok(r0); let b = ok(r0)` yields two real values
+// and r0 stays readable — value semantics, byte-identical to native. Before:
+// the first ctor MOVED r0's handle, so the second found nothing and deferred to
+// the zeroed Opaque, printing `ok("")` (fuzz seed-20260718 index 248).
+fn main() -> Unit = {
+  let r0: String = int.to_string(2)
+  let a: Result[String, String] = ok(r0)
+  let b: Result[String, String] = ok(r0)
+  let c: Option[String] = some(r0)
+  let d: Result[Int, String] = err(r0)
+  println("a = ${a}")
+  println("b = ${b}")
+  println("c = ${c}")
+  println("d = ${d}")
+  println("r0 = ${r0}")
+}
+
+test "repeated ctors over the same var are value copies" {
+  let r0: String = int.to_string(2)
+  let a: Result[String, String] = ok(r0)
+  let b: Result[String, String] = ok(r0)
+  assert_eq(a, ok("2"))
+  assert_eq(b, ok("2"))
+  assert_eq(r0, "2")
+}

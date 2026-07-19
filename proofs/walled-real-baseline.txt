@@ -5,3 +5,22 @@
 # and the ProcessStatus erasure). The gate semantics (proofs/corpus-wall.sh): any
 # walled-real function fails — ship the lowering in the same change; this file is
 # the wall=0 ENDGAME claim restored over the FULL test-fn corpus.
+# 2026-07-17: guard-else-VALUE inside a loop (a function-level early return from a
+# loop body) walled 6 fns here — previously classified "lowered" but SILENT
+# MISCOMPILES (binary_search hung at v == target). 2026-07-18: the
+# desugar_loop_early_returns pass (flag+result rewrite, desugar-before-both)
+# lowers them faithfully — all 6 removed, wall=0 restored.
+# (2026-07-17 second pass: the computed-message die materialization — prim.handle over
+# a ConcatStr/StringInterp — cleared the assert-exposed json_path/matrix_arith walls.)
+#
+# DESIGNED PROBES (2026-07-18): entries below are NOT feature-frontier debt — each
+# is a fixture whose CONTRACT is "this shape WALLS instead of silently zeroing"
+# (the same by-design class as the v1 sweep's intentional-probe walls). C-152:
+# `ok(float.parse(s))` — a ctor over an un-admitted heap call payload (a nested
+# Result) — must wall until the nested `Result[Result[..],..]` drop ships (the F2
+# admission follow-up); the fixture pins the byte-identical v0 output meanwhile.
+spec/wasm_cross/result_wall_escalations.almd :: main
+# C-149 (unwrap_or edition): the fixture's `ok(result.unwrap_or(..))` payload IS
+# the C-152 wall shape — main walls by design so the v0 leg's share discipline
+# is the one exercised (that is the contract under test).
+spec/wasm_cross/nested_unwrap_or_share.almd :: main

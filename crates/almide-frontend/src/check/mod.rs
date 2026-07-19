@@ -112,6 +112,17 @@ pub struct Checker {
     /// Map literal key types to validate after constraint solving.
     /// Each entry: (key_type, span) — checked via `is_hash()` once types are resolved.
     pub(crate) deferred_map_key_checks: Vec<(Ty, Option<crate::ast::Span>)>,
+    /// Order-sensitive combinator subjects/keys (list.sort/min/max, sort_by's
+    /// key) awaiting the post-solve ORDERABLE-element check (E030).
+    pub(crate) deferred_ord_elem_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
+    /// Annotation-resolved types awaiting the post-solve UNKNOWN-NAME check
+    /// (E029): a `Ty::Named` whose sym is not a declared type compiles to a
+    /// nonexistent Rust type (E0412/E0422/E0425) after `check` accepted — the
+    /// acceptance-parity gap differential-fuzz seed 20260718 index 940 hit
+    /// with a mutated-away `type` declaration. Generic params are immune by
+    /// construction: resolve_type_expr turns an in-scope generic into
+    /// `Ty::TypeVar` at annotation time, never `Named`.
+    pub(crate) deferred_unknown_type_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
     /// Empty-collection producers whose element type must be inferable from
     /// context. Each entry is the producer's result `Ty` (carrying the fresh
     /// element type var), the construct kind (for the diagnostic's wording), and
@@ -277,9 +288,11 @@ impl Checker {
             deferred_tuple_indices: Vec::new(),
             deferred_field_accesses: Vec::new(),
             deferred_map_key_checks: Vec::new(),
+            deferred_ord_elem_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
+            deferred_unknown_type_checks: Vec::new(),
         }
     }
 
@@ -435,11 +448,38 @@ impl Checker {
     /// Type-check a program whose environment was pre-populated by `canonicalize_program`.
     /// Skips import table building and declaration registration — inference only.
     pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
+        // `main` takes NO parameters (#789): the parameter form typechecked but no
+        // codegen leg wires the argument — native emitted an uncallable driver
+        // ("codegen produced invalid Rust — this is an Almide bug") and the v1 wasm
+        // `_start` glue a structurally invalid module. Reject it HERE with the
+        // documented convention (`env.args()`) instead of blaming the compiler
+        // downstream.
+        for decl in &program.decls {
+            let ast::Decl::Fn { name, params, span, .. } = decl else { continue };
+            if name.as_str() != "main" || params.is_empty() {
+                continue;
+            }
+            let mut diag = err(
+                "main() takes no parameters",
+                "program arguments are read with `env.args()` inside the body \
+                 (add `import env`): `effect fn main() { let args = env.args() ... }`",
+                "fn main",
+            )
+            .with_code("E028");
+            if let Some(s) = span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+            }
+            self.diagnostics.push(diag);
+        }
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
         resolve_type_map(&mut self.type_map, &self.uf);
         self.validate_map_key_types();
+        self.validate_ord_elem_types();
+        self.validate_unknown_named_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
         self.validate_unresolved_binding_types();
@@ -744,6 +784,9 @@ impl Checker {
         self.enter_generics(generics);
         for p in params.iter_mut() {
             let ty = self.resolve_type_expr(&p.ty);
+            self.deferred_unknown_type_checks.push((
+                ty.clone(), self.current_span, format!("parameter '{}'", p.name),
+            ));
             self.env.define_var(&p.name, ty.clone());
             self.env.param_vars.insert(sym(&p.name));
             if p.is_mut { self.env.mutable_vars.insert(sym(&p.name)); }
@@ -753,6 +796,9 @@ impl Checker {
             }
         }
         let ret_ty = self.resolve_type_expr(return_type);
+        self.deferred_unknown_type_checks.push((
+            ret_ty.clone(), self.current_span, format!("return type of '{}'", name),
+        ));
         let prev = (self.env.current_ret.take(), self.env.can_call_effect, self.env.auto_unwrap, self.env.lambda_depth);
         let is_effect = effect.unwrap_or(false);
         self.env.current_ret = Some(ret_ty.clone());

@@ -1,0 +1,47 @@
+// matrix_fused — SELF-HOSTED fused/aliased matrix kernels for v1, written at the
+// stdlib `Matrix` signature (pure compositions of the registered matrix.* self-
+// hosts — no prim floor here). Native-side these ARE delegations (matrix_p2.rs:
+// mul_scaled = scale(mul), the f32 family aliases the f64 ops), so composition is
+// the oracle. Each intermediate binds owned and drops at scope end.
+
+fn matrix_mul_scaled(a: Matrix, s: Float, b: Matrix) -> Matrix = {
+  let p = matrix.mul(a, b)
+  matrix.scale(p, s)
+}
+
+fn matrix_mul_f32(a: Matrix, b: Matrix) -> Matrix =
+  matrix.mul(a, b)
+
+fn matrix_mul_f32_scaled(a: Matrix, s: Float, b: Matrix) -> Matrix = {
+  let p = matrix.mul(a, b)
+  matrix.scale(p, s)
+}
+
+fn matrix_mul_f32_t(a: Matrix, b: Matrix) -> Matrix = {
+  let t = matrix.transpose(b)
+  matrix.mul(a, t)
+}
+
+fn matrix_mul_f32_t_scaled(a: Matrix, s: Float, b: Matrix) -> Matrix = {
+  let t = matrix.transpose(b)
+  let p = matrix.mul(a, t)
+  matrix.scale(p, s)
+}
+
+fn matrix_zeros_f32(rows: Int, cols: Int) -> Matrix = matrix.zeros(rows, cols)
+
+fn matrix_ones_f32(rows: Int, cols: Int) -> Matrix = matrix.ones(rows, cols)
+
+// ── attention (native: mul → scale → softmax_rows, then · V) ──
+
+fn matrix_attention_weights(q: Matrix, kt: Matrix, s: Float) -> Matrix = {
+  let p = matrix.mul(q, kt)
+  let sc = matrix.scale(p, s)
+  matrix.softmax_rows(sc)
+}
+
+fn matrix_scaled_dot_product_attention(q: Matrix, kt: Matrix, v: Matrix, s: Float) -> Matrix = {
+  let w = matrix_attention_weights(q, kt, s)
+  matrix.mul(w, v)
+}
+

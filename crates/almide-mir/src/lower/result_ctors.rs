@@ -280,6 +280,64 @@ impl LowerCtx {
         Some(obj)
     }
 
+    /// Is `ty` a `Result[T_heap, <user variant>]` — the HEAP-Ok structured-error shape
+    /// (`classify: Result[String, MathError]`)? Cap-as-tag (both arms heap), so the
+    /// reader is `seed_variant_param`'s both-heap branch and the eq is
+    /// `result_eq_general_from_handles`'s tag@16 route.
+    pub(crate) fn is_heap_ok_variant_err_result(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+            if a.len() == 2
+                && is_heap_ty(&a[0])
+                && self.custom_variant_type_name(&a[1]).is_some())
+    }
+
+    /// `err(<user-variant ctor>)` for `Result[T_heap, <user variant>]` — the HEAP-Ok
+    /// twin of [`Self::try_lower_result_err_variant_ctor`]. The variant ctor is INLINED
+    /// (`try_lower_variant_ctor` — a ctor is NOT a wasm fn; the generic heap-Err arm's
+    /// `lower_result_str_piece` Named-call fallback emitted a dangling `(call $NegativeInput)`)
+    /// and MOVED into the CAP-AS-TAG wrapper (`materialize_result_str` — payload @12,
+    /// tag @16 = 1), the exact layout the both-heap reader + `result_eq_general` read.
+    /// A RICH variant type (Overflow(String) — nested heap) routes the wrapper's drop to
+    /// the ERR-side recursion (`reserr:<V>` → `DropWrapperRec` `err_rec`: tag@16 == 1 →
+    /// `$__drop_<V>`, Ok → flat `rc_dec` of the @12 String); a FLAT variant keeps the
+    /// flat `DropListStr` (its block owns no nested heap). `None` outside the shape.
+    pub(crate) fn try_lower_result_err_variant_ctor_heap_ok(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let err_ty = match result_ty {
+            Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && is_heap_ty(&a[0]) =>
+            {
+                &a[1]
+            }
+            _ => return None,
+        };
+        let type_name = self.custom_variant_type_name(err_ty)?;
+        let repr = repr_of(result_ty).ok()?;
+        let IrExprKind::ResultErr { expr: inner } = &expr.kind else {
+            return None;
+        };
+        let piece = self.try_lower_variant_ctor(inner)?;
+        let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name, &|rn| {
+            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+        });
+        // The variant block is MOVED into the wrapper @12 — detach its own scope-end
+        // drop so it frees exactly once, through the wrapper.
+        self.variant_drop_handles.remove(&piece);
+        self.heap_elem_lists.remove(&piece);
+        self.live_heap_handles.retain(|h| *h != piece);
+        let obj = self.materialize_result_str(piece, repr, true, false);
+        if needs_rec {
+            self.heap_elem_lists.remove(&obj);
+            self.variant_drop_handles.insert(obj, format!("reserr:{type_name}"));
+        }
+        Some(obj)
+    }
+
     /// `ok(<Option[R] value>)` / `ok(none)` / `err(<String>)` for `Result[Option[R], String]` where R is
     /// a record needing a recursive drop — read_message's `ok(none)` / `ok(r)` bases (r:
     /// `Option[JsonRpcRequest]`). The Ok payload (an Option Var → `Dup`; `some(record)` / `none` →

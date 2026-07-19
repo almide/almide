@@ -226,6 +226,17 @@ fn count_ir_calls(
         variant_layouts: &'a almide_mir::lower::VariantLayouts,
     }
     impl almide_ir::visit::IrVisitor for CallCounter<'_> {
+        fn visit_stmt(&mut self, s: &almide_ir::IrStmt) {
+            // A map-insert STATEMENT `m[k] = v` rewrites to ONE synthetic `map.set`
+            // CallFn (the functional rebind — mod_p3's MapInsert arm). Credit the
+            // statement node so the synthetic call has a matching ir_call and
+            // `mir_calls <= ir_calls` holds BY CONSTRUCTION. map.set is pure (a
+            // COW block build, no Stdout), adding no real capability.
+            if matches!(s.kind, almide_ir::IrStmtKind::MapInsert { .. }) {
+                self.n += 1;
+            }
+            almide_ir::visit::walk_stmt(self, s);
+        }
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
             use almide_ir::IrExprKind::{Call, ClosureCreate, FnRef, RuntimeCall, TailCall};
             // A direct call is one ir_call. A FnRef / ClosureCreate passed to a pure
@@ -507,40 +518,14 @@ fn plus_one_events_backed(mir: &MirFunction) -> bool {
         })
         .count();
     let dups = mir.ops.iter().filter(|o| matches!(o, Op::Dup { .. })).count();
-    // A RELEASED branch-merge dst's `i` (the arm's moved-in reference — see
-    // ownership_certificate's released_merge_dsts) is backed by the arm value's
-    // real producer: the merge is a reference changing hands (the wasm merge
-    // local.set), not a synthetic +1. Count exactly the merges the certificate
-    // credits so the two stay in lockstep.
-    let released_merges = {
-        let mut merge_dsts = std::collections::HashSet::new();
-        let mut released = std::collections::HashSet::new();
-        for op in &mir.ops {
-            match op {
-                Op::IfThen { dst: Some(d), .. } => {
-                    merge_dsts.insert(*d);
-                }
-                Op::Consume { v } | Op::Drop { v } | Op::DropListStr { v } => {
-                    if merge_dsts.contains(v) {
-                        released.insert(*v);
-                    }
-                }
-                Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } => {
-                    if merge_dsts.contains(v) {
-                        released.insert(*v);
-                    }
-                }
-                _ => {}
-            }
-        }
-        if let Some(r) = mir.ret {
-            if merge_dsts.contains(&r) {
-                released.insert(r);
-            }
-        }
-        released.len()
-    };
-    i == allocs + heap_results + released_merges && a == dups
+    // A branch-merge dst's `i` (a RELEASED merge's moved-in reference, or a
+    // slot-FEEDER merge's routed `i` — see ownership_certificate) is backed by
+    // the arm value's real producer: the merge is a reference changing hands
+    // (the wasm merge local.set), not a synthetic +1. The certificate module
+    // itself counts the merges it credits so the two stay in lockstep by
+    // construction.
+    let merge_credits = almide_mir::certificate::merge_dst_i_credits(mir);
+    i == allocs + heap_results + merge_credits && a == dups
 }
 
 /// Outcome of driving one `.almd` source through the frontend to linked IR.
@@ -882,10 +867,18 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         // Transparent-newtype erasure LAST (post-link, pre-lowering) — the SAME pass the
         // pipeline runs, so the caps mir == ir count sees the erased tree on both sides.
         almide_mir::lower::erase_transparent_newtypes(&mut ir);
+        almide_mir::lower::fill_record_defaults(&mut ir);
         almide_mir::lower::inline_pure_call_globals(&mut ir);
         // C-132 move-mode write-back — the SAME pre-lowering rewrite the pipeline
         // runs (see source_to_ir_with), so mir == ir on both sides.
         almide_ir::mut_param::lower_mut_params_move_mode(&mut ir);
+        // Guard → if restructure — the SAME pre-lowering pass the pipeline runs.
+        almide_mir::lower::desugar_fn_body_guards(&mut ir);
+        almide_mir::lower::normalize_tail_err_raise_ifs(&mut ir);
+        almide_mir::lower::hoist_block_call_args(&mut ir);
+        almide_mir::lower::desugar_loop_early_returns(&mut ir);
+        almide_mir::lower::hoist_spread_call_bases(&mut ir);
+        almide_mir::lower::hoist_record_literal_args(&mut ir);
         Ok(ir)
     }));
     match result {
@@ -1222,6 +1215,7 @@ fn classify_file(
                     func.name.as_str() == "main",
                     &variant_layouts,
                     &record_layouts,
+                    &func.params,
                 );
                 // INTERP COVERAGE (a): this function LOWERED, so its FULLY-LINKABLE
                 // interps (Lit/String/Int/Bool parts) fold to a registered __str_concat /

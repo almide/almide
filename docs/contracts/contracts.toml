@@ -265,7 +265,7 @@ evidence  = [
 id        = "C-016"
 spec      = "ALS-S1"
 title     = "UTF-8 codepoint-aware string ops are byte-identical"
-statement = "Codepoint-aware string ops (chars/reverse/slice/take/drop/first/last/get/codepoint/from_codepoint/pad) operate on Unicode scalars and are byte-identical native == wasm on ASCII and multibyte input (Latin-1 accent, CJK, 4-byte emoji, 3-byte currency). Native (Rust char-based) is the oracle; the wasm runtime must byte-match it for every scalar."
+statement = "Codepoint-aware string ops (chars/reverse/slice/take/drop/first/last/get/codepoint/from_codepoint/pad) operate on Unicode scalars and are byte-identical native == wasm on ASCII and multibyte input (Latin-1 accent, CJK, 4-byte emoji, 3-byte currency). An EMPTY pad string falls back to a single SPACE (`pad.chars().next().unwrap_or(' ')` — the v0 arm returned a width-0 unit, silently making pad_start/pad_end a no-op; differential-fuzz seed 1784416403485348966). Native (Rust char-based) is the oracle; the wasm runtime must byte-match it for every scalar."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -388,7 +388,7 @@ evidence  = [
 id        = "C-026"
 spec      = "ALS-T10"
 title     = "Vendored-libm trig / exp / log / pow are byte-identical cross-target"
-statement = "`math.sin/cos/tan`, `math.exp/log/log2/log10`, and float `**` / `math.fpow` route through the SAME vendored musl-libm reference on both targets (native runtime/rs/src/libm.rs, wasm rt_libm.rs), so every result is byte-identical — printed via the (itself byte-identical) Dragon4 `float.to_string`. Special cases match libm: `log(0) = -inf`, `log(neg) = NaN`, `exp(-745) = 5e-324`, `fpow(-2,0.5) = NaN`, `fpow(-2,3) = -8`, `fpow(2,inf)` does not trap. Differential fuzz suites certify the continuous input space."
+statement = "`math.sin/cos/tan`, `math.exp/log/log2/log10`, and float `**` / `math.fpow` route through the SAME vendored musl-libm reference on both targets (native runtime/rs/src/libm.rs, wasm rt_libm.rs), so every result is byte-identical — printed via the (itself byte-identical) Dragon4 `float.to_string`. Special cases match libm: `log(0) = -inf` AND `log(-0.0) = -inf` for all three log variants (the v1 self-host dropped the sign-bit half of musl's `hx < 0x00100000 || hx>>31` gate, sending -0.0 to the NaN reject — differential-fuzz seed 1784416403485348966), `log(neg) = NaN`, `exp(-745) = 5e-324`, `fpow(-2,0.5) = NaN`, `fpow(-2,3) = -8`, `fpow(2,inf)` does not trap. Differential fuzz suites certify the continuous input space."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -492,7 +492,7 @@ evidence  = [
 id        = "C-034"
 spec      = "ALS-C4"
 title     = "Out-of-range list ops clamp / no-op gracefully (no OOB heap access)"
-statement = "Out-of-range `list.insert` clamps the index to the end (`min(i, len)`), `list.remove_at` / `list.swap` with an index >= len are no-ops, `list.slice` clamps past-the-end indices (end -> len, start >= effective_end -> []), and `list.with_capacity(n)` starts empty without header corruption for any n — all byte-identical native == wasm with no OOB heap read/write. `with_capacity` is TOTAL on both targets: capacity is an unobservable hint whose EAGER reservation is clamped to the SAME named byte ceiling (`MAX_WITH_CAPACITY_PREALLOC_BYTES` = 64 MiB, runtime/rs/src/list.rs == emit_wasm/calls_list.rs), so a huge request neither aborts native (`Vec::with_capacity(i32::MAX)` over a 24-byte element = ~51.5 GB, machine-dependent) nor corrupts the wasm header (the data byte count is computed in i64 so `hdr + bytes` never overflows i32); `push` grows past the clamped reservation normally. Native (runtime/rs/src/list.rs) is the oracle for each."
+statement = "Out-of-range `list.insert` clamps the index to the end (`min(i, len)`), `list.remove_at` / `list.swap` with an index >= len are no-ops, `list.slice` clamps past-the-end indices (end -> len, start >= effective_end -> []), and `list.with_capacity(n)` starts empty without header corruption for any n — all byte-identical native == wasm with no OOB heap read/write. `with_capacity` is TOTAL on both targets: capacity is an unobservable hint whose EAGER reservation is clamped to the SAME named byte ceiling (`MAX_WITH_CAPACITY_PREALLOC_BYTES` = 64 MiB, runtime/rs/src/list.rs == emit_wasm/calls_list.rs), so a huge request neither aborts native (`Vec::with_capacity(i32::MAX)` over a 24-byte element = ~51.5 GB, machine-dependent) nor corrupts the wasm header (the data byte count is computed in i64 so `hdr + bytes` never overflows i32); `push` grows past the clamped reservation normally. Native (runtime/rs/src/list.rs) is the oracle for each. On the v1 leg `list.slice` routes by ELEMENT repr like take/drop: String elements ride the deep-copying `list.slice_str` twin (same clamp edges), other heap elements wall — the Int twin's raw i64 element copy aliased String handles un-owned, a scope-end double free after correct output (differential-fuzz seed 20260718 index 680)."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -786,7 +786,7 @@ evidence  = [
 id        = "C-055"
 spec      = "ALS-C9"
 title     = "list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets"
-statement = "`list.sort`/`list.min`/`list.max` over `List[Float]` and `list.sort_by` with a Float key ORDER by IEEE-754 totalOrder (the ordering twin of `f64::total_cmp`): a +NaN takes the greatest totalOrder position (after +inf), a -NaN the least (before -inf), and `-0.0 < +0.0`. This makes Float ordering legal and byte-identical native == wasm, fixing the divergence where native REJECTED it at compile (`f64: Ord` unsatisfied) while wasm either accepted it with NaN-unaware `f64.le` or emitted an INVALID module (the `sort_by` Float-key path stored an f64 into an i64 local → `local.set` validator error). Native routes `List[Float]` ordering to `total_cmp`-based `_float` runtime variants (IntrinsicLowering swaps the symbol); wasm mirrors with the sign-magnitude bit trick inside `emit_ord_cmp3`'s Float arm (`key = bits ^ ((bits >>_s 63) >>_u 1)`, a monotone i64 key) and pre-transforms `sort_by` Float keys onto the i64 storage path; interp mirrors with `f64::total_cmp`. NaN-SIGN CAVEAT: the totalOrder POSITION of a NaN depends on its sign bit, which for a COMPUTED NaN (`0.0/0.0`) is implementation-defined — native/wasm const-fold it to +NaN (top) while the interp's runtime `divsd` yields -NaN (bottom), so the 3-way fixture stays sign-deterministic (uses ±inf, not a divided NaN); the +NaN-at-top positioning is verified native == wasm directly. ASYMMETRY (named deliberately): this list-extremum/ordering totalOrder is a DIFFERENT contract from the SCALAR `float.min`/`float.max`/`math.fmin`/`math.fmax`, which keep their C-049 NaN-IGNORING semantics — a resolved-but-unsupported sort element type is still a clean emit-time ICE, never an invalid module."
+statement = "`list.sort`/`list.min`/`list.max` over `List[Float]` and `list.sort_by` with a Float key ORDER by IEEE-754 totalOrder (the ordering twin of `f64::total_cmp`): a +NaN takes the greatest totalOrder position (after +inf), a -NaN the least (before -inf), and `-0.0 < +0.0`. This makes Float ordering legal and byte-identical native == wasm, fixing the divergence where native REJECTED it at compile (`f64: Ord` unsatisfied) while wasm either accepted it with NaN-unaware `f64.le` or emitted an INVALID module (the `sort_by` Float-key path stored an f64 into an i64 local → `local.set` validator error). Native routes `List[Float]` ordering to `total_cmp`-based `_float` runtime variants (IntrinsicLowering swaps the symbol); wasm mirrors with the sign-magnitude bit trick inside `emit_ord_cmp3`'s Float arm (`key = bits ^ ((bits >>_s 63) >>_u 1)`, a monotone i64 key) and pre-transforms `sort_by` Float keys onto the i64 storage path; interp mirrors with `f64::total_cmp`. On the v1 leg the cached-keys desugar (`sort_by` → `sort_by_keys` + a materialized key map) admits ONLY Int keys: it types the synthesized keys list as List[Int], so an ungated String key linked the scalar `list.map` (indirect-call type mismatch trap, differential-fuzz seed 20260718 index 866) and a Float key would sort by raw i64 BIT patterns (wrong order for negatives) — String keys wall honestly (`sort_by_str_key_x`), Float keys ride the totalOrder route. NaN-SIGN CAVEAT: the totalOrder POSITION of a NaN depends on its sign bit, which for a COMPUTED NaN (`0.0/0.0`) is implementation-defined — native/wasm const-fold it to +NaN (top) while the interp's runtime `divsd` yields -NaN (bottom), so the 3-way fixture stays sign-deterministic (uses ±inf, not a divided NaN); the +NaN-at-top positioning is verified native == wasm directly. ASYMMETRY (named deliberately): this list-extremum/ordering totalOrder is a DIFFERENT contract from the SCALAR `float.min`/`float.max`/`math.fmin`/`math.fmax`, which keep their C-049 NaN-IGNORING semantics — a resolved-but-unsupported sort element type is still a clean emit-time ICE, never an invalid module."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -941,7 +941,7 @@ evidence  = [
 id        = "C-069"
 spec      = "ALS-M4"
 title     = "Effect-fn tail self-recursion loop-converts to O(1) stack on both targets"
-statement = "A self-recursive `effect fn` whose recursive call is in tail position runs in O(1) native/wasm stack (loop-converted), identically to the non-effect equivalent — not O(n) frames that overflow at ~1e5 depth. The auto-? desugar moved into the frontend (cc70ebc4), so the tail self-call reaches TailCallOpt already wrapped as `Try{Call self}` (Rust arm) or `Ok(Try(Call self))` (wasm arm, where ResultPropagation precedes TCO); TCO sees through both wrappers — the `?` is subsumed by the loop (an Err can only originate at a base case) and the `Ok` propagation wrapper is tail-transparent for effect fns. The Err short-circuit at a base case still fires. Before the fix every implicitly-lifted recursive effect fn crashed at ~1e5 depth (native stack overflow exit, wasm call-stack-exhausted trap) while the identical non-effect fn was O(1)."
+statement = "A self-recursive `effect fn` whose recursive call is in tail position runs in O(1) native/wasm stack (loop-converted), identically to the non-effect equivalent — not O(n) frames that overflow at ~1e5 depth. The auto-? desugar moved into the frontend (cc70ebc4), so the tail self-call reaches TailCallOpt already wrapped as `Try{Call self}` (Rust arm) or `Ok(Try(Call self))` (wasm arm, where ResultPropagation precedes TCO); TCO sees through both wrappers — the `?` is subsumed by the loop (an Err can only originate at a base case) and the `Ok` propagation wrapper is tail-transparent for effect fns. The Err short-circuit at a base case still fires. Before the fix every implicitly-lifted recursive effect fn crashed at ~1e5 depth (native stack overflow exit, wasm call-stack-exhausted trap) while the identical non-effect fn was O(1). The v1 leg's OWN loop rewrite must ALSO see through the wrapper: tco_collect classified `Try{Call self}` as the recursive arm but tco_rewrite lacked the twin arm, so an err-CAPABLE effect fn's recursive arm compiled to 'exit with the last base's kind' — a carried accumulator delivered its INITIAL value, and `checked(n - 0)` terminated with ok(0) where native spins (fuzz seed-20260718 index 946)."
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_tco.almd", class = "fixture" },
@@ -1717,4 +1717,219 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/math_atan_tanh.almd", class = "fixture" },
   { path = "tests/libm_atan_tanh_cross_target_test.rs", name = "atan_tanh_cross_target_random_fuzz", class = "fuzz", n = 3000 },
+]
+
+[[contract]]
+id        = "C-137"
+spec      = "ALS-R6"
+title     = "Relative fs paths resolve against the host CWD on wasm"
+statement = "Every fs operation given a RELATIVE path (`fs.read_text(\"Cargo.toml\")`, `fs.stat(\"spec/x.almd\")`, write/exists/list_dir/…) resolves it against the HOST current working directory on the wasm target, byte-identically to native std::fs. WASI has no cwd, so the wasm runtime normalizes the path first (`$path_norm`): an absolute path drops its leading '/' (fd-3-relative under the `/` preopen — the C-042 resolution), a relative path is prefixed with \"$PWD/\" (the PWD environment variable, inherited by every harness via `-S inherit-env=y`) and then resolved identically. Previously a relative path resolved against the preopen ROOT and failed (NOENT / \"stat failed\") while native succeeded — a silent native⇄wasm divergence that the native test fallback masked. fs.stat additionally stats into an 8-ALIGNED scratch buffer (WASI path_filestat_get demands alignment the self-host's Bytes scratch cannot guarantee) and copies the 64-byte filestat back."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_relative_path.almd", class = "fixture" },
+  { path = "spec/stdlib/fs_stat_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-138"
+spec      = "ALS-I3"
+title     = "ok/err ctor with a stdlib-call payload materializes the real value"
+statement = "A Result ctor whose payload is a PURE stdlib Module call (`ok(float.to_fixed(x, 4))`, `err(string.to_upper(s))`, `ok(int.to_string(n))`) bound or returned directly materializes a REAL Result block on the v1 leg — the payload call executes and its fresh owned String moves into the ctor slot, for all three Result layouts (heap-Ok ok, heap-Ok err, scalar-Ok len-as-tag err). Previously the un-admitted Module-call payload fell to the deferred Opaque and the ZEROED block reached observed output as `ok(\"\")` — even for err(), whose tag zeroed too (the silent-wrong-value class; differential-fuzz seed 1784352208133210990 index 323/768/904)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_ctor_call_payload.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-154"
+spec      = "ALS-T6"
+title     = "clamp with an invalid range aborts in the T6 form"
+statement = "`int.clamp(n, lo, hi)` with lo > hi, and `float.clamp` with lo > hi OR a NaN bound (`!(lo <= hi)` covers both in one IEEE comparison), abort with `Error: clamp requires min <= max` — one stderr line + exit 1, byte-identical on both targets. Previously native leaked the raw Rust clamp panic (exit 101, the \"min > max\" banner) while wasm's un-checked min/max chain SILENTLY returned a value (differential-fuzz seed 20260718 index 5). All four consumers carry the check: the v1 self-hosts via prim.die, the native runtime wrappers, the v0 emit arms via the interned-message div_trap, and the interp bridge via Flow::Abort."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_clamp_inverted.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_clamp_invalid.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-155"
+spec      = "ALS-T6"
+title     = "to_fixed with out-of-domain decimals aborts in the T6 form"
+statement = "`float.to_fixed(n, decimals)` with decimals outside 0..=1000000 aborts with `Error: to_fixed requires decimals in 0..=1000000` — one stderr line + exit 1, byte-identical on both targets. Previously a negative count reinterpreted as usize on native (the raw format! capacity panic, exit 101) while wasm printed the empty string for a small negative or trapped OOM for i64::MIN (differential-fuzz seed 20260718 index 49); a huge positive was the machine-dependent allocation abort on either leg. The same four consumers as C-154 carry the guard: the v1 self-host via prim.die, the native runtime wrapper, the v0 emit arm via the interned-message div_trap, and the interp bridge via Flow::Abort. In-domain decimals (up to 1e6 digits, ~1 MB) stay total and byte-identical."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/to_fixed_domain_abort.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-153"
+spec      = "ALS-T18"
+title     = "Non-test assert failures abort in the T6 form on both targets"
+statement = "A failing `assert` / `assert_eq` / `assert_ne` OUTSIDE a test block aborts with ONE stderr line + exit code 1, byte-identical across targets: `Error: assertion failed: left = <l>, right = <r>` (eq), `Error: assertion failed: both = <l>` (ne), `Error: assertion failed[: <msg>]` (assert), operand display per ALS-R2, operands evaluated exactly once (the failure line re-references bound temps). Implemented as ONE frontend-lowering desugar (if + eprintln + process.exit(1)) that native, v0-wasm, v1-wasm, and the interp all inherit. Previously native leaked the raw Rust panic (exit 101 + the panic banner) while wasm printed a value-less line with exit 1 for assert_eq and a BARE TRAP (exit 134) for assert/assert_ne (differential-fuzz seed 20260718 index 10). In passing: the bare `eprintln` builtin — which the desugar rides — was UNLINKED on the v1 leg and ICE'd the v0 emitter; it is now a registered self-host (fd-2 print_str twin) and a shared parametrized v0 runtime fn."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/assert_abort_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/assert_abort_ne.almd", class = "fixture" },
+  { path = "spec/wasm_cross/assert_abort_msg.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-147"
+spec      = "ALS-M12"
+title     = "list.unique_by routes by key repr — String keys dedupe by content"
+statement = "`list.unique_by` is routed by the KEY closure's result repr (the CallIndirect table-type axis): a scalar key over scalar elements rides the base impl, a String key over scalar elements rides the `_sk` twin (content equality via string.eq, first-kept, O(n^2) recompute of the pure key), and any other repr routes to the UNLINKED `_x` wall. Previously every instantiation linked the Int-typed base impl whose scalar `(Int) -> Int` table type TRAPPED on a String-key closure (\"indirect call type mismatch\", differential-fuzz seed 20260718 index 9 — the unique_by edition of the zip_with class C-141)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_unique_by_str_key.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-148"
+spec      = "ALS-M12"
+title     = "list.scan stores each intermediate at the accumulator's own width"
+statement = "`list.scan` is routed by the ACC repr (the closure's result AND the output element): a scalar acc rides the base impl, a String acc over scalar elements rides the `_str` twin on the v1 leg (each intermediate is the closure's fresh owned String MOVED into its slot, borrowed back for the next step), and any other repr walls (`_x`). On the v0 leg the per-step acc store switches on the accumulator's valtype — the old fallback used i64_store for every non-F64 acc, so an i32 String handle failed validation (\"expected i64, found i32\", differential-fuzz seed 20260718 index 259) and would have smeared 8 bytes over a 4-byte-stride slot."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/scan_heap_acc.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-149"
+spec      = "ALS-I1"
+title     = "unwrap_or_else hands back a co-owned heap Ok payload"
+statement = "The unwrap family with a HEAP payload hands the caller a CO-OWNED (+1) reference — on BOTH wasm legs. v0: `result.unwrap_or_else`'s input Result temp's drop releases its payload at scope end, so handing back the bare `payload@4` was a use-after-free — `unwrap_or_else(result.collect([...]), f)` read the freed list as `[]` (differential-fuzz seed 20260718 index 590). `option.unwrap_or` / `result.unwrap_or`: BOTH branches — the kept payload (still owned by the input temp) and a Var default (a borrow) — rc_inc before returning; either un-inc'd double-freed at scope end (__rc_dec trap after correct output, fuzz index 149's `ok(result.unwrap_or(..))` chain). `option.to_list`: the new list CO-OWNS the payload the Option still owns — the un-inc'd alias double-freed on a nested-Option payload (fuzz index 338). `option.to_result`: the ok() arm shares the kept payload the same way — un-inc'd it double-freed a nested-Result payload (fuzz index 937). v1: `option.or_else` with a heap payload routes to the `option.or_else_h` twin whose KEPT arm Dups the payload into the rebuilt some() — the scalar twin raw-copied the handle un-owned, the same double free (fuzz index 622). The option unwrap_or_else arm carried this share-+1 discipline first (#727 cluster 5)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/uoe_heap_ok_share.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_unwrap_or_share.almd", class = "fixture" },
+  { path = "spec/wasm_cross/to_result_nested_share.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-150"
+spec      = "ALS-C5"
+title     = "Ctors over a heap var are value copies — the var stays live"
+statement = "A Result/Option ctor wrapping a heap VAR takes a CO-OWNED reference (Dup) on the v1 leg, never the var's own handle: `let a = ok(r0); let b = ok(r0)` yields two real values and r0 stays readable afterward — value semantics, byte-identical to native. Previously the first ctor MOVED the var's handle out of the live set, so a SECOND ctor over the same var found nothing and deferred to the zeroed Opaque, printing `ok(\"\")` (differential-fuzz seed 20260718 index 248). The borrow-then-Dup discipline the param-payload arm already used, extended to owned locals."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/ctor_var_copy_semantics.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-151"
+spec      = "ALS-M5"
+title     = "Result combinators with a heap-Ok RESULT never link the scalar impl"
+statement = "`result.map`/`map_err`/`flat_map` whose RESULT type is heap-Ok while the INPUT is scalar-Ok (`result.map(r, (v) => some(v))` — `Result[Int, String]` → `Result[Option[Int], String]`) route to the UNLINKED `_x` name — a deterministic render wall. The scalar impl's i64-result closure table type mismatches the heap-result closure AND its len-as-tag rebuild is the wrong OUTPUT layout: the un-routed link printed `some(1791929075367945)` for `some(0)` (differential-fuzz seed 20260718 index 647)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_wall_escalations.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-152"
+spec      = "ALS-I3"
+title     = "An un-admitted heap call payload in a ctor walls, never zeroes"
+statement = "A Result/Option ctor whose payload is a HEAP-typed call the materializer did not admit (`ok(float.parse(s))` — a Module call returning a nested Result) WALLS the function on the v1 leg instead of deferring to the flat Opaque: the zeroed block read `ok(0)` while native printed `err(\"invalid float literal\")` (differential-fuzz seed 20260718 index 888). The C-138 admission family's honest-wall tail — admission with an exact nested drop is a follow-up; the bind-net List/Map guard already existed, this extends it to every heap call payload and to the err() ctor."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_wall_escalations.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-143"
+spec      = "ALS-I3"
+title     = "Ctor if-payloads materialize the taken arm"
+statement = "A Result/Option ctor whose String payload is a heap-result IF/MATCH (`some((if b then r0 else r0))`, `ok((if c then a else b))`, err twin, len-as-tag err twin) EXECUTES the taken arm on the v1 leg and moves the one owned result into the ctor slot. Previously the un-admitted if-payload fell to the deferred Opaque: the zeroed option READ `none` while native printed `some(\"5\")` — a silent flip (differential-fuzz seed 1784352208133210990 index 858)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/ctor_if_payload.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-144"
+spec      = "ALS-I3"
+title     = "A scalar-list literal never observes as a silent empty list"
+statement = "A NON-EMPTY scalar-element list literal bound to a let either MATERIALIZES a real populated block on the v1 leg or WALLS the function (v0 emits it) — it never defers to the flat Opaque whose every observation reads `[]`. Previously an element outside the executable subset (a nested inadmissible-HOF chain) deferred the WHOLE list: `${r4}` printed `[]` while native printed the values (differential-fuzz index 198/659), while the same chain in BIND position walled honestly — the element position now matches the bind position's honesty. The heap-element twin gate (non-empty List[heap] literal) already existed; this is its scalar twin."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_element_hof_chain.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-145"
+spec      = "ALS-M5"
+title     = "Mono-suffixed stdlib combinator names route by their base name"
+statement = "A stdlib Module call whose name the monomorphizer suffixed with its instantiation (`result.or_else__Int_String_String`) routes through the self-host registry by its BASE name — the suffix carries no information the router needs (the instantiation's types are already in the arg/result types, which the repr-keyed gates consult). Previously the suffixed form fell through every router arm to an UNLINKED dotted name and walled the using function at render — `result.or_else` walled at EVERY instantiation, capturing and non-capturing alike (differential-fuzz index 198's recovery chain)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_element_hof_chain.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-146"
+spec      = "ALS-I1"
+title     = "A lifted closure returning a captured alias hands out a co-owned reference"
+statement = "On the v0 leg, a lifted closure (`__closure_N`) whose body RETURNS a bare CAPTURED heap var (`(v) => s1` — the or_else recovery shape, chased through the conversion's nested bind blocks) rc_incs the env handle before returning: every consumer treats a closure result as OWNED, so handing out the borrowed alias un-inc'd double-freed the block at scope end with the still-owning binding — a __rc_dec trap AFTER correct output (differential-fuzz index 198: wasm run failed while native succeeded). The #666/#668 share discipline, closure-return edition; a param or computed tail keeps its existing balance."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_element_hof_chain.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-140"
+spec      = "ALS-T15"
+title     = "float.round preserves the sign of a zero result"
+statement = "`float.round` matches native `f64::round` bit-for-bit on the sign of a zero result: round(-0.0) and round(-0.4) are -0.0 (printed `-0`), round(0.4) is +0.0; every nonzero result keeps half-away-from-zero. Previously the v1 self-host branched on `x >= 0.0` — TRUE for -0.0 under IEEE — so round(-0.0) took the positive branch and printed `0` while native kept `-0` (differential-fuzz seed 1784352208133210990 index 67/655). copysign now carries x's sign onto the magnitude."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_round_negzero.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-141"
+spec      = "ALS-M12"
+title     = "list.zip_with routes by element repr — String zips work, no wrong-typed link"
+statement = "`list.zip_with` is routed by the RESULT element repr (the one axis of the closure's CallIndirect table type — params ride the widened i64 slots uniformly): a scalar result element rides the base impl (heap SOURCE elements pass as borrowed handles, never copied into the flat result), the (String, String → String) triple rides the `_str` twin (borrow the pair via load_str, MOVE the closure's fresh result in — the list_map_str discipline), and any other heap result element routes to the UNLINKED `_x` wall. Previously every instantiation linked the Int-typed base impl, whose scalar $closure_fn2 table type TRAPPED on a heap-result closure (\"indirect call type mismatch\", differential-fuzz index 65) — capturing and non-capturing alike — and whose raw slot copies would alias handles un-owned."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_zip_with_typed.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-142"
+spec      = "ALS-M5"
+title     = "result.unwrap_or_else is valid wasm at the Float instantiation on both legs"
+statement = "`result.unwrap_or_else` over a `Result[Float, String]` compiles to structurally valid wasm on BOTH legs and returns the exact payload/closure result. The v0 emitter's inline expansion carried I64 and i32-fallback cases only: a Float Ok payload emitted an `if i32` block around an f64 closure result and an i32 payload load — a structurally invalid module that the validator refused at build time while native ran (differential-fuzz index 96; surfaced when a heap-accumulator fold walled main off the v1 leg). The expansion now carries the F64 case (f64 block type + f64 payload load), mirroring the option twin that already had it."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_uoe_float.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-139"
+spec      = "ALS-I3"
+title     = "Heap-Ok Result value combinators keep tag and payload"
+statement = "The result VALUE combinators (`map`, `map_err`, `flat_map`, `unwrap_or_else`, `to_option`, `to_err_option`) applied to a heap-Ok `Result[String, String]` (the cap-as-tag block: payload handle @12, tag @16) preserve the tag and payload byte-identically to native: the `Result[String, String]` instantiation routes to `_h` twins that read tag@16 and rebuild through the typed ctors, and every OTHER heap-Ok instantiation (including `filter`/`or_else`/`flatten`/`to_list`/`zip`) routes to an UNLINKED `_x` name — a deterministic render wall, never a wrong-typed link. Previously the len-as-tag scalar impls read len@4 (always 1 for a heap-Ok block), took every ok() for an Err, and rebuilt the WRONG layout: map/map_err/flat_map swapped or replaced payloads (`ok(\"abc\")` became the closure's constant), to_option/to_err_option flipped some/none, and unwrap_or_else emitted invalid wasm (fuzz index 904 via map_err)."
+since     = "0.31.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_combinators_heap_ok.almd", class = "fixture" },
 ]

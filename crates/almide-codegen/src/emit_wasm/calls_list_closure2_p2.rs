@@ -145,7 +145,12 @@ impl FuncCompiler<'_> {
                 });
                 match acc_vt {
                     ValType::F64 => { wasm!(self.func, { f64_store(0); }); }
-                    _ => { wasm!(self.func, { i64_store(0); }); }
+                    ValType::I64 => { wasm!(self.func, { i64_store(0); }); }
+                    // A HEAP accumulator (a String/list handle — i32): the old i64
+                    // fallback stored 8 bytes of an i32 value — structurally invalid
+                    // ("expected i64, found i32", fuzz seed-20260718 index 259) and an
+                    // 8-byte write into a 4-byte-stride slot besides.
+                    _ => { wasm!(self.func, { i32_store(0); }); }
                 }
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);

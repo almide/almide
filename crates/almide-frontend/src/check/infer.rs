@@ -19,14 +19,38 @@ impl Checker {
         // `validate_int_overflow_literals`. Registering here (not in the Int arm)
         // keeps `expr.id` / `expr.span` in scope.
         if let ExprKind::Int { raw, .. } = &expr.kind {
-            if super::int_literal_overflows_i64(raw) {
-                self.deferred_int_overflow_checks.push(super::IntOverflowSite {
-                    expr_id: expr.id, raw: raw.clone(), negated: false, context_ty: None, span: expr.span,
-                });
-            }
+            // EVERY int literal gets a post-solve range site, not just the
+            // i64-overflowing ones: a SIZED context can overflow an i64-fitting
+            // literal in ANY position — `(x - x) - 256` with x: Int8 passed
+            // check while native rustc rejected `256i8` (fuzz seed-20260718
+            // index 114, the binop-operand edition of index 92). The validator
+            // resolves each site's effective type (context_ty, else the
+            // literal's own solved type) and plain-Int literals pass trivially,
+            // so the liberal enqueue costs one Vec push per literal. The Unary
+            // parent still flips `negated` (#626) and the binding/arg hooks
+            // still pin `context_ty`.
+            self.deferred_int_overflow_checks.push(super::IntOverflowSite {
+                expr_id: expr.id, raw: raw.clone(), negated: false, context_ty: None, span: expr.span,
+            });
         }
         let ity = self.infer_expr_inner(expr);
         self.type_map.insert(expr.id, ity.clone());
+        // #662 extension (fuzz seed-20260718 index 145): a CALL's instantiated
+        // result can carry an unconstrained phantom slot even when no binding
+        // sees it — `let r: Bool = result.is_ok(result.or_else(n, f))` leaves
+        // or_else's F forever unpinned, and the un-annotated-binding hook never
+        // fires (r IS annotated, the slot lives in the INTERMEDIATE expr).
+        // Native tolerated the Unknown while the wasm leg refused the build —
+        // an acceptance-parity split. Enqueue every call-result type; the
+        // post-solve validator (E025) fires only on the genuinely undecidable
+        // ones, so the liberal enqueue costs one Vec push per call.
+        if matches!(expr.kind, ExprKind::Call { .. }) {
+            self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                ty: ity.clone(),
+                name: None,
+                span: expr.span,
+            });
+        }
         ity
     }
 
@@ -205,6 +229,20 @@ impl Checker {
                                     n, &self.env.types, self.current_module_prefix.as_deref(),
                                 ).unwrap_or_else(|| sym(n)),
                             };
+                            // E029: a record literal naming an UNDECLARED type
+                            // previously fell through with empty decl fields —
+                            // validation skipped, `Ty::Named(Inner)` flowed into
+                            // the IR, and codegen emitted a nonexistent Rust
+                            // struct (E0422 — check accepted, build failed; fuzz
+                            // seed-20260718 index 940's mutated-away decl).
+                            if !self.env.types.contains_key(&canon) && !self.env.types.contains_key(&sym(n)) {
+                                self.emit(super::err(
+                                    format!("unknown type '{}'", n),
+                                    format!("no `type {}` is declared (or imported) in this program — declare it, or check the spelling", n),
+                                    format!("record literal {}", n),
+                                ).with_code("E029"));
+                                return Ty::Unknown;
+                            }
                             let generic_args = self.instantiate_type_generics(n);
                             let named = Ty::Named(canon, generic_args);
                             let (decl, closed) = match self.env.resolve_named(&named) {
@@ -225,6 +263,13 @@ impl Checker {
                     }
                     for f in fields.iter() {
                         if let Some((_, ety)) = decl_fields.iter().find(|(fname, _)| fname.as_str() == f.name.as_str()) {
+                            // E024, record-field edition: pin a bare/negated int
+                            // literal to the DECLARED sized field type so the
+                            // post-solve range validator sees it — `Inner { x:
+                            // -4294967295 }` over `x: Int8` was check-accepted
+                            // while native rustc rejected the narrowed literal
+                            // (fuzz seed-20260718 index 940, the C-038 mutation).
+                            self.record_int_literal_context(&f.value, ety);
                             if let Some(vty) = self.type_map.get(&f.value.id).cloned() {
                                 self.constrain(ety.clone(), vty, format!("field {}", f.name));
                             }

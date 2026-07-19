@@ -209,6 +209,107 @@ impl Checker {
 
 impl Checker {
     /// Validate that all Map literal key types are hashable (post-solve).
+    /// ALS-C9 / E030: an order-sensitive combinator (`list.sort`/`min`/`max`,
+    /// `sort_by`'s key) needs an ORDERABLE element — the native runtime's
+    /// `T: Ord` bound. A bare Float element is fine (it routes to the `_float`
+    /// twins); a Map/Set/Fn element — or Float NESTED inside a compound — has
+    /// no order, and previously check accepted it while native rustc rejected
+    /// the monomorph ("AlmideMap: Ord is not satisfied" — the check-vs-build
+    /// gap, fuzz seed-20260718 index 629).
+    fn validate_ord_elem_types(&mut self) {
+        use std::collections::HashSet;
+        let mut reported: HashSet<String> = HashSet::new();
+        let checks = std::mem::take(&mut self.deferred_ord_elem_checks);
+        for (subject_ty, span, fn_name) in checks {
+            let resolved = resolve_ty(&subject_ty, &self.uf);
+            // list.sort/min/max enqueue the LIST subject; sort_by enqueues the
+            // key type directly. Extract the element when it is a List.
+            let elem = match &resolved {
+                Ty::Applied(almide_lang::types::TypeConstructorId::List, a) if a.len() == 1 => {
+                    a[0].clone()
+                }
+                _ => resolved.clone(),
+            };
+            // An unresolved slot is E025's business; a BARE Float rides the
+            // `_float` twins.
+            if matches!(elem, Ty::Unknown | Ty::TypeVar(_) | Ty::Float) {
+                continue;
+            }
+            if self.env.is_ord(&elem) {
+                continue;
+            }
+            let ty_name = Self::type_display_name(&elem);
+            if !reported.insert(format!("{fn_name}:{ty_name}")) {
+                continue;
+            }
+            let mut diag = err(
+                format!("type '{}' has no ordering — cannot be used with {}", ty_name, fn_name),
+                "Ordering needs Int, Bool, String, Float, or lists/tuples/records of those.                  Map, Set, and function values have no order; Float inside a compound                  element has none either (compare via an explicit key instead)."
+                    .to_string(),
+                format!("call to {}", fn_name),
+            ).with_code("E030");
+            if let Some(s) = span {
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// E029: every `Ty::Named` mentioned in an ANNOTATION must be a declared
+    /// type. An undeclared name flowed through unification unconstrained
+    /// (`let xs: List[Inner] = []`) and compiled to a nonexistent Rust type
+    /// (E0412/E0425) — check accepted, build failed (the acceptance-parity
+    /// gap, differential-fuzz seed 20260718 index 940's mutated-away `type`
+    /// declaration). Generic params are immune: resolve_type_expr turns an
+    /// in-scope generic into `Ty::TypeVar` at annotation time, never `Named`.
+    fn validate_unknown_named_types(&mut self) {
+        use std::collections::HashSet;
+        fn collect_named(ty: &Ty, out: &mut Vec<Sym>) {
+            match ty {
+                Ty::Named(s, args) => {
+                    out.push(*s);
+                    for a in args { collect_named(a, out); }
+                }
+                Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) => {
+                    for a in args { collect_named(a, out); }
+                }
+                Ty::Fn { params, ret } => {
+                    for p in params { collect_named(p, out); }
+                    collect_named(ret, out);
+                }
+                Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                    for (_, f) in fields { collect_named(f, out); }
+                }
+                _ => {}
+            }
+        }
+        let mut reported: HashSet<Sym> = HashSet::new();
+        let checks = std::mem::take(&mut self.deferred_unknown_type_checks);
+        for (ty, span, ctx) in checks {
+            let resolved = resolve_ty(&ty, &self.uf);
+            let mut names = Vec::new();
+            collect_named(&resolved, &mut names);
+            for s in names {
+                // `Value` is the BUILT-IN dynamic type (json/codec surface) —
+                // nominal by name but never declared in env.types.
+                if s.as_str() == "Value" || self.env.types.contains_key(&s) || !reported.insert(s) {
+                    continue;
+                }
+                let mut diag = err(
+                    format!("unknown type '{}'", s),
+                    format!("no `type {}` is declared (or imported) in this program — declare it, or check the spelling", s),
+                    ctx.clone(),
+                ).with_code("E029");
+                if let Some(sp) = span {
+                    diag.line = Some(sp.line);
+                    diag.col = Some(sp.col);
+                }
+                self.diagnostics.push(diag);
+            }
+        }
+    }
+
     fn validate_map_key_types(&mut self) {
         use std::collections::HashSet;
         let mut reported: HashSet<String> = HashSet::new();

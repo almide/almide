@@ -1,0 +1,7 @@
+import env
+
+effect fn main() -> Result[Unit, String] = {
+  let args = env.args()
+  println(int.to_string(list.len(args)))
+  ok(())
+}

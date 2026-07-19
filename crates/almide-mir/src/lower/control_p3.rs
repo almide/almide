@@ -562,6 +562,11 @@ impl LowerCtx {
         if self.try_lower_scalar_for_list(var, var_tuple, iterable, body) {
             return Ok(());
         }
+        // Then `for (k, v) in m` / `for k in m` over a self-hosted Map layout as a
+        // real entry loop.
+        if self.try_lower_scalar_for_map(var, var_tuple, iterable, body) {
+            return Ok(());
+        }
         // The iterable is evaluated ONCE before the loop. A heap iterable goes through
         // `lower_call_args` — an already-tracked `Var` is borrowed (no new ownership),
         // a fresh heap value is materialized into an owned temp dropped at the OUTER
@@ -659,6 +664,31 @@ impl LowerCtx {
     /// frame — the cert verifies ONE balanced iteration, sound for any N (the existing
     /// model-one-iteration argument), the markers only make wasm actually run it N times.
     /// Returns false (and rolls back) when out of subset; `lower_while` then falls back.
+    /// Pre-loop OWNED COPY for every borrowed-param slot the loop body HEAP-REASSIGNS
+    /// (the C-132 callee shape after the move-mode rewrite: `fn addc(mut s: String, n)
+    /// = { while k < n { s = s + "x"; … } … }` — the rebind arrives via the string.push
+    /// functional rewrite). The loop rebind's uniform drop-old would free the CALLER's
+    /// buffer on iteration 1 (the mut_heap_param rc-underflow trap); starting the slot
+    /// as a `Dup` (+1) of the borrowed param makes iteration 1 drop the copy (the
+    /// caller's reference stays live) and later iterations drop the owned
+    /// intermediates — the same accounting the TCO pre-copy proves. The Dup joins
+    /// `live_heap_handles` (scope-end drops the FINAL object through the same local);
+    /// its cert `a` is backed by the real `Op::Dup` (the borrow-by-default gate).
+    pub(crate) fn precopy_borrowed_reassign_slots(&mut self, body: &[IrStmt]) {
+        let mut vars: Vec<VarId> = Vec::new();
+        collect_heap_reassign_vars(body, &mut vars);
+        for var in vars {
+            if let Some(&val) = self.value_of.get(&var) {
+                if self.param_values.contains(&val) {
+                    let owned = self.fresh_value();
+                    self.ops.push(Op::Dup { dst: owned, src: val });
+                    self.value_of.insert(var, owned);
+                    self.live_heap_handles.push(owned);
+                }
+            }
+        }
+    }
+
     pub(crate) fn try_lower_scalar_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> bool {
         if !matches!(cond.ty, Ty::Int | Ty::Bool) {
             return false;
@@ -667,6 +697,7 @@ impl LowerCtx {
         let lhh_mark = self.live_heap_handles.len();
         let lifted_mark = self.lifted.len();
         let value_of_snapshot = self.value_of.clone();
+        self.precopy_borrowed_reassign_slots(body);
 
         self.ops.push(Op::LoopStart);
         let cond_v = match self.lower_scalar_value(cond) {
@@ -1245,13 +1276,14 @@ impl LowerCtx {
         let mut acc: Option<ValueId> = None;
         for (i, fty) in ftys.iter().enumerate() {
             let off = crate::lower::layout::slot_offset(i) as i64;
-            let kind = if is_heap_ty(fty) {
-                crate::PrimKind::LoadHandle
+            let (lf, rf) = if is_heap_ty(fty) {
+                (self.load_payload_addr(hl, off), self.load_payload_addr(hr, off))
             } else {
-                crate::PrimKind::Load { width: 8 }
+                (
+                    self.load_at_offset(hl, off, crate::PrimKind::Load { width: 8 }),
+                    self.load_at_offset(hr, off, crate::PrimKind::Load { width: 8 }),
+                )
             };
-            let lf = self.load_at_offset(hl, off, kind);
-            let rf = self.load_at_offset(hr, off, kind);
             let e = self.typed_slot_eq(lf, rf, fty, depth + 1)?;
             acc = Some(match acc {
                 None => e,
@@ -1298,7 +1330,6 @@ impl LowerCtx {
         self.ops.push(Op::IfThen { cond: t_eq, dst: Some(dst) });
         // then-branch: the chain value.
         let mut ends: Vec<ValueId> = Vec::new();
-        let mut chain_val: Option<ValueId> = None;
         for (tag, ftys) in &fielded {
             let tagv = self.fresh_value();
             self.ops.push(Op::ConstInt { dst: tagv, value: *tag });
@@ -1310,13 +1341,14 @@ impl LowerCtx {
             let mut cmp: Option<ValueId> = None;
             for (j, fty) in ftys.iter().enumerate() {
                 let foff = crate::lower::layout::slot_offset(1 + j) as i64;
-                let kind = if is_heap_ty(fty) {
-                    crate::PrimKind::LoadHandle
+                let (l1, r1) = if is_heap_ty(fty) {
+                    (self.load_payload_addr(hl, foff), self.load_payload_addr(hr, foff))
                 } else {
-                    crate::PrimKind::Load { width: 8 }
+                    (
+                        self.load_at_offset(hl, foff, crate::PrimKind::Load { width: 8 }),
+                        self.load_at_offset(hr, foff, crate::PrimKind::Load { width: 8 }),
+                    )
                 };
-                let l1 = self.load_at_offset(hl, foff, kind);
-                let r1 = self.load_at_offset(hr, foff, kind);
                 let f_eq = self.typed_slot_eq(l1, r1, fty, depth + 1)?;
                 cmp = Some(match cmp {
                     None => f_eq,
@@ -1329,7 +1361,6 @@ impl LowerCtx {
             }
             self.ops.push(Op::Else { val: Some(cmp?) });
             ends.push(d2);
-            chain_val = Some(d2);
         }
         // innermost else: no field-ctor matched (a fieldless ctor) — equal.
         let one = self.fresh_value();
@@ -1340,7 +1371,11 @@ impl LowerCtx {
             self.ops.push(Op::EndIf { val: Some(inner) });
             inner = *d2;
         }
-        let then_v = chain_val.unwrap_or(one);
+        // The chain's value is the OUTERMOST merge (`ends[0]`): each nested if's
+        // dst is only assigned along the path that reaches it, so yielding an
+        // inner dst reads an unassigned local whenever an OUTER arm was taken
+        // (first-ctor eq returned false with ≥2 fielded ctors).
+        let then_v = inner;
         let zero = self.fresh_value();
         self.ops.push(Op::Else { val: Some(then_v) });
         self.ops.push(Op::ConstInt { dst: zero, value: 0 });
@@ -1361,8 +1396,14 @@ impl LowerCtx {
         err_ty: &Ty,
         depth: u32,
     ) -> Option<ValueId> {
-        let tag_l = self.load_at_offset(hl, 4, crate::PrimKind::Load { width: 4 });
-        let tag_r = self.load_at_offset(hr, 4, crate::PrimKind::Load { width: 4 });
+        // TWO Result layouts share this eq: a SCALAR-Ok Result is len-as-tag (@4: 0 = Ok,
+        // 1 = Err), but a HEAP-Ok Result is the cap-as-tag 1-slot block (len@4 is ALWAYS 1;
+        // the Ok/Err tag lives in slot 0's HIGH 32 bits @16 — materialize_result_str).
+        // Reading @4 on the heap-Ok layout classified EVERY value as Err, so
+        // `ok(xs) == ok(ys)` string-compared the two payload HANDLES (false for equal lists).
+        let tag_off: i64 = if is_heap_ty(ok_ty) { 16 } else { 4 };
+        let tag_l = self.load_at_offset(hl, tag_off, crate::PrimKind::Load { width: 4 });
+        let tag_r = self.load_at_offset(hr, tag_off, crate::PrimKind::Load { width: 4 });
         let zero = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: zero, value: 0 });
         let ok_l = self.fresh_value();
@@ -1376,13 +1417,14 @@ impl LowerCtx {
         // Gated Ok compare.
         let ok_gate = self.fresh_value();
         self.ops.push(Op::IfThen { cond: both_ok, dst: Some(ok_gate) });
-        let kind = if is_heap_ty(ok_ty) {
-            crate::PrimKind::LoadHandle
+        let (pl, pr) = if is_heap_ty(ok_ty) {
+            (self.load_payload_addr(hl, 12), self.load_payload_addr(hr, 12))
         } else {
-            crate::PrimKind::Load { width: 8 }
+            (
+                self.load_at_offset(hl, 12, crate::PrimKind::Load { width: 8 }),
+                self.load_at_offset(hr, 12, crate::PrimKind::Load { width: 8 }),
+            )
         };
-        let pl = self.load_at_offset(hl, 12, kind);
-        let pr = self.load_at_offset(hr, 12, kind);
         let ok_eq = self.typed_slot_eq(pl, pr, ok_ty, depth + 1)?;
         self.ops.push(Op::Else { val: Some(ok_eq) });
         let f1 = self.fresh_value();
@@ -1391,13 +1433,14 @@ impl LowerCtx {
         // Gated Err compare.
         let err_gate = self.fresh_value();
         self.ops.push(Op::IfThen { cond: both_err, dst: Some(err_gate) });
-        let kind = if is_heap_ty(err_ty) {
-            crate::PrimKind::LoadHandle
+        let (el, er) = if is_heap_ty(err_ty) {
+            (self.load_payload_addr(hl, 12), self.load_payload_addr(hr, 12))
         } else {
-            crate::PrimKind::Load { width: 8 }
+            (
+                self.load_at_offset(hl, 12, crate::PrimKind::Load { width: 8 }),
+                self.load_at_offset(hr, 12, crate::PrimKind::Load { width: 8 }),
+            )
         };
-        let el = self.load_at_offset(hl, 12, kind);
-        let er = self.load_at_offset(hr, 12, kind);
         let err_eq = self.typed_slot_eq(el, er, err_ty, depth + 1)?;
         self.ops.push(Op::Else { val: Some(err_eq) });
         let f2 = self.fresh_value();
@@ -1413,6 +1456,18 @@ impl LowerCtx {
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![block] });
         h
+    }
+
+    /// LoadHandle a nested payload slot AND normalize it to the eq engine's i64
+    /// byte-ADDRESS form (`Prim::Handle`): a raw `LoadHandle` result is an i32 Ptr
+    /// local, but every structural recursion (`load_at_offset`'s IntBinOp address
+    /// math) consumes handles as i64 — mixing the classes emitted
+    /// `(i64.add (local.get $v:i32))`, invalid wasm (the Option[(Int, String)] eq).
+    /// Module-eq callees (`string.eq`/`list.eq_*`) accept the i64 form through
+    /// `render_arg_wasm`'s Handle wrap, so normalizing is uniformly safe.
+    pub(crate) fn load_payload_addr(&mut self, h: ValueId, off: i64) -> ValueId {
+        let raw = self.load_at_offset(h, off, crate::PrimKind::LoadHandle);
+        self.handle_of(raw)
     }
 
     /// Materialize ONE operand of a heap `==` cond into a block whose handle the eq core reads.

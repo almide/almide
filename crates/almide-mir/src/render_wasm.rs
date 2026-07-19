@@ -257,7 +257,47 @@ pub fn unlinked_call_names(prog: &MirProgram) -> BTreeSet<String> {
 /// the MIR call count the corpus gate sees can only DROP — `mir_calls <= ir_calls` is
 /// preserved, and caps-verified cannot regress (a walled function is cleanly excluded, not
 /// mis-counted). It is strictly more conservative: it can never create a false-green.
+/// The deriver burns the SINGLE-mangled cross-module derived-codec name
+/// (`almide_rt_varlib_Pigment_encode`) into field-encode call sites, while the
+/// DEFINITION carries the DOUBLE mangle (`almide_rt_varlib_varlib_Pigment_encode`
+/// — module prefix + qualified type name, observed in the linked IR). Resolve the
+/// alias at the render boundary: the burned name is undefined, but re-inserting
+/// the module segment hits the defined fn. A module name containing `_` fails the
+/// split and simply keeps the conservative wall.
+fn resolve_rt_alias(name: &str, resolvable: &BTreeSet<String>) -> Option<String> {
+    let rest = name.strip_prefix("almide_rt_")?;
+    let (m, _) = rest.split_once('_')?;
+    let cand = format!("almide_rt_{m}_{rest}");
+    resolvable.contains(&cand).then_some(cand)
+}
+
 pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower::LowerError> {
+    // Remap aliasable burned names BEFORE the unlinked check (clone only when an
+    // alias actually applies — the common path stays zero-copy).
+    let resolvable = resolvable_call_names(prog);
+    let needs_alias = prog.functions.iter().flat_map(|f| f.ops.iter()).any(|op| {
+        matches!(op, Op::CallFn { name, .. }
+            if !resolvable.contains(name) && resolve_rt_alias(name, &resolvable).is_some())
+    });
+    let remapped;
+    let prog = if needs_alias {
+        let mut p = prog.clone();
+        for f in &mut p.functions {
+            for op in &mut f.ops {
+                if let Op::CallFn { name, .. } = op {
+                    if !resolvable.contains(name) {
+                        if let Some(alias) = resolve_rt_alias(name, &resolvable) {
+                            *name = alias;
+                        }
+                    }
+                }
+            }
+        }
+        remapped = p;
+        &remapped
+    } else {
+        prog
+    };
     let missing = unlinked_call_names(prog);
     if !missing.is_empty() {
         let names = missing.into_iter().collect::<Vec<_>>().join(", ");

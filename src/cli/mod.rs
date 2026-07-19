@@ -87,6 +87,12 @@ name = "almide-out"
 version = "0.1.0"
 edition = "2021"
 
+# Self-isolate from any ENCLOSING cargo workspace: without this, running almide
+# with a project dir nested inside a Rust workspace (a repo's tools/ tree, the
+# fuzzer's .scratch) makes cargo resolve the parent workspace and refuse the
+# build ("current package believes it's in a workspace when it's not").
+[workspace]
+
 [profile.dev]
 opt-level = 1
 overflow-checks = false
@@ -102,6 +108,8 @@ const GENERATED_CARGO_TOML_HTTP: &str = r#"[package]
 name = "almide-out"
 version = "0.1.0"
 edition = "2021"
+
+[workspace]
 
 [dependencies]
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
@@ -300,6 +308,8 @@ fn cargo_build_cdylib(rs_code: &str, project_dir: &std::path::Path, lib_name: &s
 name = "almide-cdylib"
 version = "0.1.0"
 edition = "2021"
+
+[workspace]
 
 [lib]
 name = "{}"

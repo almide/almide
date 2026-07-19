@@ -175,7 +175,7 @@ impl LowerCtx {
                         .lower_call_args(std::slice::from_ref(subject))
                         .map(|v| v.into_iter().next())
                     {
-                        if self.try_lower_tuple_destructure(elements, subj) {
+                        if self.try_lower_tuple_destructure(elements, subj, Some(&subject.ty)) {
                             if let Some(dst) = self.lower_scalar_value(&arms[0].body) {
                                 self.value_of.insert(var, dst);
                                 return Ok(());
@@ -506,7 +506,10 @@ impl LowerCtx {
                 // below, which would read `none` / `ok([])` (the some(computed)/ok(computed) silent
                 // miscompile the adversarial fuzz surfaced). Wall instead — a wall is always safe, a
                 // wrong byte never is.
-                if let IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } = &value.kind {
+                if let IrExprKind::OptionSome { expr }
+                | IrExprKind::ResultOk { expr }
+                | IrExprKind::ResultErr { expr } = &value.kind
+                {
                     use almide_lang::types::constructor::TypeConstructorId;
                     if matches!(&expr.ty,
                         Ty::Applied(TypeConstructorId::List, _) | Ty::Applied(TypeConstructorId::Map, _))
@@ -515,6 +518,19 @@ impl LowerCtx {
                             "some/ok of a list or map payload outside the executable subset cannot be \
                              faithfully materialized in this brick (e.g. an empty `[:]` — would defer \
                              to an empty container)"
+                                .into(),
+                        ));
+                    }
+                    // A HEAP CALL payload the ctor materializer DECLINED (`ok(float.parse(s))`
+                    // — a Module call returning a nested Result, fuzz seed-20260718 index
+                    // 888): the deferred Opaque read `ok(0)` while native printed the err —
+                    // the C-138 family's un-admitted tail. WALL — admission with an exact
+                    // nested drop is a follow-up; a wall is always safe, a wrong byte never.
+                    if is_heap_ty(&expr.ty) && matches!(expr.kind, IrExprKind::Call { .. }) {
+                        return Err(LowerError::Unsupported(
+                            "some/ok/err of an un-admitted heap call payload cannot be \
+                             faithfully materialized in this brick (walled, not read as a \
+                             zeroed ctor)"
                                 .into(),
                         ));
                     }
@@ -646,6 +662,25 @@ impl LowerCtx {
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
                 let init = alloc_init(value);
+                // A NON-EMPTY SCALAR-element List literal that did NOT fold to a real
+                // `Init::IntList` (a computed element the builders above declined — e.g. a
+                // nested inadmissible-HOF chain, fuzz B-198/659): the flat Opaque reads as
+                // an EMPTY list at any observation (`${r4}` printed `[]` while native
+                // printed the values — the silent-wrong-value class). WALL instead — the
+                // heap-element twin at the gate above already does; this is its scalar twin.
+                if let IrExprKind::List { elements } = &value.kind {
+                    use almide_lang::types::constructor::TypeConstructorId;
+                    let scalar_elem_list = matches!(ty,
+                        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
+                    if scalar_elem_list && !elements.is_empty() && matches!(init, Init::Opaque) {
+                        return Err(LowerError::Unsupported(
+                            "non-empty scalar-element list literal with an element outside \
+                             the executable subset cannot be faithfully materialized in this \
+                             brick (walled, not emitted empty)"
+                                .into(),
+                        ));
+                    }
+                }
                 // An all-literal `Init::IntList` is a REAL, POPULATED block (every slot a constant) —
                 // admit a direct `xs[i]` bounds-checked load over it. An `Init::Opaque` (a deferred /
                 // unsupported value) is NOT tracked: indexing it would trap on cap 0.
@@ -913,6 +948,17 @@ impl LowerCtx {
                 {
                     self.materialized_lists.insert(dst);
                 }
+                // A self-host returning a RECORD/TUPLE (`list.partition` → (List, List)):
+                // seed the READ-shape — without it a `.0`/`.1` projection falls to the
+                // container-grain Dup and a consumer reads the TUPLE header
+                // (list.len(result.0) returned the tuple's len 2, not the slot list's 5 —
+                // the pipe_chain partition miscompile, 2026-07-17). READ-shape ONLY: the
+                // drop stays the pre-existing flat one (re-routing it through record_masks
+                // here imbalanced the ownership cert — the callee's fills are opaque to
+                // the caller's witness; the Named arm's mask rides a different accounting).
+                if faithful && self.aggregate_field_tys(ty).is_some() {
+                    self.materialized_aggregates.insert(dst);
+                }
                 // A BORROW result (`prim.load_str` of a list slot — the list still owns it) is NOT
                 // added to the scope-end drop set; everything else is a fresh owned value.
                 if !self.param_values.contains(&dst) {
@@ -1133,6 +1179,27 @@ impl LowerCtx {
                 ))
             }
             IrExprKind::If { else_, .. } => {
+                // A VARIANT (Option/Result)-typed `if` RHS (`let $r = if c then ok(T)
+                // else err(e)` — the tail err-raise normalization's two-step bind, and
+                // the hand-written equivalent): EXECUTE via the proven heap-result-if
+                // machinery (each arm materializes + Consumes its value; the merge is
+                // the ONE owned rc=1 block), bind + scope-track it, and SEED its
+                // variant READ-shape so a following `$r!` / `match $r` takes the
+                // executing tag-read path — the same classification a call-result
+                // bind gets (seed_variant_param is read-shape only: no ownership
+                // change, the scope-end drop stays this binding's).
+                if is_variant_ty(ty) {
+                    if let IrExprKind::If { cond, then, else_ } = &value.kind {
+                        if let Some(obj) = self.try_lower_heap_result_if(cond, then, else_, ty) {
+                            self.value_of.insert(var, obj);
+                            if !self.live_heap_handles.contains(&obj) {
+                                self.live_heap_handles.push(obj);
+                            }
+                            self.seed_variant_param(obj, ty);
+                            return Ok(());
+                        }
+                    }
+                }
                 // STRAIGHT-LINE identity-else shadow rebind `let acc = if cond then acc + [x] else acc`
                 // (porta `serialize_opts`' 7 stacked optional-arg appends on one `args` slot). The ELSE
                 // arm is EXACTLY the accumulator var — the PROVEN loop-carried `i(id)m` append slot,
@@ -1302,7 +1369,7 @@ impl LowerCtx {
                         }
                     }
                 }
-                if self.try_lower_tuple_destructure(elements, subj) {
+                if self.try_lower_tuple_destructure(elements, subj, Some(&value.ty)) {
                     return Ok(());
                 }
             }

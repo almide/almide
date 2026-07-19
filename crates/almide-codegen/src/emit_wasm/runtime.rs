@@ -3,7 +3,10 @@
 //! These are emitted as regular WASM functions, not imports.
 //! Only fd_write is imported from WASI.
 
-use super::{CompiledFunc, WasmEmitter, SCRATCH_ITOA, NEWLINE_OFFSET};
+use super::{
+    CompiledFunc, WasmEmitter, SCRATCH_ITOA, NEWLINE_OFFSET, IOVEC_BUF_ADDR, IOVEC_LEN_ADDR,
+    NWRITTEN_ADDR, FD_STDOUT, FD_STDERR,
+};
 use super::rt_string::{string_data_off, string_hdr, string_cap_off, list_data_off, list_hdr};
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
@@ -197,6 +200,10 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // __println_str(ptr: i32) -> ()
     let println_ty = emitter.register_type(vec![ValType::I32], vec![]);
     emitter.rt.println_str = emitter.register_func("__println_str", println_ty);
+    // __eprintln_str(ptr: i32) -> () — println_str's STDERR twin (fd 2): the
+    // ALS-T18 assert-abort desugar and user eprintln ride it. Previously the
+    // bare `eprintln` builtin ICE'd here ("not in func_map").
+    emitter.rt.eprintln_str = emitter.register_func("__eprintln_str", println_ty);
 
     // __int_to_string(n: i64) -> i32
     let itoa_ty = emitter.register_type(vec![ValType::I64], vec![ValType::I32]);
@@ -410,6 +417,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_heap_restore(emitter);
     compile_alloc_pinned(emitter);
     compile_println_str(emitter);
+    compile_eprintln_str(emitter);
     compile_int_to_string(emitter);
     // float.to_string driver (Dragon4 shortest-decimal). Registered early, so
     // its body is emitted here; the bignum helpers (registered late) are

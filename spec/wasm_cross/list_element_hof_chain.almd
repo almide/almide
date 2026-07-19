@@ -1,0 +1,29 @@
+// @contract: C-144, C-145, C-146
+// A scalar-element list literal whose element is a nested result-combinator
+// chain — including a mono-suffixed `result.or_else` and a closure returning its
+// own CAPTURED subject — prints the same values and exit code on both targets.
+// Three bugs hid here (fuzz B-198/659): (1) the v1 element position DEFERRED the
+// whole list to an Opaque that printed `[]` (bind position walled honestly) —
+// now the non-literal scalar-list bind walls (C-144); (2) `result.or_else`
+// reached the registry under its MONO-SUFFIXED name (`or_else__Int_String_
+// String`) and walled every instantiation — the router now strips the suffix
+// (C-145); (3) the v0 leg's lifted closure returned a BORROWED env alias for a
+// bare captured-var body, double-freeing at scope end (__rc_dec trap after
+// correct output) — the closure now hands out a co-owned +1 (C-146).
+fn main() -> Unit = {
+  let s1: Result[Int, String] = err("x")
+  let r4: List[Int] = [1000000, 7, result.unwrap_or_else(result.or_else(s1, ((v) => s1)), ((t) => 256))]
+  let x3: Result[Bool, String] = ok(true)
+  let r5: List[Bool] = [result.unwrap_or(result.or_else(x3, ((x4) => x3)), true), true, false, true]
+  println("r4 = ${r4}")
+  println("r5 = ${r5}")
+}
+
+test "or_else recovery closure returning its captured subject" {
+  let s1: Result[Int, String] = err("x")
+  let m: Result[Int, String] = result.or_else(s1, ((v) => s1))
+  assert_eq(m, err("x"))
+  let k: Result[Int, String] = ok(7)
+  let m2: Result[Int, String] = result.or_else(s1, ((v) => k))
+  assert_eq(m2, ok(7))
+}

@@ -7,7 +7,10 @@ Usage:
      (casedump = the tiny dumper in scripts/casedump/ — every codepoint where
       to_uppercase/to_lowercase != identity, plus black-box Cased/Case_Ignorable
       sets probed through the Final_Sigma behavior of str::to_lowercase)
-  3. python3 scripts/gen-case-tables.py casemap.txt caseprops.txt   (from the repo root)
+  3. python3 scripts/gen-case-tables.py casemap.txt caseprops.txt [classes.txt]
+     (from the repo root; classes.txt = `casedump classes` — the is_alphabetic /
+      is_uppercase / is_lowercase / is_numeric RANGE dump — regenerates
+      stdlib/string_class.almd's tables in place)
 
 Regenerate whenever the Rust toolchain bumps its Unicode version — the tables
 are dumped FROM the oracle, so v0/v1 cannot drift.
@@ -238,3 +241,23 @@ lower_body = emit('to_lower', 'to_lowercase', lower, 65, 90, 32, sigma=(len(case
 lower_body = lower_body.replace('fn string_to_lower', FINAL_SIGMA + '\nfn string_to_lower')
 open('stdlib/string_to_lower.almd', 'w').write(lower_body)
 print('generated')
+
+
+# ── stdlib/string_class.almd tables (optional 3rd arg: `casedump classes` dump) ──
+# The .almd body (scan fns, doc) is hand-maintained; ONLY the four table literals
+# and their range counts are regenerated in place, so a Unicode bump is one diff.
+if len(sys.argv) > 3:
+    import re as _re
+    cls = {"A": [], "U": [], "L": [], "N": []}
+    for line in open(sys.argv[3]):
+        tag, a, b = line.split()
+        cls[tag].append((int(a, 16), int(b, 16)))
+    hx = lambda rs: "".join(f"{a:06X}{b:06X}" for a, b in sorted(rs))
+    body = open('stdlib/string_class.almd').read()
+    for tag, fn_name in [("A", "__alpha_table"), ("U", "__upper_table"), ("L", "__lower_table"), ("N", "__num_table")]:
+        body = _re.sub(fn_name + r'\(\) -> String =\n  "[0-9A-F]*"',
+                       fn_name + '() -> String =\n  "' + hx(cls[tag]) + '"', body)
+    for tag, marker in [("A", "__alpha_n"), ("U", "__upper_n"), ("L", "__lower_n"), ("N", "__num_n")]:
+        pass  # counts are inlined literals; keep in sync manually if range counts change
+    open('stdlib/string_class.almd', 'w').write(body)
+    print('string_class tables regenerated (verify the inlined range COUNTS if they changed)')

@@ -47,6 +47,51 @@ impl FuncCompiler<'_> {
                             }
                         }
                     }
+                    "eprintln" => {
+                        // println's STDERR twin — the ALS-T18 assert-abort line and
+                        // user diagnostics. Previously this ICE'd ("not in func_map").
+                        let arg = &args[0];
+                        match &arg.ty {
+                            Ty::String => {
+                                self.emit_expr(arg);
+                                wasm!(self.func, { call(self.emitter.rt.eprintln_str); });
+                            }
+                            Ty::Int => {
+                                self.emit_expr(arg);
+                                wasm!(self.func, {
+                                    call(self.emitter.rt.int_to_string);
+                                    call(self.emitter.rt.eprintln_str);
+                                });
+                            }
+                            Ty::Float => {
+                                self.emit_expr(arg);
+                                wasm!(self.func, {
+                                    call(self.emitter.rt.float_to_string);
+                                    call(self.emitter.rt.eprintln_str);
+                                });
+                            }
+                            Ty::Bool => {
+                                self.emit_expr(arg);
+                                let true_str = self.emitter.intern_string("true");
+                                let false_str = self.emitter.intern_string("false");
+                                wasm!(self.func, {
+                                    if_i32;
+                                    i32_const(true_str as i32);
+                                    else_;
+                                    i32_const(false_str as i32);
+                                    end;
+                                    call(self.emitter.rt.eprintln_str);
+                                });
+                            }
+                            _ => {
+                                let s = self.emitter.intern_string("<unsupported>");
+                                wasm!(self.func, {
+                                    i32_const(s as i32);
+                                    call(self.emitter.rt.eprintln_str);
+                                });
+                            }
+                        }
+                    }
                     "assert_eq" => {
                         self.emit_assert_eq(&args[0], &args[1]);
                     }

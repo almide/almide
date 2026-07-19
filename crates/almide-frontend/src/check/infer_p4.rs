@@ -9,6 +9,11 @@ impl Checker {
                 let val_ty = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
+                    // E029: an undeclared Named in the annotation compiles to a
+                    // nonexistent Rust type after `check` accepted (fuzz index 940).
+                    self.deferred_unknown_type_checks.push((
+                        declared.clone(), *span, format!("let '{}'", name),
+                    ));
                     self.record_int_literal_context(value, &declared);
                     self.constrain(declared.clone(), val_ty, format!("let {}", name));
                     declared
@@ -37,6 +42,10 @@ impl Checker {
                 let val_ty = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
+                    // E029: same undeclared-Named annotation check as Let.
+                    self.deferred_unknown_type_checks.push((
+                        declared.clone(), *span, format!("var '{}'", name),
+                    ));
                     self.record_int_literal_context(value, &declared);
                     self.constrain(declared.clone(), val_ty, format!("let {}", name));
                     declared

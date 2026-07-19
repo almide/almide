@@ -8,8 +8,13 @@ fn int_min(a: Int, b: Int) -> Int = if a < b then a else b
 
 fn int_max(a: Int, b: Int) -> Int = if a > b then a else b
 
-// clamp(n, lo, hi) = max(lo, min(n, hi)) — assumes lo <= hi (v0 i64::clamp).
-fn int_clamp(n: Int, lo: Int, hi: Int) -> Int =
+// clamp(n, lo, hi) = max(lo, min(n, hi)). ALS-T6: an INVERTED range (lo > hi)
+// is a domain error aborting with one stderr line + exit 1 on both targets —
+// native i64::clamp leaked the raw Rust panic (exit 101) while the un-checked
+// wasm chain returned a value (fuzz seed-20260718 index 5).
+fn int_clamp(n: Int, lo: Int, hi: Int) -> Int = {
+  if lo > hi then prim.die(prim.handle("Error: clamp requires min <= max\n")) else ()
   if n < lo then lo
   else if n > hi then hi
   else n
+}

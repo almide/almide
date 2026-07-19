@@ -40,6 +40,7 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__sort_copy_rc",     // list.sort_str — rc-copy each String element
     "__filterrc_fill",
     "__sbfr_init",
+    "__sbr_init",         // list.sort_by_rc — rc_inc each element handle copied into the result
     "__ivh_set_copy",
     "__hvl_set_copy",
     "__hvl_set_append",
@@ -57,9 +58,16 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__repeat_fill_rc",   // list.repeat_rc — rc_inc the element into each duplicated slot
     "__enum_fill_h",      // list.enumerate_str — rc_inc the element into its (i, x) pair
     "__zip_fill_rc",      // list.zip_rc — rc_inc both elements into each pair
+    "__lpart_fill_rc",    // list.partition_rc — rc_inc each element into its side
+    "__otl_fill_rc",      // option.to_list_rc — rc_inc the Some payload into the list
+    "__zip_fill_rcb",     // list.zip_sh — rc_inc the heap RIGHT element only
+    "__zip_fill_rca",     // list.zip_hs — rc_inc the heap LEFT element only
     "__take_h_fill",      // list.take_hshare — rc_inc each shared element slot
     "__uh_acquire",       // list.unique_hshare / dedup_hshare — rc_inc each KEPT shared element
     "__skv_entries_fill", // map.entries_skv — rc_inc each key into its (k, v) pair
+    "__vu_fill",          // value.pick/omit — rc_inc each kept key+value into the fresh Object
+    "__vu_ren_fill_c",    // value.to_camel_case — rc_inc each value (keys are fresh owned strings)
+    "__vu_ren_fill_s",    // value.to_snake_case — rc_inc each value (keys are fresh owned strings)
 ];
 
 /// RECURSIVE-DROP CONSUMERS — rc_dec each element at the container's death (the `rec_drop` half of

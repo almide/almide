@@ -89,7 +89,8 @@ fixture `spec/wasm_cross/string_case_unicode.almd` に対して行う）。
 **exit code 1 で停止**する。ハードウェア trap（wasm unreachable、exit 134 等）や
 無言の wrap は不適合。同じ規約は `math.pow` の負指数（`Error: negative exponent`）、
 `int.rotate_*` の非正幅（`Error: rotate width must be positive`）、リスト添字の
-範囲外（`Error: index out of bounds`）に適用される。
+範囲外（`Error: index out of bounds`）、`int.clamp`/`float.clamp` の不正範囲
+（lo > hi、float は NaN 境界も — `Error: clamp requires min <= max`）に適用される。
 Fixtures: `spec/wasm_cross/int_div_by_zero*.almd`, `int_mod_*`, `int8_div_overflow.almd`,
 `int_pow_negative_exponent.almd`, `int_rotate_nonpositive_width.almd`, `index_bounds.almd`。
 
@@ -153,8 +154,9 @@ Contracts: C-048。
 
 `float.sign` は `f64::signum`（NaN → NaN、±0 → ±1）。`float.min/max`・
 `math.min/max` は **NaN を無視**する（片方が NaN なら他方を返す — IEEE-754
-minNum/maxNum 系、Rust `f64::min/max` と一致）。
-Contracts: C-049。
+minNum/maxNum 系、Rust `f64::min/max` と一致）。`float.round` はゼロ結果の
+符号を保つ（round(-0.0) = -0.0、half away from zero は不変）。
+Contracts: C-049, C-140。
 
 ## ALS-T16 長さ・添字の i64 クランプ
 
@@ -171,3 +173,21 @@ v0-wasm / 自己ホストの 3 バックエンドが同一の逐次 `string.repl
 ため、出力はバイト一致。`%` は上記指定子の直前でのみ特別扱いされ、`%%` エス
 ケープは存在しない（認識されない `%X` はそのまま素通り）。SCOPE: 年 0..9999
 （5 桁年は 4 桁欄を超える — `to_iso` と同じ文書化済みの端）。Contracts: C-128。
+
+## ALS-T18 assert の abort 形（非 test 位置）
+
+`test` ブロック外の `assert` 族の失敗は、**stderr 1行 + exit code 1** で停止する
+（T6 の終了規約ファミリ）。生の Rust panic（exit 101）や wasm trap（exit 134）、
+値情報なしの出力は不適合。行の形（表示は ALS-R2 の補間 Display と同一）:
+
+- `assert_eq(l, r)` → `Error: assertion failed: left = <l>, right = <r>`
+- `assert_ne(l, r)` → `Error: assertion failed: both = <l>`
+- `assert(c)` → `Error: assertion failed`
+- `assert(c, msg)` → `Error: assertion failed: <msg>`
+
+被演算子は**一度だけ評価**される（失敗メッセージは束縛済み temp を再参照する）。
+`test` ブロック内はテストハーネスの報告形式に従う（本節の対象外）。
+実装は frontend lowering の単一脱糖（desugar once）で、native / v0-wasm /
+v1-wasm / interp の全系統が同じ IR を継ぐ。
+Fixtures: `spec/wasm_cross/assert_abort_eq.almd`, `assert_abort_ne.almd`,
+`assert_abort_msg.almd`。Contracts: C-153。

@@ -1,0 +1,21 @@
+// eprintln — the SELF-HOSTED bare `eprintln(s)` for v1 over the prim floor:
+// print_str's STDERR twin (fd 2), byte-for-byte the same two single-iovec
+// fd_write discipline (string bytes, then "\n" at scratch 768). Previously the
+// bare builtin was UNLINKED on the v1 leg (an honest wall) and the v0 emitter
+// ICE'd on it — user stderr diagnostics and every non-test assert desugar
+// (ALS-T18's `Error: assertion failed…` line) ride this.
+//
+// Reaching prim.fd_write carries Capability::Stderr-class output exactly like
+// print_str carries Stdout — the caps fold derives it from this body.
+fn __eprintln_str(s: String) -> Unit = {
+  let h = prim.handle(s)        // i64 address of the [rc][len][cap][bytes] block
+  let len = prim.load32(h + 4)  // header len (LIST_LEN_OFFSET)
+  let data = h + 12             // byte start (LIST_HEADER)
+  prim.store32(8, data)         // iovec = { the string bytes, len }
+  prim.store32(12, len)
+  let _w0 = prim.fd_write(2, 8, 1, 0)  // fd_write(stderr, iovec@8, count 1, nwritten@0)
+  prim.store8(768, 10)          // "\n" at scratch 768
+  prim.store32(8, 768)          // iovec = { the newline, 1 }
+  prim.store32(12, 1)
+  let _w1 = prim.fd_write(2, 8, 1, 0)
+}

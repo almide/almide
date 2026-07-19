@@ -795,19 +795,21 @@
     fn unlinked_stdlib_call_is_walled_not_dangling_wasm() {
         use crate::lower::LowerError;
         use crate::render_wasm::{try_render_wasm_program, unlinked_call_names};
-        // `float.to_fixed` is NOT in the self-host registry (only the free-format `float.to_string`
-        // dtoa is self-hosted; the fixed-precision `{:.N}` path is unrevived), so it auto-links
-        // nothing and stays a bare `CallFn` — the canonical unlinked call. (`float.from_int` AND
-        // the now-linked `float.to_string` ARE registered — the contrast that proves the wall is
-        // precise, not a blanket reject of all float.* calls.)
+        // `list.bundled_probe` is NOT in the self-host registry — it is the bundled-body
+        // MACHINERY PROBE (stdlib/list.almd), deliberately never self-hosted, so it stays a
+        // bare `CallFn` — a STABLE canonical unlinked call (the previous exemplar,
+        // `float.to_fixed`, got self-hosted 2026-07-17 and broke this test's premise).
+        // (`float.from_int` AND `float.to_string` ARE registered — the contrast that proves
+        // the wall is precise, not a blanket reject.)
         let src = "fn main() -> Unit = {\n  \
-            let x = float.from_int(3)\n  println(float.to_fixed(x, 2)) }\n";
+            let x = float.from_int(3)\n  println(float.to_string(x))\n  \
+            println(int.to_string(list.bundled_probe(3))) }\n";
         let prog = lower_source(src);
         // The resolution check flags exactly the unlinked name, nothing else.
         let missing = unlinked_call_names(&prog);
         assert!(
-            missing.contains("float.to_fixed"),
-            "the unlinked float.to_fixed must be detected, got {missing:?}"
+            missing.contains("list.bundled_probe"),
+            "the unlinked list.bundled_probe must be detected, got {missing:?}"
         );
         assert!(
             !missing.contains("float.from_int"),
@@ -817,7 +819,7 @@
         match try_render_wasm_program(&prog) {
             Err(LowerError::Unsupported(msg)) => {
                 assert!(
-                    msg.contains("float.to_fixed"),
+                    msg.contains("list.bundled_probe"),
                     "the wall message must name the unlinked callee, got {msg:?}"
                 );
             }

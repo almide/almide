@@ -80,7 +80,12 @@ pub fn resolve_derived_method_owner(name: String) -> String {
             let o = o.borrow();
             match o.get(ty) {
                 Some(m) if qualifier.is_none() || qualifier == Some(m.as_str()) => {
-                    Some(format!("almide_rt_{}_{}_{}", m.replace('.', "_"), ty, method))
+                    // The DEFINITION side mangles the QUALIFIED type name (`varlib.Pigment`
+                    // → `varlib_Pigment`) under the module prefix, so the derived fn is
+                    // `almide_rt_varlib_varlib_Pigment_encode` (module twice — observed in
+                    // the linked IR). Mirror that exactly or the call dangles unlinked.
+                    let mm = m.replace('.', "_");
+                    Some(format!("almide_rt_{mm}_{mm}_{ty}_{method}"))
                 }
                 _ => None,
             }
@@ -140,11 +145,19 @@ fn has_result_err(body: &IrExpr) -> bool {
             // classified never-err, its callers' `!` got stripped, and the caller
             // read the REAL Result block as the raw payload (record fields off a
             // Result handle — the read_message `method=` garbage, 2026-07-03).
+            // …and the same blindness holds for `!`/`?` over ANY non-Named subject: a
+            // local Result var (`let r: Result[Int,String] = …; r!` — result_option_
+            // matrix's unwrap_result_ok), a field, an Option unwrap (raises on none) —
+            // all propagate an error channel the Named-call fixpoint cannot see.
+            // Classifying them never-err stripped the CALLERS' `!` (bare i64 read)
+            // while the def kept the Result-handle pass-through — the def/callsite
+            // ABI split = invalid wasm (i64/i32, latent until the file first rendered).
+            // Only a `Named` call stays out (the fixpoint tracks it precisely).
             if let IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner } = &e.kind {
-                if matches!(&inner.kind,
-                    IrExprKind::Call { target: CallTarget::Module { .. }, .. }
-                        | IrExprKind::RuntimeCall { .. })
-                {
+                if !matches!(
+                    &inner.kind,
+                    IrExprKind::Call { target: CallTarget::Named { .. }, .. }
+                ) {
                     self.0 = true;
                 }
             }
@@ -247,7 +260,6 @@ pub fn strip_never_err_unwraps(
     struct S<'a> {
         can_err: &'a std::collections::HashSet<String>,
         lifted: &'a std::collections::HashSet<String>,
-        self_name: &'a str,
     }
     impl IrMutVisitor for S<'_> {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
@@ -265,10 +277,17 @@ pub fn strip_never_err_unwraps(
             // `Try` (the frontend auto-`?`) over the same never-err lifted callee is
             // the identical no-op — `x = step(x)` carries `Try{step(x)}`, which an
             // unstripped path lowered to a deferred Const-0 (effect_assign_unwrap).
+            // The SELF-call exception admits only a LIFTED self: a DECLARED-Result self
+            // (`effect fn eval_e(..) -> Result[Int, String]`) builds a REAL Result block,
+            // so stripping a BIND-position `eval_e(l)!` made the binder read the block
+            // handle as the raw payload (i64 local ← i32 call: invalid wasm — the
+            // box_deref_clone recursion). A lifted self keeps the strip everywhere (the
+            // yaml TCO shape); a declared-Result tail self-`!` is pass-through in the
+            // tail lowering without any strip.
             let never_err_named_call = |inner: &IrExpr| {
                 matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
                     if !self.can_err.contains(name.as_str())
-                        && (self.lifted.contains(name.as_str()) || name.as_str() == self.self_name)
+                        && self.lifted.contains(name.as_str())
                         && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str())))
             };
             let strip = matches!(&expr.kind,
@@ -312,7 +331,8 @@ pub fn strip_never_err_unwraps(
             }
         }
     }
-    S { can_err, lifted: lifted_effect_fns, self_name }.visit_expr_mut(body);
+    let _ = self_name; // kept in the signature: callers name the fn being stripped
+    S { can_err, lifted: lifted_effect_fns }.visit_expr_mut(body);
 }
 
 /// Rewrite `Try/Unwrap { fan.map(xs, (x) => ok(E)) }` → `list.map(xs, (x) => E)` — a PURE
@@ -727,6 +747,13 @@ pub fn lifted_effect_fn_names(fns: &[IrFunction]) -> std::collections::HashSet<S
 /// from `fns` — extracted from [`inline_mutual_tail_recursion`] so the pipeline can WIDEN the
 /// registries over the WHOLE program (main + mangled module siblings) without feeding module
 /// bodies through the main pre-pass rewrites (which regressed the intra-module tail-call shape).
+/// A snapshot of the AUTO_WRAP registry — the pipeline's populate→rewrite fixpoint
+/// compares successive snapshots to detect stability (the registry is thread-local
+/// and `pub(crate)`, so the pipeline reads it through this accessor).
+pub fn auto_wrap_abi_snapshot() -> std::collections::HashSet<String> {
+    AUTO_WRAP_ABI_FNS.with(|s| s.borrow().clone())
+}
+
 pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayouts) {
     let can_err = compute_can_err(fns);
     let lifted_effect_fns = lifted_effect_fn_names(fns);
@@ -1223,6 +1250,13 @@ pub(crate) struct LowerCtx {
     /// Option handle AS the Result — a confirmed silent wrong-value. Threaded as an explicit
     /// per-fn FACT (the `unit_main` pattern) so the desugar never trusts a tree-local `.ty`.
     ret_is_result_abi: bool,
+    /// This fn's effective ERR type: the declared `Result[_, E]`'s `E`, or `String` for a
+    /// lifted effect fn (the synthetic `Result[T, String]`); `None` when no Result ABI applies
+    /// (a declared `-> Option[..]` fn, a lifted lambda sub-ctx). Gates the tail-`!` pass-through
+    /// (tail.rs): `f() = g()!` returns g's Result AS f's, which is sound only when the err
+    /// components match — v0 coerces a mismatch with `.map_err(...)` at the `?` site, so the
+    /// unchecked pass-through type-punned the err payload (the collect_map! class, 2026-07-17).
+    decl_fn_err: Option<Ty>,
 }
 
 /// Type NAME → (generic param names, declaration-ordered fields) — the VALUE-MODEL

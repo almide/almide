@@ -57,3 +57,31 @@ fn map_fold_skv_msi(
   let entries = prim.load32(sh + 4)
   __mfh_skv_loop(sh, f, entries, 0, init)
 }
+
+// ── list.fold over a `Map[String, Int]` accumulator (String elements) ── the
+// frequencies shape (`list.fold(xs, [:], (acc, x) => map.set(acc, x, …))`).
+// f consumes the acc and returns the next (the fold_ols ownership discipline);
+// elements read as borrows.
+fn __fold_smsi_loop(
+  h: Int,
+  f: (Map[String, Int], String) -> Map[String, Int],
+  n: Int,
+  i: Int,
+  acc: Map[String, Int],
+) -> Map[String, Int] =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __fold_smsi_loop(h, f, n, i + 1, nacc)
+  }
+
+fn list_fold_str_msi(
+  xs: List[String],
+  init: Map[String, Int],
+  f: (Map[String, Int], String) -> Map[String, Int],
+) -> Map[String, Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  __fold_smsi_loop(h, f, n, 0, init)
+}

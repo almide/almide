@@ -613,17 +613,53 @@ impl Checker {
     /// Pin the declared type onto an int-overflow candidate when the literal is
     /// the DIRECT value of an annotated binding (`let x: T = 5…` or `= -5…`), so
     /// a wider `T` (e.g. `UInt64`) makes a >i64 literal valid post-solve (#626).
-    fn record_int_literal_context(&mut self, value: &ast::Expr, declared: &Ty) {
-        let lit_id = match &value.kind {
-            ExprKind::Int { .. } => Some(value.id),
+    /// Pin `ty` as an EXISTING literal site's range context (first pin wins —
+    /// a binding/arg annotation set earlier stays authoritative). Every int
+    /// literal has a site since the liberal enqueue, so a lookup miss is a
+    /// no-op by construction.
+    pub(crate) fn pin_int_literal_context(&mut self, id: almide_lang::ast::ExprId, ty: &Ty) {
+        if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == id) {
+            if site.context_ty.is_none() {
+                site.context_ty = Some(ty.clone());
+            }
+        }
+    }
+
+    pub(crate) fn record_int_literal_context(&mut self, value: &ast::Expr, declared: &Ty) {
+        let (lit_id, raw, negated) = match &value.kind {
+            ExprKind::Int { raw, .. } => (Some(value.id), Some(raw.clone()), false),
             ExprKind::Unary { op, operand, .. } if op.as_str() == "-"
-                && matches!(&operand.kind, ExprKind::Int { .. }) => Some(operand.id),
-            ExprKind::Paren { expr } if matches!(&expr.kind, ExprKind::Int { .. }) => Some(expr.id),
-            _ => None,
+                && matches!(&operand.kind, ExprKind::Int { .. }) =>
+            {
+                let raw = if let ExprKind::Int { raw, .. } = &operand.kind { Some(raw.clone()) } else { None };
+                (Some(operand.id), raw, true)
+            }
+            ExprKind::Paren { expr } if matches!(&expr.kind, ExprKind::Int { .. }) => {
+                let raw = if let ExprKind::Int { raw, .. } = &expr.kind { Some(raw.clone()) } else { None };
+                (Some(expr.id), raw, false)
+            }
+            _ => (None, None, false),
         };
         if let Some(id) = lit_id {
             if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == id) {
                 site.context_ty = Some(declared.clone());
+                return;
+            }
+            // A literal that fits i64 was never enqueued — but a SIZED context
+            // can still overflow it (`neg_one_i8(128)`: check accepted, native
+            // rustc rejected `128i8` — the check-vs-build gap, fuzz
+            // seed-20260718 index 92). Enqueue a site so the post-solve E024
+            // range check runs against the sized context.
+            if let Some(raw) = raw {
+                if !matches!(declared, Ty::Int | Ty::Unknown | Ty::TypeVar(_)) {
+                    self.deferred_int_overflow_checks.push(super::IntOverflowSite {
+                        expr_id: id,
+                        raw,
+                        negated,
+                        context_ty: Some(declared.clone()),
+                        span: value.span,
+                    });
+                }
             }
         }
     }

@@ -128,6 +128,18 @@ impl LowerCtx {
             matches!(ty, Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && matches!(a[0], Ty::String))
         };
+        // A String-err Result capture (`(v) => s1` — the or_else recovery shape,
+        // fuzz B-198) shares the DynListStr layout family: len-as-tag
+        // `Result[scalar, String]` (Ok = len 0, nothing to free; Err = len 1
+        // owning the message) and cap-as-tag `Result[String, String]` (len 1,
+        // String payload @slot 0 either arm) are both freed EXACTLY by the
+        // nested `__drop_list_str` walk — so they ride the nested-heap env
+        // class. Any other Result instantiation keeps the honest-wall defer.
+        let is_nested_result_str = |ty: &Ty| -> bool {
+            matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && matches!(a[1], Ty::String)
+                    && (!is_heap_ty(&a[0]) || matches!(a[0], Ty::String)))
+        };
         let mut closure_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut heap_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut nested_heap_caps: Vec<(VarId, Ty)> = Vec::new();
@@ -137,7 +149,7 @@ impl LowerCtx {
                 closure_caps.push((v, ty));
             } else if one_level_exact(&ty) {
                 heap_caps.push((v, ty));
-            } else if is_nested_list_str(&ty) {
+            } else if is_nested_list_str(&ty) || is_nested_result_str(&ty) {
                 nested_heap_caps.push((v, ty));
             } else if matches!(ty, Ty::Int | Ty::Bool) {
                 scalar_caps.push((v, ty));

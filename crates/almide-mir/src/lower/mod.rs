@@ -80,6 +80,18 @@ pub fn is_heap_ty(ty: &Ty) -> bool {
     )
 }
 
+/// The i64-uniform bit pattern of a float literal: a `Float32`-typed literal carries the
+/// LOW-32 f32 pattern (the F32Demote/IntToF32 convention — see `PrimKind::F32Bin`),
+/// everything else the f64 bits. Emitting f64 bits for a Float32 made every downstream
+/// f32-family op (arith, compare, to_string) read garbage.
+pub(crate) fn float_lit_bits(value: f64, ty: &Ty) -> i64 {
+    if matches!(ty, Ty::Float32) {
+        (value as f32).to_bits() as i64
+    } else {
+        value.to_bits() as i64
+    }
+}
+
 /// A CONST-foldable module-global initializer → its direct `Init` (NO runtime call), else `None`.
 /// Admits exactly the compile-time-known heap constants the module-global materialization emits as
 /// data: a string literal, an all-int-literal `List[Int]`, and `bytes.from_list([int literals])`.
@@ -1030,12 +1042,16 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
     use almide_lang::intern::sym;
     fn die_expr(msg: &str) -> IrExpr {
-        let lit = IrExpr {
+        die_on(IrExpr {
             kind: IrExprKind::LitStr { value: msg.to_string() },
             ty: Ty::String,
             span: None,
             def_id: None,
-        };
+        })
+    }
+    /// die on an arbitrary String-typed message EXPRESSION (the computed 2-arg
+    /// assert message: `assert(c, "got " + float.to_string(x))`).
+    fn die_on(lit: IrExpr) -> IrExpr {
         let handle = IrExpr {
             kind: IrExprKind::Call {
                 target: CallTarget::Module { module: sym("prim"), func: sym("handle"), def_id: None },
@@ -1063,16 +1079,58 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
     impl IrMutVisitor for S {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
-            if !matches!(e.ty, Ty::Unit) {
+            let is_panic = matches!(&e.kind,
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+                    if name.as_str() == "panic" && args.len() == 1
+                        && matches!(args[0].ty, Ty::String));
+            // `panic` types as the enclosing branch demands (Unit or Never) — it must
+            // bypass the Unit gate below.
+            if !is_panic && !matches!(e.ty, Ty::Unit) {
                 return;
             }
             let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind
             else {
                 return;
             };
+            // `panic(msg)` — an UNCONDITIONAL abort: die on "PANIC: " + msg (the v0
+            // wasm form: prefix + message, then halt). The message expr is evaluated
+            // only here (the abort path), like the computed assert message.
+            if name.as_str() == "panic" && args.len() == 1 && matches!(args[0].ty, Ty::String)
+            {
+                let msg = args[0].clone();
+                let text = match &msg.kind {
+                    IrExprKind::LitStr { value } => {
+                        die_expr(&format!("PANIC: {value}"))
+                    }
+                    _ => die_on(IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: almide_ir::BinOp::ConcatStr,
+                            left: Box::new(IrExpr {
+                                kind: IrExprKind::LitStr { value: "PANIC: ".to_string() },
+                                ty: Ty::String,
+                                span: None,
+                                def_id: None,
+                            }),
+                            right: Box::new(msg),
+                        },
+                        ty: Ty::String,
+                        span: None,
+                        def_id: None,
+                    }),
+                };
+                *e = text;
+                self.changed = true;
+                return;
+            }
             let (cond, msg) = match (name.as_str(), args.as_slice()) {
                 ("assert", [c]) if matches!(c.ty, Ty::Bool) => {
-                    (c.clone(), "assertion failed: assert(false)")
+                    (c.clone(), None)
+                }
+                // The 2-arg form `assert(cond, msg)`: a LITERAL message folds into
+                // the die text; a COMPUTED String message dies on the CONCAT
+                // `"assertion failed: " + msg` (evaluated only on the failing path).
+                ("assert", [c, m]) if matches!(c.ty, Ty::Bool) && matches!(m.ty, Ty::String) => {
+                    (c.clone(), Some(m.clone()))
                 }
                 ("assert_eq", [a, b]) => (
                     IrExpr {
@@ -1085,7 +1143,7 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
                         span: None,
                         def_id: None,
                     },
-                    "assertion failed: left == right",
+                    None,
                 ),
                 ("assert_ne", [a, b]) => (
                     IrExpr {
@@ -1098,16 +1156,46 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
                         span: None,
                         def_id: None,
                     },
-                    "assertion failed: left != right",
+                    None,
                 ),
                 _ => return,
+            };
+            let default_text = match name.as_str() {
+                "assert_eq" => "assertion failed: left == right",
+                "assert_ne" => "assertion failed: left != right",
+                _ => "assertion failed: assert(false)",
+            };
+            let die = match msg {
+                None => die_expr(default_text),
+                Some(m) => match &m.kind {
+                    IrExprKind::LitStr { value } => {
+                        die_expr(&format!("assertion failed: {value}"))
+                    }
+                    _ => die_on(IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: almide_ir::BinOp::ConcatStr,
+                            left: Box::new(IrExpr {
+                                kind: IrExprKind::LitStr {
+                                    value: "assertion failed: ".to_string(),
+                                },
+                                ty: Ty::String,
+                                span: None,
+                                def_id: None,
+                            }),
+                            right: Box::new(m),
+                        },
+                        ty: Ty::String,
+                        span: None,
+                        def_id: None,
+                    }),
+                },
             };
             let unit = IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
             *e = IrExpr {
                 kind: IrExprKind::If {
                     cond: Box::new(cond),
                     then: Box::new(unit),
-                    else_: Box::new(die_expr(msg)),
+                    else_: Box::new(die),
                 },
                 ty: Ty::Unit,
                 span: e.span.clone(),
@@ -1204,6 +1292,144 @@ fn desugar_bytes_index_calls(body: &IrExpr) -> Option<IrExpr> {
     s.changed.then_some(out)
 }
 
+/// A float-family BinOp over MATRIX operands (`a * b` / `a + b` / `a - b` on Matrix —
+/// the numeric-protocol operators) → the registered `matrix.mul`/`add`/`sub` module
+/// call. The scalar-binop path had NO operand gate on the arithmetic arms, so `a * b`
+/// lowered as an f64 multiply of the two BLOCK HANDLES — a silent garbage Matrix on
+/// the verified default (matrix_test's `*` row). Same desugar-before-both slot as
+/// `desugar_map_access_calls` (the rewrite adds ONE counted Module call).
+fn desugar_matrix_binops(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::intern::sym;
+    struct S {
+        changed: bool,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::BinOp { op, left, right } = &e.kind else { return };
+            let is_matrix = |t: &Ty| {
+                matches!(t, Ty::Matrix)
+                    || matches!(t, Ty::Applied(
+                        almide_lang::types::constructor::TypeConstructorId::Matrix, _))
+            };
+            // `m * k` / `k * m` (ScaleMatrix — one Matrix, one scalar) → matrix.scale
+            // with the Matrix normalized to the FIRST arg (the self-host's signature).
+            if matches!(op, almide_ir::BinOp::ScaleMatrix) {
+                let (m, k) = if is_matrix(&left.ty) {
+                    ((**left).clone(), (**right).clone())
+                } else {
+                    ((**right).clone(), (**left).clone())
+                };
+                e.kind = IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: sym("matrix"),
+                        func: sym("scale"),
+                        def_id: None,
+                    },
+                    args: vec![m, k],
+                    type_args: Vec::new(),
+                };
+                self.changed = true;
+                return;
+            }
+            if !is_matrix(&left.ty) || !is_matrix(&right.ty) {
+                return;
+            }
+            // The frontend's dispatch: `a * b` (both Matrix) → MulMatrix; `m * k` →
+            // ScaleMatrix (handled by the two-typed arm below); `a + b`/`a - b` fall
+            // through the NUMERIC arms as AddInt/SubInt (neither operand is Float),
+            // so those are matched here by the MATRIX operand types, not the op class.
+            let func = match op {
+                almide_ir::BinOp::MulMatrix => "mul",
+                almide_ir::BinOp::AddMatrix => "add",
+                almide_ir::BinOp::SubMatrix => "sub",
+                almide_ir::BinOp::AddInt | almide_ir::BinOp::AddFloat => "add",
+                almide_ir::BinOp::SubInt | almide_ir::BinOp::SubFloat => "sub",
+                almide_ir::BinOp::DivInt | almide_ir::BinOp::DivFloat => "div",
+                almide_ir::BinOp::MulInt | almide_ir::BinOp::MulFloat => "mul",
+                _ => return,
+            };
+            e.kind = IrExprKind::Call {
+                target: CallTarget::Module {
+                    module: sym("matrix"),
+                    func: sym(func),
+                    def_id: None,
+                },
+                args: vec![(**left).clone(), (**right).clone()],
+                type_args: Vec::new(),
+            };
+            self.changed = true;
+        }
+    }
+    let mut s = S { changed: false };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}
+
+/// `buf[i] = v` over `Bytes` — the WRITE-side twin of `desugar_bytes_index_calls` —
+/// → statement `bytes.set_at(buf, i, v)`, the CHECKED packed-byte store self-host
+/// (whose receiver rides the #794 COW discipline: local var → MakeUnique, mut param
+/// → write-through). Without this rewrite `IndexAssign` lowers as a uniform 8-byte
+/// SLOT store (`+12+i*8` — never where `bytes.index` reads `+12+i`, and past a
+/// packed block's end for i>3): `buf[2] = 0x42` silently vanished on the verified
+/// default while corrupting the neighboring heap block. Bytes receivers are known
+/// by TYPE: `Bytes`-typed params plus `Bind`s with `ty: Bytes`, seen in statement
+/// order (VarIds are function-unique, so no scoping ambiguity).
+fn desugar_bytes_index_assign(body: &IrExpr, params: &[IrParam]) -> Option<IrExpr> {
+    use almide_ir::{walk_stmt_mut, IrMutVisitor};
+    use almide_lang::intern::sym;
+    struct S {
+        bytes_vars: HashSet<VarId>,
+        changed: bool,
+    }
+    impl IrMutVisitor for S {
+        fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
+            walk_stmt_mut(self, stmt);
+            if let IrStmtKind::Bind { var, ty: Ty::Bytes, .. } = &stmt.kind {
+                self.bytes_vars.insert(*var);
+                return;
+            }
+            let IrStmtKind::IndexAssign { target, index, value } = &stmt.kind else {
+                return;
+            };
+            if !self.bytes_vars.contains(target) {
+                return;
+            }
+            let recv = IrExpr {
+                kind: IrExprKind::Var { id: *target },
+                ty: Ty::Bytes,
+                span: index.span.clone(),
+                def_id: None,
+            };
+            let call = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: sym("bytes"),
+                        func: sym("set_at"),
+                        def_id: None,
+                    },
+                    args: vec![recv, index.clone(), value.clone()],
+                    type_args: Vec::new(),
+                },
+                ty: Ty::Unit,
+                span: index.span.clone(),
+                def_id: None,
+            };
+            stmt.kind = IrStmtKind::Expr { expr: call };
+            self.changed = true;
+        }
+    }
+    let mut s = S {
+        bytes_vars: params.iter().filter(|p| matches!(p.ty, Ty::Bytes)).map(|p| p.var).collect(),
+        changed: false,
+    };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}
+
 /// `xs[a..b]` over a SCALAR-element list: the frontend struck the range slice
 /// directly to `RuntimeCall{almide_rt_list_slice}` (expressions.rs), which the
 /// v1 bind path can only defer to an EMPTY Opaque — `sub[0]` then walls. But
@@ -1213,6 +1439,10 @@ fn desugar_bytes_index_calls(body: &IrExpr) -> Option<IrExpr> {
 /// Same desugar-before-both slot as `desugar_map_access_calls`. Gated to a
 /// `List[scalar]` result — the registered self-host is the scalar-element
 /// `list_slice`; a heap-element slice keeps the (walling) deferred path.
+/// `buf[a..b]` over `Bytes` (`RuntimeCall{almide_rt_bytes_slice}`) is the same
+/// deferred-Opaque hole with a WORSE failure (the empty defer READS as len 0 —
+/// `bytes.len(sub)` returned 0 silently) — rewrite to the self-hosted
+/// `bytes.slice(b, start, end)` (bytes_core.almd, v0-clamping semantics).
 fn desugar_list_slice_calls(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
     use almide_lang::intern::sym;
@@ -1225,17 +1455,21 @@ fn desugar_list_slice_calls(body: &IrExpr) -> Option<IrExpr> {
             let IrExprKind::RuntimeCall { symbol, args } = &e.kind else {
                 return;
             };
-            if symbol.as_str() != "almide_rt_list_slice"
-                || args.len() != 3
-                || !crate::lower::is_scalar_elem_list_ty(&e.ty)
-            {
+            if args.len() != 3 {
                 return;
             }
+            let (module, func) = match symbol.as_str() {
+                "almide_rt_list_slice" if crate::lower::is_scalar_elem_list_ty(&e.ty) => {
+                    ("list", "slice")
+                }
+                "almide_rt_bytes_slice" if matches!(e.ty, Ty::Bytes) => ("bytes", "slice"),
+                _ => return,
+            };
             *e = IrExpr {
                 kind: IrExprKind::Call {
                     target: CallTarget::Module {
-                        module: sym("list"),
-                        func: sym("slice"),
+                        module: sym(module),
+                        func: sym(func),
                         def_id: None,
                     },
                     args: args.clone(),
@@ -1465,6 +1699,17 @@ fn lower_function_all_impl(
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)
         ) || crate::lower::AUTO_WRAP_ABI_FNS
             .with(|s| s.borrow().contains(func.name.as_str())),
+        // The fn's effective err type — declared `Result[_, E]`'s E, `String` for the lifted
+        // synthetic Result, None for a declared Option (its `!` pass-through is repr-identical).
+        decl_fn_err: match &func.ret_ty {
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                if a.len() == 2 =>
+            {
+                Some(a[1].clone())
+            }
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _) => None,
+            _ => Some(Ty::String),
+        },
         ..Default::default()
     };
     let params = ctx.bind_params(&func.params)?;
@@ -1516,6 +1761,25 @@ fn lower_function_all_impl(
     } else {
         func_body
     };
+    // Matrix `a * b`/`+`/`-` → matrix.mul/add/sub (see `desugar_matrix_binops`) —
+    // same desugar-before-both slot.
+    let matrix_binop_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_matrix_binops(func_body) {
+        matrix_binop_body = rewritten;
+        &matrix_binop_body
+    } else {
+        func_body
+    };
+    // `buf[i] = v` over Bytes → `bytes.set_at(buf, i, v)` (see
+    // `desugar_bytes_index_assign`) — same desugar-before-both slot.
+    let bytes_index_assign_body;
+    let func_body: &IrExpr =
+        if let Some(rewritten) = desugar_bytes_index_assign(func_body, &func.params) {
+            bytes_index_assign_body = rewritten;
+            &bytes_index_assign_body
+        } else {
+            func_body
+        };
     // `xs[a..b]` slice RuntimeCall → `list.slice(xs, a, b)` (see `desugar_list_slice_calls`).
     let list_slice_body;
     let func_body: &IrExpr = if let Some(rewritten) = desugar_list_slice_calls(func_body) {
@@ -1614,6 +1878,8 @@ mod tests;
 include!("drop_sources.rs");
 include!("repr_sources.rs");
 include!("newtype_erase.rs");
+include!("record_defaults.rs");
+include!("desugar_guard.rs");
 include!("mod_p2.rs");
 include!("mod_p3.rs");
 include!("mod_p4.rs");

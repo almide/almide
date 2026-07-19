@@ -186,7 +186,9 @@ fn lower_test_with_where(ctx: &mut LowerCtx, name: &str, body: &ast::Expr, where
     for (path, override_name) in &overrides {
         rewrite_calls_in_expr(&mut body_rewritten, path, override_name);
     }
+    ctx.in_test = true;
     let ir_body = lower_expr(ctx, &body_rewritten);
+    ctx.in_test = false;
     let final_body = if stmts.is_empty() {
         ir_body
     } else {

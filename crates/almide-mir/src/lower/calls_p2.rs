@@ -701,7 +701,7 @@ impl LowerCtx {
             // (the float-floor render reinterprets), so `2.5` materializes as ConstInt.
             IrExprKind::LitFloat { value } => {
                 let dst = self.fresh_value();
-                self.ops.push(Op::ConstInt { dst, value: value.to_bits() as i64 });
+                self.ops.push(Op::ConstInt { dst, value: crate::lower::float_lit_bits(*value, &a.ty) });
                 CallArg::Scalar(dst)
             }
             // `f(a + b)` — a string concat in a CALL-ARG position (also a NESTED `a + b + c`,

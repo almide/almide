@@ -15,5 +15,9 @@ fn __round_neg(x: Float) -> Float = {
 
 fn float_round(x: Float) -> Float = {
   let nonneg = prim.fge(x, 0.0)
-  if nonneg then __round_pos(x) else __round_neg(x)
+  let m = if nonneg then __round_pos(x) else __round_neg(x)
+  // copysign carries x's sign onto a zero magnitude: `-0.0 >= 0.0` is TRUE (IEEE),
+  // so round(-0.0) took the positive branch and returned +0.0 while native
+  // f64::round keeps -0.0 (fuzz A-67). Nonzero magnitudes already share x's sign.
+  prim.fcopysign(m, x)
 }

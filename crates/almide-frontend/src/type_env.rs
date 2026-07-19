@@ -271,6 +271,40 @@ impl TypeEnv {
         }
     }
 
+    /// Can values of `ty` be ORDERED end-to-end (the native runtime's `T: Ord`
+    /// bound on list.sort/min/max and sort_by keys)? Float is rejected HERE —
+    /// f64 is not Ord — and the caller special-cases the BARE-Float element,
+    /// which routes to the dedicated `_float` twins. Fn/Map/Set never order.
+    pub fn is_ord(&self, ty: &Ty) -> bool {
+        let mut seen = std::collections::HashSet::new();
+        self.is_ord_inner(ty, &mut seen)
+    }
+
+    fn is_ord_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<Sym>) -> bool {
+        match ty {
+            Ty::Float | Ty::Float32 | Ty::Float64 | Ty::Fn { .. } => false,
+            Ty::Applied(almide_lang::types::TypeConstructorId::Map, _) => false,
+            Ty::Applied(almide_lang::types::TypeConstructorId::Set, _) => false,
+            Ty::Variant { name, .. } => {
+                if !seen.insert(*name) {
+                    return true;
+                }
+                ty.children().iter().all(|child| self.is_ord_inner(child, seen))
+            }
+            Ty::Named(name, _) => {
+                if !seen.insert(*name) {
+                    return true;
+                }
+                if let Some(resolved) = self.types.get(name) {
+                    self.is_ord_inner(resolved, seen)
+                } else {
+                    true
+                }
+            }
+            _ => ty.children().iter().all(|child| self.is_ord_inner(child, seen)),
+        }
+    }
+
     pub fn push_scope(&mut self) {
         self.scopes.push(std::collections::HashMap::new());
     }

@@ -21,3 +21,28 @@ fn list_zip_with(a: List[Int], b: List[Int], f: (Int, Int) -> Int) -> List[Int] 
   let _x = __zipw_fill(prim.handle(buf), prim.handle(a), prim.handle(b), f, n, 0)
   buf
 }
+
+// String-element twin (`List[String] × List[String] → List[String]`): the scalar impl's
+// $closure_fn2 (scalar-result) table type TRAPPED on a heap-result closure ("indirect
+// call type mismatch", fuzz G-65), and its raw slot copies would alias handles un-owned.
+// Borrow each pair via load_str (the sources keep owning them), call f over the uniform
+// heap-arg ABI, MOVE f's fresh owned String into the result slot — the list_map_str
+// discipline exactly.
+fn __zipw_str_fill(dh: Int, ah: Int, bh: Int, f: (String, String) -> String, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load_str(ah + 12 + i * 8)
+    let y = prim.load_str(bh + 12 + i * 8)
+    let z = f(x, y)
+    prim.store_str(dh + 12 + i * 8, z)
+    __zipw_str_fill(dh, ah, bh, f, n, i + 1)
+  }
+
+fn list_zip_with_str(a: List[String], b: List[String], f: (String, String) -> String) -> List[String] = {
+  let na = list.len(a)
+  let nb = list.len(b)
+  let n = if na < nb then na else nb
+  let buf = prim.alloc_list_str(n)
+  let _x = __zipw_str_fill(prim.handle(buf), prim.handle(a), prim.handle(b), f, n, 0)
+  buf
+}

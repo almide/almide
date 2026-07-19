@@ -33,7 +33,7 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
         ExprKind::None => out.push_str("none"),
         ExprKind::Hole | ExprKind::Placeholder => out.push('_'),
         ExprKind::Error => out.push_str("/* error */"),
-        ExprKind::Todo { message, .. } => if message.is_empty() { out.push_str("todo"); } else { w!(out, "todo(\"{message}\")"); },
+        ExprKind::Todo { message, .. } => if message.is_empty() { out.push_str("todo"); } else { w!(out, "todo(\"{}\")", crate::fmt::escape_dquoted(message)); },
         ExprKind::Some { expr: e, .. } => { out.push_str("some("); fmt_expr(out, e, depth); out.push(')'); }
         ExprKind::Ok { expr: e, .. } => { out.push_str("ok("); fmt_expr(out, e, depth); out.push(')'); }
         ExprKind::Err { expr: e, .. } => { out.push_str("err("); fmt_expr(out, e, depth); out.push(')'); }
@@ -274,7 +274,7 @@ fn fmt_test_where_bare(out: &mut String, wc: &TestWhere, depth: usize) {
             fmt_expr(out, response, depth);
         }
         TestWhere::Case { name, bindings } => {
-            w!(out, "\"{}\" [", name);
+            w!(out, "\"{}\" [", crate::fmt::escape_dquoted(name));
             comma_sep(out, bindings, |out, b| fmt_test_where_bare(out, b, depth));
             out.push(']');
         }

@@ -28,6 +28,12 @@ impl LowerCtx {
         for p in params {
             let v = self.fresh_value();
             self.value_of.insert(p.var, v);
+            // The param's DECLARED ty, for the same type-directed rewrites a local
+            // bind gets (the FieldAssign/MapInsert functional rebinds need the record/
+            // map ty of a move-mode param target — the C-132 `list.push(b.xs, v)`
+            // write-back shape). The scalar-slot store path is unaffected: its
+            // borrowed-param wall (`lower_place_mutation`) fires before the read.
+            self.var_decl_tys.insert(p.var, p.ty.clone());
             // A FUNCTION-typed param (`f: (Int) -> Int`, the closures machinery) is a
             // CLOSURE BLOCK — the uniform heap representation: the caller passes the
             // block (borrowed, like every heap param) and it joins `closure_values` —
@@ -88,6 +94,21 @@ impl LowerCtx {
                         self.value_result_results.insert(v);
                     } else {
                         self.heap_elem_lists.insert(v);
+                        // A RICH custom-variant Err payload (`Result[String, MathError]` —
+                        // Overflow(String) owns nested heap): the flat DropListStr would
+                        // free the variant BLOCK but leak its fields. Route the drop to the
+                        // Err-side recursion (`reserr:` — DropWrapperRec `err_rec`); the
+                        // heap_elem_lists membership stays for the bind gates (drop_op_for
+                        // consults variant_drop_handles first). A PARAM is never dropped
+                        // (it stays in param_values), so the entry is read-inert there.
+                        if let Some(vn) = self.custom_variant_type_name(&a[1]) {
+                            if self.variant_layouts.needs_recursive_drop(&vn, &|rn| {
+                                crate::lower::canonical_record_key(&self.record_layouts, rn)
+                                    .is_some()
+                            }) {
+                                self.variant_drop_handles.insert(v, format!("reserr:{vn}"));
+                            }
+                        }
                     }
                 } else {
                     // Scalar Ok (`Result[Int, String]`) — len-as-tag, scalar Ok payload. A heap Err
@@ -304,15 +325,78 @@ impl LowerCtx {
             // like every `Opaque`; capture its calls so the caps fold stays honest. A
             // SCALAR reassignment (`i = i + 1`) rebinds to a Copy `Const` with no handle
             // to dangle, so it is admitted unchanged (e.g. a loop counter).
-            IrStmtKind::Assign { var, value } => {
+            IrStmtKind::Assign { var, value } => self.lower_stmt_assign(*var, value),
+            // `let (a, b) = (x, y)` — a TUPLE destructuring bind.
+            IrStmtKind::BindDestructure { pattern, value } => {
+                self.lower_destructure(pattern, value)
+            }
+            // In-place mutation of a place: `xs[i] = v` and `r.field = v` both
+            // require the buffer to be UNIQUELY owned (copy-on-write) → `MakeUnique`.
+            // The written value (and an index expression) are deferred — record any
+            // call inside them so the caps fold is not blind to their effects.
+            IrStmtKind::IndexAssign { target, index, value } => self.lower_stmt_index_assign(*target, index, value),
+            IrStmtKind::FieldAssign { target, field, value } => self.lower_stmt_field_assign(*target, *field, value),
+            // `m[k] = v` — map insertion/update, in-place on the buffer. Like
+            // `IndexAssign` it requires the map to be UNIQUELY owned (copy-on-write) →
+            // `MakeUnique`. The key and value are deferred — record their calls so the
+            // caps fold is not blind to their effects.
+            IrStmtKind::MapInsert { target, key, value } => self.lower_stmt_map_insert(*target, key, value),
+            // A bare expression statement: an `if`/`match` in statement position is
+            // LINEARIZED (control flow), an EFFECT call (`println(s)`) is lowered as a
+            // runtime effect. Other non-call expr statements stay Unsupported (the
+            // lower_effect_call guard rejects them — flight-grade totality).
+            IrStmtKind::Expr { expr } => self.lower_stmt_expr(expr),
+            // A source comment carries no ownership — skip it (it is not a
+            // "silent drop": Comment is a no-op by definition, not an unhandled op).
+            IrStmtKind::Comment { .. } => Ok(()),
+            // `guard cond else { body }` — a CONDITIONAL early exit. The guard adds NO
+            // ownership: the model takes the always-CONTINUE path (success), which is
+            // self-consistent and memory-safe; the failure path's early exit and the
+            // `else` body's effects are DEFERRED, like every Opaque (the guard's job is
+            // functional, not a safety property). Capture the caps of any call in the
+            // condition or the else body so a printing/effectful guard taints honestly.
+            IrStmtKind::Guard { cond, else_ } => {
+                // `guard cond else E` is a CONDITIONAL EARLY RETURN: when `!cond`, `E` is the
+                // function's result. The old model DEFERRED it (always-continue), which SILENTLY
+                // MISCOMPILES every call with `!cond` — `guard len(s)>0 else err("empty"); ok(x)`
+                // returned `ok` for the empty input (validated(""), error_test). v1 has no
+                // early-return control flow yet, so WALL it (honest) rather than emit wrong output.
+                // (A guard whose `else` is a pure no-op continue would be safe to defer, but the
+                // corpus guards all early-RETURN a value — none is a no-op — so an unconditional
+                // wall matches the real shapes without a false-negative.)
+                self.record_elided_calls(cond);
+                self.record_elided_calls(else_);
+                let _ = (cond, else_);
+                Err(LowerError::Unsupported(
+                    "guard-else early return cannot be faithfully lowered (v1 has no early-return                      control flow; deferring it silently miscompiles the !cond path) not in this brick"
+                        .into(),
+                ))
+            }
+            other => Err(LowerError::Unsupported(format!(
+                "statement {} not in the value-semantics subset",
+                stmt_kind_name(other)
+            ))),
+        }
+    }
+
+    /// In-place mutation of a place (`xs[i] = v` / `r.field = v`): the write must
+    /// land on a UNIQUELY-owned buffer, so emit `Op::MakeUnique` (copy-on-write if
+    /// the buffer is shared). The written value is copied (value semantics; its
+    /// content is deferred, and any call in it is caps-tainted by the elided-call
+    /// gate, not silently dropped). A borrowed-param target is walled — mutating
+    /// the caller's data needs the move-mode calling convention.
+
+    /// The `Assign` statement arm of [`Self::lower_stmt`] — verbatim move
+    /// (#781 decomposition; the match bindings become parameters).
+    fn lower_stmt_assign(&mut self, var: VarId, value: &IrExpr) -> Result<(), LowerError> {
                 // ASSIGN to a MUTABLE module-level `var`: write through its STORAGE SLOT
                 // (`lower_bind` below would rebind a function-LOCAL copy and the write
                 // silently vanishes for every other function). The `value_of` gate skips a
                 // CROSS-REGION VarId collision where the target really is a bound local
                 // (a mutable global itself never enters `value_of`: reads are uncached).
-                if !self.value_of.contains_key(var) {
-                    if let Some((index, gty)) = crate::lower::mutable_global_info(*var) {
-                        return self.lower_mutable_global_assign(*var, index, &gty, value);
+                if !self.value_of.contains_key(&var) {
+                    if let Some((index, gty)) = crate::lower::mutable_global_info(var) {
+                        return self.lower_mutable_global_assign(var, index, &gty, value);
                     }
                 }
                 // Inside a scalar-marker loop, a reassignment mutates the var's STABLE
@@ -335,8 +419,8 @@ impl LowerCtx {
                             ..
                         } = &value.kind
                         {
-                            if matches!(&left.kind, IrExprKind::Var { id } if id == var) {
-                                if let Some(&slot_local) = self.value_of.get(var) {
+                            if matches!(&left.kind, IrExprKind::Var { id } if id == &var) {
+                                if let Some(&slot_local) = self.value_of.get(&var) {
                                     if let Some(new) = self.try_lower_concat_list(value) {
                                         let drop_op = self.drop_op_for(slot_local);
                                         self.ops.push(drop_op);
@@ -352,7 +436,7 @@ impl LowerCtx {
                         // block, drop the old slot, rebind IN PLACE. Not a ConcatList (fast-path) nor
                         // a `lower_owned_heap_field` shape, so handle it here. Cert: drop-old (`d`) +
                         // alloc (`i`) = the same loop-carried `i(id)` the append slot proves.
-                        if let Some(&slot_local) = self.value_of.get(var) {
+                        if let Some(&slot_local) = self.value_of.get(&var) {
                             let empty = match &value.kind {
                                 IrExprKind::List { elements } if elements.is_empty() => Some(
                                     crate::Init::IntList(vec![]),
@@ -383,7 +467,7 @@ impl LowerCtx {
                         // (cert `i`); drop the old slot (`d`) and rebind in place (`m`) — the SAME
                         // loop-carried `i(id)m` the self-append/reset slots prove (OwnershipChecker.v
                         // `check_line_unroll_sound`), generalized to any fresh-owned producer.
-                        if let Some(&slot_local) = self.value_of.get(var) {
+                        if let Some(&slot_local) = self.value_of.get(&var) {
                             let new = match &value.kind {
                                 IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {
                                     self.try_lower_concat_list(value)
@@ -473,7 +557,7 @@ impl LowerCtx {
                             "heap reassignment in a scalar loop body".into(),
                         ));
                     }
-                    let local = *self.value_of.get(var).ok_or_else(|| {
+                    let local = *self.value_of.get(&var).ok_or_else(|| {
                         LowerError::Unsupported("scalar loop reassigns an unbound var".into())
                     })?;
                     // The reassigned value is a SCALAR: a literal/arithmetic (lower_scalar_value) OR a
@@ -507,13 +591,60 @@ impl LowerCtx {
                 // is the var's own already-defined slot, so SetLocal carries no new heap
                 // ownership (cert-neutral, like the loop-carried SetLocal above).
                 if self.unit_arm_depth > 0 && !is_heap_ty(&value.ty) {
-                    if let Some(&local) = self.value_of.get(var) {
+                    if let Some(&local) = self.value_of.get(&var) {
                         if let Some(src) = self
                             .lower_scalar_value(value)
                             .or_else(|| self.try_lower_scalar_call(value, &value.ty))
                         {
                             self.ops.push(Op::SetLocal { local, src });
                             return Ok(());
+                        }
+                    }
+                }
+                // A HEAP reassignment inside an EXECUTING unit arm (`if let v = x {
+                // out = int.to_string(v) }` — the statement if-let / variant-match
+                // arms): the var already owns a stable scope-tracked heap local, so
+                // the write is drop-old + `SetLocal` IN PLACE — the same rebind unit
+                // the loop-carried slot proves (per-arm the `i` of the fresh value
+                // and the `d` of the old one balance; the slot's scope-end drop
+                // frees whichever object the taken arm left). A borrowed-param slot
+                // is excluded (its drop-old would release the caller's reference).
+                if self.unit_arm_depth > 0 && is_heap_ty(&value.ty) {
+                    if let Some(&local) = self.value_of.get(&var) {
+                        if self.live_heap_handles.contains(&local)
+                            && !self.param_values.contains(&local)
+                        {
+                            let mark = self.ops.len();
+                            let lhh_mark = self.live_heap_handles.len();
+                            // A literal/concat/interp/Var value via the owned-field
+                            // helper; a heap-returning CALL (`out = int.to_string(v)`)
+                            // via the call-arg materialization (a fresh owned result).
+                            let new = self.lower_owned_heap_field(value).or_else(|| {
+                                if !matches!(&value.kind, IrExprKind::Call { .. }) {
+                                    return None;
+                                }
+                                match self.lower_call_args(std::slice::from_ref(value)) {
+                                    Ok(args) => match args.into_iter().next() {
+                                        Some(crate::CallArg::Handle(v)) => Some(v),
+                                        _ => None,
+                                    },
+                                    Err(_) => None,
+                                }
+                            });
+                            if let Some(new) = new {
+                                let drop_op = self.drop_op_for(local);
+                                self.ops.push(drop_op);
+                                self.ops.push(Op::SetLocal { local, src: new });
+                                // ONLY the rebound value leaves the scope-drop set (the
+                                // slot owns it; the local's own scope-end drop frees it).
+                                // Any arg temp the value lowering tracked stays — the
+                                // per-arm drop releases it (truncating it away left the
+                                // arm +1 → a grouped seg → the {i|} poison cascade).
+                                self.live_heap_handles.retain(|&v| v != new);
+                                return Ok(());
+                            }
+                            self.ops.truncate(mark);
+                            self.live_heap_handles.truncate(lhh_mark);
                         }
                     }
                 }
@@ -535,18 +666,13 @@ impl LowerCtx {
                     self.record_elided_calls(value);
                     Ok(())
                 } else {
-                    self.lower_bind(*var, &value.ty, value)
+                    self.lower_bind(var, &value.ty, value)
                 }
-            }
-            // `let (a, b) = (x, y)` — a TUPLE destructuring bind.
-            IrStmtKind::BindDestructure { pattern, value } => {
-                self.lower_destructure(pattern, value)
-            }
-            // In-place mutation of a place: `xs[i] = v` and `r.field = v` both
-            // require the buffer to be UNIQUELY owned (copy-on-write) → `MakeUnique`.
-            // The written value (and an index expression) are deferred — record any
-            // call inside them so the caps fold is not blind to their effects.
-            IrStmtKind::IndexAssign { target, index, value } => {
+    }
+
+
+    /// The `IndexAssign` arm of [`Self::lower_stmt`] — verbatim move (#781).
+    fn lower_stmt_index_assign(&mut self, target: VarId, index: &IrExpr, value: &IrExpr) -> Result<(), LowerError> {
                 // A mutable-GLOBAL place target: `g[i] = v` routes through the slot as
                 // TAKE (the slot's owned ref transfers to us) → `MakeUnique` (COW if a
                 // reader's Dup is still live — the mutation must touch no alias) →
@@ -556,8 +682,8 @@ impl LowerCtx {
                 // value. SCALAR-element lists only this round (the #29 store subset);
                 // heap-element / non-scalar shapes WALL, as does a modeled frame (the
                 // write is an effect the model would elide).
-                if !self.value_of.contains_key(target) {
-                    if let Some((gindex, gty)) = crate::lower::mutable_global_info(*target) {
+                if !self.value_of.contains_key(&target) {
+                    if let Some((gindex, gty)) = crate::lower::mutable_global_info(target) {
                         if self.in_frame > 0
                             && self.unit_arm_depth == 0
                             && self.scalar_loop_depth == 0
@@ -625,7 +751,7 @@ impl LowerCtx {
                 // assignment lowered to ONLY the MakeUnique guard (a silent no-op — `xs[1] = 99` never
                 // wrote; v1-spine hole #29). The `$elem_addr` is bounds-checked (traps OOB, matching
                 // native's panic). The store runs AFTER MakeUnique so it writes the unique copy.
-                self.lower_place_mutation(*target)?;
+                self.lower_place_mutation(target)?;
                 // The SCALAR-element store subset (`List[Int/Float/Bool]`, a lowerable scalar index +
                 // value) — the #29 shape. Attempt it; on a miss (a heap-element store, or a non-scalar
                 // index/value) ROLL BACK to the prior behavior (record the operands' calls for caps,
@@ -636,7 +762,7 @@ impl LowerCtx {
                 let lhh_mark = self.live_heap_handles.len();
                 let stored = if !is_heap_ty(&value.ty) {
                     if let (Ok(list), Some(idx), Some(val)) = (
-                        self.value_for(*target),
+                        self.value_for(target),
                         self.lower_scalar_value(index),
                         self.lower_scalar_value(value),
                     ) {
@@ -666,15 +792,56 @@ impl LowerCtx {
                     self.record_elided_calls(value);
                 }
                 Ok(())
-            }
-            IrStmtKind::FieldAssign { target, field, value } => {
+    }
+
+
+    /// The `FieldAssign` arm of [`Self::lower_stmt`] — verbatim move (#781).
+    fn lower_stmt_field_assign(&mut self, target: VarId, field: almide_lang::intern::Sym, value: &IrExpr) -> Result<(), LowerError> {
                 // Mutable-GLOBAL target: same COW-copy silent-miscompile class as the
                 // IndexAssign guard above — WALL.
-                if !self.value_of.contains_key(target) && crate::lower::is_mutable_global(*target) {
+                if !self.value_of.contains_key(&target) && crate::lower::is_mutable_global(target) {
                     return Err(LowerError::Unsupported(format!(
                         "field-assign to mutable module-level var {target:?} (in-place \
                          mutation through the global slot) is not in this brick"
                     )));
+                }
+                // A HEAP-typed field write takes the functional REBIND `r.f = v` ≡
+                // `r = { ...r, f: v }` — the same value-semantics treatment `m[k] = v`
+                // gets: the spread construct reads the old record (a borrow), and the
+                // Assign path owns the whole rebind protocol (drop-old + slot
+                // accounting). BOTH legs take this path (one shared rewrite — the
+                // permissive cert then witnesses the SAME ops the strict render emits;
+                // a strict-only rewrite walled the permissive leg's mut-param shapes
+                // and broke the walled-real ratchet). NO MakeUnique here — an aliased
+                // record must NOT be uniquified first (the manual COW guard composed
+                // with the Assign's drop-old into an rc-underflow trap: alias_cow
+                // test_6). On Err the whole fn WALLS (ctx discarded), so no rollback
+                // is needed.
+                if is_heap_ty(&value.ty) {
+                    if let Some(rec_ty) = self.var_decl_tys.get(&target).cloned() {
+                        if self.aggregate_field_tys(&rec_ty).is_some() {
+                            let base = IrExpr {
+                                kind: IrExprKind::Var { id: target },
+                                ty: rec_ty.clone(),
+                                span: None,
+                                def_id: None,
+                            };
+                            let spread = IrExpr {
+                                kind: IrExprKind::SpreadRecord {
+                                    base: Box::new(base),
+                                    fields: vec![(field, value.clone())],
+                                },
+                                ty: rec_ty,
+                                span: None,
+                                def_id: None,
+                            };
+                            let assign = IrStmt {
+                                kind: IrStmtKind::Assign { var: target, value: spread },
+                                span: None,
+                            };
+                            return self.lower_stmt(&assign);
+                        }
+                    }
                 }
                 // COW-guard the buffer, then ACTUALLY STORE the field: `r.f = v` →
                 // `ListSetScalar(block, slot(f), v)` on the uniform 8-byte-slot aggregate
@@ -682,13 +849,13 @@ impl LowerCtx {
                 // store, the assignment lowered to ONLY the MakeUnique guard — EVERY record
                 // field-assign was a silent no-op on the verified default (v1 read back the
                 // pre-assign value while native mutated: the recassign wrong-value class).
-                self.lower_place_mutation(*target)?;
+                self.lower_place_mutation(target)?;
                 let ops_mark = self.ops.len();
                 let lhh_mark = self.live_heap_handles.len();
                 let stored = if !is_heap_ty(&value.ty) {
                     let slot = self
                         .var_decl_tys
-                        .get(target)
+                        .get(&target)
                         .cloned()
                         .and_then(|ty| self.aggregate_field_offset_any(&ty, field.as_str()))
                         .map(|off| {
@@ -696,7 +863,7 @@ impl LowerCtx {
                                 / crate::lower::layout::SLOT_SIZE
                         });
                     if let (Ok(list), Some(slot), Some(val)) =
-                        (self.value_for(*target), slot, self.lower_scalar_value(value))
+                        (self.value_for(target), slot, self.lower_scalar_value(value))
                     {
                         let idx = self.fresh_value();
                         self.ops.push(Op::ConstInt { dst: idx, value: slot as i64 });
@@ -713,7 +880,8 @@ impl LowerCtx {
                     self.live_heap_handles.truncate(lhh_mark);
                     // STRICT value mode (the real render path): an elided field write is an
                     // EXECUTABLE silent no-op — REFUSE, so the fn walls and v0 emits the
-                    // correct bytes. The permissive caps-counting classifier keeps the old
+                    // correct bytes. (The heap-typed value shape already took the spread
+                    // REBIND above.) The permissive caps-counting classifier keeps the old
                     // elision (its only consumer is call accounting).
                     if crate::lower::strict_values() {
                         return Err(LowerError::Unsupported(format!(
@@ -726,21 +894,53 @@ impl LowerCtx {
                     self.record_elided_calls(value);
                 }
                 Ok(())
-            }
-            // `m[k] = v` — map insertion/update, in-place on the buffer. Like
-            // `IndexAssign` it requires the map to be UNIQUELY owned (copy-on-write) →
-            // `MakeUnique`. The key and value are deferred — record their calls so the
-            // caps fold is not blind to their effects.
-            IrStmtKind::MapInsert { target, key, value } => {
+    }
+
+
+    /// The `MapInsert` arm of [`Self::lower_stmt`] — verbatim move (#781).
+    fn lower_stmt_map_insert(&mut self, target: VarId, key: &IrExpr, value: &IrExpr) -> Result<(), LowerError> {
                 // Mutable-GLOBAL target: same COW-copy silent-miscompile class as the
                 // IndexAssign guard above — WALL.
-                if !self.value_of.contains_key(target) && crate::lower::is_mutable_global(*target) {
+                if !self.value_of.contains_key(&target) && crate::lower::is_mutable_global(target) {
                     return Err(LowerError::Unsupported(format!(
                         "map-insert to mutable module-level var {target:?} (in-place \
                          mutation through the global slot) is not in this brick"
                     )));
                 }
-                self.lower_place_mutation(*target)?;
+                // Functional REBIND: `m[k] = v` ≡ `m = map.set(m, k, v)` (value
+                // semantics) — the SAME treatment the `map.insert(m, k, v)` CALL form
+                // already gets below; the repr dispatch suffixes the self-host
+                // (set_skv/str/…) exactly like a source-level call. Both legs take this
+                // path (one shared rewrite, mir==ir symmetric); classify credits the
+                // MapInsert node with the one synthetic call. Needs the declared map ty
+                // for the Var reference — a target without one (a param, not a local
+                // bind) keeps the historic wall below.
+                if let Some(map_ty) = self.var_decl_tys.get(&target).cloned() {
+                    let m_ref = IrExpr {
+                        kind: IrExprKind::Var { id: target },
+                        ty: map_ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    let call = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("map"),
+                                func: sym("set"),
+                                def_id: None,
+                            },
+                            args: vec![m_ref, key.clone(), value.clone()],
+                            type_args: vec![],
+                        },
+                        ty: map_ty,
+                        span: None,
+                        def_id: None,
+                    };
+                    let assign =
+                        IrStmt { kind: IrStmtKind::Assign { var: target, value: call }, span: None };
+                    return self.lower_stmt(&assign);
+                }
+                self.lower_place_mutation(target)?;
                 // STRICT value mode: the insert itself was ELIDED (only the MakeUnique
                 // guard emitted) — `m[k] = v` was a silent no-op on the verified default
                 // (native inserted, v1 read the map unchanged). REFUSE so the fn walls
@@ -756,12 +956,12 @@ impl LowerCtx {
                 self.record_elided_calls(key);
                 self.record_elided_calls(value);
                 Ok(())
-            }
-            // A bare expression statement: an `if`/`match` in statement position is
-            // LINEARIZED (control flow), an EFFECT call (`println(s)`) is lowered as a
-            // runtime effect. Other non-call expr statements stay Unsupported (the
-            // lower_effect_call guard rejects them — flight-grade totality).
-            IrStmtKind::Expr { expr } => match &expr.kind {
+    }
+
+
+    /// The `Expr` (statement-position expression) arm of [`Self::lower_stmt`] — verbatim move (#781).
+    fn lower_stmt_expr(&mut self, expr: &IrExpr) -> Result<(), LowerError> {
+        match &expr.kind {
                 // A Unit `if` statement EXECUTES (only the taken arm's effects run) when
                 // its cond is a scalar; otherwise it falls back to the linearization.
                 IrExprKind::If { cond, then, else_ }
@@ -856,19 +1056,43 @@ impl LowerCtx {
                 // name (`almide_rt_bytes_append_u8`) — identical rewrite.
                 IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
                     if module.as_str() == "bytes"
-                        && (func.as_str() == "push" || func.as_str() == "append_u8")
-                        && args.len() == 2
+                        && (func.as_str() == "push"
+                            || func.as_str() == "append_u8"
+                            // the MULTI-BYTE in-place appends: same rewrite, the
+                            // functional twins live in bytes_append_multi.almd
+                            || matches!(func.as_str(),
+                                "append_u16_le" | "append_u16_be" | "append_i16_le"
+                                | "append_i16_be" | "append_u32_le" | "append_u32_be"
+                                | "append_i32_le" | "append_i32_be" | "append_i64_le"
+                                | "append_i64_be" | "append_f32_le" | "append_f32_be"
+                                | "append_f64_le" | "append_f64_be")
+                            // the typed Endian-dispatch appends (bytes_typed.almd):
+                            // same in-place v0 form, functional twin + rebind here.
+                            // 3 args (buf, value, endian) — the receiver stays args[0].
+                            || matches!(func.as_str(),
+                                "write_uint16" | "write_uint32" | "write_int32"
+                                | "write_float32"))
+                        && matches!(args.len(), 2 | 3)
                         && matches!(&args[0].kind, IrExprKind::Var { .. }) =>
                 {
                     let IrExprKind::Var { id } = &args[0].kind else { unreachable!() };
+                    // push/append_u8 route to the 1-byte `bytes.append`; every
+                    // multi-byte variant keeps its own name (its functional twin).
+                    let fname = if matches!(func.as_str(), "push" | "append_u8") {
+                        "append".to_string()
+                    } else {
+                        func.as_str().to_string()
+                    };
                     let append = IrExpr {
                         kind: IrExprKind::Call {
                             target: CallTarget::Module {
                                 module: sym("bytes"),
-                                func: sym("append"),
+                                func: sym(&fname),
                                 def_id: None,
                             },
-                            args: vec![args[0].clone(), args[1].clone()],
+                            // ALL args ride through — the typed Endian writes carry a
+                            // third (endian) argument the functional twin dispatches on.
+                            args: args.clone(),
                             type_args: vec![],
                         },
                         ty: args[0].ty.clone(),
@@ -879,6 +1103,123 @@ impl LowerCtx {
                         kind: IrStmtKind::Assign { var: *id, value: append },
                         span: None,
                     };
+                    self.lower_stmt(&assign)
+                }
+                // `map.insert(m, k, v)` / `map.delete(m, k)` — v0 in-place map mutations:
+                // same functional-rebind treatment as bytes.push (`m = map.set(m, k, v)` /
+                // `m = map.remove(m, k)`); the repr dispatch then suffixes the self-host
+                // (set_skv/msv/… , remove_skv/str) exactly like a source-level call.
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if module.as_str() == "map"
+                        && matches!(func.as_str(), "insert" | "delete")
+                        && matches!(&args[0].kind, IrExprKind::Var { .. }) =>
+                {
+                    let IrExprKind::Var { id } = &args[0].kind else { unreachable!() };
+                    let fname = if func.as_str() == "insert" { "set" } else { "remove" };
+                    let call = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("map"),
+                                func: sym(fname),
+                                def_id: None,
+                            },
+                            args: args.clone(),
+                            type_args: vec![],
+                        },
+                        ty: args[0].ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    let assign =
+                        IrStmt { kind: IrStmtKind::Assign { var: *id, value: call }, span: None };
+                    self.lower_stmt(&assign)
+                }
+                // `list.push(xs, v)` / `string.push(s, x)` — v0 in-place appends: the
+                // same functional-rebind treatment as bytes.push (`xs = xs + [v]` /
+                // `s = s + x`); the ConcatList/ConcatStr lowering then emits the ONE
+                // synthetic concat call the source Call node already credits (mir <= ir
+                // holds). A `Var` receiver rebinds via Assign; a FIELD receiver
+                // (`list.push(b.xs, v)` — the C-132 mut-param write-back shape) routes
+                // through FieldAssign, whose spread rebind owns the write-back.
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if func.as_str() == "push"
+                        && matches!(module.as_str(), "list" | "string")
+                        && args.len() == 2
+                        && (matches!(&args[0].kind, IrExprKind::Var { .. })
+                            || matches!(&args[0].kind, IrExprKind::Member { object, .. }
+                                if matches!(&object.kind, IrExprKind::Var { .. }))) =>
+                {
+                    let is_list = module.as_str() == "list";
+                    let recv = args[0].clone();
+                    let rhs = if is_list {
+                        IrExpr {
+                            kind: IrExprKind::List { elements: vec![args[1].clone()] },
+                            ty: recv.ty.clone(),
+                            span: None,
+                            def_id: None,
+                        }
+                    } else {
+                        args[1].clone()
+                    };
+                    let concat = IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: if is_list {
+                                almide_ir::BinOp::ConcatList
+                            } else {
+                                almide_ir::BinOp::ConcatStr
+                            },
+                            left: Box::new(recv.clone()),
+                            right: Box::new(rhs),
+                        },
+                        ty: recv.ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    let stmt = match &recv.kind {
+                        IrExprKind::Var { id } => {
+                            IrStmt { kind: IrStmtKind::Assign { var: *id, value: concat }, span: None }
+                        }
+                        IrExprKind::Member { object, field } => {
+                            let IrExprKind::Var { id } = &object.kind else { unreachable!() };
+                            IrStmt {
+                                kind: IrStmtKind::FieldAssign {
+                                    target: *id,
+                                    field: *field,
+                                    value: concat,
+                                },
+                                span: None,
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+                    self.lower_stmt(&stmt)
+                }
+                // `map.clear(m)` / `list.clear(xs)` — the in-place empty: rebind to the
+                // EMPTY literal of the receiver's own type (adds no call; mir <= ir holds).
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if func.as_str() == "clear"
+                        && matches!(module.as_str(), "map" | "list")
+                        && args.len() == 1
+                        && matches!(&args[0].kind, IrExprKind::Var { .. }) =>
+                {
+                    let IrExprKind::Var { id } = &args[0].kind else { unreachable!() };
+                    let empty = if module.as_str() == "map" {
+                        IrExpr {
+                            kind: IrExprKind::EmptyMap,
+                            ty: args[0].ty.clone(),
+                            span: None,
+                            def_id: None,
+                        }
+                    } else {
+                        IrExpr {
+                            kind: IrExprKind::List { elements: vec![] },
+                            ty: args[0].ty.clone(),
+                            span: None,
+                            def_id: None,
+                        }
+                    };
+                    let assign =
+                        IrStmt { kind: IrStmtKind::Assign { var: *id, value: empty }, span: None };
                     self.lower_stmt(&assign)
                 }
                 // `list.push(entries, e)` — same treatment as bytes.push: v0's in-place
@@ -915,46 +1256,9 @@ impl LowerCtx {
                     self.lower_stmt(&assign)
                 }
                 _ => self.lower_effect_call(expr),
-            },
-            // A source comment carries no ownership — skip it (it is not a
-            // "silent drop": Comment is a no-op by definition, not an unhandled op).
-            IrStmtKind::Comment { .. } => Ok(()),
-            // `guard cond else { body }` — a CONDITIONAL early exit. The guard adds NO
-            // ownership: the model takes the always-CONTINUE path (success), which is
-            // self-consistent and memory-safe; the failure path's early exit and the
-            // `else` body's effects are DEFERRED, like every Opaque (the guard's job is
-            // functional, not a safety property). Capture the caps of any call in the
-            // condition or the else body so a printing/effectful guard taints honestly.
-            IrStmtKind::Guard { cond, else_ } => {
-                // `guard cond else E` is a CONDITIONAL EARLY RETURN: when `!cond`, `E` is the
-                // function's result. The old model DEFERRED it (always-continue), which SILENTLY
-                // MISCOMPILES every call with `!cond` — `guard len(s)>0 else err("empty"); ok(x)`
-                // returned `ok` for the empty input (validated(""), error_test). v1 has no
-                // early-return control flow yet, so WALL it (honest) rather than emit wrong output.
-                // (A guard whose `else` is a pure no-op continue would be safe to defer, but the
-                // corpus guards all early-RETURN a value — none is a no-op — so an unconditional
-                // wall matches the real shapes without a false-negative.)
-                self.record_elided_calls(cond);
-                self.record_elided_calls(else_);
-                let _ = (cond, else_);
-                Err(LowerError::Unsupported(
-                    "guard-else early return cannot be faithfully lowered (v1 has no early-return                      control flow; deferring it silently miscompiles the !cond path) not in this brick"
-                        .into(),
-                ))
-            }
-            other => Err(LowerError::Unsupported(format!(
-                "statement {} not in the value-semantics subset",
-                stmt_kind_name(other)
-            ))),
         }
     }
 
-    /// In-place mutation of a place (`xs[i] = v` / `r.field = v`): the write must
-    /// land on a UNIQUELY-owned buffer, so emit `Op::MakeUnique` (copy-on-write if
-    /// the buffer is shared). The written value is copied (value semantics; its
-    /// content is deferred, and any call in it is caps-tainted by the elided-call
-    /// gate, not silently dropped). A borrowed-param target is walled — mutating
-    /// the caller's data needs the move-mode calling convention.
     pub(crate) fn lower_place_mutation(&mut self, target: VarId) -> Result<(), LowerError> {
         let v = self.value_for(target)?;
         if self.param_values.contains(&v) {
@@ -1308,7 +1612,19 @@ impl LowerCtx {
         // generators name `$__drop_<R>` from the QUALIFIED decl.
         let canonical =
             crate::lower::canonical_record_key(&self.record_layouts, &name)?.to_string();
-        let (_, tys) = self.aggregate_field_tys(ty)?;
+        let (names, tys) = self.aggregate_field_tys(ty)?;
+        // A GENERIC decl has no shared `$__drop_<R>` (the heap mask differs per
+        // instantiation — `Pair[Int, String]` vs `Pair[String, Int]`): route to the
+        // per-shape `__drop_anonrec_<hash>` over the SUBSTITUTED fields, the same
+        // identity `collect_recursive_anon_records` registers for generation.
+        if self.record_layouts.get(canonical.as_str()).is_some_and(|(gs, _)| !gs.is_empty()) {
+            let pairs: Vec<(almide_lang::intern::Sym, Ty)> =
+                names.into_iter().zip(tys.iter().cloned()).collect();
+            if crate::lower::anon_record_needs_recursive_drop(&pairs) {
+                return Some(crate::lower::anon_record_drop_name(&pairs));
+            }
+            return None;
+        }
         tys.iter()
             .any(record_field_needs_recursive_drop)
             .then_some(canonical)
@@ -1349,12 +1665,19 @@ impl LowerCtx {
                 // An Option WRAPPER holding a heap RECORD payload (`some({key, val})`): recurse into
                 // the @12 record via `$__drop_<drop_fn>` at the wrapper's last ref, then free the
                 // wrapper block. The `optrec:` prefix is injected by `materialize_opt_aggregate_some`.
-                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: false }
+                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: false, err_rec: false }
             } else if let Some(drop_fn) = ty.strip_prefix("resrec:") {
                 // A Result WRAPPER holding a heap RECORD Ok payload (`ok({val, next})`): recurse into
                 // the @12 record (tag@16==0) via `$__drop_<drop_fn>`, else `rc_dec` the @12 Err
                 // String, then free the wrapper. Injected by `materialize_result_aggregate`.
-                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: true }
+                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: true, err_rec: false }
+            } else if let Some(drop_fn) = ty.strip_prefix("reserr:") {
+                // The heap-Ok × variant-ERR wrapper (`Result[String, MathError]` — the
+                // `err(NegativeInput(x))` class): recurse into the @12 VARIANT (tag@16==1)
+                // via `$__drop_<drop_fn>`, else `rc_dec` the @12 Ok payload, then free the
+                // wrapper. Injected by `try_lower_result_err_variant_ctor_heap_ok` and the
+                // both-heap `seed_variant_param` branch (rich-variant Err types).
+                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: true, err_rec: true }
             } else {
                 Op::DropVariant { v, ty: ty.clone() }
             }

@@ -72,12 +72,29 @@ impl FuncCompiler<'_> {
                             if_i32;
                         });
                         self.emit_expr(&args[1]);
-                        wasm!(self.func, {
-                            else_;
-                              local_get(s);
-                              i32_load(0);
-                            end;
-                        });
+                        if Self::is_heap_type(&inner_ty) {
+                            // BOTH branches hand out a value the caller will own:
+                            // the kept payload is still owned by the Option temp
+                            // (its drop frees it) and a Var default is a borrow —
+                            // un-inc'd either way was a double-free at scope end
+                            // (__rc_dec trap; the #727 unwrap_or_else share family,
+                            // unwrap_or edition — fuzz seed-20260718 index 149).
+                            wasm!(self.func, {
+                                call(self.emitter.rt.rc_inc);
+                                else_;
+                                  local_get(s);
+                                  i32_load(0);
+                                  call(self.emitter.rt.rc_inc);
+                                end;
+                            });
+                        } else {
+                            wasm!(self.func, {
+                                else_;
+                                  local_get(s);
+                                  i32_load(0);
+                                end;
+                            });
+                        }
                     }
                 }
                 self.scratch.free_i32(s);
@@ -259,6 +276,13 @@ impl FuncCompiler<'_> {
                       local_get(s);
                 });
                 self.emit_load_at(&inner_ty, 0);
+                // SHARE the kept payload: the Option temp still owns it, so the
+                // fresh ok() must CO-OWN (+1) — the un-inc'd alias double-freed a
+                // nested Result payload at scope end (#727 share family, fuzz
+                // seed-20260718 index 937's option.to_result(some(err(..)), ..)).
+                if Self::is_heap_type(&inner_ty) {
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&inner_ty, 4);
                 wasm!(self.func, {
                       local_get(s2);
@@ -386,6 +410,13 @@ impl FuncCompiler<'_> {
                       local_get(s);
                 });
                 self.emit_load_at(&inner_ty, 0);
+                if Self::is_heap_type(&inner_ty) {
+                    // The new list CO-OWNS the payload the Option still owns —
+                    // an un-inc'd alias double-freed at scope end (__rc_dec
+                    // trap; the #727 share family, option.to_list edition —
+                    // fuzz seed-20260718 index 338's nested-Option payload).
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&inner_ty, self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32 as u32);
                 wasm!(self.func, {
                       local_get(s2);
@@ -486,9 +517,20 @@ impl FuncCompiler<'_> {
                         wasm!(self.func, { end; });
                     }
                     _ => {
-                        wasm!(self.func, { local_set(s); local_get(s); i32_load(0); i32_eqz; if_i32; local_get(s); i32_load(4); else_; });
-                        self.emit_expr(&args[1]);
-                        wasm!(self.func, { end; });
+                        if Self::is_heap_type(&inner_ty) {
+                            // The kept Ok payload AND a Var default are both
+                            // borrowed here — hand out co-owned +1 refs (the #727
+                            // share family, result.unwrap_or edition — fuzz
+                            // seed-20260718 index 149's ok(unwrap_or(..)) chain
+                            // double-freed at scope end).
+                            wasm!(self.func, { local_set(s); local_get(s); i32_load(0); i32_eqz; if_i32; local_get(s); i32_load(4); call(self.emitter.rt.rc_inc); else_; });
+                            self.emit_expr(&args[1]);
+                            wasm!(self.func, { call(self.emitter.rt.rc_inc); end; });
+                        } else {
+                            wasm!(self.func, { local_set(s); local_get(s); i32_load(0); i32_eqz; if_i32; local_get(s); i32_load(4); else_; });
+                            self.emit_expr(&args[1]);
+                            wasm!(self.func, { end; });
+                        }
                     }
                 }
                 self.scratch.free_i32(s);
@@ -614,6 +656,12 @@ impl FuncCompiler<'_> {
                       local_get(s);
                 });
                 self.emit_load_at(&ok_ty, 4);
+                if Self::is_heap_type(&ok_ty) {
+                    // The new Option CO-OWNS the payload the Result still owns —
+                    // un-inc'd it double-freed at scope end (the #727 share
+                    // family, to_option edition — fuzz seed-20260718 index 345).
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&ok_ty, 0);
                 wasm!(self.func, { local_get(s2); end; });
                 self.scratch.free_i32(s2);
@@ -636,6 +684,11 @@ impl FuncCompiler<'_> {
                       local_get(s);
                 });
                 self.emit_load_at(&err_ty, 4);
+                if Self::is_heap_type(&err_ty) {
+                    // Same share as to_option — the Err payload stays owned by
+                    // the input Result.
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&err_ty, 0);
                 wasm!(self.func, { local_get(s2); end; });
                 self.scratch.free_i32(s2);
@@ -661,14 +714,81 @@ impl FuncCompiler<'_> {
                         self.emit_closure_call(&err_ty, &ok_ty);
                         wasm!(self.func, { end; });
                     }
+                    ValType::F64 => {
+                        // A Float Ok payload: f64 block type + f64 payload load — the i32
+                        // fallback emitted `if i32` around an f64 closure result, a
+                        // structurally invalid module (fuzz G-96; the option twin above
+                        // already carried this case).
+                        wasm!(self.func, { local_get(result); i32_load(0); i32_eqz; if_f64; local_get(result); f64_load(4); else_; });
+                        wasm!(self.func, { local_get(closure); i32_load(4); local_get(result); i32_load(4); local_get(closure); i32_load(0); });
+                        let err_ty = self.result_err_ty(&args[0].ty);
+                        self.emit_closure_call(&err_ty, &ok_ty);
+                        wasm!(self.func, { end; });
+                    }
                     _ => {
-                        wasm!(self.func, { local_get(result); i32_load(0); i32_eqz; if_i32; local_get(result); i32_load(4); else_; });
+                        if Self::is_heap_type(&ok_ty) {
+                            // A HEAP Ok payload (a List/String handle) must be CO-OWNED
+                            // (+1): the input Result temp's drop releases its payload at
+                            // scope end, so handing back the bare `payload@4` was a
+                            // use-after-free — `unwrap_or_else(collect(...), f)` read the
+                            // freed list as `[]` (fuzz seed-20260718 index 590). Same
+                            // share-+1 discipline as the OPTION unwrap_or_else arm above.
+                            wasm!(self.func, { local_get(result); i32_load(0); i32_eqz; if_i32; local_get(result); i32_load(4); call(self.emitter.rt.rc_inc); else_; });
+                        } else {
+                            wasm!(self.func, { local_get(result); i32_load(0); i32_eqz; if_i32; local_get(result); i32_load(4); else_; });
+                        }
                         wasm!(self.func, { local_get(closure); i32_load(4); local_get(result); i32_load(4); local_get(closure); i32_load(0); });
                         let err_ty = self.result_err_ty(&args[0].ty);
                         self.emit_closure_call(&err_ty, &ok_ty);
                         wasm!(self.func, { end; });
                     }
                 }
+                self.scratch.free_i32(closure);
+                self.scratch.free_i32(result);
+            }
+            "flatten" => {
+                // flatten(Result[Result[T,E],E]) → Result[T,E]: Ok(inner) → the INNER
+                // box (co-owned +1 — its own drop stays with the outer's payload slot),
+                // Err(e) → the OUTER box itself (co-owned +1; it already IS `err(e)`).
+                // Previously flatten had no arm and ICE'd on pipelines without the
+                // named-dispatch runtime fn (the determinism harness).
+                let result = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(result);
+                    local_get(result); i32_load(0); i32_eqz;
+                    if_i32;
+                      local_get(result); i32_load(4); call(self.emitter.rt.rc_inc);
+                    else_;
+                      local_get(result); call(self.emitter.rt.rc_inc);
+                    end;
+                });
+                self.scratch.free_i32(result);
+            }
+            "or_else" => {
+                // or_else(r, f) → Result: Ok kept (the INPUT box, co-owned +1 — the
+                // option or_else's #666 share discipline), Err(e) → f(e) (the recovery
+                // closure gets the err payload, its fresh Result moved out). Previously
+                // result.or_else had NO arm here and leaned on the named-dispatch
+                // fallback — a pipeline without the lowered runtime fn ICE'd
+                // ("no WASM dispatch for `result.or_else`", the determinism harness).
+                let result = self.scratch.alloc_i32();
+                let closure = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(result); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    local_set(closure);
+                    local_get(result); i32_load(0); i32_eqz;
+                    if_i32;
+                      local_get(result); call(self.emitter.rt.rc_inc);
+                    else_;
+                });
+                // f(err_payload) — closure gets the borrowed message handle.
+                wasm!(self.func, { local_get(closure); i32_load(4); local_get(result); i32_load(4); local_get(closure); i32_load(0); });
+                let err_ty = self.result_err_ty(&args[0].ty);
+                self.emit_closure_call(&err_ty, &args[0].ty);
+                wasm!(self.func, { end; });
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(result);
             }

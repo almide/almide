@@ -842,3 +842,76 @@ fn bytes_read_f32_be(b: Bytes, pos: Int) -> Float = {
     }
   }
 }
+
+// ── bytes.to_string ── std::str::from_utf8's Result, message-exact: a valid buffer
+// deep-copies into a fresh String; an invalid one errs with Rust's Utf8Error Display
+// ("invalid utf-8 sequence of {error_len} bytes from index {valid_up_to}", or the
+// "incomplete utf-8 byte sequence from index {valid_up_to}" tail-truncation form),
+// prefixed "invalid UTF-8: " (the native wrapper). The walk reuses the validation
+// table above; the diag result packs valid_up_to*4 + code (0=incomplete, 1..3=len).
+
+fn __u2s_seq(h: Int, n: Int, pos: Int, b0: Int, w: Int, j: Int) -> Int =
+  if j >= w then 0 - 1
+  else if pos + j >= n then pos * 4
+  else {
+    let bj = prim.load8(h + pos + j)
+    let lo = if j == 1 then __b1lo(b0, w) else 128
+    let hi = if j == 1 then __b1hi(b0, w) else 191
+    if __inrange(bj, lo, hi) then __u2s_seq(h, n, pos, b0, w, j + 1)
+    else pos * 4 + j
+  }
+
+fn __u2s_walk(h: Int, n: Int, pos: Int) -> Int =
+  if pos >= n then 0 - 1
+  else {
+    let b0 = prim.load8(h + pos)
+    if b0 < 128 then __u2s_walk(h, n, pos + 1)
+    else if b0 < 194 then pos * 4 + 1
+    else if b0 < 245 then {
+      let w = __width(b0)
+      let r = __u2s_seq(h, n, pos, b0, w, 1)
+      if r < 0 then __u2s_walk(h, n, pos + w) else r
+    }
+    else pos * 4 + 1
+  }
+
+fn __u2s_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.store8(dst + i, prim.load8(src + i))
+    __u2s_copy(dst, src, n, i + 1)
+  }
+
+fn bytes_to_string(b: Bytes) -> Result[String, String] = {
+  let h0 = prim.handle(b)
+  let n = prim.load32(h0 + 4)
+  let r = __u2s_walk(h0 + 12, n, 0)
+  if r < 0 then {
+    let out = prim.alloc_str(n)
+    let _c = __u2s_copy(prim.handle(out) + 12, h0 + 12, n, 0)
+    ok(out)
+  } else {
+    let st = r / 4
+    let code = prim.band(r, 3)
+    if code == 0 then err("invalid UTF-8: incomplete utf-8 byte sequence from index " + int.to_string(st))
+    else err("invalid UTF-8: invalid utf-8 sequence of " + int.to_string(code) + " bytes from index " + int.to_string(st))
+  }
+}
+
+// ── bytes.map_each ── every byte through `f` (once, in order), the result truncated
+// to u8 (native: `f(*x as i64) as u8`).
+fn __bme_fill(dh: Int, sh: Int, f: (Int) -> Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = f(prim.load8(sh + i))
+    prim.store8(dh + i, prim.band(v, 255))
+    __bme_fill(dh, sh, f, n, i + 1)
+  }
+
+fn bytes_map_each(b: Bytes, f: (Int) -> Int) -> Bytes = {
+  let h = prim.handle(b)
+  let n = prim.load32(h + 4)
+  let out = prim.alloc_bytes(n)
+  let _x = __bme_fill(prim.handle(out) + 12, h + 12, f, n, 0)
+  out
+}

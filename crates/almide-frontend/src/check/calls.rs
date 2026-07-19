@@ -135,6 +135,18 @@ impl Checker {
                 self.lambda_arg_hint = pinned;
                 let aty = self.infer_expr(a);
                 self.lambda_arg_hint = prev_hint;
+                // E024, call-arg edition: a bare int literal flowing into a
+                // SIZED param must fit the declared width — `neg_one_i8(128)`
+                // passed check while native rustc rejected `128i8` (the
+                // check-vs-build gap, fuzz seed-20260718 index 92). Recording
+                // the param as the literal's context routes it through the
+                // post-solve E024 range check (non-integer/generic contexts
+                // fall back harmlessly).
+                if let Some(sig) = &call_sig {
+                    if let Some((_, pty)) = sig.params.get(i) {
+                        self.record_int_literal_context(a, pty);
+                    }
+                }
                 // Accumulate generic bindings from this arg so later lambda
                 // params can be pinned. Lambdas contribute nothing new here.
                 if let Some(sig) = &call_sig {
@@ -563,6 +575,20 @@ impl Checker {
         let Some(sig) = sig else {
             return self.check_unresolved_named_call(name, arg_tys);
         };
+
+        // E026: order-sensitive combinators enqueue their subject (or key) for
+        // the post-solve ORDERABLE-element check — see validate_ord_elem_types.
+        let ord_name = qualified_via_direct.as_deref().unwrap_or(name);
+        if matches!(ord_name, "list.sort" | "list.min" | "list.max") {
+            if let Some(a0) = arg_tys.first() {
+                self.deferred_ord_elem_checks.push((a0.clone(), self.current_span, ord_name.to_string()));
+            }
+        }
+        if ord_name == "list.sort_by" {
+            if let Some(Ty::Fn { ret, .. }) = arg_tys.get(1) {
+                self.deferred_ord_elem_checks.push(((**ret).clone(), self.current_span, ord_name.to_string()));
+            }
+        }
 
         self.last_mut_params = sig.mut_params.clone();
 

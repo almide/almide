@@ -132,16 +132,12 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         return;
     }
 
-    // Native target: use cargo to resolve rustls/webpki-roots for HTTPS support
-    let project_dir = std::env::temp_dir().join("almide-build");
-    // Serialize across processes: the shared scratch dir's src + target would
-    // otherwise be corrupted by a concurrent `almide build`. Held through the
-    // copy-out below so the generated binary can't be overwritten between
-    // build and copy.
-    let _ = std::fs::create_dir_all(&project_dir);
-    let _flock = super::run::BuildDirLock::acquire(&project_dir)
-        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-    match super::cargo_build_generated_with_native(&rs_code, &project_dir, use_release, native_deps, source_root) {
+    // Native target: the content-cached build shared with `almide run` — the
+    // cache key is the generated code, so identical output from any caller (or
+    // any source path) reuses one binary and skips cargo entirely. Locking and
+    // atomic binary staging live inside build_native_cached; the copy-out below
+    // reads a content-named, atomically-renamed file, so it needs no lock.
+    match super::run::build_native_cached(&rs_code, false, use_release, None, native_deps, source_root) {
         Ok(bin_path) => {
             // Copy the built binary to the desired output location. Create the
             // output's parent directory first — `-o build/app` must not fail

@@ -1,0 +1,23 @@
+// @contract: C-149
+// result.unwrap_or_else with a HEAP Ok payload (a List) hands back a CO-OWNED
+// (+1) reference on the v0 leg: the input Result temp's drop releases its
+// payload at scope end, so the bare `payload@4` was a use-after-free — the
+// unwrapped list read as `[]` after the temp's drop (fuzz seed-20260718 index
+// 590). The option unwrap_or_else arm carried this share discipline already;
+// this is its result-side twin.
+fn main() -> Unit = {
+  let n3: Result[Float, String] = ok(1.5)
+  let a4: Result[Float, String] = ok(0.0)
+  let r6: List[Float] = result.unwrap_or_else(result.collect([n3, a4, a4]), ((e) => [-0.0]))
+  println("r6 = ${r6}")
+  let bad: Result[Float, String] = err("x")
+  let r7: List[Float] = result.unwrap_or_else(result.collect([n3, bad]), ((e) => [9.0]))
+  println("r7 = ${r7}")
+}
+
+test "unwrap_or_else over a collected list keeps the payload alive" {
+  let n3: Result[Float, String] = ok(1.5)
+  let a4: Result[Float, String] = ok(0.0)
+  let r6: List[Float] = result.unwrap_or_else(result.collect([n3, a4]), ((e) => [-0.0]))
+  assert_eq(r6, [1.5, 0.0])
+}

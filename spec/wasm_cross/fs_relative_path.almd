@@ -1,0 +1,39 @@
+// @contract: C-137
+// RELATIVE fs paths resolve against the HOST CWD on the wasm target, matching
+// native std::fs. WASI itself has no cwd: the v1 runtime's `$path_norm` prepends
+// "$PWD/" (inherited via the harness's `-S inherit-env=y`) to any path that does
+// not start with '/', then resolves it fd-3-relative exactly like an absolute
+// path. Previously every relative fs op on wasm resolved against the `/` preopen
+// root and failed (`fs.stat("spec/…")` → "stat failed", fs.read_text → NOENT)
+// while native succeeded — the fs_stat_test vein (#790).
+//
+// The gate (tests/wasm_runtime_test.rs::wasm_cross_target_spec) runs this on BOTH
+// targets from the same cwd, so the relative path below names the same host file
+// on both legs. SELF-CONTAINED: the fixture creates its own relative directory
+// first (any writable cwd works — the host-arch determinism harness runs from a
+// different cwd than cargo test) and removes it at the end.
+//
+// What this LOCKS:
+//   - fs.mkdir_p / fs.write / fs.read_text / fs.exists / fs.remove_all on a
+//     RELATIVE path all resolve to the same host file as native (write →
+//     read-back → cleanup round-trip). fs.stat's relative-path + 8-aligned
+//     filestat-scratch behavior is pinned by the second evidence fixture
+//     (spec/stdlib/fs_stat_test.almd, which stats repo files by relative path
+//     on the wasm test leg); v0's harness-only pipeline cannot compile fs.stat
+//     (the FileStat registry skew), so this determinism-gated fixture stays on
+//     the v0-compilable surface.
+
+import fs
+
+effect fn main() -> Unit = {
+  let dir = "almide_xt_relpath_tmp"
+  let _ = fs.mkdir_p(dir)!
+  let path = "almide_xt_relpath_tmp/probe.txt"
+  let _ = fs.write(path, "RELATIVE-OK")!
+  let back = fs.read_text(path)!
+  println(back)
+  let e = fs.exists(path)
+  println(if e then "exists" else "missing")
+  let _ = fs.remove_all(dir)!
+  println(if fs.exists(path) then "leaked" else "cleaned")
+}

@@ -43,3 +43,23 @@ fn option_to_list(o: Option[Int]) -> List[Int] = {
   let _f = __otl_fill(h, prim.handle(buf), len)
   buf
 }
+
+// HEAP-payload `option.to_list` (`some("s")` → `["s"]`): the result list CO-OWNS the
+// payload (rc_inc) — the scalar impl's raw slot copy aliased the String un-owned and
+// the two drops double-freed (the option_completeness vein).
+fn __otl_fill_rc(h: Int, bh: Int, len: Int) -> Int =
+  if len == 0 then 0
+  else {
+    let v = prim.load64(h + 12)
+    prim.rc_inc(v)
+    prim.store64(bh + 12, v)
+    0
+  }
+
+fn option_to_list_rc(o: Option[Int]) -> List[Int] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let buf = prim.alloc_list(len)
+  let _f = __otl_fill_rc(h, prim.handle(buf), len)
+  buf
+}

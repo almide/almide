@@ -65,6 +65,8 @@ impl<'a> Interpreter<'a> {
             ("list", "sort_by") => self.hof_sort_by(&evaled),
             ("list", "each") => self.hof_each(&evaled),
             ("list", "zip_with") => self.hof_zip_with(&evaled),
+            ("list", "unique_by") => self.hof_unique_by(&evaled),
+            ("list", "scan") => self.hof_scan(&evaled),
 
             // ── option HOFs ──
             ("option", "map") => self.hof_option_map(&evaled),
@@ -78,6 +80,7 @@ impl<'a> Interpreter<'a> {
             ("result", "map_err") => self.hof_result_map(&evaled, true),
             ("result", "flat_map") => self.hof_result_flat_map(&evaled),
             ("result", "unwrap_or_else") => self.hof_result_unwrap_or_else(&evaled),
+            ("result", "or_else") => self.hof_result_or_else(&evaled),
 
             // ── set HOFs (operate on the ordered backing vec) ──
             ("set", "map") => self.hof_set_map(&evaled),
@@ -432,6 +435,52 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::list(out))
     }
 
+    // unique_by(xs, key) — keep the FIRST element of each distinct key (the
+    // native first-kept discipline; keys compared by Value equality).
+    fn hof_unique_by(&mut self, args: &[Value]) -> Flow {
+        let xs = match args.first().and_then(|v| v.as_iter_items()) {
+            Some(i) => i,
+            None => return Flow::Abort("internal: unique_by arg 0 not iterable".into()),
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut seen: Vec<Value> = Vec::new();
+        let mut out = Vec::new();
+        for x in xs {
+            let k = val!(self.apply_closure(&clo, vec![x.clone()]));
+            if !seen.iter().any(|s| s == &k) {
+                seen.push(k);
+                out.push(x);
+            }
+        }
+        Flow::val(Value::list(out))
+    }
+
+    // scan(xs, init, f) — a fold that collects every running accumulator
+    // (length n; the init itself is NOT emitted).
+    fn hof_scan(&mut self, args: &[Value]) -> Flow {
+        let xs = match args.first().and_then(|v| v.as_iter_items()) {
+            Some(i) => i,
+            None => return Flow::Abort("internal: scan arg 0 not iterable".into()),
+        };
+        let mut acc = match args.get(1) {
+            Some(v) => v.clone(),
+            None => return Flow::Abort("internal: scan missing init".into()),
+        };
+        let clo = match Self::recv_closure(args, 2) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = Vec::new();
+        for x in xs {
+            acc = val!(self.apply_closure(&clo, vec![acc.clone(), x]));
+            out.push(acc.clone());
+        }
+        Flow::val(Value::list(out))
+    }
+
     // ── option HOFs ────────────────────────────────────────────
 
     fn hof_option_map(&mut self, args: &[Value]) -> Flow {
@@ -548,6 +597,22 @@ impl<'a> Interpreter<'a> {
                 Flow::val(Value::Result(Err(e.clone())))
             }
             _ => Flow::Abort("internal: result.flat_map on non-Result".into()),
+        }
+    }
+
+    // Ok(v) kept; Err(e) → f(e), the recovery closure's Result returned as-is
+    // (runtime/rs result.rs or_else — flat_map's Err-side twin).
+    fn hof_result_or_else(&mut self, args: &[Value]) -> Flow {
+        match args.first() {
+            Some(Value::Result(Ok(v))) => Flow::val(Value::Result(Ok(v.clone()))),
+            Some(Value::Result(Err(e))) => {
+                let clo = match Self::recv_closure(args, 1) {
+                    Ok(c) => c,
+                    Err(f) => return f,
+                };
+                self.apply_closure(&clo, vec![(**e).clone()])
+            }
+            _ => Flow::Abort("internal: result.or_else on non-Result".into()),
         }
     }
 
@@ -671,6 +736,7 @@ impl<'a> Interpreter<'a> {
                 None => Flow::Abort("internal: list.last on non-list".into()),
             }),
             ("list", "get") => Some(self.list_get(args)),
+            ("list", "get_or") => Some(self.list_get_or(args)),
             ("list", "contains") => Some(match (args.first().and_then(|v| v.as_iter_items()), args.get(1)) {
                 (Some(items), Some(x)) => Flow::val(Value::Bool(items.contains(x))),
                 _ => Flow::Abort("internal: list.contains bad args".into()),
@@ -803,8 +869,83 @@ impl<'a> Interpreter<'a> {
                 (Some(Value::Result(Err(_))), Some(d)) => Flow::val(d.clone()),
                 _ => Flow::Abort("internal: result.unwrap_or bad args".into()),
             }),
+            // some(v) → [v], none → [] (runtime/rs option.rs to_list)
+            ("option", "to_list") => Some(match args.first() {
+                Some(Value::Option(Some(v))) => Flow::val(Value::list(vec![(**v).clone()])),
+                Some(Value::Option(None)) => Flow::val(Value::list(vec![])),
+                _ => Flow::Abort("internal: option.to_list on non-option".into()),
+            }),
+            // some(v) → ok(v), none → err(msg) (runtime/rs option.rs to_result)
+            ("option", "to_result") => Some(match (args.first(), args.get(1)) {
+                (Some(Value::Option(Some(v))), _) => Flow::val(Value::Result(Ok(v.clone()))),
+                (Some(Value::Option(None)), Some(msg)) => {
+                    Flow::val(Value::Result(Err(Box::new(msg.clone()))))
+                }
+                _ => Flow::Abort("internal: option.to_result bad args".into()),
+            }),
+            // ok(v) → some(v), err(_) → none (runtime/rs result.rs to_option)
+            ("result", "to_option") => Some(match args.first() {
+                Some(Value::Result(Ok(v))) => Flow::val(Value::Option(Some(v.clone()))),
+                Some(Value::Result(Err(_))) => Flow::val(Value::Option(None)),
+                _ => Flow::Abort("internal: result.to_option on non-result".into()),
+            }),
+            // ok(_) → none, err(e) → some(e) (runtime/rs result.rs to_err_option)
+            ("result", "to_err_option") => Some(match args.first() {
+                Some(Value::Result(Ok(_))) => Flow::val(Value::Option(None)),
+                Some(Value::Result(Err(e))) => Flow::val(Value::Option(Some(e.clone()))),
+                _ => Flow::Abort("internal: result.to_err_option on non-result".into()),
+            }),
+            // ok(inner) → inner, err(e) → err(e) (runtime/rs result.rs flatten)
+            ("result", "flatten") => Some(match args.first() {
+                Some(Value::Result(Ok(inner))) => Flow::val((**inner).clone()),
+                Some(Value::Result(Err(e))) => {
+                    Flow::val(Value::Result(Err(e.clone())))
+                }
+                _ => Flow::Abort("internal: result.flatten on non-result".into()),
+            }),
+            // collect(List[Result[T,E]]) → all ok → ok(List[T]), else err(List[E])
+            // of EVERY err (the native runtime's partition-style collect).
+            ("result", "collect") => Some(match args.first().and_then(|v| v.as_iter_items()) {
+                Some(items) => {
+                    let mut oks = Vec::new();
+                    let mut errs = Vec::new();
+                    for it in items {
+                        match it {
+                            Value::Result(Ok(v)) => oks.push((*v).clone()),
+                            Value::Result(Err(e)) => errs.push((*e).clone()),
+                            _ => {
+                                return Some(Flow::Abort(
+                                    "internal: result.collect non-result element".into(),
+                                ))
+                            }
+                        }
+                    }
+                    if errs.is_empty() {
+                        Flow::val(Value::Result(Ok(Box::new(Value::list(oks)))))
+                    } else {
+                        Flow::val(Value::Result(Err(Box::new(Value::list(errs)))))
+                    }
+                }
+                None => Flow::Abort("internal: result.collect on non-list".into()),
+            }),
 
             _ => None,
+        }
+    }
+
+    // get_or(xs, i, default) — the OOB/negative index yields the default
+    // (runtime/rs list.rs get_or; the Value-level twin of list_get's some/none).
+    pub(crate) fn list_get_or(&mut self, args: &[Value]) -> Flow {
+        match (args.first().and_then(|v| v.as_iter_items()), args.get(1), args.get(2)) {
+            (Some(items), Some(Value::Int(i)), Some(default)) => {
+                let i = *i;
+                if i < 0 || (i as usize) >= items.len() {
+                    Flow::val(default.clone())
+                } else {
+                    Flow::val(items[i as usize].clone())
+                }
+            }
+            _ => Flow::Abort("internal: list.get_or bad args".into()),
         }
     }
 

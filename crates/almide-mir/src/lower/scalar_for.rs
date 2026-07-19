@@ -30,6 +30,7 @@ impl LowerCtx {
         let lhh_mark = self.live_heap_handles.len();
         let lifted_mark = self.lifted.len();
         let value_of_snapshot = self.value_of.clone();
+        self.precopy_borrowed_reassign_slots(body);
 
         // Snapshot `end` once; init the index local `i = start` (a fresh ConstInt — a
         // distinct, mutable local, never aliasing a caller value). `one` for the step.
@@ -137,13 +138,35 @@ impl LowerCtx {
                 return false;
             }
         }
-        if var_tuple.is_some() {
-            return false;
-        }
+        // A TUPLE-DESTRUCTURING loop (`for (k, v) in pairs`): the element is a borrowed
+        // aggregate block, and each component binds per-slot via the SAME typed
+        // destructure `let (k, v) = p` uses (try_lower_tuple_destructure over the
+        // borrowed element). Requires the heap-aggregate Tuple element shape — anything
+        // else keeps the model path's honest wall. (Re-enabled: the cert now folds the
+        // loop-carried if-merge reassign — the pipe_chain `iamdd` witness the kernel
+        // checker rightly rejected balances via the merge-dst feeder routing.)
+        let tuple_binds: Option<Vec<almide_ir::IrPattern>> = match var_tuple {
+            None => None,
+            Some(vars) => {
+                if !elem_is_aggregate {
+                    return false;
+                }
+                match &elem_ty {
+                    Ty::Tuple(ts) if ts.len() == vars.len() => Some(
+                        vars.iter()
+                            .zip(ts.iter())
+                            .map(|(v, t)| almide_ir::IrPattern::Bind { var: *v, ty: t.clone() })
+                            .collect(),
+                    ),
+                    _ => return false,
+                }
+            }
+        };
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
         let lifted_mark = self.lifted.len();
         let value_of_snapshot = self.value_of.clone();
+        self.precopy_borrowed_reassign_slots(body);
 
         // Borrow the list (evaluated once); a Var is borrowed, a fresh literal is materialized
         // (owned, dropped at the outer scope — it stays in live_heap_handles). A heap-element
@@ -231,6 +254,199 @@ impl LowerCtx {
             // owner — no double-free.
             if elem_is_aggregate {
                 self.materialized_aggregates.insert(elem);
+            }
+            // The tuple components bind per-slot off the borrowed element block — the
+            // same typed reads `let (k, v) = p` emits; a shape the precise destructure
+            // declines (an unresolved component ty) rolls the whole loop back.
+            if let Some(pats) = &tuple_binds {
+                if !self.try_lower_tuple_destructure(pats, elem, Some(&elem_ty)) {
+                    self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
+                    return false;
+                }
+            }
+        }
+
+        let body_mark = self.live_heap_handles.len();
+        self.in_frame += 1;
+        self.scalar_loop_depth += 1;
+        let mut ok = true;
+        for stmt in body {
+            if self.lower_while_body_stmt(stmt).is_err() {
+                ok = false;
+                break;
+            }
+        }
+        self.scalar_loop_depth -= 1;
+        self.in_frame -= 1;
+        if !ok {
+            self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
+            return false;
+        }
+        self.drop_arm_locals(body_mark);
+        let next_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: next_v, op: IntOp::Add, a: i_v, b: one_v });
+        self.ops.push(Op::SetLocal { local: i_v, src: next_v });
+        self.ops.push(Op::LoopEnd);
+        true
+    }
+
+    /// EXECUTE `for (k, v) in m { … }` over a self-hosted Map as a real entry loop. The
+    /// three v1 map layouts this covers (all insertion-ordered blocks, entry count from
+    /// the len header at h+4):
+    /// - `Map[scalar, scalar]` (map_core / map_if): INTERLEAVED paired slots, entry i's
+    ///   key at base+i*16, value at +8, len = entry count;
+    /// - `Map[String, scalar]` (map_skv): TWO REGIONS — key handles at base+i*8, i64
+    ///   values at base+(entries+i)*8, len = entry count;
+    /// - `Map[String, String]` (map_str): INTERLEAVED String handles, key at base+i*16,
+    ///   value at +8, len = SLOT count (entries = len/2).
+    /// Other flavors (hval/ivh/hobj/mlo — record/variant/list values, Int→String) keep
+    /// the model path's honest wall. Scalar components bind as stable mutable locals
+    /// (a COPY); String components bind as BORROWED handles re-`LoadHandle`d per
+    /// iteration and registered in `param_values` (the map owns its keys/values — the
+    /// loop vars are never second owners; a body that moves one out rolls back).
+    pub(crate) fn try_lower_scalar_for_map(
+        &mut self,
+        var: VarId,
+        var_tuple: &Option<Vec<VarId>>,
+        iterable: &IrExpr,
+        body: &[IrStmt],
+    ) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        use crate::PrimKind;
+        let (kty, vty) = match &iterable.ty {
+            Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 => (a[0].clone(), a[1].clone()),
+            _ => return false,
+        };
+        // `for (k, v) in m` binds both components; `for k in m` iterates the KEYS
+        // (v0's map iteration order), binding only the key.
+        let (k_var, v_var): (VarId, Option<VarId>) = match var_tuple {
+            Some(vars) => {
+                let [k, v] = vars.as_slice() else { return false };
+                (*k, Some(*v))
+            }
+            None => (var, None),
+        };
+        let k_heap = is_heap_ty(&kty);
+        let v_heap = is_heap_ty(&vty);
+        // Flavor gate: interleaved (scalar/scalar or String/String) vs two-region
+        // (String/scalar). A heap side must be EXACTLY String — a record/variant/list
+        // component is a different physical flavor (hval/ivh/…), walled for now.
+        let interleaved = match (&kty, &vty) {
+            _ if !k_heap && !v_heap => true,
+            (Ty::String, Ty::String) => true,
+            (Ty::String, _) if !v_heap => false,
+            _ => return false,
+        };
+        let len_is_slots = interleaved && k_heap;
+
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let lifted_mark = self.lifted.len();
+        let value_of_snapshot = self.value_of.clone();
+        self.precopy_borrowed_reassign_slots(body);
+
+        // Borrow the map (evaluated once; a map literal already desugared to a
+        // `map.from_list` call, so `lower_call_args` materializes it as an owned temp
+        // dropped at the outer scope).
+        let map_v = match self.lower_call_args(std::slice::from_ref(iterable)) {
+            Ok(args) => match args.into_iter().next() {
+                Some(CallArg::Handle(v)) => v,
+                _ => {
+                    self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
+                    return false;
+                }
+            },
+            Err(_) => {
+                self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
+                return false;
+            }
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![map_v] });
+        let len_v = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        // The ENTRY count: map_str's len header counts SLOTS (2 per entry).
+        let entries_v = if len_is_slots {
+            let two = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: two, value: 2 });
+            let e = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: e, op: IntOp::Div, a: len_v, b: two });
+            e
+        } else {
+            len_v
+        };
+        let i_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: i_v, value: 0 });
+        let one_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one_v, value: 1 });
+        // Scalar components are stable mutable i64 locals (SetLocal per iteration);
+        // heap (String) components re-`LoadHandle` fresh inside the loop.
+        let k_local = if k_heap {
+            None
+        } else {
+            let x = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: x, value: 0 });
+            self.value_of.insert(k_var, x);
+            Some(x)
+        };
+        let v_local = match v_var {
+            Some(vv) if !v_heap => {
+                let x = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: x, value: 0 });
+                self.value_of.insert(vv, x);
+                Some(x)
+            }
+            _ => None,
+        };
+
+        self.ops.push(Op::LoopStart);
+        let cond_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: entries_v });
+        self.ops.push(Op::LoopBreakUnless { cond: cond_v });
+        let base = self.load_addr(h, 12);
+        // Entry i's key/value slot addresses, per flavor.
+        let (addr_k, addr_v) = if interleaved {
+            let sixteen = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: sixteen, value: 16 });
+            let i16_v = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: i16_v, op: IntOp::Mul, a: i_v, b: sixteen });
+            let ak = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: ak, op: IntOp::Add, a: base, b: i16_v });
+            let eight = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: eight, value: 8 });
+            let av = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: av, op: IntOp::Add, a: ak, b: eight });
+            (ak, av)
+        } else {
+            let eight = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: eight, value: 8 });
+            let i8_v = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: i8_v, op: IntOp::Mul, a: i_v, b: eight });
+            let ak = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: ak, op: IntOp::Add, a: base, b: i8_v });
+            let ei = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: ei, op: IntOp::Add, a: entries_v, b: i_v });
+            let ei8 = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: ei8, op: IntOp::Mul, a: ei, b: eight });
+            let av = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: av, op: IntOp::Add, a: base, b: ei8 });
+            (ak, av)
+        };
+        let mut binds = vec![(k_local, k_var, addr_k)];
+        if let Some(vv) = v_var {
+            binds.push((v_local, vv, addr_v));
+        }
+        for (local, bind_var, addr) in binds {
+            if let Some(x) = local {
+                let elem = self.fresh_value();
+                self.ops
+                    .push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(elem), args: vec![addr] });
+                self.ops.push(Op::SetLocal { local: x, src: elem });
+            } else {
+                let elem = self.fresh_value();
+                self.ops
+                    .push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(elem), args: vec![addr] });
+                self.value_of.insert(bind_var, elem);
+                self.param_values.insert(elem);
             }
         }
 

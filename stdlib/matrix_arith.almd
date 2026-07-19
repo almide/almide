@@ -1,0 +1,129 @@
+// matrix_arith — SELF-HOSTED element-wise `matrix.sub` / `matrix.div` / `matrix.neg` /
+// `matrix.pow` for v1, byte-matching native runtime/rs/src/matrix.rs (zip semantics:
+// rows/cols truncate to the shorter operand, exactly `a.iter().zip(b.iter())`; pow is
+// element-wise `x.powf(exp)` via the vendored math.fpow). The prim-floor row walk is
+// matrix_core.almd's `__mx_add_*` shape verbatim, one file so the auto-linker pulls the
+// whole family together; `matrix.pow`'s element hop calls math.fpow CROSS-FILE
+// (math_fpow.almd) like every other cross-file self-host callee.
+
+fn __mxa_sub_row(dh: Int, ah: Int, bh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(ah + 12 + i * 8))
+    let y = prim.ffrombits(prim.load64(bh + 12 + i * 8))
+    prim.store64(dh + 12 + i * 8, prim.fbits(x - y))
+    __mxa_sub_row(dh, ah, bh, n, i + 1)
+  }
+
+fn __mxa_sub_rows(ho: Int, ha: Int, hb: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let ar = prim.load64(ha + 12 + i * 8)
+    let br = prim.load64(hb + 12 + i * 8)
+    let ca = prim.load32(ar + 4)
+    let cb = prim.load32(br + 4)
+    let c = if ca < cb then ca else cb
+    let row = prim.alloc_list_f64(c)
+    let _f = __mxa_sub_row(prim.handle(row), ar, br, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mxa_sub_rows(ho, ha, hb, n, i + 1)
+  }
+
+fn matrix_sub(a: List[List[Float]], b: List[List[Float]]) -> List[List[Float]] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let n = if la < lb then la else lb
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mxa_sub_rows(prim.handle(out), ha, hb, n, 0)
+  out
+}
+
+fn __mxa_div_row(dh: Int, ah: Int, bh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(ah + 12 + i * 8))
+    let y = prim.ffrombits(prim.load64(bh + 12 + i * 8))
+    prim.store64(dh + 12 + i * 8, prim.fbits(x / y))
+    __mxa_div_row(dh, ah, bh, n, i + 1)
+  }
+
+fn __mxa_div_rows(ho: Int, ha: Int, hb: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let ar = prim.load64(ha + 12 + i * 8)
+    let br = prim.load64(hb + 12 + i * 8)
+    let ca = prim.load32(ar + 4)
+    let cb = prim.load32(br + 4)
+    let c = if ca < cb then ca else cb
+    let row = prim.alloc_list_f64(c)
+    let _f = __mxa_div_row(prim.handle(row), ar, br, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mxa_div_rows(ho, ha, hb, n, i + 1)
+  }
+
+fn matrix_div(a: List[List[Float]], b: List[List[Float]]) -> List[List[Float]] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let n = if la < lb then la else lb
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mxa_div_rows(prim.handle(out), ha, hb, n, 0)
+  out
+}
+
+fn __mxa_neg_row(dh: Int, sh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(sh + 12 + i * 8))
+    prim.store64(dh + 12 + i * 8, prim.fbits(0.0 - x))
+    __mxa_neg_row(dh, sh, n, i + 1)
+  }
+
+fn __mxa_neg_rows(ho: Int, hm: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let sr = prim.load64(hm + 12 + i * 8)
+    let c = prim.load32(sr + 4)
+    let row = prim.alloc_list_f64(c)
+    let _f = __mxa_neg_row(prim.handle(row), sr, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mxa_neg_rows(ho, hm, n, i + 1)
+  }
+
+fn matrix_neg(m: List[List[Float]]) -> List[List[Float]] = {
+  let hm = prim.handle(m)
+  let n = prim.load32(hm + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mxa_neg_rows(prim.handle(out), hm, n, 0)
+  out
+}
+
+fn __mxa_pow_row(dh: Int, sh: Int, e: Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(sh + 12 + i * 8))
+    prim.store64(dh + 12 + i * 8, prim.fbits(math.fpow(x, e)))
+    __mxa_pow_row(dh, sh, e, n, i + 1)
+  }
+
+fn __mxa_pow_rows(ho: Int, hm: Int, e: Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let sr = prim.load64(hm + 12 + i * 8)
+    let c = prim.load32(sr + 4)
+    let row = prim.alloc_list_f64(c)
+    let _f = __mxa_pow_row(prim.handle(row), sr, e, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mxa_pow_rows(ho, hm, e, n, i + 1)
+  }
+
+fn matrix_pow(m: List[List[Float]], e: Float) -> List[List[Float]] = {
+  let hm = prim.handle(m)
+  let n = prim.load32(hm + 4)
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __mxa_pow_rows(prim.handle(out), hm, e, n, 0)
+  out
+}

@@ -1,0 +1,19 @@
+// @contract: C-148
+// list.scan with a HEAP (String) accumulator stores each intermediate with the
+// accumulator's OWN value width. The v0 emitter's store fallback was i64_store
+// for every non-F64 accumulator: an i32 String handle failed validation
+// ("expected i64, found i32", fuzz seed-20260718 index 259) — and would have
+// smeared 8 bytes over a 4-byte-stride slot besides.
+fn step(acc: String, b: Bool) -> String = acc + (if b then "1" else "0")
+
+fn main() -> Unit = {
+  let steps: List[String] = list.scan([true, false, true], "s", ((acc, b) => step(acc, b)))
+  println("steps = ${steps}")
+  let sums: List[Int] = list.scan([1, 2, 3], 0, ((acc, x) => acc + x))
+  println("sums = ${sums}")
+}
+
+test "scan over String and Int accumulators" {
+  assert_eq(list.scan([1, 2, 3], 0, ((acc, x) => acc + x)), [1, 3, 6])
+  assert_eq(list.scan([true, false], "s", ((acc, b) => step(acc, b))), ["s1", "s10"])
+}

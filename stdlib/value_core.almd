@@ -665,6 +665,21 @@ fn option_listint_unwrap_or(o: Option[List[Int]], d: List[Int]) -> List[Int] = {
   }
 }
 
+// `result.unwrap_or(r, d)` over a Result[<flat scalar block>, String] — a scalar TUPLE
+// (`result.zip`'s `(Int, Int)`), a List[<scalar>], or a Bytes Ok payload. The heap-Ok
+// Result is the CAP-AS-TAG 1-slot block (tag @16: 0 = Ok, 1 = Err; payload handle @12) —
+// the Ok arm loads the @12 inner block and the bare-Var tail auto-acquires (Dup, freed by
+// the flat rc_dec — scalar slots own nothing), the Err arm returns the fallback.
+fn result_flat_unwrap_or(r: Result[List[Int], String], d: List[Int]) -> List[Int] = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  if tag != 0 then d
+  else {
+    let v: List[Int] = prim.load_handle(h + 12)
+    v
+  }
+}
+
 // `?? d` over an Option[List[String]] (`list.get_liststr(rows, i) ?? []`): the SAME len-as-tag prim
 // shape as option_value_unwrap_or, with a List[String] payload — the Some arm loads the @12 inner-list
 // handle and the bare-Var tail auto-acquires (Dup), the None arm returns the fallback.
@@ -1087,3 +1102,54 @@ fn list_get_or_value(xs: List[Value], i: Int, default: Value) -> Value = {
   else if i >= len then default
   else __get_or_value_elem(h, i)
 }
+
+// ── json.stringify_pretty ── 2-space indent, native stringify_value's exact shape:
+// empty [] / {} inline; else one element per line at depth+1, closer at depth.
+// Strings quote via __json_quote (the {:?} escapes the fixtures exercise).
+fn __vsp_indent(d: Int) -> String = string.repeat("  ", d)
+
+fn __vsp_sep(i: Int) -> String = {
+  let k = if i == 0 then 0 else 1
+  string.repeat(",\n", k)
+}
+
+fn __vsp_arr(v: Value, i: Int, n: Int, d: Int, acc: String) -> String =
+  if i >= n then acc
+  else {
+    let e: Value = prim.load_handle(prim.handle(v) + 12 + i * 8)
+    let piece = __vsp_sep(i) + __vsp_indent(d + 1) + json_stringify_pretty_at(e, d + 1)
+    __vsp_arr(v, i + 1, n, d, acc + piece)
+  }
+
+fn __vsp_obj(v: Value, i: Int, n: Int, d: Int, acc: String) -> String =
+  if i >= n then acc
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let val: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    let piece = __vsp_sep(i) + __vsp_indent(d + 1) + __json_quote(k) + ": " + json_stringify_pretty_at(val, d + 1)
+    __vsp_obj(v, i + 1, n, d, acc + piece)
+  }
+
+fn json_stringify_pretty_at(v: Value, d: Int) -> String = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag == 0 then "null"
+  else if tag == 1 then (if prim.load64(h + 12) != 0 then "true" else "false")
+  else if tag == 2 then int.to_string(prim.load64(h + 12))
+  else if tag == 3 then __vstr_float(prim.ffrombits(prim.load64(h + 12)))
+  else if tag == 4 then __json_quote(prim.load_str(h + 12))
+  else if tag == 5 then {
+    let n = prim.load32(h + 8)
+    if n == 0 then "[]"
+    else "[\n" + __vsp_arr(v, 0, n, d, "") + "\n" + __vsp_indent(d) + "]"
+  }
+  else if tag == 6 then {
+    let n = prim.load32(h + 8) / 2
+    if n == 0 then "{}"
+    else "{\n" + __vsp_obj(v, 0, n, d, "") + "\n" + __vsp_indent(d) + "}"
+  }
+  else "null"
+}
+
+fn json_stringify_pretty(v: Value) -> String = json_stringify_pretty_at(v, 0)

@@ -1,0 +1,11 @@
+// @contract: C-155
+// float.to_fixed outside the decimals domain (0..=1000000) aborts in the T6
+// form — one stderr line + exit 1, byte-identical on both targets. Native
+// previously leaked the raw format! capacity panic (exit 101) on a negative
+// count while wasm printed the empty string or trapped OOM (fuzz seed-20260718
+// index 49). The in-domain call before the abort stays total and identical.
+fn main() -> Unit = {
+  println("pre = ${float.to_fixed(1.25, 3)}")
+  println("${float.to_fixed(0.5, -1)}")
+  println("unreachable")
+}

@@ -483,3 +483,147 @@ fn float_to_string(x: Float) -> String = {
   else if is_zero then (if neg then "-0.0" else "0.0")
   else __dg_string_main(x)
 }
+
+// ───────────────────────── float.to_fixed (Dragon fixed mode) ─────────────────────────
+// v0 native: `format!("{:.N}", x)` — the EXACT decimal expansion rounded to N fractional
+// digits, ties-to-even (core::fmt flt2dec). Same bignum floor: x = R/S with the fixups
+// pinning R/S ∈ [1/10, 1) so x = (R/S)·10^k; generate EXACTLY k+N digits, then round on
+// the remainder (2R vs S; a tie rounds up iff the last digit is odd), carry-propagate
+// via __dg_carry (which bumps k on overflow — the 0.999→"1.00" case). No MP/MM (fixed
+// mode has no shortest-interval); NaN/inf render like to_string (precision ignored).
+
+// R-only ×10 scale (the __dg_scale_down twin without MP/MM).
+fn __dgf_scale_down(r: Int, nk: Int, i: Int) -> Int =
+  if i >= nk then 0
+  else { __dg_mul10(r); __dgf_scale_down(r, nk, i + 1) }
+
+// fix1': while R >= S { S *= 10; k++ }  (pin R/S < 1)
+fn __dgf_fix1(r: Int, s: Int, k: Int) -> Int =
+  if __dg_cmp(r, s) < 0 then k
+  else { __dg_mul10(s); __dgf_fix1(r, s, k + 1) }
+
+// fix2': while R*10 < S { R *= 10; k-- }  (pin R/S >= 1/10)
+fn __dgf_fix2(r: Int, s: Int, tmp: Int, k: Int) -> Int = {
+  __dg_copy(tmp, r)
+  __dg_mul10(tmp)
+  if __dg_cmp(tmp, s) >= 0 then k
+  else { __dg_mul10(r); __dgf_fix2(r, s, tmp, k - 1) }
+}
+
+// Exactly n digits: R *= 10; d = floor(R/S); R -= d*S (the repeated-subtraction digit).
+fn __dgf_gen(r: Int, s: Int, dp: Int, n: Int, i: Int) -> Int =
+  if i >= n then n
+  else {
+    __dg_mul10(r)
+    let d = __dg_digit(r, s, 0)
+    prim.store8(dp + i, 48 + d)
+    __dgf_gen(r, s, dp, n, i + 1)
+  }
+
+// "0.000…0" (nd zeros; no point when nd == 0), signed.
+fn __dgf_zeros(nd: Int, neg: Bool) -> String = {
+  let sign_w = if neg then 1 else 0
+  let point_w = if nd > 0 then 1 else 0
+  let buf = prim.alloc_str(sign_w + 1 + point_w + nd)
+  let base = prim.handle(buf) + 12
+  let c0 = if neg then { prim.store8(base, 45); base + 1 } else base
+  prim.store8(c0, 48)
+  let _e = if nd > 0 then {
+    prim.store8(c0 + 1, 46)
+    __dg_zeros(c0 + 2, nd)
+  } else 0
+  buf
+}
+
+// digits dp[0..dlen) at decimal exponent kf, dlen == kf + nd (the fixed invariant):
+//   kf <= 0 : "[-]0." + (-kf) zeros + digits      kf > 0 : "[-]" + digits[0..kf] + "." + rest
+fn __dgf_render(dp: Int, dlen: Int, kf: Int, nd: Int, neg: Bool) -> String = {
+  let int_len = if kf > 0 then kf else 1
+  let sign_w = if neg then 1 else 0
+  let point_w = if nd > 0 then 1 else 0
+  let buf = prim.alloc_str(sign_w + int_len + point_w + nd)
+  let base = prim.handle(buf) + 12
+  let c0 = if neg then { prim.store8(base, 45); base + 1 } else base
+  let c1 = if kf > 0 then __dg_bcopy(dp, c0, kf)
+           else { prim.store8(c0, 48); c0 + 1 }
+  let _e = if nd > 0 then {
+    prim.store8(c1, 46)
+    let zeros = if kf < 0 then 0 - kf else 0
+    let c2 = __dg_zeros(c1 + 1, zeros)
+    let taken = if kf > 0 then kf else 0
+    __dg_bcopy(dp + taken, c2, dlen - taken)
+  } else 0
+  buf
+}
+
+fn __dgf_main(x: Float, nd: Int) -> String = {
+  let bits0 = prim.fbits(x)
+  let neg = bits0 < 0
+  let bits = prim.band(bits0, 9223372036854775807)
+  let raw_exp = prim.band(prim.bshr_u(bits, 52), 2047)
+  let raw_mant = prim.band(bits, 4503599627370495)
+  let ff = if raw_exp == 0 then raw_mant else raw_mant + 4503599627370496
+  let e = if raw_exp == 0 then 0 - 1074 else raw_exp - 1075
+  let blk = prim.alloc_list(468)
+  let sb = prim.handle(blk) + 12
+  let off_r = sb + 0
+  let off_s = sb + 528
+  let off_tmp = sb + 2112
+  let dp = sb + 2640
+  __dg_set_u64(off_r, ff)
+  let _init = if e >= 0 then {
+    __dg_shl(off_r, e)
+    __dg_set_small(off_s, 1)
+    0
+  } else {
+    __dg_set_small(off_s, 1)
+    __dg_shl(off_s, 0 - e)
+    0
+  }
+  let log10_2 = prim.ffrombits(4599094494223104511)
+  let approx = prim.fadd(__dg_log10(prim.i2f(ff)), prim.fmul(prim.i2f(e), log10_2))
+  let k0 = prim.f2i(prim.fceil(approx))
+  let _sc = if k0 >= 0 then __dg_scale_up(off_s, k0, 0)
+            else __dgf_scale_down(off_r, 0 - k0, 0)
+  let k1 = __dgf_fix1(off_r, off_s, k0)
+  let k = __dgf_fix2(off_r, off_s, off_tmp, k1)
+  let n = k + nd
+  if n < 0 then __dgf_zeros(nd, neg)
+  else {
+    let dlen = __dgf_gen(off_r, off_s, dp, n, 0)
+    __dg_copy(off_tmp, off_r)
+    __dg_shl(off_tmp, 1)
+    let c = __dg_cmp(off_tmp, off_s)
+    let last_odd = if dlen == 0 then false
+                   else prim.band(prim.load8(dp + dlen - 1) - 48, 1) == 1
+    let up = if c > 0 then true else (if c == 0 then last_odd else false)
+    if up then {
+      if dlen == 0 then {
+        prim.store8(dp, 49)
+        __dgf_render(dp, 1, k + 1, nd, neg)
+      } else {
+        let kf = __dg_carry(dp, dlen, k)
+        let dl2 = if kf > k then dlen + 1 else dlen
+        __dgf_render(dp, dl2, kf, nd, neg)
+      }
+    }
+    else {
+      if dlen == 0 then __dgf_zeros(nd, neg)
+      else __dgf_render(dp, dlen, k, nd, neg)
+    }
+  }
+}
+
+fn float_to_fixed(x: Float, nd: Int) -> String = {
+  // ALS-T6: out-of-domain decimals abort with the 1-line message (native
+  // reinterpreted a negative as usize — a raw format! capacity panic; a huge
+  // positive is the machine-dependent allocation abort). 0..=1e6 everywhere.
+  if nd < 0 or nd > 1000000 then prim.die(prim.handle("Error: to_fixed requires decimals in 0..=1000000\n")) else ()
+  let bits0 = prim.fbits(x)
+  let bits = prim.band(bits0, 9223372036854775807)
+  let raw_exp = prim.band(prim.bshr_u(bits, 52), 2047)
+  let raw_mant = prim.band(bits, 4503599627370495)
+  if raw_exp == 2047 then __dg_special(bits0, raw_mant)
+  else if bits == 0 then __dgf_zeros(nd, bits0 < 0)
+  else __dgf_main(x, nd)
+}

@@ -23,11 +23,26 @@ pub fn almide_rt_float_min(a: f64, b: f64) -> f64 {
 pub fn almide_rt_float_max(a: f64, b: f64) -> f64 {
     if a.is_nan() { b } else if b.is_nan() { a } else if a < b { b } else { a }
 }
-pub fn almide_rt_float_clamp(n: f64, lo: f64, hi: f64) -> f64 { n.clamp(lo, hi) }
+// ALS-T6: lo > hi OR a NaN bound aborts in the T6 form — `!(lo <= hi)` covers
+// both (f64::clamp panics raw on either).
+pub fn almide_rt_float_clamp(n: f64, lo: f64, hi: f64) -> f64 {
+    if !(lo <= hi) { eprintln!("Error: clamp requires min <= max"); std::process::exit(1); }
+    n.clamp(lo, hi)
+}
 pub fn almide_rt_float_sign(n: f64) -> f64 { n.signum() }
 pub fn almide_rt_float_to_int(n: f64) -> i64 { n as i64 }
 pub fn almide_rt_float_from_int(n: i64) -> f64 { n as f64 }
-pub fn almide_rt_float_to_fixed(n: f64, decimals: i64) -> String { format!("{:.1$}", n, decimals as usize) }
+pub fn almide_rt_float_to_fixed(n: f64, decimals: i64) -> String {
+    // ALS-T6 form: out-of-domain decimals abort with the 1-line message on BOTH
+    // targets. A negative count reinterpreted as usize (format! capacity panic,
+    // raw exit 101) while wasm printed "" or trapped OOM; a huge positive is the
+    // machine-dependent allocation abort. 1e6 digits (~1 MB) is safely total.
+    if !(0..=1_000_000).contains(&decimals) {
+        eprintln!("Error: to_fixed requires decimals in 0..=1000000");
+        std::process::exit(1);
+    }
+    format!("{:.1$}", n, decimals as usize)
+}
 pub fn almide_rt_float_is_nan(n: f64) -> bool { n.is_nan() }
 pub fn almide_rt_float_is_infinite(n: f64) -> bool { n.is_infinite() }
 pub fn almide_rt_float_to_bits(f: f64) -> i64 { f.to_bits() as i64 }

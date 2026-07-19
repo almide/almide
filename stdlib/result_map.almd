@@ -160,3 +160,105 @@ fn result_flatten(r: Result[Result[Int, String], String]) -> Result[Int, String]
   let rmsg = prim.load64(h + 12)
   if tag == 0 then __rfl_outer_ok(h) else __rfl_err_at(rmsg)
 }
+
+// ── HEAP-Ok Result twins (`Result[String, String]`) ─────────────────────────
+// A heap-Ok Result is the CAP-AS-TAG block (payload handle @12, tag @16; len@4
+// always 1) — the len-as-tag impls above read len@4 and took every `ok("s")` for
+// an Err, then rebuilt the WRONG layout (the fuzz C-904 silent `ok("")` /
+// payload-swap class). Each twin reads tag@16, borrows the payload via
+// load_handle, and rebuilds through the typed ok()/err()/some() ctors (which
+// materialize the cap-as-tag / 0-or-1-Option layouts the consumers read). A
+// borrowed payload SHARES into the rebuilt ctor (Dup — the option-twin
+// discipline); a closure's fresh result MOVES in.
+
+fn __rmh_ok_share(x: String) -> Result[String, String] = ok(x)
+fn __rmh_err_share(x: String) -> Result[String, String] = err(x)
+fn __rmh_some_share(x: String) -> Option[String] = some(x)
+
+// result.map_h: ok(x) → ok(f(x)), err(e) → err(e shared)
+fn __rmh_map_ok(x: String, f: (String) -> String) -> Result[String, String] = {
+  let y = f(x)
+  ok(y)
+}
+fn result_map_h(r: Result[String, String], f: (String) -> String) -> Result[String, String] = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  if tag == 0 then {
+    let x: String = prim.load_handle(h + 12)
+    __rmh_map_ok(x, f)
+  } else {
+    let e: String = prim.load_handle(h + 12)
+    __rmh_err_share(e)
+  }
+}
+
+// result.map_err_h: ok(x) → ok(x shared), err(e) → err(f(e))
+fn __rmh_maperr_err(e: String, f: (String) -> String) -> Result[String, String] = {
+  let y = f(e)
+  err(y)
+}
+fn result_map_err_h(r: Result[String, String], f: (String) -> String) -> Result[String, String] = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  if tag == 0 then {
+    let x: String = prim.load_handle(h + 12)
+    __rmh_ok_share(x)
+  } else {
+    let e: String = prim.load_handle(h + 12)
+    __rmh_maperr_err(e, f)
+  }
+}
+
+// result.flat_map_h: ok(x) → f(x) (its fresh Result moved out), err(e) → err(e shared)
+fn __rmh_flatmap_ok(x: String, f: (String) -> Result[String, String]) -> Result[String, String] = {
+  let r2 = f(x)
+  r2
+}
+fn result_flat_map_h(r: Result[String, String], f: (String) -> Result[String, String]) -> Result[String, String] = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  if tag == 0 then {
+    let x: String = prim.load_handle(h + 12)
+    __rmh_flatmap_ok(x, f)
+  } else {
+    let e: String = prim.load_handle(h + 12)
+    __rmh_err_share(e)
+  }
+}
+
+// result.unwrap_or_else_h: ok(x) → x, err(e) → f(e) (option_unwrap_or_else_h's shape)
+fn __rmh_uoe_err(e: String, f: (String) -> String) -> String = {
+  let y = f(e)
+  y
+}
+fn result_unwrap_or_else_h(r: Result[String, String], f: (String) -> String) -> String = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  if tag == 0 then {
+    let x: String = prim.load_handle(h + 12)
+    x
+  } else {
+    let e: String = prim.load_handle(h + 12)
+    __rmh_uoe_err(e, f)
+  }
+}
+
+// result.to_option_h: ok(x) → some(x shared), err(_) → none
+fn result_to_option_h(r: Result[String, String]) -> Option[String] = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  if tag == 0 then {
+    let x: String = prim.load_handle(h + 12)
+    __rmh_some_share(x)
+  } else none
+}
+
+// result.to_err_option_h: ok(_) → none, err(e) → some(e shared)
+fn result_to_err_option_h(r: Result[String, String]) -> Option[String] = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  if tag >= 1 then {
+    let e: String = prim.load_handle(h + 12)
+    __rmh_some_share(e)
+  } else none
+}

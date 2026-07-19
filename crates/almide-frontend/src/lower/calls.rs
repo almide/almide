@@ -207,6 +207,25 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
         }
     }
 
+    // ALS-T18: the assert family OUTSIDE a test block desugars ONCE here into
+    // the normalized abort form, so every consumer (the native walker, the v0
+    // wasm emit, the v1 MIR leg, the interp oracle) inherits identical
+    // observables: ONE stderr line + exit 1 — never a raw Rust panic (exit
+    // 101) or a bare wasm trap (exit 134). Fuzz seed-20260718 index 10:
+    // `assert_eq` in main leaked the native panic banner with exit 101 while
+    // wasm printed a value-less line with exit 1. Test blocks keep the harness
+    // assertion forms (cargo / the wasm test runner report those).
+    if !ctx.in_test {
+        if let CallTarget::Named { name } = &target {
+            let n = name.as_str();
+            if (matches!(n, "assert_eq" | "assert_ne") && ir_args.len() == 2)
+                || (n == "assert" && !ir_args.is_empty())
+            {
+                return desugar_assert_abort(ctx, n, ir_args, span);
+            }
+        }
+    }
+
     // A call to a closure VALUE (Computed target) has, by definition, the
     // callee's RETURN type — even when the inferred `ty` came back as the whole
     // `Fn` type (which happens for a HOF lambda parameter whose concrete type is
@@ -231,6 +250,127 @@ fn strip_result_ok(ty: &Ty) -> Ty {
         Ty::Applied(TypeConstructorId::Result, args) if !args.is_empty() => args[0].clone(),
         _ => ty.clone(),
     }
+}
+
+/// Build the ALS-T18 abort form for a non-test assert:
+/// ```text
+/// { let __a0 = l; let __a1 = r;
+///   if <cond> then () else { eprintln("Error: assertion failed: …"); process.exit(1) } }
+/// ```
+/// Operands bind to temps FIRST so each evaluates exactly once (the failure
+/// message re-references the temps, never re-runs the operand expressions).
+/// The message forms: `assert_eq` → `Error: assertion failed: left = <l>,
+/// right = <r>`; `assert_ne` → `Error: assertion failed: both = <l>`;
+/// `assert(c)` → `Error: assertion failed`; `assert(c, msg)` → `Error:
+/// assertion failed: <msg>`. Display of the operands is the ALS-R2
+/// interpolation form (the same `${…}` rendering).
+fn desugar_assert_abort(
+    ctx: &mut LowerCtx,
+    name: &str,
+    ir_args: Vec<IrExpr>,
+    span: Option<ast::Span>,
+) -> IrExpr {
+    let mut stmts: Vec<IrStmt> = Vec::new();
+    let mut vars: Vec<IrExpr> = Vec::new();
+    for (i, a) in ir_args.into_iter().enumerate() {
+        let a_ty = a.ty.clone();
+        let v = ctx.define_var(&format!("__assert_{i}"), a_ty.clone(), Mutability::Let, None);
+        stmts.push(IrStmt {
+            kind: IrStmtKind::Bind { var: v, mutability: Mutability::Let, ty: a_ty.clone(), value: a },
+            span: None,
+        });
+        vars.push(ctx.mk(IrExprKind::Var { id: v }, a_ty, span));
+    }
+    let cond = match name {
+        "assert_eq" => ctx.mk(
+            IrExprKind::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(vars[0].clone()),
+                right: Box::new(vars[1].clone()),
+            },
+            Ty::Bool,
+            span,
+        ),
+        "assert_ne" => ctx.mk(
+            IrExprKind::BinOp {
+                op: BinOp::Neq,
+                left: Box::new(vars[0].clone()),
+                right: Box::new(vars[1].clone()),
+            },
+            Ty::Bool,
+            span,
+        ),
+        _ => vars[0].clone(),
+    };
+    let parts: Vec<IrStringPart> = match name {
+        "assert_eq" => vec![
+            IrStringPart::Lit { value: "Error: assertion failed: left = ".into() },
+            IrStringPart::Expr { expr: vars[0].clone() },
+            IrStringPart::Lit { value: ", right = ".into() },
+            IrStringPart::Expr { expr: vars[1].clone() },
+        ],
+        "assert_ne" => vec![
+            IrStringPart::Lit { value: "Error: assertion failed: both = ".into() },
+            IrStringPart::Expr { expr: vars[0].clone() },
+        ],
+        _ if vars.len() >= 2 => vec![
+            IrStringPart::Lit { value: "Error: assertion failed: ".into() },
+            IrStringPart::Expr { expr: vars[1].clone() },
+        ],
+        _ => vec![IrStringPart::Lit { value: "Error: assertion failed".into() }],
+    };
+    let msg = ctx.mk(IrExprKind::StringInterp { parts }, Ty::String, span);
+    let eprint = ctx.mk(
+        IrExprKind::Call {
+            target: CallTarget::Named { name: sym("eprintln") },
+            args: vec![msg],
+            type_args: vec![],
+        },
+        Ty::Unit,
+        span,
+    );
+    let one = ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span);
+    let exit = ctx.mk(
+        IrExprKind::Call {
+            target: CallTarget::Module {
+                module: sym("process"),
+                func: sym("exit"),
+                def_id: ctx.def_map.get(&sym("process.exit")).copied(),
+            },
+            args: vec![one],
+            type_args: vec![],
+        },
+        Ty::Unit,
+        span,
+    );
+    let fail = ctx.mk(
+        IrExprKind::Block {
+            stmts: vec![
+                IrStmt { kind: IrStmtKind::Expr { expr: eprint }, span: None },
+                IrStmt { kind: IrStmtKind::Expr { expr: exit }, span: None },
+            ],
+            expr: None,
+        },
+        Ty::Unit,
+        span,
+    );
+    let ok = ctx.mk(IrExprKind::Block { stmts: vec![], expr: None }, Ty::Unit, span);
+    let guard = ctx.mk(
+        IrExprKind::If { cond: Box::new(cond), then: Box::new(ok), else_: Box::new(fail) },
+        Ty::Unit,
+        span,
+    );
+    ctx.mk(
+        IrExprKind::Block {
+            stmts: {
+                stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: guard }, span: None });
+                stmts
+            },
+            expr: None,
+        },
+        Ty::Unit,
+        span,
+    )
 }
 
 pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallTarget {

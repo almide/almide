@@ -134,10 +134,24 @@ cog>100 は workspace 全体で **47 本**。内訳とスコープ判定:
   + certs/pins フルラダーで着手すること。
 
 判定: 元の「14 本」テーブルは mir/frontend の初回スナップショットで、完遂の
-定義は「アクティブ系の cog>100 = 0」に更新する（v0 退役分は #782 に従属）。
+定義は「アクティブ系の cog>100 = 0」に更新する（v0 退役分は #782 に従属)。
 確立済みレシピ: 純テキスト移動（python 機械導出）→ certs byte 比較、
 State-struct 束ね（OwnershipScan / CertScan 前例）→ ownership.cert 一致が
 決定的証明。
+
+## 再計測（2026-07-18、#782 file-level WALL 焼却アーク完結後）
+
+アクティブ系（almide-codegen 除外）cog>100 は **26 本**（wall 焼却の新機構分を
+含む）。ワースト: lower_stmt(315)、render_fn(285)、try_render_wasm_source_impl
+(269)、list_call_name(239)、lower_bind_heap(225)、frontend lower_expr(206) …。
+
+- 2026-07-18 `lower_stmt`（cog 315 — アクティブ系ワースト）→ ~95 行の
+  per-stmt-kind router + 5 メソッド（lower_stmt_assign / _index_assign /
+  _field_assign / _map_insert / _expr、いずれも verbatim 移動 + 参照調整
+  （match 束縛 `*var`→param `var: VarId`/`Sym` の機械 rename）のみ）。検証:
+  **4 certs + wall report byte 一致** + corpus-wall（kernel oracle 込み）+
+  almide test 288 + sweep PASS 279/TRAP 0 + cargo test。halves の
+  `lower_stmt_assign`(120) が第二ラウンド候補に残存、`lower_stmt_expr` は 75。
 
 ## 残り 8 本の分解性分類（2026-07-16 精査）
 
