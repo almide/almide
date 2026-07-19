@@ -127,22 +127,39 @@ fn render_op(
             }
             s
         }
-        // The rung-4 bounds-checked SCALAR element load — the exact composition the
-        // inline `Handle`+`ElemAddr`+`Load{8}` sequence rendered (`$elem_addr_chk`
-        // TRAPs on idx<0 / >=cap, matching native's halt).
+        // The rung-4 bounds-checked SCALAR element load. The check + address are
+        // INLINE-EXPANDED (#806): the old `call $elem_addr_chk` put a function call
+        // in every `v[j]` of a hot loop (~17x vs native on spectralnorm — wasmtime
+        // does not inline across wasm calls), where native's LLVM reduces the same
+        // check to a few instructions. The expansion is byte-for-byte the SAME
+        // semantics as `$elem_addr_chk`: idx<0 || idx>=LEN aborts with the
+        // native-identical bounds message (never silent corruption), else
+        // list + HEADER + idx*ELEM_SIZE. Operands are locals, so re-evaluating
+        // them costs nothing and no scratch local is needed.
         Op::ListGetScalar { dst, list, idx } => {
             format!(
-                "    (local.set {d} (i64.load (call $elem_addr_chk (local.get {l}) (i32.wrap_i64 (local.get {i})))))\n",
+                "    (if (i32.or (i32.lt_s (i32.wrap_i64 (local.get {i})) (i32.const 0))\n\
+                 \x20                (i32.ge_s (i32.wrap_i64 (local.get {i}))\n\
+                 \x20                          (i32.load (i32.add (local.get {l}) (i32.const {LIST_LEN_OFFSET})))))\n\
+                 \x20     (then (call $__div_trap (i32.const {BOUNDS_MSG_ADDR}) (i32.const 27))))\n\
+                 \x20   (local.set {d} (i64.load (i32.add (i32.add (local.get {l}) (i32.const {LIST_HEADER}))\n\
+                 \x20                                     (i32.mul (i32.wrap_i64 (local.get {i})) (i32.const {ELEM_SIZE})))))\n",
                 d = local(*dst),
                 l = local(*list),
                 i = local(*idx),
             )
         }
         // The rung-4 bounds-checked SCALAR element store (COW is the caller's
-        // MakeUnique before this op) — the inline `Handle`+`ElemAddr`+`Store{8}` twin.
+        // MakeUnique before this op) — the inline-expanded twin of the load above.
         Op::ListSetScalar { list, idx, val } => {
             format!(
-                "    (i64.store (call $elem_addr_chk (local.get {l}) (i32.wrap_i64 (local.get {i}))) (local.get {v}))\n",
+                "    (if (i32.or (i32.lt_s (i32.wrap_i64 (local.get {i})) (i32.const 0))\n\
+                 \x20                (i32.ge_s (i32.wrap_i64 (local.get {i}))\n\
+                 \x20                          (i32.load (i32.add (local.get {l}) (i32.const {LIST_LEN_OFFSET})))))\n\
+                 \x20     (then (call $__div_trap (i32.const {BOUNDS_MSG_ADDR}) (i32.const 27))))\n\
+                 \x20   (i64.store (i32.add (i32.add (local.get {l}) (i32.const {LIST_HEADER}))\n\
+                 \x20                       (i32.mul (i32.wrap_i64 (local.get {i})) (i32.const {ELEM_SIZE})))\n\
+                 \x20              (local.get {v}))\n",
                 l = local(*list),
                 i = local(*idx),
                 v = local(*val),
