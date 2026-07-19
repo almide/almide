@@ -21,6 +21,8 @@ Use `almide explain <code>` to read these from the CLI.
 | [E014](E014.md) | Unreachable match arm |
 | [E015](E015.md) | Possible stdlib reimplementation (warning, delegation shim) |
 | [E028](E028.md) | `main()` takes no parameters (use `env.args()`) |
+| [E029](E029.md) | Unknown type name in an annotation or record literal |
+| [E030](E030.md) | Type has no ordering (sort/min/max over Map/Set/Fn or compound Float) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Codes in the 4-digit range (`E0001` and up) that leak into output

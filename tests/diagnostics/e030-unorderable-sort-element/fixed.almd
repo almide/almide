@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let xs: List[Map[String, Int]] = [["a": 1], ["b": 2]]
+  let sorted = list.sort_by(xs, (m) => map.len(m))
+  println(int.to_string(list.len(sorted)))
+}

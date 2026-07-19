@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let xs: List[Inner] = [Inner { x: 1, y: 10 }]
+  println(int.to_string(list.len(xs)))
+}

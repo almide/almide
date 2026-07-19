@@ -209,7 +209,7 @@ impl Checker {
 
 impl Checker {
     /// Validate that all Map literal key types are hashable (post-solve).
-    /// ALS-C9 / E026: an order-sensitive combinator (`list.sort`/`min`/`max`,
+    /// ALS-C9 / E030: an order-sensitive combinator (`list.sort`/`min`/`max`,
     /// `sort_by`'s key) needs an ORDERABLE element — the native runtime's
     /// `T: Ord` bound. A bare Float element is fine (it routes to the `_float`
     /// twins); a Map/Set/Fn element — or Float NESTED inside a compound — has
@@ -247,7 +247,7 @@ impl Checker {
                 "Ordering needs Int, Bool, String, Float, or lists/tuples/records of those.                  Map, Set, and function values have no order; Float inside a compound                  element has none either (compare via an explicit key instead)."
                     .to_string(),
                 format!("call to {}", fn_name),
-            ).with_code("E026");
+            ).with_code("E030");
             if let Some(s) = span {
                 diag.line = Some(s.line);
                 diag.col = Some(s.col);
@@ -256,7 +256,7 @@ impl Checker {
         }
     }
 
-    /// E027: every `Ty::Named` mentioned in an ANNOTATION must be a declared
+    /// E029: every `Ty::Named` mentioned in an ANNOTATION must be a declared
     /// type. An undeclared name flowed through unification unconstrained
     /// (`let xs: List[Inner] = []`) and compiled to a nonexistent Rust type
     /// (E0412/E0425) — check accepted, build failed (the acceptance-parity
@@ -300,7 +300,7 @@ impl Checker {
                     format!("unknown type '{}'", s),
                     format!("no `type {}` is declared (or imported) in this program — declare it, or check the spelling", s),
                     ctx.clone(),
-                ).with_code("E027");
+                ).with_code("E029");
                 if let Some(sp) = span {
                     diag.line = Some(sp.line);
                     diag.col = Some(sp.col);

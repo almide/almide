@@ -229,7 +229,7 @@ impl Checker {
                                     n, &self.env.types, self.current_module_prefix.as_deref(),
                                 ).unwrap_or_else(|| sym(n)),
                             };
-                            // E027: a record literal naming an UNDECLARED type
+                            // E029: a record literal naming an UNDECLARED type
                             // previously fell through with empty decl fields —
                             // validation skipped, `Ty::Named(Inner)` flowed into
                             // the IR, and codegen emitted a nonexistent Rust
@@ -240,7 +240,7 @@ impl Checker {
                                     format!("unknown type '{}'", n),
                                     format!("no `type {}` is declared (or imported) in this program — declare it, or check the spelling", n),
                                     format!("record literal {}", n),
-                                ).with_code("E027"));
+                                ).with_code("E029"));
                                 return Ty::Unknown;
                             }
                             let generic_args = self.instantiate_type_generics(n);

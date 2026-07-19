@@ -113,10 +113,10 @@ pub struct Checker {
     /// Each entry: (key_type, span) — checked via `is_hash()` once types are resolved.
     pub(crate) deferred_map_key_checks: Vec<(Ty, Option<crate::ast::Span>)>,
     /// Order-sensitive combinator subjects/keys (list.sort/min/max, sort_by's
-    /// key) awaiting the post-solve ORDERABLE-element check (E026).
+    /// key) awaiting the post-solve ORDERABLE-element check (E030).
     pub(crate) deferred_ord_elem_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
     /// Annotation-resolved types awaiting the post-solve UNKNOWN-NAME check
-    /// (E027): a `Ty::Named` whose sym is not a declared type compiles to a
+    /// (E029): a `Ty::Named` whose sym is not a declared type compiles to a
     /// nonexistent Rust type (E0412/E0422/E0425) after `check` accepted — the
     /// acceptance-parity gap differential-fuzz seed 20260718 index 940 hit
     /// with a mutated-away `type` declaration. Generic params are immune by
