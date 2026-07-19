@@ -2132,6 +2132,12 @@ impl LowerCtx {
                     {
                         self.seed_variant_param(p, fty);
                     }
+                    // A CLOSURE payload (`Run(f) => f()` — the variant-stored closure
+                    // class): the borrowed handle IS a closure block — admit it to the
+                    // dispatch set so the arm's `f(…)` lowers to `CallIndirect`.
+                    if matches!(fty, Ty::Fn { .. }) {
+                        self.closure_values.insert(p);
+                    }
                     self.value_of.insert(*var, p);
                 } else {
                     // Rung-5 variants slab: a SCALAR payload is a plain slot of the
@@ -2249,7 +2255,16 @@ impl LowerCtx {
     ) -> Result<(), LowerError> {
         let mark = self.live_heap_handles.len();
         self.bind_variant_arm(kind, h, subj);
-        self.lower_branch_arm(None, body)?;
+        // This arm executes under REAL `IfThen`/`Else`/`EndIf` markers (only the taken
+        // arm runs — `emit_variant_unit_chain`), so it is an EXECUTABLE unit arm:
+        // raise `unit_arm_depth` so a shared-cell/mutable-global write inside it is
+        // admitted as a real conditional effect (the modeled-frame guard keys on this;
+        // `lower_branch_arm` alone raises only `in_frame`, which also covers the
+        // both-arms linearization where such a write MUST wall).
+        self.unit_arm_depth += 1;
+        let r = self.lower_branch_arm(None, body);
+        self.unit_arm_depth -= 1;
+        r?;
         self.drop_arm_locals(mark);
         Ok(())
     }

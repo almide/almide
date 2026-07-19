@@ -49,6 +49,16 @@ impl LowerCtx {
             }
             return self.lower_bind(var, ty, tail);
         }
+        // A SHARED-CELL var (captured by a lambda AND mutated — cells.rs): bind it
+        // into a 1-slot heap cell instead of a plain local, so the closure and the
+        // enclosing scope share storage. Only the admitted inner classes take a cell;
+        // an unadmitted class binds normally and `lift_lambda`'s mutated-capture
+        // gate refuses the lift — an honest wall, never the value-copy miscompile.
+        if self.cell_vars.contains(&var) {
+            if let Some(class) = cell_class_of(ty) {
+                return self.lower_cell_bind(var, ty, value, class);
+            }
+        }
         // Decomposed (#781, cog 272): the SCALAR path and the HEAP path are
         // verbatim text moves into `lower_bind_scalar` / `lower_bind_heap` —
         // behavior proven by the classify wall-list byte-identity ladder.

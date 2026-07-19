@@ -397,6 +397,16 @@ impl LowerCtx {
                     .try_lower_option_ctor(arg, &arg.ty)
                     .or_else(|| self.lower_owned_heap_field(arg))?;
                 field_vals.push((obj, true));
+            } else if matches!(&arg.ty, Ty::Fn { .. }) {
+                // A CLOSURE ctor field (`Run(() => …)` / `Thunk((x) => x * x)` — the
+                // variant-stored closure class): a Lambda arg LIFTS to its closure
+                // block, a Var arg Dups the tracked block (both via
+                // `lower_owned_heap_field`'s existing arms); the ctor then owns the
+                // block and the generated `$__drop_<T>`'s Fn arm frees it via
+                // `__drop_closure` (the classifier + generator admit Fn fields in
+                // the same change — construction and drop agree).
+                let obj = self.lower_owned_heap_field(arg)?;
+                field_vals.push((obj, true));
             } else if is_heap_ty(&arg.ty) {
                 return None; // List[String] / Map / other heap ctor field — a later brick
             } else {

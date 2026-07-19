@@ -389,6 +389,12 @@ impl LowerCtx {
     /// The `Assign` statement arm of [`Self::lower_stmt`] — verbatim move
     /// (#781 decomposition; the match bindings become parameters).
     fn lower_stmt_assign(&mut self, var: VarId, value: &IrExpr) -> Result<(), LowerError> {
+                // ASSIGN to a SHARED-CELL var (cells.rs): write through the cell slot —
+                // rebinding a local copy would silently vanish for the sharing closure
+                // (the same hazard as a mutable global, function-locally).
+                if let Some(&cell) = self.cell_of.get(&var) {
+                    return self.lower_cell_assign(var, cell, value);
+                }
                 // ASSIGN to a MUTABLE module-level `var`: write through its STORAGE SLOT
                 // (`lower_bind` below would rebind a function-LOCAL copy and the write
                 // silently vanishes for every other function). The `value_of` gate skips a
@@ -1415,6 +1421,12 @@ impl LowerCtx {
     }
 
     pub(crate) fn value_or_global(&mut self, var: VarId) -> Result<ValueId, LowerError> {
+        // A SHARED-CELL var (cells.rs) reads its cell slot FRESH on every reference —
+        // checked BEFORE `value_of` (a cell var must never be cached: an intervening
+        // closure call may have written the cell, exactly like a mutable global).
+        if let Some(&cell) = self.cell_of.get(&var) {
+            return self.lower_cell_read(var, cell);
+        }
         if let Some(&v) = self.value_of.get(&var) {
             return Ok(v);
         }

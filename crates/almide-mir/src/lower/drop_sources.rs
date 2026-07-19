@@ -122,6 +122,17 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                         "        prim.rc_dec(prim.load64(h + {off}))
 "
                     ));
+                } else if matches!(ty, Ty::Fn { .. }) {
+                    // A CLOSURE ctor field (`Run(() -> Unit)` — the variant-stored closure
+                    // class): the slot holds a self-describing closure block whose captured
+                    // heap env a flat rc_dec would LEAK — free it via `__drop_closure`, the
+                    // SAME routine the record-drop generator's Fn arm uses (CLOSURE_DROP_SRC
+                    // is linked whenever the program creates closures, which a populated Fn
+                    // payload requires). The binding type is the block's List[Int] rep.
+                    frees.push_str(&format!(
+                        "        let f{idx}: List[Int] = prim.load_handle(h + {off})\n        __drop_closure(f{idx})\n"
+                    ));
+                    idx += 1;
                 } else if let Some(ev) = list_rich_variant_elem(ty, &rec_variant_names) {
                     // A `List[<rich variant>]` ctor field (`Block(_, List[Instr])`): each element is a
                     // recursive-drop variant block, freed per-element by the generated `$__drop_list_<ev>`

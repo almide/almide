@@ -212,9 +212,14 @@ fn preamble_func_names() -> BTreeSet<String> {
 fn resolvable_call_names(prog: &MirProgram) -> BTreeSet<String> {
     let mut names: BTreeSet<String> = prog.functions.iter().map(|f| f.name.clone()).collect();
     names.extend(preamble_func_names());
-    // The mutable-global slot take-accessor is emitted iff the program has slots — it
-    // resolves exactly then (a global-free program never names it).
-    if prog.mutable_global_count > 0 {
+    // The mutable-global slot take-accessor: emitted for programs with global slots
+    // AND for local SHARED-CELL assigns (cells.rs), which name it over a cell-slot
+    // address — mirror the `mg_helpers` emission condition exactly, so the name
+    // resolves iff the definition is rendered.
+    let uses_mg_take = prog.functions.iter().any(|f| {
+        f.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
+    });
+    if prog.mutable_global_count > 0 || uses_mg_take {
         names.insert("__mg_take".to_string());
     }
     names
@@ -554,7 +559,12 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // to the caller (the assign path drops it and stores a replacement), which is
     // exactly the fresh-owned CallFn result the ownership certificate models. Reads
     // need no helper: they borrow-then-`Dup` the slot handle inline (`rc_inc`).
-    let mg_helpers = if prog.mutable_global_count > 0 {
+    // Emitted for mutable-global slots AND for the local SHARED-CELL assigns
+    // (cells.rs), which reuse the same take accessor over a cell-slot address.
+    let uses_mg_take = prog.functions.iter().any(|f| {
+        f.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
+    });
+    let mg_helpers = if prog.mutable_global_count > 0 || uses_mg_take {
         "  (func $__mg_take (param $a i64) (result i32)\n    \
          (i32.load (i32.wrap_i64 (local.get $a))))\n"
             .to_string()

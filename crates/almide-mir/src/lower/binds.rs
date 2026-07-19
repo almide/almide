@@ -78,14 +78,23 @@ impl LowerCtx {
         }
         let mut cc = CapCollect { free: &free, out: Vec::new() };
         almide_ir::visit::IrVisitor::visit_expr(&mut cc, body);
-        // HONEST-WALL GATE — a MUTATED capture (`(x) => { calls = calls + 1; x }`,
-        // indexassign/fieldassign through a capture): env slots are VALUE COPIES /
-        // co-owns, so writing the copy silently LOSES the mutation (sort_by_call_count
-        // printed calls=0; the closure-mutation wasm_runtime cells printed stale
-        // values — all bisect-confirmed PRE-EXISTING under `--verified`). Decline the
-        // lift: the call site then walls (strict mode) and `--verified` falls back to
-        // v0. Shapes the DEFUNC inliner takes (list/fan HOFs with inline lambdas)
-        // never reach this lift — inlined mutation is direct and correct.
+        // HONEST-WALL GATE — a MUTATED capture without a SHARED CELL: env slots are
+        // VALUE COPIES / co-owns, so writing the copy silently LOSES the mutation
+        // (sort_by_call_count printed calls=0; the closure-mutation wasm_runtime
+        // cells printed stale values — all bisect-confirmed). A var the cell pre-scan
+        // promoted (`cell_of`) is EXEMPT — its capture is the cell handle and every
+        // read/write goes through the shared slot. Two layers:
+        //   (a) the pre-scan verdict: a captured var in `cell_vars` (mutated ANYWHERE
+        //       — including the enclosing scope after capture, the STALE-READ
+        //       direction a body-only scan cannot see) that did NOT get a cell (an
+        //       unadmitted inner class) refuses the lift;
+        //   (b) the body-local MutScan (kept for entry paths that skip the pre-scan),
+        //       now also catching IN-PLACE MUTATOR CALLS (`list.push(acc, 1)`) — the
+        //       exact shape the rebind desugar turns into an Assign only later, which
+        //       an Assign-only scan missed (the s2/s4 container-closure miscompile).
+        if free.iter().any(|v| self.cell_vars.contains(v) && !self.cell_of.contains_key(v)) {
+            return None;
+        }
         {
             struct MutScan<'a> {
                 free: &'a [VarId],
@@ -108,8 +117,18 @@ impl LowerCtx {
                     }
                     almide_ir::visit::walk_stmt(self, s);
                 }
+                fn visit_expr(&mut self, e: &IrExpr) {
+                    if let Some(v) = crate::lower::inplace_mutated_receiver(e) {
+                        if self.free.contains(&v) {
+                            self.hit = true;
+                        }
+                    }
+                    almide_ir::visit::walk_expr(self, e);
+                }
             }
-            let mut ms = MutScan { free: &free, hit: false };
+            let ms_free: Vec<VarId> =
+                free.iter().copied().filter(|v| !self.cell_of.contains_key(v)).collect();
+            let mut ms = MutScan { free: &ms_free, hit: false };
             almide_ir::visit::IrVisitor::visit_expr(&mut ms, body);
             if ms.hit {
                 return None;
@@ -159,6 +178,21 @@ impl LowerCtx {
         let mut nested_heap_caps: Vec<(VarId, Ty)> = Vec::new();
         let mut scalar_caps: Vec<(VarId, Ty)> = Vec::new();
         for (v, ty) in cc.out {
+            // A SHARED-CELL capture (cells.rs): the env slot holds the CELL handle,
+            // not a value copy — reads/writes inside the body go through the shared
+            // slot (`sub.cell_of`, seeded in the prologue). Drop-class placement
+            // rides the existing self-describing header: a SCALAR-inner cell is a
+            // FLAT block (one rc_dec frees it; the raw inner slot is untouched); a
+            // FLAT-HEAP-inner cell is physically a 1-slot DynListStr (the nested
+            // walk decs slot 0 — a full free for a flat inner — then frees the cell).
+            if self.cell_of.contains_key(&v) {
+                match cell_class_of(&ty) {
+                    Some(CellClass::Scalar) => heap_caps.push((v, ty)),
+                    Some(CellClass::FlatHeap) => nested_heap_caps.push((v, ty)),
+                    None => return None,
+                }
+                continue;
+            }
             if matches!(ty, Ty::Fn { .. }) {
                 closure_caps.push((v, ty));
             } else if one_level_exact(&ty) {
@@ -185,7 +219,11 @@ impl LowerCtx {
         // KNOWN closure block (closure_values), or its slot would hold a non-block.
         let mut cap_vals: Vec<ValueId> = Vec::new();
         for (i, (v, _)) in captures.iter().enumerate() {
-            let cv = *self.value_of.get(v)?;
+            // A cell capture resolves to its CELL BLOCK (shared storage), not a value.
+            let cv = match self.cell_of.get(v) {
+                Some(&c) => c,
+                None => *self.value_of.get(v)?,
+            };
             if i < n_closure && !self.closure_values.contains(&cv) {
                 return None;
             }
@@ -218,6 +256,9 @@ impl LowerCtx {
             // top-level `let` materializes its real value exactly like the
             // enclosing fn does.
             global_inits: self.global_inits.clone(),
+            // …and the SHARED-CELL var set, so a NESTED lift inside this body
+            // re-captures a cell as a cell (its own `cell_of` seeds below).
+            cell_vars: self.cell_vars.clone(),
             ..Default::default()
         };
         // The leading ENV param: the closure block itself, BORROWED (the caller owns it
@@ -261,7 +302,7 @@ impl LowerCtx {
         // handle also joins the sub-context's `closure_values` so `g(x)` inside the body
         // dispatches (the `compose` shape). A scalar capture is a raw 64-bit load. All
         // Prim reads — no ownership events (the block is the caller's).
-        for (i, (v, _)) in captures.iter().enumerate() {
+        for (i, (v, ty)) in captures.iter().enumerate() {
             let val = sub.fresh_value();
             if i < n_closure + n_heap + n_nested_heap {
                 let h = sub.fresh_value();
@@ -280,6 +321,15 @@ impl LowerCtx {
                 sub.param_values.insert(val);
                 if i < n_closure {
                     sub.closure_values.insert(val);
+                }
+                // A SHARED-CELL capture: the loaded handle IS the cell block — map the
+                // var into the sub-context's `cell_of` (NOT `value_of`), so body reads
+                // load the slot fresh and body assigns store through it. The inner
+                // type rides along for the read/write class dispatch.
+                if self.cell_of.contains_key(v) {
+                    sub.cell_of.insert(*v, val);
+                    sub.var_decl_tys.insert(*v, ty.clone());
+                    continue;
                 }
             } else {
                 // Rung-5 closures slab: a SCALAR capture reads its slot through the

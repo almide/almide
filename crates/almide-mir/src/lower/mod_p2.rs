@@ -1078,6 +1078,22 @@ pub(crate) struct LowerCtx {
     /// carries only the VarId, and the field-slot store (`r.f = v` → `ListSetScalar`)
     /// needs the container type's field offsets.
     var_decl_tys: HashMap<VarId, Ty>,
+    /// SHARED-CELL vars (closures Rung 6): locals that are BOTH captured by some lambda
+    /// AND mutated (an `Assign`/in-place mutator anywhere in the fn — enclosing scope or
+    /// any lambda body). A plain env value-copy capture silently LOSES such mutations
+    /// (the closure rebinds its copy — the container-stored-closure miscompile class), so
+    /// these vars live in a heap CELL instead: a 1-slot block holding the current
+    /// value/handle, read fresh at every reference and written through at every assign —
+    /// the LOCAL analogue of the mutable-global slot machinery (`value_or_global` /
+    /// `__mg_take`+Store). Computed by `collect_cell_vars` over the final desugared body
+    /// before lowering, so bind/read/write/capture all agree on which vars are cells.
+    cell_vars: HashSet<VarId>,
+    /// var → its live CELL BLOCK value (`cell_vars` members only, populated at the
+    /// `Bind`). Reads load slot 0 fresh (never cached in `value_of` — an intervening
+    /// closure call may have written it); assigns take+drop the old slot value and
+    /// store the new one; `lift_lambda` captures the CELL handle (rc-shared), so the
+    /// closure and the enclosing scope address the same storage.
+    cell_of: HashMap<VarId, ValueId>,
     /// MIR values that are `List[String]` (NESTED-OWNERSHIP lists — their i64 slots hold OWNED
     /// String handles). A scope-end drop of one emits [`Op::DropListStr`] (recursive free),
     /// not a flat [`Op::Drop`] — so the element Strings are reclaimed. Populated when an
@@ -1413,6 +1429,8 @@ impl VariantLayouts {
             self.field_is_variant(t)
                 || matches!(t, Ty::Named(n, _) if is_record(n.as_str()))
                 || matches!(t, Ty::String)
+                // A CLOSURE field — freed via `__drop_closure` (mirrors the generator).
+                || matches!(t, Ty::Fn { .. })
                 || matches!(t, Ty::Applied(TypeConstructorId::List, a)
                     if a.len() == 1
                         && (!is_heap_ty(&a[0])

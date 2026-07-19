@@ -508,6 +508,13 @@ impl LowerCtx {
                             self.heap_elem_lists.insert(v);
                         }
                     }
+                    // A CLOSURE slot (`let (g, _) = pair` where slot 0 is a Fn — the
+                    // first-class storage class): the borrowed handle IS a closure
+                    // block — admit it to the dispatch set so a later `g()` lowers
+                    // to `CallIndirect` instead of walling on an unknown callee.
+                    if matches!(ty, Ty::Fn { .. }) {
+                        self.closure_values.insert(v);
+                    }
                 } else {
                     self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(v), args: vec![addr] });
                 }

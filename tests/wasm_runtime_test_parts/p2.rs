@@ -426,7 +426,6 @@ fn wasm_reader_closure_observes_writer_closure() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_bytes_mutable_capture_through_closure() {
     // Closure v2 P6: a captured `var buf: Bytes` mutated through a closure must
     // become a shared cell, like List/Map/String. `bytes.push` (and the rest of the
@@ -464,7 +463,6 @@ fn wasm_string_push_clear_in_place() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_closure_stored_in_tuple() {
     // A capture-mutating closure stored in a tuple, destructured into a `let`, and
     // called. Rust typed the binding `(impl Fn(), i64)` → E0562 (impl Trait in a
@@ -483,7 +481,6 @@ fn wasm_closure_stored_in_tuple() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_call_closure_through_list_index() {
     // `fs[0]()` — calling a closure indexed out of a list. The parser read `[0](` as
     // a const-generic type-args call (`fs::<0>()`), emitting an invalid bare-name
@@ -501,7 +498,6 @@ fn wasm_call_closure_through_list_index() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_closure_in_anonymous_record() {
     // A closure stored in an ANONYMOUS record field, then called via `r.run()`.
     // Rust gave `E0277`: the generic anon-record struct demanded `T: Clone + Debug

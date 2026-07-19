@@ -121,7 +121,6 @@ fn assert_cross_target(source: &str) {
 // would break if the [len][cap][data] layout is inconsistent.
 
 #[test]
-    #[ignore = "#782 v1 gap (lowering subset) — native (almide run/test) works via fallback; only the direct wasm-build path walls. Tracked for the next lowering wave."]
 fn wasm_list_literal_access() {
     assert_cross_target(r#"
 fn main() -> Unit = println([10, 20, 30][1] |> int.to_string)

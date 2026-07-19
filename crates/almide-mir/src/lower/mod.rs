@@ -835,6 +835,9 @@ pub fn variant_needs_recursive_drop(
         variant_field_name(t, variant_names).is_some()
             || matches!(t, Ty::Named(n, _) if record_names.contains(n.as_str()))
             || matches!(t, Ty::String)
+            // A CLOSURE field: the generator's Fn arm frees the self-describing
+            // closure block via `__drop_closure`.
+            || matches!(t, Ty::Fn { .. })
             || matches!(t, Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1
                     && (!is_heap_ty(&a[0])
@@ -1849,7 +1852,12 @@ fn lower_function_all_impl(
     let pre_tco = desugar_heap_branches(func_body, variant_layouts);
     let body_ref: &IrExpr = pre_tco.as_ref().unwrap_or(func_body);
     let tco_body = try_tco_rewrite(&ctx.fn_name, &func.params, body_ref);
-    let ret = ctx.lower_body_into(tco_body.as_ref().unwrap_or(body_ref))?;
+    let final_body = tco_body.as_ref().unwrap_or(body_ref);
+    // SHARED-CELL pre-scan (closures Rung 6, cells.rs): over the FINAL lowered tree,
+    // so bind/read/write/capture all classify the same vars as cells. A pure scan —
+    // no rewrite, so the counted tree is untouched.
+    ctx.cell_vars = collect_cell_vars(final_body, &ctx.globals, &func.params);
+    let ret = ctx.lower_body_into(final_body)?;
     // The function's EFFECT SIGNATURE → its declared capability bound. The v1 model
     // has one capability (Stdout); an `effect fn` declares it may reach the host, so
     // it admits the only modeled cap. A pure `fn` declares ∅ — so if it reached
@@ -1913,6 +1921,7 @@ include!("repr_sources.rs");
 include!("newtype_erase.rs");
 include!("record_defaults.rs");
 include!("desugar_guard.rs");
+include!("cells.rs");
 include!("mod_p2.rs");
 include!("mod_p3.rs");
 include!("mod_p4.rs");
