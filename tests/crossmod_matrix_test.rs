@@ -147,7 +147,7 @@ effect fn main() -> Unit = {
 }
 "#,
             expected: "2",
-            status: Status::KnownBroken("#782 v1 gap: a cross-module GENERIC fn call mono-instantiates without a module-fn sibling, so the call site burns the v0 flatten name (almide_rt_m_stash) with no definition — needs mono-instance sibling registration"),
+            status: Status::Works,
         },
         Cell {
             name: "tuple_variant_payload_type",
