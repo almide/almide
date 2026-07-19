@@ -560,7 +560,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (
             include_str!("../../../../stdlib/map_hval.almd"),
-            &[("map_new_hval", "map.new_hval"), ("map_set_hval", "map.set_hval"), ("map_eq_hval", "map.eq_hval"), ("map_from_list_hval", "map.from_list_hval"), ("map_to_string_hval", "map.to_string_hval"), ("list_to_string_lmh", "list.to_string_lmh"), ("map_len_hval", "map.len_hval"), ("map_contains_hval", "map.contains_hval"), ("map_get_hval", "map.get_hval"), ("map_keys_hval", "map.keys_hval"), ("list_group_by", "list.group_by")],
+            &[("map_new_hval", "map.new_hval"), ("map_set_hval", "map.set_hval"), ("map_eq_hval", "map.eq_hval"), ("map_from_list_hval", "map.from_list_hval"), ("map_to_string_hval", "map.to_string_hval"), ("list_to_string_lmh", "list.to_string_lmh"), ("map_len_hval", "map.len_hval"), ("map_contains_hval", "map.contains_hval"), ("map_get_hval", "map.get_hval"), ("map_get_or_hval", "map.get_or_hval"), ("map_keys_hval", "map.keys_hval"), ("list_group_by", "list.group_by")],
         ),
         (include_str!("../../../../stdlib/list_sortby_float.almd"), &[("list_sort_by_float", "list.sort_by_float"), ("list_sort_by_float_rc", "list.sort_by_float_rc")]),
         (include_str!("../../../../stdlib/list_unique.almd"), &[("list_unique", "list.unique")]),

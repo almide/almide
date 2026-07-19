@@ -1246,6 +1246,34 @@ fn __drop_list_closure_loop(h: Int, n: Int, i: Int) -> Unit =
   }
 ";
 
+/// The ALMIDE SOURCE of `__drop_map_mclo` — the recursive release of a
+/// `Map[String, <Fn>]` (the closure-valued map, mclo class). The map is the
+/// hval/skv SPLIT layout ([rc][n@4][cap], keys @ slots 0..n-1, values @ slots
+/// n..2n-1): at the block's last ref, `rc_dec` each key String and free each
+/// VALUE slot via `__drop_closure` (the uniform self-describing closure free —
+/// `__drop_map_hval`'s blind per-slot `rc_dec` would decrement each closure
+/// block without recursively freeing its captured env, the exact leak class
+/// `__drop_list_closure` exists for), then the block. Requires
+/// `CLOSURE_DROP_SRC` in scope (a populated closure-valued map implies the
+/// program creates closures). The param type is spelled `Map[String, Int]` —
+/// any heap map spelling; the routine is handle-level and never reads a value
+/// slot as its declared type.
+pub const MAP_MCLO_DROP_SRC: &str = "\
+fn __drop_map_mclo(m: Map[String, Int]) -> Unit = {
+  let h = prim.handle(m)
+  if prim.load32(h + 0) == 1 then __drop_map_mclo_loop(h, prim.load32(h + 4), 0) else ()
+  prim.rc_dec(h)
+}
+fn __drop_map_mclo_loop(h: Int, n: Int, i: Int) -> Unit =
+  if i >= n then ()
+  else {
+    prim.rc_dec(prim.load64(h + 12 + i * 8))
+    let f: List[Int] = prim.load_handle(h + 12 + (n + i) * 8)
+    __drop_closure(f)
+    __drop_map_mclo_loop(h, n, i + 1)
+  }
+";
+
 /// The ALMIDE SOURCE of `__drop_opt_str_int` — the recursive release of an
 /// `Option[(String, Int)]` (`map.find`'s predicate-search result: `Some((key,
 /// value))` on a hit). Wrapper `[rc][len@4=0-or-1 (Option's tag)][cap@8][@12

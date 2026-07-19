@@ -1301,6 +1301,10 @@ impl LowerCtx {
                 self.str_str_elem_lists.insert(dst);
             } else if crate::lower::is_lenlist_list_ty(ty) {
                 self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+            } else if crate::lower::is_map_fn_ty(ty) {
+                // `Map[String, <Fn>]` arg temp — `$__drop_map_mclo` frees each value via
+                // `__drop_closure` (a flat sweep would leak every captured env slot).
+                self.variant_drop_handles.insert(dst, "map_mclo".to_string());
             } else if let Some(hname) = self.map_named_value_drop(ty) {
                 self.variant_drop_handles.insert(dst, hname);
             } else if crate::lower::is_map_msv_ty(ty) {

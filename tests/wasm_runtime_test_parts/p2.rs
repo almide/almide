@@ -536,7 +536,6 @@ fn wasm_indexassign_noncopy_element_through_closure() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_closures_stored_in_map() {
     // Two DIFFERENT closures stored in a `Map[String, () -> Unit]`, then one
     // extracted via get_or and called. Rust gave `E0308` — the map's erased `_`

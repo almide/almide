@@ -820,6 +820,10 @@ impl LowerCtx {
                 } else if crate::lower::is_map_ivh_ty(ty) {
                     // `Map[Int, String]` — `$__drop_map_ivh` rc_decs each OWNED value slot.
                     self.variant_drop_handles.insert(dst, "map_ivh".to_string());
+                } else if crate::lower::is_map_fn_ty(ty) {
+                    // `Map[String, <Fn>]` — `$__drop_map_mclo` frees each value via
+                    // `__drop_closure` (the hval flat rc_dec would leak captured env).
+                    self.variant_drop_handles.insert(dst, "map_mclo".to_string());
                 } else if crate::lower::is_map_hval_ty(ty) {
                     // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
                     self.variant_drop_handles.insert(dst, "map_hval".to_string());
@@ -961,10 +965,13 @@ impl LowerCtx {
                         &a.kind,
                         IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::ClosureCreate { .. }
                     ) || matches!(&a.kind, IrExprKind::Var { id } if self.lambda_bindings.contains_key(id));
-                    // `List[<Fn>]` is B36's representable shape — excluded from the wall.
+                    // `List[<Fn>]` (B36) and `Map[String, <Fn>]` (the mclo family — the
+                    // hval handle-level twins + `$__drop_map_mclo`) are representable
+                    // closure CONTAINERS — excluded from the wall.
                     let is_representable_closure_list = matches!(&a.ty,
                         Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e)
-                            if e.len() == 1 && matches!(e[0], Ty::Fn { .. }));
+                            if e.len() == 1 && matches!(e[0], Ty::Fn { .. }))
+                        || crate::lower::is_map_fn_ty(&a.ty);
                     !is_closure_arg && !is_representable_closure_list && crate::lower::ty_contains_fn(&a.ty)
                 });
                 let faithful = !self.last_call_had_unlifted_closure && !data_arg_has_fn;
@@ -981,6 +988,15 @@ impl LowerCtx {
                 // `list.map(xs, (x) => x + 1)`, `(p) => p.x` over `List[Point]`) is
                 // UNTOUCHED, so the in-scope HOF byte-matches stay materialized.
                 if crate::lower::is_higher_order(args) && !faithful {
+                    if std::env::var("ALMIDE_DBG_ANF").is_ok() {
+                        eprintln!(
+                            "[hof-guard] {}.{} unlifted={} data_arg_has_fn={}",
+                            module.as_str(),
+                            func.as_str(),
+                            self.last_call_had_unlifted_closure,
+                            data_arg_has_fn
+                        );
+                    }
                     return Err(LowerError::Unsupported(format!(
                         "{}.{} with an unliftable/closure-list higher-order argument \
                          cannot execute faithfully in this brick (walled, not mis-valued)",
@@ -1027,6 +1043,14 @@ impl LowerCtx {
                 if is_self_host_option_module_fn(module.as_str(), func.as_str()) {
                     self.materialized_options.insert(dst);
                 }
+                // A FUNCTION-valued module-call result (`let f = map.get_or(m, k, d)` —
+                // the closure-valued map read): the result IS a closure block — track it
+                // so a later `f()` dispatches via CallIndirect, and its scope-end drop
+                // routes to the recursive `$__drop_closure` (`closure_values` drives
+                // `drop_op_for`; a captured env slot would leak under the flat rc_dec).
+                if matches!(ty, Ty::Fn { .. }) {
+                    self.closure_values.insert(dst);
+                }
                 // A self-host Result fn (`int.parse`) returns a real materialized Result — track it
                 // so a later `match r { Ok(v) => …, Err(e) => … }` over the var EXECUTES.
                 if is_self_host_result_module_fn(module.as_str(), func.as_str()) {
@@ -1069,6 +1093,10 @@ impl LowerCtx {
                 } else if crate::lower::is_map_ivh_ty(ty) {
                     // `Map[Int, String]` — `$__drop_map_ivh` rc_decs each OWNED value slot.
                     self.variant_drop_handles.insert(dst, "map_ivh".to_string());
+                } else if crate::lower::is_map_fn_ty(ty) {
+                    // `Map[String, <Fn>]` — `$__drop_map_mclo` frees each value via
+                    // `__drop_closure` (the hval flat rc_dec would leak captured env).
+                    self.variant_drop_handles.insert(dst, "map_mclo".to_string());
                 } else if crate::lower::is_map_hval_ty(ty) {
                     // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
                     self.variant_drop_handles.insert(dst, "map_hval".to_string());

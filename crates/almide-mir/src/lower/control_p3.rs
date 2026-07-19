@@ -292,6 +292,58 @@ impl LowerCtx {
                 }
             }
         }
+        // `Option[<Fn>] ?? <lambda>` (`map.get(m, "add") ?? ((x) => x)` — the
+        // closure-valued map coalesce): Some → BORROW the payload handle @12 (the
+        // closure block — the Option keeps owning it) then `Dup` a fresh OWNED
+        // reference; None → LIFT the fallback lambda (a fresh owned closure block).
+        // Both arms merge through the SAME proven IfThen/Else/EndIf heap-result
+        // skeleton the variant-ctor fallback above uses; the result joins
+        // `closure_values` (CallIndirect dispatch + the `$__drop_closure` route).
+        if !is_result {
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) =
+                &expr.ty
+            {
+                if a.len() == 1 && matches!(a[0], Ty::Fn { .. }) {
+                    if let IrExprKind::Lambda { params, body, .. } = &fallback.kind {
+                        use crate::PrimKind;
+                        let h = self.fresh_value();
+                        self.ops.push(Op::Prim {
+                            kind: PrimKind::Handle,
+                            dst: Some(h),
+                            args: vec![handle],
+                        });
+                        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+                        let result = self.fresh_value();
+                        self.ops.push(Op::IfThen { cond: tag, dst: Some(result) });
+                        let borrowed = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                        let owned = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: owned, src: borrowed });
+                        self.ops.push(Op::Else { val: Some(owned) });
+                        let (params, body) = (params.clone(), body.clone());
+                        match self.lift_lambda(&params, &body) {
+                            Some(fb) => {
+                                // The fallback block is ELSE-ARM-LOCAL and MOVES into the
+                                // merge (`EndIf val`) — remove it from the scope-end drop
+                                // set (`lift_lambda` pushed it): an unconditional drop
+                                // would free a never-allocated local (0) on the Some path.
+                                self.live_heap_handles.retain(|x| *x != fb);
+                                self.ops.push(Op::EndIf { val: Some(fb) });
+                            }
+                            None => {
+                                self.ops.truncate(ops_mark);
+                                self.live_heap_handles.truncate(lhh_mark);
+                                return None;
+                            }
+                        }
+                        if track_result {
+                            self.live_heap_handles.push(result);
+                        }
+                        self.closure_values.insert(result);
+                        return Some(result);
+                    }
+                }
+            }
+        }
         // HEAP-String result (`Option[String] ?? "default"` — the most common heap `??`): the scalar
         // unwrap below can't carry a heap payload (it would mis-read the slot-0 String HANDLE as an
         // i64 scalar). Route to the self-host `option.unwrap_or_str` CALL — a call returning a FRESH

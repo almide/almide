@@ -1749,6 +1749,19 @@ pub fn is_map_ivh_ty(ty: &Ty) -> bool {
 
 /// `Map[String, List[scalar]]` — the String-key / FLAT-heap-value map (self-host
 /// map_hval; a flat value block's rc_dec is its full free).
+/// `Map[String, <Fn>]` — the mclo (closure-valued map) family: String keys +
+/// closure-block values. CONSTRUCTION rides the handle-level `_hval` twins
+/// (set/get/get_or store & share plain value handles — type-agnostic physics);
+/// only the DROP differs: `$__drop_map_mclo` frees each value via
+/// `__drop_closure` (the hval flat per-slot `rc_dec` would leak every captured
+/// env slot — the `__drop_list_closure` leak class).
+pub fn is_map_fn_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty,
+        Ty::Applied(TypeConstructorId::Map, a)
+            if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::Fn { .. }))
+}
+
 pub fn is_map_hval_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     // A FLAT heap value: a List[scalar] row OR an all-scalar tuple (`map.map(mi,

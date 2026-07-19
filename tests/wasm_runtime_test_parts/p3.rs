@@ -327,7 +327,6 @@ fn wasm_closure_map_from_hof_then_coalesce() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_closure_map_set_then_coalesce() {
     // A `Map[String, (Int) -> Int]` built with `map.set` (immutable update), read
     // with `map.get(...) ?? fallback`. The stored closures and the `??` fallback

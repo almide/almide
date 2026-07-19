@@ -2547,13 +2547,35 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, map_key_nullary: bo
                 if a.len() == 2 && matches!(&a[1],
                     Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && !is_heap_ty(&e[0]))
         );
+        // The CLOSURE-value class (`Map[String, () -> Unit]` — the mclo family): the
+        // hval twins are handle-level (set stores + rc-shares the value handle, get/
+        // get_or share it back), so a closure block rides them unchanged; only the
+        // DROP routes differently (`$__drop_map_mclo` — the bind/arg registration
+        // sites key on `is_map_fn_ty`). `eq` is EXCLUDED (hval eq compares values
+        // STRUCTURALLY as List — closure identity has no such compare; it stays an
+        // honest wall).
+        let val_is_fn = matches!(
+            arg_tys.first().or(Some(result_ty)),
+            Some(Ty::Applied(TypeConstructorId::Map, a))
+                if a.len() == 2 && matches!(a[1], Ty::Fn { .. })
+        );
         let variant = match (key_heap, val_heap) {
             // `Map[String, List[scalar]]` — the implemented subset of the heap-value
-            // family (new/set/eq/len/contains/get; other funcs keep the unregistered
-            // wall name). `get`'s Some SHARES the stored list (the hshare discipline).
+            // family (new/set/eq/len/contains/get/get_or; other funcs keep the
+            // unregistered wall name). `get`/`get_or` SHARE the stored value (the
+            // hshare discipline).
             (true, true)
                 if val_is_flat_list
-                    && matches!(func, "new" | "set" | "eq" | "len" | "contains" | "get" | "keys") =>
+                    && matches!(
+                        func,
+                        "new" | "set" | "eq" | "len" | "contains" | "get" | "get_or" | "keys"
+                    ) =>
+            {
+                Some("_hval")
+            }
+            (true, true)
+                if val_is_fn
+                    && matches!(func, "new" | "set" | "len" | "contains" | "get" | "get_or") =>
             {
                 Some("_hval")
             }

@@ -564,6 +564,15 @@ fn try_render_wasm_source_impl(
     } else {
         ""
     };
+    // A `Map[String, <Fn>]` (the closure-valued map — mclo class) routes its scope-end
+    // drop to `$__drop_map_mclo` (per-value `$__drop_closure` over the split layout).
+    // Needs `CLOSURE_DROP_SRC` in scope, which `program_uses_closures` guarantees
+    // whenever a closure-valued map exists (its values are Fn-typed exprs).
+    let map_mclo_drop = if crate::lower::program_uses_map_closure(&ir) {
+        crate::lower::MAP_MCLO_DROP_SRC
+    } else {
+        ""
+    };
     // A `List[Option/Result]` literal with owned-handle-slot elements routes its drop to the
     // generated `$__drop_list_lenlist` (the shared `lenlist_elem_class` decides both sides).
     let lenlist_drop = if crate::lower::program_uses_lenlist_elem_lists(&ir) {
@@ -605,7 +614,7 @@ fn try_render_wasm_source_impl(
         ""
     };
     let drops = format!(
-        "{}{}{}{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}{}{}{}",
         generic_variant_type_decl_src,
         crate::lower::generate_variant_drop_sources(&all_type_decls),
         crate::lower::generate_record_drop_sources(&all_type_decls, &anon_recs, uses_result_opt_str),
@@ -616,6 +625,7 @@ fn try_render_wasm_source_impl(
         lenlist_drop,
         list_str_drop,
         list_closure_drop,
+        map_mclo_drop,
         opt_str_int_drop,
     );
     // The generated drops free a `Value` field via value_core's INTERNAL `__drop_value` — bring

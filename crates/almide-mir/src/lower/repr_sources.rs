@@ -1408,6 +1408,42 @@ pub fn program_uses_closure_list(program: &almide_ir::IrProgram) -> bool {
     false
 }
 
+/// Does the program carry a `Map[String, <Fn>]` anywhere (a bind/return/call-arg type) —
+/// gates `MAP_MCLO_DROP_SRC`'s injection (the closure-valued map's recursive drop), the
+/// exact sibling of [`program_uses_closure_list`]'s gate.
+pub fn program_uses_map_closure(program: &almide_ir::IrProgram) -> bool {
+    let is_mclo = |ty: &Ty| crate::lower::is_map_fn_ty(ty);
+    struct Finder<'a> {
+        found: bool,
+        pred: &'a dyn Fn(&Ty) -> bool,
+    }
+    impl almide_ir::visit::IrVisitor for Finder<'_> {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if (self.pred)(&expr.ty) {
+                self.found = true;
+            }
+            if !self.found {
+                almide_ir::visit::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut finder = Finder { found: false, pred: &is_mclo };
+    let funcs = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in funcs {
+        if is_mclo(&f.ret_ty) || f.params.iter().any(|p| is_mclo(&p.ty)) {
+            return true;
+        }
+        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
+        if finder.found {
+            return true;
+        }
+    }
+    false
+}
+
 /// Does the program call `map.find` anywhere (a `Some((key,value))` predicate-search result
 /// — the Option-tuple payload `$__drop_opt_str_int` frees) — gates `OPT_STR_INT_DROP_SRC`'s
 /// injection. Conservative on the call NAME alone (not the key/value TYPE, which would need
