@@ -556,7 +556,7 @@ effect fn main() -> Result[Unit, String] = {
 }
 "#,
             expected: "ok:y",
-            status: Status::KnownBroken("#782 v1 gap: heap-result ResultOk cannot be faithfully returned (would move out an empty deferred heap value)"),
+            status: Status::Works,
         },
         // auto-? skip set, depth: the binding + Result-match live INSIDE another
         // match arm. The skip set used to apply only to top-level binds, so the

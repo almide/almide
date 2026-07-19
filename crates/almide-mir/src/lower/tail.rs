@@ -695,6 +695,49 @@ impl LowerCtx {
                         return Ok(Some(dst));
                     }
                 }
+                // `ok(<Unit expr>)` RETURNED (`ok(match parsed { ok(v) => println…, err(e)
+                // => println… })` — the result_match_behind_ok_wrapper shape): the payload
+                // is an EFFECT, not a value — run it through the statement dispatcher (the
+                // unit match executes only the taken arm over its tracked subject), then
+                // return the plain `ok(())` block. Effects are emitted BEFORE the ctor, so
+                // a ctor decline after them must WALL (falling through would re-lower the
+                // payload = double effects).
+                if let IrExprKind::ResultOk { expr } = &tail.kind {
+                    if matches!(expr.ty, Ty::Unit)
+                        && matches!(
+                            expr.kind,
+                            IrExprKind::Match { .. }
+                                | IrExprKind::If { .. }
+                                | IrExprKind::Block { .. }
+                                | IrExprKind::Call { .. }
+                        )
+                    {
+                        let payload = (**expr).clone();
+                        self.lower_stmt_expr(&payload)?;
+                        let unit_ok = IrExpr {
+                            kind: IrExprKind::ResultOk {
+                                expr: Box::new(IrExpr {
+                                    kind: IrExprKind::Unit,
+                                    ty: Ty::Unit,
+                                    span: None,
+                                    def_id: None,
+                                }),
+                            },
+                            ty: tail.ty.clone(),
+                            span: None,
+                            def_id: None,
+                        };
+                        if let Some(dst) = self.try_lower_result_scalar_ok_ctor(&unit_ok, &tail.ty) {
+                            return Ok(Some(dst));
+                        }
+                        return Err(LowerError::Unsupported(
+                            "unit-payload `ok(<effect>)` return whose `ok(())` block is \
+                             outside the ctor subset (the payload's effects were already \
+                             emitted) not in this brick"
+                                .into(),
+                        ));
+                    }
+                }
                 // `ok({val, next})` / `err(msg)` RETURNED for a `Result[heap-record, String]` (porta
                 // read_valtype): materialize the record-Ok / String-Err block, MOVED OUT as the
                 // return (the recursive `Op::DropWrapperRec` frees it via `$__drop_<R>` at the
