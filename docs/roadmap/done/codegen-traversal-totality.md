@@ -1,4 +1,5 @@
 <!-- description: Make a codegen pass forgetting to recurse into a node kind a compile error or CI failure, never a silent native/WASM divergence -->
+<!-- done: 2026-06-04 -->
 # Codegen traversal totality
 
 **Goal:** make "a pass forgot to recurse into a node kind" a **compile error or a CI failure**, never

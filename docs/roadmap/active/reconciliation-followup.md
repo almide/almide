@@ -16,7 +16,23 @@
 - reconciliation は `git merge -s ours` で履歴を記録しつつ v1 tree を保持したので、
   これらは「tree に無い」だけで「失われて」はいない。
 
-## 0.28.1 で取り込む候補（cherry-pick 可）
+## 未決の候補（cherry-pick 可、判断は先送りしすぎ）
+
+> 現在の develop は 0.32.0。「0.28.1 で取り込む」という当初の見出しはとうに過ぎている。
+> 下の3件は `git log develop` には並ぶが、reconciliation の `git merge -s ours` は
+> **履歴を記録するだけで内容は再適用しない**ため、実際には一つも取り込まれていない
+> ことを実際に確認した:
+>
+> - `crates/almide-codegen/src/emit_wasm/calls.rs` に `ASCII_COLON` / `Imm32` は
+>   存在しない（c3648caa の named-constant 化は未適用 — これは元々「永久スキップ」
+>   判定なので想定通り）
+> - `calls_matrix_p3.rs` / `calls_matrix_p4.rs` は q1_0 の SIMD（`v128` ベース、
+>   `select_rows_q1_0` / `linear_q1_0_row_no_bias`）を**独自に**実装済みだが、
+>   c2f87402 由来のコードではない（develop-v1 が別途書いたもの）
+> - `.github/workflows/fuzz-nightly.yml` に reap / killpg / setsid / process-group
+>   の類は一切なし — 13691202 の子プロセス回収ロジックも未適用
+>
+> つまり3件とも「見送った」のではなく「決めていない」。判断は overdue。
 
 ### c2f87402 — WASM SIMD perf（q1_0/transpose/fold）
 - **性質**: perf 最適化。**correctness core（variant-eq tail-zero）は v1 で冗長**と実証済み

@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 extract_title() {
-  head -10 "$1" 2>/dev/null | grep '^# ' | head -1 | sed 's/^# //'
+  head -40 "$1" 2>/dev/null | grep '^# ' | head -1 | sed 's/^# //' || true
 }
 
 extract_desc() {

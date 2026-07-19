@@ -1,4 +1,5 @@
 <!-- description: Goal prompt: finish v1 ADT brick 5 (heap-field bind + recursive drop) to close the #1 cross-repo wall lever -->
+<!-- done: 2026-06-20 -->
 # GOAL PROMPT — finish ADT brick 5 (heap-field bind + recursive drop) to the #1 lever
 
 You are continuing the v1 trust-spine ADT value-model work on branch **`develop-v1`**. Bricks

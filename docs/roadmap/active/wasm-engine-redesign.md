@@ -3,7 +3,7 @@
 
 > **Status**: Design phase — foundation (LayoutRegistry + WasmIR + WasmBuilder) exists, full recreate planned
 > **Motivation**: Hand-written WASM emission is the largest correctness gap. Also: WASM 3.0, WASI Preview 2, and Component Model all require a proper compilation pipeline, not raw instruction assembly.
-> **Goal**: Replace the 40-file hand-written assembler with a type-aware, layout-safe, stack-verified WASM compiler that outputs core modules or Component Model components.
+> **Goal**: Replace the hand-written assembler (now 110 files, ~56K lines — it has grown, not shrunk, since this doc was written) with a type-aware, layout-safe, stack-verified WASM compiler that outputs core modules or Component Model components.
 
 ## Problem Statement
 
@@ -208,6 +208,12 @@ Replace hand-written emission with AlmideIR → WasmIR lowering.
 
 ### Phase 2: Component Model
 
+> **Note**: [docs/roadmap/active/wasm-platform-frontier.md](wasm-platform-frontier.md) is now the
+> doc that actually owns Component Model / WASI Preview 2 planning (its "WASI 0.2/0.3 + Component
+> Model" section has a staged Phase 1-4 rollout with a current `almide_host` import ABI as the
+> near-term step). Treat Phase 2/3 here as superseded by that doc's plan — don't let the two
+> roadmaps diverge on the same phases.
+
 - [ ] WIT generation from Almide pub exports (`almide build --target wasm-component`)
 - [ ] Canonical ABI adapter generation (string, list, record, variant, option, result)
 - [ ] `wit-component` integration for component wrapping
@@ -237,7 +243,7 @@ Waiting for wasmtime to enable by default.
 
 ## What Dies
 
-All of current `emit_wasm/` (40 files, ~15K LOC):
+All of current `emit_wasm/` (grown to 110 files, ~56K lines — was 40 files, ~15K LOC when this doc was written):
 
 | Current | Replacement |
 |---------|------------|
@@ -261,7 +267,7 @@ Already implemented in `emit_wasm/engine/`:
 - **WasmBuilder**: Chainable API with layout-safe field access, collection iteration, RC ops
 - **Emit**: WasmIR → wasm-encoder translation
 
-23 files already migrated to LayoutRegistry. WasmBuilder used in list_layout.rs and Perceus core.
+Verified 2026-07-19 (`grep -rl LayoutRegistry crates/almide-codegen/src/emit_wasm/*.rs`): only 5 files actually use LayoutRegistry — `mod.rs`, `mod_p2.rs`, `list_layout.rs`, `rt_string.rs`, `statements_p2.rs` — not 23. Migration appears stalled: the foundation exists but isn't expanding into the other 105 files, which still do hand-rolled offset arithmetic.
 
 ## Metrics
 

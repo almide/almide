@@ -327,3 +327,18 @@ corpus-wall ACCEPT (3 props, ownership = the leak/double-free check that catches
 ## Honest scale
 
 This is a COUPLED unit (~5 pieces, recursive runtime drop + serializer), genuinely a focused multi-brick push, not a single-turn task — but every piece is Coq-free and byte-verifiable, and the recursive-drop is the ONLY trusted-base addition (one routine, like DropListStr). Path A keeps the Value model PROVEN, which is the v1 differentiator.
+
+## Closing pointer (verified 2026-07-19) — the open frontier above was resolved
+
+This doc's open frontier — Camp-4 depth (the heap-payload `Ok(items) => …` bind over a
+heap-Result) and `value.stringify` undesigned — was resolved by commits that postdate this doc:
+`value.stringify` landed 2026-06-19/20 (commits **85e05369** "Self-host value.stringify (the
+recursive JSON serializer) — byte-identical to v0" and **43c15123** "Record value.stringify as
+landed"). The Camp-4 heap-payload/heap-Result-match pattern identified here was later
+**generalized and reused** across other stdlib surfaces: `b1c7e91b` (Camp-4 sub-case 1, scalar-Ok
+/ heap-Err `Result[Int,String]`), `9be785f4` (Camp-4 sub-case 2, heap-Ok `Result[List[Int],String]`
+— base64 decode), and `a564a12e` (unwrap-`!`-bound-to-let desugared to an early-return match,
+eliminating the top cross-repo wall) — see [v1-v0-parity.md](v1-v0-parity.md)'s B-2 track for
+current status on the remaining derived-Codec `.decode()` follow-on. This file is NOT moved to
+`done/` — it still has open scope beyond the yaml Value-model portion (see "Honest scale" above
+and the PRIM-FLOOR/layers sections), just the specific frontier it flagged as blocking is closed.

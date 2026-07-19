@@ -1,6 +1,10 @@
 <!-- description: AI-DLC Bolt backlog for the v1 climb — the camps/steps roadmap expressed as intent-driven, time-boxed Bolts (each with intent / Definition-of-Done / gate / deps / status). The construction guardrails are the goal-prompt discipline; each Bolt's exit gate is independent review (reviewer agent + Trust Spine CI + unbiased dual-oracle corpus); humans (Mob) decide at the marked forks. Tracks "あと何 Bolt" to each summit. -->
 # v1 Bolt Backlog(AI-DLC 管理)
 
+> **STALE (last touched 2026-06-21)** — see [v1-loop-ownership-cert.md](v1-loop-ownership-cert.md) and
+> [v1-org-byte-verification.md](v1-org-byte-verification.md) for the current wall status; the Camp 1
+> status table below likely no longer reflects reality.
+
 > **これは何か**: 頂上までの camp/step ロードマップを、**AI-DLC の Bolt**(intent 駆動・時間箱・
 > 数時間スケールの作業単位)として構造化したもの。**1 Bolt ≒ 1 commit/brick**。進捗を「あと
 > 何 Bolt」で測り、自走ループで消化する。

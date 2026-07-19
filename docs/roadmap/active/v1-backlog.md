@@ -69,19 +69,22 @@
 
 ## Tier 5 — 契約・計測
 
-10. **matrix.mul / from_bytes OOB の契約台帳（v0-native 依存でブロック）**: v1 は
-    native 契約（mul は k 昇順、OOB は全ゼロ行列）に適合済みだが、matrix fixture は
-    `almide run`（native）が壊れているため output-parity gate で byte-verify できない
-    （v0fail になる）。**v0-native matrix codegen 修正（下記引き継ぎ）が前提**。
+10. **matrix.mul / from_bytes OOB の契約台帳**: v1 は native 契約（mul は k 昇順、OOB は
+    全ゼロ行列）に適合済み。ブロッカーだった v0-native matrix codegen 破損は
+    38382cf8（2026-07-07、"Stop embedding the kernel bridge module and retire the stale
+    burn matrix splicer that corrupted every native matrix build"）で解消済みを実測で確認
+    （`matrix.zeros`/`matrix.rows`/`matrix.cols`/`matrix.transpose` を使う fixture が
+    `almide run` で今日コンパイル・実行できる）。**unblocked — 未着手だが着手可能**。
 11. **カバレッジ**: 直近 66.30%。最大の未踏面は control_p5（defunc エンジン）、
     次いで tail.rs / binds_p2 / binds_p4。計測は `bash proofs/coverage.sh`。
 
 ## v1 レーン外（引き継ぎ事項 — ここでは直さない）
 
-- **v0-native の matrix codegen 破損（develop-v1 既存）**: 生成 Rust の
+- **（解消済み 2026-07-07）v0-native の matrix codegen 破損**: 生成 Rust の
   `bridge::AlmideMatrix` が enum 化される一方、vendored glue（transpose 等）が旧
   `Vec<Vec<f64>>` API のままで不整合 → `almide run` の matrix コードが
-  「codegen produced invalid Rust」。flat ABI / burn リワーク（並行セッション領域）の
-  過渡状態とみられるため**所有セッションへ引き継ぎ**。v1 の matrix parity oracle は
-  当面 `almide run --target wasm`（byte-identical 保証）を使う。Tier 5-10 の契約
-  fixture はこれの解消待ち。
+  「codegen produced invalid Rust」だった件は、38382cf8（"Stop embedding the kernel
+  bridge module and retire the stale burn matrix splicer that corrupted every native
+  matrix build"）で解消済み。`matrix.zeros`/`matrix.rows`/`matrix.cols`/
+  `matrix.transpose` の native 実行を実測で再確認済み。Tier 5-10 の契約 fixture は
+  もうブロックされていない（unblocked、未着手）。

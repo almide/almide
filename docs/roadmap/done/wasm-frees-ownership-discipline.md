@@ -1,9 +1,17 @@
 <!-- description: Drain the WASM reference-count-frees ownership discipline gap toward the two-gate green -->
+<!-- done: 2026-06-11 -->
 # WASM Reference-Count Frees: the Ownership-Discipline Drain
 
-**Status:** in progress (2026-06-07). Branch `perceus-belt-hard-error`, worktree
-`xtarget-compound-display`. All work LOCAL/uncommitted pending the full two-gate
-green.
+**Status:** DONE. The drain completed 2026-06-11 (v0.27.0), landed directly on
+`develop` via 11d33841 (THE FLIP — frees on by default), 5238efbc (Stage C —
+per-iteration TCO reclamation), and a1be5518 (Stage D — fs scratch pinning +
+C-042 root fix). Verified current: `wasm_frees_enabled()`
+(`crates/almide-codegen/src/emit_wasm/runtime_p2.rs`) defaults to `true`
+(opt-out only via `ALMIDE_WASM_FREES=0`). The `perceus-belt-hard-error` branch
+this doc originally tracked was never merged — its 4 remaining commits
+(`git log develop..origin/perceus-belt-hard-error`) were superseded by the
+direct-to-develop landing above, not cherry-picked, and that branch/worktree
+can be considered abandoned.
 
 ## Mission
 

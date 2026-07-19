@@ -1,4 +1,5 @@
 <!-- description: Clean up CI warnings and non-fatal ICE messages on Windows/macOS CI -->
+<!-- done: 2026-06-06 -->
 # CI Warnings Cleanup
 
 > **Status**: Active

@@ -1,4 +1,5 @@
 <!-- description: v0 wasm codegen: fix the Try/Unwrap/Fan early-return heap leak (emitter-side emit_early_return_decs) -->
+<!-- done: 2026-06-14 -->
 # v0 wasm codegen: Try/Unwrap/Fan early-return heap leak
 
 **Status**: IMPLEMENTED + verified (emitter-side `emit_early_return_decs`); v1 wall LIFTED, -59 recovered (in-profile 4083). Leak-free (100k-err-loop completes) + double-free-free (260-file wasm corpus green).

@@ -1,4 +1,11 @@
 <!-- description: v1 self-host print floor — the observability keystone for the first self-host slice -->
+<!-- done: 2026-06-15 -->
+> **NOTE**: the `print_str` keystone itself is DONE (commits 74cc1fff, 7d82f628, 915fe2ee,
+> b2896c87, 2026-06-14/15 — scalar-value foundation + prim floor + self-hosted `print_str`
+> byte-matching v0). This doc's own "NEXT" section below (`print_int` / general control-flow
+> execution via `Op::If`) describes separate, likely-still-open follow-on work — if it isn't
+> already tracked by a newer active/ doc, a fresh one should be opened for it (not created here).
+
 # v1 self-host print floor — the ③ observability keystone
 
 **Status**: design (2026-06-14). Synthesized from a 5-agent design workflow

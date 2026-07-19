@@ -133,18 +133,35 @@ counted range のみ・no-alloc-in-loop・static pool ── これは **DO-178C
   オブジェクトコードの信頼を肩代わりし、必要なのは**証明の中で一番安い層(翻訳忠実性)
   だけ**。**証明コストとしては wasm 経路より飛行経路の方が安い。**
 
-### 4.3 本当のコストは証明ではなくレンダラ(エンジニアリング)
+### 4.3 本当のコストは証明ではなくレンダラ(エンジニアリング) — **🔄 進行中、実質的な建て込み済み (2026-07-19 更新)**
 
-Rust 経路が**2本に分裂**している:
+**この節が書かれた時点(368行のデモ・CLI未接続)からは前進した。** `crates/almide-mir/src/render_rust.rs`
+は今 **`src/cli/build.rs`(~66行目)/ `src/cli/run.rs`(~71行目)が `try_render_rust_source`
+を直接呼ぶ形で CLI に配線済み** — 「デモ」ではなく `--verified` フラグの下で実行される
+本番経路になった。[native-trust-spine](native-trust-spine.md) が **4本の出荷済み rung**
+(commit 519b67df, 574af24b, 2780f429, e088c25d — 全て 2026-07-14/15)を記録している:
+rung 1(scalar・String literal・制御フロー)、rung 2(動的 String 演算 shim)、rung 3(String
+境界面の全面拡張)、rung 4(target-neutral `ListLit`/`ListGetScalar`/`ListSetScalar` op による
+scalar list、wasm レンダラと共有 MIR op)。各 rung は `tests/native_v1_differential_test.rs`
+の v0-differential ゲート(stdout/stderr/exit の byte 比較)付きで出荷 — **証明の心配だった
+Rust 経路が、今は「まだ全部ではないが、ゲート付きで確実に育っている」実装**に変わった。
 
-- **綺麗な所有権保存マッピング** = `crates/almide-mir/src/render_rust.rs`(368行のデモ)。
-  だが Vec<i64> 一律・CLI 未接続・`v0`/`v1` 番号ローカルで**レビュー不可グレード**。
-- **本番 Rust** = `crates/almide-codegen/src/walker/` + `codegen/templates/rust.toml`
-  (v0/legacy)。イディオマティックで**レビュー可・DO-178C「ソースは可読」を満たす**が、
-  **MIR-op ↔ Rust 片の対応オブジェクトが無く・v1 MIR で駆動されていない・未証明**。
+依然として旧来の**2本分裂**は残る:
 
-→ pivot の実コスト = **本番グレードの v1 MIR→Rust レンダラを建てる**(`render_wasm.rs`
-の全言語版・約5倍規模)こと。**同じ認証済み MIR witness が両ターゲットを駆動**する形に。
+- **v1 所有権保存レンダラ** = `render_rust.rs`(現 409 行、成長中)。上記4 rung 経由で
+  scalar/String/List を CLI 配線・差分ゲート付きで生産カバー。**まだ全 MIR op を覆っていない**
+  (WCET キーストーン(あ)未着手のループ形など)。
+- **本番 Rust(v0/legacy)** = `crates/almide-codegen/src/walker/` + `codegen/templates/rust.toml`。
+  イディオマティックで**レビュー可・DO-178C「ソースは可読」を満たす**が、**MIR-op ↔ Rust 片の
+  対応オブジェクトが無く・v1 MIR で駆動されていない・未証明**のまま(v1 経路が育つまでの
+  被覆先)。
+
+→ pivot の残コスト = **v1 MIR→Rust レンダラのカバレッジを rung 5+ で伸ばし続ける**こと
+(`render_wasm.rs` の全言語版・約5倍規模、という当初見積りに対し**4 rung ぶんは既に着地**)。
+**同じ認証済み MIR witness が両ターゲットを駆動**する形は、scalar/String/List の範囲では
+**既に実現している**。**まだ Ferrocene には束縛されていない** — `rust_pattern` 表や
+Ferrocene 参照はリポジトリのどこにも見つからない(確認: `grep -rn "Ferrocene\|rust_pattern"
+proofs/ crates/ | grep -v flight-` は無ヒット)。その最終区間は genuinely open のまま。
 
 ### 4.4 v1-mir-architecture §9 との和解
 
@@ -227,7 +244,13 @@ Almide 飛行サブセット            counted loop / no-alloc-in-loop / static
 
 - **G-F0**: 🔄 進行中 ── self-host stdlib で実行パリティを登攀中(string/list/math を Almide 化)
 - **G-F1**: 📐 規範仕様あり・未強制 ── [flight-subset-spec](flight-subset-spec.md)(特徴分類・open question 決着・`@flight` 強制設計)
-- **G-F2/G-F3**: 📐 設計済み・未実装 ── 本書 §3/§4 のキーストーン2本が**最大の技術的山**([flight-wcet-loops](flight-wcet-loops.md) / [flight-rust-ferrocene](flight-rust-ferrocene.md))
+- **G-F2**: 📐 設計済み・未実装 ── 本書 §3 のキーストーン(あ)が**最大の技術的山**([flight-wcet-loops](flight-wcet-loops.md))
+- **G-F3**: 🔄 **進行中、実質的な建て込みあり (2026-07-19 更新)** ── キーストーン(い)の
+  「本番 v1 MIR→Rust レンダラ」半分は [native-trust-spine](native-trust-spine.md) の
+  4 rung(scalar/String/List、CLI 配線済み、v0 差分ゲート付き)で前進済み。**残る山** =
+  「`rust_pattern` 忠実性層」と「Ferrocene コンパイル実証」── この2つはまだ 📐 設計済み・
+  未着手のまま([flight-rust-ferrocene](flight-rust-ferrocene.md))。G-F3 全体としては
+  📐→🔄 に上がったが完了ではない
 - **G-F4**: 📐 設計済み・未実装 ── [flight-reference-app](flight-reference-app.md)(PID 制御則カーネル + make verify 7 段 + receipt。Slice 0 は今 green)
 - **G-F5/G-F6**: 📐 設計済み・未着手 ── [flight-qualification](flight-qualification.md)(DO-178C/330/333 マッピング + 資格化キット)
 

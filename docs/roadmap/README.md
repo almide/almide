@@ -6,7 +6,7 @@
 
 ## Active
 
-66 items
+54 items
 
 | Item | Description |
 |------|-------------|
@@ -15,11 +15,8 @@
 | [Build Speed: Runtime rlib + Hot-Fn Inlining](active/build-speed-runtime-rlib.md) | Native build-speed — precompiled almide_rt runtime rlib, and recovering the shipping-build inlining gap with #[inline] |
 | [Certificate Format v1 — design](active/certificate-format-v1.md) | v1 trust-spine certificate format design — ownership alphabet (i/a/d/m), per-call-site caps, branch-agreement encoding, and the kernel-as-oracle gate |
 | [Certification-Grade Hardening — 認証級への硬化](active/certification-grade.md) | Certification-grade hardening — adopt the mechanisms of DO-178C / ISO 26262 / IEC 61508 (spec, traceability, coverage, tool qualification, dossier) for the machine-written-software trust layer |
-| [CI Warnings Cleanup](active/ci-warnings-cleanup.md) | Clean up CI warnings and non-fatal ICE messages on Windows/macOS CI |
-| [Closure Architecture v2](active/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
 | [Closure cross-target completeness](active/closure-cross-target-completeness.md) | Eliminate native/WASM closure-codegen divergence classes by construction, backed by a permanent CI differential gate |
 | [Code Health: Codopsy-Driven File Splits and Function Decomposition](active/code-health-codopsy.md) | Codopsy-driven code health: split 1000+ line files, decompose cog>100 fns |
-| [Codegen traversal totality](active/codegen-traversal-totality.md) | Make a codegen pass forgetting to recurse into a node kind a compile error or CI failure, never a silent native/WASM divergence |
 | [Completeness by Construction](active/completeness-by-construction.md) | Make compiler correctness structural (by construction) rather than convention-enforced, extending the Perceus/borrow-checker completeness pattern compiler-wide |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) | Audit of the well-typed-source-to-correct-binary chain — which layers have mechanical/mathematical proof and which don't, with per-layer milestones |
 | [Cross-Target Completeness (the Lid)](active/cross-target-completeness.md) | Cross-target completeness lid — the staged path from "all known divergences fixed + byte-diff gate" to structural equivalence (drain → interpreter+fuzz → selfhost → kernel proofs), with the live drain queue |
@@ -38,21 +35,15 @@
 | [Issue Ledger Burn-down — 完全性キャンペーンの残量計](active/issue-ledger-burndown.md) | Issue-ledger burn-down tracker for the completeness campaign — GitHub open-issue count as the completeness residual |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) | Design decision and roadmap for Map[K,V]/Set[T]: an O(1) insertion-ordered hash map (compact-ordered-dict) |
-| [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](active/native-boxed-pattern-lowering.md) | Fix native (Rust) codegen for nested ctor/literal patterns on a Box'd recursive-variant field (#610) |
-| [Native Trust Spine — Perceus as the single memory model (#764)](active/native-trust-spine.md) | Route almide build --target rust through the same v1 Perceus MIR as the wasm leg, certified per build by verify_ownership (#764) |
 | [Post-0.29 Improvement Sweep](active/post-0.29-improvement-sweep.md) | Post-0.29.0 improvement sweep — every open gap issue-ized and ordered, from face-fixes to the v0 wasm retirement |
 | [Protocols: declared conformance + opt-in `any P`](active/protocol-any-existentials.md) | Declared conformance + opt-in `any P` existentials — take Go's interface-value ergonomics without its implicit-satisfaction and nil-interface traps; the one Swift idea worth stealing, none of the rest |
 | [Receipt Logic — 受領書の論理](active/receipt-logic.md) | Formal foundation for the trust layer — receipt logic: claim types, threat model, trust bases, falsification procedures, completeness relative to use-case |
 | [reconciliation follow-up — v0.28.0 で見送った develop 側の残件](active/reconciliation-followup.md) | v0.28.0 reconciliation follow-up: deferred develop commits for 0.28.1 |
 | [Trust Layer — 機械が書くソフトウェアの信頼層](active/trust-layer.md) | Category strategy — winning "the trust layer for machine-written software": MWS Trust Levels, receipts, critical path |
 | [Type Where Constraints](active/type-where-constraints.md) | where clauses on type/fn definitions for type constraints |
-| [v0 wasm codegen: Try/Unwrap/Fan early-return heap leak](active/v0-unwrap-early-return-leak.md) | v0 wasm codegen: fix the Try/Unwrap/Fan early-return heap leak (emitter-side emit_early_return_decs) |
-| [GOAL PROMPT — finish ADT brick 5 (heap-field bind + recursive drop) to the #1 lever](active/v1-adt-brick5-goal.md) | Goal prompt: finish v1 ADT brick 5 (heap-field bind + recursive drop) to close the #1 cross-repo wall lever |
-| [v1 ① — custom ADT (variant) as a first-class value](active/v1-adt-value-model.md) | v1: make custom ADT (variant) values first-class, closing the #1 cross-repo wall lever (~41 walls, recursive to_string/pretty-print over user variants) |
 | [V1 Backlog — trust spine の残件一覧（優先度付き）](active/v1-backlog.md) | The v1 trust-spine backlog — soundness, drop completeness, self-host surface, walls |
 | [v1 Bolt Backlog(AI-DLC 管理)](active/v1-bolt-backlog.md) | AI-DLC Bolt backlog for the v1 climb — the camps/steps roadmap expressed as intent-driven, time-boxed Bolts (each with intent / Definition-of-Done / gate / deps / status). The construction guardrails are the goal-prompt discipline; each Bolt's exit gate is independent review (reviewer agent + Trust Spine CI + unbiased dual-oracle corpus); humans (Mob) decide at the marked forks. Tracks "あと何 Bolt" to each summit. |
 | [v1 → develop Reflow Strategy](active/v1-develop-reflow.md) | Strategy for flowing the develop-v1 trust spine back into develop — what moves, in what order, and what stays branch-local until its gate exists |
-| [v1 heap-result `if`/`match` execution — design (DE-RISKED: no Coq change)](active/v1-heap-result-control-flow.md) | v1: design for heap-result if/match execution — de-risked, no Coq change required |
 | [v1 KGI / KPI スコアボード](active/v1-kgi-kpi.md) | v1 KGI/KPI scoreboard — the terminal goal indicators (trust + writability), the guard invariants that must never degrade (checker size, TB purity, axiom cleanliness, zero claim-drift), and the progress KPIs toward each gap. Weekly fill-in. |
 | [v1 heap-loop-carried ownership — option C (cert-spine extension), the COMPLETENESS fix](active/v1-loop-ownership-cert.md) | v1: teach the proven ownership checker to reason about loop-carried heap accumulators (option C), the completeness fix for the remaining yaml walls |
 | [Almide v1: MIR を唯一の真とする単一意味論アーキテクチャ](active/v1-mir-architecture.md) | Almide v1: MIR as the single source of semantic truth — greenfield + dual-oracle architecture, mission-first surface language |
@@ -61,10 +52,8 @@
 | [Almide v1 Phase 1: MIR コア + 二レンダラ — 実装設計](active/v1-phase1-mir-core.md) | Almide v1 Phase 1: MIR core + dual renderer — implementation design following the Phase 0 decision gate |
 | [v1 Proof Architecture — 構想(着地形)](active/v1-proof-architecture.md) | v1 vision — the landed proof architecture: untrusted compiler + two tiny qualified checkers, ALS as normative semantics, single Coq trust base, per-build receipts. Self-contained, terminal-state. |
 | [v1 Proof Spine — #31 progress (全V / leak-freedom / 推移的caps / 抽出穴)](active/v1-proof-spine-progress.md) | v1 proof-spine progress — what of task #31 (全V / leak-freedom / 推移的caps / 抽出穴) is PROVEN vs the honest remaining. Records the CapabilityReach.v transitive-caps theorem (2026-06-21). |
-| [v1 — records feature: svg FULL CONQUEST (goal prompt)](active/v1-records-svg.md) | v1 records feature: full conquest of the svg org repo on the WASM trust spine (construct, field read, spread, recursive nested ownership) |
 | [v1 リリース路線 — 段階リリース計画](active/v1-release-path.md) | v1 リリース路線 — opt-in 検証 codegen(v0 fallback) を beachhead に、カバレッジ→証明書 emit→flight-grade へ段階リリースする計画。4案のメリデメと選定理由、各段の受入基準。 |
 | [v1 stdlib self-host — the machinery phase (Option / List-building / closures)](active/v1-selfhost-machinery.md) | v1 stdlib self-host machinery phase (Option / list-building / closures) — self-hosting all ~381 v0 stdlib fns to execute byte-for-byte |
-| [v1 self-host print floor — the ③ observability keystone](active/v1-selfhost-print-floor.md) | v1 self-host print floor — the observability keystone for the first self-host slice |
 | [v1 trust-spine correctness holes (adversarial sweep 2026-06-27)](active/v1-spine-correctness-holes.md) | v1 trust-spine correctness holes found by an adversarial sweep of render_program vs native (30 confirmed holes) |
 | [v1 System Map — 全体像(mermaid)](active/v1-system-map.md) | v1 system map — mermaid diagrams of the whole trust architecture: each component's what / why / which area it secures, the PCC trust flow, the trust base, the three pillars, the threat model, and the maturity ladder. |
 | [v1 TCO — self-recursive tail calls → scalar-state loop (the yaml parser keystone)](active/v1-tco-self-recursion.md) | v1 TCO for self-recursive tail calls to a scalar-state loop — the yaml-parser keystone |
@@ -72,7 +61,6 @@
 | [v1 dynamic Value model — the yaml keystone (path A: self-host + ONE trusted recursive-drop routine)](active/v1-value-model.md) | v1 dynamic Value model — the yaml keystone: self-hosted constructors/extractors/serializer with one trusted recursive-drop routine (path A) |
 | [柱C extension: bring Value rc into the certified region](active/value-rc-cert.md) | Bring Value refcount ops into the certified ownership region (柱C extension) — closing the prim.handle-fed rc blind spot |
 | [Almide WASM Engine — Complete Redesign](active/wasm-engine-redesign.md) | Complete redesign of the hand-written WASM emitter into a type-aware, layout-safe, stack-verified compiler (WASM 3.0/Component Model ready) |
-| [WASM Reference-Count Frees: the Ownership-Discipline Drain](active/wasm-frees-ownership-discipline.md) | Drain the WASM reference-count-frees ownership discipline gap toward the two-gate green |
 | [WASM Optimization Roadmap](active/wasm-optimization-roadmap.md) | WASM emitter performance roadmap — closing wins/ties/losses against rustc+LLVM across benchmarks |
 | [WASM 所有権 emit 層の機械化 (Perceus drift の構造的封じ込め)](active/wasm-ownership-emit-mechanization.md) | Mechanize the WASM ownership emit layer to structurally contain Perceus drift (#643) |
 | [WASM Platform Frontier — beyond core Wasm 3.0](active/wasm-platform-frontier.md) | Post-Wasm-3.0 platform tracking — WASI 0.3 / Component Model, stack switching, shared-everything-threads |
@@ -116,13 +104,14 @@
 
 ## Done
 
-258 items
+270 items
 
 <details>
-<summary>Show all 258 completed items</summary>
+<summary>Show all 270 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-07-16 | [Native Trust Spine — Perceus as the single memory model (#764)](done/native-trust-spine.md) | Route almide build --target rust through the same v1 Perceus MIR as the wasm leg, certified per build by verify_ownership (#764) |
 | 2026-07-15 | [Claim wording: Perceus phrasing and the byte-identity guarantee scope](done/claim-wording-perceus-byte-identity.md) | Two claim-wording fixes so the public pitch is 100% backed by measurement |
 | 2026-07-14 | [v1 walled-real → 0 (ENDGAME — COMPLETE 2026-07-14, 112 → 0)](done/v1-wall-histogram-goal.md) | ENDGAME COMPLETE - v1 walled-real 112 to 0 (2026-07-14); stage ledger B1-B129 |
 | 2026-07-10 | [GOAL PROMPT — closure env full mode: heap, Float and Fn captures](done/closure-env-heap-captures-goal.md) | GOAL PROMPT — closure env full mode: heap/Float/Fn captures with masked recursive drop |
@@ -130,9 +119,20 @@
 | 2026-07-08 | [GOAL PROMPT — cert format brick 5: full mode (branch agreement + `b` + closure signatures)](done/cert-format-brick5-goal.md) | GOAL PROMPT — cert format brick 5: full mode (branch resource-state agreement + closure-env borrow + closure signatures) |
 | 2026-07-04 | [Crush-Pass Continuation — gguf + Matrix walls closed](done/crush-pass-continuation.md) | gguf ADT walls, the Matrix value model, and coverage pins — all closed; nn walls 0 |
 | 2026-07-02 | [Handoff — porta wall=0 + read_message cross-module on v1 (session record)](done/v1-porta-read-message-handoff.md) | PC-switch handoff: porta wall=0 + read_message cross-module on v1 (steps 1-3 done) |
+| 2026-06-21 | [v1 — records feature: svg FULL CONQUEST (goal prompt)](done/v1-records-svg.md) | v1 records feature: full conquest of the svg org repo on the WASM trust spine (construct, field read, spread, recursive nested ownership) |
+| 2026-06-20 | [v1 ① — custom ADT (variant) as a first-class value](done/v1-adt-value-model.md) | v1: make custom ADT (variant) values first-class, closing the #1 cross-repo wall lever (~41 walls, recursive to_string/pretty-print over user variants) |
+| 2026-06-20 | [GOAL PROMPT — finish ADT brick 5 (heap-field bind + recursive drop) to the #1 lever](done/v1-adt-brick5-goal.md) | Goal prompt: finish v1 ADT brick 5 (heap-field bind + recursive drop) to close the #1 cross-repo wall lever |
+| 2026-06-17 | [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](done/native-boxed-pattern-lowering.md) | Fix native (Rust) codegen for nested ctor/literal patterns on a Box'd recursive-variant field (#610) |
+| 2026-06-15 | [v1 self-host print floor — the ③ observability keystone](done/v1-selfhost-print-floor.md) | v1 self-host print floor — the observability keystone for the first self-host slice |
+| 2026-06-15 | [v1 heap-result `if`/`match` execution — design (DE-RISKED: no Coq change)](done/v1-heap-result-control-flow.md) | v1: design for heap-result if/match execution — de-risked, no Coq change required |
+| 2026-06-14 | [v0 wasm codegen: Try/Unwrap/Fan early-return heap leak](done/v0-unwrap-early-return-leak.md) | v0 wasm codegen: fix the Try/Unwrap/Fan early-return heap leak (emitter-side emit_early_return_decs) |
+| 2026-06-11 | [WASM Reference-Count Frees: the Ownership-Discipline Drain](done/wasm-frees-ownership-discipline.md) | Drain the WASM reference-count-frees ownership discipline gap toward the two-gate green |
+| 2026-06-06 | [CI Warnings Cleanup](done/ci-warnings-cleanup.md) | Clean up CI warnings and non-fatal ICE messages on Windows/macOS CI |
 | 2026-06-05 | [WASM Remaining 15 Skips — Fix Roadmap](done/wasm-remaining-15.md) | WASM spec skip burndown — fixable skips all resolved, 233/233 wasm-eligible (8 intentional skips) |
 | 2026-06-05 | [Perceus Void Block Stack Balance — CI Blocker](done/wasm-perceus-void-block.md) | StackBalancePass — void-context blocks never leak stack values (wasmtime 45+ strict validation) |
+| 2026-06-04 | [Codegen traversal totality](done/codegen-traversal-totality.md) | Make a codegen pass forgetting to recurse into a node kind a compile error or CI failure, never a silent native/WASM divergence |
 | 2026-06-02 | [Closure Codegen Cross-Target Gaps](done/closure-codegen-cross-target-gaps.md) | Cross-target (native vs wasm) closure-codegen divergences found by the adversarial differential sweep — all 8 fixed |
+| 2026-06-02 | [Closure Architecture v2](done/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
 | 2026-05-29 | [WASM Component Model](done/wasm-component-model.md) | WebAssembly Component Model support with WIT bindings |
 | 2026-05-25 | [Cross-crate stdlib struct injection — DONE](done/cross-crate-struct-injection.md) | Fix ProcessStatus struct missing in cross-crate codegen — blocks almai dependency usage |
 | 2026-05-25 | [Cross-crate default field codegen](done/cross-crate-default-fields.md) | Fix cross-crate codegen for types with default field values |

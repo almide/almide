@@ -10,13 +10,39 @@
 
 ## 0. 接地事実(今スパインが産出するもの)
 
-- Coq **16 ファイル / 45 定理**、全 `Print Assumptions` = "Closed under the global context"、
+> **2026-07-19 再接地**: 本節の当初の数字(16 ファイル/45 定理、4/8 性質被覆、3 モジュール製
+> checker)は古い。以下、確認できた範囲で更新。
+
+- Coq **24 ファイル**(旧 16 から成長。`ls proofs/*.v | wc -l` で確認)。うち本書執筆後に
+  追加された3本: `CapabilityReach.v`(2026-06-21 新規)、`OwnershipLoop.v`(2026-06-20 新規)、
+  `WasmIsa.v`(2026-06-21 新規)。全 `Print Assumptions` = "Closed under the global context"、
   `coqchk` De-Bruijn 再検査、cross-version 9.1.1 + 9.2(`proofs/check.sh`, `TRUSTED_BASE.md`)。
-- 資格化対象 = `proofs/checker.ml`(**683 行 OCaml 抽出**)← `OwnershipChecker.v`(309)+
-  `Subset.v`(88)+ `Extract.v`。核 = 符号付き Δ 左 fold + `subset_check` 包含。
+  定理数も 45 からは増えている(`Theorem`/`Corollary` キーワード grep で 61 件、`Qed.` 総数で
+  219 件 ── ただし元の「45」がどの数え方だったか本パスでは再現できないため、**この2値は
+  参考値**として記載。ファイル数 24 のみが厳密に確認済み)。
+- 資格化対象 = `proofs/checker.ml`(**行数は未再計測** ── 抽出はビルド時生成物で本パスでは
+  未実行)← 旧「3 モジュール」(`OwnershipChecker.v` + `Subset.v` + `Extract.v`)ではなく、
+  現在の `proofs/build-checker.sh` によれば **7 モジュール**から抽出: `Subset.v` →
+  `OwnershipChecker.v` → `NameTotality.v` → `CapabilityBound.v` → `CapabilityReach.v` →
+  `CallModes.v` → `Extract.v`(この順でコンパイル・リンク)。ソース行数も成長: 現在
+  `OwnershipChecker.v` 884 行・`Subset.v` 100 行・`NameTotality.v` 57 行・
+  `CapabilityBound.v` 61 行・`CapabilityReach.v` 169 行・`CallModes.v` 389 行・
+  `Extract.v` 43 行(計 1,703 行、旧「309+88」から大幅増)。核は依然、符号付き Δ 左 fold +
+  `subset_check` 包含 + 新たに transitive capability reach(`CapabilityReach.v`)と
+  call-mode fill checker(`CallModes.v`)。
 - `make verify-trust` = `check.sh` + `gate.sh` + `corpus-wall.sh` + `cargo test -p almide-mir`。
   `make receipt` = `receipt.sh`。CI が両方実行(`.github/workflows/trust-spine.yml`)。
-- 性質被覆 **4/8**(mem/name/cap/type ✅、leak/reuse/call-mode/byte 残)。in-profile 4083/4195。
+- 性質被覆は **4/8 ではなくなっている** ── `proofs/TRUSTED_BASE.md`(87-109行目)の
+  "flight-grade property SET is complete" 段落は今、RC balance(mem)・name totality(name)・
+  capability bound incl. transitive(cap)・type-concretization(type)・**leak-freedom(leak)**・
+  **reuse soundness + free-list reuse-safety + copy-on-write alias-safety(reuse)**・
+  **byte-binding table + rc_dec/rc_inc instruction-trees + 実 wasm バイト実行 + full
+  rc_dec bytes safety(byte)** の **7/8** を明示的に証明済みと列挙(37 audited theorems)。
+  残る **call-mode** も同ファイルの axiom ledger(80-81行目)に `check_fill_sound` /
+  `check_modes_cert_sound`(`CallModes.v`、"Closed under the global context")が載っており
+  kernel-proven ── よって実質 **8/8** だが、TRUSTED_BASE.md 自身は "8/8" という書き方を
+  していない(prose 段落が call-mode を明示的に束ねていないだけで、証明自体は存在する)。
+  in-profile 4083/4195 は本パスでは再検証していない(古いまま引き継ぎ)。
 - receipt 主張 = C-PROVEN / C-SAFE / C-FAITHFUL / C-WALL / C-REPRO(`receipt.sh`, [receipt-logic](receipt-logic.md))。
 
 ---

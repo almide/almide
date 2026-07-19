@@ -14,7 +14,7 @@ FROM, not verbatim.** The §7 review corrections are part of the spec.
 | | adds | sandbox exit | ceiling |
 |---|---|---|---|
 | **(A) WASI host-import floor** | new `PrimKind` rendered as `(call $wasi_fn)` vs new `(import "wasi_snapshot_preview1" …)` in `preamble()`, mirroring the sole existing `fd_write` (`render_wasm.rs:890`); effectful bodies then self-hosted in Almide over them | YES | **declared-caps-safe** (runs + caps ACCEPT; output unprovable by nature) |
-| **(B) Capability vocabulary** | grow `enum Capability` (`lib.rs:471`, today only `Stdout=0`) + `Capability::id` + Coq ids to `{Stdout,Fs,Net,Clock,Random,Env,Process}`; make `cap_witness`+`declared_caps` attribute honestly | n/a (it is the accounting for A) | proof-foundation |
+| **(B) Capability vocabulary** | ~~grow `enum Capability` (`lib.rs:471`, today only `Stdout=0`)~~ **UPDATE (2026-07-19): already grown.** Current `enum Capability` (`crates/almide-mir/src/lib.rs:873-900`) has **7 variants**: `Stdout, Entropy, CliArgs, FsRead, FsWrite, Clock, Stdin` — a different taxonomy than the `{Stdout,Fs,Net,Clock,Random,Env,Process}` originally proposed here (Fs split into FsRead/FsWrite, Random→Entropy, CliArgs added, Stdin added; Net/Process/general-Env still absent). `Capability::id` + Coq ids exist and stay injective (Stdout=0, Entropy=1, CliArgs=2, …). Remaining gap vs this row's original ask: **Net** and **Process** capabilities still don't exist (http/net stay WASI-p1-blocked per §2 below regardless). `cap_witness`/`declared_caps` honesty for the now-7 variants not re-audited in this pass. | n/a (it is the accounting for A) | proof-foundation |
 | **(C) raw-pointer / mem** | one `repr_of` arm (`Ty::RawPtr => Word`); `bytes.*` ptr fns = `prim.handle(b)+12`; non-cap `prim.heap_mark/heap_reset` over `$bump` | NO (linear-mem address math) | **offset-functional** (round-trip; byte-equality inapplicable) |
 
 **Empirical anchor (A):** v0's `emit_wasm/runtime.rs:14-145` ALREADY registers + runs the full
@@ -152,7 +152,27 @@ column too), not deferred.
 ## 8. Review must-fixes (folded into §2–§5 above)
 1. `is_known_free` narrowing must land BEFORE B7 + cover BOTH fold closures (else dotted cap call = accept-but-unsafe). 2. `CallIndirect` taint = `Capability::ALL` (derived) + B4 asserts coverage. 3. B2 relabelled NEEDS-FRESH, atomic with B6. 4. B11 is tier-3 OFFSET, not "safe and done". 5. B15 = DEFER (not UNSAFE-floor-only). 6. B10 needs a static scratch-region map first. 7. tier check verifies the byte-assertion, not just test existence. 8. `process.args` differs test-runner vs `almide run --` (production parity). 9. B4 hoisted to parallel-with-strong-proof.
 
-## env.args v1 — validated design + the entanglement (2026-06-25)
+## env.args v1 — ✅ SHIPPED (originally "validated design", 2026-06-25 → landed since)
+
+**2026-07-19 update**: this section originally described an unbuilt design. It has since
+shipped. Evidence:
+- `PrimKind::ArgsGetList` / `PrimKind::ArgsGetListFull` exist in `crates/almide-mir/src/lib.rs`
+  (~line 556) — the actual prim names differ from the `ArgsSizesGet`/`ArgsGet` pair originally
+  proposed below (one combined WASI-args-reading prim + a "full incl. argv[0]" variant, not two
+  separate size/read prims), but the mechanism (self-host fn → `prim.*` → `Capability::CliArgs`
+  → cert accounting → WASI render) is exactly as designed.
+- Wired through `certificate.rs` (~lines 213-224 cap_witness accounting, ~line 1242 the
+  heap-return move-out discipline) and `render_wasm.rs` (~lines 816-826, heap-Ptr result
+  handling alongside `LoadHandle`).
+- `stdlib/env.almd` line ~20 has `@intrinsic("almide_rt_env_args")` — the self-host stdlib
+  binding is live.
+- `Capability::CliArgs` is the 3rd variant in the now-7-variant `Capability` enum (see the (B)
+  row above), exactly at the Stdout=0/Entropy=1/CliArgs=2 ordering this section anticipated.
+
+The original design steps 1-5 and the byte-match-oracle entanglement note below are kept as
+historical record of the design reasoning that got this shipped:
+
+<details><summary>original design (2026-06-25, historical)</summary>
 
 env.args is the WASI floor's FIRST I/O capability for v1. It MIRRORS the proven random.int mechanism (the ONE admitted effectful call today): self-host stdlib fn → a `prim.*` op that carries a Capability → transitive cap_witness → `used ⊆ declared` cert verification → render emits the WASI call. The exact pieces:
 1. `Capability::CliArgs` (lib.rs:599 enum; the Coq registry mapping lib.rs:614 must stay injective+stable: Stdout=0, Entropy=1, CliArgs=2) — the FORMAL trust-spine addition.
@@ -164,3 +184,10 @@ env.args is the WASI floor's FIRST I/O capability for v1. It MIRRORS the proven 
 🚨 ENTANGLEMENT (why this is bigger than a clean capability add): the BYTE-MATCH ORACLE is broken. `almide run --target wasm -- file.csv` does NOT forward the `--` args to the wasm execution (env.args() returns EMPTY → csv-to-json prints "usage" instead of the JSON) — the args plumbing is broken EVEN in the full emit backend. And the wasm_cross harness runs pure fixtures only (no program-args support). So before env.args can be cert-byte-verified, the args plumbing (CLI runner forwarding + the harness passing identical argv to native and wasmtime) must be fixed — that is the genuine FIRST step of "段階的に", a CLI/test-infra brick separate from the trust-spine capability work.
 
 SEQUENCING: (a) fix the args plumbing + wasm_cross harness args support (the byte-match oracle), THEN (b) the env.args capability mirroring random.int (steps 1-5). csv-to-json ALSO needs fs.read_text (path_open+fd_read self-host + Capability::FsRead), and almide-grep + fs.walk — each its own capability brick. The full WASI file-I/O floor for these two apps is ~3-4 capability bricks + the infra. Recommended as a focused fresh effort (delegate+gate per capability).
+
+</details>
+
+**Still open** (unaffected by the above): B15 (`heap_mark`/`heap_reset`) — confirmed absent
+(`grep -rn "heap_mark\|heap_reset"` finds nothing in `crates/`/`src/`/`stdlib/`), correctly
+still DEFERRED per this doc's own §5 rationale. `http.*`/`net.*` remain WASI-p1-blocked,
+correctly still open per §2.

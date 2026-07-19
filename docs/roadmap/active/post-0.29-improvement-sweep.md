@@ -17,13 +17,13 @@
 - [x] [#753](https://github.com/almide/almide/issues/753) debug-profile ANF trap — 現 develop で再現せず（0.29 サイクルの lowering 修正で解消）。両 fixture を debug バイナリで検証しクローズ。debug-only の postcondition 実行は設計どおり（pass.rs に文書化済み）
 - [x] [#783](https://github.com/almide/almide/issues/783) name-pinning 再発 — 根治: repair が `map_children` ベースで ForIn/While body（`Vec<IrStmt>`）内の Bind ty を素通ししていた。canonical `IrMutVisitor` に書き換えて checker と同じ走査族に統一（enumeration drift クラスごと解消）。gate の where_ に位置粒度も追加
 - [x] [#784](https://github.com/almide/almide/issues/784) 匿名 record フィールドの Unknown — 真因は**無注釈の負リテラル module 定数**のシードが Unknown（`infer_literal_type` に Unary 枝が無い）。修正で ceangal suite がコンパイル通過（残りは #433 系 cell と個別テスト失敗）。回帰: cross_module_let_test に2本追加
-- [ ] [#785](https://github.com/almide/almide/issues/785) 呼び出し初期化の module 定数も Unknown leak — refresh 経路（check_decl の top_lets 再登録）が読者を救えていない。ここが本丸の契約
+- [x] [#785](https://github.com/almide/almide/issues/785) 呼び出し初期化の module 定数も Unknown leak — refresh 経路（check_decl の top_lets 再登録）が読者を救えていない。ここが本丸の契約
 
 ## 戦略級（次の大玉）
 
-- [ ] [#782](https://github.com/almide/almide/issues/782) **Phase 3: v0 wasm emitter 退役** — 前提を大幅前進: frontend バグ #783/#784/#785 済、**wasm:skip stale sweep 完了**（23→15 markers、8個は wasm 経路が既に追いついていた: fn_ref/再帰generics/closure-capture/borrow_hoist/mut params×2/random(C-112)/url_decode）。残る本物: [#786](https://github.com/almide/almide/issues/786) cross-module Unit effect fn の不正 wasm 生成、構造的 native 7 markers、oracle 後継決定
-- [~] [#764](https://github.com/almide/almide/issues/764) native trust-spine — **Float slab 出荷**（実 f64、3点 byte 一致、differential 4 rows）。残り records（DynList 発見で設計激縮小 — ListLit 再利用 + FieldGetScalar 1 op、台帳に emit サイト6箇所固定済み）/variants/closures → rung 6 → default flip
-- [ ] [#617](https://github.com/almide/almide/issues/617) Matrix/Bytes の RcCow 化（値セマンティクス維持でディープクローン税を消す）
+- [ ] [#782](https://github.com/almide/almide/issues/782) **Phase 3: v0 wasm emitter 退役** — 前提を大幅前進: frontend バグ #783/#784/#785/#786 済（#786 は develop @ a96cee1d で解消、C-135）、**wasm:skip stale sweep 完了**（enumerated walled-real baseline 37→18、#791 に per-class map）。残る本物: 構造的 native 7 markers、oracle 後継決定（当面 v0 は build-only の CI parity oracle として存続、almide-interp が第三の独立オラクルへ）
+- [x] [#764](https://github.com/almide/almide/issues/764) native trust-spine — **着地**: Perceus が native の唯一のメモリモデルに（records/variants/closures 出荷）
+- [x] [#617](https://github.com/almide/almide/issues/617) Matrix/Bytes の RcCow 化（値セマンティクス維持でディープクローン税を消す）
 
 ## 品質基盤（コツコツ級）
 

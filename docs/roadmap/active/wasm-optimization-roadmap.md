@@ -4,6 +4,12 @@
 > Almide's WASM emitter: 336B hello world. **Current: 3 wins / 2 ties / 6 losses vs Rust+LLVM
 > (v0.25.0 vs rustc 1.95, 2026-06-07 — 相手も動く。Baseline Update 参照)**. v0.23.4 時点は 5W/2T/4L。
 > This roadmap targets winning **all 11** benchmarks against *current stable* rustc.
+>
+> **STALE**: last measured at v0.25.0; current is v0.32.0 — unremeasured since (several releases
+> have shipped in between). The perf-ratchet gate described below in "教訓 → タスク" was never
+> built: `scripts/` has no perf-ratchet script, only `check-ratchet-separation.sh` (an unrelated
+> commit-hygiene gate for verification-artifact/implementation separation, per flight-evidence-gaps
+> F5). So these numbers are historical, not current — treat them as a snapshot, not a live score.
 
 ## Precision Benchmark (1M scale, v0.23.4)
 
@@ -197,10 +203,13 @@ Pairs with escape analysis.
 
 Specialize higher-order functions at known call sites.
 
-### 2.4 wasm-opt integration (optional)
+### 2.4 wasm-opt integration (DONE — ships by default)
 
-Post-build `wasm-opt -Oz` as opt-in flag. Current built-in DCE
-makes this nearly redundant (saves <1% additional).
+Verified in `src/cli/build.rs`: post-build `wasm-opt -O3` (not `-Oz`) now runs
+**by default** on every v0 build (opt-out via `ALMIDE_NO_WASM_OPT=1`, silent
+skip if `wasm-opt` isn't installed). PCC-verified v1 modules skip it — an
+unverified transform can't touch bytes the trust-spine already certified. This
+is no longer an opt-in flag as originally planned here.
 
 ### 2.5 Memory layout type safety
 

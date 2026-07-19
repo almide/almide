@@ -1,4 +1,5 @@
 <!-- description: Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION -->
+<!-- done: 2026-06-02 -->
 # Closure Architecture v2
 
 > **One identity, one capture-set, lifting is lowering.** A closure is a single

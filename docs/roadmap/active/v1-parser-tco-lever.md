@@ -714,3 +714,13 @@ statement-match subject tracking must cover a user named-call Result (a separate
 miscompile, hok2). These 3 interlock; do them together FRESH with byte-tests (the corpus-wall gate does
 NOT catch byte-miscompiles, so each needs a v0==v1 fixture). This is the single lever finishing base64
 decode + the bulk of toml's heap-Ok / unwrap-in-call-arg walls.
+
+## RESOLVED
+
+The decode_chunks ONION and the toml/base64 blockers described above are resolved.
+[v1-org-byte-verification.md](v1-org-byte-verification.md)'s 2026-07-02 session log lists both `toml`
+and `base64` among the org repos that fully pass both targets ("All org repos WITH test suites pass
+both targets: yaml, sha1, toml, svg, rsa, porta, csv, bigint, base64, aes, ..."), and
+[v1-loop-ownership-cert.md](v1-loop-ownership-cert.md) carries 44 commits dated 2026-06-27–30 (Camp-4
+sub-case work, the porta read_message stack, load_porta_config) that resolved the frontiers this doc
+left open. See those two docs for how this closed.

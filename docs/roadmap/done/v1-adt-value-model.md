@@ -1,4 +1,5 @@
 <!-- description: v1: make custom ADT (variant) values first-class, closing the #1 cross-repo wall lever (~41 walls, recursive to_string/pretty-print over user variants) -->
+<!-- done: 2026-06-20 -->
 # v1 ① — custom ADT (variant) as a first-class value
 
 The cross-repo wall lever #1 (~41 walls: recursive `to_string`/pretty-print over `type Expr = Lit(Int)

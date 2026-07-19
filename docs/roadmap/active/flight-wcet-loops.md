@@ -71,9 +71,9 @@ CountedLoopEnd,
 ### 2.3 強制の二層(ラダー表 [flight-profile](flight-profile.md) §7.2 と整合)
 
 1. **lowering ゲート(コンパイラ側・未証明・最安の壁)** ── `try_lower_scalar_for_range`
-   (`crates/almide-mir/src/lower/control.rs:766`)で `end` もリテラルなら静的 bound を
+   (`crates/almide-mir/src/lower/scalar_for.rs:12`)で `end` もリテラルなら静的 bound を
    計算し `CountedLoopStart { bound }` を出す。本体を `scalar_loop_depth > 0`
-   (`control.rs:816`)下で lower する間、`is_allocating` な op を拒否 ── 既存の heap 再代入
+   (`lower/scalar_for.rs:64`)下で lower する間、`is_allocating` な op を拒否 ── 既存の heap 再代入
    壁(`lower/mod.rs:278-292`)の兄弟。拒否時は rollback で sound な model-one-iteration 形へ
    (非飛行プログラムもコンパイルは通る、飛行サブセット外なだけ)。
 2. **checker 性質(証明・毎ビルド再検証)** ── G-F2 の `NoAllocInLoop`。lowering ゲートは
@@ -256,7 +256,7 @@ const-foldable に緩和。
 |---|---|---|
 | counted-loop `Op` | `crates/almide-mir/src/lib.rs:248` | `CountedLoopStart{bound:u64}`/`CountedLoopEnd` 追加 |
 | no-op fold アーム | `lib.rs:548-551`, `certificate.rs:377`, `translation_validation.rs:92-95` | 各2アーム |
-| bound 導出 + no-alloc 壁 | `lower/control.rs:766,816`, `lower/mod.rs:278` | counted marker emit、本体 `is_allocating` 拒否 |
+| bound 導出 + no-alloc 壁 | `lower/scalar_for.rs:12,64`, `lower/mod.rs:278` | counted marker emit、本体 `is_allocating` 拒否 |
 | 新 witness emitter | `certificate.rs`(`cap_witness_string` の後) | `alloc_bound_witness_string` |
 | Coq 停止性 | model on `Termination.v:27-56` | 新 `proofs/CountedLoop.v` `lrun` + `counted_loop_steps_bounded` |
 | Coq 性質1 | model on `Subset.v:22-38` | 新 `proofs/NoAllocInLoop.v` |
