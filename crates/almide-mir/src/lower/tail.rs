@@ -442,6 +442,13 @@ impl LowerCtx {
                         }
                     }
                 }
+                // A TUPLE subject in Unit-tail position — the heap-branch tail
+                // duplication turns `let s = match (…) {…}; use(s)` into exactly
+                // this shape (the whole body IS the match): the refinement chain's
+                // unit sibling runs only the taken arm's effects.
+                if self.try_lower_tuple_refinement_unit_match(subject, arms) {
+                    return Ok(None);
+                }
                 self.lower_branch(tail)?;
                 Ok(None)
             }
@@ -946,6 +953,13 @@ impl LowerCtx {
                 if let Some(dst) = self.try_lower_list_match_value(subject, arms, &tail.ty) {
                     return Ok(Some(dst));
                 }
+                // A TUPLE subject of SCALAR elements with HEAP-result arms (`match (n % 3,
+                // n % 5) { (0, 0) => "FizzBuzz", … }` — the fizz shape, the CHEATSHEET's
+                // canonical match idiom): the ordered tuple-refinement chain, extended to
+                // heap merges (per-arm `lower_heap_result_arm` + release parity).
+                if let Some(dst) = self.try_lower_tuple_refinement_match(subject, arms, &tail.ty) {
+                    return Ok(Some(dst));
+                }
                 // `desugar_match_to_if` wraps its OUTPUT in a `Block` (hoisted `let`s
                 // preceding the `If`) whenever the subject isn't one of `subject_pure`'s
                 // freely-substitutable kinds (`Var`/`LitInt`/`LitBool`/`LitFloat` —
@@ -1223,6 +1237,12 @@ impl LowerCtx {
                 if let Some(dst) =
                     self.try_lower_custom_variant_match(subject, arms, &tail.ty)
                 {
+                    return Ok(Some(dst));
+                }
+                // A TUPLE subject of scalar elements/expressions with a SCALAR result
+                // (`match (a % 2, b % 3) { (0, 0) => 100, … }`) — the ordered
+                // refinement chain (the scalar sibling of the heap-tail hook).
+                if let Some(dst) = self.try_lower_tuple_refinement_match(subject, arms, &tail.ty) {
                     return Ok(Some(dst));
                 }
                 // A VARIANT (Option/Result) subject returned by a function — execute the

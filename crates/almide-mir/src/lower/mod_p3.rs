@@ -1025,6 +1025,14 @@ impl LowerCtx {
                             }
                         }
                     }
+                    // A TUPLE subject of scalar elements in STATEMENT position — the
+                    // heap-branch tail-duplication rewrites `let s = match (…) {…};
+                    // use(s)` into this Unit form, so the refinement chain needs a
+                    // unit sibling (real IfThen/Else/EndIf markers; only the taken
+                    // arm's effects run — the linearization guard stays for the rest).
+                    if self.try_lower_tuple_refinement_unit_match(subject, arms) {
+                        return Ok(());
+                    }
                     self.lower_branch(expr)
                 }
                 IrExprKind::If { .. } => self.lower_branch(expr),
@@ -1068,6 +1076,13 @@ impl LowerCtx {
                                     if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
                                         done = self.try_lower_unit_if(cond, then, else_);
                                     }
+                                }
+                                // The tuple-refinement unit chain (the Block-tail twin
+                                // of the statement-Match hook — the heap-branch tail
+                                // duplication lands the match HERE when the `let` was
+                                // a block's last statement).
+                                if !done {
+                                    done = self.try_lower_tuple_refinement_unit_match(subject, arms);
                                 }
                                 if !done {
                                     self.lower_branch(t)?;

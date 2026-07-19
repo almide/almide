@@ -1285,6 +1285,17 @@ impl LowerCtx {
                         }
                     }
                 }
+                // A TUPLE subject of scalar elements/expressions with a HEAP result
+                // (`let s = match (string.len(x), n % 5) { (2, 0) => "…", _ => "…" }`):
+                // the ordered refinement chain (heap merge), bound + scope-tracked
+                // like any owned heap value.
+                if let Some(dst) = self.try_lower_tuple_refinement_match(subject, arms, ty) {
+                    self.value_of.insert(var, dst);
+                    if !self.live_heap_handles.contains(&dst) {
+                        self.live_heap_handles.push(dst);
+                    }
+                    return Ok(());
+                }
                 Err(LowerError::Unsupported(
                     "heap-result `match` bound to a let/var cannot be faithfully \
                      computed in this brick (would bind an empty deferred heap value); \

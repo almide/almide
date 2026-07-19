@@ -1707,7 +1707,7 @@ impl LowerCtx {
         if dbg {
             eprintln!("[tuple-match] entry: subj={:?} arms={}", std::mem::discriminant(&subject.kind), arms.len());
         }
-        if is_heap_ty(result_ty) || arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
+        if arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
             return None;
         }
         let IrExprKind::Tuple { elements } = &subject.kind else { return None };
@@ -1717,17 +1717,50 @@ impl LowerCtx {
             }
             return None;
         }
-        // Elements: plain Vars, each a variant (block) or scalar.
+        // The marks precede the ELEMENT resolution: a scalar-EXPRESSION element
+        // (`n % 3` — the fizz shape) ANF-lowers here, so every decline below must
+        // roll its ops back.
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let mut rollback = |s: &mut Self| {
+            s.ops.truncate(ops_mark);
+            s.live_heap_handles.truncate(lhh_mark);
+        };
+        // Elements: a plain Var (variant block or scalar), or a SCALAR expression
+        // materialized to a fresh value (read once — exactly the by-value tuple
+        // subject semantics; the match reads only these copies).
         let mut elems: Vec<(ValueId, Ty)> = Vec::with_capacity(elements.len());
         for e in elements {
-            let IrExprKind::Var { id } = &e.kind else { return None };
-            let v = self.value_for(*id).ok()?;
+            let v = match &e.kind {
+                IrExprKind::Var { id } => match self.value_for(*id) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        rollback(self);
+                        return None;
+                    }
+                },
+                _ if !is_heap_ty(&e.ty) => match self.lower_scalar_value(e) {
+                    Some(v) => v,
+                    None => {
+                        rollback(self);
+                        return None;
+                    }
+                },
+                _ => {
+                    rollback(self);
+                    return None;
+                }
+            };
             elems.push((v, e.ty.clone()));
         }
         // Validate every refutable arm up front (no mid-emission decline).
         for a in &arms[..arms.len() - 1] {
-            let IrPattern::Tuple { elements: pats } = &a.pattern else { return None };
+            let IrPattern::Tuple { elements: pats } = &a.pattern else {
+                rollback(self);
+                return None;
+            };
             if pats.len() != elems.len() {
+                rollback(self);
                 return None;
             }
             for (p, (_, ty)) in pats.iter().zip(elems.iter()) {
@@ -1746,13 +1779,12 @@ impl LowerCtx {
                     _ => false,
                 };
                 if !ok {
+                    rollback(self);
                     return None;
                 }
             }
         }
-        let ops_mark = self.ops.len();
-        let lhh_mark = self.live_heap_handles.len();
-        match self.tuple_refinement_chain(&elems, arms) {
+        match self.tuple_refinement_chain(&elems, arms, result_ty) {
             Some(dst) => Some(dst),
             None => {
                 self.ops.truncate(ops_mark);
@@ -1762,14 +1794,169 @@ impl LowerCtx {
         }
     }
 
+    /// The UNIT-statement sibling of [`Self::try_lower_tuple_refinement_match`] —
+    /// the heap-branch tail duplication turns `let s = match (a, b) { … }; use(s)`
+    /// into a STATEMENT match whose arms carry the continuation's effects, so the
+    /// refinement chain must run them under REAL `IfThen`/`Else`/`EndIf` markers
+    /// (only the taken arm executes — `unit_arm_depth` raised per arm, exactly the
+    /// `lower_variant_unit_arm` discipline). Returns `true` iff fully lowered;
+    /// rolls back and returns `false` on any decline.
+    pub(crate) fn try_lower_tuple_refinement_unit_match(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+    ) -> bool {
+        if arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
+            return false;
+        }
+        let IrExprKind::Tuple { elements } = &subject.kind else { return false };
+        if !matches!(arms.last().map(|a| &a.pattern), Some(IrPattern::Wildcard)) {
+            return false;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let mut elems: Vec<(ValueId, Ty)> = Vec::with_capacity(elements.len());
+        for e in elements {
+            let v = match &e.kind {
+                IrExprKind::Var { id } => self.value_for(*id).ok(),
+                _ if !is_heap_ty(&e.ty) => self.lower_scalar_value(e),
+                _ => None,
+            };
+            match v {
+                Some(v) => elems.push((v, e.ty.clone())),
+                None => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return false;
+                }
+            }
+        }
+        let mut valid = true;
+        'outer: for a in &arms[..arms.len() - 1] {
+            let IrPattern::Tuple { elements: pats } = &a.pattern else {
+                valid = false;
+                break;
+            };
+            if pats.len() != elems.len() {
+                valid = false;
+                break;
+            }
+            for (p, (_, ty)) in pats.iter().zip(elems.iter()) {
+                let ok = match p {
+                    IrPattern::Wildcard => true,
+                    IrPattern::Literal { expr } => {
+                        !is_heap_ty(ty)
+                            && matches!(
+                                expr.kind,
+                                IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. }
+                            )
+                    }
+                    IrPattern::Constructor { .. } => self
+                        .custom_variant_type_name(ty)
+                        .is_some_and(|n| self.nested_refinement_pat_valid(p, &n)),
+                    _ => false,
+                };
+                if !ok {
+                    valid = false;
+                    break 'outer;
+                }
+            }
+        }
+        if !valid || !self.tuple_refinement_unit_chain(&elems, arms) {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return false;
+        }
+        true
+    }
+
+    fn tuple_refinement_unit_chain(
+        &mut self,
+        elems: &[(ValueId, Ty)],
+        arms: &[IrMatchArm],
+    ) -> bool {
+        let Some(arm) = arms.first() else { return true };
+        let lower_unit_arm = |s: &mut Self, body: &IrExpr| -> bool {
+            let mark = s.live_heap_handles.len();
+            s.unit_arm_depth += 1;
+            let r = s.lower_branch_arm(None, body);
+            s.unit_arm_depth -= 1;
+            if r.is_err() {
+                return false;
+            }
+            s.drop_arm_locals(mark);
+            true
+        };
+        if matches!(arm.pattern, IrPattern::Wildcard) {
+            return lower_unit_arm(self, &arm.body);
+        }
+        let IrPattern::Tuple { elements: pats } = &arm.pattern else { return false };
+        let mut conj: Option<ValueId> = None;
+        for (p, (v, ty)) in pats.iter().zip(elems.iter()) {
+            let ci = match p {
+                IrPattern::Wildcard => continue,
+                IrPattern::Literal { expr } => {
+                    let lit = self.fresh_value();
+                    let value = match &expr.kind {
+                        IrExprKind::LitInt { value } => *value,
+                        IrExprKind::LitBool { value } => *value as i64,
+                        _ => return false,
+                    };
+                    self.ops.push(Op::ConstInt { dst: lit, value });
+                    let c = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: c, op: IntOp::Eq, a: *v, b: lit });
+                    c
+                }
+                IrPattern::Constructor { .. } => {
+                    let Some(vname) = self.custom_variant_type_name(ty) else { return false };
+                    match self.nested_refinement_cond(*v, p, &vname) {
+                        Some(c) => c,
+                        None => return false,
+                    }
+                }
+                _ => return false,
+            };
+            conj = Some(match conj {
+                None => ci,
+                Some(prev) => {
+                    let c = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: c, op: IntOp::Mul, a: prev, b: ci });
+                    c
+                }
+            });
+        }
+        let Some(cond) = conj else {
+            return lower_unit_arm(self, &arm.body);
+        };
+        self.ops.push(Op::IfThen { cond, dst: None });
+        if !lower_unit_arm(self, &arm.body) {
+            return false;
+        }
+        self.ops.push(Op::Else { val: None });
+        if !self.tuple_refinement_unit_chain(elems, &arms[1..]) {
+            return false;
+        }
+        self.ops.push(Op::EndIf { val: None });
+        true
+    }
+
     fn tuple_refinement_chain(
         &mut self,
         elems: &[(ValueId, Ty)],
         arms: &[IrMatchArm],
+        result_ty: &Ty,
     ) -> Option<ValueId> {
+        let heap = is_heap_ty(result_ty);
+        let lower_arm = |s: &mut Self, body: &IrExpr| -> Option<ValueId> {
+            if heap {
+                s.lower_heap_result_arm(body, result_ty)
+            } else {
+                s.lower_scalar_arm(body)
+            }
+        };
         let arm = arms.first()?;
         if matches!(arm.pattern, IrPattern::Wildcard) {
-            return self.lower_scalar_arm(&arm.body);
+            return lower_arm(self, &arm.body);
         }
         let IrPattern::Tuple { elements: pats } = &arm.pattern else { return None };
         let mut conj: Option<ValueId> = None;
@@ -1805,13 +1992,39 @@ impl LowerCtx {
         }
         // An all-wildcard tuple arm is irrefutable — its body IS the rest.
         let Some(cond) = conj else {
-            return self.lower_scalar_arm(&arm.body);
+            return lower_arm(self, &arm.body);
         };
         let dst = self.fresh_value();
         self.ops.push(Op::IfThen { cond, dst: Some(dst) });
-        let then_v = self.lower_scalar_arm(&arm.body)?;
+        // RELEASE PARITY for the HEAP merge (mirrors emit_variant_arm_chain): an
+        // outer handle one side moves out must be released by the other, else the
+        // branch-grouped cert rejects the path-dependent accounting. The scalar
+        // path emits no ownership events, so the parity sets stay empty there.
+        let outer: Vec<ValueId> = self.live_heap_handles.clone();
+        let then_v = lower_arm(self, &arm.body)?;
+        let consumed_by_then: Vec<ValueId> =
+            outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
+        let else_marker_at = self.ops.len();
         self.ops.push(Op::Else { val: Some(then_v) });
-        let rest_v = self.tuple_refinement_chain(elems, &arms[1..])?;
+        let live_after_then: Vec<ValueId> = self.live_heap_handles.clone();
+        let rest_v = self.tuple_refinement_chain(elems, &arms[1..], result_ty)?;
+        let consumed_by_else: Vec<ValueId> = live_after_then
+            .iter()
+            .copied()
+            .filter(|x| !self.live_heap_handles.contains(x))
+            .collect();
+        for x in &consumed_by_then {
+            if !consumed_by_else.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.push(op);
+            }
+        }
+        for x in &consumed_by_else {
+            if !consumed_by_then.contains(x) {
+                let op = self.drop_op_for(*x);
+                self.ops.insert(else_marker_at, op);
+            }
+        }
         self.ops.push(Op::EndIf { val: Some(rest_v) });
         Some(dst)
     }
