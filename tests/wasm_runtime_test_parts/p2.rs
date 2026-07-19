@@ -411,7 +411,6 @@ fn wasm_sibling_closures_share_mutable_capture() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_reader_closure_observes_writer_closure() {
     // Same shared-cell sibling-closure case via in-place `list.pop`: the writer
     // drains 3 of 4 elements, a separate reader closure reports the length. The
@@ -525,7 +524,6 @@ fn wasm_closure_in_anonymous_record() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_indexassign_noncopy_element_through_closure() {
     // IndexAssign of a NON-Copy element through a closure capturing the list:
     // `xs: List[String]; () => { xs[0] = xs[0] + "!" }`. WASM trapped — the
