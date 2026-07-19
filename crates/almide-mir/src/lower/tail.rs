@@ -414,10 +414,15 @@ impl LowerCtx {
     fn lower_tail_unit(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
         return match &tail.kind {
             IrExprKind::Unit => Ok(None),
-            // A Unit-typed call tail is an EFFECT call (e.g. `println(s)`):
-            // lower it as a statement-effect, no return value.
+            // A Unit-typed call tail is an EFFECT call (e.g. `println(s)`): lower it
+            // through the STATEMENT dispatcher — the same one-dispatcher discipline
+            // as the branch arm-tail — so the functional-rebind group (list.push /
+            // map.insert / bytes.push / clear) fires here too. A lifted LAMBDA whose
+            // body is `{ list.push(g, 7) }` reaches its push as this unit TAIL; the
+            // direct lower_effect_call bypassed the rebind and emitted a bare
+            // unlinked `list.push` (the closure-over-global wall class).
             IrExprKind::Call { .. } => {
-                self.lower_effect_call(tail)?;
+                self.lower_stmt_expr(tail)?;
                 Ok(None)
             }
             // A Unit `if` tail EXECUTES (only the taken arm's effects run) when the

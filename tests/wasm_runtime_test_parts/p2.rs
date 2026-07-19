@@ -350,7 +350,6 @@ fn rust_process_exec_forwards_bound_list() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_non_copy_mutable_capture_through_closure() {
     // Closure v2 P6: mutating a captured non-Copy `var` through a closure must be
     // visible to the enclosing scope — on BOTH targets. Before P6 it silently
@@ -369,7 +368,6 @@ fn wasm_non_copy_mutable_capture_through_closure() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_nested_non_copy_mutable_capture() {
     // A non-Copy `var` bound inside a closure, mutated by a nested closure — the
     // tail read of the shared cell must not outlive it (a Rust borrow-lifetime
@@ -390,7 +388,6 @@ fn wasm_nested_non_copy_mutable_capture() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_sibling_closures_share_mutable_capture() {
     // Closure v2 P6: two SIBLING closures capture the same non-Copy `var` — one
     // mutates it, the other only reads it. The reader must observe the writer's
@@ -449,7 +446,6 @@ fn wasm_bytes_mutable_capture_through_closure() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_string_push_clear_in_place() {
     // string.push / string.clear had NO WASM dispatch arm — they ICE'd the emitter
     // (native worked). They are `mut s`/in-place mutators in is_inplace_mutator, so

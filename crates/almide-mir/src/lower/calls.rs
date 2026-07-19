@@ -858,8 +858,16 @@ impl LowerCtx {
                                     kind: almide_ir::IrStmtKind::Expr { expr: body },
                                     span: None,
                                 };
-                                if self.lower_stmt(&stmt).is_ok() {
-                                    return Ok(());
+                                match self.lower_stmt(&stmt) {
+                                    Ok(()) => return Ok(()),
+                                    Err(e) => {
+                                        if std::env::var("ALMIDE_DBG_ANF").is_ok() {
+                                            eprintln!(
+                                                "[c1-stmt-inline] body failed in {}: {e:?}",
+                                                self.fn_name
+                                            );
+                                        }
+                                    }
                                 }
                                 self.ops.truncate(ops_mark);
                                 self.live_heap_handles.truncate(lhh_mark);

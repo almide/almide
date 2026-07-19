@@ -21,7 +21,6 @@ fn wasm_reassign_concat_capture_through_closure() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_module_global_list_mutated_through_closure() {
     // A module-level mutable global (`var g`) mutated through a closure must behave
     // identically on both targets. On Rust the global lowers to a `thread_local!`
@@ -41,7 +40,6 @@ fn wasm_module_global_list_mutated_through_closure() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_module_global_map_mutated_through_closure() {
     // Same, via `map.insert` invoked as an EXPRESSION on a `ModuleRc` global. The
     // Rust walker only special-cased list push/pop/clear, so map/string/bytes
@@ -61,7 +59,6 @@ fn wasm_module_global_map_mutated_through_closure() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_closure_selected_by_if_branch() {
     // `let f = if c then A else B` where A, B are distinct closures. Native gave
     // E0308 "if and else have incompatible types" (each branch a different
@@ -79,7 +76,6 @@ fn wasm_closure_selected_by_if_branch() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap: closure env is a value-copy so a mutable capture through a closure needs a shared-cell env (heap cell) — tracked for the next lowering wave. Native (almide run/test) works via fallback; only the direct wasm-build path walls."]
 fn wasm_closure_selected_by_match_arm() {
     // Same join via `match`. Native gave E0308 "match arms have incompatible
     // types". Boxing each arm body unifies them. 1 call -> len 1.
@@ -207,7 +203,6 @@ fn wasm_closure_with_fn_typed_param() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap (closure env shared-cell) — native (almide run/test) works via fallback; only the direct wasm-build path walls. Tracked for the next lowering wave."]
 fn wasm_global_named_rust_keyword() {
     // A global named `box` (a Rust reserved word). The thread_local static is
     // declared `BOX` (raw name uppercased) but reads/writes used the keyword-
@@ -226,7 +221,6 @@ fn wasm_global_named_rust_keyword() {
 }
 
 #[test]
-    #[ignore = "#782 v1 gap (closure env shared-cell) — native (almide run/test) works via fallback; only the direct wasm-build path walls. Tracked for the next lowering wave."]
 fn wasm_global_name_collides_with_stdlib_param() {
     // A mutable global `n: Int` collides by name with the `n` parameter of stdlib
     // numeric helpers (e.g. `int.to_int8_checked(n)`). The storage classifier's

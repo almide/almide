@@ -287,6 +287,37 @@ impl LowerCtx {
                 }
             }
         }
+        // A UNIT body (`let f = () => { list.push(g, 7) }; f()` — an effect
+        // closure): lower it through the STATEMENT machinery — the same
+        // dispatcher a fn body uses — so the functional-rebind group
+        // (list.push / map.insert / clear) fires. Routing it through
+        // `lower_scalar_value` treated the unit-call tail as a scalar CALL
+        // OPERAND and emitted the raw unlinked `list.push` (the
+        // closure-over-global wall class). The call site discards a Unit
+        // call's value, so the returned dst is a dummy zero.
+        if matches!(ty, Ty::Unit) {
+            let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
+                IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
+                _ => (&[], Some(&body)),
+            };
+            for s in stmts {
+                if self.lower_stmt(s).is_err() {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            }
+            if let Some(t) = tail {
+                if !matches!(t.kind, IrExprKind::Unit) && self.lower_stmt_expr(t).is_err() {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            }
+            let dst = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst, value: 0 });
+            return Some(dst);
+        }
         // Lower the lambda BODY inline as a scalar value (captures resolve through value_of).
         match self.lower_scalar_value(&body) {
             Some(v) if !is_heap_ty(ty) => Some(v),

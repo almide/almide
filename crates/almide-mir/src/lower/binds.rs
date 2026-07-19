@@ -48,6 +48,20 @@ impl LowerCtx {
             bound.insert(*v);
         }
         let free = almide_ir::free_vars::free_vars(body, &bound);
+        // A MODULE-LEVEL global (a top `let` or a mutable `var`) is NOT a capture:
+        // the lambda body reads/writes it through the GLOBAL SLOT machinery
+        // (`value_or_global` / the `__mg_take`+Store assign), which the lifted
+        // sub-context carries (`globals` cloned; `mutable_global_info` is
+        // program-static). The slot IS the shared cell, so a `var` global mutated
+        // through a closure keeps native's shared semantics — capturing it as an
+        // env VALUE COPY both broke the lift (a global has no `value_of` entry to
+        // read the capture from) and would have frozen a stale snapshot.
+        let free: Vec<VarId> = free
+            .into_iter()
+            .filter(|v| {
+                !self.globals.contains_key(v) && crate::lower::mutable_global_info(*v).is_none()
+            })
+            .collect();
         struct CapCollect<'a> {
             free: &'a [VarId],
             out: Vec<(VarId, Ty)>,
