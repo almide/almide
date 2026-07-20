@@ -1837,6 +1837,20 @@ fn unwrap_or_call_name(module: &str, arg_tys: &[Ty]) -> Option<String> {
 /// Every `list.*` typed-variant route (extracted verbatim, order preserved;
 /// `None` = no typed variant applies → the caller falls to the plain name).
 fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    // Split (2026-07-20, #781 cog>100 burn-down) into per-theme routers, called in the
+    // SAME ORDER the original single if-chain evaluated them (order is load-bearing: e.g.
+    // `enumerate` has two historical arms and the FIRST one — source_keyed — is exhaustive
+    // for any single-type-arg List, making transform's `enumerate` arm dead by construction,
+    // exactly as in the original unified function). Pure text move, no logic change.
+    list_call_name_hof_combinators(func, arg_tys, result_ty)
+        .or_else(|| list_call_name_source_keyed(func, arg_tys, result_ty))
+        .or_else(|| list_call_name_ordering(func, arg_tys, result_ty))
+        .or_else(|| list_call_name_transform(func, arg_tys, result_ty))
+        .or_else(|| list_call_name_modifiers(func, arg_tys, result_ty))
+        .or_else(|| list_call_name_accessors(func, arg_tys, result_ty))
+}
+
+fn list_call_name_hof_combinators(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
     // `list.shuffle` / `list.choice` ARE `random.shuffle`/`random.choice` under a second
     // stdlib name (the same almide_rt intrinsics) — delegate to the random element-repr
@@ -1918,6 +1932,11 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
             _ => "list.unique_by_x".to_string(),
         });
     }
+    None
+}
+
+fn list_call_name_source_keyed(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
     // `list.enumerate` keys on its SOURCE element: scalar → the flat-pair self-host;
     // String → the rc-share pair variant (`DropListIntStr` at the call site frees each
     // pair's key ref); any other heap element routes to an UNREGISTERED name (walls
@@ -2006,6 +2025,11 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
             }
         }
     }
+    None
+}
+
+fn list_call_name_ordering(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
     // List[Float] ordering uses IEEE-754 totalOrder (f64::total_cmp), NOT a signed-int slot
     // compare. Float is SCALAR (is_heap_ty false), so the heap routes below never fire for it —
     // route sort/min/max explicitly on the element being Ty::Float (C-055). sort_by keys on the
@@ -2094,6 +2118,11 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
             }
         }
     }
+    None
+}
+
+fn list_call_name_transform(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
     // `list.map` is the one combinator whose SOURCE and RESULT element reprs may DIFFER (the
     // closure transforms the type). A heap RESULT over a SCALAR source (`float.to_string` over a
     // List[Float], `int.to_string` over a List[Int]) must read the source slot as a raw i64
@@ -2152,6 +2181,11 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
             }
         }
     }
+    None
+}
+
+fn list_call_name_modifiers(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
     // `list.set` over a List[String] → `list.set_str` (the val is a String HANDLE, not an i64
     // Int — the generic list.set's i64 val param mismatches; set_str rc-copies + co-owns). The
     // yaml `list.set(lines, dp, …)` shape.
@@ -2217,6 +2251,11 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
             }
         }
     }
+    None
+}
+
+fn list_call_name_accessors(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
     // Element-RETURNING accessors / search over a List[heap] (the result is an Option[heap]):
     // get/first/last (positional) + find (predicate higher-order).
     if matches!(func, "get" | "first" | "last" | "find") {
@@ -2371,6 +2410,7 @@ fn list_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> 
     }
     None
 }
+
 
 /// Every `set.*` typed-variant route (see the block comments).
 fn set_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
