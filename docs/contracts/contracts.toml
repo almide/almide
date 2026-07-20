@@ -1935,3 +1935,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/opt_str_str_ctor.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-157"
+spec      = "ALS-I3"
+title     = "An unannotated generic-ctor top-let carries its solved payload type to every reader"
+statement = "A top-level `let` whose initializer is a generic constructor over a nominal payload (`let MAYBE = some(Cfg { … })`, no annotation) presents the fully SOLVED type (`Option[Cfg]`) to every reader — a same-file `match`'s payload binding and a cross-module reader (`m.MAYBE`) alike — and the match executes identically on both targets. Previously the registration seed `Option[Unknown]` leaked: the pre-solve write to `env.top_lets` was never upgraded after constraint solving, the v1 wasm pipeline skipped the module top-let refresh pre-pass entirely, and re-registration clobbered an already-solved entry back to the seed — the payload binding stayed Unknown and the whole program walled off the v1 leg while native ran (the option_record_toplet crossmod matrix cell, the last KnownBroken cell in the matrix)."
+since     = "0.32.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unannotated_toplet_generic_ctor.almd", class = "fixture" },
+]

@@ -259,7 +259,7 @@ effect fn main() -> Unit =
   match m.MAYBE { some(c) => println(c.name), none => println("?") }
 "#,
             expected: "opt",
-            status: Status::KnownBroken("#782 v1 gap: match over an UNTRACKED subject with a call-bearing arm cannot take the both-arms linearization (would run the untaken arm's effects)"),
+            status: Status::Works,
         },
         Cell {
             name: "crossmod_brace_construction",

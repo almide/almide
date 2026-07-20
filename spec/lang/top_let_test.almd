@@ -86,3 +86,26 @@ test "top-level let in comparison" {
   assert_eq(MAX_COUNT < 200, true);
   assert_eq(ZERO == 0, true)
 }
+
+// ── Unannotated generic-ctor top-level lets ──
+// The registration seed for these is `Option[Unknown]` / `Result[Unknown]`;
+// the payload type only exists after constraint solving. Readers (including
+// match payload bindings) must see the SOLVED type, not the seed.
+type TlCfg = { name: String }
+
+let MAYBE_CFG = some(TlCfg { name: "opt" })
+
+let NO_CFG: Option[TlCfg] = none
+
+test "unannotated option-of-record top-level let match" {
+  let label = match MAYBE_CFG {
+    some(c) => c.name,
+    none => "?",
+  };
+  assert_eq(label, "opt");
+  let missing = match NO_CFG {
+    some(c) => c.name,
+    none => "?",
+  };
+  assert_eq(missing, "?")
+}

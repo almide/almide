@@ -127,6 +127,19 @@ fn source_to_ir_with(
         modules.iter().map(|(n, p, s)| (n.as_str(), p, *s)),
     );
     let mut checker = Checker::from_env(canon.env);
+    // #785 parity with the CLI drivers: module top-let types must be fully
+    // inferred BEFORE the entry program reads them. Without this pre-pass a
+    // cross-module reader of a generic-ctor top-let (`let MAYBE = some(Cfg
+    // {…})`) sees the registration seed `Option[Unknown]`, the match payload
+    // binding stays Unknown, and the whole program walls.
+    for (name, mod_prog, _) in modules {
+        if almide_lang::stdlib_info::is_stdlib_module(name)
+            && !almide_lang::stdlib_info::is_bundled_module(name)
+        {
+            continue;
+        }
+        checker.refresh_module_top_lets(mod_prog, name);
+    }
     let diags = checker.infer_program(&mut prog);
     let errors: Vec<_> = diags
         .iter()

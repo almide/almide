@@ -1,0 +1,25 @@
+// @contract: C-157
+// An UNANNOTATED generic-ctor top-let (`let MAYBE = some(Cfg {…})`) registers
+// as `Option[Unknown]` — the payload type only exists after constraint
+// solving. Readers (a match's payload binding, `c.name`) must see the SOLVED
+// `Option[Cfg]`: previously the seed leaked, the payload binding stayed
+// Unknown, and the whole program walled off the v1 leg while native ran
+// (the option_record_toplet crossmod matrix cell).
+type Cfg = { name: String }
+
+let MAYBE = some(Cfg { name: "opt" })
+
+let ABSENT: Option[Cfg] = none
+
+effect fn main() -> Unit = {
+  let label = match MAYBE {
+    some(c) => c.name,
+    none => "?",
+  }
+  println("label = ${label}")
+  let missing = match ABSENT {
+    some(c) => c.name,
+    none => "?",
+  }
+  println("missing = ${missing}")
+}

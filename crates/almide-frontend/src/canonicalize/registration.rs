@@ -876,7 +876,21 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
                 let rt = ty.as_ref().map(|te| resolve(env, te))
                     .unwrap_or_else(|| infer_top_let_seed(env, prefix, value));
                 let key = prefixed_key(prefix, name);
-                env.top_lets.insert(sym(&key), rt.clone());
+                // A PREFIXED key names exactly one decl program-wide, and
+                // registration re-runs per driver leg over a persistent env —
+                // re-seeding must not downgrade a fully inferred entry (the
+                // post-solve flush's `Option[Cfg]`) back to the seed's partial
+                // `Option[Unknown]`. Unprefixed keys stay unconditional: they
+                // are scoped aliases (main program / intra-module temp) where
+                // an entry may legitimately describe a DIFFERENT decl.
+                let keep_existing = prefix.is_some()
+                    && (rt.contains_unknown() || rt.contains_typevar())
+                    && env.top_lets.get(&sym(&key)).is_some_and(|t| {
+                        !t.contains_unknown() && !t.contains_typevar()
+                    });
+                if !keep_existing {
+                    env.top_lets.insert(sym(&key), rt.clone());
+                }
                 // Register in DefTable
                 let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");
                 let mod_path = prefix.unwrap_or("");
