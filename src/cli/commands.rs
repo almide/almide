@@ -940,8 +940,17 @@ pub fn cmd_fmt(files: &[String], write_back: bool) {
     let (dep_names, dep_submodules) = load_dep_info_for_fmt();
 
     for file in files {
-        let (mut program, _, _) = parse_file(file);
-        let source_text = std::fs::read_to_string(file).unwrap_or_default();
+        let (mut program, source_text, parse_errors) = parse_file(file);
+        if !parse_errors.is_empty() {
+            // A partially-parsed program silently drops unparseable top-level
+            // items — formatting it and writing back would delete that code
+            // from the file on disk. Report and skip instead.
+            for e in &parse_errors {
+                eprintln!("{}", crate::diagnostic_render::display_with_source(e, &source_text));
+            }
+            eprintln!("{}: {} parse error(s), skipping", file, parse_errors.len());
+            continue;
+        }
         // Auto-manage imports: add missing, remove unused
         let import_changes = fmt::auto_imports(&mut program, &source_text, &dep_names, &dep_submodules);
         for msg in &import_changes {

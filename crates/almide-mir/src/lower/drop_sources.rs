@@ -1478,8 +1478,9 @@ pub fn generate_record_drop_sources(
             continue;
         }
         let tname = decl.name.as_str();
+        let fname = drop_fn_ident(tname);
         out.push_str(&format!(
-            "fn __drop_opt_{tname}(e: Option[{tname}]) -> Unit = {{\n  match e {{\n    some(r) => (),\n    none => (),\n  }}\n}}\n"
+            "fn __drop_opt_{fname}(e: Option[{tname}]) -> Unit = {{\n  match e {{\n    some(r) => (),\n    none => (),\n  }}\n}}\n"
         ));
     }
     // `$__drop_opt_str` — frees an `Option[String]` (the recursive-drop leaf of a `Result[Option[String],
@@ -1852,61 +1853,70 @@ pub fn generate_krec_sources(
         out.push_str(&format!("  a{}\n}}\n", tys.len()));
     };
 
+    // `r` is a record NAME (`recs`' HashMap key) — a cross-module record carries
+    // its dotted module prefix (`m.Cfg`), which is only valid Almide syntax as a
+    // TYPE reference. Every `__krec_*` string below uses it as a FUNCTION NAME, so
+    // each loop derives the sanitized `rf` (via `drop_fn_ident`, the same dots→
+    // underscores mangling `generate_record_drop_sources` applies) and formats
+    // with `{rf}`, keeping `r`/`recs[r]` only for the HashMap lookup.
     for r in uses.map_iv.iter() {
-        emit_norm_tys(&mut out, r, &recs[r]);
+        let rf = drop_fn_ident(r);
+        emit_norm_tys(&mut out, &rf, &recs[r]);
         out.push_str(&format!(
-            "fn __krec_mfl_{r}_iv_at(pairs: List[(Value, Int)], i: Int, m: Map[String, Int]) -> Map[String, Int] =\n  \
+            "fn __krec_mfl_{rf}_iv_at(pairs: List[(Value, Int)], i: Int, m: Map[String, Int]) -> Map[String, Int] =\n  \
                if i >= list.len(pairs) then m\n  \
                else match list.get(pairs, i) {{\n    \
                  some(p) => {{\n      \
                    let (k, v) = p\n      \
-                   __krec_mfl_{r}_iv_at(pairs, i + 1, map.set(m, __krec_norm_{r}(k), v))\n    }},\n    \
+                   __krec_mfl_{rf}_iv_at(pairs, i + 1, map.set(m, __krec_norm_{rf}(k), v))\n    }},\n    \
                  none => m,\n  }}\n\
-             fn __krec_map_from_list_{r}_iv(pairs: List[(Value, Int)]) -> Map[String, Int] = {{\n  \
+             fn __krec_map_from_list_{rf}_iv(pairs: List[(Value, Int)]) -> Map[String, Int] = {{\n  \
                let m: Map[String, Int] = map.new()\n  \
-               __krec_mfl_{r}_iv_at(pairs, 0, m)\n}}\n\
-             fn __krec_map_set_{r}_iv(m: Map[String, Int], k: Value, v: Int) -> Map[String, Int] =\n  \
-               map.set(m, __krec_norm_{r}(k), v)\n\
-             fn __krec_map_get_{r}_iv(m: Map[String, Int], k: Value) -> Option[Int] =\n  \
-               map.get(m, __krec_norm_{r}(k))\n\
-             fn __krec_map_contains_{r}_iv(m: Map[String, Int], k: Value) -> Bool =\n  \
-               map.contains(m, __krec_norm_{r}(k))\n"
+               __krec_mfl_{rf}_iv_at(pairs, 0, m)\n}}\n\
+             fn __krec_map_set_{rf}_iv(m: Map[String, Int], k: Value, v: Int) -> Map[String, Int] =\n  \
+               map.set(m, __krec_norm_{rf}(k), v)\n\
+             fn __krec_map_get_{rf}_iv(m: Map[String, Int], k: Value) -> Option[Int] =\n  \
+               map.get(m, __krec_norm_{rf}(k))\n\
+             fn __krec_map_contains_{rf}_iv(m: Map[String, Int], k: Value) -> Bool =\n  \
+               map.contains(m, __krec_norm_{rf}(k))\n"
         ));
     }
     for r in uses.map_sv.iter() {
-        emit_norm_tys(&mut out, r, &recs[r]);
+        let rf = drop_fn_ident(r);
+        emit_norm_tys(&mut out, &rf, &recs[r]);
         out.push_str(&format!(
-            "fn __krec_mfl_{r}_sv_at(pairs: List[(Value, String)], i: Int, m: Map[String, String]) -> Map[String, String] =\n  \
+            "fn __krec_mfl_{rf}_sv_at(pairs: List[(Value, String)], i: Int, m: Map[String, String]) -> Map[String, String] =\n  \
                if i >= list.len(pairs) then m\n  \
                else match list.get(pairs, i) {{\n    \
                  some(p) => {{\n      \
                    let (k, v) = p\n      \
-                   __krec_mfl_{r}_sv_at(pairs, i + 1, map.set(m, __krec_norm_{r}(k), v))\n    }},\n    \
+                   __krec_mfl_{rf}_sv_at(pairs, i + 1, map.set(m, __krec_norm_{rf}(k), v))\n    }},\n    \
                  none => m,\n  }}\n\
-             fn __krec_map_from_list_{r}_sv(pairs: List[(Value, String)]) -> Map[String, String] = {{\n  \
+             fn __krec_map_from_list_{rf}_sv(pairs: List[(Value, String)]) -> Map[String, String] = {{\n  \
                let m: Map[String, String] = map.new()\n  \
-               __krec_mfl_{r}_sv_at(pairs, 0, m)\n}}\n\
-             fn __krec_map_set_{r}_sv(m: Map[String, String], k: Value, v: String) -> Map[String, String] =\n  \
-               map.set(m, __krec_norm_{r}(k), v)\n\
-             fn __krec_map_get_{r}_sv(m: Map[String, String], k: Value) -> Option[String] =\n  \
-               map.get(m, __krec_norm_{r}(k))\n\
-             fn __krec_map_contains_{r}_sv(m: Map[String, String], k: Value) -> Bool =\n  \
-               map.contains(m, __krec_norm_{r}(k))\n"
+               __krec_mfl_{rf}_sv_at(pairs, 0, m)\n}}\n\
+             fn __krec_map_set_{rf}_sv(m: Map[String, String], k: Value, v: String) -> Map[String, String] =\n  \
+               map.set(m, __krec_norm_{rf}(k), v)\n\
+             fn __krec_map_get_{rf}_sv(m: Map[String, String], k: Value) -> Option[String] =\n  \
+               map.get(m, __krec_norm_{rf}(k))\n\
+             fn __krec_map_contains_{rf}_sv(m: Map[String, String], k: Value) -> Bool =\n  \
+               map.contains(m, __krec_norm_{rf}(k))\n"
         ));
     }
     for r in uses.sets.iter() {
-        emit_norm_tys(&mut out, r, &recs[r]);
+        let rf = drop_fn_ident(r);
+        emit_norm_tys(&mut out, &rf, &recs[r]);
         out.push_str(&format!(
-            "fn __krec_sfl_{r}_at(xs: List[Value], i: Int, acc: Set[String]) -> Set[String] =\n  \
+            "fn __krec_sfl_{rf}_at(xs: List[Value], i: Int, acc: Set[String]) -> Set[String] =\n  \
                if i >= list.len(xs) then acc\n  \
                else match list.get(xs, i) {{\n    \
-                 some(x) => __krec_sfl_{r}_at(xs, i + 1, set.insert(acc, __krec_norm_{r}(x))),\n    \
+                 some(x) => __krec_sfl_{rf}_at(xs, i + 1, set.insert(acc, __krec_norm_{rf}(x))),\n    \
                  none => acc,\n  }}\n\
-             fn __krec_set_from_list_{r}(xs: List[Value]) -> Set[String] = {{\n  \
+             fn __krec_set_from_list_{rf}(xs: List[Value]) -> Set[String] = {{\n  \
                let acc: Set[String] = set.new()\n  \
-               __krec_sfl_{r}_at(xs, 0, acc)\n}}\n\
-             fn __krec_set_insert_{r}(s: Set[String], x: Value) -> Set[String] = set.insert(s, __krec_norm_{r}(x))\n\
-             fn __krec_set_contains_{r}(s: Set[String], x: Value) -> Bool = set.contains(s, __krec_norm_{r}(x))\n"
+               __krec_sfl_{rf}_at(xs, 0, acc)\n}}\n\
+             fn __krec_set_insert_{rf}(s: Set[String], x: Value) -> Set[String] = set.insert(s, __krec_norm_{rf}(x))\n\
+             fn __krec_set_contains_{rf}(s: Set[String], x: Value) -> Bool = set.contains(s, __krec_norm_{rf}(x))\n"
         ));
     }
     for (hash, tys) in uses.uniq_structs.iter() {
@@ -1935,25 +1945,26 @@ pub fn generate_krec_sources(
         ));
     }
     for r in uses.uniques.iter() {
-        emit_norm_tys(&mut out, r, &recs[r]);
+        let rf = drop_fn_ident(r);
+        emit_norm_tys(&mut out, &rf, &recs[r]);
         out.push_str(&format!(
-            "fn __krec_uniqfill_{r}(h: Int, oh: Int, n: Int, i: Int, cnt: Int, seen: Set[String]) -> Int =\n  \
+            "fn __krec_uniqfill_{rf}(h: Int, oh: Int, n: Int, i: Int, cnt: Int, seen: Set[String]) -> Int =\n  \
                if i >= n then cnt\n  \
                else {{\n    \
                  let x: Value = prim.load_handle(h + 12 + i * 8)\n    \
-                 let key = __krec_norm_{r}(x)\n    \
-                 if set.contains(seen, key) then __krec_uniqfill_{r}(h, oh, n, i + 1, cnt, seen)\n    \
+                 let key = __krec_norm_{rf}(x)\n    \
+                 if set.contains(seen, key) then __krec_uniqfill_{rf}(h, oh, n, i + 1, cnt, seen)\n    \
                  else {{\n      \
                    let e = prim.load64(h + 12 + i * 8)\n      \
                    prim.rc_inc(e)\n      \
                    prim.store64(oh + 12 + cnt * 8, e)\n      \
-                   __krec_uniqfill_{r}(h, oh, n, i + 1, cnt + 1, set.insert(seen, key))\n    }}\n  }}\n\
-             fn __krec_list_unique_{r}(xs: List[Value]) -> List[Value] = {{\n  \
+                   __krec_uniqfill_{rf}(h, oh, n, i + 1, cnt + 1, set.insert(seen, key))\n    }}\n  }}\n\
+             fn __krec_list_unique_{rf}(xs: List[Value]) -> List[Value] = {{\n  \
                let h = prim.handle(xs)\n  \
                let n = prim.load32(h + 4)\n  \
                let out: List[Value] = prim.alloc_list_str(n)\n  \
                let seen: Set[String] = set.new()\n  \
-               let cnt = __krec_uniqfill_{r}(h, prim.handle(out), n, 0, 0, seen)\n  \
+               let cnt = __krec_uniqfill_{rf}(h, prim.handle(out), n, 0, 0, seen)\n  \
                prim.store32(prim.handle(out) + 4, cnt)\n  \
                out\n}}\n"
         ));

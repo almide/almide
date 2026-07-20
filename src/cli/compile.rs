@@ -97,7 +97,14 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
         }
     };
 
-    let (mut program, source_text, _parse_errors) = parse_file(&file);
+    let (mut program, source_text, parse_errors) = parse_file(&file);
+    if !parse_errors.is_empty() {
+        for e in &parse_errors {
+            eprintln!("{}", crate::diagnostic_render::display_with_source(e, &source_text));
+        }
+        eprintln!("\n{} parse error(s) found", parse_errors.len());
+        std::process::exit(1);
+    }
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> =
         if std::path::Path::new("almide.toml").exists() {
