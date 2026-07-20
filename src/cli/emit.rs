@@ -1,7 +1,14 @@
 use crate::{parse_file, canonicalize, codegen, check, diagnostic, resolve, project, project_fetch};
 
 pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_dialect: bool, no_check: bool, repr_c: bool) {
-    let (mut program, source_text, _parse_errors) = parse_file(file);
+    let (mut program, source_text, parse_errors) = parse_file(file);
+    if !parse_errors.is_empty() {
+        for e in &parse_errors {
+            eprintln!("{}", crate::diagnostic_render::display_with_source(e, &source_text));
+        }
+        eprintln!("\n{} parse error(s) found", parse_errors.len());
+        std::process::exit(1);
+    }
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {

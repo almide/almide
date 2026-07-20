@@ -19,7 +19,7 @@ pub use build::cmd_build;
 pub use compile::cmd_compile;
 pub use emit::cmd_emit;
 pub use check::{cmd_check, cmd_check_json, cmd_check_effects};
-pub use commands::{cmd_init, cmd_test, cmd_test_fast, cmd_test_json, cmd_test_wasm, cmd_test_ts, cmd_fmt, cmd_clean};
+pub use commands::{cmd_init, cmd_test, cmd_test_fast, cmd_test_json, cmd_test_wasm, cmd_fmt, cmd_clean};
 pub use install::cmd_install;
 pub use selfupdate::cmd_self_update;
 pub use ide::{cmd_ide_outline, cmd_ide_doc, cmd_ide_stdlib_snapshot};

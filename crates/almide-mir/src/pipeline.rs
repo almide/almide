@@ -119,9 +119,22 @@ fn source_to_ir_with(
     modules: &[(String, almide_lang::ast::Program, bool)],
 ) -> Result<almide_ir::IrProgram, LowerError> {
     let tokens = Lexer::tokenize(source);
-    let mut prog = Parser::new(tokens)
+    let mut parser = Parser::new(tokens);
+    let mut prog = parser
         .parse()
         .map_err(|e| LowerError::Unsupported(format!("parse error: {e:?}")))?;
+    // `Parser::parse()` is a recovery parser: it can return `Ok` with a
+    // partial `Program` (unparseable top-level items dropped) while still
+    // recording the failures in `.errors` — the CLI's own `parse_file`
+    // checks this separately (main.rs). Skipping this check here would
+    // silently compile a truncated program instead of walling honestly.
+    if !parser.errors.is_empty() {
+        let messages: Vec<String> = parser.errors.iter().map(|d| d.display()).collect();
+        return Err(LowerError::Unsupported(format!(
+            "parse error: {}",
+            messages.join("\n")
+        )));
+    }
     let canon = canonicalize::canonicalize_program(
         &prog,
         modules.iter().map(|(n, p, s)| (n.as_str(), p, *s)),
@@ -1805,4 +1818,34 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
         },
         &sigs,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `Parser::parse()` is a recovery parser: an unparseable top-level bare
+    // statement (never valid Almide grammar — only fn/effect fn/type/let/
+    // var/trait/impl/test are top-level declarations) is dropped via
+    // `skip_to_next_decl()`, but `parse()` still returns `Ok` as long as some
+    // decl survived. Before this fix, `source_to_ir_with` only checked the
+    // `Result` and never inspected `Parser::errors`, so a source like this
+    // would silently compile with the bare `println` call missing from the
+    // output — a wall was expected instead.
+    #[test]
+    fn dropped_top_level_statement_walls_instead_of_silently_compiling() {
+        let source = r#"
+let x = 1
+let y = 2
+println("top-level-statement-should-not-be-silently-dropped")
+fn main() -> Unit = {
+  println("from-main")
+}
+"#;
+        let result = try_render_wasm_source(source, &[], false);
+        assert!(
+            result.is_err(),
+            "a source with a dropped top-level statement must wall, not silently compile"
+        );
+    }
 }
