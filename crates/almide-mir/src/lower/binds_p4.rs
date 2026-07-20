@@ -707,21 +707,23 @@ impl LowerCtx {
     /// (len=0) — the SAME render as today, only now its `dst` is tracked. The ownership
     /// cert is one `Alloc` = i either way (init-agnostic), so NO checker change.
     pub(crate) fn try_lower_option_ctor(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        // Split (2026-07-20, #781 cog>100 burn-down) into per-payload-shape helpers,
+        // tried in the SAME ORDER the original single match evaluated its arms (order is
+        // load-bearing — Rust's match picks the FIRST arm whose pattern+guard matches, and
+        // sequential `.or_else()` over sub-matches run in the same order reproduces that
+        // exactly). Pure text move, no logic change — verified via classify_corpus cert
+        // byte-identity over the full spec corpus.
+        self.try_lower_opt_tuple_and_variant_payloads(value, ty)
+            .or_else(|| self.try_lower_opt_heap_general(value, ty))
+            .or_else(|| self.try_lower_opt_fallback_and_none(value, ty))
+            .or_else(|| self.try_lower_result_ok_heap(value, ty))
+            .or_else(|| self.try_lower_result_small_arms(value, ty))
+            .or_else(|| self.try_lower_result_err_heap_ok_result(value, ty))
+            .or_else(|| self.try_lower_result_err_heap_fallback(value, ty))
+    }
+
+    fn try_lower_opt_tuple_and_variant_payloads(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
         match &value.kind {
-            // `Some(heap)` RETURNED / bound directly — a fresh OWNED message/element (a LitStr, a
-            // Named-call result, or an OWNED `Var` in `live_heap_handles`, NOT a borrowed param)
-            // materializes the 0-or-1-element DynListStr Option (the element MOVED in). Same cert as
-            // the heap-result-`if` arm; the owned gate keeps a borrowed `Some(param)` deferred.
-            // `Some(Value)` — a dynamic Value payload (`list.get_value`'s `Some(@i)`): Dup the
-            // (borrowed) Value into a fresh co-owned ref via `lower_owned_heap_field` (exactly
-            // value.get's `Ok(@12)`), then materialize the 0-or-1 Option. The flat rc_dec drop
-            // (heap_elem_lists) is correct — the Value is CO-OWNED (the list keeps its ref; the shared
-            // block is recursively freed at the LAST ref, via the list's own drop). Checked before the
-            // general heap-Some arm, whose Var case requires `live_heap_handles` (a borrow is not).
-            // `Some((Int, String))` — the `list.find` over a `List[(Int,String)]` result. Co-own the
-            // (borrowed) tuple by Dup (`lower_owned_heap_field`), then materialize a 1-element Option
-            // whose drop is the RECURSIVE `$__drop_list_int_str` (the per-tuple rc==1 guard makes the
-            // co-ownership with the source list safe — no leak, no double-free).
             IrExprKind::OptionSome { expr }
                 if matches!(&expr.ty,
                     Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)) =>
@@ -730,13 +732,6 @@ impl LowerCtx {
                 let piece = self.lower_owned_heap_field(expr)?;
                 Some(self.materialize_opt_int_str_some(piece, repr))
             }
-            // `some(Number(7))` — Some wrapping a CUSTOM-VARIANT ctor payload (the
-            // option-of-variant shape): build the variant block, move it into the
-            // 1-element Option. Drop routing by the payload's own discipline: a
-            // recursive-drop variant routes "optrec:<Type>" → the generated
-            // `$__drop_<Type>` frees the payload (fields, then block) then the option
-            // block; a flat variant (no heap fields, `Number(Int)`) uses the
-            // Some(string) shape — DropListStr's flat slot-0 free IS its exact drop.
             IrExprKind::OptionSome { expr }
                 if matches!(&expr.kind,
                     IrExprKind::Call { target: CallTarget::Named { name }, .. }
@@ -758,12 +753,6 @@ impl LowerCtx {
                     self.materialize_opt_str_some(piece, repr)
                 })
             }
-            // `some(Cfg { name: "opt" })` — Some wrapping a RECORD-literal payload (the
-            // crossmod option_record_toplet global): build the record block (the same
-            // builders a `let c = Cfg{..}` uses), move it into the 1-element Option.
-            // A RECURSIVE-drop record routes "optrec:<R>" (the payload's fields freed
-            // via `$__drop_<R>`, then the blocks); a scalar-only record's flat slot-0
-            // free is exact (the Some(string) shape).
             IrExprKind::OptionSome { expr }
                 if matches!(&expr.kind, IrExprKind::Record { .. })
                     && self.aggregate_field_tys(&expr.ty).is_some() =>
@@ -777,12 +766,6 @@ impl LowerCtx {
                     None => self.materialize_opt_str_some(piece, repr),
                 })
             }
-            // `Some((1, 2))` — an ALL-SCALAR tuple literal payload (`match x { some((a, b))
-            // => a + b, … }` — the nested-some-tuple pattern shape). Build the flat tuple
-            // block, move it into the 1-element Option: the payload block owns NO inner
-            // heap, so DropListStr's flat slot-0 free is EXACT (frees the tuple block, then
-            // the option block) — the same discipline as the (Int,String) case above minus
-            // the recursive element drop.
             IrExprKind::OptionSome { expr }
                 if matches!(&expr.kind, IrExprKind::Tuple { .. })
                     && matches!(&expr.ty,
@@ -794,13 +777,6 @@ impl LowerCtx {
                 let piece = self.try_lower_scalar_tuple_construct(&elements)?;
                 Some(self.materialize_opt_str_some(piece, repr))
             }
-            // `some((s1, s2))` — a `(String, String)` tuple literal payload (the
-            // if-merged Option ctor the fuzz index-374 divergence exposed: an
-            // un-admitted payload left the bind Opaque and `option.unwrap_or_else`
-            // misread len 0 as None — the fallback ran on a Some). Build the tuple
-            // (both slots owned Strings), move it into the 1-element Option, and
-            // route the drop to `$__drop_opt_str_str` (both slots + tuple + wrapper
-            // — the flat default would leak both Strings).
             IrExprKind::OptionSome { expr }
                 if matches!(&expr.kind, IrExprKind::Tuple { .. })
                     && matches!(&expr.ty,
@@ -815,14 +791,6 @@ impl LowerCtx {
                 self.variant_drop_handles.insert(obj, "opt_str_str".to_string());
                 Some(obj)
             }
-            // `Some((k, v))` — a `(String, <scalar>)` tuple literal payload (`map.find`'s
-            // `__skv_find_some(k, v) = Some((kc, v))`). Build the tuple (`try_lower_tuple_
-            // construct`, one heap slot: the String), move it into the 1-element Option. The
-            // DEFAULT `materialize_opt_str_some` flat drop would only `rc_dec` the TUPLE's
-            // own handle, leaking its String (the same class of bug the `_str`-dispatch fix
-            // and the drop-authority swap below both guard against) — override the routing
-            // to the type-specific recursive `$__drop_opt_str_int` (generated,
-            // OPT_STR_INT_DROP_SRC), mirroring the `(Value, scalar)` swap immediately below.
             IrExprKind::OptionSome { expr }
                 if matches!(&expr.kind, IrExprKind::Tuple { .. })
                     && matches!(&expr.ty,
@@ -850,12 +818,6 @@ impl LowerCtx {
                 let piece = self.lower_owned_heap_field(expr)?;
                 Some(self.materialize_opt_str_some(piece, repr))
             }
-            // `some(<record>)` RETURNED — Option wrapping a heap RECORD (porta find_eq_pos's tail).
-            // Materialize the owned record (`try_lower_record_construct`, recursive-drop) and wrap it
-            // in the 0-or-1 Option, routing the Option's drop to the recursive `$__drop_<R>`
-            // (`Op::DropWrapperRec`) — NOT the flat `DropListStr` that leaks the record's nested heap
-            // fields. The tail counterpart of the heap-result-arm record-Some case. Gated on the record
-            // needing a recursive drop; a scalar-only record falls through (no `$__drop_<R>`).
             IrExprKind::OptionSome { expr }
                 if matches!(expr.kind, IrExprKind::Record { .. })
                     && self.record_or_anon_drop_type_name(&expr.ty).is_some() =>
@@ -865,12 +827,6 @@ impl LowerCtx {
                 let piece = self.try_lower_record_construct(expr)?;
                 Some(self.materialize_opt_aggregate_some(piece, repr, drop_fn))
             }
-            // `some(<SCALAR-ONLY record>)` (`some(Point { x: 7, y: 8 })` — compound_repr's
-            // opt_rec): the record block owns NO children, so the flat 0-or-1 Option drop
-            // (`DropListStr`: rc_dec of the payload handle + the block) frees it EXACTLY —
-            // materialize instead of deferring. (The deferred-empty placeholder was silently
-            // read as `none` once the container-repr display routed over it — the wrong-bytes
-            // class this campaign exists to prevent; construction must be real before display.)
             IrExprKind::OptionSome { expr }
                 if matches!(expr.kind, IrExprKind::Record { .. })
                     && matches!(&expr.ty, Ty::Named(..))
@@ -884,6 +840,12 @@ impl LowerCtx {
                     .or_else(|| self.try_lower_scalar_record_construct(expr))?;
                 Some(self.materialize_opt_str_some(piece, repr))
             }
+            _ => None,
+        }
+    }
+
+    fn try_lower_opt_heap_general(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        match &value.kind {
             IrExprKind::OptionSome { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(ty).ok()?;
                 let piece = match &expr.kind {
@@ -1046,6 +1008,12 @@ impl LowerCtx {
                 // materialize_opt_str_some tracks materialized_options + heap_elem_lists.
                 Some(self.materialize_opt_str_some(piece, repr))
             }
+            _ => None,
+        }
+    }
+
+    fn try_lower_opt_fallback_and_none(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        match &value.kind {
             IrExprKind::OptionSome { expr } => {
                 // SCALAR payload only — `lower_scalar_value` returns `None` for a heap
                 // payload, which IS the gate (a heap `Some` aliases its element, a later
@@ -1075,16 +1043,12 @@ impl LowerCtx {
                 }
                 Some(dst)
             }
-            // A `Result[Int, String]` ctor RETURNED / bound directly (`fn f() = Ok(y)` / `… = Err(
-            // msg)`) MATERIALIZES the DynListStr Result (len-as-tag: Ok = len 0 with the scalar in
-            // slot 0, Err = len 1 owning the message), tracked so the caller can `match` it. Same
-            // cert as the heap-result-`if` arms (reuses `materialize_result_ok` / the Some-string
-            // builder) — no new Init. SCALAR Ok payload, heap (Var/LitStr/Named-call) Err payload.
-            // HEAP-Ok `Result[String, String]` (`Ok(s)` with a heap payload, both arms heap) RETURNED
-            // / bound directly — the 2-SLOT DynListStr (String @slot 0, Ok/Err tag @slot 1, len 1 so
-            // `DropListStr` frees only the one String). Same cert as the Err-heap arm (one owned
-            // String moved in). Owned-`Var` / LitStr / Named-call piece only (a borrowed param would
-            // double-free), else the deferred Opaque.
+            _ => None,
+        }
+    }
+
+    fn try_lower_result_ok_heap(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        match &value.kind {
             IrExprKind::ResultOk { expr }
                 if is_heap_ty(&expr.ty) && Self::is_heap_ok_result(ty) =>
             {
@@ -1244,6 +1208,12 @@ impl LowerCtx {
                 self.seed_variant_param(dst, ty);
                 Some(dst)
             }
+            _ => None,
+        }
+    }
+
+    fn try_lower_result_small_arms(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        match &value.kind {
             IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => {
                 let payload = self.lower_scalar_value(expr)?;
                 let repr = repr_of(ty).ok()?;
@@ -1251,12 +1221,6 @@ impl LowerCtx {
                 self.materialized_results.insert(dst);
                 Some(dst)
             }
-            // `err(<scalar>)` for a SCALAR-SCALAR Result (`Result[Int, Int]` — the
-            // match_container `ck(err(404))` class): the len-as-tag Err twin of the
-            // scalar-Ok arm above. NOT heap_elem_lists-tracked — the flat Drop is the
-            // exact free (a DropListStr over len 1 would rc_dec the raw scalar payload
-            // as a handle). Gated to BOTH sides scalar so the heap-err layouts (String
-            // err → DropListStr slot-0 free) keep their existing arms below.
             IrExprKind::ResultErr { expr }
                 if !is_heap_ty(&expr.ty)
                     && matches!(ty,
@@ -1269,22 +1233,9 @@ impl LowerCtx {
                 self.materialized_results.insert(dst);
                 Some(dst)
             }
-            // `err(<user-variant ctor>)` for `Result[T_scalar, <user variant>]` — the
-            // structured-error class (`let e: Result[Int, MathError] =
-            // err(Overflow("m"))`, `assert_eq(f(x), err(DivideByZero))`). The
-            // len-as-tag Err wrapper the reader seeds for this type; rich payloads
-            // route to `$__drop_res_<V>`. NOT self-tracked: like every ctor arm here,
-            // the CALLER owns the tracking (a call-arg site re-tracks via
-            // `materialized_call_arg` — a push here double-freed at scope end).
             IrExprKind::ResultErr { .. } if self.is_scalar_ok_variant_err_result(ty) => {
                 self.try_lower_result_err_variant_ctor(value, ty)
             }
-            // `err(<user-variant ctor>)` for `Result[T_heap, <user variant>]` — the HEAP-Ok
-            // structured-error class (`assert_eq(classify(-3), err(NegativeInput(-3)))`).
-            // Cap-as-tag wrapper; a rich payload routes to the Err-side recursion
-            // (`reserr:<V>`). MUST precede the generic both-heap Err arm below, whose
-            // Named-call fallback emitted the ctor as a dangling `(call $NegativeInput)`.
-            // A `err(<Var>)` payload keeps the generic route (owned-move / param-Dup).
             IrExprKind::ResultErr { expr }
                 if is_heap_ty(&expr.ty)
                     && !matches!(&expr.kind, IrExprKind::Var { .. })
@@ -1292,11 +1243,12 @@ impl LowerCtx {
             {
                 self.try_lower_result_err_variant_ctor_heap_ok(value, ty)
             }
-            // HEAP-Ok `Result[(Int,Int), String]` etc. — `Err(msg)` RETURNED / bound directly
-            // (`fn __rzip_err(..) = Err(copy)`). The Err message goes into the SAME cap-as-tag 1-slot
-            // DynListStr as the heap-Ok arm (payload @12, tag @16 = 1), so a `match` reading tag @16
-            // sees Err. Without this it would fall to the len-as-tag arm below (a DIFFERENT layout the
-            // heap-Ok match misreads). Owned-`Var` / LitStr / Named-call piece only.
+            _ => None,
+        }
+    }
+
+    fn try_lower_result_err_heap_ok_result(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        match &value.kind {
             IrExprKind::ResultErr { expr }
                 if is_heap_ty(&expr.ty) && Self::is_heap_ok_result(ty) =>
             {
@@ -1410,6 +1362,12 @@ impl LowerCtx {
                 };
                 Some(self.materialize_result_str(piece, repr, true, false))
             }
+            _ => None,
+        }
+    }
+
+    fn try_lower_result_err_heap_fallback(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        match &value.kind {
             IrExprKind::ResultErr { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(ty).ok()?;
                 // A FRESH owned message only — a LitStr alloc, a Named-call result, or an OWNED
@@ -1520,4 +1478,5 @@ impl LowerCtx {
             _ => None,
         }
     }
+
 }
