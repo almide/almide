@@ -184,6 +184,23 @@ pub fn almide_json_stringify_pretty(j: &Value) -> String {
     stringify_value(j, 0)
 }
 
+/// The canonical 5-escape JSON string quoting — the SAME rule the compact
+/// `almide_rt_value_stringify` and the self-hosted wasm `__json_quote` use.
+/// Everything else stays raw UTF-8 (valid JSON). The previous `{:?}` (Rust
+/// `escape_debug`) additionally escaped combining marks as `\u{301}` — not
+/// valid JSON escaping, and a byte divergence against the wasm leg
+/// (differential-fuzz: `"cafe\u{301}"` vs the raw combining char).
+fn json_quote(s: &str) -> String {
+    format!(
+        "\"{}\"",
+        s.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t")
+    )
+}
+
 fn stringify_value(v: &Value, depth: usize) -> String {
     let ind = "  ".repeat(depth);
     let ind1 = "  ".repeat(depth + 1);
@@ -192,7 +209,7 @@ fn stringify_value(v: &Value, depth: usize) -> String {
         Value::Bool(b) => if *b { "true" } else { "false" }.into(),
         Value::Int(n) => n.to_string(),
         Value::Float(f) => format!("{}", f),
-        Value::Str(s) => format!("{:?}", s),
+        Value::Str(s) => json_quote(s),
         Value::Array(items) => {
             if items.is_empty() { return "[]".into(); }
             let parts: Vec<String> = items.iter().map(|v| format!("{}{}", ind1, stringify_value(v, depth + 1))).collect();
@@ -200,7 +217,7 @@ fn stringify_value(v: &Value, depth: usize) -> String {
         }
         Value::Object(entries) => {
             if entries.is_empty() { return "{}".into(); }
-            let parts: Vec<String> = entries.iter().map(|(k, v)| format!("{}{:?}: {}", ind1, k, stringify_value(v, depth + 1))).collect();
+            let parts: Vec<String> = entries.iter().map(|(k, v)| format!("{}{}: {}", ind1, json_quote(k), stringify_value(v, depth + 1))).collect();
             format!("{{\n{}\n{}}}", parts.join(",\n"), ind)
         }
     }

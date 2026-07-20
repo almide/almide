@@ -72,4 +72,11 @@ fn main() -> Unit = {
   println("slice 1..3:         [" + string.slice(s, 1, 3) + "]")
   println("slice 2^32..2^32+2: [" + string.slice(s, 4294967296, 4294967298) + "]")
   println("slice 2^31+1..2^33: [" + string.slice(s, 2147483649, 8589934592) + "]")
+
+  // ── repeat: count clamps SIGNED — negative yields EMPTY on both targets ──
+  // (was: native Rust capacity-overflow panic exit 101 vs wasm negative-alloc
+  // trap exit 134 on repeat(s, -2^31) — differential-fuzz, neither a T6 form)
+  println("repeat -2^31: [" + string.repeat("a", -2147483648) + "]")
+  println("repeat -1:    [" + string.repeat("ab", -1) + "]")
+  println("repeat 3:     [" + string.repeat("ab", 3) + "]")
 }

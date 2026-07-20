@@ -10,8 +10,21 @@ fn main() -> Unit = {
   let b: Option[Float] = some(math.sqrt(6.25))
   let c: Result[Float, String] = ok(option.unwrap_or(some(2.5), 0.1))
   let d: Option[Int] = some(int.abs(-7))
+  // The heap-payload sibling through the same ANF route: `ok(float.parse(…))`
+  // over a closure-fed String (fuzz index 704: native err("invalid float
+  // literal") vs wasm ok(0) before the fix).
+  let x0: Result[String, String] = ok("ß")
+  let e: Result[Result[Float, String], String] = ok(float.parse(result.unwrap_or_else(x0, ((x1) => x1))))
+  let f: Result[Float, String] = result.flatten(e)
+  // TUPLE literal payload through the same route: `ok((Float, Int))` deferred
+  // to an empty block and result.unwrap_or aborted "index out of bounds" on
+  // the wasm leg while native succeeded (RunFailureDivergence).
+  let y0: Result[(Float, Int), String] = ok((0.3, 1000000))
+  let g: (Float, Int) = result.unwrap_or((if true then y0 else y0), (100.0, 7))
   println("a = ${a}")
   println("b = ${b}")
   println("c = ${c}")
   println("d = ${d}")
+  println("f = ${f}")
+  println("g = ${g}")
 }

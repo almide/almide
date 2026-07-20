@@ -545,11 +545,30 @@ impl LowerCtx {
                     // to the deferred Opaque — an EMPTY block the formatter read as
                     // `ok(0)` while native printed the real value (differential-fuzz
                     // seed 1784512190387680000 index 74, a silent wrong value).
-                    if matches!(expr.kind, IrExprKind::Call { .. }) {
+                    // TUPLE literal payloads too (`ok((0.3, 1000000))` — the (Float, Int)
+                    // mixed-scalar payload the ctor materializer declines): deferred, the
+                    // `result.flat_unwrap_or` twin read the EMPTY block's payload out of
+                    // bounds — a runtime abort native never had (RunFailureDivergence).
+                    if matches!(expr.kind, IrExprKind::Call { .. } | IrExprKind::Tuple { .. }) {
                         let payload_ty = expr.ty.clone();
                         let payload = (**expr).clone();
                         let tmp = self.fresh_synth_var();
                         self.lower_bind(tmp, &payload_ty, &payload)?;
+                        // The ANF bind itself may have DEFERRED (an Opaque skeleton —
+                        // e.g. a capturing-closure element): retrying the ctor over it
+                        // would wrap the same empty block. Wall instead.
+                        if self
+                            .value_of
+                            .get(&tmp)
+                            .is_some_and(|v| self.deferred_opaque_binds.contains(v))
+                        {
+                            return Err(LowerError::Unsupported(
+                                "some/ok/err payload whose materialization deferred cannot \
+                                 be faithfully wrapped in this brick (walled, not read as a \
+                                 zeroed ctor)"
+                                    .into(),
+                            ));
+                        }
                         let synth = IrExpr {
                             kind: IrExprKind::Var { id: tmp },
                             ty: payload_ty,
