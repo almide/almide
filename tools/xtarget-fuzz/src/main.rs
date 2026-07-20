@@ -302,6 +302,16 @@ fn worker_loop(
             Outcome::GeneratorReject { .. } => {
                 stats.generator_rejects.fetch_add(1, Ordering::Relaxed);
             }
+            Outcome::Walled { reason } => {
+                stats.walled.fetch_add(1, Ordering::Relaxed);
+                let mut reasons = stats.wall_reasons.lock().unwrap();
+                let key = if reason.len() > 160 {
+                    format!("{}…", &reason[..reason.char_indices().take_while(|(i, _)| *i < 160).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0)])
+                } else {
+                    reason
+                };
+                *reasons.entry(key).or_insert(0) += 1;
+            }
             Outcome::Skipped { .. } => {
                 stats.skipped.fetch_add(1, Ordering::Relaxed);
             }
@@ -459,6 +469,11 @@ struct Stats {
     generator_rejects: AtomicU64,
     findings: AtomicU64,
     skipped: AtomicU64,
+    /// Honest v1 walls (`Unsupported`) — subset-coverage debt, NOT findings
+    /// (#796 taxonomy: a walled program has no wasm leg to diverge). The
+    /// reason histogram feeds the subset burn-down.
+    walled: AtomicU64,
+    wall_reasons: std::sync::Mutex<std::collections::BTreeMap<String, u64>>,
 }
 
 fn report_progress(
@@ -489,11 +504,12 @@ fn report_progress(
         let g = stats.generated.load(Ordering::Relaxed);
         let secs = start.elapsed().as_secs_f64().max(0.001);
         eprintln!(
-            "  [{:>5.0}s] generated={g} clean={} rejects={} findings={} skipped={} | {:.1} prog/min",
+            "  [{:>5.0}s] generated={g} clean={} rejects={} findings={} walls={} skipped={} | {:.1} prog/min",
             secs,
             stats.clean.load(Ordering::Relaxed),
             stats.generator_rejects.load(Ordering::Relaxed),
             stats.findings.load(Ordering::Relaxed),
+            stats.walled.load(Ordering::Relaxed),
             stats.skipped.load(Ordering::Relaxed),
             g as f64 / secs * 60.0,
         );
@@ -515,8 +531,19 @@ fn print_summary(stats: &Stats, sink: &FindingSink, elapsed: Duration, out_dir: 
         stats.generator_rejects.load(Ordering::Relaxed)
     );
     eprintln!("  skipped          = {}", stats.skipped.load(Ordering::Relaxed));
+    let walls = stats.walled.load(Ordering::Relaxed);
+    eprintln!("  walls (subset)   = {walls}");
     eprintln!("  unique findings  = {}", sink.count());
     eprintln!("  throughput       = {:.1} programs/min", g as f64 / secs * 60.0);
+    if walls > 0 {
+        let reasons = stats.wall_reasons.lock().unwrap();
+        let mut top: Vec<(&String, &u64)> = reasons.iter().collect();
+        top.sort_by(|a, b| b.1.cmp(a.1));
+        eprintln!("  top wall reasons (subset burn-down, not findings):");
+        for (reason, n) in top.iter().take(8) {
+            eprintln!("    {n:>4}× {reason}");
+        }
+    }
     if sink.count() > 0 {
         eprintln!("  findings dir     = {}", out_dir.display());
     }
@@ -529,6 +556,9 @@ fn print_outcome(outcome: &Outcome) {
             eprintln!("GENERATOR REJECT (check failed):\n{diagnostics}")
         }
         Outcome::Skipped { reason } => eprintln!("SKIPPED: {reason}"),
+        Outcome::Walled { reason } => {
+            eprintln!("WALLED (subset-coverage, not a finding): {reason}")
+        }
         Outcome::Finding(f) => {
             eprintln!("FINDING [{:?}] at rung {:?}: {}", f.kind, f.rung, f.summary);
             if let Some(n) = &f.native {
