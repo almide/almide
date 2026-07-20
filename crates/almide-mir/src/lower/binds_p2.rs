@@ -531,7 +531,7 @@ impl LowerCtx {
                                 .into(),
                         ));
                     }
-                    // A HEAP CALL payload (`ok(result.unwrap_or(…))` — the C-149
+                    // A CALL payload (`ok(result.unwrap_or(…))` — the C-149
                     // nested-share chain): ANF-materialize the call into a synth temp via
                     // the SAME `lower_bind` path a `let tmp = call` takes (tracked, typed
                     // drop, read shapes seeded — the lower_heap_extraction Call-container
@@ -540,7 +540,12 @@ impl LowerCtx {
                     // (Dup) discipline. A payload the Var arms still decline WALLS (the
                     // deferred Opaque would read `ok(0)` while native printed the err —
                     // the C-138 family; a wall is always safe, a wrong byte never).
-                    if is_heap_ty(&expr.ty) && matches!(expr.kind, IrExprKind::Call { .. }) {
+                    // SCALAR call payloads take the same route (C-158): requiring a heap
+                    // payload here let `ok(<un-lowerable Float combinator chain>)` skip
+                    // to the deferred Opaque — an EMPTY block the formatter read as
+                    // `ok(0)` while native printed the real value (differential-fuzz
+                    // seed 1784512190387680000 index 74, a silent wrong value).
+                    if matches!(expr.kind, IrExprKind::Call { .. }) {
                         let payload_ty = expr.ty.clone();
                         let payload = (**expr).clone();
                         let tmp = self.fresh_synth_var();

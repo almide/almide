@@ -1,0 +1,17 @@
+// @contract: C-158
+// A some/ok ctor over a SCALAR call payload must materialize the REAL value
+// (or wall) — never fall to the deferred Opaque an EMPTY block the formatter
+// reads as `ok(0)`/`some(0)`. The heap-payload safety net (C-138/C-152)
+// required a heap payload type, so a Float/Int combinator-chain payload
+// skipped it entirely (differential-fuzz seed 1784512190387680000 index 74:
+// native printed `ok(1e300)`, wasm printed `ok(0)` — a silent wrong value).
+fn main() -> Unit = {
+  let a: Result[Int, String] = ok(list.len([1, 2, 3]))
+  let b: Option[Float] = some(math.sqrt(6.25))
+  let c: Result[Float, String] = ok(option.unwrap_or(some(2.5), 0.1))
+  let d: Option[Int] = some(int.abs(-7))
+  println("a = ${a}")
+  println("b = ${b}")
+  println("c = ${c}")
+  println("d = ${d}")
+}

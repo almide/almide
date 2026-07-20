@@ -1946,3 +1946,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unannotated_toplet_generic_ctor.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-158"
+spec      = "ALS-I3"
+title     = "A some/ok ctor over a scalar call payload materializes the real value, never a zeroed ctor"
+statement = "A `some(...)`/`ok(...)`/`err(...)` constructor whose payload is a SCALAR-typed call (`ok(<Float combinator chain>)`, `some(list.len(...))`) either materializes the REAL computed payload — byte-identical to native — or WALLS honestly. Previously the ctor safety net required a HEAP payload type, so a scalar call payload outside the executable subset skipped it and fell to the deferred Opaque: an EMPTY block the Result/Option formatter read as `ok(0)` while native printed the real value (differential-fuzz seed 1784512190387680000 index 74, a silent wrong value). The scalar payload now takes the same ANF route as the heap one: materialize into a synth temp via the ordinary bind path, rebuild the ctor over the temp, and wall if the bind itself is outside the subset."
+since     = "0.32.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/ctor_scalar_call_payload.almd", class = "fixture" },
+]
