@@ -1105,7 +1105,8 @@ fn list_get_or_value(xs: List[Value], i: Int, default: Value) -> Value = {
 
 // ── json.stringify_pretty ── 2-space indent, native stringify_value's exact shape:
 // empty [] / {} inline; else one element per line at depth+1, closer at depth.
-// Strings quote via __json_quote (the {:?} escapes the fixtures exercise).
+// Strings quote via __json_quote — the canonical 5-escape rule both targets
+// share (native json.rs json_quote is the mirror; C-095).
 fn __vsp_indent(d: Int) -> String = string.repeat("  ", d)
 
 fn __vsp_sep(i: Int) -> String = {

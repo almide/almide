@@ -755,6 +755,11 @@ fn render_fn(
                 tys.insert(*d, NTy::F64);
                 line!("let mut {}: f64 = {a} {sym} {b};", var(*d));
             }
+            // `float.from_int` — int (i64) to f64, carried per the float floor.
+            Op::Prim { kind: crate::PrimKind::F64FromInt, dst: Some(d), args } if args.len() == 1 => {
+                tys.insert(*d, NTy::F64);
+                line!("let mut {}: f64 = ({} as f64);", var(*d), var(args[0]));
+            }
             Op::Prim { kind: crate::PrimKind::FloatUn(op), dst: Some(d), args } if args.len() == 1 => {
                 use crate::FUnOp;
                 let a = as_f64_arg(&var(args[0]), *tys.get(&args[0]).ok_or_else(|| wall("native: float arg untyped"))?)?;

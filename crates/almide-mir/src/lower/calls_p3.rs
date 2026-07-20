@@ -57,6 +57,23 @@ impl LowerCtx {
                 return Some(p);
             }
         }
+        // A closure EXTRACTED from a container (`fs[i]()` — a List[Fn] element;
+        // `pair.0()` — a tuple slot): borrow the element/slot handle through the
+        // SAME gated machinery every heap field/element read uses (bounds-checked
+        // `$elem_addr` LoadHandle for a list element, slot LoadHandle for a
+        // tuple/record field — the container keeps ownership, the borrow joins
+        // `param_values` inside), and admit it to the CallIndirect dispatch set.
+        if matches!(callee.ty, almide_lang::types::Ty::Fn { .. })
+            && matches!(
+                &callee.kind,
+                IrExprKind::IndexAccess { .. } | IrExprKind::TupleIndex { .. }
+            )
+        {
+            if let Some(p) = self.try_lower_heap_field_borrow(callee) {
+                self.closure_values.insert(p);
+                return Some(p);
+            }
+        }
         None
     }
 
@@ -286,6 +303,37 @@ impl LowerCtx {
                     return None;
                 }
             }
+        }
+        // A UNIT body (`let f = () => { list.push(g, 7) }; f()` — an effect
+        // closure): lower it through the STATEMENT machinery — the same
+        // dispatcher a fn body uses — so the functional-rebind group
+        // (list.push / map.insert / clear) fires. Routing it through
+        // `lower_scalar_value` treated the unit-call tail as a scalar CALL
+        // OPERAND and emitted the raw unlinked `list.push` (the
+        // closure-over-global wall class). The call site discards a Unit
+        // call's value, so the returned dst is a dummy zero.
+        if matches!(ty, Ty::Unit) {
+            let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
+                IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
+                _ => (&[], Some(&body)),
+            };
+            for s in stmts {
+                if self.lower_stmt(s).is_err() {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            }
+            if let Some(t) = tail {
+                if !matches!(t.kind, IrExprKind::Unit) && self.lower_stmt_expr(t).is_err() {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            }
+            let dst = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst, value: 0 });
+            return Some(dst);
         }
         // Lower the lambda BODY inline as a scalar value (captures resolve through value_of).
         match self.lower_scalar_value(&body) {
@@ -635,6 +683,20 @@ impl LowerCtx {
                 if is_heap_ty(&object.ty) =>
             {
                 self.try_lower_heap_field_borrow(object)?
+            }
+            // A bare LIST LITERAL container (`[10, 20, 30][1]`): ANF-materialize it to a
+            // synthetic temp via the SAME `lower_bind` path a `let t = [10, 20, 30]`
+            // takes (tracked in `materialized_lists`, scope-end drop registered), then
+            // index the temp — the literal is a real populated block, so the
+            // bounds-checked load is sound.
+            IrExprKind::List { .. } if is_heap_ty(&object.ty) => {
+                let tmp = self.fresh_synth_var();
+                self.lower_bind(tmp, &object.ty, object).ok()?;
+                let v = self.value_for(tmp).ok()?;
+                if !self.materialized_lists.contains(&v) {
+                    return None;
+                }
+                v
             }
             _ => return None,
         };

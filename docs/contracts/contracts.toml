@@ -71,7 +71,6 @@ evidence  = [
   { path = "spec/wasm_cross/int_div_by_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_mod_by_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_div_by_zero_literal.almd", class = "fixture" },
-  { path = "crates/almide-codegen/rt-oracle-registry.toml", name = "compile_div_trap", class = "doc-only" },
 ]
 
 [[contract]]
@@ -179,7 +178,6 @@ doc       = "C-008-009-010-repr.md"
 evidence  = [
   { path = "spec/wasm_cross/compound_repr_records_interp.almd", class = "fixture" },
   { path = "spec/wasm_cross/compound_repr_recursive_interp.almd", class = "fixture" },
-  { path = "crates/almide-codegen/rt-oracle-registry.toml", name = "compile_repr_funcs", class = "doc-only" },
 ]
 
 [[contract]]
@@ -293,10 +291,6 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_predicates.almd", class = "fixture" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs", name = "alphabetic_table_matches_char_method", class = "exhaustive" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs", name = "alphanumeric_table_matches_char_method", class = "exhaustive" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs", name = "uppercase_table_matches_char_method", class = "exhaustive" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs", name = "lowercase_table_matches_char_method", class = "exhaustive" },
 ]
 
 [[contract]]
@@ -320,8 +314,6 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_case_unicode.almd", class = "fixture" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs", name = "tables_reproduce_char_methods", class = "exhaustive" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs", name = "final_sigma_via_serialized_sets", class = "exhaustive" },
 ]
 
 [[contract]]
@@ -344,7 +336,6 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_from_bytes.almd", class = "fixture" },
-  { path = "crates/almide-codegen/src/emit_wasm/rt_string.rs", name = "derived_classification_matches_from_utf8_lossy", class = "fuzz", n = 300000 },
 ]
 
 # ── FLOAT FORMATTING / PARSING (Dragon4 / dec2flt) ──────────────────
@@ -772,7 +763,7 @@ evidence  = [
 id        = "C-054"
 spec      = "ALS-T16"
 title     = "List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB"
-statement = "Every list/string op that takes an `Int` (i64) COUNT or INDEX clamps it on the FULL i64 value BEFORE the wasm `i32_wrap_i64` narrowing, so a value at/over the 2^32 boundary can never wrap to a small in-range value, and a NEGATIVE value takes native's unsigned `n as usize` path — never the wrong lo-clamp-to-0 result (the C-034 `with_capacity` rule generalized via named `emit_clamp_count_to_i32` (UNSIGNED `min_u`) / `emit_clamp_count_signed_i32` (SIGNED `max(0).min`) / `emit_clamp_index_to_len_i32` / `emit_checked_index_i32` helpers). For UNSIGNED COUNTS — `list.take`/`drop`/`take_end`/`drop_end`/`chunk`/`windows`, `list.slice` start/end, `string.take`/`drop`/`take_end`/`drop_end`, `string.repeat`, `string.pad_start`/`pad_end` widths — the count is `min(n as usize, hi)`: a NEGATIVE count is enormous as `usize` and saturates to `hi`, so `take(-1)` returns the WHOLE collection, `drop(-1)` returns empty, `chunk(-1)` groups into ONE chunk (was a div-by-0 TRAP), `windows(-1)` is empty (was a wrong non-empty length), and `string.take(s, 2^32)` returns the whole string (was empty); a count `>= 2^32` likewise saturates instead of wrapping to a small in-range count. The size-bounded `repeat`/`chunk`/`windows`/`pad` use an `i32::MAX` sentinel so a genuinely huge count BOTH-FAILS (wasm `memory.grow` / native abort) rather than wasm silently emptying/short-cutting. The ONE exception is `string.slice` start/end, whose native oracle clamps SIGNED (`(x.max(0) as usize).min(len)`): a negative `string.slice` start maps to 0, handled by the separate SIGNED helper. For INDICES — `list.get`/`get_or`/`set`/`insert`/`remove_at`/`swap`/`update` — the index is UNSIGNED (`i as usize`) so a negative or `>= 2^32` index takes native's no-op / default / append path. Previously `list.drop_end(xs, 2^32-1)` returned a corrupt length exposing uninitialized heap, `list.take_end(xs, 2^32-1)` TRAPPED (exit 134), `list.chunk(xs, -1)` TRAPPED on wasm while native made one chunk, and `string.take(s, 2^32)` returned empty on wasm while native returned the whole string — all now byte-identical native == wasm at the 2^31 / 2^32 boundary and for negative counts on small inputs. The fixtures exercise COUNT boundaries (not SIZE boundaries), so no allocation exceeds a few KiB and the result is machine-independent."
+statement = "Every list/string op that takes an `Int` (i64) COUNT or INDEX clamps it on the FULL i64 value BEFORE the wasm `i32_wrap_i64` narrowing, so a value at/over the 2^32 boundary can never wrap to a small in-range value, and a NEGATIVE value takes native's unsigned `n as usize` path — never the wrong lo-clamp-to-0 result (the C-034 `with_capacity` rule generalized via named `emit_clamp_count_to_i32` (UNSIGNED `min_u`) / `emit_clamp_count_signed_i32` (SIGNED `max(0).min`) / `emit_clamp_index_to_len_i32` / `emit_checked_index_i32` helpers). For UNSIGNED COUNTS — `list.take`/`drop`/`take_end`/`drop_end`/`chunk`/`windows`, `list.slice` start/end, `string.take`/`drop`/`take_end`/`drop_end`, `string.pad_start`/`pad_end` widths — the count is `min(n as usize, hi)`: a NEGATIVE count is enormous as `usize` and saturates to `hi`, so `take(-1)` returns the WHOLE collection, `drop(-1)` returns empty, `chunk(-1)` groups into ONE chunk (was a div-by-0 TRAP), `windows(-1)` is empty (was a wrong non-empty length), and `string.take(s, 2^32)` returns the whole string (was empty); a count `>= 2^32` likewise saturates instead of wrapping to a small in-range count. The size-bounded `chunk`/`windows`/`pad` use an `i32::MAX` sentinel so a genuinely huge count BOTH-FAILS (wasm `memory.grow` / native abort) rather than wasm silently emptying/short-cutting. The `repeat` family (`string.repeat`/`list.repeat`/`bytes.repeat`) clamps SIGNED: a negative count yields the EMPTY string/list/bytes on BOTH targets — previously `string.repeat(s, -2^31)` panicked natively (Rust capacity overflow, raw exit 101) while the wasm leg trapped on the negative alloc size (exit 134): differential-fuzz, neither a T6 form. bytes/list already clamped; string now matches. The ONE exception is `string.slice` start/end, whose native oracle clamps SIGNED (`(x.max(0) as usize).min(len)`): a negative `string.slice` start maps to 0, handled by the separate SIGNED helper. For INDICES — `list.get`/`get_or`/`set`/`insert`/`remove_at`/`swap`/`update` — the index is UNSIGNED (`i as usize`) so a negative or `>= 2^32` index takes native's no-op / default / append path. Previously `list.drop_end(xs, 2^32-1)` returned a corrupt length exposing uninitialized heap, `list.take_end(xs, 2^32-1)` TRAPPED (exit 134), `list.chunk(xs, -1)` TRAPPED on wasm while native made one chunk, and `string.take(s, 2^32)` returned empty on wasm while native returned the whole string — all now byte-identical native == wasm at the 2^31 / 2^32 boundary and for negative counts on small inputs. The fixtures exercise COUNT boundaries (not SIZE boundaries), so no allocation exceeds a few KiB and the result is machine-independent."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -1202,7 +1193,7 @@ evidence  = [
 id        = "C-095"
 spec      = "ALS-D6"
 title     = "json.stringify_pretty is byte-identical indented output across targets"
-statement = "json.stringify_pretty produces the same indented JSON on both backends. The WASM arm was a stub (compact output plus a stray newline); it now has a real recursive pretty-printer (__json_stringify_pretty) mirroring the native oracle (json.rs stringify_value): two-space indent per depth, one array element / object member per line, comma-then-newline separators, and inline [] / {} for empty containers. Scalars match the compact form. Verified byte-identical native == wasm over a nested object/array document, a top-level array, and a top-level scalar."
+statement = "json.stringify_pretty produces the same indented JSON on both backends. The WASM arm was a stub (compact output plus a stray newline); it now has a real recursive pretty-printer (__json_stringify_pretty) mirroring the native oracle (json.rs stringify_value): two-space indent per depth, one array element / object member per line, comma-then-newline separators, and inline [] / {} for empty containers. Scalars match the compact form. String quoting is the canonical 5-escape rule (backslash, quote, \\n, \\r, \\t; everything else raw UTF-8) — the SAME rule the compact stringify and the wasm __json_quote use. Previously the native pretty printer used Rust's {:?} (escape_debug), which escaped combining marks as `\\u{301}` — not valid JSON escaping and a byte divergence against the wasm leg (differential-fuzz: a `cafe` + U+0301 key). Verified byte-identical native == wasm over a nested object/array document, a top-level array, a top-level scalar, and combining-mark strings/keys."
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/json_stringify_pretty.almd", class = "fixture" },
@@ -1758,11 +1749,12 @@ evidence  = [
 id        = "C-155"
 spec      = "ALS-T6"
 title     = "to_fixed with out-of-domain decimals aborts in the T6 form"
-statement = "`float.to_fixed(n, decimals)` with decimals outside 0..=1000000 aborts with `Error: to_fixed requires decimals in 0..=1000000` — one stderr line + exit 1, byte-identical on both targets. Previously a negative count reinterpreted as usize on native (the raw format! capacity panic, exit 101) while wasm printed the empty string for a small negative or trapped OOM for i64::MIN (differential-fuzz seed 20260718 index 49); a huge positive was the machine-dependent allocation abort on either leg. The same four consumers as C-154 carry the guard: the v1 self-host via prim.die, the native runtime wrapper, the v0 emit arm via the interned-message div_trap, and the interp bridge via Flow::Abort. In-domain decimals (up to 1e6 digits, ~1 MB) stay total and byte-identical."
+statement = "`float.to_fixed(n, decimals)` with decimals outside 0..=4096 aborts with `Error: to_fixed requires decimals in 0..=4096` — one stderr line + exit 1, byte-identical on both targets. Previously a negative count reinterpreted as usize on native (the raw format! capacity panic, exit 101) while wasm printed the empty string for a small negative or trapped OOM for i64::MIN (differential-fuzz seed 20260718 index 49). The bound was then 0..=1000000, which was itself NOT total: Rust's format! caps runtime precision at u16::MAX, so `to_fixed(1.5, 1000000)` panicked raw on native (101) while the wasm dragon expansion trapped (134) — differential-fuzz seed 1784512190387680000. An f64's exact expansion never exceeds ~1074 fractional digits, so 0..=4096 is generous AND total. The guard's consumers: the v1 self-host via prim.die, the native runtime wrapper, and the interp bridge via Flow::Abort. In-domain decimals stay total and byte-identical."
 since     = "0.31.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/to_fixed_domain_abort.almd", class = "fixture" },
+  { path = "spec/wasm_cross/to_fixed_domain_abort_hi.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1932,4 +1924,48 @@ since     = "0.31.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_combinators_heap_ok.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-156"
+spec      = "ALS-I3"
+title     = "An if-merged some((String, String)) ctor is a real tracked Option"
+statement = "A `some((s1, s2))` constructor over a `(String, String)` tuple payload — including the if-merged form `if c then some((a, b)) else some((c, d))` in bind, call-argument, and arm position — materializes a REAL 1-element Option block whose payload tuple owns both Strings, and `option.unwrap_or_else` over it takes the Some payload. The scope-end drop routes to the generated `$__drop_opt_str_str` (both tuple slots, the tuple block, then the wrapper). Previously the un-admitted payload left the bind a deferred Opaque (len 0) that the unwrap twin misread as None — the fallback closure ran on a Some (differential-fuzz seed 20260721 index 374, a silent wrong value)."
+since     = "0.32.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/opt_str_str_ctor.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-157"
+spec      = "ALS-I3"
+title     = "An unannotated generic-ctor top-let carries its solved payload type to every reader"
+statement = "A top-level `let` whose initializer is a generic constructor over a nominal payload (`let MAYBE = some(Cfg { … })`, no annotation) presents the fully SOLVED type (`Option[Cfg]`) to every reader — a same-file `match`'s payload binding and a cross-module reader (`m.MAYBE`) alike — and the match executes identically on both targets. Previously the registration seed `Option[Unknown]` leaked: the pre-solve write to `env.top_lets` was never upgraded after constraint solving, the v1 wasm pipeline skipped the module top-let refresh pre-pass entirely, and re-registration clobbered an already-solved entry back to the seed — the payload binding stayed Unknown and the whole program walled off the v1 leg while native ran (the option_record_toplet crossmod matrix cell, the last KnownBroken cell in the matrix)."
+since     = "0.32.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unannotated_toplet_generic_ctor.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-158"
+spec      = "ALS-I3"
+title     = "A some/ok ctor over a scalar call or tuple payload materializes the real value, never a zeroed ctor"
+statement = "A `some(...)`/`ok(...)`/`err(...)` constructor whose payload is a SCALAR-typed call (`ok(<Float combinator chain>)`, `some(list.len(...))`) or a TUPLE literal (`ok((0.3, 1000000))` — the mixed-scalar (Float, Int) shape) either materializes the REAL computed payload — byte-identical to native — or WALLS honestly. Previously the ctor safety net required a HEAP CALL payload, so these fell to the deferred Opaque: an EMPTY block the Result/Option formatter read as `ok(0)` while native printed the real value (differential-fuzz seed 1784512190387680000 index 74, a silent wrong value), and `result.unwrap_or` over the deferred tuple-payload wrapper aborted \"index out of bounds\" on the wasm leg while native succeeded (RunFailureDivergence). These — and IF-merged payloads (`ok(if c then some(\"a\") else some(\"b\"))`, whose deferral made the downstream unwrap take the FALLBACK on a Some) — now take the same ANF route: materialize into a synth temp via the ordinary bind path, rebuild the ctor over the temp, retry the materializer, and wall if the bind itself deferred or is outside the subset."
+since     = "0.32.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/ctor_scalar_call_payload.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-159"
+spec      = "ALS-I1"
+title     = "list.binary_search returns the same index on both targets for duplicate keys"
+statement = "`list.binary_search` over a sorted `List[Int]` returns the IDENTICAL index on native and wasm even when the key occurs more than once. The native oracle is Rust std's branchless (1.52+) `binary_search_by` loop, which does NOT early-return on equality — `while size > 1 { half = size/2; mid = base+half; base = if elem > target then base else mid; size -= half }` then one final equality check — so an all-equal `[2,2,2,2,2]` search lands on index 4. The wasm self-host previously replicated the CLASSIC early-exit loop and returned 2 (differential-fuzz seed 1784512190387680000: `some(4)` vs `some(2)`, a silent wrong value). Both indices are valid per the std contract, but the native == wasm byte-identity invariant demands one — the self-host now replicates the branchless loop instruction-for-instruction."
+since     = "0.32.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/binary_search_duplicate_keys.almd", class = "fixture" },
 ]

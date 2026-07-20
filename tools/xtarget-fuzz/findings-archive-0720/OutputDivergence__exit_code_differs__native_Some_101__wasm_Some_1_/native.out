@@ -1,0 +1,13 @@
+exit_code = Some(101)
+timed_out = false
+
+--- stdout ---
+
+--- stderr ---
+
+thread 'main' (29761134) panicked at /Users/o6lvl4/workspace/github.com/almide/almide/tools/xtarget-fuzz/.scratch/build-2/almide_gen_main.rs:10:5:
+assertion `left == right` failed
+  left: "SELECT *\nFROM users\nWHERE id = 1"
+ right: "hello"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+

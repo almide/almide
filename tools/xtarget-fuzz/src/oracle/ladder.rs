@@ -35,6 +35,14 @@ pub enum Outcome {
     /// A genuine compiler/runtime finding worth a repro.
     Finding(Finding),
 
+    /// The v1 wasm renderer declined the program with an HONEST wall
+    /// (`Unsupported(...)` — #782: a wall is a clean error, never a silent
+    /// fallback). This is SUBSET-COVERAGE debt, not a divergence bug: the
+    /// program has no wasm leg to compare. Counted separately (the wall
+    /// rate is its own metric); `reason` is the wall line for the
+    /// burn-down histogram.
+    Walled { reason: String },
+
     /// The program could not be evaluated to a comparison (e.g. wasm
     /// runtime missing) — skipped, not counted against anything.
     Skipped { reason: String },
@@ -187,6 +195,13 @@ pub fn run_ladder(
     // ── Rung (d): wasm build ──
     let wasm_build = tc.build_wasm(file, wasm_out);
     if !wasm_build.success() {
+        // An HONEST wall (`wall: Unsupported(...)`) is subset-coverage debt,
+        // not a finding — there is no wasm leg to diverge. Anything else
+        // (validator failure, panic, missing-wall crash) stays a finding.
+        let stderr = String::from_utf8_lossy(&wasm_build.stderr);
+        if let Some(line) = stderr.lines().find(|l| l.contains("wall: Unsupported")) {
+            return Outcome::Walled { reason: line.trim().to_string() };
+        }
         return Outcome::Finding(Finding {
             rung: Rung::WasmBuild,
             kind: FindingKind::WasmBuildFailure,
@@ -205,6 +220,21 @@ pub fn run_ladder(
         };
     }
     if wasm.timed_out {
+        // The SYMMETRIC rule to the native-hang skip above: a wasm hang is
+        // only evidence when native CLEANLY SUCCEEDED. A mutation can
+        // synthesize a genuinely non-terminating program whose two legs
+        // merely FAIL at different speeds — native blows its stack in
+        // milliseconds while the wasm leg (TCO'd into a loop) grinds past
+        // the timeout toward the 4GB ceiling. Both diverge only in failure
+        // form/speed — no divergence oracle.
+        if !native.success() {
+            return Outcome::Skipped {
+                reason: "wasm hung while native also failed (a non-terminating or \
+                         resource-unbounded program by construction) — no divergence \
+                         oracle"
+                    .into(),
+            };
+        }
         return Outcome::Finding(Finding {
             rung: Rung::Run,
             kind: FindingKind::Hang,

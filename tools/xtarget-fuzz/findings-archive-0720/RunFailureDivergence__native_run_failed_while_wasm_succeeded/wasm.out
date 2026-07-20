@@ -1,0 +1,16 @@
+exit_code = Some(0)
+timed_out = false
+
+--- stdout ---
+9
+2
+31
+bob
+5
+a
+b
+42
+5
+
+--- stderr ---
+

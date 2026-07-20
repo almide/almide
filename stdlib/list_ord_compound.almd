@@ -1,0 +1,318 @@
+// list_ord_compound — SELF-HOSTED type-directed ordering (list.sort/min/max) over
+// COMPOUND elements, matching native's derived Ord (the C-053 lattice):
+//   - `tss`  : (scalar, scalar) 2-tuple — lexicographic i64 slot compare
+//   - `tsstr`: (scalar, String) 2-tuple — i64 slot 0, byte-lex String slot 1
+//   - `lint` : List[Int/Bool] element  — elementwise i64, shorter-first tiebreak
+//   - `lstr` : List[String] element    — elementwise byte-lex, shorter-first
+//   - `oint` : Option[scalar] element  — none < some, some by payload
+// The generic scalar twins compared the i64 HANDLE (arbitrary order — a silent
+// miscompile) and raw-copied handles (double-free); these follow the list_sort_str
+// discipline instead: sort rc_incs every copied handle into an owned result buffer
+// (the caller's type-routed recursive drop balances it), min/max return
+// Some(a SHARED +1 reference to the winning element). Float components stay walled
+// (IEEE totalOrder is the _float family's job, not an i64 slot compare).
+
+fn __ordc_strcmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int =
+  if k >= la then (if k >= lb then 0 else 0 - 1)
+  else if k >= lb then 1
+  else {
+    let ca = prim.load8(ah + 12 + k)
+    let cb = prim.load8(bh + 12 + k)
+    if ca < cb then 0 - 1
+    else if ca > cb then 1
+    else __ordc_strcmp_at(ah, bh, la, lb, k + 1)
+  }
+
+fn __ordc_strcmp(ah: Int, bh: Int) -> Int =
+  __ordc_strcmp_at(ah, bh, prim.load32(ah + 4), prim.load32(bh + 4), 0)
+
+fn __ordc_icmp(a: Int, b: Int) -> Int =
+  if a < b then 0 - 1 else if a > b then 1 else 0
+
+// ── comparators (raw block handles in, -1/0/1 out) ──
+
+fn __cmp_tss(a: Int, b: Int) -> Int = {
+  let c0 = __ordc_icmp(prim.load64(a + 12), prim.load64(b + 12))
+  if c0 != 0 then c0
+  else __ordc_icmp(prim.load64(a + 20), prim.load64(b + 20))
+}
+
+fn __cmp_tsstr(a: Int, b: Int) -> Int = {
+  let c0 = __ordc_icmp(prim.load64(a + 12), prim.load64(b + 12))
+  if c0 != 0 then c0
+  else __ordc_strcmp(prim.load64(a + 20), prim.load64(b + 20))
+}
+
+fn __cmp_lint_at(a: Int, b: Int, la: Int, lb: Int, k: Int) -> Int =
+  if k >= la then (if k >= lb then 0 else 0 - 1)
+  else if k >= lb then 1
+  else {
+    let c = __ordc_icmp(prim.load64(a + 12 + k * 8), prim.load64(b + 12 + k * 8))
+    if c != 0 then c
+    else __cmp_lint_at(a, b, la, lb, k + 1)
+  }
+
+fn __cmp_lint(a: Int, b: Int) -> Int =
+  __cmp_lint_at(a, b, prim.load32(a + 4), prim.load32(b + 4), 0)
+
+fn __cmp_lstr_at(a: Int, b: Int, la: Int, lb: Int, k: Int) -> Int =
+  if k >= la then (if k >= lb then 0 else 0 - 1)
+  else if k >= lb then 1
+  else {
+    let c = __ordc_strcmp(prim.load64(a + 12 + k * 8), prim.load64(b + 12 + k * 8))
+    if c != 0 then c
+    else __cmp_lstr_at(a, b, la, lb, k + 1)
+  }
+
+fn __cmp_lstr(a: Int, b: Int) -> Int =
+  __cmp_lstr_at(a, b, prim.load32(a + 4), prim.load32(b + 4), 0)
+
+fn __cmp_oint(a: Int, b: Int) -> Int = {
+  let ta = prim.load32(a + 4)
+  let tb = prim.load32(b + 4)
+  if ta == 0 and tb == 0 then 0
+  else if ta == 0 then 0 - 1
+  else if tb == 0 then 1
+  else __ordc_icmp(prim.load64(a + 12), prim.load64(b + 12))
+}
+
+// ── shared machinery: rc-copy, per-comparator selection sort / extremum index ──
+
+fn __ordc_copy_rc(srch: Int, dsth: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(srch + 12 + i * 8)
+    prim.rc_inc(e)
+    prim.store64(dsth + 12 + i * 8, e)
+    __ordc_copy_rc(srch, dsth, n, i + 1)
+  }
+
+fn __ordc_swap(h: Int, i: Int, j: Int) -> Int = {
+  let a = prim.load64(h + 12 + i * 8)
+  let b = prim.load64(h + 12 + j * 8)
+  prim.store64(h + 12 + i * 8, b)
+  prim.store64(h + 12 + j * 8, a)
+  0
+}
+
+fn __selmin_tss(h: Int, n: Int, j: Int, best: Int) -> Int =
+  if j >= n then best
+  else {
+    let nb = if __cmp_tss(prim.load64(h + 12 + j * 8), prim.load64(h + 12 + best * 8)) < 0 then j else best
+    __selmin_tss(h, n, j + 1, nb)
+  }
+fn __selsort_tss(h: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let _x = __ordc_swap(h, i, __selmin_tss(h, n, i + 1, i))
+    __selsort_tss(h, n, i + 1)
+  }
+
+fn __selmin_tsstr(h: Int, n: Int, j: Int, best: Int) -> Int =
+  if j >= n then best
+  else {
+    let nb = if __cmp_tsstr(prim.load64(h + 12 + j * 8), prim.load64(h + 12 + best * 8)) < 0 then j else best
+    __selmin_tsstr(h, n, j + 1, nb)
+  }
+fn __selsort_tsstr(h: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let _x = __ordc_swap(h, i, __selmin_tsstr(h, n, i + 1, i))
+    __selsort_tsstr(h, n, i + 1)
+  }
+
+fn __selmin_lint(h: Int, n: Int, j: Int, best: Int) -> Int =
+  if j >= n then best
+  else {
+    let nb = if __cmp_lint(prim.load64(h + 12 + j * 8), prim.load64(h + 12 + best * 8)) < 0 then j else best
+    __selmin_lint(h, n, j + 1, nb)
+  }
+fn __selsort_lint(h: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let _x = __ordc_swap(h, i, __selmin_lint(h, n, i + 1, i))
+    __selsort_lint(h, n, i + 1)
+  }
+
+fn __selmin_oint(h: Int, n: Int, j: Int, best: Int) -> Int =
+  if j >= n then best
+  else {
+    let nb = if __cmp_oint(prim.load64(h + 12 + j * 8), prim.load64(h + 12 + best * 8)) < 0 then j else best
+    __selmin_oint(h, n, j + 1, nb)
+  }
+fn __selsort_oint(h: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let _x = __ordc_swap(h, i, __selmin_oint(h, n, i + 1, i))
+    __selsort_oint(h, n, i + 1)
+  }
+
+// Extremum INDEX per comparator (dir: max when the compare is > 0).
+fn __exidx_tss(h: Int, n: Int, i: Int, best: Int, want_max: Bool) -> Int =
+  if i >= n then best
+  else {
+    let c = __cmp_tss(prim.load64(h + 12 + i * 8), prim.load64(h + 12 + best * 8))
+    let nb = if (want_max and c > 0) or (not want_max and c < 0) then i else best
+    __exidx_tss(h, n, i + 1, nb, want_max)
+  }
+fn __exidx_tsstr(h: Int, n: Int, i: Int, best: Int, want_max: Bool) -> Int =
+  if i >= n then best
+  else {
+    let c = __cmp_tsstr(prim.load64(h + 12 + i * 8), prim.load64(h + 12 + best * 8))
+    let nb = if (want_max and c > 0) or (not want_max and c < 0) then i else best
+    __exidx_tsstr(h, n, i + 1, nb, want_max)
+  }
+fn __exidx_lint(h: Int, n: Int, i: Int, best: Int, want_max: Bool) -> Int =
+  if i >= n then best
+  else {
+    let c = __cmp_lint(prim.load64(h + 12 + i * 8), prim.load64(h + 12 + best * 8))
+    let nb = if (want_max and c > 0) or (not want_max and c < 0) then i else best
+    __exidx_lint(h, n, i + 1, nb, want_max)
+  }
+fn __exidx_lstr(h: Int, n: Int, i: Int, best: Int, want_max: Bool) -> Int =
+  if i >= n then best
+  else {
+    let c = __cmp_lstr(prim.load64(h + 12 + i * 8), prim.load64(h + 12 + best * 8))
+    let nb = if (want_max and c > 0) or (not want_max and c < 0) then i else best
+    __exidx_lstr(h, n, i + 1, nb, want_max)
+  }
+fn __exidx_oint(h: Int, n: Int, i: Int, best: Int, want_max: Bool) -> Int =
+  if i >= n then best
+  else {
+    let c = __cmp_oint(prim.load64(h + 12 + i * 8), prim.load64(h + 12 + best * 8))
+    let nb = if (want_max and c > 0) or (not want_max and c < 0) then i else best
+    __exidx_oint(h, n, i + 1, nb, want_max)
+  }
+
+// ── public twins ──
+// sort: rc-copy into an owned buffer, selection-sort in place (handle swaps only).
+// The RESULT's recursive drop is routed by TYPE at the caller's bind — balanced
+// against the rc_incs here.
+
+fn list_sort_tsstr(xs: List[(Int, String)]) -> List[(Int, String)] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __ordc_copy_rc(h, bh, n, 0)
+  let _s = __selsort_tsstr(bh, n, 0)
+  buf
+}
+
+fn list_sort_tss(xs: List[(Int, Int)]) -> List[(Int, Int)] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __ordc_copy_rc(h, bh, n, 0)
+  let _s = __selsort_tss(bh, n, 0)
+  buf
+}
+
+fn list_sort_lint(xs: List[List[Int]]) -> List[List[Int]] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __ordc_copy_rc(h, bh, n, 0)
+  let _s = __selsort_lint(bh, n, 0)
+  buf
+}
+
+fn list_sort_oint(xs: List[Option[Int]]) -> List[Option[Int]] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __ordc_copy_rc(h, bh, n, 0)
+  let _s = __selsort_oint(bh, n, 0)
+  buf
+}
+
+// min/max: Some(a SHARED +1 reference to the winning element) — the source list
+// keeps its own reference; the Option's type-routed drop releases the share.
+
+fn __ordc_some_tsstr(h: Int, i: Int) -> Option[(Int, String)] = {
+  let e = prim.load64(h + 12 + i * 8)
+  prim.rc_inc(e)
+  let x: (Int, String) = prim.load_handle(h + 12 + i * 8)
+  Some(x)
+}
+fn list_min_tsstr(xs: List[(Int, String)]) -> Option[(Int, String)] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  if n <= 0 then None else __ordc_some_tsstr(h, __exidx_tsstr(h, n, 1, 0, false))
+}
+fn list_max_tsstr(xs: List[(Int, String)]) -> Option[(Int, String)] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  if n <= 0 then None else __ordc_some_tsstr(h, __exidx_tsstr(h, n, 1, 0, true))
+}
+
+fn __ordc_some_tss(h: Int, i: Int) -> Option[(Int, Int)] = {
+  let e = prim.load64(h + 12 + i * 8)
+  prim.rc_inc(e)
+  let x: (Int, Int) = prim.load_handle(h + 12 + i * 8)
+  Some(x)
+}
+fn list_min_tss(xs: List[(Int, Int)]) -> Option[(Int, Int)] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  if n <= 0 then None else __ordc_some_tss(h, __exidx_tss(h, n, 1, 0, false))
+}
+fn list_max_tss(xs: List[(Int, Int)]) -> Option[(Int, Int)] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  if n <= 0 then None else __ordc_some_tss(h, __exidx_tss(h, n, 1, 0, true))
+}
+
+fn __ordc_some_lint(h: Int, i: Int) -> Option[List[Int]] = {
+  let e = prim.load64(h + 12 + i * 8)
+  prim.rc_inc(e)
+  let x: List[Int] = prim.load_handle(h + 12 + i * 8)
+  Some(x)
+}
+fn list_min_lint(xs: List[List[Int]]) -> Option[List[Int]] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  if n <= 0 then None else __ordc_some_lint(h, __exidx_lint(h, n, 1, 0, false))
+}
+fn list_max_lint(xs: List[List[Int]]) -> Option[List[Int]] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  if n <= 0 then None else __ordc_some_lint(h, __exidx_lint(h, n, 1, 0, true))
+}
+
+fn __ordc_some_lstr(h: Int, i: Int) -> Option[List[String]] = {
+  let e = prim.load64(h + 12 + i * 8)
+  prim.rc_inc(e)
+  let x: List[String] = prim.load_handle(h + 12 + i * 8)
+  Some(x)
+}
+fn list_min_lstr(xs: List[List[String]]) -> Option[List[String]] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  if n <= 0 then None else __ordc_some_lstr(h, __exidx_lstr(h, n, 1, 0, false))
+}
+fn list_max_lstr(xs: List[List[String]]) -> Option[List[String]] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  if n <= 0 then None else __ordc_some_lstr(h, __exidx_lstr(h, n, 1, 0, true))
+}
+
+fn __ordc_some_oint(h: Int, i: Int) -> Option[Option[Int]] = {
+  let e = prim.load64(h + 12 + i * 8)
+  prim.rc_inc(e)
+  let x: Option[Int] = prim.load_handle(h + 12 + i * 8)
+  Some(x)
+}
+fn list_min_oint(xs: List[Option[Int]]) -> Option[Option[Int]] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  if n <= 0 then None else __ordc_some_oint(h, __exidx_oint(h, n, 1, 0, false))
+}
+fn list_max_oint(xs: List[Option[Int]]) -> Option[Option[Int]] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  if n <= 0 then None else __ordc_some_oint(h, __exidx_oint(h, n, 1, 0, true))
+}

@@ -344,6 +344,32 @@ impl LowerCtx {
             }
             return self.lower_tail(expr.as_deref());
         }
+        // C-127: a `match` tail whose RESULT spelling is an UNRESOLVED generic
+        // (`Unknown` / a bare type param left by an under-constrained chain link)
+        // is judged HEAP and routed down the heap-match leg — but when EVERY arm
+        // body's own type is a resolved SCALAR, the arms are the ground truth
+        // (native sizes the value the same way): retype the tail from the arms
+        // and take the scalar leg.
+        if is_heap_ty(&tail.ty) {
+            if let IrExprKind::Match { subject, arms } = &tail.kind {
+                let arm_tys_scalar = !arms.is_empty()
+                    && arms.iter().all(|a| {
+                        !is_heap_ty(&a.body.ty) && !matches!(a.body.ty, Ty::Unknown)
+                    });
+                if arm_tys_scalar {
+                    let retyped = IrExpr {
+                        kind: IrExprKind::Match {
+                            subject: subject.clone(),
+                            arms: arms.clone(),
+                        },
+                        ty: arms[0].body.ty.clone(),
+                        span: tail.span.clone(),
+                        def_id: tail.def_id,
+                    };
+                    return self.lower_tail_scalar(&retyped);
+                }
+            }
+        }
         // Decomposed (#781, cog 232): the UNIT / HEAP / SCALAR tails are verbatim
         // text moves into lower_tail_unit / lower_tail_heap / lower_tail_scalar —
         // behavior proven by the classify wall-list + cert byte-identity ladder.
@@ -388,10 +414,15 @@ impl LowerCtx {
     fn lower_tail_unit(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
         return match &tail.kind {
             IrExprKind::Unit => Ok(None),
-            // A Unit-typed call tail is an EFFECT call (e.g. `println(s)`):
-            // lower it as a statement-effect, no return value.
+            // A Unit-typed call tail is an EFFECT call (e.g. `println(s)`): lower it
+            // through the STATEMENT dispatcher — the same one-dispatcher discipline
+            // as the branch arm-tail — so the functional-rebind group (list.push /
+            // map.insert / bytes.push / clear) fires here too. A lifted LAMBDA whose
+            // body is `{ list.push(g, 7) }` reaches its push as this unit TAIL; the
+            // direct lower_effect_call bypassed the rebind and emitted a bare
+            // unlinked `list.push` (the closure-over-global wall class).
             IrExprKind::Call { .. } => {
-                self.lower_effect_call(tail)?;
+                self.lower_stmt_expr(tail)?;
                 Ok(None)
             }
             // A Unit `if` tail EXECUTES (only the taken arm's effects run) when the
@@ -410,6 +441,13 @@ impl LowerCtx {
                             return Ok(None);
                         }
                     }
+                }
+                // A TUPLE subject in Unit-tail position — the heap-branch tail
+                // duplication turns `let s = match (…) {…}; use(s)` into exactly
+                // this shape (the whole body IS the match): the refinement chain's
+                // unit sibling runs only the taken arm's effects.
+                if self.try_lower_tuple_refinement_unit_match(subject, arms) {
+                    return Ok(None);
                 }
                 self.lower_branch(tail)?;
                 Ok(None)
@@ -655,6 +693,49 @@ impl LowerCtx {
                 if let IrExprKind::UnwrapOr { expr, fallback } = &tail.kind {
                     if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, false) {
                         return Ok(Some(dst));
+                    }
+                }
+                // `ok(<Unit expr>)` RETURNED (`ok(match parsed { ok(v) => println…, err(e)
+                // => println… })` — the result_match_behind_ok_wrapper shape): the payload
+                // is an EFFECT, not a value — run it through the statement dispatcher (the
+                // unit match executes only the taken arm over its tracked subject), then
+                // return the plain `ok(())` block. Effects are emitted BEFORE the ctor, so
+                // a ctor decline after them must WALL (falling through would re-lower the
+                // payload = double effects).
+                if let IrExprKind::ResultOk { expr } = &tail.kind {
+                    if matches!(expr.ty, Ty::Unit)
+                        && matches!(
+                            expr.kind,
+                            IrExprKind::Match { .. }
+                                | IrExprKind::If { .. }
+                                | IrExprKind::Block { .. }
+                                | IrExprKind::Call { .. }
+                        )
+                    {
+                        let payload = (**expr).clone();
+                        self.lower_stmt_expr(&payload)?;
+                        let unit_ok = IrExpr {
+                            kind: IrExprKind::ResultOk {
+                                expr: Box::new(IrExpr {
+                                    kind: IrExprKind::Unit,
+                                    ty: Ty::Unit,
+                                    span: None,
+                                    def_id: None,
+                                }),
+                            },
+                            ty: tail.ty.clone(),
+                            span: None,
+                            def_id: None,
+                        };
+                        if let Some(dst) = self.try_lower_result_scalar_ok_ctor(&unit_ok, &tail.ty) {
+                            return Ok(Some(dst));
+                        }
+                        return Err(LowerError::Unsupported(
+                            "unit-payload `ok(<effect>)` return whose `ok(())` block is \
+                             outside the ctor subset (the payload's effects were already \
+                             emitted) not in this brick"
+                                .into(),
+                        ));
                     }
                 }
                 // `ok({val, next})` / `err(msg)` RETURNED for a `Result[heap-record, String]` (porta
@@ -913,6 +994,13 @@ impl LowerCtx {
                 // arms — the len-tag twin of the Result opener (a bind-all arm aliases
                 // the owned subject temp; release parity covers an arm move-out).
                 if let Some(dst) = self.try_lower_list_match_value(subject, arms, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                // A TUPLE subject of SCALAR elements with HEAP-result arms (`match (n % 3,
+                // n % 5) { (0, 0) => "FizzBuzz", … }` — the fizz shape, the CHEATSHEET's
+                // canonical match idiom): the ordered tuple-refinement chain, extended to
+                // heap merges (per-arm `lower_heap_result_arm` + release parity).
+                if let Some(dst) = self.try_lower_tuple_refinement_match(subject, arms, &tail.ty) {
                     return Ok(Some(dst));
                 }
                 // `desugar_match_to_if` wraps its OUTPUT in a `Block` (hoisted `let`s
@@ -1192,6 +1280,12 @@ impl LowerCtx {
                 if let Some(dst) =
                     self.try_lower_custom_variant_match(subject, arms, &tail.ty)
                 {
+                    return Ok(Some(dst));
+                }
+                // A TUPLE subject of scalar elements/expressions with a SCALAR result
+                // (`match (a % 2, b % 3) { (0, 0) => 100, … }`) — the ordered
+                // refinement chain (the scalar sibling of the heap-tail hook).
+                if let Some(dst) = self.try_lower_tuple_refinement_match(subject, arms, &tail.ty) {
                     return Ok(Some(dst));
                 }
                 // A VARIANT (Option/Result) subject returned by a function — execute the

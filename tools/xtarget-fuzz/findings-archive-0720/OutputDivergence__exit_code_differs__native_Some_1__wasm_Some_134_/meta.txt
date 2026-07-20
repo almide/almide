@@ -1,0 +1,7 @@
+seed        = 20260718
+index       = 998
+origin      = mutation of /Users/o6lvl4/workspace/github.com/almide/almide/examples/roman-numeral.almd
+rung        = Run
+kind        = OutputDivergence
+summary     = exit code differs: native=Some(1) wasm=Some(134)
+reproduce   = xtarget-fuzz replay --seed 20260718 --index 998

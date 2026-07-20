@@ -102,7 +102,7 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI) so this section cannot drift from what the gates actually verify:
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 155 contracts — 155 active, 0 flagged-for-revision.**
+> **Ledger: 159 contracts — 159 active, 0 flagged-for-revision.**
 >
 > **Exceptions: none.** Every contract in the ledger is `active`, carrying
 > executable evidence of class ≥ `fixture`.
@@ -207,9 +207,14 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 
 | Headline | Value |
 |---|---|
-| WASM "Hello World" binary | **467 B** — raw output, self-contained, `wasm-opt` saves only 1–5 more bytes |
+| WASM "Hello World" binary | **8.7 KB** verified as shipped (runtime + debug names included) — **874 B** after `wasm-opt -Oz`; Rust on the same target is 40 KB+ even fully size-tuned |
 | Native minigit CLI binary | **444 KB** stripped, 0 dependencies |
 | MiniGit AI-coding benchmark | **100% pass** (Sonnet 5 × 20 trials) — most concise of 5 languages (233 LOC), faster than Gleam/MoonBit |
+
+The verified pipeline ships the exact bytes it certified — post-hoc optimizers are
+never run on the default path, so the "as shipped" number carries the full audited
+runtime and the name section for trap backtraces. What's inside the binary, why it's
+small, and how to reproduce every number: **[docs/WASM-OUTPUT.md](./docs/WASM-OUTPUT.md)**.
 
 Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.md)**.
 
@@ -220,9 +225,9 @@ Full tables, methodology, and charts: **[docs/BENCHMARKS.md](./docs/BENCHMARKS.m
 | Compiler | Pure Rust, single binary, 0 ICE |
 | Targets | Rust (native), WASM (direct emit) |
 | Verified codegen | The v1 PCC pipeline is the **default** wasm path since 0.29.0 — certificates re-verified on every build (`--no-verified` opts out) |
-| Codegen | v0 Rust: Nanopass + TOML templates; wasm: certified MIR → direct emit |
+| Codegen | Rust: Nanopass + TOML templates; wasm: certified MIR → direct emit (the sole wasm path — the unverified emitter is retired) |
 | Stdlib | 834 functions across 39 modules |
-| Tests | 285 test files pass (271 via WASM, 14 native) + 133-contract cross-target ledger |
+| Tests | 288 test files pass (270 via WASM, 18 native) + 155-contract cross-target ledger |
 | MSR | 100% (30/30 tasks, Sonnet 4.6) — see the [scorecard](#msr-scorecard) above, measured by [almide-dojo](https://github.com/almide/almide-dojo) |
 | MiniGit Bench | 100% pass, Sonnet 5 × 20 trials, same-model snapshot vs Gleam/MoonBit/Rust/TypeScript ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)) |
 | Artifacts | `.almdi` module interface files via `almide compile` |

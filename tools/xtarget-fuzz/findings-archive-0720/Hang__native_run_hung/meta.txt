@@ -1,0 +1,7 @@
+seed        = 20260718
+index       = 198
+origin      = mutation of /Users/o6lvl4/workspace/github.com/almide/almide/spec/wasm_cross/mutual_append.almd
+rung        = Run
+kind        = Hang
+summary     = native run hung
+reproduce   = xtarget-fuzz replay --seed 20260718 --index 198

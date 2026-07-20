@@ -1078,6 +1078,22 @@ pub(crate) struct LowerCtx {
     /// carries only the VarId, and the field-slot store (`r.f = v` → `ListSetScalar`)
     /// needs the container type's field offsets.
     var_decl_tys: HashMap<VarId, Ty>,
+    /// SHARED-CELL vars (closures Rung 6): locals that are BOTH captured by some lambda
+    /// AND mutated (an `Assign`/in-place mutator anywhere in the fn — enclosing scope or
+    /// any lambda body). A plain env value-copy capture silently LOSES such mutations
+    /// (the closure rebinds its copy — the container-stored-closure miscompile class), so
+    /// these vars live in a heap CELL instead: a 1-slot block holding the current
+    /// value/handle, read fresh at every reference and written through at every assign —
+    /// the LOCAL analogue of the mutable-global slot machinery (`value_or_global` /
+    /// `__mg_take`+Store). Computed by `collect_cell_vars` over the final desugared body
+    /// before lowering, so bind/read/write/capture all agree on which vars are cells.
+    cell_vars: HashSet<VarId>,
+    /// var → its live CELL BLOCK value (`cell_vars` members only, populated at the
+    /// `Bind`). Reads load slot 0 fresh (never cached in `value_of` — an intervening
+    /// closure call may have written it); assigns take+drop the old slot value and
+    /// store the new one; `lift_lambda` captures the CELL handle (rc-shared), so the
+    /// closure and the enclosing scope address the same storage.
+    cell_of: HashMap<VarId, ValueId>,
     /// MIR values that are `List[String]` (NESTED-OWNERSHIP lists — their i64 slots hold OWNED
     /// String handles). A scope-end drop of one emits [`Op::DropListStr`] (recursive free),
     /// not a flat [`Op::Drop`] — so the element Strings are reclaimed. Populated when an
@@ -1413,6 +1429,8 @@ impl VariantLayouts {
             self.field_is_variant(t)
                 || matches!(t, Ty::Named(n, _) if is_record(n.as_str()))
                 || matches!(t, Ty::String)
+                // A CLOSURE field — freed via `__drop_closure` (mirrors the generator).
+                || matches!(t, Ty::Fn { .. })
                 || matches!(t, Ty::Applied(TypeConstructorId::List, a)
                     if a.len() == 1
                         && (!is_heap_ty(&a[0])
@@ -1702,13 +1720,15 @@ pub(crate) fn is_opt_list_str_ty(ty: &Ty) -> bool {
 /// OOMs). Checked BEFORE `is_heap_elem_list_ty` (which also matches this List type).
 pub(crate) fn is_list_str_str_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
-    // BOTH pair sides must be single FLAT blocks — a String or a List[scalar] row
-    // (list.zip_rc over matrix rows) — so DropListStrStr's two per-slot rc_decs are each
+    // BOTH pair sides must be single FLAT blocks — a String, a List[scalar] row
+    // (list.zip_rc over matrix rows), or an all-scalar TUPLE (map.entries over the
+    // hval-tuple flavor, C-039) — so DropListStrStr's two per-slot rc_decs are each
     // a FULL free. A rich payload (List[heap], record, Value) stays out (would leak).
     let flat = |t: &Ty| {
         matches!(t, Ty::String)
             || matches!(t, Ty::Applied(TypeConstructorId::List, b)
                 if b.len() == 1 && !is_heap_ty(&b[0]))
+            || matches!(t, Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c)))
     };
     matches!(ty,
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
@@ -1729,12 +1749,31 @@ pub fn is_map_ivh_ty(ty: &Ty) -> bool {
 
 /// `Map[String, List[scalar]]` — the String-key / FLAT-heap-value map (self-host
 /// map_hval; a flat value block's rc_dec is its full free).
-pub fn is_map_hval_ty(ty: &Ty) -> bool {
+/// `Map[String, <Fn>]` — the mclo (closure-valued map) family: String keys +
+/// closure-block values. CONSTRUCTION rides the handle-level `_hval` twins
+/// (set/get/get_or store & share plain value handles — type-agnostic physics);
+/// only the DROP differs: `$__drop_map_mclo` frees each value via
+/// `__drop_closure` (the hval flat per-slot `rc_dec` would leak every captured
+/// env slot — the `__drop_list_closure` leak class).
+pub fn is_map_fn_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(ty,
         Ty::Applied(TypeConstructorId::Map, a)
-            if a.len() == 2 && matches!(a[0], Ty::String) && matches!(&a[1],
-                Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && !is_heap_ty(&e[0])))
+            if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::Fn { .. }))
+}
+
+pub fn is_map_hval_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    // A FLAT heap value: a List[scalar] row OR an all-scalar tuple (`map.map(mi,
+    // (v) => (v, v*v))` — C-039). Either way `$__drop_map_hval`'s rc_dec of all
+    // 2n slots is the exact free (both value classes are single flat blocks).
+    matches!(ty,
+        Ty::Applied(TypeConstructorId::Map, a)
+            if a.len() == 2 && matches!(a[0], Ty::String)
+                && (matches!(&a[1],
+                        Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && !is_heap_ty(&e[0]))
+                    || matches!(&a[1],
+                        Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|c| !is_heap_ty(c)))))
 }
 
 /// `Map[String, Map[String, String]]` — the msv family (String keys, MAP values;

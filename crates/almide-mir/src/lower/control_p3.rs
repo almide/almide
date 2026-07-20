@@ -62,6 +62,11 @@ impl LowerCtx {
                         && !self.materialized_options.contains(&v)
                 })
                 .unwrap_or(false),
+            // A Result-typed FIELD/TUPLE-SLOT (`h.r ?? -1` / `t.0 ?? -1` — C-068):
+            // the borrowed block reads its tag INVERSELY like any Result.
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
+                is_result_ty(&expr.ty)
+            }
             // A USER function returning Result — read its tag INVERSELY (Ok = tag 0).
             _ if is_named_variant_call => is_result_ty(&expr.ty),
             _ => is_self_host_result_call(expr),
@@ -92,22 +97,33 @@ impl LowerCtx {
                 }
                 _ => return None,
             }
-        } else if let IrExprKind::Member { object, field } = &expr.kind {
+        } else if let IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } = &expr.kind {
             // `r.opt ?? d` — an `Option[scalar/String]` FIELD of a materialized record: BORROW the
             // field's Option block handle (`LoadHandle` at the field offset; the record keeps
             // ownership, the `??` only READS the tag + scalar/String payload — no transfer, no drop).
             // Gated to a scalar/String Option leaf so the scalar-payload / `option.unwrap_or_str` read
             // below is over a real 0-or-1 block. Exposed by derived-Codec Option decode (the
             // codec_float_int `r.opt ?? -1.0` consumer): without it the `??` fell to a silent Const-0.
+            // A `Result[scalar, _]` field/tuple-slot (`h.r ?? -1` / `t.0 ?? -1` — the
+            // C-068 autotry construction class) is the SAME len-as-tag block, read
+            // INVERSELY via `is_result` above.
             let leaf_ok = matches!(&expr.ty,
                 Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
-                    if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Float | Ty::Bool | Ty::String));
+                    if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Float | Ty::Bool | Ty::String))
+                || matches!(&expr.ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                        if a.len() == 2 && matches!(a[0], Ty::Int | Ty::Float | Ty::Bool));
             if !leaf_ok {
                 return None;
             }
-            let offset = match self.aggregate_field_offset_any(&object.ty, field.as_str()) {
-                Some(o) => o,
-                None => return None,
+            let (object, offset) = match &expr.kind {
+                IrExprKind::Member { object, field } => {
+                    (object, self.aggregate_field_offset_any(&object.ty, field.as_str())?)
+                }
+                IrExprKind::TupleIndex { object, index } => {
+                    (object, self.aggregate_index_offset_any(&object.ty, *index)?)
+                }
+                _ => unreachable!(),
             };
             let ch = match self.resolve_aggregate_container_handle(object) {
                 Some(c) => c,
@@ -272,6 +288,58 @@ impl LowerCtx {
                                 return Some(result);
                             }
                         }
+                    }
+                }
+            }
+        }
+        // `Option[<Fn>] ?? <lambda>` (`map.get(m, "add") ?? ((x) => x)` — the
+        // closure-valued map coalesce): Some → BORROW the payload handle @12 (the
+        // closure block — the Option keeps owning it) then `Dup` a fresh OWNED
+        // reference; None → LIFT the fallback lambda (a fresh owned closure block).
+        // Both arms merge through the SAME proven IfThen/Else/EndIf heap-result
+        // skeleton the variant-ctor fallback above uses; the result joins
+        // `closure_values` (CallIndirect dispatch + the `$__drop_closure` route).
+        if !is_result {
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) =
+                &expr.ty
+            {
+                if a.len() == 1 && matches!(a[0], Ty::Fn { .. }) {
+                    if let IrExprKind::Lambda { params, body, .. } = &fallback.kind {
+                        use crate::PrimKind;
+                        let h = self.fresh_value();
+                        self.ops.push(Op::Prim {
+                            kind: PrimKind::Handle,
+                            dst: Some(h),
+                            args: vec![handle],
+                        });
+                        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+                        let result = self.fresh_value();
+                        self.ops.push(Op::IfThen { cond: tag, dst: Some(result) });
+                        let borrowed = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                        let owned = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: owned, src: borrowed });
+                        self.ops.push(Op::Else { val: Some(owned) });
+                        let (params, body) = (params.clone(), body.clone());
+                        match self.lift_lambda(&params, &body) {
+                            Some(fb) => {
+                                // The fallback block is ELSE-ARM-LOCAL and MOVES into the
+                                // merge (`EndIf val`) — remove it from the scope-end drop
+                                // set (`lift_lambda` pushed it): an unconditional drop
+                                // would free a never-allocated local (0) on the Some path.
+                                self.live_heap_handles.retain(|x| *x != fb);
+                                self.ops.push(Op::EndIf { val: Some(fb) });
+                            }
+                            None => {
+                                self.ops.truncate(ops_mark);
+                                self.live_heap_handles.truncate(lhh_mark);
+                                return None;
+                            }
+                        }
+                        if track_result {
+                            self.live_heap_handles.push(result);
+                        }
+                        self.closure_values.insert(result);
+                        return Some(result);
                     }
                 }
             }
@@ -478,6 +546,13 @@ impl LowerCtx {
                 if self.custom_variant_type_name(&subject.ty).is_some() =>
             {
                 self.try_lower_custom_variant_match(subject, arms, &t.ty)
+            }
+            // A TUPLE-of-bound-vars subject (the frontend's factored form of a
+            // multi-arm nested-ctor match — C-070): per-element refinement chain.
+            IrExprKind::Match { subject, arms }
+                if matches!(subject.kind, IrExprKind::Tuple { .. }) =>
+            {
+                self.try_lower_tuple_refinement_match(subject, arms, &t.ty)
             }
             IrExprKind::Match { subject, arms } if is_variant_ty(&subject.ty) => {
                 self.try_lower_variant_value_match(subject, arms, &t.ty)

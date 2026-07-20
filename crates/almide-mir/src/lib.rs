@@ -525,6 +525,14 @@ pub enum PrimKind {
     /// self-host arm of the §13 termination convention (math.pow negative
     /// exponent, int.rotate nonpositive width). Never returns.
     Die,
+    /// `process.exit(code)` — the WASI `proc_exit` host call with a USER exit
+    /// code (`args = [code]`, i64 wrapped to i32; no message line, unlike
+    /// [`PrimKind::Die`]'s fixed exit-1 + stderr). Never returns; carries no
+    /// ownership event and no capability of its own (the frontend's E006
+    /// already forces the calling fn to be `effect`). #782: the assert/T18
+    /// desugar's `process.exit(1)` statement rode the retired v0 emitter —
+    /// this is its v1 floor.
+    ProcExit,
     /// The `fd_write` WASI host call — `args = [fd, iov, count, nwritten]`, dst = the
     /// i64 errno. A sandbox exit; carries [`Capability::Stdout`].
     FdWrite,
@@ -727,6 +735,12 @@ pub enum PrimKind {
     /// f64 category for self-host over `prim.fabs` / `prim.fadd` / `prim.f2i` / etc.
     FloatUn(FUnOp),
     FloatBin(FBinOp),
+    /// `float.from_int(x)` — the sitofp floor (#806 step 2): ONE
+    /// `f64.convert_i64_s` (bits-reinterpreted into the i64-uniform float
+    /// slot), replacing the self-host runtime CALL that dominated inlined hot
+    /// loops. `args = [int_value]`, dst = the f64 BITS. A pure scalar
+    /// conversion — no ownership event, no capability.
+    F64FromInt,
     FloatCmp(FCmpOp),
     /// `i64.trunc_sat_f64_s(reinterpret(x))` — Float → Int (saturating truncate, v0's `as i64`).
     FloatToInt,

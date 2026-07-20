@@ -58,6 +58,35 @@ fn map_fold_skv_msi(
   __mfh_skv_loop(sh, f, entries, 0, init)
 }
 
+// ── map.fold over a STRING accumulator (`Map[String, String]` subject) ── the
+// map_fold.almd builder shape (`map.fold(ms, "[", (acc, k, v) => acc + k + "=" + v)`).
+// Same interleaved-pair walk as fold_str_msi; the acc is a String handle with the
+// same move-into-f discipline.
+fn __mfh_str_sacc_loop(
+  sh: Int,
+  f: (String, String, String) -> String,
+  entries: Int,
+  i: Int,
+  acc: String,
+) -> String =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 16)
+    let v = prim.load_str(sh + 12 + i * 16 + 8)
+    let nacc = f(acc, k, v)
+    __mfh_str_sacc_loop(sh, f, entries, i + 1, nacc)
+  }
+
+fn map_fold_str_sacc(
+  m: Map[String, String],
+  init: String,
+  f: (String, String, String) -> String,
+) -> String = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  __mfh_str_sacc_loop(sh, f, n / 2, 0, init)
+}
+
 // ── list.fold over a `Map[String, Int]` accumulator (String elements) ── the
 // frequencies shape (`list.fold(xs, [:], (acc, x) => map.set(acc, x, …))`).
 // f consumes the acc and returns the next (the fold_ols ownership discipline);

@@ -1,0 +1,20 @@
+
+// @contract: C-066
+// F7 pin (#527): a fn returning a CONTAINER of let-bound elements relies on
+// the cross-layer pair "emit_stored_field's element dup (emit time)" ×
+// "the return-lift's consumption-as-use Decs (pass time)". Either side
+// changing without the other re-opens freed-elements-inside-a-returned-
+// container. This fixture executes the shape end-to-end under default frees.
+fn make() -> List[String] = {
+  let e0 = string.repeat("a", -2147483648);
+  let e1 = string.repeat("b", 4);
+  [e0, e1]
+}
+
+fn main() -> Unit = {
+  let r = make();
+  println(list.get_or(r, 0, "z"));
+  println(list.get_or(r, 1, "z"));
+  let r2 = make();
+  println(list.join(r2, "-"))
+}

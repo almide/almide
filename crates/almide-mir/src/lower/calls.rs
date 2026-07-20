@@ -198,6 +198,9 @@ impl LowerCtx {
         // `mir == ir` double-count gate is untouched), unlike synthesizing a `string.len` call arg.
         let name = if module == "string" && func == "slice" && args.len() == 2 {
             "string.slice2".to_string()
+        } else if let Some(krec) = self.krec_call_name(module, func, &arg_tys, result_ty) {
+            // A String-field-record key/element (C-015) — the generated `__krec_*` twin.
+            krec
         } else {
             let key_nullary = self.map_key_is_nullary_variant(&arg_tys, result_ty);
             let key_scalar_rec = self.map_key_is_scalar_record(&arg_tys, result_ty);
@@ -390,6 +393,19 @@ impl LowerCtx {
         // A prim-floor STATEMENT (`prim.store32(a, v)`) → Op::Prim (Unit, no result).
         if module == "prim" {
             self.lower_prim_call(func, args)?;
+            return Ok(());
+        }
+        // `process.exit(code)` — the T18 assert desugar's abort tail (and the user
+        // form). Lowers to the ProcExit prim over the scalar code: no ownership
+        // event, no capability of its own (E006 already forced the caller
+        // effect). #782: this statement previously rode the retired v0 emitter.
+        if module == "process" && func == "exit" && args.len() == 1 {
+            let code = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported(
+                    "process.exit code outside the scalar value subset not in this brick".into(),
+                )
+            })?;
+            self.ops.push(Op::Prim { kind: crate::PrimKind::ProcExit, dst: None, args: vec![code] });
             return Ok(());
         }
         // An IN-PLACE `&mut` BYTES mutator (set_*/write_*/fill/clear/copy_within/
@@ -842,8 +858,16 @@ impl LowerCtx {
                                     kind: almide_ir::IrStmtKind::Expr { expr: body },
                                     span: None,
                                 };
-                                if self.lower_stmt(&stmt).is_ok() {
-                                    return Ok(());
+                                match self.lower_stmt(&stmt) {
+                                    Ok(()) => return Ok(()),
+                                    Err(e) => {
+                                        if std::env::var("ALMIDE_DBG_ANF").is_ok() {
+                                            eprintln!(
+                                                "[c1-stmt-inline] body failed in {}: {e:?}",
+                                                self.fn_name
+                                            );
+                                        }
+                                    }
                                 }
                                 self.ops.truncate(ops_mark);
                                 self.live_heap_handles.truncate(lhh_mark);

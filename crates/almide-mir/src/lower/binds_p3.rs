@@ -397,6 +397,16 @@ impl LowerCtx {
                     .try_lower_option_ctor(arg, &arg.ty)
                     .or_else(|| self.lower_owned_heap_field(arg))?;
                 field_vals.push((obj, true));
+            } else if matches!(&arg.ty, Ty::Fn { .. }) {
+                // A CLOSURE ctor field (`Run(() => …)` / `Thunk((x) => x * x)` — the
+                // variant-stored closure class): a Lambda arg LIFTS to its closure
+                // block, a Var arg Dups the tracked block (both via
+                // `lower_owned_heap_field`'s existing arms); the ctor then owns the
+                // block and the generated `$__drop_<T>`'s Fn arm frees it via
+                // `__drop_closure` (the classifier + generator admit Fn fields in
+                // the same change — construction and drop agree).
+                let obj = self.lower_owned_heap_field(arg)?;
+                field_vals.push((obj, true));
             } else if is_heap_ty(&arg.ty) {
                 return None; // List[String] / Map / other heap ctor field — a later brick
             } else {
@@ -689,6 +699,7 @@ impl LowerCtx {
             CtorFlat,
             CtorLenLoop,
             Closure,
+            StrClosure,
         }
         // A STRUCTURAL record element (`[{key: "x", val: "2"}]` in argument position —
         // the checker leaves the literal structural, so `record_drop_type_name` alone
@@ -778,6 +789,17 @@ impl LowerCtx {
             // last-ref inner list (a flat rc_dec would leak every Option block). Same
             // placement rationale as StrMapStr above.
             ListElemDrop::StrListOpt
+        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+            && matches!(tys[1], Ty::Fn { .. }))
+        {
+            // A `(String, <Fn>)` TUPLE element (`map.from_list([("a", () => …)])` — the
+            // closure-valued map's pairs list): slot1 is a CLOSURE BLOCK whose captured
+            // env a flat rc_dec would leak — the static `$__drop_list_str_clo` frees
+            // slot0 flat (String rc_dec) and routes slot1 through `__drop_closure`.
+            // Checked BEFORE the generic `(String, <non-flat heap>)` StrVariant arm
+            // below, whose variant-name lookup would DECLINE a Fn slot (killing the
+            // whole builder).
+            ListElemDrop::StrClosure
         } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
             && is_heap_ty(&tys[1]) && !self.is_flat_heap_tuple_slot(&tys[1]))
         {
@@ -1104,6 +1126,9 @@ impl LowerCtx {
             }
             ListElemDrop::Closure => {
                 self.variant_drop_handles.insert(dst, "list_closure".to_string());
+            }
+            ListElemDrop::StrClosure => {
+                self.variant_drop_handles.insert(dst, "list_str_clo".to_string());
             }
         }
         // The literal is a REAL, POPULATED nested-ownership block (every element built

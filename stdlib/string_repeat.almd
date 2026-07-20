@@ -25,7 +25,9 @@ fn __str_repeat(src: Int, dst: Int, slen: Int, count: Int) -> Int =
 fn string_repeat(s: String, n: Int) -> String = {
   let h = prim.handle(s)
   let slen = prim.load32(h + 4)              // byte length at LIST_LEN_OFFSET(4)
-  let buf = prim.alloc_str(slen * n)         // owned rc=1 String, slen*n bytes
-  let _e = __str_repeat(h + 12, prim.handle(buf) + 12, slen, n)
+  let count = if n > 0 then n else 0         // C-054 clamp (negative → empty; the
+                                             // bytes/list repeats already clamp)
+  let buf = prim.alloc_str(slen * count)     // owned rc=1 String, slen*count bytes
+  let _e = __str_repeat(h + 12, prim.handle(buf) + 12, slen, count)
   buf
 }

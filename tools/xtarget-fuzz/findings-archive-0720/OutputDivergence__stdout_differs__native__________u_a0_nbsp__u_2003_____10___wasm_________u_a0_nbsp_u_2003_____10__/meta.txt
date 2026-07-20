@@ -1,0 +1,7 @@
+seed        = 20260718
+index       = 995
+origin      = mutation of /Users/o6lvl4/workspace/github.com/almide/almide/spec/wasm_cross/json_stringify_pretty.almd
+rung        = Run
+kind        = OutputDivergence
+summary     = stdout differs: native="    \"\\u{a0}nbsp\\u{2003}\": 10," wasm="    \"\u{a0}nbsp\u{2003}\": 10,"
+reproduce   = xtarget-fuzz replay --seed 20260718 --index 995

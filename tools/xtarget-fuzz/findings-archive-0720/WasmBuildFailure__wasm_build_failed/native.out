@@ -1,0 +1,9 @@
+exit_code = Some(0)
+timed_out = false
+
+--- stdout ---
+r0 = false
+r7 = ["👨‍👩‍👧": true]
+
+--- stderr ---
+

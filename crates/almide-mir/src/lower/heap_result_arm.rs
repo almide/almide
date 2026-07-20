@@ -420,6 +420,29 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // `some((s1, s2))` — a `(String, String)` TUPLE payload as an if/match ARM
+            // value (the if-merged Option ctor, `try_lower_option_ctor`'s bind-position
+            // twin — the fuzz index-374 divergence): build the tuple (both slots owned
+            // Strings), move it into the 1-element Option routed to
+            // `$__drop_opt_str_str`. Per-arm `"im"` balance (Alloc `i` + move-out
+            // `Consume` `m`); transient temps freed within the arm.
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind, IrExprKind::Tuple { .. })
+                    && matches!(&expr.ty,
+                        Ty::Tuple(tys) if tys.len() == 2
+                            && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let repr = repr_of(result_ty).ok()?;
+                let IrExprKind::Tuple { elements } = &expr.kind else { return None };
+                let elements = elements.clone();
+                let piece = self.try_lower_tuple_construct(&elements)?;
+                let obj = self.materialize_opt_str_some(piece, repr);
+                self.variant_drop_handles.insert(obj, "opt_str_str".to_string());
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // `some((i, s))` — an `(Int, String)` TUPLE payload (the zip_first merge arm:
             // `(some(a), some(b)) => some((a, b))` after the tuple-variant desugar). The fresh
             // owned tuple (`lower_owned_heap_field` — literal construct or borrowed-Var Dup)

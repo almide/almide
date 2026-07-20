@@ -446,8 +446,17 @@ impl LowerCtx {
             // whose calls we capture as effect markers (its content, like every
             // `Opaque`, is carried by the merged result, not modelled per-arm).
             match &tail.kind {
+                // Route through the STATEMENT dispatcher, not lower_effect_call
+                // directly: an in-place mutator tail (`if c then { list.push(out,
+                // x) } else { … }` — the arm-tail shape) must take the SAME
+                // functional-rebind interceptions a statement-position push gets
+                // (mod_p3's push/clear/insert arms), or it falls through to a raw
+                // unlinked `list.push` CallFn (#782: the retired v0 emitter used
+                // to absorb that). Double-run safety: a call-bearing arm never
+                // reaches the linearization (lower_branch walls it), so this arm
+                // only executes under a REAL branch (try_lower_unit_if).
                 IrExprKind::Call { .. } if matches!(tail.ty, Ty::Unit) => {
-                    self.lower_effect_call(tail)?
+                    self.lower_stmt_expr(tail)?
                 }
                 // A Unit arm-tail effect call wrapped in `Try`/`Unwrap` (the auto-`?` of an
                 // effect-fn call, e.g. the recursive `loop(rest)` tail or `eff_call(x)`):
@@ -967,7 +976,15 @@ impl LowerCtx {
                                     // `Option[List[String]]` (the heap-acc fold value) — routed
                                     // to the nested DropListListStr set; the payload-borrow
                                     // discipline is identical.
-                                    || self.list_list_str_lists.contains(&subj)) =>
+                                    || self.list_list_str_lists.contains(&subj)
+                                    // An `Option[record]` subject (the materialized option
+                                    // toplet — its drop routes "optrec:<R>" via
+                                    // DropWrapperRec): the record payload binds as the SAME
+                                    // borrow; the option's recursive drop keeps ownership.
+                                    || self
+                                        .variant_drop_handles
+                                        .get(&subj)
+                                        .is_some_and(|d| d.starts_with("optrec:"))) =>
                         {
                             Some((*var, true, ty.clone()))
                         }

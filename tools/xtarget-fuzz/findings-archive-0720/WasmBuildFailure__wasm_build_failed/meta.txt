@@ -1,0 +1,7 @@
+seed        = 1784512190387680000
+index       = 4
+origin      = synthesis
+rung        = WasmBuild
+kind        = WasmBuildFailure
+summary     = wasm build failed
+reproduce   = xtarget-fuzz replay --seed 1784512190387680000 --index 4

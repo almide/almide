@@ -737,6 +737,24 @@ impl<'a> Interpreter<'a> {
             }),
             ("list", "get") => Some(self.list_get(args)),
             ("list", "get_or") => Some(self.list_get_or(args)),
+            // The native oracle IS Rust std's branchless binary_search (C-159:
+            // the duplicate-key index is pinned to it on both backends), so the
+            // third vote calls it directly on the extracted i64s.
+            ("list", "binary_search") => Some(match (args.first().and_then(|v| v.as_iter_items()), args.get(1)) {
+                (Some(items), Some(Value::Int(target))) => {
+                    let xs: Option<Vec<i64>> = items
+                        .iter()
+                        .map(|v| if let Value::Int(n) = v { Some(*n) } else { None })
+                        .collect();
+                    match xs {
+                        Some(xs) => Flow::val(Value::Option(
+                            xs.binary_search(target).ok().map(|i| Box::new(Value::Int(i as i64))),
+                        )),
+                        None => Flow::Unsupported("list.binary_search non-Int elements".into()),
+                    }
+                }
+                _ => Flow::Abort("internal: list.binary_search bad args".into()),
+            }),
             ("list", "contains") => Some(match (args.first().and_then(|v| v.as_iter_items()), args.get(1)) {
                 (Some(items), Some(x)) => Flow::val(Value::Bool(items.contains(x))),
                 _ => Flow::Abort("internal: list.contains bad args".into()),

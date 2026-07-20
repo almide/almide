@@ -1,0 +1,24 @@
+// list_fold_hsca — SELF-HOSTED heap-accumulator `list.fold` over SCALAR (Int/Bool)
+// elements (the result_uoe_float shape: `list.fold([true, false], tmp, (s, v) =>
+// ok(…))` with a `Result[Float, String]` accumulator). TYPE-ERASED like
+// list_fold_hrec: the acc is a uniform heap HANDLE (the Value spelling serves any
+// heap instantiation — the router only admits heap accs); each element is a plain
+// i64 slot COPY (no ownership). f : (acc, elem) -> acc via the (heap, scalar) ->
+// heap 2-arity CallIndirect. OWNERSHIP: `acc` MOVES into f each iteration (f
+// consumes it and returns the next acc — this fn never frees it); the final acc is
+// the owned result. Float elements are NOT admitted (an f64 closure param would
+// ABI-mismatch the i64 slot load — the router gates to Int/Bool).
+
+fn __fold_hsca_loop(h: Int, f: (Value, Int) -> Value, n: Int, i: Int, acc: Value) -> Value =
+  if i >= n then acc
+  else {
+    let x = prim.load64(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __fold_hsca_loop(h, f, n, i + 1, nacc)
+  }
+
+fn list_fold_hsca(xs: List[Int], init: Value, f: (Value, Int) -> Value) -> Value = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  __fold_hsca_loop(h, f, n, 0, init)
+}

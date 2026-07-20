@@ -152,6 +152,18 @@ pub struct Checker {
     /// defaulted. Without it the value passed `check` and then tripped the
     /// ConcretizeTypes COMPILER-BUG gate on BOTH targets (#662).
     pub(crate) deferred_unresolved_binding_checks: Vec<UnresolvedBindingSite>,
+    /// Top-let `env.top_lets` writes awaiting the post-solve upgrade. The
+    /// `TopLet` branch resolves its initializer type BEFORE `solve_constraints`
+    /// runs, so a generic-ctor initializer (`let MAYBE = some(Cfg {…})`) stores
+    /// `Option[Unknown]` — its payload constraint is still unsolved — and every
+    /// cross-module reader then sees an Unknown payload (the
+    /// option_record_toplet wasm wall). Each entry is `(top_lets key, ty with
+    /// inference vars intact)`; [`Checker::flush_pending_toplet_tys`] re-resolves
+    /// after solving and upgrades entries that are still partially Unknown.
+    /// Drained by each inference flow AFTER its own solve and BEFORE its
+    /// union-find is swapped back (a pending var resolved against a different
+    /// UF would produce garbage).
+    pub(crate) pending_toplet_tys: Vec<(almide_base::intern::Sym, Ty)>,
 }
 
 /// An integer literal that does not fit `i64`, pending a post-solve range check.
@@ -293,6 +305,7 @@ impl Checker {
             deferred_int_overflow_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
             deferred_unknown_type_checks: Vec::new(),
+            pending_toplet_tys: Vec::new(),
         }
     }
 
@@ -473,9 +486,17 @@ impl Checker {
             }
             self.diagnostics.push(diag);
         }
+        // #785 for the ENTRY program itself: a generic-ctor top-let (`let
+        // MAYBE = some(Cfg {…})`) seeds `Option[Unknown]`, and a same-file
+        // reader consumes that seed DURING constraint collection — before the
+        // post-solve flush below can upgrade it. Pre-solve the entry's
+        // top-lets in the same isolated bracket the module refresh uses; the
+        // real pass right after re-checks them and owns all reporting.
+        self.refresh_module_top_lets(program, "__entry");
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
+        self.flush_pending_toplet_tys();
         resolve_type_map(&mut self.type_map, &self.uf);
         self.validate_map_key_types();
         self.validate_ord_elem_types();
@@ -636,6 +657,7 @@ impl Checker {
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
+        self.flush_pending_toplet_tys();
         resolve_type_map(&mut self.type_map, &self.uf);
         self.validate_map_key_types();
         self.validate_empty_collection_elements();
@@ -673,6 +695,20 @@ impl Checker {
         // `let MOOD = Happy` sees its own type twice). Discard everything
         // this pass emits.
         let saved_diag_len = self.diagnostics.len();
+        // Deferred-check sites registered here carry TypeVars owned by THIS
+        // pass's union-find; validating them later against the real pass's UF
+        // would mis-resolve (false E018/E025 or silent misses). The real pass
+        // re-registers every site, so truncate the pre-pass's additions away.
+        let saved_deferred_lens = (
+            self.deferred_tuple_indices.len(),
+            self.deferred_field_accesses.len(),
+            self.deferred_map_key_checks.len(),
+            self.deferred_ord_elem_checks.len(),
+            self.deferred_unknown_type_checks.len(),
+            self.deferred_empty_collection_checks.len(),
+            self.deferred_int_overflow_checks.len(),
+            self.deferred_unresolved_binding_checks.len(),
+        );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
         let import_table_name = self_name.as_deref().unwrap_or(module_name);
@@ -695,6 +731,7 @@ impl Checker {
             }
         }
         self.solve_constraints();
+        self.flush_pending_toplet_tys();
         self.current_module_prefix = saved_prefix;
 
         self.constraints = saved_constraints;
@@ -703,6 +740,38 @@ impl Checker {
         self.env.import_table = saved_import_table;
         self.env.restore_keys(&snapshot);
         self.diagnostics.truncate(saved_diag_len);
+        self.deferred_tuple_indices.truncate(saved_deferred_lens.0);
+        self.deferred_field_accesses.truncate(saved_deferred_lens.1);
+        self.deferred_map_key_checks.truncate(saved_deferred_lens.2);
+        self.deferred_ord_elem_checks.truncate(saved_deferred_lens.3);
+        self.deferred_unknown_type_checks.truncate(saved_deferred_lens.4);
+        self.deferred_empty_collection_checks.truncate(saved_deferred_lens.5);
+        self.deferred_int_overflow_checks.truncate(saved_deferred_lens.6);
+        self.deferred_unresolved_binding_checks.truncate(saved_deferred_lens.7);
+    }
+
+    /// Upgrade `env.top_lets` entries from the POST-solve resolution of their
+    /// initializer types. The `TopLet` branch writes pre-solve (all it can do
+    /// mid-pass), which leaves a generic-ctor initializer's payload Unknown;
+    /// this pass replaces any still-partially-Unknown entry once the
+    /// union-find actually knows the answer. Only a FULLY concrete resolution
+    /// upgrades — swapping one partial type for another would churn without
+    /// fixing readers. Must run before the calling flow swaps its UF back.
+    fn flush_pending_toplet_tys(&mut self) {
+        for (key, ity) in std::mem::take(&mut self.pending_toplet_tys) {
+            let existing = self.env.top_lets.get(&key);
+            let stale = match existing {
+                None => true,
+                Some(t) => t.contains_unknown() || t.contains_typevar(),
+            };
+            if !stale {
+                continue;
+            }
+            let r = resolve_ty(&ity, &self.uf);
+            if !r.contains_unknown() && !r.contains_typevar() {
+                self.env.top_lets.insert(key, r);
+            }
+        }
     }
 
     // ── Declaration checking ──
@@ -873,10 +942,12 @@ impl Checker {
                     if matches!(self.env.top_lets.get(&k), Some(Ty::Unknown) | None) {
                         self.env.top_lets.insert(k, resolved.clone());
                     }
+                    self.pending_toplet_tys.push((k, ity.clone()));
                 }
                 if matches!(self.env.top_lets.get(&sym(name)), Some(Ty::Unknown) | None) {
                     self.env.top_lets.insert(sym(name), resolved);
                 }
+                self.pending_toplet_tys.push((sym(name), ity));
             }
             ast::Decl::Impl { methods, .. } => {
                 for m in methods.iter_mut() {

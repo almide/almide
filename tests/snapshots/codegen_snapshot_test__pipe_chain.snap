@@ -92,7 +92,9 @@ pub fn almide_rt_list_insert<T>(mut xs: Vec<T>, i: i64, x: T) -> Vec<T> { let id
 pub fn almide_rt_list_remove_at<T>(mut xs: Vec<T>, i: i64) -> Vec<T> { if (i as usize) < xs.len() { xs.remove(i as usize); } xs }
 pub fn almide_rt_list_update<A: Clone>(mut xs: Vec<A>, i: i64, f: std::rc::Rc<dyn Fn(A) -> A>) -> Vec<A> { let f = move |a| f(a); if let Some(s) = xs.get_mut(i as usize) { *s = f(s.clone()); } xs }
 pub fn almide_rt_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> { let mut r = Vec::new(); for (i, x) in xs.into_iter().enumerate() { if i > 0 { r.push(sep.clone()); } r.push(x); } r }
-pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> { vec![x; n as usize] }
+// Negative counts clamp to 0 (C-054 discipline — the wasm self-host
+// `list_repeat` already clamps; `n as usize` on a negative i64 panicked).
+pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> { vec![x; n.max(0) as usize] }
 pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> { (start..end).collect() }
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }

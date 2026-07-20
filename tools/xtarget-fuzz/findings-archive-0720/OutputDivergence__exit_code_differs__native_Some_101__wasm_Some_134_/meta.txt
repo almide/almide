@@ -1,0 +1,7 @@
+seed        = 1784512190387680000
+index       = 1695
+origin      = mutation of /Users/o6lvl4/workspace/github.com/almide/almide/spec/wasm_cross/container_alias_return.almd
+rung        = Run
+kind        = OutputDivergence
+summary     = exit code differs: native=Some(101) wasm=Some(134)
+reproduce   = xtarget-fuzz replay --seed 1784512190387680000 --index 1695

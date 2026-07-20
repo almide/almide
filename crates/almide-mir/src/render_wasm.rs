@@ -175,8 +175,13 @@ pub fn render_wasm(func: &MirFunction) -> String {
     let no_slots: BTreeMap<String, u32> = BTreeMap::new();
     let no_param_counts: BTreeMap<String, usize> = BTreeMap::new();
     let reprs = value_reprs_wasm(func);
+    // Legacy single-function render: no typed scalar locals and no tree
+    // fusion here (empty classification + a fresh Fuser per op keeps this
+    // path byte-identical to before).
+    let no_floats: BTreeSet<ValueId> = BTreeSet::new();
+    let mut no_fuser = Fuser::new();
     for op in &func.ops {
-        body.push_str(&render_op(op, &label_off, &no_slots, &no_param_counts, &func.heap_slot_masks, &reprs));
+        body.push_str(&render_op(op, &label_off, &no_slots, &no_param_counts, &func.heap_slot_masks, &reprs, &no_floats, &mut no_fuser));
     }
 
     format!(
@@ -212,9 +217,14 @@ fn preamble_func_names() -> BTreeSet<String> {
 fn resolvable_call_names(prog: &MirProgram) -> BTreeSet<String> {
     let mut names: BTreeSet<String> = prog.functions.iter().map(|f| f.name.clone()).collect();
     names.extend(preamble_func_names());
-    // The mutable-global slot take-accessor is emitted iff the program has slots — it
-    // resolves exactly then (a global-free program never names it).
-    if prog.mutable_global_count > 0 {
+    // The mutable-global slot take-accessor: emitted for programs with global slots
+    // AND for local SHARED-CELL assigns (cells.rs), which name it over a cell-slot
+    // address — mirror the `mg_helpers` emission condition exactly, so the name
+    // resolves iff the definition is rendered.
+    let uses_mg_take = prog.functions.iter().any(|f| {
+        f.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
+    });
+    if prog.mutable_global_count > 0 || uses_mg_take {
         names.insert("__mg_take".to_string());
     }
     names
@@ -237,6 +247,9 @@ pub fn unlinked_call_names(prog: &MirProgram) -> BTreeSet<String> {
         for op in &f.ops {
             if let Op::CallFn { name, .. } = op {
                 if !resolvable.contains(name) {
+                    if std::env::var("ALMIDE_DBG_UNLINKED").is_ok() {
+                        eprintln!("[unlinked] {} references {}", f.name, name);
+                    }
                     missing.insert(name.clone());
                 }
             }
@@ -300,12 +313,71 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
     };
     let missing = unlinked_call_names(prog);
     if !missing.is_empty() {
-        let names = missing.into_iter().collect::<Vec<_>>().join(", ");
-        return Err(crate::lower::LowerError::Unsupported(format!(
-            "unlinked stdlib/runtime call(s) with no wasm definition: {names} — \
-             rendering them would emit a dangling `(call $…)` (invalid wasm). \
-             Add the callee to the self-host registry or wall the using function."
-        )));
+        // DEAD-FUNCTION PRUNE (#782): an UNREACHABLE function carrying an unlinked call
+        // (`local fn dead(..) = matrix.qwen3_…(..)` — a native-only intrinsic in a fn
+        // main never calls) must not fail the whole module: v0 simply never emitted it.
+        // Drop every function that is (a) not a root — `main` / a declared export —
+        // AND (b) not REFERENCED by any surviving function (a `CallFn`/`FuncRef` edge,
+        // or a `$__drop_<ty>` walker named by a `DropVariant`) AND (c) itself carrying
+        // an unlinked call. Iterated to a fixpoint (a dead fn referenced only by
+        // another dead fn prunes in a later round). A REACHABLE unlinked call keeps
+        // the loud reject below — never a dangling `(call $…)`.
+        let mut kept: Vec<MirFunction> = prog.functions.clone();
+        loop {
+            let resolvable = {
+                let mut names: BTreeSet<String> =
+                    kept.iter().map(|f| f.name.clone()).collect();
+                names.extend(preamble_func_names());
+                names.insert("__mg_take".to_string());
+                names
+            };
+            let mut referenced: BTreeSet<String> = BTreeSet::new();
+            for f in &kept {
+                for op in &f.ops {
+                    match op {
+                        Op::CallFn { name, .. } => {
+                            referenced.insert(name.clone());
+                        }
+                        Op::FuncRef { name, .. } => {
+                            referenced.insert(name.clone());
+                        }
+                        Op::DropVariant { ty, .. } => {
+                            referenced.insert(format!("__drop_{ty}"));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            let roots: BTreeSet<&str> = std::iter::once("main")
+                .chain(prog.exports.iter().map(|(_, internal, _, _)| internal.as_str()))
+                .collect();
+            let before = kept.len();
+            kept.retain(|f| {
+                roots.contains(f.name.as_str())
+                    || referenced.contains(&f.name)
+                    || f.ops.iter().all(|op| {
+                        !matches!(op, Op::CallFn { name, .. } if !resolvable.contains(name))
+                    })
+            });
+            if kept.len() == before {
+                break;
+            }
+        }
+        let pruned_prog = MirProgram {
+            functions: kept,
+            exports: prog.exports.clone(),
+            mutable_global_count: prog.mutable_global_count,
+        };
+        let still_missing = unlinked_call_names(&pruned_prog);
+        if !still_missing.is_empty() {
+            let names = still_missing.into_iter().collect::<Vec<_>>().join(", ");
+            return Err(crate::lower::LowerError::Unsupported(format!(
+                "unlinked stdlib/runtime call(s) with no wasm definition: {names} — \
+                 rendering them would emit a dangling `(call $…)` (invalid wasm). \
+                 Add the callee to the self-host registry or wall the using function."
+            )));
+        }
+        return Ok(render_wasm_program(&pruned_prog));
     }
     Ok(render_wasm_program(prog))
 }
@@ -551,7 +623,12 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // to the caller (the assign path drops it and stores a replacement), which is
     // exactly the fresh-owned CallFn result the ownership certificate models. Reads
     // need no helper: they borrow-then-`Dup` the slot handle inline (`rc_inc`).
-    let mg_helpers = if prog.mutable_global_count > 0 {
+    // Emitted for mutable-global slots AND for the local SHARED-CELL assigns
+    // (cells.rs), which reuse the same take accessor over a cell-slot address.
+    let uses_mg_take = prog.functions.iter().any(|f| {
+        f.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
+    });
+    let mg_helpers = if prog.mutable_global_count > 0 || uses_mg_take {
         "  (func $__mg_take (param $a i64) (result i32)\n    \
          (i32.load (i32.wrap_i64 (local.get $a))))\n"
             .to_string()
@@ -604,6 +681,7 @@ pub fn render_wasm_fn(
     param_counts: &BTreeMap<String, usize>,
 ) -> String {
     let reprs = value_reprs_wasm(func);
+    let floats = classify_f64_locals(func);
     // A LIFTED LAMBDA (`__lambda_*`) is dispatched through the function table against the uniform
     // i64 closure signature (`$closure_fnN`), so its params MUST all be i64. A HEAP param (a Ptr)
     // is received as an i64 raw param and NARROWED to its Ptr value local at entry (the dual of the
@@ -641,7 +719,11 @@ pub fn render_wasm_fn(
     for op in &func.ops {
         if let Some(d) = defined_value(op) {
             if seen.insert(d) {
-                let ty = wasm_ty(reprs.get(&d).copied().unwrap_or(SCALAR_REPR));
+                let ty = if floats.contains(&d) {
+                    "f64"
+                } else {
+                    wasm_ty(reprs.get(&d).copied().unwrap_or(SCALAR_REPR))
+                };
                 locals.push(format!("(local {} {ty})", local(d)));
             }
         }
@@ -694,29 +776,111 @@ pub fn render_wasm_fn(
     // wasm while shape `(block $brk (loop $cont … (br_if $brk (eqz cond)) … (br $cont)))`.
     // A unique id per loop keeps nested loops' labels distinct; the stack tracks which
     // open loop a break/back-edge closes.
+    //
+    // #806 step 3b: a loop condition computed by the IMMEDIATELY preceding compare
+    // whose Bool is used ONLY by the break renders as one direct `br_if` on the
+    // (negated) compare — dropping the extend/local.set/local.get/eqz churn that
+    // sat in EVERY hot loop's header. Int compares negate exactly (total order);
+    // float compares wrap in `i32.eqz` instead (¬(a<b) ≠ (a≥b) under NaN).
+    // Render-level only: the MIR and its certificate are untouched.
+    let mut fused_break: BTreeMap<usize, String> = BTreeMap::new();
+    let mut fused_skip: BTreeSet<usize> = BTreeSet::new();
+    // Total occurrences (def + uses) per value — shared by the 3b br_if
+    // fusion (exactly 2 = def + the break) and the 3c tree fuser (exactly 2 =
+    // def + one consumer).
+    let mut occ: BTreeMap<ValueId, usize> = BTreeMap::new();
+    {
+        let mut vals: Vec<ValueId> = Vec::new();
+        for op in &func.ops {
+            vals.clear();
+            op_values(op, &mut vals);
+            for v in &vals {
+                *occ.entry(*v).or_insert(0) += 1;
+            }
+        }
+        for i in 1..func.ops.len() {
+            let Op::LoopBreakUnless { cond } = &func.ops[i] else { continue };
+            // exactly two occurrences program-wide: the def (dst) + this use.
+            if occ.get(cond).copied() != Some(2) {
+                continue;
+            }
+            match &func.ops[i - 1] {
+                Op::IntBinOp { dst, op, a, b } if dst == cond => {
+                    let neg = match op {
+                        IntOp::Lt => "i64.ge_s",
+                        IntOp::Le => "i64.gt_s",
+                        IntOp::Gt => "i64.le_s",
+                        IntOp::Ge => "i64.lt_s",
+                        IntOp::Eq => "i64.ne",
+                        IntOp::Ne => "i64.eq",
+                        _ => continue,
+                    };
+                    fused_break.insert(
+                        i,
+                        format!("({neg} (local.get {}) (local.get {}))", local(*a), local(*b)),
+                    );
+                    fused_skip.insert(i - 1);
+                }
+                Op::Prim { kind: PrimKind::FloatCmp(op), dst: Some(d), args } if d == cond => {
+                    let f = |a: usize| {
+                        if floats.contains(&args[a]) {
+                            format!("(local.get {})", local(args[a]))
+                        } else {
+                            format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]))
+                        }
+                    };
+                    let instr = match op {
+                        FCmpOp::Lt => "f64.lt",
+                        FCmpOp::Le => "f64.le",
+                        FCmpOp::Gt => "f64.gt",
+                        FCmpOp::Ge => "f64.ge",
+                        FCmpOp::Eq => "f64.eq",
+                        FCmpOp::Ne => "f64.ne",
+                    };
+                    fused_break
+                        .insert(i, format!("(i32.eqz ({instr} {} {}))", f(0), f(1)));
+                    fused_skip.insert(i - 1);
+                }
+                _ => {}
+            }
+        }
+    }
     let mut loop_ctr: u32 = 0;
     let mut loop_stack: Vec<u32> = Vec::new();
-    for op in &func.ops {
+    let mut fuser = Fuser::new();
+    fuser.scan_consts(&func.ops);
+    for (op_idx, op) in func.ops.iter().enumerate() {
+        if fused_skip.contains(&op_idx) {
+            continue;
+        }
         match op {
             Op::LoopStart => {
+                fuser.flush_all(&mut body);
                 let id = loop_ctr;
                 loop_ctr += 1;
                 loop_stack.push(id);
                 body.push_str(&format!("    (block $brk{id}\n    (loop $cont{id}\n"));
             }
             Op::LoopBreakUnless { cond } => {
+                fuser.flush_all(&mut body);
                 let id = *loop_stack.last().expect("LoopBreakUnless outside a loop");
-                body.push_str(&format!(
-                    "    (br_if $brk{id} (i64.eqz (local.get {})))\n",
-                    local(*cond)
-                ));
+                if let Some(fc) = fused_break.get(&op_idx) {
+                    body.push_str(&format!("    (br_if $brk{id} {fc})\n"));
+                } else {
+                    body.push_str(&format!(
+                        "    (br_if $brk{id} (i64.eqz (local.get {})))\n",
+                        local(*cond)
+                    ));
+                }
             }
             Op::LoopEnd => {
+                fuser.flush_all(&mut body);
                 let id = loop_stack.pop().expect("LoopEnd without LoopStart");
                 // unconditional back-edge to the loop top, then close `loop` and `block`.
                 body.push_str(&format!("    (br $cont{id})\n    ))\n"));
             }
             Op::IfThen { cond, dst } => {
+                fuser.flush_all(&mut body);
                 if_stack.push(*dst);
                 // The result type follows the dst repr: a heap-result `if` yields an i32
                 // handle, a scalar one an i64 (value_reprs_wasm fixed dst from the arm val).
@@ -734,17 +898,63 @@ pub fn render_wasm_fn(
                 ));
             }
             Op::Else { val } => {
+                fuser.flush_all(&mut body);
                 body.push_str(&format!("{}      )\n      (else\n", arm_val(val)));
             }
             Op::EndIf { val } => {
+                fuser.flush_all(&mut body);
                 let dst = if_stack.pop().expect("EndIf without IfThen");
                 // close: else-arm value, `)` else, `)` if, and `)` local.set if scalar.
                 let close = if dst.is_some() { "))\n" } else { ")\n" };
                 body.push_str(&format!("{}      ){close}", arm_val(val)));
             }
-            _ => body.push_str(&render_op(op, label_off, func_slots, param_counts, &func.heap_slot_masks, &reprs)),
+            _ => {
+                // #806 step 3c bookkeeping — see [`Fuser`]. Writes of this op:
+                let mut writes: Vec<ValueId> = Vec::new();
+                if let Some(d) = defined_value(op) {
+                    writes.push(d);
+                }
+                if let Op::SetLocal { local: l, .. } = op {
+                    writes.push(*l);
+                }
+                // A pending being REWRITTEN must materialize first (write order).
+                fuser.flush_values(&writes, &mut body);
+                if splice_capable(op) {
+                    let consumed: Vec<ValueId> = match op {
+                        Op::IntBinOp { a, b, .. } => vec![*a, *b],
+                        Op::SetLocal { src, .. } => vec![*src],
+                        Op::Prim { args, .. } => args.clone(),
+                        _ => Vec::new(),
+                    }
+                    .into_iter()
+                    .filter(|v| fuser.pending.contains_key(v))
+                    .collect();
+                    fuser.flush_reading(&writes, &consumed, &mut body);
+                    // Defer a single-use pure-scalar def (def + 1 use = 2 occurrences).
+                    if let Some(d) = defined_value(op) {
+                        if occ.get(&d).copied() == Some(2) && func.ret != Some(d) {
+                            if let Some((dst, e, reads)) = fusable_expr(op, &mut fuser, &floats) {
+                                fuser.pending.insert(dst, (e, reads));
+                                fuser.order.push(dst);
+                                continue;
+                            }
+                        }
+                    }
+                    body.push_str(&render_op(op, label_off, func_slots, param_counts, &func.heap_slot_masks, &reprs, &floats, &mut fuser));
+                } else {
+                    // A non-splicing op reads through plain `local.get`: any
+                    // pending it touches materializes first, as does any
+                    // pending reading a local it writes.
+                    let mut vals: Vec<ValueId> = Vec::new();
+                    op_values(op, &mut vals);
+                    fuser.flush_values(&vals, &mut body);
+                    fuser.flush_reading(&writes, &[], &mut body);
+                    body.push_str(&render_op(op, label_off, func_slots, param_counts, &func.heap_slot_masks, &reprs, &floats, &mut fuser));
+                }
+            }
         }
     }
+    fuser.flush_all(&mut body);
     let tail = func.ret.map(|r| format!("    (local.get {})\n", local(r))).unwrap_or_default();
     format!("  (func ${} {params}{result} {locals_decl}\n{body}{tail}  )\n", func.name)
 }
@@ -760,6 +970,388 @@ fn wasm_ty(repr: Repr) -> &'static str {
 }
 
 /// The value an op defines (binds), if any.
+/// Every [`ValueId`] an op touches (dst + all operands), exhaustively — the
+/// generic occurrence walk the render-level peepholes (#806 step 3b) use to
+/// prove a value is single-use before fusing its def into its use site.
+fn op_values(op: &Op, out: &mut Vec<ValueId>) {
+    let args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
+        for a in args {
+            match a {
+                CallArg::Handle(v) | CallArg::Scalar(v) => out.push(*v),
+                CallArg::Imm(_) | CallArg::Label(_) => {}
+            }
+        }
+    };
+    match op {
+        Op::Alloc { dst, init, .. } => {
+            out.push(*dst);
+            match init {
+                Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
+                    out.push(*len)
+                }
+                Init::OptSome { payload } => out.push(*payload),
+                Init::Opaque
+                | Init::OptNone
+                | Init::IntList(_)
+                | Init::Bytes(_)
+                | Init::Str(_) => {}
+            }
+        }
+        Op::Const { dst } | Op::ConstInt { dst, .. } | Op::FuncRef { dst, .. } => out.push(*dst),
+        Op::Dup { dst, src } => {
+            out.push(*dst);
+            out.push(*src);
+        }
+        Op::Drop { v }
+        | Op::DropListStr { v }
+        | Op::DropValue { v }
+        | Op::DropListValue { v }
+        | Op::DropListStrValue { v }
+        | Op::DropListStrStr { v }
+        | Op::DropListIntStr { v }
+        | Op::DropListStrInt { v }
+        | Op::DropResultListValue { v }
+        | Op::DropResultValue { v }
+        | Op::DropResultStrInt { v }
+        | Op::DropResultValueInt { v }
+        | Op::DropResultListValueInt { v }
+        | Op::DropResultListStrInt { v }
+        | Op::DropResultListStr { v }
+        | Op::DropListListStr { v }
+        | Op::DropVariant { v, .. }
+        | Op::DropWrapperRec { v, .. }
+        | Op::Consume { v }
+        | Op::Borrow { v }
+        | Op::MakeUnique { v } => out.push(*v),
+        Op::Pure { dst, uses } => {
+            out.push(*dst);
+            out.extend(uses.iter().copied());
+        }
+        Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } | Op::CallImport { dst, args, .. } => {
+            if let Some(d) = dst {
+                out.push(*d);
+            }
+            args_vals(args, out);
+        }
+        Op::CallIndirect { dst, table_idx, args, .. } => {
+            if let Some(d) = dst {
+                out.push(*d);
+            }
+            out.push(*table_idx);
+            args_vals(args, out);
+        }
+        Op::ListLit { dst, elems } => {
+            out.push(*dst);
+            out.extend(elems.iter().copied());
+        }
+        Op::ListGetScalar { dst, list, idx } => {
+            out.push(*dst);
+            out.push(*list);
+            out.push(*idx);
+        }
+        Op::ListSetScalar { list, idx, val } => {
+            out.push(*list);
+            out.push(*idx);
+            out.push(*val);
+        }
+        Op::IntBinOp { dst, a, b, .. } => {
+            out.push(*dst);
+            out.push(*a);
+            out.push(*b);
+        }
+        Op::Prim { dst, args, .. } => {
+            if let Some(d) = dst {
+                out.push(*d);
+            }
+            out.extend(args.iter().copied());
+        }
+        Op::IfThen { cond, dst } => {
+            out.push(*cond);
+            if let Some(d) = dst {
+                out.push(*d);
+            }
+        }
+        Op::Else { val } | Op::EndIf { val } => {
+            if let Some(v) = val {
+                out.push(*v);
+            }
+        }
+        Op::LoopBreakUnless { cond } => out.push(*cond),
+        Op::LoopStart | Op::LoopEnd => {}
+        Op::SetLocal { local, src } => {
+            out.push(*local);
+            out.push(*src);
+        }
+    }
+}
+
+/// #806 step 3c: the expression-tree fuser. A single-use PURE scalar def
+/// (const / non-trapping int op / f64 op) is DEFERRED instead of emitted as a
+/// `local.set`, and spliced as a nested expression at its one consumer —
+/// collapsing the per-op `local.set`/`local.get` churn of hot arithmetic
+/// chains into wasm expression trees. Safety is enforced by flushing, never
+/// by reordering effects: a pending expr reads ONLY locals (no memory), so it
+/// is flushed (materialized as the original `local.set`) before (a) any
+/// control marker (block boundary), (b) any op that REDEFINES a local it
+/// reads (unless that op is its own consumer — operand evaluation precedes
+/// the write), and (c) any op that would read it through a non-splicing
+/// position. Render-level only: the MIR and its certificate are untouched.
+pub(crate) struct Fuser {
+    /// dst → (rendered expr, the locals the expr reads). The expr is typed
+    /// exactly as the local would have been (f64 for float-classified dsts).
+    pending: BTreeMap<ValueId, (String, BTreeSet<ValueId>)>,
+    /// def order, for deterministic flushing.
+    order: Vec<ValueId>,
+    /// SSA-const values: `ConstInt` dsts never reassigned by a `SetLocal`.
+    /// Lets the Div/Mod render elide the (statically decided) zero / MIN÷-1
+    /// checks for a constant divisor and strength-reduce `÷ 2^k` to the exact
+    /// correction-shift sequence — wasmtime's Cranelift does neither, and the
+    /// serialized hardware sdiv alone cost ~25% of spectralnorm's inner loop.
+    consts: BTreeMap<ValueId, i64>,
+}
+
+impl Fuser {
+    pub(crate) fn new() -> Self {
+        Fuser { pending: BTreeMap::new(), order: Vec::new(), consts: BTreeMap::new() }
+    }
+    /// Pre-scan the function for SSA-const locals (a `ConstInt` def with no
+    /// `SetLocal` reassignment — reassigned loop seeds are removed).
+    pub(crate) fn scan_consts(&mut self, ops: &[Op]) {
+        for op in ops {
+            if let Op::ConstInt { dst, value } = op {
+                self.consts.insert(*dst, *value);
+            }
+        }
+        for op in ops {
+            if let Op::SetLocal { local, .. } = op {
+                self.consts.remove(local);
+            }
+        }
+    }
+    pub(crate) fn const_of(&self, v: ValueId) -> Option<i64> {
+        self.consts.get(&v).copied()
+    }
+    /// Read operand `v`: consume its pending expr if one exists, else a plain
+    /// `local.get`. Accumulates the transitive read-set into `reads`.
+    fn take(&mut self, v: ValueId, reads: &mut BTreeSet<ValueId>) -> String {
+        if let Some((e, rs)) = self.pending.remove(&v) {
+            self.order.retain(|x| *x != v);
+            reads.extend(rs);
+            e
+        } else {
+            reads.insert(v);
+            format!("(local.get {})", local(v))
+        }
+    }
+    /// Operand read for render_op arms that do not need read-set tracking.
+    pub(crate) fn operand(&mut self, v: ValueId) -> String {
+        let mut reads = BTreeSet::new();
+        self.take(v, &mut reads)
+    }
+    fn emit(&mut self, v: ValueId, body: &mut String) {
+        if let Some((e, _)) = self.pending.remove(&v) {
+            self.order.retain(|x| *x != v);
+            body.push_str(&format!("    (local.set {} {e})\n", local(v)));
+        }
+    }
+    fn flush_all(&mut self, body: &mut String) {
+        for v in std::mem::take(&mut self.order) {
+            if let Some((e, _)) = self.pending.remove(&v) {
+                body.push_str(&format!("    (local.set {} {e})\n", local(v)));
+            }
+        }
+    }
+    /// Flush pendings that READ any of `written`, except those in `consumed`
+    /// (about to be spliced into the writing op itself, whose operand
+    /// evaluation precedes the write).
+    fn flush_reading(&mut self, written: &[ValueId], consumed: &[ValueId], body: &mut String) {
+        let victims: Vec<ValueId> = self
+            .order
+            .iter()
+            .filter(|v| {
+                !consumed.contains(v)
+                    && self.pending.get(v).is_some_and(|(_, rs)| {
+                        written.iter().any(|w| rs.contains(w))
+                    })
+            })
+            .copied()
+            .collect();
+        for v in victims {
+            self.emit(v, body);
+        }
+    }
+    /// Flush pendings whose dst appears in `vals` (an op will read them
+    /// through a position that cannot splice).
+    fn flush_values(&mut self, vals: &[ValueId], body: &mut String) {
+        let victims: Vec<ValueId> =
+            self.order.iter().filter(|v| vals.contains(v)).copied().collect();
+        for v in victims {
+            self.emit(v, body);
+        }
+    }
+}
+
+/// Read a FLOAT-op operand: splice a pending expr / plain `local.get`, in the
+/// f64 form when the value is float-classified, else reinterpreted from the
+/// i64-uniform slot.
+fn float_operand(fuser: &mut Fuser, floats: &BTreeSet<ValueId>, v: ValueId) -> String {
+    let raw = fuser.operand(v);
+    if floats.contains(&v) {
+        raw
+    } else {
+        format!("(f64.reinterpret_i64 {raw})")
+    }
+}
+
+/// The splice-capable op kinds: every read position of these renders through
+/// [`Fuser::operand`], so pendings among their operands are consumed, never
+/// stale-read. `Div`/`Mod` are excluded — their checked render reads each
+/// operand several times.
+fn splice_capable(op: &Op) -> bool {
+    match op {
+        Op::IntBinOp { op, .. } => !matches!(op, IntOp::Div | IntOp::Mod),
+        // No read positions at all — trivially splice-clean, and its dst is a
+        // prime defer candidate (a single-use const in a hot loop).
+        Op::ConstInt { .. } => true,
+        Op::SetLocal { .. } => true,
+        Op::Prim { kind, .. } => matches!(
+            kind,
+            PrimKind::FloatUn(_)
+                | PrimKind::FloatBin(_)
+                | PrimKind::FloatCmp(_)
+                | PrimKind::F64FromInt
+                | PrimKind::FloatToInt
+                | PrimKind::IntToFloat
+        ),
+        _ => false,
+    }
+}
+
+/// Build the deferred expression for a fusable single-use def, splicing
+/// already-pending operands. Returns `None` when the op is not a fusable
+/// pure-scalar def (the caller renders it normally).
+fn fusable_expr(
+    op: &Op,
+    fuser: &mut Fuser,
+    floats: &BTreeSet<ValueId>,
+) -> Option<(ValueId, String, BTreeSet<ValueId>)> {
+    let mut reads = BTreeSet::new();
+    match op {
+        Op::ConstInt { dst, value } => {
+            let e = if floats.contains(dst) {
+                format!("(f64.const {})", wat_f64_const(*value as u64))
+            } else {
+                format!("(i64.const {value})")
+            };
+            Some((*dst, e, reads))
+        }
+        Op::IntBinOp { dst, op: iop, a, b } => {
+            let instr = match iop {
+                IntOp::Add => "i64.add",
+                IntOp::Sub => "i64.sub",
+                IntOp::Mul => "i64.mul",
+                IntOp::Div | IntOp::Mod => return None,
+                IntOp::Lt => "i64.lt_s",
+                IntOp::Le => "i64.le_s",
+                IntOp::Gt => "i64.gt_s",
+                IntOp::Ge => "i64.ge_s",
+                IntOp::Eq => "i64.eq",
+                IntOp::Ne => "i64.ne",
+                IntOp::And => "i64.and",
+                IntOp::Or => "i64.or",
+                IntOp::Xor => "i64.xor",
+                IntOp::Shl => "i64.shl",
+                IntOp::Shr => "i64.shr_s",
+                IntOp::ShrU => "i64.shr_u",
+            };
+            let ea = fuser.take(*a, &mut reads);
+            let eb = fuser.take(*b, &mut reads);
+            let core = format!("({instr} {ea} {eb})");
+            let e = if matches!(
+                iop,
+                IntOp::Lt | IntOp::Le | IntOp::Gt | IntOp::Ge | IntOp::Eq | IntOp::Ne
+            ) {
+                format!("(i64.extend_i32_u {core})")
+            } else {
+                core
+            };
+            Some((*dst, e, reads))
+        }
+        Op::Prim { kind, dst: Some(d), args } => {
+            let mut farg = |fuser: &mut Fuser, reads: &mut BTreeSet<ValueId>, i: usize| {
+                let raw = fuser.take(args[i], reads);
+                if floats.contains(&args[i]) {
+                    raw
+                } else {
+                    format!("(f64.reinterpret_i64 {raw})")
+                }
+            };
+            let inner = match kind {
+                PrimKind::FloatUn(op) => {
+                    let x = farg(fuser, &mut reads, 0);
+                    let e = match op {
+                        FUnOp::Abs => format!("(f64.abs {x})"),
+                        FUnOp::Sqrt => format!("(f64.sqrt {x})"),
+                        FUnOp::Floor => format!("(f64.floor {x})"),
+                        FUnOp::Ceil => format!("(f64.ceil {x})"),
+                        FUnOp::Neg => format!("(f64.neg {x})"),
+                    };
+                    e
+                }
+                PrimKind::FloatBin(op) => {
+                    let a = farg(fuser, &mut reads, 0);
+                    let b = farg(fuser, &mut reads, 1);
+                    let instr = match op {
+                        FBinOp::Add => "f64.add",
+                        FBinOp::Sub => "f64.sub",
+                        FBinOp::Mul => "f64.mul",
+                        FBinOp::Div => "f64.div",
+                        FBinOp::Min => "f64.min",
+                        FBinOp::Max => "f64.max",
+                        FBinOp::CopySign => "f64.copysign",
+                    };
+                    format!("({instr} {a} {b})")
+                }
+                PrimKind::FloatCmp(op) => {
+                    let a = farg(fuser, &mut reads, 0);
+                    let b = farg(fuser, &mut reads, 1);
+                    let instr = match op {
+                        FCmpOp::Lt => "f64.lt",
+                        FCmpOp::Le => "f64.le",
+                        FCmpOp::Gt => "f64.gt",
+                        FCmpOp::Ge => "f64.ge",
+                        FCmpOp::Eq => "f64.eq",
+                        FCmpOp::Ne => "f64.ne",
+                    };
+                    return Some((
+                        *d,
+                        format!("(i64.extend_i32_u ({instr} {a} {b}))"),
+                        reads,
+                    ));
+                }
+                PrimKind::F64FromInt | PrimKind::IntToFloat => {
+                    let x = fuser.take(args[0], &mut reads);
+                    format!("(f64.convert_i64_s {x})")
+                }
+                PrimKind::FloatToInt => {
+                    let x = farg(fuser, &mut reads, 0);
+                    return Some((*d, format!("(i64.trunc_sat_f64_s {x})"), reads));
+                }
+                _ => return None,
+            };
+            // f64-valued result: keep the f64 form for a float-classified dst,
+            // else reinterpret back into the i64-uniform slot.
+            let e = if floats.contains(d) {
+                inner
+            } else {
+                format!("(i64.reinterpret_f64 {inner})")
+            };
+            Some((*d, e, reads))
+        }
+        _ => None,
+    }
+}
+
 fn defined_value(op: &Op) -> Option<ValueId> {
     match op {
         Op::Alloc { dst, .. }
@@ -872,6 +1464,239 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
         }
     }
     m
+}
+
+/// #806 step 3a: the set of locals this function can declare as REAL `f64`
+/// wasm locals instead of i64-uniform bit slots. The uniform model pays 2-3
+/// `reinterpret`s (GPR↔XMM moves Cranelift does not eliminate through locals)
+/// per float op — measured 2.1× alone on spectralnorm's inner loop.
+///
+/// Classification is a conservative fixpoint over `SetLocal` copy edges:
+/// - HARD-float sites (f64-op operands/results) pull a value toward f64.
+/// - FLEXIBLE sites can emit either type (`ConstInt` bits, `ListGet/SetScalar`
+///   element slots via `f64.load`/`f64.store`, `ListLit` elems via one
+///   boundary reinterpret, `Const`'s zero default, `SetLocal` copies).
+/// - EVERYTHING else — params/ret (the i64-uniform ABI), calls, allocs,
+///   drops, int ops, if-merged values, bit-identity ops (`FloatBits`), the
+///   f32 family — POISONS the value: it stays i64 and the affected float
+///   arms keep today's reinterpret emission. A poisoned + hard value is
+///   simply not retyped, so soundness never depends on the classification
+///   being sharp. Byte-behavior is unchanged: reinterpret/load/store are
+///   bit-preserving, and the arithmetic instructions are identical.
+pub(crate) fn classify_f64_locals(func: &MirFunction) -> BTreeSet<ValueId> {
+    let mut hard: BTreeSet<ValueId> = BTreeSet::new();
+    let mut poison: BTreeSet<ValueId> = func.params.iter().map(|p| p.value).collect();
+    if let Some(r) = func.ret {
+        poison.insert(r);
+    }
+    let mut edges: Vec<(ValueId, ValueId)> = Vec::new();
+    let arg_vals = |args: &[CallArg], poison: &mut BTreeSet<ValueId>| {
+        for a in args {
+            match a {
+                CallArg::Handle(v) | CallArg::Scalar(v) => {
+                    poison.insert(*v);
+                }
+                CallArg::Imm(_) | CallArg::Label(_) => {}
+            }
+        }
+    };
+    for op in &func.ops {
+        match op {
+            Op::Prim { kind: PrimKind::FloatUn(_) | PrimKind::FloatBin(_), dst, args } => {
+                for a in args {
+                    hard.insert(*a);
+                }
+                if let Some(d) = dst {
+                    hard.insert(*d);
+                }
+            }
+            Op::Prim { kind: PrimKind::FloatCmp(_), dst, args } => {
+                for a in args {
+                    hard.insert(*a);
+                }
+                if let Some(d) = dst {
+                    poison.insert(*d);
+                }
+            }
+            Op::Prim { kind: PrimKind::F64FromInt | PrimKind::IntToFloat, dst, args } => {
+                for a in args {
+                    poison.insert(*a);
+                }
+                if let Some(d) = dst {
+                    hard.insert(*d);
+                }
+            }
+            Op::Prim { kind: PrimKind::FloatToInt, dst, args } => {
+                for a in args {
+                    hard.insert(*a);
+                }
+                if let Some(d) = dst {
+                    poison.insert(*d);
+                }
+            }
+            // FloatBits / the f32 family are BIT-level (identity pass-throughs, low-32
+            // patterns) — they need the i64-uniform slot. Every other prim borrows
+            // addresses/handles or produces non-float scalars.
+            Op::Prim { dst, args, .. } => {
+                for a in args {
+                    poison.insert(*a);
+                }
+                if let Some(d) = dst {
+                    poison.insert(*d);
+                }
+            }
+            Op::ConstInt { .. } | Op::Const { .. } => {}
+            Op::SetLocal { local, src } => edges.push((*local, *src)),
+            Op::ListGetScalar { dst: _, list, idx } => {
+                poison.insert(*list);
+                poison.insert(*idx);
+            }
+            Op::ListSetScalar { list, idx, val: _ } => {
+                poison.insert(*list);
+                poison.insert(*idx);
+            }
+            Op::ListLit { dst, elems: _ } => {
+                poison.insert(*dst);
+            }
+            Op::IntBinOp { dst, a, b, .. } => {
+                poison.insert(*dst);
+                poison.insert(*a);
+                poison.insert(*b);
+            }
+            Op::IfThen { cond, dst } => {
+                poison.insert(*cond);
+                if let Some(d) = dst {
+                    poison.insert(*d);
+                }
+            }
+            Op::Else { val } | Op::EndIf { val } => {
+                if let Some(v) = val {
+                    poison.insert(*v);
+                }
+            }
+            Op::LoopBreakUnless { cond } => {
+                poison.insert(*cond);
+            }
+            Op::LoopStart | Op::LoopEnd => {}
+            Op::Alloc { dst, init, .. } => {
+                poison.insert(*dst);
+                match init {
+                    Init::DynStr { len }
+                    | Init::DynList { len }
+                    | Init::DynListStr { len } => {
+                        poison.insert(*len);
+                    }
+                    Init::OptSome { payload } => {
+                        poison.insert(*payload);
+                    }
+                    Init::Opaque
+                    | Init::OptNone
+                    | Init::IntList(_)
+                    | Init::Bytes(_)
+                    | Init::Str(_) => {}
+                }
+            }
+            Op::Dup { dst, src } => {
+                poison.insert(*dst);
+                poison.insert(*src);
+            }
+            Op::Drop { v }
+            | Op::DropListStr { v }
+            | Op::DropValue { v }
+            | Op::DropListValue { v }
+            | Op::DropListStrValue { v }
+            | Op::DropListStrStr { v }
+            | Op::DropListIntStr { v }
+            | Op::DropListStrInt { v }
+            | Op::DropResultListValue { v }
+            | Op::DropResultValue { v }
+            | Op::DropResultStrInt { v }
+            | Op::DropResultValueInt { v }
+            | Op::DropResultListValueInt { v }
+            | Op::DropResultListStrInt { v }
+            | Op::DropResultListStr { v }
+            | Op::DropListListStr { v }
+            | Op::DropVariant { v, .. }
+            | Op::DropWrapperRec { v, .. }
+            | Op::Consume { v }
+            | Op::Borrow { v }
+            | Op::MakeUnique { v } => {
+                poison.insert(*v);
+            }
+            Op::Pure { dst, uses } => {
+                poison.insert(*dst);
+                for u in uses {
+                    poison.insert(*u);
+                }
+            }
+            Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } | Op::CallImport { dst, args, .. } => {
+                if let Some(d) = dst {
+                    poison.insert(*d);
+                }
+                arg_vals(args, &mut poison);
+            }
+            Op::CallIndirect { dst, table_idx, args, .. } => {
+                if let Some(d) = dst {
+                    poison.insert(*d);
+                }
+                poison.insert(*table_idx);
+                arg_vals(args, &mut poison);
+            }
+            Op::FuncRef { dst, .. } => {
+                poison.insert(*dst);
+            }
+        }
+    }
+    // Propagate both properties across copy components to a fixpoint: a
+    // component with any poisoned member stays i64 throughout; one with a
+    // hard-float member (and no poison) is f64 throughout.
+    loop {
+        let mut changed = false;
+        for (a, b) in &edges {
+            if poison.contains(a) != poison.contains(b) {
+                poison.insert(*a);
+                poison.insert(*b);
+                changed = true;
+            }
+            if hard.contains(a) != hard.contains(b) {
+                hard.insert(*a);
+                hard.insert(*b);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    hard.difference(&poison).copied().collect()
+}
+
+/// Format the EXACT f64 value held by `bits` as a WAT hexfloat literal —
+/// bit-precise for every case (normals, subnormals, ±0, ±inf, NaN payloads),
+/// so `(f64.const …)` materializes the identical bit pattern the i64-uniform
+/// slot carried. Emitting `(f64.reinterpret_i64 (i64.const bits))` instead is
+/// NOT folded by Cranelift — it executed a movabs + GPR→XMM move per loop
+/// iteration (measured ~1s on spectralnorm's inner loop).
+fn wat_f64_const(bits: u64) -> String {
+    let sign = if bits >> 63 == 1 { "-" } else { "" };
+    let exp = ((bits >> 52) & 0x7ff) as i64;
+    let man = bits & 0xf_ffff_ffff_ffff;
+    if exp == 0x7ff {
+        return if man == 0 {
+            format!("{sign}inf")
+        } else {
+            format!("{sign}nan:0x{man:x}")
+        };
+    }
+    if exp == 0 {
+        return if man == 0 {
+            format!("{sign}0x0p+0")
+        } else {
+            // subnormal: fraction digits are man / 2^52, scaled by 2^-1022.
+            format!("{sign}0x0.{man:013x}p-1022")
+        };
+    }
+    format!("{sign}0x1.{man:013x}p{:+}", exp - 1023)
 }
 
 fn local(v: ValueId) -> String {

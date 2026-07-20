@@ -1,0 +1,145 @@
+// map_typechange — SELF-HOSTED type-CHANGING `map.map` flavors + the missing
+// `map.entries` flavors (the C-039 class: the closure's return type differs from
+// the subject's value type, so the RESULT map is a DIFFERENT physical flavor).
+// Where the result flavor has a registered generic `map.set`, the twin COMPOSES
+// through it (the map_if from_list discipline — set handles dedup/copy/ownership);
+// the tuple-valued result (no set twin) builds the skv-split block raw.
+
+// ── map.entries over the CORE (scalar/scalar, interleaved 16-byte pairs) flavor ──
+// List[(Int, Int)] in insertion order; each pair a fresh flat 2-slot block.
+fn __mtc_entries_core_fill(dh: Int, sh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let pair = prim.alloc_list(2)
+    let ph = prim.handle(pair)
+    prim.store64(ph + 12, prim.load64(sh + 12 + i * 16))
+    prim.store64(ph + 20, prim.load64(sh + 12 + i * 16 + 8))
+    prim.store_str(dh + 12 + i * 8, pair)
+    __mtc_entries_core_fill(dh, sh, n, i + 1)
+  }
+
+fn map_entries_core(m: Map[Int, Int]) -> List[(Int, Int)] = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let out: List[(Int, Int)] = prim.alloc_list_str(n)
+  let _x = __mtc_entries_core_fill(prim.handle(out), h, n, 0)
+  out
+}
+
+// ── map.entries over the hval-TUPLE flavor (Map[String, (scalar, scalar)]) ──
+// skv-split layout (keys 0..n-1, values n..2n-1). Each pair CO-OWNS its key and
+// its tuple value (rc_inc — DropListStrStr at the call site releases both; a
+// scalar tuple is a flat block, so its rc_dec is a full free).
+fn __mtc_entries_hvalt_fill(dh: Int, sh: Int, entries: Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let k = prim.load64(sh + 12 + i * 8)
+    prim.rc_inc(k)
+    let v = prim.load64(sh + 12 + (entries + i) * 8)
+    prim.rc_inc(v)
+    let pair = prim.alloc_list(2)
+    let ph = prim.handle(pair)
+    prim.store64(ph + 12, k)
+    prim.store64(ph + 20, v)
+    prim.store_str(dh + 12 + i * 8, pair)
+    __mtc_entries_hvalt_fill(dh, sh, entries, i + 1)
+  }
+
+fn map_entries_hvalt(m: Map[String, (Int, Int)]) -> List[(String, (Int, Int))] = {
+  let h = prim.handle(m)
+  let entries = prim.load32(h + 4)
+  let out: List[(String, (Int, Int))] = prim.alloc_list_str(entries)
+  let _x = __mtc_entries_hvalt_fill(prim.handle(out), h, entries, 0)
+  out
+}
+
+// ── map.map: skv (String key, scalar value) → str (String value) ──
+fn __mtc_skv2str_go(sh: Int, entries: Int, f: (Int) -> String, i: Int, acc: Map[String, String]) -> Map[String, String] =
+  if i >= entries then acc
+  else {
+    let k: String = prim.load_str(sh + 12 + i * 8)
+    let nv = f(prim.load64(sh + 12 + (entries + i) * 8))
+    __mtc_skv2str_go(sh, entries, f, i + 1, map.set(acc, k, nv))
+  }
+
+fn map_map_skv2str(m: Map[String, Int], f: (Int) -> String) -> Map[String, String] = {
+  let sh = prim.handle(m)
+  let acc: Map[String, String] = map.new()
+  __mtc_skv2str_go(sh, prim.load32(sh + 4), f, 0, acc)
+}
+
+// ── map.map: str (String value, interleaved) → skv (scalar value) ──
+fn __mtc_str2skv_go(sh: Int, entries: Int, f: (String) -> Int, i: Int, acc: Map[String, Int]) -> Map[String, Int] =
+  if i >= entries then acc
+  else {
+    let k: String = prim.load_str(sh + 12 + i * 16)
+    let v: String = prim.load_str(sh + 12 + i * 16 + 8)
+    __mtc_str2skv_go(sh, entries, f, i + 1, map.set(acc, k, f(v)))
+  }
+
+fn map_map_str2skv(m: Map[String, String], f: (String) -> Int) -> Map[String, Int] = {
+  let sh = prim.handle(m)
+  let acc: Map[String, Int] = map.new()
+  __mtc_str2skv_go(sh, prim.load32(sh + 4) / 2, f, 0, acc)
+}
+
+// ── map.map: ivh (Int key, String value, split) → core (scalar value) ──
+fn __mtc_ivh2core_go(sh: Int, entries: Int, f: (String) -> Int, i: Int, acc: Map[Int, Int]) -> Map[Int, Int] =
+  if i >= entries then acc
+  else {
+    let k = prim.load64(sh + 12 + i * 8)
+    let v: String = prim.load_str(sh + 12 + (entries + i) * 8)
+    __mtc_ivh2core_go(sh, entries, f, i + 1, map.set(acc, k, f(v)))
+  }
+
+fn map_map_ivh2core(m: Map[Int, String], f: (String) -> Int) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let acc: Map[Int, Int] = map.new()
+  __mtc_ivh2core_go(sh, prim.load32(sh + 4), f, 0, acc)
+}
+
+// ── map.map: skv → hval-TUPLE (Map[String, (scalar, scalar)]) ── raw skv-split
+// build: keys deep-copied, each value the closure's fresh OWNED tuple block moved
+// into its slot ($__drop_map_hval's 2n-slot rc_dec is the exact free).
+fn __mtc_store_key(addr: Int, s: String) -> Int = {
+  let copy = string.repeat(s, 1)
+  prim.store_str(addr, copy)
+  0
+}
+
+fn __mtc_skv2hvalt_fill(sh: Int, rh: Int, entries: Int, f: (Int) -> (Int, Int), i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let k: String = prim.load_str(sh + 12 + i * 8)
+    let _kc = __mtc_store_key(rh + 12 + i * 8, k)
+    let t = f(prim.load64(sh + 12 + (entries + i) * 8))
+    prim.store_str(rh + 12 + (entries + i) * 8, t)
+    __mtc_skv2hvalt_fill(sh, rh, entries, f, i + 1)
+  }
+
+fn map_map_skv2hvalt(m: Map[String, Int], f: (Int) -> (Int, Int)) -> Map[String, (Int, Int)] = {
+  let sh = prim.handle(m)
+  let entries = prim.load32(sh + 4)
+  let r: Map[String, (Int, Int)] = prim.alloc_map_kv(entries * 2)
+  let rh = prim.handle(r)
+  let _c = __mtc_skv2hvalt_fill(sh, rh, entries, f, 0)
+  prim.store32(rh + 4, entries)
+  r
+}
+
+// ── set.map: SCALAR elements → String (C-039's `set.map(si, (x) => "n" + …)`) ──
+// The generic set.map's i64-result closure table type traps on an i32-result
+// closure. Compose through set.insert on a Set[String] accumulator (content
+// dedup + deep copy — the _str family's own discipline).
+fn __stc_i2s_go(sh: Int, n: Int, f: (Int) -> String, i: Int, acc: Set[String]) -> Set[String] =
+  if i >= n then acc
+  else {
+    let v = f(prim.load64(sh + 12 + i * 8))
+    __stc_i2s_go(sh, n, f, i + 1, set.insert(acc, v))
+  }
+
+fn set_map_i2s(s: Set[Int], f: (Int) -> String) -> Set[String] = {
+  let sh = prim.handle(s)
+  let acc: Set[String] = set.new()
+  __stc_i2s_go(sh, prim.load32(sh + 4), f, 0, acc)
+}

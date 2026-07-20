@@ -1,0 +1,5 @@
+// list_to_string_lob — SELF-HOSTED `${xs}` interp display for a `List[Option[Bool]]`
+// (`[some(true), none]` — the C-149 option.to_list chain). Composed exactly like
+// list_to_string_lo with the Bool payload interp.
+fn list_to_string_lob(xs: List[Option[Bool]]) -> String =
+  "[" + (xs |> list.map((o) => "${o}") |> list.join(", ")) + "]"

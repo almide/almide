@@ -1,0 +1,27 @@
+exit_code = Some(0)
+timed_out = false
+
+--- stdout ---
+list=[1, 2, 3]
+empty_list=[]
+smap=["a": 1, "b": 2]
+imap=[10: "x", 20: "y"]
+empty_map=[:]
+big_map=["a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8, "i": 9, "j": 10]
+set=set.from_list([3, 1, 2])
+set_str=set.from_list(["x", "y", "z"])
+tuple=(1, "two", true)
+opt_some=some(42)
+opt_none=none
+res_ok=ok(7)
+res_err=err("boom")
+nested=[["a": [1, 2]], ["b": [3]]]
+map_of_lists=["xs": [1, 2, 3], "ys": [4, 5]]
+list_of_opt=[some(1), none, some(3)]
+deep=[["k": [some(1), none]]]
+escapes=["say \"hi\"", "tab\tgap", "back\\slash", "new\nline"]
+floats=[0.1, 0.2, 0.30000000000000004]
+float_map=[1: 0.5, 2: 0.30000000000000004]
+
+--- stderr ---
+

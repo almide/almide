@@ -1,0 +1,13 @@
+exit_code = Some(1)
+timed_out = false
+
+--- stdout ---
+
+--- stderr ---
+error: this program shape is not yet supported by the verified wasm renderer
+  wall: Unsupported("main is outside the MIR-lowering subset")
+  The unverified v0 wasm emitter was retired (#782): a wall is now an honest
+  error instead of a silent fallback. Please file an issue with the wall reason
+  above and the source shape that triggered it:
+  https://github.com/almide/almide/issues
+

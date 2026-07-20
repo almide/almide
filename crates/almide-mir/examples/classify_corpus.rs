@@ -235,6 +235,19 @@ fn count_ir_calls(
             if matches!(s.kind, almide_ir::IrStmtKind::MapInsert { .. }) {
                 self.n += 1;
             }
+            // A HEAP-element index-assign STATEMENT `xs[i] = "Z"` (String/Value
+            // element — mod_p3's C-136 admission, mirrored exactly) rewrites to ONE
+            // synthetic `list.set` CallFn (the functional rebind). Credit the
+            // statement so the synthetic call has a matching ir_call and
+            // `mir_calls <= ir_calls` holds BY CONSTRUCTION (the place_mutation
+            // mir 19 > ir 18 breach). An un-admitted element class walls (no MIR
+            // ops), where the extra credit only taints conservatively.
+            if matches!(&s.kind, almide_ir::IrStmtKind::IndexAssign { value, .. }
+                if matches!(value.ty, almide_lang::types::Ty::String)
+                    || almide_mir::lower::is_value_ty(&value.ty))
+            {
+                self.n += 1;
+            }
             almide_ir::visit::walk_stmt(self, s);
         }
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
@@ -253,6 +266,9 @@ fn count_ir_calls(
                 // uses, so `mir == ir` holds by construction (its operand's own calls
                 // are counted by the descent as usual).
                 && almide_mir::lower::identity_int_widening_call(e).is_none()
+                // `float.from_int` lowers to ONE F64FromInt prim (no call) — skip by
+                // the SAME predicate the lowering uses (#806 step 2).
+                && almide_mir::lower::float_from_int_prim_call(e).is_none()
             {
                 self.n += 1;
             }
@@ -869,6 +885,8 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         almide_mir::lower::erase_transparent_newtypes(&mut ir);
         almide_mir::lower::fill_record_defaults(&mut ir);
         almide_mir::lower::inline_pure_call_globals(&mut ir);
+        // #806 step 2 — the SAME small-scalar-fn inline the pipeline runs.
+        almide_mir::lower::inline_small_scalar_fns(&mut ir);
         // C-132 move-mode write-back — the SAME pre-lowering rewrite the pipeline
         // runs (see source_to_ir_with), so mir == ir on both sides.
         almide_ir::mut_param::lower_mut_params_move_mode(&mut ir);
@@ -1125,7 +1143,7 @@ fn classify_file(
     // init_order shapes), the cross-module NAME bridge OVERRIDES a colliding module-raw
     // key (the byvalue shapes), and main's own top-lets (re-inserted last) win where the
     // name bridge would misfire — composition order: module union → bridge → main.
-    almide_mir::lower::bridge_cross_module_toplets(&ir, &mut globals, &mut global_inits);
+    almide_mir::lower::bridge_cross_module_toplets(&ir, &mut globals, &mut global_inits, &mut std::collections::HashMap::new());
     for tl in &ir.top_lets {
         globals.insert(tl.var, tl.ty.clone());
         global_inits.insert(tl.var, tl.value.clone());

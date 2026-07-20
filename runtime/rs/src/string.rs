@@ -16,7 +16,10 @@ pub fn almide_rt_string_ends_with(s: &str, suffix: &str) -> bool { s.ends_with(s
 pub fn almide_rt_string_split(s: &str, sep: &str) -> Vec<String> { s.split(sep).map(|x| x.to_string()).collect() }
 pub fn almide_rt_string_replace(s: &str, from: &str, to: &str) -> String { s.replace(from, to) }
 pub fn almide_rt_string_join(parts: &[String], sep: &str) -> String { parts.join(sep) }
-pub fn almide_rt_string_repeat(s: &str, n: i64) -> String { s.repeat(n as usize) }
+// Negative counts clamp to 0 (C-054 discipline; `n as usize` on a negative
+// i64 reinterpreted to a huge count — a native "capacity overflow" panic
+// while the wasm leg trapped on the negative alloc size).
+pub fn almide_rt_string_repeat(s: &str, n: i64) -> String { s.repeat(n.max(0) as usize) }
 pub fn almide_rt_string_reverse(s: &str) -> String { s.chars().rev().collect() }
 pub fn almide_rt_string_chars(s: &str) -> Vec<String> { s.chars().map(|c| c.to_string()).collect() }
 pub fn almide_rt_string_char_at(s: &str, i: i64) -> Option<String> {

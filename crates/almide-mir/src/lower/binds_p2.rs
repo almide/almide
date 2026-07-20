@@ -49,6 +49,16 @@ impl LowerCtx {
             }
             return self.lower_bind(var, ty, tail);
         }
+        // A SHARED-CELL var (captured by a lambda AND mutated — cells.rs): bind it
+        // into a 1-slot heap cell instead of a plain local, so the closure and the
+        // enclosing scope share storage. Only the admitted inner classes take a cell;
+        // an unadmitted class binds normally and `lift_lambda`'s mutated-capture
+        // gate refuses the lift — an honest wall, never the value-copy miscompile.
+        if self.cell_vars.contains(&var) {
+            if let Some(class) = cell_class_of(ty) {
+                return self.lower_cell_bind(var, ty, value, class);
+            }
+        }
         // Decomposed (#781, cog 272): the SCALAR path and the HEAP path are
         // verbatim text moves into `lower_bind_scalar` / `lower_bind_heap` —
         // behavior proven by the classify wall-list byte-identity ladder.
@@ -521,12 +531,78 @@ impl LowerCtx {
                                 .into(),
                         ));
                     }
-                    // A HEAP CALL payload the ctor materializer DECLINED (`ok(float.parse(s))`
-                    // — a Module call returning a nested Result, fuzz seed-20260718 index
-                    // 888): the deferred Opaque read `ok(0)` while native printed the err —
-                    // the C-138 family's un-admitted tail. WALL — admission with an exact
-                    // nested drop is a follow-up; a wall is always safe, a wrong byte never.
-                    if is_heap_ty(&expr.ty) && matches!(expr.kind, IrExprKind::Call { .. }) {
+                    // A CALL payload (`ok(result.unwrap_or(…))` — the C-149
+                    // nested-share chain): ANF-materialize the call into a synth temp via
+                    // the SAME `lower_bind` path a `let tmp = call` takes (tracked, typed
+                    // drop, read shapes seeded — the lower_heap_extraction Call-container
+                    // discipline), then rebuild the ctor over the temp VAR and retry the
+                    // ctor materializer — its Var arms admit the payload with the share
+                    // (Dup) discipline. A payload the Var arms still decline WALLS (the
+                    // deferred Opaque would read `ok(0)` while native printed the err —
+                    // the C-138 family; a wall is always safe, a wrong byte never).
+                    // SCALAR call payloads take the same route (C-158): requiring a heap
+                    // payload here let `ok(<un-lowerable Float combinator chain>)` skip
+                    // to the deferred Opaque — an EMPTY block the formatter read as
+                    // `ok(0)` while native printed the real value (differential-fuzz
+                    // seed 1784512190387680000 index 74, a silent wrong value).
+                    // TUPLE literal payloads too (`ok((0.3, 1000000))` — the (Float, Int)
+                    // mixed-scalar payload the ctor materializer declines): deferred, the
+                    // `result.flat_unwrap_or` twin read the EMPTY block's payload out of
+                    // bounds — a runtime abort native never had (RunFailureDivergence).
+                    // And IF-merged payloads (`ok(if c then some("a") else some("b"))`):
+                    // deferred, the downstream unwrap misread the empty block as None and
+                    // took the fallback while native returned the real payload — the ANF
+                    // bind routes them through the proven heap-result-if bind machinery
+                    // (C-106) instead.
+                    if matches!(
+                        expr.kind,
+                        IrExprKind::Call { .. } | IrExprKind::Tuple { .. } | IrExprKind::If { .. }
+                    ) {
+                        let payload_ty = expr.ty.clone();
+                        let payload = (**expr).clone();
+                        let tmp = self.fresh_synth_var();
+                        self.lower_bind(tmp, &payload_ty, &payload)?;
+                        // The ANF bind itself may have DEFERRED (an Opaque skeleton —
+                        // e.g. a capturing-closure element): retrying the ctor over it
+                        // would wrap the same empty block. Wall instead.
+                        if self
+                            .value_of
+                            .get(&tmp)
+                            .is_some_and(|v| self.deferred_opaque_binds.contains(v))
+                        {
+                            return Err(LowerError::Unsupported(
+                                "some/ok/err payload whose materialization deferred cannot \
+                                 be faithfully wrapped in this brick (walled, not read as a \
+                                 zeroed ctor)"
+                                    .into(),
+                            ));
+                        }
+                        let synth = IrExpr {
+                            kind: IrExprKind::Var { id: tmp },
+                            ty: payload_ty,
+                            span: payload.span,
+                            def_id: None,
+                        };
+                        let rebuilt_kind = match &value.kind {
+                            IrExprKind::OptionSome { .. } => {
+                                IrExprKind::OptionSome { expr: Box::new(synth) }
+                            }
+                            IrExprKind::ResultOk { .. } => {
+                                IrExprKind::ResultOk { expr: Box::new(synth) }
+                            }
+                            _ => IrExprKind::ResultErr { expr: Box::new(synth) },
+                        };
+                        let rebuilt = IrExpr {
+                            kind: rebuilt_kind,
+                            ty: value.ty.clone(),
+                            span: value.span,
+                            def_id: value.def_id,
+                        };
+                        if let Some(dst) = self.try_lower_option_ctor(&rebuilt, ty) {
+                            self.value_of.insert(var, dst);
+                            self.live_heap_handles.push(dst);
+                            return Ok(());
+                        }
                         return Err(LowerError::Unsupported(
                             "some/ok/err of an un-admitted heap call payload cannot be \
                              faithfully materialized in this brick (walled, not read as a \
@@ -776,6 +852,10 @@ impl LowerCtx {
                 } else if crate::lower::is_map_ivh_ty(ty) {
                     // `Map[Int, String]` — `$__drop_map_ivh` rc_decs each OWNED value slot.
                     self.variant_drop_handles.insert(dst, "map_ivh".to_string());
+                } else if crate::lower::is_map_fn_ty(ty) {
+                    // `Map[String, <Fn>]` — `$__drop_map_mclo` frees each value via
+                    // `__drop_closure` (the hval flat rc_dec would leak captured env).
+                    self.variant_drop_handles.insert(dst, "map_mclo".to_string());
                 } else if crate::lower::is_map_hval_ty(ty) {
                     // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
                     self.variant_drop_handles.insert(dst, "map_hval".to_string());
@@ -791,6 +871,20 @@ impl LowerCtx {
                     // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
                     // last-ref value list's Option slots (a flat rc_dec would leak them).
                     self.variant_drop_handles.insert(dst, "map_mlo".to_string());
+                } else if let Some(rname) = (match ty {
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                        if a.len() == 1 =>
+                    {
+                        self.record_or_anon_drop_type_name(&a[0])
+                    }
+                    _ => None,
+                }) {
+                    // A `List[<recursive-drop record>]` result (`list.unique` over a
+                    // String-field record via the `__krec_*` twins): route to the generated
+                    // `$__drop_list_<R>` (emitted for EVERY recursive-drop record) — the
+                    // flat per-slot dec freed each element block but LEAKED its String
+                    // fields (the krec-unique residue).
+                    self.variant_drop_handles.insert(dst, format!("list_{rname}"));
                 } else if crate::lower::is_lenlist_list_ty(ty) {
                     // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
                     // flat DropListStr would leak each element's owned payload slots.
@@ -819,6 +913,20 @@ impl LowerCtx {
                     // bounds-checked load over the bound result — the C-132 move-mode
                     // write-back binds the returned buffer exactly here (`__mp_buf =
                     // add_item(data, 1)` then `data = __mp_buf; data[0]`).
+                    self.materialized_lists.insert(dst);
+                }
+                // A user fn returning `List[heap]` (`build_nested() -> List[List[Int]]`) is
+                // likewise a REAL, POPULATED nested-ownership block, so admit the element
+                // borrow `nested[i]` (LoadHandle at `$elem_addr`) over the bound var — the
+                // exact mirror of the Module-call bind's `string.split` registration. Without
+                // it, `nested[10]` fell to the container-grain Dup of the WHOLE list and a
+                // consumer read the outer block (`list.len(mid)` = the OUTER len — the
+                // rc_alloc_stress silent miscompile). Narrowed to `List[heap]` (NOT the
+                // broader Option/Result/Map `is_heap_elem_list_ty` also matches) — only a
+                // real list is `[i]`-indexable here.
+                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                        if a.len() == 1 && is_heap_ty(&a[0]))
+                {
                     self.materialized_lists.insert(dst);
                 }
                 // A `Value` result from a user fn (`let v = parse_number(c, raw)`) drops via the
@@ -903,10 +1011,13 @@ impl LowerCtx {
                         &a.kind,
                         IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::ClosureCreate { .. }
                     ) || matches!(&a.kind, IrExprKind::Var { id } if self.lambda_bindings.contains_key(id));
-                    // `List[<Fn>]` is B36's representable shape — excluded from the wall.
+                    // `List[<Fn>]` (B36) and `Map[String, <Fn>]` (the mclo family — the
+                    // hval handle-level twins + `$__drop_map_mclo`) are representable
+                    // closure CONTAINERS — excluded from the wall.
                     let is_representable_closure_list = matches!(&a.ty,
                         Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e)
-                            if e.len() == 1 && matches!(e[0], Ty::Fn { .. }));
+                            if e.len() == 1 && matches!(e[0], Ty::Fn { .. }))
+                        || crate::lower::is_map_fn_ty(&a.ty);
                     !is_closure_arg && !is_representable_closure_list && crate::lower::ty_contains_fn(&a.ty)
                 });
                 let faithful = !self.last_call_had_unlifted_closure && !data_arg_has_fn;
@@ -923,6 +1034,15 @@ impl LowerCtx {
                 // `list.map(xs, (x) => x + 1)`, `(p) => p.x` over `List[Point]`) is
                 // UNTOUCHED, so the in-scope HOF byte-matches stay materialized.
                 if crate::lower::is_higher_order(args) && !faithful {
+                    if std::env::var("ALMIDE_DBG_ANF").is_ok() {
+                        eprintln!(
+                            "[hof-guard] {}.{} unlifted={} data_arg_has_fn={}",
+                            module.as_str(),
+                            func.as_str(),
+                            self.last_call_had_unlifted_closure,
+                            data_arg_has_fn
+                        );
+                    }
                     return Err(LowerError::Unsupported(format!(
                         "{}.{} with an unliftable/closure-list higher-order argument \
                          cannot execute faithfully in this brick (walled, not mis-valued)",
@@ -969,6 +1089,14 @@ impl LowerCtx {
                 if is_self_host_option_module_fn(module.as_str(), func.as_str()) {
                     self.materialized_options.insert(dst);
                 }
+                // A FUNCTION-valued module-call result (`let f = map.get_or(m, k, d)` —
+                // the closure-valued map read): the result IS a closure block — track it
+                // so a later `f()` dispatches via CallIndirect, and its scope-end drop
+                // routes to the recursive `$__drop_closure` (`closure_values` drives
+                // `drop_op_for`; a captured env slot would leak under the flat rc_dec).
+                if matches!(ty, Ty::Fn { .. }) {
+                    self.closure_values.insert(dst);
+                }
                 // A self-host Result fn (`int.parse`) returns a real materialized Result — track it
                 // so a later `match r { Ok(v) => …, Err(e) => … }` over the var EXECUTES.
                 if is_self_host_result_module_fn(module.as_str(), func.as_str()) {
@@ -1011,6 +1139,10 @@ impl LowerCtx {
                 } else if crate::lower::is_map_ivh_ty(ty) {
                     // `Map[Int, String]` — `$__drop_map_ivh` rc_decs each OWNED value slot.
                     self.variant_drop_handles.insert(dst, "map_ivh".to_string());
+                } else if crate::lower::is_map_fn_ty(ty) {
+                    // `Map[String, <Fn>]` — `$__drop_map_mclo` frees each value via
+                    // `__drop_closure` (the hval flat rc_dec would leak captured env).
+                    self.variant_drop_handles.insert(dst, "map_mclo".to_string());
                 } else if crate::lower::is_map_hval_ty(ty) {
                     // `Map[String, List[scalar]]` — `$__drop_map_hval` rc_decs all 2n slots.
                     self.variant_drop_handles.insert(dst, "map_hval".to_string());
@@ -1026,6 +1158,20 @@ impl LowerCtx {
                     // `Map[String, List[Option[Int]]]` — `$__drop_map_mlo` sweeps each
                     // last-ref value list's Option slots (a flat rc_dec would leak them).
                     self.variant_drop_handles.insert(dst, "map_mlo".to_string());
+                } else if let Some(rname) = (match ty {
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                        if a.len() == 1 =>
+                    {
+                        self.record_or_anon_drop_type_name(&a[0])
+                    }
+                    _ => None,
+                }) {
+                    // A `List[<recursive-drop record>]` result (`list.unique` over a
+                    // String-field record via the `__krec_*` twins): route to the generated
+                    // `$__drop_list_<R>` (emitted for EVERY recursive-drop record) — the
+                    // flat per-slot dec freed each element block but LEAKED its String
+                    // fields (the krec-unique residue).
+                    self.variant_drop_handles.insert(dst, format!("list_{rname}"));
                 } else if crate::lower::is_lenlist_list_ty(ty) {
                     // `List[Result[_, String]]`/`List[Option[String]]` — the len-loop drop; the
                     // flat DropListStr would leak each element's owned payload slots.
@@ -1170,6 +1316,17 @@ impl LowerCtx {
                             return Ok(());
                         }
                     }
+                }
+                // A TUPLE subject of scalar elements/expressions with a HEAP result
+                // (`let s = match (string.len(x), n % 5) { (2, 0) => "…", _ => "…" }`):
+                // the ordered refinement chain (heap merge), bound + scope-tracked
+                // like any owned heap value.
+                if let Some(dst) = self.try_lower_tuple_refinement_match(subject, arms, ty) {
+                    self.value_of.insert(var, dst);
+                    if !self.live_heap_handles.contains(&dst) {
+                        self.live_heap_handles.push(dst);
+                    }
+                    return Ok(());
                 }
                 Err(LowerError::Unsupported(
                     "heap-result `match` bound to a let/var cannot be faithfully \

@@ -211,6 +211,22 @@ impl LowerCtx {
                 let operand = crate::lower::identity_int_widening_call(expr)?;
                 self.lower_scalar_value(operand)
             }
+            // `float.from_int(x)` — the single-instruction sitofp floor (#806 step 2):
+            // one `PrimKind::F64FromInt`, no call, no ownership. The caps counter
+            // skips the node by the same predicate, so `mir == ir` by construction.
+            IrExprKind::Call { .. }
+                if crate::lower::float_from_int_prim_call(expr).is_some() =>
+            {
+                let operand = crate::lower::float_from_int_prim_call(expr)?;
+                let v = self.lower_scalar_value(operand)?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::Prim {
+                    kind: crate::PrimKind::F64FromInt,
+                    dst: Some(dst),
+                    args: vec![v],
+                });
+                Some(dst)
+            }
             // A scalar `if`/`match` as an OPERAND (`a + (if c then 1 else 2)`,
             // `n + match k { 0 => x, _ => y }`): EXECUTE it to a scalar via the same
             // `try_lower_scalar_if` the let-bind path uses — only the taken arm runs. The
@@ -226,6 +242,11 @@ impl LowerCtx {
             IrExprKind::Match { subject, arms } if !is_heap_ty(&expr.ty) => {
                 // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
                 if let Some(dst) = self.try_lower_custom_variant_match(subject, arms, &expr.ty) {
+                    return Some(dst);
+                }
+                // A TUPLE-of-bound-vars subject (the frontend's factored form of a
+                // multi-arm nested-ctor match — C-070): per-element refinement chain.
+                if let Some(dst) = self.try_lower_tuple_refinement_match(subject, arms, &expr.ty) {
                     return Some(dst);
                 }
                 // A VARIANT (Option/Result) subject — execute via the tag-read value-match
@@ -1150,7 +1171,12 @@ impl LowerCtx {
             // (crate::coown_names) grounded in proofs/CoownLoop.v + CoownCompose.v — see that module.
             "rc_dec" | "rc_inc"
                 if crate::coown_names::is_coown_rc_routine(self.fn_name.as_str())
-                    || self.fn_name.starts_with("__drop_") =>
+                    || self.fn_name.starts_with("__drop_")
+                    // `__krec_uniqfill_<R>` — the GENERATED list.unique fill over a
+                    // String-field-record element (C-015): rc_inc each KEPT element
+                    // into the result (the __uh_acquire pattern, per-type generated
+                    // like __drop_*; drop_sources.rs is the single emitter).
+                    || self.fn_name.starts_with("__krec_uniqfill_") =>
             {
                 // `__drop_*` also covers the GENERATED per-type custom-variant recursive drops
                 // (`__drop_Expr`, ADT brick 5b) — the same trusted prim-only free routine.
@@ -1243,7 +1269,7 @@ impl LowerCtx {
             })?;
             lowered.push(v);
         }
-        let dst = if matches!(kind, PrimKind::Store { .. } | PrimKind::RcDec | PrimKind::RcInc | PrimKind::Die) {
+        let dst = if matches!(kind, PrimKind::Store { .. } | PrimKind::RcDec | PrimKind::RcInc | PrimKind::Die | PrimKind::ProcExit) {
             None
         } else {
             Some(self.fresh_value())
@@ -1291,6 +1317,10 @@ impl LowerCtx {
                 self.str_str_elem_lists.insert(dst);
             } else if crate::lower::is_lenlist_list_ty(ty) {
                 self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+            } else if crate::lower::is_map_fn_ty(ty) {
+                // `Map[String, <Fn>]` arg temp — `$__drop_map_mclo` frees each value via
+                // `__drop_closure` (a flat sweep would leak every captured env slot).
+                self.variant_drop_handles.insert(dst, "map_mclo".to_string());
             } else if let Some(hname) = self.map_named_value_drop(ty) {
                 self.variant_drop_handles.insert(dst, hname);
             } else if crate::lower::is_map_msv_ty(ty) {
@@ -1303,6 +1333,18 @@ impl LowerCtx {
                 // `Map[String, List[Option[Int]]]` arg temp — `$__drop_map_mlo` (the
                 // bind-site route, mirrored; the flat fallback would leak the value lists).
                 self.variant_drop_handles.insert(dst, "map_mlo".to_string());
+            } else if let Some(rname) = (match ty {
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                    if a.len() == 1 =>
+                {
+                    self.record_or_anon_drop_type_name(&a[0])
+                }
+                _ => None,
+            }) {
+                // A `List[<recursive-drop record>]` arg temp — `$__drop_list_<R>` (the
+                // bind-site route, mirrored; the flat fallback leaked each element's
+                // String fields — the krec-unique residue).
+                self.variant_drop_handles.insert(dst, format!("list_{rname}"));
             } else if matches!(ty,
                 Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
                     if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))

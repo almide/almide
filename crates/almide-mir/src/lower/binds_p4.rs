@@ -192,6 +192,22 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
+            // A `(String, <Fn>)` TUPLE literal (`("a", () => …)` — the closure-valued
+            // map's from_list pair): String slot 0, closure-block slot 1 (the Lambda
+            // element lifts via this fn's own Lambda arm inside
+            // `try_lower_tuple_construct`). The enclosing pairs list frees it via
+            // `$__drop_list_str_clo` (key rc_dec + `__drop_closure` per value).
+            IrExprKind::Tuple { elements }
+                if matches!(&expr.ty,
+                    Ty::Tuple(tys) if tys.len() == 2
+                        && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::Fn { .. })) =>
+            {
+                let obj = self.try_lower_tuple_construct(elements)?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
             // A `(<flat heap>, <scalar>)` TUPLE literal (`("a", 1)` — the deep_eq tuple-eq
             // operand / the gguf (key, pos) accumulator element / `[East: 90]`'s pairs):
             // flat-heap slot 0 (@12), scalar slot 1 (@20). try_lower_tuple_construct builds
@@ -508,6 +524,13 @@ impl LowerCtx {
                             self.heap_elem_lists.insert(v);
                         }
                     }
+                    // A CLOSURE slot (`let (g, _) = pair` where slot 0 is a Fn — the
+                    // first-class storage class): the borrowed handle IS a closure
+                    // block — admit it to the dispatch set so a later `g()` lowers
+                    // to `CallIndirect` instead of walling on an unknown callee.
+                    if matches!(ty, Ty::Fn { .. }) {
+                        self.closure_values.insert(v);
+                    }
                 } else {
                     self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(v), args: vec![addr] });
                 }
@@ -735,6 +758,25 @@ impl LowerCtx {
                     self.materialize_opt_str_some(piece, repr)
                 })
             }
+            // `some(Cfg { name: "opt" })` — Some wrapping a RECORD-literal payload (the
+            // crossmod option_record_toplet global): build the record block (the same
+            // builders a `let c = Cfg{..}` uses), move it into the 1-element Option.
+            // A RECURSIVE-drop record routes "optrec:<R>" (the payload's fields freed
+            // via `$__drop_<R>`, then the blocks); a scalar-only record's flat slot-0
+            // free is exact (the Some(string) shape).
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind, IrExprKind::Record { .. })
+                    && self.aggregate_field_tys(&expr.ty).is_some() =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let piece = self
+                    .try_lower_record_construct(expr)
+                    .or_else(|| self.try_lower_scalar_record_construct(expr))?;
+                Some(match self.record_or_anon_drop_type_name(&expr.ty) {
+                    Some(rname) => self.materialize_opt_aggregate_some(piece, repr, rname),
+                    None => self.materialize_opt_str_some(piece, repr),
+                })
+            }
             // `Some((1, 2))` — an ALL-SCALAR tuple literal payload (`match x { some((a, b))
             // => a + b, … }` — the nested-some-tuple pattern shape). Build the flat tuple
             // block, move it into the 1-element Option: the payload block owns NO inner
@@ -751,6 +793,27 @@ impl LowerCtx {
                 let elements = elements.clone();
                 let piece = self.try_lower_scalar_tuple_construct(&elements)?;
                 Some(self.materialize_opt_str_some(piece, repr))
+            }
+            // `some((s1, s2))` — a `(String, String)` tuple literal payload (the
+            // if-merged Option ctor the fuzz index-374 divergence exposed: an
+            // un-admitted payload left the bind Opaque and `option.unwrap_or_else`
+            // misread len 0 as None — the fallback ran on a Some). Build the tuple
+            // (both slots owned Strings), move it into the 1-element Option, and
+            // route the drop to `$__drop_opt_str_str` (both slots + tuple + wrapper
+            // — the flat default would leak both Strings).
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.kind, IrExprKind::Tuple { .. })
+                    && matches!(&expr.ty,
+                        Ty::Tuple(tys) if tys.len() == 2
+                            && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let IrExprKind::Tuple { elements } = &expr.kind else { return None };
+                let elements = elements.clone();
+                let piece = self.try_lower_tuple_construct(&elements)?;
+                let obj = self.materialize_opt_str_some(piece, repr);
+                self.variant_drop_handles.insert(obj, "opt_str_str".to_string());
+                Some(obj)
             }
             // `Some((k, v))` — a `(String, <scalar>)` tuple literal payload (`map.find`'s
             // `__skv_find_some(k, v) = Some((kc, v))`). Build the tuple (`try_lower_tuple_

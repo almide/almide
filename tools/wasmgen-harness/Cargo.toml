@@ -19,7 +19,8 @@ name = "wasmgen-harness"
 path = "src/main.rs"
 
 [dependencies]
-almide = { path = "../.." }
+almide-mir = { path = "../../crates/almide-mir" }
+wat = "1"
 
 [profile.release]
 opt-level = 2

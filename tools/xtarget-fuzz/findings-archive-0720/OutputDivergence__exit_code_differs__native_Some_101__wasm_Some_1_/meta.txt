@@ -1,0 +1,7 @@
+seed        = 20260718
+index       = 10
+origin      = mutation of /Users/o6lvl4/workspace/github.com/almide/almide/spec/stdlib/heredoc_test.almd
+rung        = Run
+kind        = OutputDivergence
+summary     = exit code differs: native=Some(101) wasm=Some(1)
+reproduce   = xtarget-fuzz replay --seed 20260718 --index 10

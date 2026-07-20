@@ -212,6 +212,38 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
         impl<'a> IrMutVisitor for Discover<'a> {
             fn visit_expr_mut(&mut self, expr: &mut almide_ir::IrExpr) {
                 walk_expr_mut(self, expr);
+                // A CROSS-MODULE generic call the frontend already FLATTENED to its
+                // v0 name (`m.stash(41)` → `Named { almide_rt_m_stash }` — the
+                // #788/#782 crossmod cell): match the exact flatten spelling per
+                // generic (module list + fn name — no string parsing), so the call
+                // site instantiates exactly like a `Module { m, f }` one.
+                if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind {
+                    let n = name.as_str();
+                    for (gi, g) in self.generics.iter().enumerate() {
+                        let flat = format!("almide_rt_{}_{}", self.module_names[g.mi], g.name);
+                        if n != flat { continue; }
+                        let ptys = &self.param_types[gi];
+                        let bindings = collect_mono_bindings(&g.bounds, args, ptys);
+                        let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
+                            !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
+                            && !matches!(ty, Ty::TypeVar(_))
+                            && !ty.contains_typevar()
+                        );
+                        if !all_concrete { continue; }
+                        let generic_names: Vec<String> = self.generics[gi].bounds.iter()
+                            .map(|b| b.type_var.clone()).collect::<std::collections::HashSet<_>>()
+                            .into_iter().collect::<Vec<_>>();
+                        let mut sorted = generic_names;
+                        sorted.sort();
+                        let suffix = sorted.iter()
+                            .filter_map(|g| bindings.get(g))
+                            .filter_map(|t| ty_to_name(t))
+                            .collect::<Vec<_>>()
+                            .join("_");
+                        self.out.push((g.mi, g.fi, bindings, suffix));
+                        break;
+                    }
+                }
                 if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &expr.kind {
                     let m = module.as_str();
                     let f = func.as_str();
@@ -340,6 +372,38 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
     impl<'a> IrMutVisitor for Rewriter<'a> {
         fn visit_expr_mut(&mut self, expr: &mut almide_ir::IrExpr) {
             walk_expr_mut(self, expr);
+            // The FLATTENED cross-module generic call (the Discover Named arm's
+            // twin): rewrite `Named { almide_rt_m_stash }` to the specialized
+            // instance's own flatten spelling (`almide_rt_m_stash__Int`) — the
+            // SAME name the module-fn flattening gives the pushed instance.
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &mut expr.kind {
+                let n = name.as_str().to_string();
+                for (gi, g) in self.generics.iter().enumerate() {
+                    let m = self.module_names[g.mi].clone();
+                    let flat = format!("almide_rt_{}_{}", m, g.name);
+                    if n != flat { continue; }
+                    let bindings = collect_mono_bindings(&g.bounds, args, &self.param_types[gi]);
+                    let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
+                        !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
+                        && !matches!(ty, Ty::TypeVar(_))
+                        && !ty.contains_typevar()
+                    );
+                    if !all_concrete { break; }
+                    let generic_names: std::collections::HashSet<String> = g.bounds.iter()
+                        .map(|b| b.type_var.clone()).collect();
+                    let mut sorted: Vec<String> = generic_names.into_iter().collect();
+                    sorted.sort();
+                    let suffix = sorted.iter()
+                        .filter_map(|gn| bindings.get(gn))
+                        .filter_map(|t| ty_to_name(t))
+                        .collect::<Vec<_>>()
+                        .join("_");
+                    if let Some(new_name) = self.rename.get(&(m.clone(), g.name.clone(), suffix)) {
+                        *name = sym(&format!("almide_rt_{}_{}", m, new_name));
+                    }
+                    break;
+                }
+            }
             if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &mut expr.kind {
                 let m = module.as_str().to_string();
                 let f = func.as_str().to_string();

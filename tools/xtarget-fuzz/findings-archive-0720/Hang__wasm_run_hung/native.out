@@ -1,0 +1,10 @@
+exit_code = Some(1)
+timed_out = false
+
+--- stdout ---
+
+--- stderr ---
+
+thread 'main' (50934152) has overflowed its stack
+fatal runtime error: stack overflow, aborting
+

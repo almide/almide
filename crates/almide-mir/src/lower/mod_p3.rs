@@ -389,6 +389,12 @@ impl LowerCtx {
     /// The `Assign` statement arm of [`Self::lower_stmt`] — verbatim move
     /// (#781 decomposition; the match bindings become parameters).
     fn lower_stmt_assign(&mut self, var: VarId, value: &IrExpr) -> Result<(), LowerError> {
+                // ASSIGN to a SHARED-CELL var (cells.rs): write through the cell slot —
+                // rebinding a local copy would silently vanish for the sharing closure
+                // (the same hazard as a mutable global, function-locally).
+                if let Some(&cell) = self.cell_of.get(&var) {
+                    return self.lower_cell_assign(var, cell, value);
+                }
                 // ASSIGN to a MUTABLE module-level `var`: write through its STORAGE SLOT
                 // (`lower_bind` below would rebind a function-LOCAL copy and the write
                 // silently vanishes for every other function). The `value_of` gate skips a
@@ -777,6 +783,44 @@ impl LowerCtx {
                 if !stored {
                     self.ops.truncate(ops_mark);
                     self.live_heap_handles.truncate(lhh_mark);
+                    // A HEAP String/Value element (`xs[0] = "Z"` — the C-136 case-5
+                    // shape): desugar to the FUNCTIONAL rebind `xs = list.set(xs, i, v)`
+                    // — the router picks the registered rc-correct `_str`/`_value` twin
+                    // (rc_dec the replaced element + own the new), and the ordinary
+                    // Assign machinery swaps the local (the map-insert discipline).
+                    if matches!(&value.ty, Ty::String) || crate::lower::is_value_ty(&value.ty) {
+                        {
+                            let list_ty = Ty::Applied(
+                                almide_lang::types::constructor::TypeConstructorId::List,
+                                vec![value.ty.clone()],
+                            );
+                            let xs_expr = IrExpr {
+                                kind: IrExprKind::Var { id: target },
+                                ty: list_ty.clone(),
+                                span: value.span,
+                                def_id: None,
+                            };
+                            let call = IrExpr {
+                                kind: IrExprKind::Call {
+                                    target: CallTarget::Module {
+                                        module: almide_lang::intern::sym("list"),
+                                        func: almide_lang::intern::sym("set"),
+                                        def_id: None,
+                                    },
+                                    args: vec![xs_expr, index.clone(), value.clone()],
+                                    type_args: Vec::new(),
+                                },
+                                ty: list_ty,
+                                span: value.span,
+                                def_id: None,
+                            };
+                            let assign = IrStmt {
+                                kind: IrStmtKind::Assign { var: target, value: call },
+                                span: value.span.clone(),
+                            };
+                            return self.lower_stmt(&assign);
+                        }
+                    }
                     // STRICT value mode: an elided element write is an EXECUTABLE silent
                     // no-op (`xs[0] = "Z"` left the list unchanged on the verified default
                     // while native stored). REFUSE — the fn walls, v0 emits correct bytes.
@@ -960,7 +1004,7 @@ impl LowerCtx {
 
 
     /// The `Expr` (statement-position expression) arm of [`Self::lower_stmt`] — verbatim move (#781).
-    fn lower_stmt_expr(&mut self, expr: &IrExpr) -> Result<(), LowerError> {
+    pub(crate) fn lower_stmt_expr(&mut self, expr: &IrExpr) -> Result<(), LowerError> {
         match &expr.kind {
                 // A Unit `if` statement EXECUTES (only the taken arm's effects run) when
                 // its cond is a scalar; otherwise it falls back to the linearization.
@@ -981,6 +1025,14 @@ impl LowerCtx {
                             }
                         }
                     }
+                    // A TUPLE subject of scalar elements in STATEMENT position — the
+                    // heap-branch tail-duplication rewrites `let s = match (…) {…};
+                    // use(s)` into this Unit form, so the refinement chain needs a
+                    // unit sibling (real IfThen/Else/EndIf markers; only the taken
+                    // arm's effects run — the linearization guard stays for the rest).
+                    if self.try_lower_tuple_refinement_unit_match(subject, arms) {
+                        return Ok(());
+                    }
                     self.lower_branch(expr)
                 }
                 IrExprKind::If { .. } => self.lower_branch(expr),
@@ -998,8 +1050,11 @@ impl LowerCtx {
                     }
                     if let Some(t) = tail {
                         match &t.kind {
+                            // Same statement-dispatcher routing as the arm-tail
+                            // (control.rs): a Block-tail in-place mutator must
+                            // take the functional-rebind interceptions (#782).
                             IrExprKind::Call { .. } if matches!(t.ty, Ty::Unit) => {
-                                self.lower_effect_call(t)?
+                                self.lower_stmt_expr(t)?
                             }
                             // A Block-TAIL `if` (the TCO loop body is `{ if … }`, so the base-check
                             // arrives HERE, not via the bare-If statement arm): EXECUTE it via
@@ -1021,6 +1076,13 @@ impl LowerCtx {
                                     if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
                                         done = self.try_lower_unit_if(cond, then, else_);
                                     }
+                                }
+                                // The tuple-refinement unit chain (the Block-tail twin
+                                // of the statement-Match hook — the heap-branch tail
+                                // duplication lands the match HERE when the `let` was
+                                // a block's last statement).
+                                if !done {
+                                    done = self.try_lower_tuple_refinement_unit_match(subject, arms);
                                 }
                                 if !done {
                                     self.lower_branch(t)?;
@@ -1374,6 +1436,12 @@ impl LowerCtx {
     }
 
     pub(crate) fn value_or_global(&mut self, var: VarId) -> Result<ValueId, LowerError> {
+        // A SHARED-CELL var (cells.rs) reads its cell slot FRESH on every reference —
+        // checked BEFORE `value_of` (a cell var must never be cached: an intervening
+        // closure call may have written the cell, exactly like a mutable global).
+        if let Some(&cell) = self.cell_of.get(&var) {
+            return self.lower_cell_read(var, cell);
+        }
         if let Some(&v) = self.value_of.get(&var) {
             return Ok(v);
         }
@@ -1509,6 +1577,25 @@ impl LowerCtx {
                             self.record_masks.remove(&dst);
                             self.variant_drop_handles.insert(dst, name);
                         }
+                        self.value_of.insert(var, dst);
+                        return Ok(dst);
+                    }
+                }
+                // An OPTION-ctor heap global (`let MAYBE = some(Cfg { name: "opt" })` —
+                // the crossmod option_record_toplet): a call-free `some(...)`/`none`
+                // initializer builds through the SAME ctor builder a local `let o =
+                // some(..)` uses (allocs + stores only, zero `CallFn` — the count gate
+                // stays exact), which registers the Option's own drop route. Tracked in
+                // `materialized_options` so a `match m.MAYBE { some(c) => … }` over the
+                // fresh copy EXECUTES (reads the real len-as-tag).
+                if matches!(init.kind, IrExprKind::OptionSome { .. } | IrExprKind::OptionNone)
+                    && !crate::lower::expr_contains_call(&init)
+                {
+                    if let Some(dst) = self.try_lower_option_ctor(&init, &ty) {
+                        if !self.live_heap_handles.contains(&dst) {
+                            self.live_heap_handles.push(dst);
+                        }
+                        self.materialized_options.insert(dst);
                         self.value_of.insert(var, dst);
                         return Ok(dst);
                     }

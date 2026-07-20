@@ -207,6 +207,23 @@ fn map_get_hval(m: Map[String, List[Int]], k: String) -> Option[List[Int]] = {
   else __hvl_some(h, n, idx)
 }
 
+// The stored value (or the default) via the hshare co-own idiom — the msv
+// get_or mirrored onto the hval split layout (keys 0..n-1, values n..2n-1).
+// Serves every handle-valued map the router sends here (List[scalar] values
+// AND closure blocks — the slot is a plain shared handle either way).
+fn __hvl_elem(h: Int, n: Int, idx: Int) -> List[Int] = {
+  let v: List[Int] = prim.load_handle(h + 12 + (n + idx) * 8)
+  v
+}
+
+fn map_get_or_hval(m: Map[String, List[Int]], k: String, default: List[Int]) -> List[Int] = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let idx = __hvl_find(h, n, k, 0)
+  if idx < 0 then default
+  else __hvl_elem(h, n, idx)
+}
+
 // ── list.group_by ── v0: fold in list order; a key's group keeps its FIRST-seen
 // position, each element appends to its group (native pushes to the entry's Vec).
 // The accumulator recursion is __hvf_at's exact shape (each step's map is a fresh
@@ -260,4 +277,23 @@ fn __gby_step(xs: List[Int], f: (Int) -> String, n: Int, i: Int, m: Map[String, 
 fn list_group_by(xs: List[Int], f: (Int) -> String) -> Map[String, List[Int]] = {
   let n = prim.load32(prim.handle(xs) + 4)
   __gby_step(xs, f, n, 0, map_new_hval())
+}
+
+// map.keys — each entry's key into a fresh List[String], deep-copied so the list
+// owns them independently of the map (the skv walk — hval mirrors its layout).
+fn __hvl_keys_fill(sh: Int, oh: Int, entries: Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let _c = __hvl_store_key(oh + 12 + i * 8, k)
+    __hvl_keys_fill(sh, oh, entries, i + 1)
+  }
+
+fn map_keys_hval(m: Map[String, List[Int]]) -> List[String] = {
+  let h = prim.handle(m)
+  let entries = prim.load32(h + 4)
+  let out = prim.alloc_list_str(entries)
+  let oh = prim.handle(out)
+  let _x = __hvl_keys_fill(h, oh, entries, 0)
+  out
 }

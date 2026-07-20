@@ -1,0 +1,18 @@
+// @contract: C-159
+// list.binary_search must return the SAME index on both targets even when the
+// key occurs more than once. Rust std's binary_search (the native oracle) is
+// the BRANCHLESS 1.52+ loop that does NOT early-return on equality — an
+// all-equal [2,2,2,2,2] search lands on index 4 — while the wasm self-host
+// replicated the classic early-exit loop and returned 2 (differential-fuzz:
+// native some(4) vs wasm some(2), a silent wrong value; both indices are
+// "valid" per the std spec, but native == wasm byte-identity demands one).
+fn main() -> Unit = {
+  println("dup5  = ${list.binary_search([2, 2, 2, 2, 2], 2)}")
+  println("dup4  = ${list.binary_search([2, 2, 2, 2], 2)}")
+  println("mid   = ${list.binary_search([1, 3, 3, 3, 9], 3)}")
+  println("one   = ${list.binary_search([7], 7)}")
+  println("none  = ${list.binary_search([1, 2, 4], 3)}")
+  println("empty = ${list.binary_search([], 5)}")
+  println("first = ${list.binary_search([1, 2, 3], 1)}")
+  println("last  = ${list.binary_search([1, 2, 3], 3)}")
+}

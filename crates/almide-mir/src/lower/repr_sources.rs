@@ -32,6 +32,23 @@ pub fn collect_interp_anon_records(
                                 self.out.push(fields.clone());
                             }
                         }
+                        // `${[a]}` — a List[<structural record>] part: collect the
+                        // ELEMENT shape so the generator emits its `__repr_anonrec_<h>`
+                        // plus the `__repr_list_anonrec_<h>` walker the interp routes to.
+                        if let Ty::Applied(
+                            almide_lang::types::constructor::TypeConstructorId::List,
+                            a,
+                        ) = &expr.ty
+                        {
+                            if a.len() == 1 {
+                                if let Ty::Record { fields } = &a[0] {
+                                    let key = anon_record_drop_name(fields);
+                                    if self.seen.insert(key) {
+                                        self.out.push(fields.clone());
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -59,12 +76,46 @@ pub struct InterpReprContainers {
     pub rec_lists: std::collections::BTreeSet<String>,
     pub rec_opts: std::collections::BTreeSet<String>,
     pub var_lists: std::collections::BTreeSet<String>,
+    /// `${Option[<non-generic variant>]}` parts (`opt_tree=${opt_tree}`) — the
+    /// generator emits `__repr_opt_<V>` for each emittable one.
+    pub var_opts: std::collections::BTreeSet<String>,
+    /// `${List[<generic-variant instantiation>]}` / `${Option[<instantiation>]}`
+    /// parts (`forest=${forest}` over `List[Tree[Int]]`) — the generator emits the
+    /// instantiation-keyed walkers (`__repr_list_<key>` / `__repr_opt_<key>`).
+    pub var_inst_lists: Vec<(String, Vec<Ty>)>,
+    pub var_inst_opts: Vec<(String, Vec<Ty>)>,
     pub rec_maps: std::collections::BTreeSet<String>,
     pub var_maps: std::collections::BTreeSet<String>,
     /// GENERIC-variant interp instantiations (`${l}` over `ReprEither[Int, String]`)
     /// — the (name, args) pairs the generator emits an instantiation-keyed
     /// `__repr_<key>` for (deduped + sorted at generation).
     pub var_insts: Vec<(String, Vec<Ty>)>,
+    /// SCALAR-component tuple CONTAINER interp shapes (`${list.sort(tups)}` over
+    /// `List[(Int, String)]`, `${list.min(tups)}` over `Option[(Bool, Bool)]`) —
+    /// component-type lists keyed by [`tuple_repr_ident`]; the generator emits
+    /// `__repr_tup_<key>` + the `__repr_list_tup_<key>` / `__repr_opt_tup_<key>`
+    /// walkers (Int/Bool/String components only; others keep the honest wall).
+    pub tup_lists: Vec<Vec<Ty>>,
+    pub tup_opts: Vec<Vec<Ty>>,
+    /// A bare `${obj}` over a `Value` part exists somewhere — the generator emits
+    /// the `__repr_Value` wrapper over the value_core JSON serializer (C-060).
+    pub value_parts: bool,
+}
+
+/// The generated-repr key for a scalar-component tuple shape — one tag per
+/// component (`(Int, String)` → `i_s`). Derived IDENTICALLY at the interp call
+/// site (mod_p4) and in the generator, so the call links by construction.
+/// `None` for any component outside Int/Bool/String (the honest-wall gate).
+pub(crate) fn tuple_repr_ident(tys: &[Ty]) -> Option<String> {
+    let tag = |t: &Ty| -> Option<&'static str> {
+        match t {
+            Ty::Int => Some("i"),
+            Ty::Bool => Some("b"),
+            Ty::String => Some("s"),
+            _ => None,
+        }
+    };
+    Some(tys.iter().map(tag).collect::<Option<Vec<_>>>()?.join("_"))
 }
 pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpReprContainers {
     use almide_ir::visit::{walk_expr, IrVisitor};
@@ -81,18 +132,59 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
                     let almide_ir::IrStringPart::Expr { expr } = p else { continue };
                     match &expr.ty {
                         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-                            if let Ty::Named(n, _) = &a[0] {
+                            if let Ty::Named(n, args) = &a[0] {
                                 if self.rec_names.contains(n.as_str()) {
                                     self.out.rec_lists.insert(n.as_str().to_string());
                                 } else if self.var_names.contains(n.as_str()) {
-                                    self.out.var_lists.insert(n.as_str().to_string());
+                                    if args.is_empty() {
+                                        self.out.var_lists.insert(n.as_str().to_string());
+                                    } else {
+                                        // A generic-variant INSTANTIATION element
+                                        // (`${forest}` over List[Tree[Int]]): the walker
+                                        // needs the element's instantiation-keyed repr too.
+                                        self.out
+                                            .var_inst_lists
+                                            .push((n.as_str().to_string(), args.clone()));
+                                        self.out
+                                            .var_insts
+                                            .push((n.as_str().to_string(), args.clone()));
+                                    }
+                                }
+                            }
+                            // `${List[(Int, String)]}` — a scalar-component tuple
+                            // element: the generator emits its `__repr_list_tup_<key>`.
+                            if let Ty::Tuple(ts) = &a[0] {
+                                if let Some(key) = tuple_repr_ident(ts) {
+                                    if !self.out.tup_lists.iter().any(|e| tuple_repr_ident(e).as_deref() == Some(&key)) {
+                                        self.out.tup_lists.push(ts.clone());
+                                    }
                                 }
                             }
                         }
                         Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
-                            if let Ty::Named(n, _) = &a[0] {
+                            if let Ty::Named(n, args) = &a[0] {
                                 if self.rec_names.contains(n.as_str()) {
                                     self.out.rec_opts.insert(n.as_str().to_string());
+                                } else if self.var_names.contains(n.as_str()) {
+                                    if args.is_empty() {
+                                        self.out.var_opts.insert(n.as_str().to_string());
+                                    } else {
+                                        self.out
+                                            .var_inst_opts
+                                            .push((n.as_str().to_string(), args.clone()));
+                                        self.out
+                                            .var_insts
+                                            .push((n.as_str().to_string(), args.clone()));
+                                    }
+                                }
+                            }
+                            // `${Option[(Bool, Bool)]}` (a list.min/max result) — the
+                            // generator emits its `__repr_opt_tup_<key>`.
+                            if let Ty::Tuple(ts) = &a[0] {
+                                if let Some(key) = tuple_repr_ident(ts) {
+                                    if !self.out.tup_opts.iter().any(|e| tuple_repr_ident(e).as_deref() == Some(&key)) {
+                                        self.out.tup_opts.push(ts.clone());
+                                    }
                                 }
                             }
                         }
@@ -114,6 +206,11 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
                             if !args.is_empty() && self.var_names.contains(n.as_str()) =>
                         {
                             self.out.var_insts.push((n.as_str().to_string(), args.clone()));
+                        }
+                        // A bare `${obj}` over a `Value` — the generator emits the
+                        // `__repr_Value` wrapper (value_core's JSON serializer, C-060).
+                        t if crate::lower::is_value_ty(t) => {
+                            self.out.value_parts = true;
                         }
                         _ => {}
                     }
@@ -164,11 +261,19 @@ pub(crate) fn repr_inst_ident(name: &str, args: &[Ty]) -> String {
 /// instantiation brick — scalar/String leaves only, so the generated fn's param
 /// annotation (`e: ReprEither[Int, String]`) type-checks.
 fn repr_ty_spelling(ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
     Some(match ty {
         Ty::Int => "Int".to_string(),
         Ty::Bool => "Bool".to_string(),
         Ty::String => "String".to_string(),
         Ty::Float => "Float".to_string(),
+        // A `List[Int]` instantiation arg (`Tree[List[Int]]` — the nested
+        // recursive-generic C-010 shape).
+        Ty::Applied(TypeConstructorId::List, a)
+            if a.len() == 1 && matches!(a[0], Ty::Int) =>
+        {
+            "List[Int]".to_string()
+        }
         _ => return None,
     })
 }
@@ -278,6 +383,45 @@ fn emit_variant_repr_body(
                         "    let v{i}: {rn_s} = prim.load_handle(h + {off})\n    let f{i} = __repr_rec_{rn_fn}(v{i})\n"
                     ));
                 }
+                // An ANONYMOUS-record payload (`Circle({ r: Int })` — #628/C-079):
+                // borrow the payload block and render via its `__repr_anonrec_<hash>`
+                // (the record half emits one per variant-payload shape).
+                Ty::Record { fields: rf } => {
+                    let hash = anon_record_drop_name(rf);
+                    let spell = anon_record_source_ty(rf);
+                    out.push_str(&format!(
+                        "    let v{i}: {spell} = prim.load_handle(h + {off})\n    let f{i} = __repr_{hash}(v{i})\n"
+                    ));
+                }
+                // A `List[Int]` payload (`Leaf([1, 2])` in `Tree[List[Int]]` — C-010):
+                // borrow the block, render via the generated `__repr_list_int` helper
+                // (the dispatch name `list.to_string` is self-host-only, unknown to
+                // the checker — the string.cmp lesson).
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                    if a.len() == 1 && matches!(a[0], Ty::Int) =>
+                {
+                    out.push_str(&format!(
+                        "    let v{i}: List[Int] = prim.load_handle(h + {off})\n    let f{i} = __repr_list_int(v{i})\n"
+                    ));
+                }
+                // A generic-variant INSTANTIATION field (`Node(Tree[Int], Tree[Int])`
+                // after substitution — the recursive-generic C-010 class): recurse
+                // through the SAME instantiation-keyed fn (terminates on the finite
+                // value; the admissibility gate admits only the exact self-reference).
+                Ty::Named(n, args) if !args.is_empty() => {
+                    let key = repr_inst_ident(n.as_str(), args);
+                    let spell = format!(
+                        "{}[{}]",
+                        n.as_str(),
+                        args.iter()
+                            .map(|a| repr_ty_spelling(a).unwrap_or_else(|| "Int".to_string()))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                    out.push_str(&format!(
+                        "    let v{i}: {spell} = prim.load_handle(h + {off})\n    let f{i} = __repr_{key}(v{i})\n"
+                    ));
+                }
                 _ => {
                     // an emittable nested variant (the fixpoint admitted it)
                     let fv = variant_field_name(ty, names).expect("fixpoint-admitted");
@@ -293,6 +437,29 @@ fn emit_variant_repr_body(
         out.push_str(&format!("    {concat}\n  }}\n"));
     }
     out.push_str("  else \"\"\n}\n");
+}
+
+/// The Float display helpers (`__repr_float` — shortest-round-trip with the
+/// integral `.0` dropped): emitted once, on demand, by either the decl-scan gate
+/// or the instantiation loop (function order in the generated source is free).
+fn emit_float_helpers(out: &mut String) {
+    out.push_str(
+        "fn __repr_float_ends_dot0(src: Int, n: Int) -> Bool =\n  \
+           if n < 2 then false\n  \
+           else if prim.load8(src + n - 2) != 46 then false\n  \
+           else prim.load8(src + n - 1) == 48\n\
+         fn __repr_float_copy(src: Int, dst: Int, n: Int) -> Int =\n  \
+           if n <= 0 then dst\n  \
+           else {\n    prim.store8(dst, prim.load8(src))\n    __repr_float_copy(src + 1, dst + 1, n - 1)\n  }\n\
+         fn __repr_float(x: Float) -> String = {\n  \
+           let s = float.to_string(x)\n  \
+           let sh = prim.handle(s)\n  \
+           let n = prim.load32(sh + 4)\n  \
+           if __repr_float_ends_dot0(sh + 12, n) then {\n    \
+             let out = prim.alloc_str(n - 2)\n    \
+             let e = __repr_float_copy(sh + 12, prim.handle(out) + 12, n - 2)\n    \
+             out\n  } else s\n}\n",
+    );
 }
 
 /// A ctor/record field whose slot renders as a plain signed decimal via
@@ -370,6 +537,12 @@ pub fn generate_variant_repr_sources(
                         // A SCALAR-record ctor field (`Label { at: Point }`) renders via the
                         // record section's unconditional `__repr_rec_<R>`.
                         || matches!(ty, Ty::Named(n, _) if scalar_rec_names.contains(n.as_str()))
+                        // An ANONYMOUS-record payload (`Circle({ r: Int })` — #628/C-079)
+                        // renders via its `__repr_anonrec_<hash>` (emitted for every
+                        // variant-payload shape by the record half).
+                        || matches!(ty, Ty::Record { fields }
+                            if fields.iter().all(|(_, t)|
+                                repr_int_field(t) || matches!(t, Ty::Bool | Ty::String)))
                         || variant_field_name(ty, &names)
                             .map(|fv| emittable.contains(&fv))
                             .unwrap_or(false)
@@ -387,7 +560,17 @@ pub fn generate_variant_repr_sources(
     // Records also emit through this generator (the section below) — only bail when
     // NEITHER kind has an emittable member.
     let any_record = type_decls.iter().any(|d| matches!(&d.kind, IrTypeDeclKind::Record { .. }));
-    if emittable.is_empty() && !any_record && interp_anon_recs.is_empty() {
+    if emittable.is_empty()
+        && !any_record
+        && interp_anon_recs.is_empty()
+        && interp_containers.tup_lists.is_empty()
+        && interp_containers.tup_opts.is_empty()
+        && !interp_containers.value_parts
+        // A GENERIC-variant program can have ZERO bare-emittable variants (every
+        // field a type param) yet need its INSTANTIATION-keyed reprs (`Tree[T]`
+        // used only as Tree[Int]/Tree[String] — the recursive-generic C-010 class).
+        && interp_containers.var_insts.is_empty()
+    {
         return String::new();
     }
     // The shared QUOTE helper (v0's escape set: \" \\ \n \r \t).
@@ -435,24 +618,14 @@ pub fn generate_variant_repr_sources(
             })
     });
     if need_float {
-        out.push_str(
-        "fn __repr_float_ends_dot0(src: Int, n: Int) -> Bool =\n  \
-           if n < 2 then false\n  \
-           else if prim.load8(src + n - 2) != 46 then false\n  \
-           else prim.load8(src + n - 1) == 48\n\
-         fn __repr_float_copy(src: Int, dst: Int, n: Int) -> Int =\n  \
-           if n <= 0 then dst\n  \
-           else {\n    prim.store8(dst, prim.load8(src))\n    __repr_float_copy(src + 1, dst + 1, n - 1)\n  }\n\
-         fn __repr_float(x: Float) -> String = {\n  \
-           let s = float.to_string(x)\n  \
-           let sh = prim.handle(s)\n  \
-           let n = prim.load32(sh + 4)\n  \
-           if __repr_float_ends_dot0(sh + 12, n) then {\n    \
-             let out = prim.alloc_str(n - 2)\n    \
-             let e = __repr_float_copy(sh + 12, prim.handle(out) + 12, n - 2)\n    \
-             out\n  } else s\n}\n",
-        );
+        emit_float_helpers(&mut out);
     }
+    // Instantiation-keyed repr bookkeeping (filled by the inst loop below): which
+    // (name, args) actually EMITTED (walkers gate on it), and whether any inst
+    // field needs the Float display helpers.
+    let mut emitted_insts: Vec<(String, Vec<Ty>, String)> = Vec::new();
+    let mut inst_needs_float = false;
+    let mut inst_needs_list_int = false;
     let mut sorted: Vec<&almide_ir::IrTypeDecl> = type_decls
         .iter()
         .filter(|d| {
@@ -497,23 +670,132 @@ pub fn generate_variant_repr_sources(
             gps.iter().map(|g| g.name).zip(iargs.iter().cloned()).collect();
         let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else { continue };
         let flat = flatten_variant_cases(cases, Some(&subst));
-        // Admissibility: every INSTANTIATED field a plain int/Bool/String leaf (no
-        // Float/nested composition in this brick — those keep the unlinked wall).
+        // Admissibility: every INSTANTIATED field a plain int/Bool/String/Float leaf,
+        // a `List[Int]` payload (the `Tree[List[Int]]` shape — rendered via
+        // list.to_string), or an EXACT SELF-reference (`Node(Tree[T], Tree[T])` after
+        // substitution — the recursive-generic C-010 class; the body recurses through
+        // the SAME instantiation-keyed fn, terminating on the finite value). Anything
+        // else keeps the honest unlinked wall.
+        let self_ref = |t: &Ty| {
+            matches!(t, Ty::Named(n, a) if n.as_str() == iname.as_str() && a == iargs)
+        };
         if !flat.iter().all(|(_, fs)| {
-            fs.iter().all(|(_, t)| repr_int_field(t) || matches!(t, Ty::Bool | Ty::String))
+            fs.iter().all(|(_, t)| {
+                repr_int_field(t)
+                    || matches!(t, Ty::Bool | Ty::String | Ty::Float)
+                    || matches!(t,
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                            if a.len() == 1 && matches!(a[0], Ty::Int))
+                    || self_ref(t)
+            })
         }) {
             continue;
+        }
+        if flat.iter().any(|(_, fs)| fs.iter().any(|(_, t)| matches!(t, Ty::Float))) {
+            inst_needs_float = true;
+        }
+        if flat.iter().any(|(_, fs)| {
+            fs.iter().any(|(_, t)| matches!(t,
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                    if a.len() == 1 && matches!(a[0], Ty::Int)))
+        }) {
+            inst_needs_list_int = true;
         }
         let key = repr_inst_ident(iname, iargs);
         let tspell = format!("{}[{}]", iname, spells.join(", "));
         emit_variant_repr_body(&mut out, &key, &tspell, &flat, &scalar_rec_names, &names);
+        emitted_insts.push((iname.clone(), iargs.clone(), tspell));
+    }
+    // The instantiation-keyed CONTAINER walkers (`${forest}` over `List[Tree[Int]]`,
+    // `${opt}` over `Option[Tree[String]]`) — same loops as the non-generic variant
+    // walkers, keyed + typed by the instantiation.
+    for (iname, iargs) in &interp_containers.var_inst_lists {
+        let Some((_, _, tspell)) = emitted_insts
+            .iter()
+            .find(|(n, a, _)| n == iname && a == iargs)
+        else {
+            continue;
+        };
+        let key = repr_inst_ident(iname, iargs);
+        out.push_str(&format!(
+            "fn __repr_list_{key}_go(h: Int, n: Int, i: Int, acc: String) -> String =\n  \
+               if i >= n then acc + \"]\"\n  \
+               else {{\n    \
+                 let e: {tspell} = prim.load_handle(h + 12 + i * 8)\n    \
+                 let s = __repr_{key}(e)\n    \
+                 let acc2 = if i == 0 then acc + s else acc + \", \" + s\n    \
+                 __repr_list_{key}_go(h, n, i + 1, acc2)\n  }}\n\
+             fn __repr_list_{key}(xs: List[{tspell}]) -> String = {{\n  \
+               let h = prim.handle(xs)\n  \
+               __repr_list_{key}_go(h, prim.load32(h + 4), 0, \"[\")\n}}\n"
+        ));
+    }
+    for (iname, iargs) in &interp_containers.var_inst_opts {
+        let Some((_, _, tspell)) = emitted_insts
+            .iter()
+            .find(|(n, a, _)| n == iname && a == iargs)
+        else {
+            continue;
+        };
+        let key = repr_inst_ident(iname, iargs);
+        out.push_str(&format!(
+            "fn __repr_opt_{key}(o: Option[{tspell}]) -> String = {{\n  \
+               let h = prim.handle(o)\n  \
+               if prim.load32(h + 4) == 0 then \"none\"\n  \
+               else {{\n    \
+                 let v: {tspell} = prim.load_handle(h + 12)\n    \
+                 \"some(\" + __repr_{key}(v) + \")\"\n  }}\n}}\n"
+        ));
+    }
+    if inst_needs_float && !need_float {
+        emit_float_helpers(&mut out);
+    }
+    if inst_needs_list_int {
+        out.push_str(
+            "fn __repr_li_go(h: Int, n: Int, i: Int, acc: String) -> String =\n  \
+               if i >= n then acc + \"]\"\n  \
+               else {\n    \
+                 let s = int.to_string(prim.load64(h + 12 + i * 8))\n    \
+                 let acc2 = if i == 0 then acc + s else acc + \", \" + s\n    \
+                 __repr_li_go(h, n, i + 1, acc2)\n  }\n\
+             fn __repr_list_int(v: List[Int]) -> String = {\n  \
+               let h = prim.handle(v)\n  \
+               __repr_li_go(h, prim.load32(h + 4), 0, \"[\")\n}\n",
+        );
     }
     // Decomposed (#781, cog 137): the NAMED-RECORD repr generation is a verbatim
     // text move into `generate_record_repr_sources_into`.
+    // A VARIANT-PAYLOAD anonymous record (`Circle({ r: Int })` — #628/C-079) needs its
+    // `__repr_anonrec_<hash>` even when no interp part carries the bare shape: the
+    // emitted variant body above calls it. Extend the interp-collected shapes with
+    // every all-scalar Record payload of an EMITTED variant (dedup by hash below).
+    let mut all_anon_recs: Vec<Vec<(almide_lang::intern::Sym, Ty)>> = interp_anon_recs.to_vec();
+    for decl in type_decls {
+        let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else { continue };
+        if !emittable.contains(decl.name.as_str()) {
+            continue;
+        }
+        for case in cases {
+            let tys: Vec<Ty> = match &case.kind {
+                IrVariantKind::Unit => vec![],
+                IrVariantKind::Tuple { fields } => fields.clone(),
+                IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect(),
+            };
+            for ty in tys {
+                if let Ty::Record { fields } = &ty {
+                    if fields.iter().all(|(_, t)| {
+                        repr_int_field(t) || matches!(t, Ty::Bool | Ty::String)
+                    }) {
+                        all_anon_recs.push(fields.clone());
+                    }
+                }
+            }
+        }
+    }
     generate_record_repr_sources_into(
         &mut out,
         type_decls,
-        interp_anon_recs,
+        &all_anon_recs,
         interp_containers,
         &names,
         &emittable,
@@ -584,6 +866,10 @@ fn generate_record_repr_sources_into(
             let ok = fields.iter().all(|(_, ty)| {
                 repr_int_field(ty)
                     || matches!(ty, Ty::Bool | Ty::String)
+                    // A `Value` field (`Tool { params: Value }` — C-060) renders via
+                    // value_core's JSON serializer (`value_stringify`, the SAME routine
+                    // native's `almide_rt_value_stringify` mirrors).
+                    || crate::lower::is_value_ty(ty)
                     || variant_field_name(ty, &names)
                         .map(|fv| emittable.contains(&fv))
                         .unwrap_or(false)
@@ -651,6 +937,12 @@ fn generate_record_repr_sources_into(
                 )),
                 Ty::String => out.push_str(&format!(
                     "  let f{i} = __repr_quote(prim.load_str(h + {off}))
+"
+                )),
+                // A `Value` field — borrow the handle and JSON-serialize (C-060).
+                t if crate::lower::is_value_ty(t) => out.push_str(&format!(
+                    "  let v{i}: Value = prim.load_handle(h + {off})
+  let f{i} = value_stringify(v{i})
 "
                 )),
                 _ => {
@@ -723,6 +1015,24 @@ fn generate_record_repr_sources_into(
 "
         ));
     }
+    // ── `${Option[<variant>]}` interp parts (`opt_tree=${opt_tree}` — C-009) ──
+    for v in &interp_containers.var_opts {
+        if !emittable.contains(v) {
+            continue;
+        }
+        let v_fn = drop_fn_ident(v);
+        out.push_str(&format!(
+            "fn __repr_opt_{v_fn}(o: Option[{v}]) -> String = {{
+                 let h = prim.handle(o)
+                 if prim.load32(h + 4) == 0 then \"none\"
+                 else {{
+                     let v: {v} = prim.load_handle(h + 12)
+                     \"some(\" + __repr_{v_fn}(v) + \")\"
+  }}
+}}
+"
+        ));
+    }
     // ── `${List[<variant>]}` interp parts (`shapes=${shapes}`) — the variant element loop ──
     for v in &interp_containers.var_lists {
         if !emittable.contains(v) {
@@ -786,6 +1096,47 @@ fn generate_record_repr_sources_into(
     // NAME while the v1 BLOCK lays fields in SOURCE order — so each generated body reads
     // slots at the SOURCE index but concatenates in sorted-name order. No type-name prefix.
     // Scalar/String fields only (a nested payload keeps the compound.to_string wall).
+    //
+    // NOMINAL resolution (#627/C-072): an INFERRED record literal keeps its STRUCTURAL
+    // type, but native reprs it NOMINALLY when its sorted field-NAME set matches exactly
+    // ONE declared record — `{ zeta: 1, alpha: 2, mid: 3 }` prints `Rec { zeta: 1,
+    // alpha: 2, mid: 3 }` in DECLARATION order. Mirror that here: the body still reads
+    // each field at its SOURCE slot (the block layout), only the PREFIX and the print
+    // ORDER switch to the declaration's. No match (or an ambiguous one) keeps the
+    // sorted anonymous render.
+    let nominal_decls: Vec<(String, Vec<String>)> = type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            IrTypeDeclKind::Record { fields }
+                if d.generics.as_ref().map_or(true, |g| g.is_empty()) =>
+            {
+                Some((
+                    d.name.as_str().to_string(),
+                    fields.iter().map(|f| f.name.as_str().to_string()).collect(),
+                ))
+            }
+            _ => None,
+        })
+        .collect();
+    let resolve_nominal = |fields: &[(almide_lang::intern::Sym, Ty)]| -> Option<(String, Vec<String>)> {
+        let mut key: Vec<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+        key.sort_unstable();
+        let mut found: Option<&(String, Vec<String>)> = None;
+        for decl in &nominal_decls {
+            if decl.1.len() != key.len() {
+                continue;
+            }
+            let mut dk: Vec<&str> = decl.1.iter().map(|s| s.as_str()).collect();
+            dk.sort_unstable();
+            if dk == key {
+                if found.is_some() {
+                    return None; // ambiguous — keep the anonymous render
+                }
+                found = Some(decl);
+            }
+        }
+        found.cloned()
+    };
     let mut anon_sorted: Vec<&Vec<(almide_lang::intern::Sym, Ty)>> =
         interp_anon_recs.iter().collect();
     anon_sorted.sort_by_key(|f| anon_record_drop_name(f));
@@ -816,9 +1167,23 @@ fn generate_record_repr_sources_into(
                 )),
             }
         }
-        let mut order: Vec<usize> = (0..fields.len()).collect();
-        order.sort_by_key(|&i| fields[i].0.as_str());
-        let mut concat = String::from("\"{ \"");
+        // Print order + prefix: DECLARED (nominal) when the shape resolves, sorted
+        // anonymous otherwise.
+        let (prefix, order): (String, Vec<usize>) = match resolve_nominal(fields) {
+            Some((decl_name, decl_order)) => (
+                format!("{decl_name} {{ "),
+                decl_order
+                    .iter()
+                    .map(|dn| fields.iter().position(|(n, _)| n.as_str() == dn.as_str()).unwrap())
+                    .collect(),
+            ),
+            None => {
+                let mut order: Vec<usize> = (0..fields.len()).collect();
+                order.sort_by_key(|&i| fields[i].0.as_str());
+                ("{ ".to_string(), order)
+            }
+        };
+        let mut concat = format!("\"{prefix}\"");
         for (k, &i) in order.iter().enumerate() {
             if k > 0 {
                 concat.push_str(" + \", \"");
@@ -827,6 +1192,98 @@ fn generate_record_repr_sources_into(
         }
         concat.push_str(" + \" }\"");
         out.push_str(&format!("  {concat}\n}}\n"));
+        // The `${[a]}` LIST walker over this element shape (`__repr_list_anonrec_<h>`):
+        // borrowed element handles, each through the element repr above, joined `, `
+        // in `[` … `]`. Emitted for every admitted shape (a dead walker is inert).
+        out.push_str(&format!(
+            "fn __repr_list_{name}_go(hh: Int, n: Int, i: Int, acc: String) -> String =\n  \
+               if i >= n then acc\n  \
+               else {{\n    \
+                 let e: {param_ty} = prim.load_handle(hh + 12 + i * 8)\n    \
+                 let s = __repr_{name}(e)\n    \
+                 let acc2 = if i == 0 then acc + s else acc + \", \" + s\n    \
+                 __repr_list_{name}_go(hh, n, i + 1, acc2)\n  }}\n\
+             fn __repr_list_{name}(xs: List[{param_ty}]) -> String = {{\n  \
+               let hh = prim.handle(xs)\n  \
+               \"[\" + __repr_list_{name}_go(hh, prim.load32(hh + 4), 0, \"\") + \"]\"\n}}\n"
+        ));
+    }
+
+    // ── SCALAR-component tuple CONTAINER reprs (`__repr_tup_<key>` + walkers) ──
+    // `${list.sort(tups)}` over `List[(Int, String)]` / `${list.min(tups)}` over
+    // `Option[(Bool, Bool)]` (the list_total_order C-053 class). The tuple block is
+    // uniform i64 slots (component i at 12 + 8i); components render Int/Bool/String
+    // only (the collector's tuple_repr_ident gate). The bare element repr is shared;
+    // the list walker borrows element handles; the option walker reads the len-tag
+    // (`none` at 0) and the borrowed payload handle at slot 0.
+    let tup_spelling = |ts: &[Ty]| -> String {
+        let one = |t: &Ty| match t {
+            Ty::Int => "Int",
+            Ty::Bool => "Bool",
+            _ => "String",
+        };
+        format!("({})", ts.iter().map(one).collect::<Vec<_>>().join(", "))
+    };
+    let mut all_tups: Vec<&Vec<Ty>> =
+        interp_containers.tup_lists.iter().chain(interp_containers.tup_opts.iter()).collect();
+    all_tups.sort_by_key(|ts| tuple_repr_ident(ts));
+    all_tups.dedup_by_key(|ts| tuple_repr_ident(ts));
+    for ts in &all_tups {
+        let Some(key) = tuple_repr_ident(ts) else { continue };
+        let spell = tup_spelling(ts);
+        out.push_str(&format!("fn __repr_tup_{key}(e: {spell}) -> String = {{\n"));
+        out.push_str("  let h = prim.handle(e)\n");
+        for (i, t) in ts.iter().enumerate() {
+            let off = layout::slot_offset(i);
+            match t {
+                Ty::Int => out.push_str(&format!(
+                    "  let f{i} = int.to_string(prim.load64(h + {off}))\n"
+                )),
+                Ty::Bool => out.push_str(&format!(
+                    "  let f{i} = if prim.load64(h + {off}) == 1 then \"true\" else \"false\"\n"
+                )),
+                _ => out.push_str(&format!(
+                    "  let f{i} = __repr_quote(prim.load_str(h + {off}))\n"
+                )),
+            }
+        }
+        let body = (0..ts.len()).map(|i| format!("f{i}")).collect::<Vec<_>>().join(" + \", \" + ");
+        out.push_str(&format!("  \"(\" + {body} + \")\"\n}}\n"));
+    }
+    for ts in &interp_containers.tup_lists {
+        let Some(key) = tuple_repr_ident(ts) else { continue };
+        let spell = tup_spelling(ts);
+        out.push_str(&format!(
+            "fn __repr_list_tup_{key}_go(hh: Int, n: Int, i: Int, acc: String) -> String =\n  \
+               if i >= n then acc\n  \
+               else {{\n    \
+                 let e: {spell} = prim.load_handle(hh + 12 + i * 8)\n    \
+                 let s = __repr_tup_{key}(e)\n    \
+                 let acc2 = if i == 0 then acc + s else acc + \", \" + s\n    \
+                 __repr_list_tup_{key}_go(hh, n, i + 1, acc2)\n  }}\n\
+             fn __repr_list_tup_{key}(xs: List[{spell}]) -> String = {{\n  \
+               let hh = prim.handle(xs)\n  \
+               \"[\" + __repr_list_tup_{key}_go(hh, prim.load32(hh + 4), 0, \"\") + \"]\"\n}}\n"
+        ));
+    }
+    for ts in &interp_containers.tup_opts {
+        let Some(key) = tuple_repr_ident(ts) else { continue };
+        let spell = tup_spelling(ts);
+        out.push_str(&format!(
+            "fn __repr_opt_tup_{key}(o: Option[{spell}]) -> String = {{\n  \
+               let h = prim.handle(o)\n  \
+               if prim.load32(h + 4) == 0 then \"none\"\n  \
+               else {{\n    \
+                 let e: {spell} = prim.load_handle(h + 12)\n    \
+                 \"some(\" + __repr_tup_{key}(e) + \")\"\n  }}\n}}\n"
+        ));
+    }
+
+    // ── `${obj}` over a bare `Value` (C-060) ── the interp routes to `__repr_Value`;
+    // it is value_core's JSON serializer verbatim (native's almide_rt_value_stringify
+    // twin, so the two targets share one text).
+    if interp_containers.value_parts {
+        out.push_str("fn __repr_Value(v: Value) -> String = value_stringify(v)\n");
     }
 }
 
@@ -941,6 +1398,126 @@ pub fn program_uses_closure_list(program: &almide_ir::IrProgram) -> bool {
         .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
     for f in funcs {
         if is_closure_list(&f.ret_ty) || f.params.iter().any(|p| is_closure_list(&p.ty)) {
+            return true;
+        }
+        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
+        if finder.found {
+            return true;
+        }
+    }
+    false
+}
+
+/// Does the program carry a `List[(String, <Fn>)]` anywhere — gates
+/// `LIST_STR_CLO_DROP_SRC`'s injection (the closure-valued map's from_list
+/// pairs-list drop), the exact sibling of [`program_uses_closure_list`]'s gate.
+pub fn program_uses_str_clo_pairs(program: &almide_ir::IrProgram) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let is_pairs = |ty: &Ty| {
+        matches!(ty, Ty::Applied(TypeConstructorId::List, a)
+            if a.len() == 1
+                && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+                    && matches!(ts[0], Ty::String) && matches!(ts[1], Ty::Fn { .. })))
+    };
+    struct Finder<'a> {
+        found: bool,
+        pred: &'a dyn Fn(&Ty) -> bool,
+    }
+    impl almide_ir::visit::IrVisitor for Finder<'_> {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if (self.pred)(&expr.ty) {
+                self.found = true;
+            }
+            if !self.found {
+                almide_ir::visit::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut finder = Finder { found: false, pred: &is_pairs };
+    let funcs = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in funcs {
+        if is_pairs(&f.ret_ty) || f.params.iter().any(|p| is_pairs(&p.ty)) {
+            return true;
+        }
+        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
+        if finder.found {
+            return true;
+        }
+    }
+    false
+}
+
+/// Does the program carry an `Option[(String, String)]` anywhere — gates
+/// `OPT_STR_STR_DROP_SRC`'s injection (the if-merged `some((s1, s2))` ctor's
+/// recursive drop), the exact sibling of [`program_uses_map_closure`]'s gate.
+pub fn program_uses_opt_str_str(program: &almide_ir::IrProgram) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let is_oss = |ty: &Ty| {
+        matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
+            if a.len() == 1
+                && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+                    && matches!(ts[0], Ty::String) && matches!(ts[1], Ty::String)))
+    };
+    struct Finder<'a> {
+        found: bool,
+        pred: &'a dyn Fn(&Ty) -> bool,
+    }
+    impl almide_ir::visit::IrVisitor for Finder<'_> {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if (self.pred)(&expr.ty) {
+                self.found = true;
+            }
+            if !self.found {
+                almide_ir::visit::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut finder = Finder { found: false, pred: &is_oss };
+    let funcs = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in funcs {
+        if is_oss(&f.ret_ty) || f.params.iter().any(|p| is_oss(&p.ty)) {
+            return true;
+        }
+        almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);
+        if finder.found {
+            return true;
+        }
+    }
+    false
+}
+
+/// Does the program carry a `Map[String, <Fn>]` anywhere (a bind/return/call-arg type) —
+/// gates `MAP_MCLO_DROP_SRC`'s injection (the closure-valued map's recursive drop), the
+/// exact sibling of [`program_uses_closure_list`]'s gate.
+pub fn program_uses_map_closure(program: &almide_ir::IrProgram) -> bool {
+    let is_mclo = |ty: &Ty| crate::lower::is_map_fn_ty(ty);
+    struct Finder<'a> {
+        found: bool,
+        pred: &'a dyn Fn(&Ty) -> bool,
+    }
+    impl almide_ir::visit::IrVisitor for Finder<'_> {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if (self.pred)(&expr.ty) {
+                self.found = true;
+            }
+            if !self.found {
+                almide_ir::visit::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut finder = Finder { found: false, pred: &is_mclo };
+    let funcs = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in funcs {
+        if is_mclo(&f.ret_ty) || f.params.iter().any(|p| is_mclo(&p.ty)) {
             return true;
         }
         almide_ir::visit::IrVisitor::visit_expr(&mut finder, &f.body);

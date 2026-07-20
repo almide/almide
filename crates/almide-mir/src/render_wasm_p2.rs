@@ -5,6 +5,8 @@ fn render_op(
     param_counts: &BTreeMap<String, usize>,
     masks: &BTreeMap<ValueId, Vec<usize>>,
     reprs: &BTreeMap<ValueId, Repr>,
+    floats: &BTreeSet<ValueId>,
+    fuser: &mut Fuser,
 ) -> String {
     match op {
         // A STRING literal — a heap block `[rc][len][cap][utf8 bytes...]` (same header
@@ -119,30 +121,59 @@ fn render_op(
             );
             for (i, e) in elems.iter().enumerate() {
                 let off = LIST_HEADER + i as u32 * ELEM_SIZE;
+                // #806 step 3a: an f64-classified element crosses back to the
+                // i64 slot with ONE boundary reinterpret (amortized outside the
+                // hot arithmetic; bit-exact).
+                let ev = if floats.contains(e) {
+                    format!("(i64.reinterpret_f64 (local.get {}))", local(*e))
+                } else {
+                    format!("(local.get {})", local(*e))
+                };
                 s.push_str(&format!(
-                    "    (i64.store (i32.add (local.get {d}) (i32.const {off})) (local.get {e}))\n",
+                    "    (i64.store (i32.add (local.get {d}) (i32.const {off})) {ev})\n",
                     d = local(*dst),
-                    e = local(*e),
                 ));
             }
             s
         }
-        // The rung-4 bounds-checked SCALAR element load — the exact composition the
-        // inline `Handle`+`ElemAddr`+`Load{8}` sequence rendered (`$elem_addr_chk`
-        // TRAPs on idx<0 / >=cap, matching native's halt).
+        // The rung-4 bounds-checked SCALAR element load. The check + address are
+        // INLINE-EXPANDED (#806): the old `call $elem_addr_chk` put a function call
+        // in every `v[j]` of a hot loop (~17x vs native on spectralnorm — wasmtime
+        // does not inline across wasm calls), where native's LLVM reduces the same
+        // check to a few instructions. The expansion is byte-for-byte the SAME
+        // semantics as `$elem_addr_chk`: idx<0 || idx>=LEN aborts with the
+        // native-identical bounds message (never silent corruption), else
+        // list + HEADER + idx*ELEM_SIZE. Operands are locals, so re-evaluating
+        // them costs nothing and no scratch local is needed.
         Op::ListGetScalar { dst, list, idx } => {
+            // #806 step 3a: an f64-classified dst loads the slot as a REAL f64
+            // (`f64.load` moves the same 8 bytes bit-exactly — no reinterpret).
+            let load = if floats.contains(dst) { "f64.load" } else { "i64.load" };
             format!(
-                "    (local.set {d} (i64.load (call $elem_addr_chk (local.get {l}) (i32.wrap_i64 (local.get {i})))))\n",
+                "    (if (i32.or (i32.lt_s (i32.wrap_i64 (local.get {i})) (i32.const 0))\n\
+                 \x20                (i32.ge_s (i32.wrap_i64 (local.get {i}))\n\
+                 \x20                          (i32.load (i32.add (local.get {l}) (i32.const {LIST_LEN_OFFSET})))))\n\
+                 \x20     (then (call $__div_trap (i32.const {BOUNDS_MSG_ADDR}) (i32.const 27))))\n\
+                 \x20   (local.set {d} ({load} (i32.add (i32.add (local.get {l}) (i32.const {LIST_HEADER}))\n\
+                 \x20                                     (i32.mul (i32.wrap_i64 (local.get {i})) (i32.const {ELEM_SIZE})))))\n",
                 d = local(*dst),
                 l = local(*list),
                 i = local(*idx),
             )
         }
         // The rung-4 bounds-checked SCALAR element store (COW is the caller's
-        // MakeUnique before this op) — the inline `Handle`+`ElemAddr`+`Store{8}` twin.
+        // MakeUnique before this op) — the inline-expanded twin of the load above.
         Op::ListSetScalar { list, idx, val } => {
+            // #806 step 3a: an f64-classified val stores as a REAL f64 (bit-exact).
+            let store = if floats.contains(val) { "f64.store" } else { "i64.store" };
             format!(
-                "    (i64.store (call $elem_addr_chk (local.get {l}) (i32.wrap_i64 (local.get {i}))) (local.get {v}))\n",
+                "    (if (i32.or (i32.lt_s (i32.wrap_i64 (local.get {i})) (i32.const 0))\n\
+                 \x20                (i32.ge_s (i32.wrap_i64 (local.get {i}))\n\
+                 \x20                          (i32.load (i32.add (local.get {l}) (i32.const {LIST_LEN_OFFSET})))))\n\
+                 \x20     (then (call $__div_trap (i32.const {BOUNDS_MSG_ADDR}) (i32.const 27))))\n\
+                 \x20   ({store} (i32.add (i32.add (local.get {l}) (i32.const {LIST_HEADER}))\n\
+                 \x20                       (i32.mul (i32.wrap_i64 (local.get {i})) (i32.const {ELEM_SIZE})))\n\
+                 \x20              (local.get {v}))\n",
                 l = local(*list),
                 i = local(*idx),
                 v = local(*val),
@@ -207,17 +238,79 @@ fn render_op(
         // A runtime call → a wasm `call` of the (bootstrap) runtime function.
         Op::Call { dst, func, args, .. } => render_call(*dst, func, args, label_off),
         Op::IntBinOp { dst, op, a, b } => {
-            let args = format!("(local.get {}) (local.get {})", local(*a), local(*b));
+            // #806 step 3c: splice pending single-use defs into the operands
+            // (Div/Mod below read operands several times, so they stay plain
+            // `local.get` — the caller flushed any pending among them).
+            let args = if matches!(op, IntOp::Div | IntOp::Mod) {
+                format!("(local.get {}) (local.get {})", local(*a), local(*b))
+            } else {
+                format!("{} {}", fuser.operand(*a), fuser.operand(*b))
+            };
+            // CHECKED division/remainder: divisor 0 / MIN÷-1 abort via $__div_trap
+            // with the native-identical stderr line + exit 1 (C-001/C-035) — never a
+            // bare i64.div_s hard trap (exit 134, no message). The checks + op are
+            // INLINE-EXPANDED (#806): the old `call $__chk_div` put a function call
+            // in every hot-loop `/`/`%` (wasmtime does not inline across wasm
+            // calls); the expansion is instruction-for-instruction the SAME
+            // semantics as `$__chk_div`/`$__chk_rem`. Operands are locals, so the
+            // re-evaluations cost nothing and no scratch local is needed.
+            if matches!(op, IntOp::Div | IntOp::Mod) {
+                let instr = if matches!(op, IntOp::Div) { "i64.div_s" } else { "i64.rem_s" };
+                // #806 step 3c: a CONSTANT nonzero divisor decides both checks
+                // statically — elide them (zero-check vacuous; MIN÷-1 only when
+                // c == -1). `÷ 2^k` (k ≥ 1) additionally strength-reduces to the
+                // EXACT correction-shift sequence (valid for every dividend,
+                // negative included) — Cranelift does neither, and the hardware
+                // sdiv alone cost ~25% of spectralnorm's inner loop.
+                match fuser.const_of(*b) {
+                    Some(c) if c != 0 && c != -1 => {
+                        if matches!(op, IntOp::Div) && c > 1 && (c as u64).is_power_of_two() {
+                            let k = (c as u64).trailing_zeros();
+                            return format!(
+                                "    (local.set {d} (i64.shr_s (i64.add (local.get {a})\n\
+                                 \x20       (i64.shr_u (i64.shr_s (local.get {a}) (i64.const 63)) (i64.const {nk})))\n\
+                                 \x20       (i64.const {k})))\n",
+                                a = local(*a),
+                                d = local(*dst),
+                                nk = 64 - k,
+                            );
+                        }
+                        return format!(
+                            "    (local.set {d} ({instr} {args}))\n",
+                            d = local(*dst),
+                        );
+                    }
+                    Some(-1) => {
+                        return format!(
+                            "    (if (i32.and (i64.eq (local.get {a}) (i64.const -9223372036854775808))\n\
+                             \x20                (i64.eq (local.get {b}) (i64.const -1)))\n\
+                             \x20     (then (call $__div_trap (i32.const {OVERFLOW_MSG_ADDR}) (i32.const 24))))\n\
+                             \x20   (local.set {d} ({instr} {args}))\n",
+                            a = local(*a),
+                            b = local(*b),
+                            d = local(*dst),
+                        );
+                    }
+                    _ => {}
+                }
+                return format!(
+                    "    (if (i64.eqz (local.get {b}))\n\
+                     \x20     (then (call $__div_trap (i32.const {DIVZERO_MSG_ADDR}) (i32.const 24))))\n\
+                     \x20   (if (i32.and (i64.eq (local.get {a}) (i64.const -9223372036854775808))\n\
+                     \x20                (i64.eq (local.get {b}) (i64.const -1)))\n\
+                     \x20     (then (call $__div_trap (i32.const {OVERFLOW_MSG_ADDR}) (i32.const 24))))\n\
+                     \x20   (local.set {d} ({instr} {args}))\n",
+                    a = local(*a),
+                    b = local(*b),
+                    d = local(*dst),
+                );
+            }
             // A comparison yields an i32 0/1 → zero-extend to the i64 scalar model.
             let expr = match op {
                 IntOp::Add => format!("(i64.add {args})"),
                 IntOp::Sub => format!("(i64.sub {args})"),
                 IntOp::Mul => format!("(i64.mul {args})"),
-                // CHECKED: divisor 0 / MIN÷-1 abort via $__div_trap with the
-                // native-identical stderr line + exit 1 (C-001/C-035) — never a
-                // bare i64.div_s hard trap (exit 134, no message).
-                IntOp::Div => format!("(call $__chk_div {args})"),
-                IntOp::Mod => format!("(call $__chk_rem {args})"),
+                IntOp::Div | IntOp::Mod => unreachable!("inline-expanded above"),
                 IntOp::Lt => format!("(i64.extend_i32_u (i64.lt_s {args}))"),
                 IntOp::Le => format!("(i64.extend_i32_u (i64.le_s {args}))"),
                 IntOp::Gt => format!("(i64.extend_i32_u (i64.gt_s {args}))"),
@@ -698,7 +791,17 @@ fn render_op(
             format!("    (local.set {} (i64.const {slot}))\n", local(*dst))
         }
         Op::ConstInt { dst, value } => {
-            format!("    (local.set {} (i64.const {value}))\n", local(*dst))
+            // #806 step 3a: an f64-classified dst materializes the SAME bit
+            // pattern as a real f64 hexfloat const (bit-exact).
+            if floats.contains(dst) {
+                format!(
+                    "    (local.set {} (f64.const {}))\n",
+                    local(*dst),
+                    wat_f64_const(*value as u64)
+                )
+            } else {
+                format!("    (local.set {} (i64.const {value}))\n", local(*dst))
+            }
         }
         // A primitive-floor op, hand-mapped INLINE (no preamble func). The MIR is
         // i64-uniform; wrap to i32 at the wasm memory boundary, zero-extend a loaded /
@@ -724,6 +827,9 @@ fn render_op(
                     format!("(i64.extend_i32_u (call $elem_addr_chk {} {}))", w(0), w(1))
                 }
                 PrimKind::Die => format!("(call $__die {})", w(0)),
+                // proc_exit(code): the i64 user code wraps to the WASI i32. Never
+                // returns — nothing follows on this path at runtime.
+                PrimKind::ProcExit => format!("(call $proc_exit {})", w(0)),
                 PrimKind::FdWrite => {
                     format!("(i64.extend_i32_u (call $fd_write {} {} {} {}))", w(0), w(1), w(2), w(3))
                 }
@@ -838,20 +944,39 @@ fn render_op(
                 // emits the call as a STATEMENT (no local.set).
                 PrimKind::RcDec => format!("(call $rc_dec {})", w(0)),
                 PrimKind::RcInc => format!("(call $rc_inc {})", w(0)),
-                // FLOAT floor: the i64 value holds the f64 bits — reinterpret around the op.
+                // `float.from_int` — the single-instruction sitofp floor (#806).
+                // An f64-classified dst (step 3a) takes the convert result directly.
+                PrimKind::F64FromInt => {
+                    let conv = format!("(f64.convert_i64_s {})", fuser.operand(args[0]));
+                    if dst.is_some_and(|d| floats.contains(&d)) {
+                        conv
+                    } else {
+                        format!("(i64.reinterpret_f64 {conv})")
+                    }
+                }
+                // FLOAT floor: the i64 value holds the f64 bits — reinterpret around the
+                // op. #806 step 3a: an f64-CLASSIFIED operand is read bare (it is a real
+                // f64 local), and an f64-classified dst takes the f64 result directly —
+                // the hot-loop shape with ZERO reinterprets. Operands splice pending
+                // single-use defs (step 3c).
                 PrimKind::FloatUn(op) => {
-                    let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
+                    let x = float_operand(fuser, floats, args[0]);
                     let inner = match op {
-                        FUnOp::Abs => format!("(f64.abs {})", f(0)),
-                        FUnOp::Sqrt => format!("(f64.sqrt {})", f(0)),
-                        FUnOp::Floor => format!("(f64.floor {})", f(0)),
-                        FUnOp::Ceil => format!("(f64.ceil {})", f(0)),
-                        FUnOp::Neg => format!("(f64.neg {})", f(0)),
+                        FUnOp::Abs => format!("(f64.abs {x})"),
+                        FUnOp::Sqrt => format!("(f64.sqrt {x})"),
+                        FUnOp::Floor => format!("(f64.floor {x})"),
+                        FUnOp::Ceil => format!("(f64.ceil {x})"),
+                        FUnOp::Neg => format!("(f64.neg {x})"),
                     };
-                    format!("(i64.reinterpret_f64 {inner})")
+                    if dst.is_some_and(|d| floats.contains(&d)) {
+                        inner
+                    } else {
+                        format!("(i64.reinterpret_f64 {inner})")
+                    }
                 }
                 PrimKind::FloatBin(op) => {
-                    let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
+                    let a = float_operand(fuser, floats, args[0]);
+                    let b = float_operand(fuser, floats, args[1]);
                     let instr = match op {
                         FBinOp::Add => "f64.add",
                         FBinOp::Sub => "f64.sub",
@@ -861,10 +986,16 @@ fn render_op(
                         FBinOp::Max => "f64.max",
                         FBinOp::CopySign => "f64.copysign",
                     };
-                    format!("(i64.reinterpret_f64 ({instr} {} {}))", f(0), f(1))
+                    let inner = format!("({instr} {a} {b})");
+                    if dst.is_some_and(|d| floats.contains(&d)) {
+                        inner
+                    } else {
+                        format!("(i64.reinterpret_f64 {inner})")
+                    }
                 }
                 PrimKind::FloatCmp(op) => {
-                    let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
+                    let a = float_operand(fuser, floats, args[0]);
+                    let b = float_operand(fuser, floats, args[1]);
                     let instr = match op {
                         FCmpOp::Lt => "f64.lt",
                         FCmpOp::Le => "f64.le",
@@ -874,17 +1005,23 @@ fn render_op(
                         FCmpOp::Ne => "f64.ne",
                     };
                     // f64 compare yields an i32 0/1 — extend to the i64-uniform Bool.
-                    format!("(i64.extend_i32_u ({instr} {} {}))", f(0), f(1))
+                    format!("(i64.extend_i32_u ({instr} {a} {b}))")
                 }
                 // SATURATING float→int (i64.trunc_SAT_f64_s), matching Rust's `as` cast (v0): NaN → 0,
                 // > i64::MAX → i64::MAX, < i64::MIN → i64::MIN — NO trap. The plain `i64.trunc_f64_s`
                 // traps on NaN/inf/out-of-range, diverging from v0 (and float_to_uint64.almd already
                 // assumes the saturating form for its f >= 2^64 → u64::MAX path).
                 PrimKind::FloatToInt => {
-                    format!("(i64.trunc_sat_f64_s (f64.reinterpret_i64 (local.get {})))", local(args[0]))
+                    let x = float_operand(fuser, floats, args[0]);
+                    format!("(i64.trunc_sat_f64_s {x})")
                 }
                 PrimKind::IntToFloat => {
-                    format!("(i64.reinterpret_f64 (f64.convert_i64_s (local.get {})))", local(args[0]))
+                    let conv = format!("(f64.convert_i64_s {})", fuser.operand(args[0]));
+                    if dst.is_some_and(|d| floats.contains(&d)) {
+                        conv
+                    } else {
+                        format!("(i64.reinterpret_f64 {conv})")
+                    }
                 }
                 // to_bits / bits_to_float: the value IS the bits — identity pass-through.
                 PrimKind::FloatBits => format!("(local.get {})", local(args[0])),
@@ -962,7 +1099,7 @@ fn render_op(
         // A scalar reassignment of a stable local — the loop-carried state. Reads `src`,
         // writes the var's own local (reusing the same wasm local is legal: read then set).
         Op::SetLocal { local: l, src } => {
-            format!("    (local.set {} (local.get {}))\n", local(*l), local(*src))
+            format!("    (local.set {} {})\n", local(*l), fuser.operand(*src))
         }
         Op::Consume { .. }
         | Op::Borrow { .. }

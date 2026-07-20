@@ -49,6 +49,10 @@ pub fn is_flat_scalar_block_ty(ty: &Ty) -> bool {
     match ty {
         Ty::Tuple(tys) => !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t)),
         Ty::Applied(TypeConstructorId::List, b) => b.len() == 1 && !is_heap_ty(&b[0]),
+        // An `Option[<scalar>]` is the SAME flat physics: len-as-tag (0 = none)
+        // + one raw scalar slot — rc_dec is its full free and a slot-wise
+        // content compare is exact (the C-149 nested-Option class).
+        Ty::Applied(TypeConstructorId::Option, b) => b.len() == 1 && !is_heap_ty(&b[0]),
         _ => false,
     }
 }
@@ -271,6 +275,23 @@ pub fn identity_int_widening_call(e: &IrExpr) -> Option<&IrExpr> {
             | Ty::UInt64
     );
     arg_int.then(|| &args[0])
+}
+
+/// A `float.from_int(x)` call over an `Int` — the sitofp floor (#806 step 2):
+/// the lowering emits ONE `PrimKind::F64FromInt` (a `f64.convert_i64_s` in the
+/// render, `as f64` natively) instead of the self-host runtime CALL, and
+/// `count_ir_calls` skips the node by this SAME predicate (`mir == ir` by
+/// construction). Returns the operand expr when the shape applies.
+pub fn float_from_int_prim_call(e: &IrExpr) -> Option<&IrExpr> {
+    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
+    else {
+        return None;
+    };
+    (module.as_str() == "float"
+        && func.as_str() == "from_int"
+        && args.len() == 1
+        && matches!(args[0].ty, Ty::Int))
+    .then(|| &args[0])
 }
 
 /// The `@extern(wasm, module, name)` attribute on a function, iff present (the
@@ -527,6 +548,13 @@ pub fn bridge_cross_module_toplets(
     ir: &almide_ir::IrProgram,
     globals: &mut std::collections::HashMap<almide_ir::VarId, Ty>,
     global_inits: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    // #782: main-side synthesized ref VarId → module-side MUTABLE var VarId.
+    // With the v0 fallback retired, a mutable cross-module reference must LOWER
+    // instead of walling: the caller aliases the main-side id onto the module
+    // var's linear-memory slot, so reads and assigns route through the SAME
+    // storage the owning module's fns use (no const-fold hazard — the slot is
+    // real storage, not an init alias).
+    mutable_aliases: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
 ) {
     use std::collections::HashMap;
     // The main-side reference entry is SYNTHESIZED by the frontend with an UPPERCASED
@@ -546,9 +574,9 @@ pub fn bridge_cross_module_toplets(
     // and layout.ROW — the ceangal zip class) resolves per-module instead of
     // dropping as ambiguous. A bare-name fallback map keeps the pre-existing
     // behavior for refs whose module_origin the frontend left unset.
-    let mut by_name: HashMap<(String, String), Option<(Ty, &almide_ir::IrExpr, bool)>> =
+    let mut by_name: HashMap<(String, String), Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>> =
         HashMap::new();
-    let mut by_bare: HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool)>> = HashMap::new();
+    let mut by_bare: HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>> = HashMap::new();
     for m in &ir.modules {
         // In-module alias chains (`let white = _white`) leave the alias tl's ty
         // UN-INFERRED — chase to the referent so the bridge carries the REAL
@@ -580,6 +608,14 @@ pub fn bridge_cross_module_toplets(
             if matches!(ty, Ty::Unknown) && !matches!(init.ty, Ty::Unknown) {
                 ty = &init.ty;
             }
+            // An OPTION-ctor init whose OWN node ty is also un-inferred (`let MAYBE =
+            // some(Cfg { .. })` — the crossmod option_record_toplet): synthesize
+            // `Option[payload.ty]` from the payload's inferred type.
+            let refined_opt;
+            if let Some(r) = refine_option_toplet_ty(ty, init) {
+                refined_opt = r;
+                ty = &refined_opt;
+            }
             // A chased init that STILL references region-local vars (a call init
             // over a sibling const, a nested alias past the hop bound) must NOT
             // cross: the ids would misresolve in the main region. Drop the name
@@ -599,10 +635,10 @@ pub fn bridge_cross_module_toplets(
                 v.visit_expr(e);
                 v.0
             }
-            let entry = if expr_has_var(init) {
+            let entry = if !mutable && expr_has_var(init) {
                 Option::None
             } else {
-                Some((ty.clone(), init, mutable))
+                Some((ty.clone(), init, mutable, tl.var))
             };
             by_name
                 .entry((m.name.as_str().to_string(), info.name.as_str().to_uppercase()))
@@ -636,21 +672,75 @@ pub fn bridge_cross_module_toplets(
             // the ceangal theme class) takes the MODULE side's type: the name is
             // unique (the ambiguity arm below dropped collisions), so the module
             // top-let IS the referent. A concretely-typed ref still must agree.
-            Some(Some((ty, init, mutable)))
-                if !mutable && (*ty == info.ty || matches!(info.ty, Ty::Unknown)) =>
+            Some(Some((ty, init, mutable, _mod_id)))
+                if !mutable && bridged_ref_ty_agrees(ty, &info.ty) =>
             {
                 globals.insert(id, ty.clone());
                 global_inits.insert(id, (*init).clone());
             }
+            // #782: a MUTABLE cross-module reference aliases onto the module
+            // var's storage slot instead of walling (the v0 fallback that used
+            // to absorb it is retired). The init is never shipped — only the
+            // slot identity — so the const-fold hazard that justified the old
+            // exclusion cannot occur.
+            Some(Some((ty, _init, true, mod_id)))
+                if bridged_ref_ty_agrees(ty, &info.ty) =>
+            {
+                mutable_aliases.insert(id, *mod_id);
+                globals.remove(&id);
+                global_inits.remove(&id);
+            }
             _ => {
-                // Unmatched or MUTABLE cross-module reference: purge any raw
-                // module-id numeric collision so the reference is honestly
-                // unbound (wall → v0 fallback), never an unrelated init.
+                // Unmatched reference: purge any raw module-id numeric collision
+                // so the reference is honestly unbound (a diagnosed wall), never
+                // an unrelated init.
                 globals.remove(&id);
                 global_inits.remove(&id);
             }
         }
     }
+}
+
+/// Does the BRIDGED module-side type agree with the main-side REFERENCE entry's
+/// type, treating the reference side's `Unknown` as a wildcard STRUCTURALLY
+/// (`Option[Unknown]` agrees with `Option[Cfg]` — the un-inferred synthesized
+/// ref vs the refined module truth)? A concrete mismatch still refuses (the
+/// honest unbound wall, never a wrong-typed alias).
+fn bridged_ref_ty_agrees(bridged: &Ty, reference: &Ty) -> bool {
+    match (bridged, reference) {
+        (_, Ty::Unknown) => true,
+        (Ty::Applied(a, xs), Ty::Applied(b, ys)) if a == b && xs.len() == ys.len() => {
+            xs.iter().zip(ys).all(|(x, y)| bridged_ref_ty_agrees(x, y))
+        }
+        _ => bridged == reference,
+    }
+}
+
+/// Refine an UNANNOTATED top-let's Unknown(-payload) type from its OPTION-ctor
+/// initializer: `let MAYBE = some(Cfg { .. })` leaves the declared ty `Unknown`
+/// (or the checker's partial `Option[Unknown]`) while the ctor's PAYLOAD expr
+/// carries its real inferred type — `Option[payload.ty]` is the structural
+/// truth, never a guess. Any other shape returns `None` (untouched).
+pub fn refine_option_toplet_ty(ty: &Ty, init: &almide_ir::IrExpr) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let unknown_payload = match ty {
+        Ty::Unknown => true,
+        Ty::Applied(TypeConstructorId::Option, a)
+            if a.len() == 1 && matches!(a[0], Ty::Unknown) =>
+        {
+            true
+        }
+        _ => false,
+    };
+    if !unknown_payload {
+        return None;
+    }
+    if let almide_ir::IrExprKind::OptionSome { expr } = &init.kind {
+        if !matches!(expr.ty, Ty::Unknown) {
+            return Some(Ty::option(expr.ty.clone()));
+        }
+    }
+    None
 }
 
 /// Repair UNKNOWN expression types the frontend leaves on CROSS-MODULE global
@@ -812,6 +902,9 @@ pub fn variant_needs_recursive_drop(
         variant_field_name(t, variant_names).is_some()
             || matches!(t, Ty::Named(n, _) if record_names.contains(n.as_str()))
             || matches!(t, Ty::String)
+            // A CLOSURE field: the generator's Fn arm frees the self-describing
+            // closure block via `__drop_closure`.
+            || matches!(t, Ty::Fn { .. })
             || matches!(t, Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1
                     && (!is_heap_ty(&a[0])
@@ -1770,6 +1863,16 @@ fn lower_function_all_impl(
     } else {
         func_body
     };
+    // The C-127 piped HOF chain (`… |> option.map(λ) |> option.unwrap_or(d)`) →
+    // its source-`let` decomposed form (see `desugar_hof_chain_anf`) — same
+    // desugar-before-both slot.
+    let hof_chain_body;
+    let func_body: &IrExpr = if let Some(rewritten) = desugar_hof_chain_anf(func_body) {
+        hof_chain_body = rewritten;
+        &hof_chain_body
+    } else {
+        func_body
+    };
     // `buf[i] = v` over Bytes → `bytes.set_at(buf, i, v)` (see
     // `desugar_bytes_index_assign`) — same desugar-before-both slot.
     let bytes_index_assign_body;
@@ -1816,7 +1919,12 @@ fn lower_function_all_impl(
     let pre_tco = desugar_heap_branches(func_body, variant_layouts);
     let body_ref: &IrExpr = pre_tco.as_ref().unwrap_or(func_body);
     let tco_body = try_tco_rewrite(&ctx.fn_name, &func.params, body_ref);
-    let ret = ctx.lower_body_into(tco_body.as_ref().unwrap_or(body_ref))?;
+    let final_body = tco_body.as_ref().unwrap_or(body_ref);
+    // SHARED-CELL pre-scan (closures Rung 6, cells.rs): over the FINAL lowered tree,
+    // so bind/read/write/capture all classify the same vars as cells. A pure scan —
+    // no rewrite, so the counted tree is untouched.
+    ctx.cell_vars = collect_cell_vars(final_body, &ctx.globals, &func.params);
+    let ret = ctx.lower_body_into(final_body)?;
     // The function's EFFECT SIGNATURE → its declared capability bound. The v1 model
     // has one capability (Stdout); an `effect fn` declares it may reach the host, so
     // it admits the only modeled cap. A pure `fn` declares ∅ — so if it reached
@@ -1880,6 +1988,8 @@ include!("repr_sources.rs");
 include!("newtype_erase.rs");
 include!("record_defaults.rs");
 include!("desugar_guard.rs");
+include!("cells.rs");
+include!("inline_scalar_fns.rs");
 include!("mod_p2.rs");
 include!("mod_p3.rs");
 include!("mod_p4.rs");

@@ -94,6 +94,10 @@ fn main() -> Unit = {
   println("windows 2 outer-len:    " + int.to_string(list.len(list.windows(xs, 2))))
   println("windows -1 outer-len:   " + int.to_string(list.len(list.windows(xs, -1))))
 
-  // ── repeat: small count materializes; the wrap is just made lossless ──
+  // ── repeat: small count materializes; the wrap is just made lossless.
+  // A NEGATIVE count clamps SIGNED to the EMPTY list on both targets (was a
+  // native `vec![x; n as usize]` capacity panic vs a wasm alloc trap) ──
   println("repeat 3: " + fmt(list.repeat(7, 3)))
+  println("repeat -1: " + fmt(list.repeat(7, -1)))
+  println("repeat -2^31: " + fmt(list.repeat(7, -2147483648)))
 }
