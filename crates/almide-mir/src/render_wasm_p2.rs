@@ -5,6 +5,7 @@ fn render_op(
     param_counts: &BTreeMap<String, usize>,
     masks: &BTreeMap<ValueId, Vec<usize>>,
     reprs: &BTreeMap<ValueId, Repr>,
+    floats: &BTreeSet<ValueId>,
 ) -> String {
     match op {
         // A STRING literal — a heap block `[rc][len][cap][utf8 bytes...]` (same header
@@ -119,10 +120,17 @@ fn render_op(
             );
             for (i, e) in elems.iter().enumerate() {
                 let off = LIST_HEADER + i as u32 * ELEM_SIZE;
+                // #806 step 3a: an f64-classified element crosses back to the
+                // i64 slot with ONE boundary reinterpret (amortized outside the
+                // hot arithmetic; bit-exact).
+                let ev = if floats.contains(e) {
+                    format!("(i64.reinterpret_f64 (local.get {}))", local(*e))
+                } else {
+                    format!("(local.get {})", local(*e))
+                };
                 s.push_str(&format!(
-                    "    (i64.store (i32.add (local.get {d}) (i32.const {off})) (local.get {e}))\n",
+                    "    (i64.store (i32.add (local.get {d}) (i32.const {off})) {ev})\n",
                     d = local(*dst),
-                    e = local(*e),
                 ));
             }
             s
@@ -137,12 +145,15 @@ fn render_op(
         // list + HEADER + idx*ELEM_SIZE. Operands are locals, so re-evaluating
         // them costs nothing and no scratch local is needed.
         Op::ListGetScalar { dst, list, idx } => {
+            // #806 step 3a: an f64-classified dst loads the slot as a REAL f64
+            // (`f64.load` moves the same 8 bytes bit-exactly — no reinterpret).
+            let load = if floats.contains(dst) { "f64.load" } else { "i64.load" };
             format!(
                 "    (if (i32.or (i32.lt_s (i32.wrap_i64 (local.get {i})) (i32.const 0))\n\
                  \x20                (i32.ge_s (i32.wrap_i64 (local.get {i}))\n\
                  \x20                          (i32.load (i32.add (local.get {l}) (i32.const {LIST_LEN_OFFSET})))))\n\
                  \x20     (then (call $__div_trap (i32.const {BOUNDS_MSG_ADDR}) (i32.const 27))))\n\
-                 \x20   (local.set {d} (i64.load (i32.add (i32.add (local.get {l}) (i32.const {LIST_HEADER}))\n\
+                 \x20   (local.set {d} ({load} (i32.add (i32.add (local.get {l}) (i32.const {LIST_HEADER}))\n\
                  \x20                                     (i32.mul (i32.wrap_i64 (local.get {i})) (i32.const {ELEM_SIZE})))))\n",
                 d = local(*dst),
                 l = local(*list),
@@ -152,12 +163,14 @@ fn render_op(
         // The rung-4 bounds-checked SCALAR element store (COW is the caller's
         // MakeUnique before this op) — the inline-expanded twin of the load above.
         Op::ListSetScalar { list, idx, val } => {
+            // #806 step 3a: an f64-classified val stores as a REAL f64 (bit-exact).
+            let store = if floats.contains(val) { "f64.store" } else { "i64.store" };
             format!(
                 "    (if (i32.or (i32.lt_s (i32.wrap_i64 (local.get {i})) (i32.const 0))\n\
                  \x20                (i32.ge_s (i32.wrap_i64 (local.get {i}))\n\
                  \x20                          (i32.load (i32.add (local.get {l}) (i32.const {LIST_LEN_OFFSET})))))\n\
                  \x20     (then (call $__div_trap (i32.const {BOUNDS_MSG_ADDR}) (i32.const 27))))\n\
-                 \x20   (i64.store (i32.add (i32.add (local.get {l}) (i32.const {LIST_HEADER}))\n\
+                 \x20   ({store} (i32.add (i32.add (local.get {l}) (i32.const {LIST_HEADER}))\n\
                  \x20                       (i32.mul (i32.wrap_i64 (local.get {i})) (i32.const {ELEM_SIZE})))\n\
                  \x20              (local.get {v}))\n",
                 l = local(*list),
@@ -733,7 +746,17 @@ fn render_op(
             format!("    (local.set {} (i64.const {slot}))\n", local(*dst))
         }
         Op::ConstInt { dst, value } => {
-            format!("    (local.set {} (i64.const {value}))\n", local(*dst))
+            // #806 step 3a: an f64-classified dst materializes the SAME bit
+            // pattern as a real f64 hexfloat const (bit-exact).
+            if floats.contains(dst) {
+                format!(
+                    "    (local.set {} (f64.const {}))\n",
+                    local(*dst),
+                    wat_f64_const(*value as u64)
+                )
+            } else {
+                format!("    (local.set {} (i64.const {value}))\n", local(*dst))
+            }
         }
         // A primitive-floor op, hand-mapped INLINE (no preamble func). The MIR is
         // i64-uniform; wrap to i32 at the wasm memory boundary, zero-extend a loaded /
@@ -877,13 +900,27 @@ fn render_op(
                 PrimKind::RcDec => format!("(call $rc_dec {})", w(0)),
                 PrimKind::RcInc => format!("(call $rc_inc {})", w(0)),
                 // `float.from_int` — the single-instruction sitofp floor (#806).
-                PrimKind::F64FromInt => format!(
-                    "(i64.reinterpret_f64 (f64.convert_i64_s (local.get {})))",
-                    local(args[0])
-                ),
-                // FLOAT floor: the i64 value holds the f64 bits — reinterpret around the op.
+                // An f64-classified dst (step 3a) takes the convert result directly.
+                PrimKind::F64FromInt => {
+                    let conv = format!("(f64.convert_i64_s (local.get {}))", local(args[0]));
+                    if dst.is_some_and(|d| floats.contains(&d)) {
+                        conv
+                    } else {
+                        format!("(i64.reinterpret_f64 {conv})")
+                    }
+                }
+                // FLOAT floor: the i64 value holds the f64 bits — reinterpret around the
+                // op. #806 step 3a: an f64-CLASSIFIED operand is read bare (it is a real
+                // f64 local), and an f64-classified dst takes the f64 result directly —
+                // the hot-loop shape with ZERO reinterprets.
                 PrimKind::FloatUn(op) => {
-                    let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
+                    let f = |a: usize| {
+                        if floats.contains(&args[a]) {
+                            format!("(local.get {})", local(args[a]))
+                        } else {
+                            format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]))
+                        }
+                    };
                     let inner = match op {
                         FUnOp::Abs => format!("(f64.abs {})", f(0)),
                         FUnOp::Sqrt => format!("(f64.sqrt {})", f(0)),
@@ -891,10 +928,20 @@ fn render_op(
                         FUnOp::Ceil => format!("(f64.ceil {})", f(0)),
                         FUnOp::Neg => format!("(f64.neg {})", f(0)),
                     };
-                    format!("(i64.reinterpret_f64 {inner})")
+                    if dst.is_some_and(|d| floats.contains(&d)) {
+                        inner
+                    } else {
+                        format!("(i64.reinterpret_f64 {inner})")
+                    }
                 }
                 PrimKind::FloatBin(op) => {
-                    let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
+                    let f = |a: usize| {
+                        if floats.contains(&args[a]) {
+                            format!("(local.get {})", local(args[a]))
+                        } else {
+                            format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]))
+                        }
+                    };
                     let instr = match op {
                         FBinOp::Add => "f64.add",
                         FBinOp::Sub => "f64.sub",
@@ -904,10 +951,21 @@ fn render_op(
                         FBinOp::Max => "f64.max",
                         FBinOp::CopySign => "f64.copysign",
                     };
-                    format!("(i64.reinterpret_f64 ({instr} {} {}))", f(0), f(1))
+                    let inner = format!("({instr} {} {})", f(0), f(1));
+                    if dst.is_some_and(|d| floats.contains(&d)) {
+                        inner
+                    } else {
+                        format!("(i64.reinterpret_f64 {inner})")
+                    }
                 }
                 PrimKind::FloatCmp(op) => {
-                    let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
+                    let f = |a: usize| {
+                        if floats.contains(&args[a]) {
+                            format!("(local.get {})", local(args[a]))
+                        } else {
+                            format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]))
+                        }
+                    };
                     let instr = match op {
                         FCmpOp::Lt => "f64.lt",
                         FCmpOp::Le => "f64.le",
@@ -924,10 +982,20 @@ fn render_op(
                 // traps on NaN/inf/out-of-range, diverging from v0 (and float_to_uint64.almd already
                 // assumes the saturating form for its f >= 2^64 → u64::MAX path).
                 PrimKind::FloatToInt => {
-                    format!("(i64.trunc_sat_f64_s (f64.reinterpret_i64 (local.get {})))", local(args[0]))
+                    let x = if floats.contains(&args[0]) {
+                        format!("(local.get {})", local(args[0]))
+                    } else {
+                        format!("(f64.reinterpret_i64 (local.get {}))", local(args[0]))
+                    };
+                    format!("(i64.trunc_sat_f64_s {x})")
                 }
                 PrimKind::IntToFloat => {
-                    format!("(i64.reinterpret_f64 (f64.convert_i64_s (local.get {})))", local(args[0]))
+                    let conv = format!("(f64.convert_i64_s (local.get {}))", local(args[0]));
+                    if dst.is_some_and(|d| floats.contains(&d)) {
+                        conv
+                    } else {
+                        format!("(i64.reinterpret_f64 {conv})")
+                    }
                 }
                 // to_bits / bits_to_float: the value IS the bits — identity pass-through.
                 PrimKind::FloatBits => format!("(local.get {})", local(args[0])),

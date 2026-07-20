@@ -175,8 +175,11 @@ pub fn render_wasm(func: &MirFunction) -> String {
     let no_slots: BTreeMap<String, u32> = BTreeMap::new();
     let no_param_counts: BTreeMap<String, usize> = BTreeMap::new();
     let reprs = value_reprs_wasm(func);
+    // Legacy single-function render: no typed scalar locals here, so the f64
+    // classification is deliberately empty (byte-identical to before).
+    let no_floats: BTreeSet<ValueId> = BTreeSet::new();
     for op in &func.ops {
-        body.push_str(&render_op(op, &label_off, &no_slots, &no_param_counts, &func.heap_slot_masks, &reprs));
+        body.push_str(&render_op(op, &label_off, &no_slots, &no_param_counts, &func.heap_slot_masks, &reprs, &no_floats));
     }
 
     format!(
@@ -676,6 +679,7 @@ pub fn render_wasm_fn(
     param_counts: &BTreeMap<String, usize>,
 ) -> String {
     let reprs = value_reprs_wasm(func);
+    let floats = classify_f64_locals(func);
     // A LIFTED LAMBDA (`__lambda_*`) is dispatched through the function table against the uniform
     // i64 closure signature (`$closure_fnN`), so its params MUST all be i64. A HEAP param (a Ptr)
     // is received as an i64 raw param and NARROWED to its Ptr value local at entry (the dual of the
@@ -713,7 +717,11 @@ pub fn render_wasm_fn(
     for op in &func.ops {
         if let Some(d) = defined_value(op) {
             if seen.insert(d) {
-                let ty = wasm_ty(reprs.get(&d).copied().unwrap_or(SCALAR_REPR));
+                let ty = if floats.contains(&d) {
+                    "f64"
+                } else {
+                    wasm_ty(reprs.get(&d).copied().unwrap_or(SCALAR_REPR))
+                };
                 locals.push(format!("(local {} {ty})", local(d)));
             }
         }
@@ -814,7 +822,7 @@ pub fn render_wasm_fn(
                 let close = if dst.is_some() { "))\n" } else { ")\n" };
                 body.push_str(&format!("{}      ){close}", arm_val(val)));
             }
-            _ => body.push_str(&render_op(op, label_off, func_slots, param_counts, &func.heap_slot_masks, &reprs)),
+            _ => body.push_str(&render_op(op, label_off, func_slots, param_counts, &func.heap_slot_masks, &reprs, &floats)),
         }
     }
     let tail = func.ret.map(|r| format!("    (local.get {})\n", local(r))).unwrap_or_default();
@@ -944,6 +952,239 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
         }
     }
     m
+}
+
+/// #806 step 3a: the set of locals this function can declare as REAL `f64`
+/// wasm locals instead of i64-uniform bit slots. The uniform model pays 2-3
+/// `reinterpret`s (GPR↔XMM moves Cranelift does not eliminate through locals)
+/// per float op — measured 2.1× alone on spectralnorm's inner loop.
+///
+/// Classification is a conservative fixpoint over `SetLocal` copy edges:
+/// - HARD-float sites (f64-op operands/results) pull a value toward f64.
+/// - FLEXIBLE sites can emit either type (`ConstInt` bits, `ListGet/SetScalar`
+///   element slots via `f64.load`/`f64.store`, `ListLit` elems via one
+///   boundary reinterpret, `Const`'s zero default, `SetLocal` copies).
+/// - EVERYTHING else — params/ret (the i64-uniform ABI), calls, allocs,
+///   drops, int ops, if-merged values, bit-identity ops (`FloatBits`), the
+///   f32 family — POISONS the value: it stays i64 and the affected float
+///   arms keep today's reinterpret emission. A poisoned + hard value is
+///   simply not retyped, so soundness never depends on the classification
+///   being sharp. Byte-behavior is unchanged: reinterpret/load/store are
+///   bit-preserving, and the arithmetic instructions are identical.
+pub(crate) fn classify_f64_locals(func: &MirFunction) -> BTreeSet<ValueId> {
+    let mut hard: BTreeSet<ValueId> = BTreeSet::new();
+    let mut poison: BTreeSet<ValueId> = func.params.iter().map(|p| p.value).collect();
+    if let Some(r) = func.ret {
+        poison.insert(r);
+    }
+    let mut edges: Vec<(ValueId, ValueId)> = Vec::new();
+    let arg_vals = |args: &[CallArg], poison: &mut BTreeSet<ValueId>| {
+        for a in args {
+            match a {
+                CallArg::Handle(v) | CallArg::Scalar(v) => {
+                    poison.insert(*v);
+                }
+                CallArg::Imm(_) | CallArg::Label(_) => {}
+            }
+        }
+    };
+    for op in &func.ops {
+        match op {
+            Op::Prim { kind: PrimKind::FloatUn(_) | PrimKind::FloatBin(_), dst, args } => {
+                for a in args {
+                    hard.insert(*a);
+                }
+                if let Some(d) = dst {
+                    hard.insert(*d);
+                }
+            }
+            Op::Prim { kind: PrimKind::FloatCmp(_), dst, args } => {
+                for a in args {
+                    hard.insert(*a);
+                }
+                if let Some(d) = dst {
+                    poison.insert(*d);
+                }
+            }
+            Op::Prim { kind: PrimKind::F64FromInt | PrimKind::IntToFloat, dst, args } => {
+                for a in args {
+                    poison.insert(*a);
+                }
+                if let Some(d) = dst {
+                    hard.insert(*d);
+                }
+            }
+            Op::Prim { kind: PrimKind::FloatToInt, dst, args } => {
+                for a in args {
+                    hard.insert(*a);
+                }
+                if let Some(d) = dst {
+                    poison.insert(*d);
+                }
+            }
+            // FloatBits / the f32 family are BIT-level (identity pass-throughs, low-32
+            // patterns) — they need the i64-uniform slot. Every other prim borrows
+            // addresses/handles or produces non-float scalars.
+            Op::Prim { dst, args, .. } => {
+                for a in args {
+                    poison.insert(*a);
+                }
+                if let Some(d) = dst {
+                    poison.insert(*d);
+                }
+            }
+            Op::ConstInt { .. } | Op::Const { .. } => {}
+            Op::SetLocal { local, src } => edges.push((*local, *src)),
+            Op::ListGetScalar { dst: _, list, idx } => {
+                poison.insert(*list);
+                poison.insert(*idx);
+            }
+            Op::ListSetScalar { list, idx, val: _ } => {
+                poison.insert(*list);
+                poison.insert(*idx);
+            }
+            Op::ListLit { dst, elems: _ } => {
+                poison.insert(*dst);
+            }
+            Op::IntBinOp { dst, a, b, .. } => {
+                poison.insert(*dst);
+                poison.insert(*a);
+                poison.insert(*b);
+            }
+            Op::IfThen { cond, dst } => {
+                poison.insert(*cond);
+                if let Some(d) = dst {
+                    poison.insert(*d);
+                }
+            }
+            Op::Else { val } | Op::EndIf { val } => {
+                if let Some(v) = val {
+                    poison.insert(*v);
+                }
+            }
+            Op::LoopBreakUnless { cond } => {
+                poison.insert(*cond);
+            }
+            Op::LoopStart | Op::LoopEnd => {}
+            Op::Alloc { dst, init, .. } => {
+                poison.insert(*dst);
+                match init {
+                    Init::DynStr { len }
+                    | Init::DynList { len }
+                    | Init::DynListStr { len } => {
+                        poison.insert(*len);
+                    }
+                    Init::OptSome { payload } => {
+                        poison.insert(*payload);
+                    }
+                    Init::Opaque
+                    | Init::OptNone
+                    | Init::IntList(_)
+                    | Init::Bytes(_)
+                    | Init::Str(_) => {}
+                }
+            }
+            Op::Dup { dst, src } => {
+                poison.insert(*dst);
+                poison.insert(*src);
+            }
+            Op::Drop { v }
+            | Op::DropListStr { v }
+            | Op::DropValue { v }
+            | Op::DropListValue { v }
+            | Op::DropListStrValue { v }
+            | Op::DropListStrStr { v }
+            | Op::DropListIntStr { v }
+            | Op::DropListStrInt { v }
+            | Op::DropResultListValue { v }
+            | Op::DropResultValue { v }
+            | Op::DropResultStrInt { v }
+            | Op::DropResultValueInt { v }
+            | Op::DropResultListValueInt { v }
+            | Op::DropResultListStrInt { v }
+            | Op::DropResultListStr { v }
+            | Op::DropListListStr { v }
+            | Op::DropVariant { v, .. }
+            | Op::DropWrapperRec { v, .. }
+            | Op::Consume { v }
+            | Op::Borrow { v }
+            | Op::MakeUnique { v } => {
+                poison.insert(*v);
+            }
+            Op::Pure { dst, uses } => {
+                poison.insert(*dst);
+                for u in uses {
+                    poison.insert(*u);
+                }
+            }
+            Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } | Op::CallImport { dst, args, .. } => {
+                if let Some(d) = dst {
+                    poison.insert(*d);
+                }
+                arg_vals(args, &mut poison);
+            }
+            Op::CallIndirect { dst, table_idx, args, .. } => {
+                if let Some(d) = dst {
+                    poison.insert(*d);
+                }
+                poison.insert(*table_idx);
+                arg_vals(args, &mut poison);
+            }
+            Op::FuncRef { dst, .. } => {
+                poison.insert(*dst);
+            }
+        }
+    }
+    // Propagate both properties across copy components to a fixpoint: a
+    // component with any poisoned member stays i64 throughout; one with a
+    // hard-float member (and no poison) is f64 throughout.
+    loop {
+        let mut changed = false;
+        for (a, b) in &edges {
+            if poison.contains(a) != poison.contains(b) {
+                poison.insert(*a);
+                poison.insert(*b);
+                changed = true;
+            }
+            if hard.contains(a) != hard.contains(b) {
+                hard.insert(*a);
+                hard.insert(*b);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    hard.difference(&poison).copied().collect()
+}
+
+/// Format the EXACT f64 value held by `bits` as a WAT hexfloat literal —
+/// bit-precise for every case (normals, subnormals, ±0, ±inf, NaN payloads),
+/// so `(f64.const …)` materializes the identical bit pattern the i64-uniform
+/// slot carried. Emitting `(f64.reinterpret_i64 (i64.const bits))` instead is
+/// NOT folded by Cranelift — it executed a movabs + GPR→XMM move per loop
+/// iteration (measured ~1s on spectralnorm's inner loop).
+fn wat_f64_const(bits: u64) -> String {
+    let sign = if bits >> 63 == 1 { "-" } else { "" };
+    let exp = ((bits >> 52) & 0x7ff) as i64;
+    let man = bits & 0xf_ffff_ffff_ffff;
+    if exp == 0x7ff {
+        return if man == 0 {
+            format!("{sign}inf")
+        } else {
+            format!("{sign}nan:0x{man:x}")
+        };
+    }
+    if exp == 0 {
+        return if man == 0 {
+            format!("{sign}0x0p+0")
+        } else {
+            // subnormal: fraction digits are man / 2^52, scaled by 2^-1022.
+            format!("{sign}0x0.{man:013x}p-1022")
+        };
+    }
+    format!("{sign}0x1.{man:013x}p{:+}", exp - 1023)
 }
 
 fn local(v: ValueId) -> String {
