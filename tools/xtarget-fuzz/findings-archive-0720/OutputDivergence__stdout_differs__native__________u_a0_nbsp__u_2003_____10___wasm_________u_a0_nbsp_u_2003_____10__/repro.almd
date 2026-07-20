@@ -1,0 +1,21 @@
+// @contract: C-095
+// json.stringify_pretty must produce byte-identical indented output on both
+// targets. The WASM arm was a stub (compact output + a stray newline); it now has
+// a real recursive pretty-printer mirroring the native oracle (json.rs
+// stringify_value): 2-space indent per depth, one element/member per line,
+// trailing comma rules, and inline `[]` / `{}` for empties. #661.
+import json
+
+fn main() -> Unit = {
+  let v = json.object([
+    ("name", json.from_string("almide")),
+    ("nums", json.array([json.from_int(1), json.from_int(2), json.from_int(3)])),
+    ("nested", json.object([(" nbsp ", json.from_int(10)), ("y", json.from_bool(true))])),
+    ("empty_arr", json.array([])),
+    ("empty_obj", json.object([])),
+    ("flag", json.from_bool(false)),
+    ("ratio", json.from_float(2.5))
+  ]);
+  println(json.stringify_pretty(v));
+  println(json.stringify_pretty(json.from_int(42)))
+}

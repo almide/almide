@@ -1,0 +1,7 @@
+seed        = 1784512190387680000
+index       = 665
+origin      = mutation of /Users/o6lvl4/workspace/github.com/almide/almide/spec/wasm_cross/value_array_tuple_tco.almd
+rung        = Run
+kind        = Hang
+summary     = wasm run hung
+reproduce   = xtarget-fuzz replay --seed 1784512190387680000 --index 665

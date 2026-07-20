@@ -1749,11 +1749,12 @@ evidence  = [
 id        = "C-155"
 spec      = "ALS-T6"
 title     = "to_fixed with out-of-domain decimals aborts in the T6 form"
-statement = "`float.to_fixed(n, decimals)` with decimals outside 0..=1000000 aborts with `Error: to_fixed requires decimals in 0..=1000000` — one stderr line + exit 1, byte-identical on both targets. Previously a negative count reinterpreted as usize on native (the raw format! capacity panic, exit 101) while wasm printed the empty string for a small negative or trapped OOM for i64::MIN (differential-fuzz seed 20260718 index 49); a huge positive was the machine-dependent allocation abort on either leg. The same four consumers as C-154 carry the guard: the v1 self-host via prim.die, the native runtime wrapper, the v0 emit arm via the interned-message div_trap, and the interp bridge via Flow::Abort. In-domain decimals (up to 1e6 digits, ~1 MB) stay total and byte-identical."
+statement = "`float.to_fixed(n, decimals)` with decimals outside 0..=4096 aborts with `Error: to_fixed requires decimals in 0..=4096` — one stderr line + exit 1, byte-identical on both targets. Previously a negative count reinterpreted as usize on native (the raw format! capacity panic, exit 101) while wasm printed the empty string for a small negative or trapped OOM for i64::MIN (differential-fuzz seed 20260718 index 49). The bound was then 0..=1000000, which was itself NOT total: Rust's format! caps runtime precision at u16::MAX, so `to_fixed(1.5, 1000000)` panicked raw on native (101) while the wasm dragon expansion trapped (134) — differential-fuzz seed 1784512190387680000. An f64's exact expansion never exceeds ~1074 fractional digits, so 0..=4096 is generous AND total. The guard's consumers: the v1 self-host via prim.die, the native runtime wrapper, and the interp bridge via Flow::Abort. In-domain decimals stay total and byte-identical."
 since     = "0.31.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/to_fixed_domain_abort.almd", class = "fixture" },
+  { path = "spec/wasm_cross/to_fixed_domain_abort_hi.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1951,9 +1952,20 @@ evidence  = [
 id        = "C-158"
 spec      = "ALS-I3"
 title     = "A some/ok ctor over a scalar call or tuple payload materializes the real value, never a zeroed ctor"
-statement = "A `some(...)`/`ok(...)`/`err(...)` constructor whose payload is a SCALAR-typed call (`ok(<Float combinator chain>)`, `some(list.len(...))`) or a TUPLE literal (`ok((0.3, 1000000))` — the mixed-scalar (Float, Int) shape) either materializes the REAL computed payload — byte-identical to native — or WALLS honestly. Previously the ctor safety net required a HEAP CALL payload, so these fell to the deferred Opaque: an EMPTY block the Result/Option formatter read as `ok(0)` while native printed the real value (differential-fuzz seed 1784512190387680000 index 74, a silent wrong value), and `result.unwrap_or` over the deferred tuple-payload wrapper aborted \"index out of bounds\" on the wasm leg while native succeeded (RunFailureDivergence). Both now take the same ANF route: materialize into a synth temp via the ordinary bind path, rebuild the ctor over the temp, retry the materializer, and wall if the bind itself deferred or is outside the subset."
+statement = "A `some(...)`/`ok(...)`/`err(...)` constructor whose payload is a SCALAR-typed call (`ok(<Float combinator chain>)`, `some(list.len(...))`) or a TUPLE literal (`ok((0.3, 1000000))` — the mixed-scalar (Float, Int) shape) either materializes the REAL computed payload — byte-identical to native — or WALLS honestly. Previously the ctor safety net required a HEAP CALL payload, so these fell to the deferred Opaque: an EMPTY block the Result/Option formatter read as `ok(0)` while native printed the real value (differential-fuzz seed 1784512190387680000 index 74, a silent wrong value), and `result.unwrap_or` over the deferred tuple-payload wrapper aborted \"index out of bounds\" on the wasm leg while native succeeded (RunFailureDivergence). These — and IF-merged payloads (`ok(if c then some(\"a\") else some(\"b\"))`, whose deferral made the downstream unwrap take the FALLBACK on a Some) — now take the same ANF route: materialize into a synth temp via the ordinary bind path, rebuild the ctor over the temp, retry the materializer, and wall if the bind itself deferred or is outside the subset."
 since     = "0.32.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/ctor_scalar_call_payload.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-159"
+spec      = "ALS-I1"
+title     = "list.binary_search returns the same index on both targets for duplicate keys"
+statement = "`list.binary_search` over a sorted `List[Int]` returns the IDENTICAL index on native and wasm even when the key occurs more than once. The native oracle is Rust std's branchless (1.52+) `binary_search_by` loop, which does NOT early-return on equality — `while size > 1 { half = size/2; mid = base+half; base = if elem > target then base else mid; size -= half }` then one final equality check — so an all-equal `[2,2,2,2,2]` search lands on index 4. The wasm self-host previously replicated the CLASSIC early-exit loop and returned 2 (differential-fuzz seed 1784512190387680000: `some(4)` vs `some(2)`, a silent wrong value). Both indices are valid per the std contract, but the native == wasm byte-identity invariant demands one — the self-host now replicates the branchless loop instruction-for-instruction."
+since     = "0.32.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/binary_search_duplicate_keys.almd", class = "fixture" },
 ]

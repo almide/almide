@@ -615,10 +615,11 @@ fn __dgf_main(x: Float, nd: Int) -> String = {
 }
 
 fn float_to_fixed(x: Float, nd: Int) -> String = {
-  // ALS-T6: out-of-domain decimals abort with the 1-line message (native
-  // reinterpreted a negative as usize — a raw format! capacity panic; a huge
-  // positive is the machine-dependent allocation abort). 0..=1e6 everywhere.
-  if nd < 0 or nd > 1000000 then prim.die(prim.handle("Error: to_fixed requires decimals in 0..=1000000\n")) else ()
+  // ALS-T6: out-of-domain decimals abort with the 1-line message. 0..=4096
+  // everywhere — the old 1e6 bound was NOT total (native `format!` caps
+  // runtime precision at u16::MAX and panicked at 1e6 while this expansion
+  // trapped; an f64's exact expansion never exceeds ~1074 fractional digits).
+  if nd < 0 or nd > 4096 then prim.die(prim.handle("Error: to_fixed requires decimals in 0..=4096\n")) else ()
   let bits0 = prim.fbits(x)
   let bits = prim.band(bits0, 9223372036854775807)
   let raw_exp = prim.band(prim.bshr_u(bits, 52), 2047)

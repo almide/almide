@@ -1,0 +1,23 @@
+exit_code = Some(134)
+timed_out = false
+
+--- stdout ---
+
+--- stderr ---
+Error: failed to run main module `/Users/o6lvl4/workspace/github.com/almide/almide/tools/xtarget-fuzz/.scratch/work-7/prog.wasm`
+
+Caused by:
+    0: failed to invoke command default
+    1: error while executing at wasm backtrace:
+    0:   0x17e3 - <unknown>!__str_copy
+    1:   0x1854 - <unknown>!__str_repeat
+    2:   0x18f8 - <unknown>!string.repeat
+    3:   0x1c6e - <unknown>!__gos_copy
+    4:   0x1ca2 - <unknown>!__gos_elem
+    5:   0x1d29 - <unknown>!list.get_or_str
+    6:   0x167d - <unknown>!main
+    7:   0x1dfb - <unknown>!<wasm function 69>
+    2: memory fault at wasm address 0x80010000 in linear memory of size 0x80010000
+    3: wasm trap: out of bounds memory access
+
+

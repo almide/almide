@@ -144,8 +144,10 @@ fn float_fn(func: &str, args: &[Value]) -> Option<Flow> {
             let n = as_float(args.first())?;
             let d = as_int(args.get(1))?;
             // ALS-T6: out-of-domain decimals abort (mirrors runtime/rs float.rs).
-            if !(0..=1_000_000).contains(&d) {
-                return Some(Flow::Abort("to_fixed requires decimals in 0..=1000000".to_string()));
+            // 0..=4096 — the 1e6 bound was NOT total (format! caps runtime
+            // precision at u16::MAX; an f64's exact expansion is ≤ ~1074 digits).
+            if !(0..=4096).contains(&d) {
+                return Some(Flow::Abort("to_fixed requires decimals in 0..=4096".to_string()));
             }
             Flow::val(Value::str(format!("{:.1$}", n, d as usize)))
         }
@@ -250,7 +252,17 @@ fn string_fn(func: &str, args: &[Value]) -> Option<Flow> {
                 .replace(as_str(args.get(1))?, as_str(args.get(2))?),
         )),
         "repeat" => Flow::val(Value::str(
-            as_str(args.first())?.repeat(as_int(args.get(1))? as usize),
+            // Negative counts clamp to 0 (C-054; mirrors runtime/rs string.rs).
+            as_str(args.first())?.repeat(as_int(args.get(1))?.max(0) as usize),
+        )),
+        // Codepoint-count take, the C-054 unsigned discipline (mirrors
+        // runtime/rs almide_rt_string_take: `chars().take(n as usize)` — a
+        // negative n is enormous as usize, so take(-1) keeps the whole string).
+        "take" => Flow::val(Value::str(
+            as_str(args.first())?
+                .chars()
+                .take(as_int(args.get(1))? as usize)
+                .collect::<String>(),
         )),
         "count" => Flow::val(Value::Int(
             as_str(args.first())?.matches(as_str(args.get(1))?).count() as i64,

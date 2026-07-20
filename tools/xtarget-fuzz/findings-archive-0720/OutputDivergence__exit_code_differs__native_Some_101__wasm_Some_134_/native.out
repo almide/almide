@@ -1,0 +1,11 @@
+exit_code = Some(101)
+timed_out = false
+
+--- stdout ---
+
+--- stderr ---
+
+thread 'main' (51911827) panicked at /rustc/e408947bfd200af42db322daf0fadfe7e26d3bd1/library/alloc/src/raw_vec/mod.rs:28:5:
+capacity overflow
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+

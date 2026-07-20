@@ -549,7 +549,15 @@ impl LowerCtx {
                     // mixed-scalar payload the ctor materializer declines): deferred, the
                     // `result.flat_unwrap_or` twin read the EMPTY block's payload out of
                     // bounds — a runtime abort native never had (RunFailureDivergence).
-                    if matches!(expr.kind, IrExprKind::Call { .. } | IrExprKind::Tuple { .. }) {
+                    // And IF-merged payloads (`ok(if c then some("a") else some("b"))`):
+                    // deferred, the downstream unwrap misread the empty block as None and
+                    // took the fallback while native returned the real payload — the ANF
+                    // bind routes them through the proven heap-result-if bind machinery
+                    // (C-106) instead.
+                    if matches!(
+                        expr.kind,
+                        IrExprKind::Call { .. } | IrExprKind::Tuple { .. } | IrExprKind::If { .. }
+                    ) {
                         let payload_ty = expr.ty.clone();
                         let payload = (**expr).clone();
                         let tmp = self.fresh_synth_var();

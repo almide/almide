@@ -1,0 +1,24 @@
+
+// @contract: C-136
+// In-place PLACE mutations persist to the subsequent read on both targets:
+//   1. record field assign, all-scalar record        (p.x = 9)
+//   2. record field assign, mixed heap/scalar record (q.age = 31, scalar slot)
+//   3. record field assign, heap-typed field         (q.name = "b")
+//   4. map insert                                    (m["k"] = 5)
+//   5. list element store, heap element              (xs[0] = "Z")
+//   6. list element store, scalar element            (ns[1] = 42)
+// Previously the v1 leg lowered 1–5 to ONLY the MakeUnique COW guard and
+// silently ELIDED the write (a caps-counting-era deferral executable on the
+// output path): the assign was a no-op and the read returned the pre-assign
+// value while native mutated — a silent wrong value on the verified default.
+// Now the scalar-slot stores execute on v1 and every other shape WALLS
+// honestly (v0 emits the correct bytes).
+effect fn main() -> Unit = {
+  var m = map.new();
+  println(int.to_string(map.get(m, "k") ?? -1));
+  var xs = ["a", "b"];
+  xs[7] = "Z";
+  println(xs[1]);
+  var out = "none";
+  println(out)
+}

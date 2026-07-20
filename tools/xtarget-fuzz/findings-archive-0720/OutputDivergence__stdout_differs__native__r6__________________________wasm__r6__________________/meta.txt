@@ -1,0 +1,7 @@
+seed        = 20260721
+index       = 374
+origin      = synthesis
+rung        = Run
+kind        = OutputDivergence
+summary     = stdout differs: native="r6 = (\"日本語\", \"Привет\")" wasm="r6 = (\"Ǆ\", \"ß\")"
+reproduce   = xtarget-fuzz replay --seed 20260721 --index 374

@@ -1,0 +1,28 @@
+exit_code = Some(0)
+timed_out = false
+
+--- stdout ---
+{
+  "name": "almide",
+  "café": [
+    1,
+    2,
+    3
+  ],
+  "nested": {
+    "x": 10,
+    "y": true
+  },
+  "empty_arr": [],
+  "empty_obj": {},
+  "flag": false,
+  "ratio": 2.5
+}
+[
+  "a",
+  "b"
+]
+42
+
+--- stderr ---
+

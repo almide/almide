@@ -1,0 +1,13 @@
+exit_code = Some(0)
+timed_out = false
+
+--- stdout ---
+r0 = 2
+r2 = ok("2")
+r3 = ["2", "2"]
+r5 = ok("2")
+r8 = 0.000001
+r9 = 0.000001
+
+--- stderr ---
+

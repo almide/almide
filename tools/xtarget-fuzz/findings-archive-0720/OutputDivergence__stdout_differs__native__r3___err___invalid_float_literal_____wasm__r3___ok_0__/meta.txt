@@ -1,0 +1,7 @@
+seed        = 20260718
+index       = 888
+origin      = synthesis
+rung        = Run
+kind        = OutputDivergence
+summary     = stdout differs: native="r3 = err(\"invalid float literal\")" wasm="r3 = ok(0)"
+reproduce   = xtarget-fuzz replay --seed 20260718 --index 888

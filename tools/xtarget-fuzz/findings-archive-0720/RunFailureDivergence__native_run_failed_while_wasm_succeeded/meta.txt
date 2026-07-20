@@ -1,0 +1,7 @@
+seed        = 1784512190387680000
+index       = 738
+origin      = mutation of /Users/o6lvl4/workspace/github.com/almide/almide/spec/wasm_cross/place_mutation.almd
+rung        = Run
+kind        = RunFailureDivergence
+summary     = native run failed while wasm succeeded
+reproduce   = xtarget-fuzz replay --seed 1784512190387680000 --index 738

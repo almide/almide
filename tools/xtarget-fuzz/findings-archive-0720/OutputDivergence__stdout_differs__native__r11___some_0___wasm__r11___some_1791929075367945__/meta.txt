@@ -1,0 +1,7 @@
+seed        = 20260718
+index       = 647
+origin      = synthesis
+rung        = Run
+kind        = OutputDivergence
+summary     = stdout differs: native="r11 = some(0)" wasm="r11 = some(1791929075367945)"
+reproduce   = xtarget-fuzz replay --seed 20260718 --index 647

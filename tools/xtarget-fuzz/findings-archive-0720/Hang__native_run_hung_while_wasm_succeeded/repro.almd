@@ -1,0 +1,20 @@
+
+// @contract: C-069
+// #557: an effect fn's tail self-recursion must loop-convert to O(1) stack on
+// BOTH targets. The frontend auto-? wraps the tail self-call as Try{Call self}
+// (and ResultPropagation on the wasm arm further wraps it Ok(Try(Call self))),
+// which TCO must see THROUGH. Before the fix, every implicitly-lifted recursive
+// effect fn ran O(n) stack and crashed at ~1e5 depth (native stack overflow /
+// wasm call-stack trap). Three shapes: plain accumulate, an Err early-exit base
+// case (the `?` short-circuit must still fire), and a managed-param carry.
+effect fn sum_to(n: Int, acc: Int) -> Int = 0
+
+effect fn checked(n: Int) -> Int = 0
+
+effect fn fail(msg: String) -> Int = err(msg)!
+
+effect fn main() -> Unit = {
+  let s = sum_to(1000000, 1);
+  let c = checked(2000000);
+  println("${s} ${c}")
+}

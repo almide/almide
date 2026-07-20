@@ -1,0 +1,7 @@
+seed        = 1784512190387680000
+index       = 697
+origin      = synthesis
+rung        = NativeBuild
+kind        = NativeBuildFailure
+summary     = native build failed after check accepted
+reproduce   = xtarget-fuzz replay --seed 1784512190387680000 --index 697

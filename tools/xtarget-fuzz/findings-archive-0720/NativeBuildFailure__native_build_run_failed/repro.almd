@@ -1,0 +1,14 @@
+
+// @contract: C-067
+// #554: the xs[i] index SYNTAX path (read AND write) aborts on OOB with the
+// UNIFIED contract — "Error: index out of bounds\n" + exit 1 — byte-identical
+// native == wasm, NOT a native panic (101) nor a wasm `unreachable` trap (134).
+// Previously wasm had NO write-path check (silent heap corruption, exit 0) and
+// wrapped the index to i32 before the read check (silent wrong element for
+// indices >= 2^32). In-bounds reads/writes stay correct.
+fn pick(n: Int) -> Int = n
+
+fn main() -> Unit = {
+  var xs = [-2147483648, 20, 30];
+  println(int.to_string(xs[pick(10)]))
+}

@@ -1,0 +1,6 @@
+
+fn main() -> Unit = {
+  let single = "hello";
+  assert_eq(single, "SELECT *\nFROM users\nWHERE id = 1");
+  println("All string tests passed!")
+}

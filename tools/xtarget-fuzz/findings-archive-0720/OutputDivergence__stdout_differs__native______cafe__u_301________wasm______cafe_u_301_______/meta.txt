@@ -1,0 +1,7 @@
+seed        = 1784512190387680000
+index       = 1055
+origin      = mutation of /Users/o6lvl4/workspace/github.com/almide/almide/spec/wasm_cross/json_stringify_pretty.almd
+rung        = Run
+kind        = OutputDivergence
+summary     = stdout differs: native="  \"cafe\\u{301}\": [" wasm="  \"cafe\u{301}\": ["
+reproduce   = xtarget-fuzz replay --seed 1784512190387680000 --index 1055

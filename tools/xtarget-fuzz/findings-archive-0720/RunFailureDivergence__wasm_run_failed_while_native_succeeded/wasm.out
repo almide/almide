@@ -1,0 +1,8 @@
+exit_code = Some(1)
+timed_out = false
+
+--- stdout ---
+
+--- stderr ---
+Error: index out of bounds
+

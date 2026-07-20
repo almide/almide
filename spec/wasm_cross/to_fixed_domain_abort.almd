@@ -1,5 +1,5 @@
 // @contract: C-155
-// float.to_fixed outside the decimals domain (0..=1000000) aborts in the T6
+// float.to_fixed outside the decimals domain (0..=4096) aborts in the T6
 // form — one stderr line + exit 1, byte-identical on both targets. Native
 // previously leaked the raw format! capacity panic (exit 101) on a negative
 // count while wasm printed the empty string or trapped OOM (fuzz seed-20260718

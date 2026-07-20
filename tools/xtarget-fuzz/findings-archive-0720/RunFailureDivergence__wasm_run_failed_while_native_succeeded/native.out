@@ -1,0 +1,9 @@
+exit_code = Some(0)
+timed_out = false
+
+--- stdout ---
+r1 = (0.3, 1000000)
+r3 = none
+
+--- stderr ---
+
