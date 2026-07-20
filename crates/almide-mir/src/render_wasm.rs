@@ -774,9 +774,78 @@ pub fn render_wasm_fn(
     // wasm while shape `(block $brk (loop $cont … (br_if $brk (eqz cond)) … (br $cont)))`.
     // A unique id per loop keeps nested loops' labels distinct; the stack tracks which
     // open loop a break/back-edge closes.
+    //
+    // #806 step 3b: a loop condition computed by the IMMEDIATELY preceding compare
+    // whose Bool is used ONLY by the break renders as one direct `br_if` on the
+    // (negated) compare — dropping the extend/local.set/local.get/eqz churn that
+    // sat in EVERY hot loop's header. Int compares negate exactly (total order);
+    // float compares wrap in `i32.eqz` instead (¬(a<b) ≠ (a≥b) under NaN).
+    // Render-level only: the MIR and its certificate are untouched.
+    let mut fused_break: BTreeMap<usize, String> = BTreeMap::new();
+    let mut fused_skip: BTreeSet<usize> = BTreeSet::new();
+    {
+        let mut occ: BTreeMap<ValueId, usize> = BTreeMap::new();
+        let mut vals: Vec<ValueId> = Vec::new();
+        for op in &func.ops {
+            vals.clear();
+            op_values(op, &mut vals);
+            for v in &vals {
+                *occ.entry(*v).or_insert(0) += 1;
+            }
+        }
+        for i in 1..func.ops.len() {
+            let Op::LoopBreakUnless { cond } = &func.ops[i] else { continue };
+            // exactly two occurrences program-wide: the def (dst) + this use.
+            if occ.get(cond).copied() != Some(2) {
+                continue;
+            }
+            match &func.ops[i - 1] {
+                Op::IntBinOp { dst, op, a, b } if dst == cond => {
+                    let neg = match op {
+                        IntOp::Lt => "i64.ge_s",
+                        IntOp::Le => "i64.gt_s",
+                        IntOp::Gt => "i64.le_s",
+                        IntOp::Ge => "i64.lt_s",
+                        IntOp::Eq => "i64.ne",
+                        IntOp::Ne => "i64.eq",
+                        _ => continue,
+                    };
+                    fused_break.insert(
+                        i,
+                        format!("({neg} (local.get {}) (local.get {}))", local(*a), local(*b)),
+                    );
+                    fused_skip.insert(i - 1);
+                }
+                Op::Prim { kind: PrimKind::FloatCmp(op), dst: Some(d), args } if d == cond => {
+                    let f = |a: usize| {
+                        if floats.contains(&args[a]) {
+                            format!("(local.get {})", local(args[a]))
+                        } else {
+                            format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]))
+                        }
+                    };
+                    let instr = match op {
+                        FCmpOp::Lt => "f64.lt",
+                        FCmpOp::Le => "f64.le",
+                        FCmpOp::Gt => "f64.gt",
+                        FCmpOp::Ge => "f64.ge",
+                        FCmpOp::Eq => "f64.eq",
+                        FCmpOp::Ne => "f64.ne",
+                    };
+                    fused_break
+                        .insert(i, format!("(i32.eqz ({instr} {} {}))", f(0), f(1)));
+                    fused_skip.insert(i - 1);
+                }
+                _ => {}
+            }
+        }
+    }
     let mut loop_ctr: u32 = 0;
     let mut loop_stack: Vec<u32> = Vec::new();
-    for op in &func.ops {
+    for (op_idx, op) in func.ops.iter().enumerate() {
+        if fused_skip.contains(&op_idx) {
+            continue;
+        }
         match op {
             Op::LoopStart => {
                 let id = loop_ctr;
@@ -786,10 +855,14 @@ pub fn render_wasm_fn(
             }
             Op::LoopBreakUnless { cond } => {
                 let id = *loop_stack.last().expect("LoopBreakUnless outside a loop");
-                body.push_str(&format!(
-                    "    (br_if $brk{id} (i64.eqz (local.get {})))\n",
-                    local(*cond)
-                ));
+                if let Some(fc) = fused_break.get(&op_idx) {
+                    body.push_str(&format!("    (br_if $brk{id} {fc})\n"));
+                } else {
+                    body.push_str(&format!(
+                        "    (br_if $brk{id} (i64.eqz (local.get {})))\n",
+                        local(*cond)
+                    ));
+                }
             }
             Op::LoopEnd => {
                 let id = loop_stack.pop().expect("LoopEnd without LoopStart");
@@ -840,6 +913,121 @@ fn wasm_ty(repr: Repr) -> &'static str {
 }
 
 /// The value an op defines (binds), if any.
+/// Every [`ValueId`] an op touches (dst + all operands), exhaustively — the
+/// generic occurrence walk the render-level peepholes (#806 step 3b) use to
+/// prove a value is single-use before fusing its def into its use site.
+fn op_values(op: &Op, out: &mut Vec<ValueId>) {
+    let args_vals = |args: &[CallArg], out: &mut Vec<ValueId>| {
+        for a in args {
+            match a {
+                CallArg::Handle(v) | CallArg::Scalar(v) => out.push(*v),
+                CallArg::Imm(_) | CallArg::Label(_) => {}
+            }
+        }
+    };
+    match op {
+        Op::Alloc { dst, init, .. } => {
+            out.push(*dst);
+            match init {
+                Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => {
+                    out.push(*len)
+                }
+                Init::OptSome { payload } => out.push(*payload),
+                Init::Opaque
+                | Init::OptNone
+                | Init::IntList(_)
+                | Init::Bytes(_)
+                | Init::Str(_) => {}
+            }
+        }
+        Op::Const { dst } | Op::ConstInt { dst, .. } | Op::FuncRef { dst, .. } => out.push(*dst),
+        Op::Dup { dst, src } => {
+            out.push(*dst);
+            out.push(*src);
+        }
+        Op::Drop { v }
+        | Op::DropListStr { v }
+        | Op::DropValue { v }
+        | Op::DropListValue { v }
+        | Op::DropListStrValue { v }
+        | Op::DropListStrStr { v }
+        | Op::DropListIntStr { v }
+        | Op::DropListStrInt { v }
+        | Op::DropResultListValue { v }
+        | Op::DropResultValue { v }
+        | Op::DropResultStrInt { v }
+        | Op::DropResultValueInt { v }
+        | Op::DropResultListValueInt { v }
+        | Op::DropResultListStrInt { v }
+        | Op::DropResultListStr { v }
+        | Op::DropListListStr { v }
+        | Op::DropVariant { v, .. }
+        | Op::DropWrapperRec { v, .. }
+        | Op::Consume { v }
+        | Op::Borrow { v }
+        | Op::MakeUnique { v } => out.push(*v),
+        Op::Pure { dst, uses } => {
+            out.push(*dst);
+            out.extend(uses.iter().copied());
+        }
+        Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } | Op::CallImport { dst, args, .. } => {
+            if let Some(d) = dst {
+                out.push(*d);
+            }
+            args_vals(args, out);
+        }
+        Op::CallIndirect { dst, table_idx, args, .. } => {
+            if let Some(d) = dst {
+                out.push(*d);
+            }
+            out.push(*table_idx);
+            args_vals(args, out);
+        }
+        Op::ListLit { dst, elems } => {
+            out.push(*dst);
+            out.extend(elems.iter().copied());
+        }
+        Op::ListGetScalar { dst, list, idx } => {
+            out.push(*dst);
+            out.push(*list);
+            out.push(*idx);
+        }
+        Op::ListSetScalar { list, idx, val } => {
+            out.push(*list);
+            out.push(*idx);
+            out.push(*val);
+        }
+        Op::IntBinOp { dst, a, b, .. } => {
+            out.push(*dst);
+            out.push(*a);
+            out.push(*b);
+        }
+        Op::Prim { dst, args, .. } => {
+            if let Some(d) = dst {
+                out.push(*d);
+            }
+            out.extend(args.iter().copied());
+        }
+        Op::IfThen { cond, dst } => {
+            out.push(*cond);
+            if let Some(d) = dst {
+                out.push(*d);
+            }
+        }
+        Op::Else { val } | Op::EndIf { val } => {
+            if let Some(v) = val {
+                out.push(*v);
+            }
+        }
+        Op::LoopBreakUnless { cond } => out.push(*cond),
+        Op::LoopStart | Op::LoopEnd => {}
+        Op::SetLocal { local, src } => {
+            out.push(*local);
+            out.push(*src);
+        }
+    }
+}
+
 fn defined_value(op: &Op) -> Option<ValueId> {
     match op {
         Op::Alloc { dst, .. }
