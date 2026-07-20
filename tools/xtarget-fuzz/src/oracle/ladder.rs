@@ -220,6 +220,21 @@ pub fn run_ladder(
         };
     }
     if wasm.timed_out {
+        // The SYMMETRIC rule to the native-hang skip above: a wasm hang is
+        // only evidence when native CLEANLY SUCCEEDED. A mutation can
+        // synthesize a genuinely non-terminating program whose two legs
+        // merely FAIL at different speeds — native blows its stack in
+        // milliseconds while the wasm leg (TCO'd into a loop) grinds past
+        // the timeout toward the 4GB ceiling. Both diverge only in failure
+        // form/speed — no divergence oracle.
+        if !native.success() {
+            return Outcome::Skipped {
+                reason: "wasm hung while native also failed (a non-terminating or \
+                         resource-unbounded program by construction) — no divergence \
+                         oracle"
+                    .into(),
+            };
+        }
         return Outcome::Finding(Finding {
             rung: Rung::Run,
             kind: FindingKind::Hang,
