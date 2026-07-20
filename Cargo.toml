@@ -35,7 +35,7 @@ semver = "1"
 toml = "1.1"
 wasm-encoder = "0.253"
 lasso = { version = "0.7", features = ["multi-threaded"] }
-lsp-server = "0.9"
+lsp-server = "0.10"
 lsp-types = "0.97"
 
 # Cross-platform advisory file lock (flock / LockFileEx) for the shared build
