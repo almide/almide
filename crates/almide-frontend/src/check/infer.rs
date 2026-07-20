@@ -68,13 +68,27 @@ impl Checker {
         // `Some(_)` exactly for their own variants). The chain is order-
         // independent — every `ExprKind` variant matches exactly one group — so
         // dispatching to them first, then the group-1 arms below, is identical
-        // to the original single match. Group 1 keeps the arms whose bodies
-        // early-`return` (TypeName / Record / Member / TupleIndex /
-        // OptionalChain), which a wrapper cannot factor out.
+        // to the original single match. Group 1's remaining arms (TypeName /
+        // Record / Member / TupleIndex / OptionalChain, 2026-07-20 #781) are
+        // each a NAMED method that re-destructures `&mut expr.kind` internally
+        // (`let PATTERN = &mut expr.kind else { unreachable!() }`) — a pure
+        // text move, its `return` statements untouched since they now return
+        // from a real function, not a match arm.
         if let Some(t) = self.infer_expr_inner_g2(expr) { return t; }
         if let Some(t) = self.infer_expr_inner_g3(expr) { return t; }
-        match &mut expr.kind {
-            ExprKind::TypeName { name, .. } => {
+        match &expr.kind {
+            ExprKind::TypeName { .. } => self.infer_expr_type_name(expr),
+            ExprKind::Record { .. } => self.infer_expr_record(expr),
+            ExprKind::Member { .. } => self.infer_expr_member(expr),
+            ExprKind::TupleIndex { .. } => self.infer_expr_tuple_index(expr),
+            ExprKind::OptionalChain { .. } => self.infer_expr_optional_chain(expr),
+            _ => unreachable!("infer_expr_inner: ExprKind variant not in {{group1,group2,group3}}"),
+        }
+    }
+
+
+    fn infer_expr_type_name(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::TypeName { name, .. } = &mut expr.kind else { unreachable!("infer_expr_type_name called on the wrong ExprKind") };
                 // Const param reference: `N` where `N: Int` is a compile-time value param
                 if let Some(Ty::ConstParam { ty, .. }) = self.env.types.get(&sym(name)).cloned() {
                     return *ty;
@@ -109,8 +123,10 @@ impl Checker {
                 }
                 else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
                 else { Ty::Named(sym(name), vec![]) }
-            }
-            ExprKind::Record { name, fields, .. } => {
+    }
+
+    fn infer_expr_record(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::Record { name, fields, .. } = &mut expr.kind else { unreachable!("infer_expr_record called on the wrong ExprKind") };
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 if let Some(n) = name {
                     // A qualified record-variant name (`mod.Ctor { … }`) keys the
@@ -284,8 +300,10 @@ impl Checker {
                     }).collect();
                     Ty::Record { fields: field_tys }
                 }
-            }
-            ExprKind::Member { object, field, .. } => {
+    }
+
+    fn infer_expr_member(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::Member { object, field, .. } = &mut expr.kind else { unreachable!("infer_expr_member called on the wrong ExprKind") };
                 // `infer_expr(object)` below overwrites `current_span`
                 // with the object's range, so capture the Member expr's
                 // own span now. E013 uses it to position the
@@ -434,8 +452,10 @@ impl Checker {
                     }
                 }
                 field_ty
-            }
-            ExprKind::TupleIndex { object, index, .. } => {
+    }
+
+    fn infer_expr_tuple_index(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::TupleIndex { object, index, .. } = &mut expr.kind else { unreachable!("infer_expr_tuple_index called on the wrong ExprKind") };
                 let obj_ty = self.infer_expr(object);
                 if let Ty::Tuple(elems) = &obj_ty {
                     if *index < elems.len() { return elems[*index].clone(); }
@@ -460,8 +480,10 @@ impl Checker {
                     }
                     _ => Ty::Unknown,
                 }
-            }
-            ExprKind::OptionalChain { expr: inner, field, .. } => {
+    }
+
+    fn infer_expr_optional_chain(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::OptionalChain { expr: inner, field, .. } = &mut expr.kind else { unreachable!("infer_expr_optional_chain called on the wrong ExprKind") };
                 let t = self.infer_expr(inner);
                 let resolved = resolve_ty(&t, &self.uf);
                 let inner_ty = if let Some(ty) = resolved.option_inner() {
@@ -504,13 +526,8 @@ impl Checker {
                         }
                     }
                 }
-            }
-            // Every other `ExprKind` variant is handled by `infer_expr_inner_g2`
-            // / `infer_expr_inner_g3` above (the partition is total), so this is
-            // genuinely unreachable for any well-formed AST.
-            _ => unreachable!("infer_expr_inner: ExprKind variant not in any group"),
-        }
     }
+
 }
 
 include!("infer_p2.rs");
