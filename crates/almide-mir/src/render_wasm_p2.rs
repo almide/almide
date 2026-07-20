@@ -6,6 +6,7 @@ fn render_op(
     masks: &BTreeMap<ValueId, Vec<usize>>,
     reprs: &BTreeMap<ValueId, Repr>,
     floats: &BTreeSet<ValueId>,
+    fuser: &mut Fuser,
 ) -> String {
     match op {
         // A STRING literal — a heap block `[rc][len][cap][utf8 bytes...]` (same header
@@ -237,7 +238,14 @@ fn render_op(
         // A runtime call → a wasm `call` of the (bootstrap) runtime function.
         Op::Call { dst, func, args, .. } => render_call(*dst, func, args, label_off),
         Op::IntBinOp { dst, op, a, b } => {
-            let args = format!("(local.get {}) (local.get {})", local(*a), local(*b));
+            // #806 step 3c: splice pending single-use defs into the operands
+            // (Div/Mod below read operands several times, so they stay plain
+            // `local.get` — the caller flushed any pending among them).
+            let args = if matches!(op, IntOp::Div | IntOp::Mod) {
+                format!("(local.get {}) (local.get {})", local(*a), local(*b))
+            } else {
+                format!("{} {}", fuser.operand(*a), fuser.operand(*b))
+            };
             // CHECKED division/remainder: divisor 0 / MIN÷-1 abort via $__div_trap
             // with the native-identical stderr line + exit 1 (C-001/C-035) — never a
             // bare i64.div_s hard trap (exit 134, no message). The checks + op are
@@ -248,6 +256,43 @@ fn render_op(
             // re-evaluations cost nothing and no scratch local is needed.
             if matches!(op, IntOp::Div | IntOp::Mod) {
                 let instr = if matches!(op, IntOp::Div) { "i64.div_s" } else { "i64.rem_s" };
+                // #806 step 3c: a CONSTANT nonzero divisor decides both checks
+                // statically — elide them (zero-check vacuous; MIN÷-1 only when
+                // c == -1). `÷ 2^k` (k ≥ 1) additionally strength-reduces to the
+                // EXACT correction-shift sequence (valid for every dividend,
+                // negative included) — Cranelift does neither, and the hardware
+                // sdiv alone cost ~25% of spectralnorm's inner loop.
+                match fuser.const_of(*b) {
+                    Some(c) if c != 0 && c != -1 => {
+                        if matches!(op, IntOp::Div) && c > 1 && (c as u64).is_power_of_two() {
+                            let k = (c as u64).trailing_zeros();
+                            return format!(
+                                "    (local.set {d} (i64.shr_s (i64.add (local.get {a})\n\
+                                 \x20       (i64.shr_u (i64.shr_s (local.get {a}) (i64.const 63)) (i64.const {nk})))\n\
+                                 \x20       (i64.const {k})))\n",
+                                a = local(*a),
+                                d = local(*dst),
+                                nk = 64 - k,
+                            );
+                        }
+                        return format!(
+                            "    (local.set {d} ({instr} {args}))\n",
+                            d = local(*dst),
+                        );
+                    }
+                    Some(-1) => {
+                        return format!(
+                            "    (if (i32.and (i64.eq (local.get {a}) (i64.const -9223372036854775808))\n\
+                             \x20                (i64.eq (local.get {b}) (i64.const -1)))\n\
+                             \x20     (then (call $__div_trap (i32.const {OVERFLOW_MSG_ADDR}) (i32.const 24))))\n\
+                             \x20   (local.set {d} ({instr} {args}))\n",
+                            a = local(*a),
+                            b = local(*b),
+                            d = local(*dst),
+                        );
+                    }
+                    _ => {}
+                }
                 return format!(
                     "    (if (i64.eqz (local.get {b}))\n\
                      \x20     (then (call $__div_trap (i32.const {DIVZERO_MSG_ADDR}) (i32.const 24))))\n\
@@ -902,7 +947,7 @@ fn render_op(
                 // `float.from_int` — the single-instruction sitofp floor (#806).
                 // An f64-classified dst (step 3a) takes the convert result directly.
                 PrimKind::F64FromInt => {
-                    let conv = format!("(f64.convert_i64_s (local.get {}))", local(args[0]));
+                    let conv = format!("(f64.convert_i64_s {})", fuser.operand(args[0]));
                     if dst.is_some_and(|d| floats.contains(&d)) {
                         conv
                     } else {
@@ -912,21 +957,16 @@ fn render_op(
                 // FLOAT floor: the i64 value holds the f64 bits — reinterpret around the
                 // op. #806 step 3a: an f64-CLASSIFIED operand is read bare (it is a real
                 // f64 local), and an f64-classified dst takes the f64 result directly —
-                // the hot-loop shape with ZERO reinterprets.
+                // the hot-loop shape with ZERO reinterprets. Operands splice pending
+                // single-use defs (step 3c).
                 PrimKind::FloatUn(op) => {
-                    let f = |a: usize| {
-                        if floats.contains(&args[a]) {
-                            format!("(local.get {})", local(args[a]))
-                        } else {
-                            format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]))
-                        }
-                    };
+                    let x = float_operand(fuser, floats, args[0]);
                     let inner = match op {
-                        FUnOp::Abs => format!("(f64.abs {})", f(0)),
-                        FUnOp::Sqrt => format!("(f64.sqrt {})", f(0)),
-                        FUnOp::Floor => format!("(f64.floor {})", f(0)),
-                        FUnOp::Ceil => format!("(f64.ceil {})", f(0)),
-                        FUnOp::Neg => format!("(f64.neg {})", f(0)),
+                        FUnOp::Abs => format!("(f64.abs {x})"),
+                        FUnOp::Sqrt => format!("(f64.sqrt {x})"),
+                        FUnOp::Floor => format!("(f64.floor {x})"),
+                        FUnOp::Ceil => format!("(f64.ceil {x})"),
+                        FUnOp::Neg => format!("(f64.neg {x})"),
                     };
                     if dst.is_some_and(|d| floats.contains(&d)) {
                         inner
@@ -935,13 +975,8 @@ fn render_op(
                     }
                 }
                 PrimKind::FloatBin(op) => {
-                    let f = |a: usize| {
-                        if floats.contains(&args[a]) {
-                            format!("(local.get {})", local(args[a]))
-                        } else {
-                            format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]))
-                        }
-                    };
+                    let a = float_operand(fuser, floats, args[0]);
+                    let b = float_operand(fuser, floats, args[1]);
                     let instr = match op {
                         FBinOp::Add => "f64.add",
                         FBinOp::Sub => "f64.sub",
@@ -951,7 +986,7 @@ fn render_op(
                         FBinOp::Max => "f64.max",
                         FBinOp::CopySign => "f64.copysign",
                     };
-                    let inner = format!("({instr} {} {})", f(0), f(1));
+                    let inner = format!("({instr} {a} {b})");
                     if dst.is_some_and(|d| floats.contains(&d)) {
                         inner
                     } else {
@@ -959,13 +994,8 @@ fn render_op(
                     }
                 }
                 PrimKind::FloatCmp(op) => {
-                    let f = |a: usize| {
-                        if floats.contains(&args[a]) {
-                            format!("(local.get {})", local(args[a]))
-                        } else {
-                            format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]))
-                        }
-                    };
+                    let a = float_operand(fuser, floats, args[0]);
+                    let b = float_operand(fuser, floats, args[1]);
                     let instr = match op {
                         FCmpOp::Lt => "f64.lt",
                         FCmpOp::Le => "f64.le",
@@ -975,22 +1005,18 @@ fn render_op(
                         FCmpOp::Ne => "f64.ne",
                     };
                     // f64 compare yields an i32 0/1 — extend to the i64-uniform Bool.
-                    format!("(i64.extend_i32_u ({instr} {} {}))", f(0), f(1))
+                    format!("(i64.extend_i32_u ({instr} {a} {b}))")
                 }
                 // SATURATING float→int (i64.trunc_SAT_f64_s), matching Rust's `as` cast (v0): NaN → 0,
                 // > i64::MAX → i64::MAX, < i64::MIN → i64::MIN — NO trap. The plain `i64.trunc_f64_s`
                 // traps on NaN/inf/out-of-range, diverging from v0 (and float_to_uint64.almd already
                 // assumes the saturating form for its f >= 2^64 → u64::MAX path).
                 PrimKind::FloatToInt => {
-                    let x = if floats.contains(&args[0]) {
-                        format!("(local.get {})", local(args[0]))
-                    } else {
-                        format!("(f64.reinterpret_i64 (local.get {}))", local(args[0]))
-                    };
+                    let x = float_operand(fuser, floats, args[0]);
                     format!("(i64.trunc_sat_f64_s {x})")
                 }
                 PrimKind::IntToFloat => {
-                    let conv = format!("(f64.convert_i64_s (local.get {}))", local(args[0]));
+                    let conv = format!("(f64.convert_i64_s {})", fuser.operand(args[0]));
                     if dst.is_some_and(|d| floats.contains(&d)) {
                         conv
                     } else {
@@ -1073,7 +1099,7 @@ fn render_op(
         // A scalar reassignment of a stable local — the loop-carried state. Reads `src`,
         // writes the var's own local (reusing the same wasm local is legal: read then set).
         Op::SetLocal { local: l, src } => {
-            format!("    (local.set {} (local.get {}))\n", local(*l), local(*src))
+            format!("    (local.set {} {})\n", local(*l), fuser.operand(*src))
         }
         Op::Consume { .. }
         | Op::Borrow { .. }
