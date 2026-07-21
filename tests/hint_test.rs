@@ -193,6 +193,13 @@ fn keyword_typo_interface() {
 }
 
 #[test]
+fn keyword_typo_impl() {
+    let got = tok(TokenType::Ident, "impl");
+    let ctx = HintContext { expected: None, got: &got, prev: None, next: None, scope: HintScope::TopLevel };
+    assert_hint_match(&ctx, "fn Type.method");
+}
+
+#[test]
 fn keyword_typo_const() {
     let got = tok(TokenType::Ident, "const");
     let ctx = HintContext { expected: None, got: &got, prev: None, next: None, scope: HintScope::TopLevel };

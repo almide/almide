@@ -98,21 +98,12 @@ protocol Action {
   fn execute(a: Self, ctx: Context) -> Result[String, String]
 }
 
-// Satisfy via convention methods (no impl block; not checked against the
-// protocol until something actually uses it through the protocol bound)
+// Satisfy via convention methods -- no impl block, this is the only way.
+// The checker validates the signature against the protocol (arity, types).
 type GreetAction: Action = { greeting: String }
 fn GreetAction.name(a: GreetAction) -> String = "greet"
 fn GreetAction.execute(a: GreetAction, ctx: Context) -> Result[String, String] =
   ok(a.greeting)
-
-// PREFER: satisfy via an impl block instead -- the checker validates each
-// method's signature against the protocol right here, with a precise
-// mismatch diagnostic (arity, parameter types)
-type LogAction = { greeting: String }
-impl Action for LogAction {
-  fn name(a: LogAction) -> String = "log:" + a.greeting
-  fn execute(a: LogAction, ctx: Context) -> Result[String, String] = ok(a.greeting)
-}
 
 // Use as generic bound
 fn run_action[T: Action](action: T, ctx: Context) -> Result[String, String] =
@@ -120,7 +111,7 @@ fn run_action[T: Action](action: T, ctx: Context) -> Result[String, String] =
 ```
 Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols too.
 
-**`self` as a bare, untyped parameter name only resolves inside a `protocol { ... }` declaration.** In both satisfaction paths above (convention methods and `impl` blocks), name and type the first parameter explicitly (`a: GreetAction`) — bare `self` there does not currently resolve.
+**`self` as a bare, untyped parameter name only resolves inside a `protocol { ... }` declaration.** On a convention method, name and type the first parameter explicitly (`a: GreetAction`) — bare `self` there does not currently resolve.
 
 ## Expressions
 
@@ -420,7 +411,7 @@ Full function signatures: [docs/stdlib/](stdlib/)
 - Use `for x in xs { ... }` for iteration
 - **No nested functions.** All `fn` must be at the top level. Use lambdas for local helpers
 - **No `mut` keyword.** Use `var` for mutable bindings, not `let mut`
-- Almide is NOT Rust. No `&`, `mut`, `trait` (use `protocol`), `pub`, `mod` (as declaration). `impl` exists, but only as `impl ProtocolName for Type { ... }` to satisfy a protocol — there is no bare `impl Type { ... }` for inherent methods
+- Almide is NOT Rust. No `&`, `mut`, `trait` (use `protocol`), `impl` (use convention methods: `fn Type.method(...)`), `pub`, `mod` (as declaration)
 
 ## Naming conventions across stdlib
 

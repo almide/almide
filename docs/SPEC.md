@@ -95,15 +95,14 @@ Numeric literals support `_` as a visual separator (e.g., `1_000_000`).
 
 Block comments nest: `/* outer /* inner */ still outer */` is valid.
 
-### 1.5 Keywords (35)
+### 1.5 Keywords (34)
 
 ```
-module  import  type    protocol impl    for     in      fn
-let     var     if      then     else    match   ok      err
-some    none    todo    true     false
-not     and     or      strict   pub     effect  test
-guard   break   continue while   local   mod
-fan
+module  import  type    protocol for     in      fn      let
+var     if      then    else     match   ok      err     some
+none    todo    true    false    not     and     or      strict
+pub     effect  test    guard    break   continue while   local
+mod     fan
 ```
 
 ### 1.6 Operators and Delimiters
@@ -169,7 +168,7 @@ text
 ```
 Program   ::= ImportDecl* TopDecl*
 
-TopDecl   ::= TypeDecl | ProtocolDecl | ImplDecl | FnDecl
+TopDecl   ::= TypeDecl | ProtocolDecl | FnDecl
             | TopLetDecl | StrictDecl | TestDecl
 
 Stmt      ::= LetStmt | VarStmt | AssignStmt | GuardStmt | Expr
@@ -332,12 +331,12 @@ ProtocolDecl ::= "protocol" TypeName "{" ProtocolMethod* "}"
 ProtocolMethod ::= ["effect"] "fn" Ident "(" Params ")" "->" TypeExpr
 ```
 
-Protocols define sets of required methods. A type declares intent to satisfy a
-protocol with `: ProtocolName`; the methods themselves are supplied one of two
-ways.
-
-**Convention style** — plain top-level functions named `Type.method`, first
-parameter explicitly typed to `Type`:
+Protocols define sets of required methods. A type declares satisfaction with
+`: ProtocolName`; the methods themselves are plain top-level functions named
+`Type.method`, first parameter explicitly typed to `Type` — there is no
+`impl Protocol for Type { ... }` block. Convention methods stay flat, top-level
+functions: no nesting, no extra indentation depth, one way to attach a method
+to a type.
 
 ```
 protocol Serializable {
@@ -350,38 +349,18 @@ fn Config.serialize(c: Config) -> String = c.key + "=" + c.value
 fn Config.deserialize(raw: String) -> Result[Config, String] = ok(Config { key: raw, value: raw })
 ```
 
-**impl block** — groups the methods under `impl ProtocolName for Type`:
+The checker validates every declared convention method against the protocol's
+signature (arity and parameter/return types, `Self` substituted for the
+declaring type), with a diagnostic pinned to the method if it doesn't match —
+a `Type: Protocol` annotation with a mismatched method is rejected at `almide
+check`, not left to fail later at native codegen. Signature checking is
+skipped for generic types for now (`Self` would need to carry the type's own
+type arguments, which nothing threads through yet).
 
-```
-ImplDecl ::= "impl" TypeName GenericParams? "for" TypeName "{" FnDecl* "}"
-```
-
-```
-protocol Comparable {
-  fn compare(a: Self, other: Self) -> Int
-}
-
-type Money = { cents: Int }
-
-impl Comparable for Money {
-  fn compare(a: Money, other: Money) -> Int = a.cents - other.cents
-}
-```
-
-**Prefer `impl` blocks.** The checker validates each `impl` method's signature
-against the protocol's declared signature right at the block (arity and
-parameter types), with a specific diagnostic on mismatch. Convention style is
-not checked against the protocol at its declaration site — a `Type: Protocol`
-annotation with a mismatched convention method currently passes `almide check`
-and only fails later, at native codegen, with a raw Rust error ([#829](https://github.com/almide/almide/issues/829)).
-Reserve convention style for methods you are not tracking against a protocol
-at all.
-
-Name and type the first parameter explicitly (`a: Config`, `a: Money`) in both
-satisfaction paths above. `self` as a bare, untyped parameter name only
-resolves inside a `protocol { ... }` declaration itself, where it is sugar for
-`self: Self` — writing bare `self` in an `impl` block or in a convention-style
-method currently fails to resolve ([#828](https://github.com/almide/almide/issues/828)).
+Name and type the first parameter explicitly (`a: Config`). `self` as a bare,
+untyped parameter name only resolves inside a `protocol { ... }` declaration
+itself, where it is sugar for `self: Self` — writing bare `self` on a
+convention method currently fails to resolve ([#828](https://github.com/almide/almide/issues/828)).
 
 `Self` is a placeholder for the implementing type. Built-in conventions (Eq,
 Repr, Ord, Hash, Codec) are protocols; `Eq` and `Hash` are compiler-derived

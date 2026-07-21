@@ -949,11 +949,6 @@ impl Checker {
                 }
                 self.pending_toplet_tys.push((sym(name), ity));
             }
-            ast::Decl::Impl { methods, .. } => {
-                for m in methods.iter_mut() {
-                    self.check_decl(m);
-                }
-            }
             ast::Decl::Type { ty, .. } => {
                 // Infer types for default value expressions in variant record fields
                 infer_default_exprs(self, ty);

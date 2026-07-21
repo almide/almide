@@ -201,9 +201,6 @@ fn collect_module_refs_decl(decl: &Decl, used: &mut std::collections::HashSet<St
             collect_module_refs_expr(value, used);
         }
         Decl::Type { ty, .. } => collect_module_refs_type(ty, used),
-        Decl::Impl { methods, .. } => {
-            for m in methods { collect_module_refs_decl(m, used); }
-        }
         _ => {}
     }
 }
@@ -530,11 +527,6 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
                 fmt_type(&mut ret_str, &m.return_type, 0);
                 wln!(out, "{inner}{effect}fn {name}({params_str}) -> {ret_str}", name = m.name);
             }
-            w!(out, "{i}}}");
-        }
-        Decl::Impl { trait_, for_, methods, .. } => {
-            wln!(out, "{i}impl {trait_} for {for_} {{");
-            for m in methods { fmt_decl(out, m, depth + 1); out.push('\n'); }
             w!(out, "{i}}}");
         }
     }

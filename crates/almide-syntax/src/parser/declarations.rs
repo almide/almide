@@ -154,9 +154,6 @@ impl Parser {
         if self.check(TokenType::Protocol) {
             return self.parse_protocol_decl();
         }
-        if self.check(TokenType::Impl) {
-            return self.parse_impl_decl();
-        }
         if self.check(TokenType::Let) {
             return self.parse_top_let(Visibility::Public, false);
         }
@@ -208,7 +205,7 @@ impl Parser {
             return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
         }
         Err(format!(
-            "Expected top-level declaration (fn, effect fn, type, let, var, protocol, impl, test) at line {}:{} (got {:?} '{}')",
+            "Expected top-level declaration (fn, effect fn, type, let, var, protocol, test) at line {}:{} (got {:?} '{}')",
             tok.line, tok.col, tok.token_type, tok.value
         ))
     }
@@ -469,29 +466,6 @@ impl Parser {
         self.expect(TokenType::Arrow)?;
         let return_type = self.parse_type_expr()?;
         Ok(ProtocolMethod { name, params, return_type, effect })
-    }
-
-    fn parse_impl_decl(&mut self) -> Result<Decl, String> {
-        let span = self.current_span();
-        self.expect(TokenType::Impl)?;
-        let trait_name = self.expect_type_name()?;
-        let generics = self.try_parse_generic_params()?;
-        self.expect(TokenType::For)?;
-        let for_name = self.expect_type_name()?;
-        if self.check(TokenType::LBracket) { self.parse_type_args()?; }
-        let open_impl = self.current().clone();
-        self.expect(TokenType::LBrace)?;
-        self.skip_newlines();
-        let mut methods = Vec::new();
-        while !self.check(TokenType::RBrace) {
-            methods.push(self.parse_fn_decl()?);
-            self.skip_newlines();
-        }
-        self.expect_closing(TokenType::RBrace, open_impl.line, open_impl.col, "impl body")?;
-        Ok(Decl::Impl {
-            trait_: trait_name, for_: for_name, generics, methods,
-            span: Some(span),
-        })
     }
 
     pub(crate) fn parse_fn_decl(&mut self) -> Result<Decl, String> {
