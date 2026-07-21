@@ -208,7 +208,7 @@ impl Parser {
             return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
         }
         Err(format!(
-            "Expected top-level declaration (fn, effect fn, type, let, var, trait, impl, test) at line {}:{} (got {:?} '{}')",
+            "Expected top-level declaration (fn, effect fn, type, let, var, protocol, impl, test) at line {}:{} (got {:?} '{}')",
             tok.line, tok.col, tok.token_type, tok.value
         ))
     }
