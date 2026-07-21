@@ -19,6 +19,14 @@ impl Parser {
         if self.check(TokenType::Pipe) { return self.parse_variant_type(); }
         if self.check(TokenType::LBrace) { return self.parse_record_type(); }
         if self.check(TokenType::Fn) { return self.parse_fn_type(); }
+        // `Fn(...)  -> ...` — "Fn" lexes as TokenType::TypeName (uppercase-first
+        // identifier), not the `fn` keyword, so it never hit the check above.
+        if self.check(TokenType::TypeName) && self.current().value == "Fn"
+            && self.peek_at(1).map(|t| t.token_type == TokenType::LParen).unwrap_or(false)
+        {
+            self.advance(); // consume "Fn"
+            return self.parse_fn_type_body();
+        }
         if self.check(TokenType::LParen) { return self.parse_tuple_type(); }
         // Module-qualified type: module.TypeName (e.g. binary.Instr)
         if self.check(TokenType::Ident) && self.peek_dot_type_name() {
@@ -256,6 +264,12 @@ impl Parser {
     }
     fn parse_fn_type(&mut self) -> Result<TypeExpr, String> {
         self.expect(TokenType::Fn)?;
+        self.parse_fn_type_body()
+    }
+
+    /// `(" Params ")" "->" TypeExpr` — shared by the `fn` keyword and the
+    /// `Fn` TypeName spellings; the caller has already consumed the head token.
+    fn parse_fn_type_body(&mut self) -> Result<TypeExpr, String> {
         self.expect(TokenType::LParen)?;
         let mut params = Vec::new();
         if !self.check(TokenType::RParen) {

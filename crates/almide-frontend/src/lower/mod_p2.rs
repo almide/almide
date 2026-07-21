@@ -301,8 +301,21 @@ fn lower_fn(
         }
     }
 
-    for p in params {
-        let ty = crate::canonicalize::resolve::resolve_type_expr_in(&p.ty, Some(&ctx.env.types), module_prefix);
+    // A bare `self` first param is sugar for `self: Self` (see registration.rs
+    // and check/mod.rs's matching fixes). `Self` only stays an unresolved
+    // placeholder inside a `protocol { ... }` declaration; on a real
+    // convention method it must lower to the enclosing type, or codegen
+    // emits the literal (nonexistent) Rust type `Self`.
+    let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
+    for (i, p) in params.iter().enumerate() {
+        let ty = if i == 0 && p.name.as_str() == "self"
+            && matches!(&p.ty, ast::TypeExpr::Simple { name: tn } if tn.as_str() == "Self")
+        {
+            receiver_ty.clone().unwrap_or_else(||
+                crate::canonicalize::resolve::resolve_type_expr_in(&p.ty, Some(&ctx.env.types), module_prefix))
+        } else {
+            crate::canonicalize::resolve::resolve_type_expr_in(&p.ty, Some(&ctx.env.types), module_prefix)
+        };
         let var = ctx.define_var(&p.name, ty.clone(), Mutability::Let, span.clone());
         let default = p.default.as_ref().map(|d| Box::new(lower_expr(ctx, d)));
         ir_params.push(IrParam {

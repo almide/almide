@@ -111,7 +111,7 @@ fn run_action[T: Action](action: T, ctx: Context) -> Result[String, String] =
 ```
 Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols too.
 
-**`self` as a bare, untyped parameter name only resolves inside a `protocol { ... }` declaration.** On a convention method, name and type the first parameter explicitly (`a: GreetAction`) — bare `self` there does not currently resolve.
+The first parameter can be named/typed explicitly (`a: GreetAction`) or written as bare `self` (sugar for `self: Self`) — both resolve to the declaring type on a convention method, same as inside a `protocol { ... }` declaration.
 
 ## Expressions
 

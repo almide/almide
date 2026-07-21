@@ -163,14 +163,11 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
             // Convention methods: "Type.method" → "Type_method" (free functions in all targets)
             if name.contains('.') {
                 name.replace('.', "_")
-            } else if super::is_rust_keyword(name.as_str()) {
-                // A user fn named `box`/`move`/`dyn`/… is raw-escaped at its
+            } else {
+                // A user fn named `box`/`move`/`dyn`/… is escaped at its
                 // definition; the call site must match or rustc rejects `box(…)`
                 // as a reserved keyword (#659).
-                ctx.templates.render_with("keyword_escape", None, &[], &[("name", name.as_str())])
-                    .unwrap_or_else(|| name.to_string())
-            } else {
-                name.to_string()
+                super::escape_rust_ident(name.as_str(), ctx.templates)
             }
         }
         CallTarget::Method { object, method } => {

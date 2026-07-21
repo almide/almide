@@ -357,10 +357,10 @@ check`, not left to fail later at native codegen. Signature checking is
 skipped for generic types for now (`Self` would need to carry the type's own
 type arguments, which nothing threads through yet).
 
-Name and type the first parameter explicitly (`a: Config`). `self` as a bare,
-untyped parameter name only resolves inside a `protocol { ... }` declaration
-itself, where it is sugar for `self: Self` — writing bare `self` on a
-convention method currently fails to resolve ([#828](https://github.com/almide/almide/issues/828)).
+The first parameter can be named and typed explicitly (`a: Config`) or written
+as bare `self`, sugar for `self: Self` that resolves to the declaring type on
+a convention method the same way it does inside a `protocol { ... }`
+declaration itself.
 
 `Self` is a placeholder for the implementing type. Built-in conventions (Eq,
 Repr, Ord, Hash, Codec) are protocols; `Eq` and `Hash` are compiler-derived
@@ -408,10 +408,8 @@ Fn(Int) -> String
 Fn(Int, Int) -> Bool
 ```
 
-`Fn(...) -> ...` currently fails to parse in every position — parameter type,
-type alias target, and return type alike ([#830](https://github.com/almide/almide/issues/830)). Use the equivalent
-bare-parens form everywhere instead (see 5.6): `fn apply(f: (Int) -> Int) -> Int = f(3)`,
-`type Handler = (String) -> String`.
+The bare-parens form (see 5.6) is equivalent and works everywhere too:
+`fn apply(f: (Int) -> Int) -> Int = f(3)`, `type Handler = (String) -> String`.
 
 ---
 
