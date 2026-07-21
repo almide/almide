@@ -25,6 +25,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod alias_safety;
 pub mod certificate;
 pub mod coown_names;
 pub mod lower;
