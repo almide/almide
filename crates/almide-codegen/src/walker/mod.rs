@@ -49,6 +49,26 @@ pub(crate) fn is_rust_keyword(name: &str) -> bool {
     )
 }
 
+/// Escape `name` for use as a Rust identifier (definition or reference).
+/// Single source of truth for every emission site (`var_name`, fn param, fn
+/// DEFINITION, fn call site) — see `is_rust_keyword`.
+///
+/// `self`/`Self`/`super`/`crate` are Rust keywords rustc explicitly refuses
+/// to raw-escape ("`self` cannot be a raw identifier") — they're rejected as
+/// `r#self` too, unlike every other keyword here. Since every convention
+/// method (`fn Type.method(...)`) compiles to a plain free function, not a
+/// real Rust method, a literal `self`/bare-self-sugar param can't be a raw
+/// identifier; it's renamed outright instead.
+pub(crate) fn escape_rust_ident(name: &str, templates: &TemplateSet) -> String {
+    match name {
+        "self" | "Self" | "super" | "crate" => format!("almide_{}", name.to_lowercase()),
+        _ if is_rust_keyword(name) => templates
+            .render_with("keyword_escape", None, &[], &[("name", name)])
+            .unwrap_or_else(|| name.to_string()),
+        _ => name.to_string(),
+    }
+}
+
 /// Render context: carries the variable table, target, and annotations.
 /// The walker NEVER checks types — all codegen decisions come from annotations.
 pub struct RenderContext<'a> {
@@ -108,12 +128,7 @@ impl<'a> RenderContext<'a> {
 
     pub(crate) fn var_name(&self, id: VarId) -> String {
         let name = &self.var_table.get(id).name;
-        if is_rust_keyword(name.as_str()) {
-            self.templates.render_with("keyword_escape", None, &[], &[("name", name.as_str())])
-                .unwrap_or_else(|| name.to_string())
-        } else {
-            name.to_string()
-        }
+        escape_rust_ident(name.as_str(), self.templates)
     }
 
     /// The thread_local static name for a global var, matching exactly what the
@@ -248,15 +263,11 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
 
     let params_str = func.params.iter()
         .map(|p| {
-            let mut param_name = p.name.to_string();
-            // Escape target-specific keywords in param names
-            let kw_list = ["default", "switch", "case", "class", "new", "delete",
-                "typeof", "void", "with", "yield", "export", "import",
-                "try", "catch", "finally", "throw"];
-            if kw_list.contains(&param_name.as_str()) {
-                param_name = fn_ctx.templates.render_with("keyword_escape", None, &[], &[("name", param_name.as_str())])
-                    .unwrap_or(param_name);
-            }
+            // Escape Rust keywords in param names — same helper as every
+            // other emission site (var_name, fn call, fn definition), so a
+            // param named e.g. `self`/`box`/`move` matches at its binding and
+            // every use within the body (#659's rule, applied here too).
+            let mut param_name = escape_rust_ident(p.name.as_str(), fn_ctx.templates);
             // Mutable params (e.g. from TCO pass) — let the template decide
             // whether to emit a `mut` prefix via the {mut_prefix} variable.
             let mut_prefix = if fn_ctx.var_table.get(p.var).mutability == Mutability::Var {
@@ -388,12 +399,9 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
     // Strip any remaining non-ASCII characters (e.g., →, ★, etc.)
     safe_name = safe_name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
-    // Escape a Rust-keyword fn name (`box` → `r#box`) via the shared predicate so
-    // the DEFINITION matches the CALL site exactly (#659).
-    if is_rust_keyword(safe_name.as_str()) {
-        safe_name = ctx.templates.render_with("keyword_escape", None, &[], &[("name", safe_name.as_str())])
-            .unwrap_or(safe_name);
-    }
+    // Escape a Rust-keyword fn name (`box` → `r#box`) so the DEFINITION
+    // matches the CALL site exactly (#659).
+    safe_name = escape_rust_ident(&safe_name, ctx.templates);
     // Emit-time prefix: module_origin → "almide_rt_{origin}_{name}"
     // IR name stays clean; prefix is a rendering concern.
     if let Some(ref origin) = func.module_origin {

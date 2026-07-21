@@ -1,0 +1,45 @@
+// fn_type_test — `Fn(T) -> U` function-type syntax (#830)
+// ── As a parameter type ──
+fn apply(f: Fn(Int) -> Int) -> Int = f(3)
+
+test "Fn(T) -> U as a parameter type" {
+  assert_eq(apply((x) => x * 2), 6)
+}
+
+// ── Multiple parameters, multiple positions ──
+fn apply2(n: Int, f: Fn(Int, Int) -> Int) -> Int = f(n, n)
+
+test "Fn(T, U) -> V with multiple params, not in first position" {
+  assert_eq(apply2(3, (a, b) => a + b), 6)
+}
+
+// ── As a type alias target ──
+type Handler = Fn(String) -> String
+
+fn run_handler(f: Handler, s: String) -> String = f(s)
+
+test "Fn(T) -> U as a type alias target" {
+  assert_eq(run_handler((s) => s + "!", "hi"), "hi!")
+}
+
+// ── As a return type ──
+fn make_adder(n: Int) -> Fn(Int) -> Int = (x) => x + n
+
+test "Fn(T) -> U as a return type" {
+  let add3 = make_adder(3);
+  assert_eq(add3(4), 7)
+}
+
+// ── Used inside a protocol method's higher-order parameter ──
+protocol Mapper {
+  fn transform(self, f: Fn(Int) -> Int) -> Int
+}
+
+type Box = { value: Int }
+
+fn Box.transform(self, f: Fn(Int) -> Int) -> Int = f(self.value)
+
+test "Fn(T) -> U as a protocol method parameter" {
+  let b = Box { value: 5 };
+  assert_eq(b.transform((x) => x + 100), 105)
+}

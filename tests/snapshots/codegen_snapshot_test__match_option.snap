@@ -1,8 +1,9 @@
 ---
 source: tests/codegen_snapshot_test.rs
+assertion_line: 96
 expression: code
 ---
-pub fn unwrap_or(x: Option<i64>, r#default: i64) -> i64 {
+pub fn unwrap_or(x: Option<i64>, default: i64) -> i64 {
     match x {
         Some(v) => v,
         None => default,

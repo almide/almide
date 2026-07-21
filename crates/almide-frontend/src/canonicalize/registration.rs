@@ -233,7 +233,23 @@ pub fn register_fn_sig(
             env.types.insert(*gn, Ty::TypeVar(*gn));
         }
     }
-    let ptys: Vec<(Sym, Ty)> = params.iter().map(|p| (sym(&p.name), resolve_in(env, &p.ty, prefix))).collect();
+    // A bare `self` first parameter is sugar for `self: Self` (the parser
+    // always types it `TypeExpr::Simple { name: "Self" }`). Inside a
+    // `protocol { ... }` declaration `Self` is a legitimate unresolved
+    // placeholder, but on a real convention method (`fn Type.method(self, ...)`)
+    // it must resolve to the enclosing type, the same way `Self` in a
+    // protocol's own signature gets substituted when checked against one.
+    let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
+    let ptys: Vec<(Sym, Ty)> = params.iter().enumerate().map(|(i, p)| {
+        if i == 0 && p.name.as_str() == "self" {
+            if let (ast::TypeExpr::Simple { name: tn }, Some(rt)) = (&p.ty, &receiver_ty) {
+                if tn.as_str() == "Self" {
+                    return (sym(&p.name), rt.clone());
+                }
+            }
+        }
+        (sym(&p.name), resolve_in(env, &p.ty, prefix))
+    }).collect();
     let mut_params: Vec<usize> = params.iter().enumerate()
         .filter(|(_, p)| p.is_mut)
         .map(|(i, _)| i)

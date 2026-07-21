@@ -851,8 +851,19 @@ impl Checker {
     ) {
         self.env.push_scope();
         self.enter_generics(generics);
-        for p in params.iter_mut() {
-            let ty = self.resolve_type_expr(&p.ty);
+        // A bare `self` first param is sugar for `self: Self` (see
+        // registration.rs's matching fix). `Self` only stays an unresolved
+        // placeholder inside a `protocol { ... }` declaration; on an actual
+        // convention method it must resolve to the enclosing type.
+        let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
+        for (i, p) in params.iter_mut().enumerate() {
+            let ty = if i == 0 && p.name.as_str() == "self"
+                && matches!(&p.ty, ast::TypeExpr::Simple { name: tn } if tn.as_str() == "Self")
+            {
+                receiver_ty.clone().unwrap_or_else(|| self.resolve_type_expr(&p.ty))
+            } else {
+                self.resolve_type_expr(&p.ty)
+            };
             self.deferred_unknown_type_checks.push((
                 ty.clone(), self.current_span, format!("parameter '{}'", p.name),
             ));
