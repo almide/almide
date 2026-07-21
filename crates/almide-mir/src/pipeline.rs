@@ -1578,6 +1578,12 @@ fn try_render_wasm_source_impl(
         }
     }
 
+    // #824: drop MakeUnique guards that are provably dead (the value they'd guard
+    // is never aliased anywhere in its own function) — see alias_safety.rs's doc
+    // comment for the soundness argument. Target-agnostic (applies before either
+    // renderer runs), so the native leg gets the identical benefit below too.
+    crate::alias_safety::elide_unaliased_make_unique(&mut functions);
+
     // Any UNLINKED stdlib/runtime call would render a dangling `(call $name)` (invalid wasm) — the
     // renderer rejects it cleanly. Returns the WAT on success.
     try_render_wasm_program(&MirProgram { functions, exports, mutable_global_count })
@@ -1809,6 +1815,11 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             sigs.insert(f.name.clone(), (ps, Some(crate::render_native::NativeSigKind::I64)));
         }
     }
+    // #824: see the wasm leg's call above — `Op::MakeUnique` already renders to
+    // nothing on native (render_native.rs's `Op::Consume | Op::Borrow |
+    // Op::MakeUnique => {}`), so this is a no-op cleanup here, kept only so both
+    // legs run the identical target-agnostic MIR pass list.
+    crate::alias_safety::elide_unaliased_make_unique(&mut functions);
     crate::render_native::try_render_native_program(
         &MirProgram {
             functions,
