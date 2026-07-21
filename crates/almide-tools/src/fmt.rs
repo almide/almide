@@ -442,6 +442,15 @@ fn maybe_generics(out: &mut String, generics: &Option<Vec<GenericParam>>) {
     if let Some(gps) = generics { if !gps.is_empty() { fmt_generics(out, gps); } }
 }
 
+/// A `self` param typed `Self` is the parser's sugar for bare `self` — the
+/// parser can never actually produce a *written-out* `self: Self` (that's a
+/// syntax error, `self` always consumes the whole param). Printing `p.name: p.ty`
+/// unconditionally here would emit exactly that unparseable text and break
+/// `fmt`'s idempotence the moment a source file uses the sugar.
+fn is_bare_self_param(p: &Param) -> bool {
+    p.name.as_str() == "self" && matches!(&p.ty, TypeExpr::Simple { name } if name.as_str() == "Self")
+}
+
 fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
     let i = ind(depth);
     match decl {
@@ -479,7 +488,11 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
                 // `mut` is semantic (mutable-borrow param) — dropping it
                 // turned every in-place mutator call into E007.
                 if p.is_mut { out.push_str("mut "); }
-                w!(out, "{}: ", p.name); fmt_type(out, &p.ty, depth);
+                if is_bare_self_param(p) {
+                    out.push_str("self");
+                } else {
+                    w!(out, "{}: ", p.name); fmt_type(out, &p.ty, depth);
+                }
                 if let Some(ref d) = p.default { out.push_str(" = "); fmt_expr(out, d, depth); }
             });
             out.push_str(") -> "); fmt_type(out, return_type, depth);
@@ -519,9 +532,13 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
                 let mut params_str = String::new();
                 for (j, p) in m.params.iter().enumerate() {
                     if j > 0 { params_str.push_str(", "); }
-                    params_str.push_str(&p.name);
-                    params_str.push_str(": ");
-                    fmt_type(&mut params_str, &p.ty, 0);
+                    if is_bare_self_param(p) {
+                        params_str.push_str("self");
+                    } else {
+                        params_str.push_str(&p.name);
+                        params_str.push_str(": ");
+                        fmt_type(&mut params_str, &p.ty, 0);
+                    }
                 }
                 let mut ret_str = String::new();
                 fmt_type(&mut ret_str, &m.return_type, 0);
