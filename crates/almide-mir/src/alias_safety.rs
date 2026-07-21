@@ -187,6 +187,27 @@ fn step(op: &Op, escaped: &mut HashSet<ValueId>) {
         | Op::DropVariant { .. }
         | Op::DropWrapperRec { .. }
         | Op::Consume { .. } => {}
+        // `PrimKind::LoadHandle` reads "the heap handle CURRENTLY stored at
+        // this address" — a record field, a heap-typed list/Option/Result
+        // slot, anything reached via `Handle`+`IntBinOp`+`LoadHandle`. This is
+        // how field/element access is lowered (no dedicated "read a heap
+        // field" op), and it is NOT the same value that any Dup targeted: a
+        // `Dup`'d handle gets `Store`d into the container, then a LATER
+        // `LoadHandle` from that same address materializes a BRAND NEW
+        // `ValueId` with no recorded relationship to the Dup that put it
+        // there. So the store→load round-trip silently erases this pass's
+        // SSA-level tracking — `dst` must be tainted, unconditionally, same
+        // as an opaque call's result (this pass cannot see whether the slot
+        // it reads was ever the target of a Dup, in THIS function or another
+        // one — record fields are exactly module-global slots' problem again,
+        // just via a container instead of `MG_SLOT_BASE`). Caught by
+        // `spec/lang/rccow_value_semantics_test.almd` ("record copy shields
+        // the original's bytes field": `var p2 = p1` Dup+field-copies `buf`
+        // into a fresh record, and reading `p2.buf` back via `LoadHandle`
+        // before `bytes.set_at` was wrongly treated as never-escaped).
+        Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(d), .. } => {
+            escaped.insert(*d);
+        }
         // Explicitly refcount-neutral reads (own doc comments: "no refcount
         // change" / "ownership-NEUTRAL" / "BORROWS its inputs").
         Op::Borrow { .. }
@@ -425,6 +446,37 @@ mod tests {
             },
             Op::MakeUnique { v: v(9) },
             Op::ListSetScalar { list: v(9), idx: v(2), val: v(3) },
+        ])];
+        elide_unaliased_make_unique(&mut fs);
+        assert_eq!(make_unique_count(&fs[0]), 1);
+    }
+
+    /// The `rccow_value_semantics_test.almd` regression this pass shipped
+    /// with ("record copy shields the original's bytes field"): `var p2 = p1`
+    /// Dups the source record, field-copies (Dup + Store) each field into a
+    /// FRESH record, then later reads a field back via `LoadHandle` before
+    /// mutating it — the `LoadHandle` result is a brand-new `ValueId` with no
+    /// recorded link to the `Dup` that populated the slot, so it must be
+    /// tainted unconditionally, not treated as a fresh, never-escaped value.
+    #[test]
+    fn keeps_makeunique_on_a_field_value_read_back_via_loadhandle() {
+        let mut fs = vec![base_func(vec![
+            alloc_list(v(1)), // the original record's buf field (e.g. Bytes)
+            Op::Dup { dst: v(2), src: v(1) }, // field-copy Dup into the new record
+            Op::Prim {
+                kind: crate::PrimKind::Store { width: 8 },
+                dst: None,
+                args: vec![v(3) /* new record slot addr */, v(2)],
+            },
+            Op::Consume { v: v(2) },
+            // later: read the field back out of the new record
+            Op::Prim {
+                kind: crate::PrimKind::LoadHandle,
+                dst: Some(v(10)),
+                args: vec![v(3)],
+            },
+            Op::MakeUnique { v: v(10) },
+            Op::ListSetScalar { list: v(10), idx: v(4), val: v(5) },
         ])];
         elide_unaliased_make_unique(&mut fs);
         assert_eq!(make_unique_count(&fs[0]), 1);
