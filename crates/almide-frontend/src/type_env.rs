@@ -101,8 +101,6 @@ pub struct TypeEnv {
     pub protocols: std::collections::HashMap<Sym, ProtocolDef>,
     /// Types' declared protocol conformances: type name → set of protocol names
     pub type_protocols: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
-    /// Protocol conformances already validated via `impl` blocks (skip re-validation)
-    pub impl_validated: std::collections::HashSet<(Sym, Sym)>,
     /// Function declaration locations: fn key -> (line, col)
     pub fn_decl_spans: std::collections::HashMap<Sym, (usize, usize)>,
     /// Whether we're inside a test block (effect fn calls return Result[T, String])
@@ -166,7 +164,6 @@ impl TypeEnv {
             fn_min_params: std::collections::HashMap::new(),
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),
-            impl_validated: std::collections::HashSet::new(),
             fn_decl_spans: std::collections::HashMap::new(),
             in_test_block: false,
             failed_fn_names: std::collections::HashSet::new(),

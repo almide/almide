@@ -33,6 +33,14 @@ pub fn check(ctx: &HintContext) -> Option<HintResult> {
         });
     }
 
+    // impl blocks (Rust/Swift) -- Almide has no impl block
+    if value == "impl" {
+        return Some(HintResult {
+            message: Some("'impl' is not a keyword in Almide".into()),
+            hint: "Implement a protocol with convention methods instead: 'fn Type.method(a: Type, ...) -> ... = expr'.".into(),
+        });
+    }
+
     // Variable declaration typos
     if matches!(value, "const" | "val") {
         return Some(HintResult {

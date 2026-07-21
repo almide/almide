@@ -96,7 +96,6 @@ fn lex_all_keywords() {
         ("module", TokenType::Module),
         ("type", TokenType::Type),
         ("protocol", TokenType::Protocol),
-        ("impl", TokenType::Impl),
         ("true", TokenType::True),
         ("false", TokenType::False),
         ("and", TokenType::And),

@@ -257,8 +257,8 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         }
     }
 
-    // Collect convention methods the user wrote EXPLICITLY (a dotted `fn X.repr`
-    // or an `impl` method), as opposed to ones auto-derive will synthesize. The
+    // Collect convention methods the user wrote EXPLICITLY (a dotted `fn X.repr`),
+    // as opposed to ones auto-derive will synthesize. The
     // interpolation `repr` dispatch uses this so a `deriving Repr` record falls
     // through to the codegen `AlmideRepr` impl (canonical literal form) while a
     // hand-written `fn X.repr` still overrides it.
@@ -266,13 +266,6 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         match decl {
             ast::Decl::Fn { name, body: Some(_), .. } if name.as_str().contains('.') => {
                 ctx.explicit_convention_fns.insert(*name);
-            }
-            ast::Decl::Impl { for_, methods, .. } => {
-                for m in methods {
-                    if let ast::Decl::Fn { name, body: Some(_), .. } = m {
-                        ctx.explicit_convention_fns.insert(sym(&format!("{}.{}", for_, name)));
-                    }
-                }
             }
             _ => {}
         }
@@ -378,16 +371,6 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                         merged.extend(case_binds.iter().cloned());
                         let test_fn = lower_test_with_where(&mut ctx, &full_name, body, &merged);
                         functions.push(test_fn);
-                    }
-                }
-            }
-            ast::Decl::Impl { for_, methods, .. } => {
-                for m in methods {
-                    if let ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, .. } = m {
-                        // Prefix method name with type name: "show" → "Dog.show"
-                        let convention_name = format!("{}.{}", for_, name);
-                        let f = lower_fn(&mut ctx, &convention_name, params, body, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, None);
-                        functions.push(f);
                     }
                 }
             }

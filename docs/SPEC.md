@@ -95,15 +95,14 @@ Numeric literals support `_` as a visual separator (e.g., `1_000_000`).
 
 Block comments nest: `/* outer /* inner */ still outer */` is valid.
 
-### 1.5 Keywords (35)
+### 1.5 Keywords (34)
 
 ```
-module  import  type    protocol impl    for     in      fn
-let     var     if      then     else    match   ok      err
-some    none    todo    true     false
-not     and     or      strict   pub     effect  test
-guard   break   continue while   local   mod
-fan
+module  import  type    protocol for     in      fn      let
+var     if      then    else     match   ok      err     some
+none    todo    true    false    not     and     or      strict
+pub     effect  test    guard    break   continue while   local
+mod     fan
 ```
 
 ### 1.6 Operators and Delimiters
@@ -169,7 +168,7 @@ text
 ```
 Program   ::= ImportDecl* TopDecl*
 
-TopDecl   ::= TypeDecl | TraitDecl | ImplDecl | FnDecl
+TopDecl   ::= TypeDecl | ProtocolDecl | FnDecl
             | TopLetDecl | StrictDecl | TestDecl
 
 Stmt      ::= LetStmt | VarStmt | AssignStmt | GuardStmt | Expr
@@ -332,7 +331,12 @@ ProtocolDecl ::= "protocol" TypeName "{" ProtocolMethod* "}"
 ProtocolMethod ::= ["effect"] "fn" Ident "(" Params ")" "->" TypeExpr
 ```
 
-Protocols define sets of required convention methods. Types declare satisfaction with `: ProtocolName`.
+Protocols define sets of required methods. A type declares satisfaction with
+`: ProtocolName`; the methods themselves are plain top-level functions named
+`Type.method`, first parameter explicitly typed to `Type` — there is no
+`impl Protocol for Type { ... }` block. Convention methods stay flat, top-level
+functions: no nesting, no extra indentation depth, one way to attach a method
+to a type.
 
 ```
 protocol Serializable {
@@ -342,10 +346,25 @@ protocol Serializable {
 
 type Config: Serializable = { key: String, value: String }
 fn Config.serialize(c: Config) -> String = c.key + "=" + c.value
-fn Config.deserialize(raw: String) -> Result[Config, String] = ...
+fn Config.deserialize(raw: String) -> Result[Config, String] = ok(Config { key: raw, value: raw })
 ```
 
-`Self` is a placeholder for the implementing type. Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols.
+The checker validates every declared convention method against the protocol's
+signature (arity and parameter/return types, `Self` substituted for the
+declaring type), with a diagnostic pinned to the method if it doesn't match —
+a `Type: Protocol` annotation with a mismatched method is rejected at `almide
+check`, not left to fail later at native codegen. Signature checking is
+skipped for generic types for now (`Self` would need to carry the type's own
+type arguments, which nothing threads through yet).
+
+Name and type the first parameter explicitly (`a: Config`). `self` as a bare,
+untyped parameter name only resolves inside a `protocol { ... }` declaration
+itself, where it is sugar for `self: Self` — writing bare `self` on a
+convention method currently fails to resolve ([#828](https://github.com/almide/almide/issues/828)).
+
+`Self` is a placeholder for the implementing type. Built-in conventions (Eq,
+Repr, Ord, Hash, Codec) are protocols; `Eq` and `Hash` are compiler-derived
+automatically from type structure and need no annotation.
 
 Protocols can be used as generic bounds:
 
@@ -389,51 +408,14 @@ Fn(Int) -> String
 Fn(Int, Int) -> Bool
 ```
 
----
-
-## 6. Traits and Implementations
-
-### 6.1 trait
-
-```
-TraitDecl ::= "trait" TypeName GenericParams? "{" TraitMethod* "}"
-TraitMethod ::= "effect"? "fn" Name "(" ParamList ")" "->" TypeExpr
-```
-
-```
-trait Iterable[T] {
-  fn map[U](self, f: Fn(T) -> U) -> Self[U]
-  fn filter(self, f: Fn(T) -> Bool) -> Self[T]
-  fn fold[U](self, init: U, f: Fn(U, T) -> U) -> U
-}
-
-trait Storage[T] {
-  effect fn save(self, item: T) -> Result[Unit, IoError]
-  effect fn load(self, id: String) -> Result[T, IoError]
-}
-```
-
-### 6.2 impl
-
-```
-ImplDecl ::= "impl" TypeName GenericParams? "for" TypeName "{" FnDecl* "}"
-```
-
-```
-impl Iterable[T] for List[T] {
-  fn map[U](self, f: Fn(T) -> U) -> List[U] = _
-  fn filter(self, f: Fn(T) -> Bool) -> List[T] = _
-}
-```
-
-### 6.3 Built-in Protocols
-
-- **Eq** and **Hash** are compiler-derived automatically from type structure. No annotation needed.
-- Conventions are specified with `:` after the type name: `type Color: Eq, Repr = ...`
+`Fn(...) -> ...` currently fails to parse in every position — parameter type,
+type alias target, and return type alike ([#830](https://github.com/almide/almide/issues/830)). Use the equivalent
+bare-parens form everywhere instead (see 5.6): `fn apply(f: (Int) -> Int) -> Int = f(3)`,
+`type Handler = (String) -> String`.
 
 ---
 
-## 7. Basic Type Environment
+## 6. Basic Type Environment
 
 ### Primitives
 
@@ -466,7 +448,7 @@ Used as receivers for external input. Requires explicit conversion before use in
 
 ---
 
-## 8. Function Declarations
+## 7. Function Declarations
 
 ```
 FnDecl ::= Visibility? "effect"? "fn" Name GenericParams?
@@ -479,7 +461,7 @@ Param      ::= Identifier ":" TypeExpr ( "=" Expr )?   // default value optional
 
 Modifier order: `[local|mod]? effect? fn`
 
-### 8.1 Principles
+### 7.1 Principles
 
 - Argument types are required
 - Return type is required
@@ -496,7 +478,7 @@ effect fn greet(name: String) -> Result[Unit, String] = {
 }
 ```
 
-### 8.2 Default Arguments
+### 7.2 Default Arguments
 
 Parameters may have default values. All parameters after the first default must also have defaults.
 
@@ -504,7 +486,7 @@ Parameters may have default values. All parameters after the first default must 
 fn connect(host: String, port: Int = 8080, secure: Bool = false) -> Connection = _
 ```
 
-### 8.3 Named Arguments
+### 7.3 Named Arguments
 
 Arguments can be named at the call site:
 
@@ -522,7 +504,7 @@ arguments is record construction: `Cfg(name: "x")` is normalized to
 missing-without-default fields are E021). Positional arguments on a record,
 and named arguments on a tuple constructor, are rejected (E021).
 
-### 8.4 Predicate Functions
+### 7.4 Predicate Functions
 
 Functions ending in `?` must return `Bool`:
 
@@ -531,7 +513,7 @@ fn empty(xs: List[Int]) -> Bool = list.len(xs) == 0
 fn tracked(index: Index, path: Path) -> Bool = _
 ```
 
-### 8.5 `effect fn` -- Explicit Side Effects
+### 7.5 `effect fn` -- Explicit Side Effects
 
 Calling an `effect fn` from a non-`effect` function is a **compile error**, not a warning.
 
@@ -542,7 +524,7 @@ fn pure_fn() -> String =
 
 The `effect` system is a **search space reducer for code generation**: a pure function can only call other pure functions, shrinking the set of valid completions.
 
-### 8.6 Top-Level let -- Module-Scope Constants
+### 7.6 Top-Level let -- Module-Scope Constants
 
 ```
 let PI = 3.14159265358979323846
@@ -552,7 +534,7 @@ let GREETING = "Hello, world"
 
 Evaluated at compile time when possible. Numeric and simple expressions become `const`; String and complex expressions use `LazyLock<T>` in Rust codegen.
 
-### 8.7 Extern Annotations
+### 7.7 Extern Annotations
 
 For FFI bindings to target-specific functions:
 
@@ -564,9 +546,9 @@ effect fn read_text(path: String) -> Result[String, String] = _
 
 ---
 
-## 9. Statements
+## 8. Statements
 
-### 9.1 let / var
+### 8.1 let / var
 
 ```
 let x = 1                   // immutable
@@ -575,7 +557,7 @@ var y = 2                   // mutable
 y = y + 1                   // reassign (var only)
 ```
 
-### 9.2 Destructuring
+### 8.2 Destructuring
 
 ```
 let { name, age } = user    // record destructure (one level only)
@@ -585,7 +567,7 @@ let { name, age } = user    // record destructure (one level only)
 - Nested destructuring is not allowed
 - Renaming is not allowed
 
-### 9.3 guard
+### 8.3 guard
 
 ```
 guard cond else expr
@@ -601,7 +583,7 @@ effect fn validate(x: Int) -> Result[Int, String] = {
 }
 ```
 
-### 9.4 Reassignment
+### 8.4 Reassignment
 
 Only allowed for identifiers bound with `var`:
 
@@ -614,9 +596,9 @@ m["key"] = value             // map write (var only)
 
 ---
 
-## 10. Expressions
+## 9. Expressions
 
-### 10.1 if Expression
+### 9.1 if Expression
 
 ```
 if cond then expr else expr
@@ -626,7 +608,7 @@ if cond then expr else expr
 - The condition must be `Bool`. No truthiness.
 - Chaining: `if a then x else if b then y else z`
 
-### 10.2 match Expression
+### 9.2 match Expression
 
 ```
 match subject {
@@ -640,7 +622,7 @@ match subject {
 
 Guards take a `Bool` expression after `if`. When the guard is false, the next arm is tried.
 
-### 10.3 Patterns
+### 9.3 Patterns
 
 ```
 Pattern ::= "_"                                      // wildcard
@@ -669,7 +651,7 @@ match shape {
 }
 ```
 
-### 10.4 Lambdas
+### 9.4 Lambdas
 
 ```
 (x) => expr
@@ -689,7 +671,7 @@ let f = (x) => {
 
 One form only. Lambda parameters may optionally include type annotations.
 
-### 10.5 Block Expression
+### 9.5 Block Expression
 
 The last expression in a block is its value:
 
@@ -701,7 +683,7 @@ The last expression in a block is its value:
 }
 ```
 
-### 10.6 for...in
+### 9.6 for...in
 
 ```
 for item in items {
@@ -719,7 +701,7 @@ for i in 0..10 {
 
 Iterates over a list. The loop body is `Unit`-typed. Use `for...in` for collection iteration.
 
-### 10.7 while
+### 9.7 while
 
 ```
 var i = 0
@@ -731,7 +713,7 @@ while i < 10 {
 
 Loops while the condition is true. The loop body is `Unit`-typed.
 
-### 10.8 fan (Structured Concurrency)
+### 9.8 fan (Structured Concurrency)
 
 ```
 fan { expr1; expr2; expr3 }
@@ -748,7 +730,7 @@ Library forms:
 - `fan.map(xs, f)` -- parallel map over a collection
 - `fan.race(thunks)` -- first to complete wins, rest cancelled
 
-### 10.10 Pipe
+### 9.10 Pipe
 
 ```
 text |> string.trim |> string.split(",")
@@ -774,7 +756,7 @@ value |> match {
 }
 ```
 
-### 10.11 UFCS (Uniform Function Call Syntax)
+### 9.11 UFCS (Uniform Function Call Syntax)
 
 `f(x, y)` and `x.f(y)` are equivalent. The compiler resolves automatically.
 
@@ -788,7 +770,7 @@ text.split(",")         // equivalent
 
 Resolution: when `x.f(args...)` is called, the compiler looks for `f(x, args...)` in scope.
 
-### 10.12 Range
+### 9.12 Range
 
 ```
 0..5            // [0, 1, 2, 3, 4]    exclusive end
@@ -796,7 +778,7 @@ Resolution: when `x.f(args...)` is called, the compiler looks for `f(x, args...)
 for i in 0..n { ... }   // no list allocation (optimized)
 ```
 
-### 10.13 Record and Spread
+### 9.13 Record and Spread
 
 ```
 let alice = { name: "alice", age: 30 }
@@ -804,7 +786,7 @@ let bob = { ...alice, name: "bob" }       // age inherited from alice
 { name }                                   // shorthand: { name: name }
 ```
 
-### 10.14 List
+### 9.14 List
 
 ```
 [1, 2, 3]
@@ -813,7 +795,7 @@ xs[0]                     // index access
 xs[i] = value             // index write (var only)
 ```
 
-### 10.15 Map
+### 9.15 Map
 
 ```
 ["a": 1, "b": 2]         // map literal
@@ -823,7 +805,7 @@ m["key"]                  // index access (returns Option[V])
 m["key"] = value          // index write (var only)
 ```
 
-### 10.16 Tuple
+### 9.16 Tuple
 
 ```
 (1, "hello")              // tuple literal
@@ -832,7 +814,7 @@ pair.0                    // index access: 1
 pair.1                    // "hello"
 ```
 
-### 10.17 String Interpolation
+### 9.17 String Interpolation
 
 ```
 let name = "world"
@@ -841,7 +823,7 @@ let msg = "hello ${name}, 1+1=${1 + 1}"
 
 Works in double-quote strings, single-quote strings, and heredocs (but not raw strings).
 
-### 10.18 Hole / Todo
+### 9.18 Hole / Todo
 
 ```
 fn parse(text: String) -> Ast = _                     // hole (type-checked stub)
@@ -850,7 +832,7 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 
 `_` (hole) and `todo(msg)` accept any expected type. The compiler reports the expected type, available variables, and suggestions.
 
-### 10.19 unsafe Block
+### 9.19 unsafe Block
 
 ```
 fn technically_pure(x: Int) -> Int =
@@ -861,7 +843,7 @@ fn technically_pure(x: Int) -> Int =
 
 ---
 
-## 11. Operators
+## 10. Operators
 
 ### Precedence (lowest to highest)
 
@@ -900,9 +882,9 @@ In Rust codegen, `==`/`!=` emit the `almide_eq!` macro for deep structural equal
 
 ---
 
-## 12. Error Model
+## 11. Error Model
 
-### 12.1 Three-Layer Strategy
+### 11.1 Three-Layer Strategy
 
 | Layer | Mechanism | Use Case |
 |---|---|---|
@@ -912,7 +894,7 @@ In Rust codegen, `==`/`!=` emit the `almide_eq!` macro for deep structural equal
 
 Exceptions **do not exist**. There is no `throw`/`catch`.
 
-### 12.2 Unwrap Operators
+### 11.2 Unwrap Operators
 
 Three postfix operators for explicit error handling on `Result[T, E]` and `Option[T]`:
 
@@ -933,7 +915,7 @@ let port = int.parse(input) ?? 8080    // err → use 8080
 let name = map.get(config, "key") ?? "default"  // none → use "default"
 ```
 
-### 12.3 Typed Error Variants
+### 11.3 Typed Error Variants
 
 For branching on error kinds, use a variant type as the error parameter:
 
@@ -957,7 +939,7 @@ match load("app.toml") {
 
 ---
 
-## 13. Holes and Incomplete Code
+## 12. Holes and Incomplete Code
 
 **Core feature of the language.** Allows incremental development.
 
@@ -976,9 +958,9 @@ When a hole is found, the compiler returns:
 
 ---
 
-## 14. Concurrency: `fan`
+## 13. Concurrency: `fan`
 
-### 14.1 fan Block
+### 13.1 fan Block
 
 `fan { }` runs expressions concurrently. Only valid inside `effect fn`.
 
@@ -995,14 +977,14 @@ effect fn main() -> Result[Unit, String] = {
 
 Results are returned as a tuple. If any expression returns `Err`, the entire `fan` fails and siblings are cancelled.
 
-### 14.2 fan.map / fan.race
+### 13.2 fan.map / fan.race
 
 ```
 let results = fan.map(urls, (url) => fetch(url))   // parallel map
 let first = fan.race([task_a, task_b])              // first to complete wins
 ```
 
-### 14.3 Rules
+### 13.3 Rules
 
 - `fan { }` only inside `effect fn` — pure functions cannot fork
 - No `var` capture — only `let` bindings from outer scope (prevents data races)
@@ -1011,9 +993,9 @@ let first = fan.race([task_a, task_b])              // first to complete wins
 
 ---
 
-## 15. Testing
+## 14. Testing
 
-### 15.1 test Declaration
+### 14.1 test Declaration
 
 ```
 test "description" {
@@ -1025,7 +1007,7 @@ test "description" {
 
 Tests are top-level declarations in the same file as functions. No separate test files required (convention: `*_test.almd` for dedicated test files).
 
-### 15.2 Assertion Functions
+### 14.2 Assertion Functions
 
 ```
 assert(cond: Bool)                    // fails if false
@@ -1033,7 +1015,7 @@ assert_eq(actual: T, expected: T)     // fails if actual != expected
 assert_ne(actual: T, expected: T)     // fails if actual == expected
 ```
 
-### 15.3 Running Tests
+### 14.3 Running Tests
 
 ```bash
 almide test                      # all .almd with test blocks (recursive)
@@ -1044,7 +1026,7 @@ almide test --run "pattern"      # filter by name
 
 ---
 
-## 16. Strict Mode
+## 15. Strict Mode
 
 ```
 strict types      // require all type annotations
@@ -1055,7 +1037,7 @@ Declared at the top of a file. Enables stricter compiler checking.
 
 ---
 
-## 17. Naming Conventions
+## 16. Naming Conventions
 
 ### Predicates
 
@@ -1075,11 +1057,11 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 
 ---
 
-## 18. Standard Library
+## 17. Standard Library
 
 834 functions across 39 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
 
-### 18.1 Auto-Imported Modules
+### 17.1 Auto-Imported Modules
 
 **string** (41 functions):
 `trim`, `trim_start`, `trim_end`, `split`, `join`, `len`, `lines`, `pad_start`, `pad_end`, `starts_with`, `ends_with`, `slice`, `to_bytes`, `from_bytes`, `contains`, `to_upper`, `to_lower`, `to_int`, `replace`, `char_at`, `chars`, `index_of`, `repeat`, `count`, `reverse`, `is_empty`, `is_digit`, `is_alpha`, `is_alphanumeric`, `is_whitespace`, `strip_prefix`, `strip_suffix`, `capitalize`, `is_upper`, `is_lower`, `codepoint`, `from_codepoint`, `replace_first`, `last_index_of`, `to_float`
@@ -1111,7 +1093,7 @@ Type-agnostic value operations for dynamic data handling.
 **set** (auto-imported):
 Set operations: `new`, `insert`, `contains`, `remove`, `union`, `intersection`, `difference`, `len`, `is_empty`, `to_list`, `from_list`.
 
-### 18.2 Import-Required Modules
+### 17.2 Import-Required Modules
 
 **fs** (24 functions, all effect):
 `read_text`, `read_bytes`, `read_lines`, `write`, `write_bytes`, `append`, `mkdir_p`, `exists`, `is_dir`, `is_file`, `remove`, `list_dir`, `copy`, `rename`, `remove_dir`, `metadata`, `glob`, `walk_dir`, `read_dir`, `create_dir`, `symlink`, `read_link`, `canonical`, `temp_dir`
@@ -1149,7 +1131,7 @@ Date/time operations: `now`, `year`, `month`, `day`, `hour`, `minute`, `second`,
 **http** (26 functions, effect):
 HTTP client operations.
 
-### 18.3 Bundled Modules (Pure Almide)
+### 17.3 Bundled Modules (Pure Almide)
 
 | Module | Functions |
 |--------|-----------|
@@ -1161,7 +1143,7 @@ HTTP client operations.
 | url | 21 |
 | csv | 9 |
 
-### 18.4 Built-in Functions
+### 17.4 Built-in Functions
 
 Available everywhere without import:
 
@@ -1177,7 +1159,7 @@ There is no `print` function (use `io.print` for no-newline output). `println` r
 
 ---
 
-## 19. Entry Point
+## 18. Entry Point
 
 ```
 effect fn main(args: List[String]) -> Result[Unit, AppError] = {
@@ -1194,9 +1176,9 @@ effect fn main(args: List[String]) -> Result[Unit, AppError] = {
 
 ---
 
-## 20. Codegen Architecture
+## 19. Codegen Architecture
 
-### 20.1 Multi-Target
+### 19.1 Multi-Target
 
 Almide compiles to multiple targets:
 
@@ -1205,7 +1187,7 @@ Almide compiles to multiple targets:
 | **Rust** | Production | Full ownership analysis, borrow/clone passes |
 | **WASM** | Production | Direct emit (linear memory, WASI) |
 
-### 20.2 Codegen v3 Pipeline
+### 19.2 Codegen v3 Pipeline
 
 Three-layer architecture: IR -> Nanopass -> Templates.
 
@@ -1232,7 +1214,7 @@ Target source code
 
 Templates are defined in TOML files (`codegen/templates/*.toml`), separating syntax from semantics.
 
-### 20.3 Cross-Target Semantics
+### 19.3 Cross-Target Semantics
 
 | Feature | Rust | WASM |
 |---------|------|------|
@@ -1246,7 +1228,7 @@ Templates are defined in TOML files (`codegen/templates/*.toml`), separating syn
 
 ---
 
-## 21. Prohibitions
+## 20. Prohibitions
 
 | # | Prohibited | Reason |
 |---|---|---|
@@ -1267,13 +1249,13 @@ Templates are defined in TOML files (`codegen/templates/*.toml`), separating syn
 
 ---
 
-## 22. Compiler Diagnostics
+## 21. Compiler Diagnostics
 
-### 22.1 One Error, One Root Cause
+### 21.1 One Error, One Root Cause
 
 Cascading derived errors are suppressed. A single root cause is presented.
 
-### 22.2 Structured Error Output
+### 21.2 Structured Error Output
 
 ```json
 {
@@ -1285,7 +1267,7 @@ Cascading derived errors are suppressed. A single root cause is presented.
 }
 ```
 
-### 22.3 Rejected Syntax Hints
+### 21.3 Rejected Syntax Hints
 
 The compiler recognizes common syntax from other languages and provides actionable hints:
 
@@ -1303,7 +1285,7 @@ The compiler recognizes common syntax from other languages and provides actionab
   Hint: Use 'and' for logical AND.
 ```
 
-### 22.4 Auto-Fix Candidates
+### 21.4 Auto-Fix Candidates
 
 - Missing imports
 - Type conversion candidates
@@ -1311,7 +1293,7 @@ The compiler recognizes common syntax from other languages and provides actionab
 - Missing `effect` modifier
 - Suggest `effect fn` when pure function calls effectful code
 
-### 22.5 Official Formatter
+### 21.5 Official Formatter
 
 ```bash
 almide fmt app.almd
@@ -1324,7 +1306,7 @@ almide fmt app.almd
 
 ---
 
-## 23. Typing Rules
+## 22. Typing Rules
 
 ### Variables
 
@@ -1424,7 +1406,7 @@ G |- _ : T                      G |- todo(msg) : T
 
 ---
 
-## 24. Complete Example
+## 23. Complete Example
 
 ```
 import fs
@@ -1483,7 +1465,7 @@ test "with_description updates correctly" {
 
 ---
 
-## 25. Evaluation Metrics
+## 24. Evaluation Metrics
 
 | Metric | Definition |
 |---|---|

@@ -22,7 +22,7 @@ Lexer, parser, and AST definition. Produces an untyped AST from source text.
 parser/
 ├── mod.rs          Parser struct, token management
 ├── entry.rs        Top-level declarations, module layout
-├── declarations.rs fn, type, trait, impl, test
+├── declarations.rs fn, type, protocol, test
 ├── expressions.rs  Binary/unary, pipe, match, if/then/else
 ├── primary.rs      Literals, identifiers, lambdas, blocks
 ├── statements.rs   let, var, guard, assignment
