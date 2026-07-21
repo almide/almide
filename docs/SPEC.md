@@ -497,10 +497,15 @@ connect(host: "localhost", secure: true)
 Named arguments after positional ones are allowed. Positional arguments after named ones are not.
 
 A call of a **record type** (or record-payload variant case) with all-named
-arguments is record construction: `Cfg(name: "x")` is normalized to
-`Cfg { name: "x" }` and validated identically (unknown / duplicate /
-missing-without-default fields are E021). Positional arguments on a record,
-and named arguments on a tuple constructor, are rejected (E021).
+arguments is record construction: `Cfg(name: "x")` is an alias, normalized to
+the canonical `Cfg { name: "x" }` and validated identically (unknown /
+duplicate / missing-without-default fields are E021). Positional arguments on
+a record, and named arguments on a tuple constructor, are rejected (E021).
+
+The paren alias also matches a plain record type in patterns (`Cfg(name) =>
+...`). It does **not** match a variant's record-payload case — only the brace
+form does there (`Circle { radius } => ...`, never `Circle(radius) => ...`,
+E021: "use a record pattern").
 
 ### 7.4 Predicate Functions
 

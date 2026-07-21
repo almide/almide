@@ -208,10 +208,14 @@ xs |> filter(_, (x) => x > 0)      // _ = placeholder for piped value
 ```
 { name: "alice", age: 30 }
 { ...base, name: "bob" }
-User { name: "alice" }     // named record construction (brace form)
-User(name: "alice")        // same thing — paren-NAMED is normalized to the brace form
+User { name: "alice" }     // named record construction — canonical form
+User(name: "alice")        // alias: named-argument call syntax, normalized to the brace form
 User("alice")              // WRONG: records take named fields, not positional (E021)
 ```
+The paren alias also works for matching a plain record type (`User(name) => ...`).
+It does **not** work for a variant's record-payload case — `Circle { radius }` (a
+case of `type Shape = Circle { radius: Float } | ...`) only matches as
+`Circle { radius }`, never `Circle(radius)` (E021).
 
 ### List
 ```
