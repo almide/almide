@@ -1,3 +1,4 @@
+<!-- description: v1: teach the proven ownership checker to reason about loop-carried heap accumulators (option C), the completeness fix for the remaining yaml walls -->
 # v1 heap-loop-carried ownership — option C (cert-spine extension), the COMPLETENESS fix
 
 **CEO chose C ("C一択", 2026-06-20): close the proof spine's completeness gap at the ROOT — teach the

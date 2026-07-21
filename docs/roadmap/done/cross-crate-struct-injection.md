@@ -1,4 +1,5 @@
 <!-- description: Fix ProcessStatus struct missing in cross-crate codegen — blocks almai dependency usage -->
+<!-- done: 2026-05-25 -->
 # Cross-crate stdlib struct injection — DONE
 
 ## Problem

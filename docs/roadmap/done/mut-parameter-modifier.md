@@ -1,4 +1,5 @@
 <!-- description: mut parameter modifier for in-place mutation (Swift inout / Mojo mut) -->
+<!-- done: 2026-05-19 -->
 # `mut` Parameter Modifier
 
 > **Status: Done** — shipped in v0.18.0.

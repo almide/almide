@@ -1,3 +1,4 @@
+<!-- description: v1: the parser-TCO lever — TCO over a match returning Result, the cross-repo lever blocking base64/toml decode -->
 # v1 — the parser-TCO lever (the real "heap-result-expr" cross-repo lever)
 
 ## ⭐ decode_chunks ONION — FULLY MAPPED (2026-06-22, turn 5, effort=max). The remaining "base64 decode / toml" frontier is ONE coherent slice: **TCO over a `match` whose result is a `Result`**, with an ownership-critical core. The unwrap-`!` desugar turns `let x = f(p)!; recurse(.., acc+[x])` into `match f(p) { ok(x) => recurse(.., acc+[x]), err(e) => err(e) }` — recursion inside a match arm, returning `Result[heap, String]`. To lower it (verified, repro `umr` = a 1-unwrap version; build it first, it is the unit test for the whole slice):

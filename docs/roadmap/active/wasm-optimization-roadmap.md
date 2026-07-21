@@ -1,3 +1,4 @@
+<!-- description: WASM emitter performance roadmap — closing wins/ties/losses against rustc+LLVM across benchmarks -->
 # WASM Optimization Roadmap
 
 > Almide's WASM emitter: 336B hello world. **Current: 3 wins / 2 ties / 6 losses vs Rust+LLVM

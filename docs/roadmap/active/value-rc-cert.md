@@ -1,3 +1,4 @@
+<!-- description: Bring Value refcount ops into the certified ownership region (柱C extension) — closing the prim.handle-fed rc blind spot -->
 # 柱C extension: bring Value rc into the certified region
 
 **Status: Brick 1+2 LANDED — carrier rc is CERTIFIED (verify_ownership + ownership_certificate, atomic, agree). 2026-06-24.**

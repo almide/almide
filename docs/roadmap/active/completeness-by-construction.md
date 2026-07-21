@@ -1,3 +1,4 @@
+<!-- description: Make compiler correctness structural (by construction) rather than convention-enforced, extending the Perceus/borrow-checker completeness pattern compiler-wide -->
 # Completeness by Construction
 
 > Perceus や Rust の borrow checker が持つ「機械的に完全性を担保する」性質を、

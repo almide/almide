@@ -1,3 +1,4 @@
+<!-- description: v1 self-host print floor — the observability keystone for the first self-host slice -->
 # v1 self-host print floor — the ③ observability keystone
 
 **Status**: design (2026-06-14). Synthesized from a 5-agent design workflow

@@ -1,4 +1,5 @@
 <!-- description: almai — multi-provider LLM client library, 8 providers shipped -->
+<!-- done: 2026-04-12 -->
 # almai — Multi-Provider LLM Client
 
 ## Status

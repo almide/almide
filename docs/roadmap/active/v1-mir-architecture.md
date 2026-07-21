@@ -1,3 +1,4 @@
+<!-- description: Almide v1: MIR as the single source of semantic truth — greenfield + dual-oracle architecture, mission-first surface language -->
 # Almide v1: MIR を唯一の真とする単一意味論アーキテクチャ
 
 Status: active — Phase 0 決定ゲート合格(5/5, §8.1)。**完全グリーンフィールド + 二重オラクル**で実装(§6)、言語表層は **mission-first**(§10)で確定(2026-06-13)。手術前の網2枚(意味法則 oracle / compound-drop churn)敷設・緑。

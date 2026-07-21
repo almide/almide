@@ -1,4 +1,5 @@
 <!-- description: fan as a language-level concurrency primitive with rush/spawn/link/cancel -->
+<!-- done: 2026-04-03 -->
 # Fan Concurrency — Next Generation
 
 ## Vision

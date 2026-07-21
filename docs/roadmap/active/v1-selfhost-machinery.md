@@ -1,3 +1,4 @@
+<!-- description: v1 stdlib self-host machinery phase (Option / list-building / closures) — self-hosting all ~381 v0 stdlib fns to execute byte-for-byte -->
 # v1 stdlib self-host — the machinery phase (Option / List-building / closures)
 
 Status: **~28 functions self-hosted + executing = v0 (corpus-wall ACCEPT 13139/4083/3582

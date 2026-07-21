@@ -1,4 +1,5 @@
 <!-- description: test where syntax — unified value/type/mock/table-driven test context -->
+<!-- done: 2026-05-23 -->
 # Test Where Syntax
 
 > **Target: v0.23.0**

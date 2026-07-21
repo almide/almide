@@ -1,3 +1,4 @@
+<!-- description: v1 dynamic Value model — the yaml keystone: self-hosted constructors/extractors/serializer with one trusted recursive-drop routine (path A) -->
 # v1 dynamic Value model — the yaml keystone (path A: self-host + ONE trusted recursive-drop routine)
 
 **Status: DESIGN (2026-06-19). CEO chose path A ("Aでいくぞ"): keep the trusted base minimal, PROVE the Value model (constructors/extractors/serializer self-hosted in .almd, cert-verified), with the recursive free as the ONE trusted runtime routine (like `DropListStr` already is). Coq-free; byte-match-verified vs v0 `runtime/rs/src/value.rs` per brick.**

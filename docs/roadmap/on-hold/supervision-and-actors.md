@@ -207,7 +207,7 @@ Receiver.try_receive() -> Result[T, Empty]
 ## Dependencies
 
 - Layer 1 (`async fn` / `await`) — DONE
-- Layer 2 (structured concurrency) — required for concurrent actor patterns (see [Structured Concurrency](../active/structured-concurrency.md). `concurrent` block syntax is TBD)
+- Layer 2 (structured concurrency) — required for concurrent actor patterns (see [Structured Concurrency](../done/structured-concurrency.md). `concurrent` block syntax is TBD)
 - Async streams (`Stream[T]` type) — required for `Actor.receive()` and `Channel.receive()`
 
 ## References

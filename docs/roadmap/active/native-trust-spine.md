@@ -1,3 +1,4 @@
+<!-- description: Route almide build --target rust through the same v1 Perceus MIR as the wasm leg, certified per build by verify_ownership (#764) -->
 # Native Trust Spine — Perceus as the single memory model (#764)
 
 > Goal: `almide build --target rust` flows through the SAME v1 Perceus MIR as the

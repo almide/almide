@@ -1,4 +1,5 @@
 <!-- description: Language Server Protocol for editor completion, diagnostics, and navigation -->
+<!-- done: 2026-03-14 -->
 # LSP Server
 
 > **Status: Done** (v0.19.0).

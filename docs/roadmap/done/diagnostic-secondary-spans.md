@@ -22,4 +22,4 @@ Activated secondary spans (displaying declaration sites that caused the error).
 ### JSON diagnostics
 - Added `end_col` and `secondary` fields to `to_json()`
 
-## Remaining → [active/diagnostic-end-col.md](../active/diagnostic-end-col.md)
+## Remaining → [done/diagnostic-end-col.md](../done/diagnostic-end-col.md)

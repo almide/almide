@@ -6,7 +6,7 @@
 
 このロードマップの 5 課題のうち、Codegen 系 (A-1/A-2) と Module-system spec 系
 (C-1/C-2/B-3) は **v0.15.0 で全て解決**。残る DX 系 2 件 (B-1 / B-2) は別 arc
-[`active/dx-testing-explain.md`](../active/dx-testing-explain.md) に切り出した。
+[`done/dx-testing-explain.md`](../done/dx-testing-explain.md) に切り出した。
 
 ### A-1 / A-2 (effect fn と built-in 混在) — 既に動作
 
@@ -56,7 +56,7 @@ nominal record / anonymous record / variant 全てが Rust と WASM 両方で cr
 
 B-1 (`almide test` stderr passthrough) と B-2 (`almide explain E003`) は純粋な DX
 項目で、effect fn codegen や module system とは独立。
-[`active/dx-testing-explain.md`](../active/dx-testing-explain.md) として再スタート。
+[`done/dx-testing-explain.md`](../done/dx-testing-explain.md) として再スタート。
 
 ## 学び
 

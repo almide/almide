@@ -1,4 +1,5 @@
 <!-- description: Fix cross-crate codegen for types with default field values -->
+<!-- done: 2026-05-25 -->
 # Cross-crate default field codegen
 
 > **Priority: high** — blocks almai Message type from being used across crates.

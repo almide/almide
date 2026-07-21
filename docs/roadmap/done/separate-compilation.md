@@ -1,4 +1,5 @@
 <!-- description: Separate compilation with unified IR linker for all targets -->
+<!-- done: 2026-05-21 -->
 # Separate Compilation
 
 > **Target: v0.21 (Phase 1-4 shipped), Phase 5 future**

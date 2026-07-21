@@ -6,8 +6,8 @@ Most items from this roadmap have been promoted to dedicated active roadmaps:
 
 ## Promoted to Active
 
-- **LSP** → [lsp.md](../active/lsp.md) — P0 priority, editor integration
-- **REPL** → [repl.md](../active/repl.md) — interactive evaluation
+- **LSP** → [lsp.md](../done/lsp.md) — P0 priority, editor integration
+- **REPL** → [repl.md](../done/repl.md) — interactive evaluation
 
 ## Remaining (ON HOLD)
 

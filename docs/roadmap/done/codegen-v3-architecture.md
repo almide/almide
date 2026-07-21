@@ -136,4 +136,4 @@ Go/Python targets are post-1.0. Architecture is ready (only TOML + pass addition
 - [x] walker `is_rust()` zero
 - [x] walker `ctx.target ==` branches zero
 - [x] Existing codegen fully replaced
-- Go target → [on-hold](../on-hold/go-target.md)
+- Go target → on-hold, later removed as obsolete

@@ -1,3 +1,4 @@
+<!-- description: Clean up CI warnings and non-fatal ICE messages on Windows/macOS CI -->
 # CI Warnings Cleanup
 
 > **Status**: Active

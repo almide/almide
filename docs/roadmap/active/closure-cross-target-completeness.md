@@ -1,3 +1,4 @@
+<!-- description: Eliminate native/WASM closure-codegen divergence classes by construction, backed by a permanent CI differential gate -->
 # Closure cross-target completeness
 
 **Goal:** make native (Rust) and WASM agree on *every* closure program — not by passing more

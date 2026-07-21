@@ -1,4 +1,5 @@
 <!-- description: lumen — pure graphics math library (vec3, mat4, color), used by webgl/canvas/obsid -->
+<!-- done: 2026-04-12 -->
 # lumen — Pure Graphics Math
 
 ## Status

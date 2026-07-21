@@ -68,5 +68,5 @@ In `emit_rust/`'s empty list codegen, the anonymous record type mapping is missi
 
 ## Related
 
-- [design-debt.md #2](../on-hold/design-debt.md) — Fundamental anonymous record design
+- [design-debt.md #2](../done/design-debt.md) — Fundamental anonymous record design
 - Grammar Lab [optional-handling REPORT](../../../research/grammar-lab/experiments/optional-handling/REPORT.md)

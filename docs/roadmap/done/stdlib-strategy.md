@@ -378,7 +378,7 @@ Include LLM-era languages in the collection targets:
 
 ## Related Roadmap
 
-- [Stdlib Architecture: 3-Layer Design](../on-hold/stdlib-architecture-3-layer-design.md) — Detailed layer separation design
+- [Stdlib Architecture: 3-Layer Design](../done/stdlib-architecture-3-layer-design.md) — Detailed layer separation design
 - [Package Registry](../on-hold/package-registry.md) — Distribution infrastructure for x/ packages
-- [Rainbow FFI Gate](../on-hold/rainbow-gate.md) — Multi-language FFI (evolution of @extern)
-- [Codec Protocol & JSON](active/codec-and-json.md) — Next format support beyond JSON
+- [Rainbow FFI Gate](../done/rainbow-gate.md) — Multi-language FFI (evolution of @extern)
+- [Codec Protocol & JSON](../done/codec-and-json.md) — Next format support beyond JSON

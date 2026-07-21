@@ -1,4 +1,5 @@
 <!-- description: buf[i] = val indexing syntax for bytes and list mutation -->
+<!-- done: 2026-05-22 -->
 # Indexing Mutation Syntax
 
 > **Target: v0.22**

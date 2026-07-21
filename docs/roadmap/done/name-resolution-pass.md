@@ -1,3 +1,5 @@
+<!-- description: Unified cross-package symbol resolution via DefId/DefTable, replacing ad-hoc name lookup -->
+<!-- done: 2026-05-14 -->
 # Name Resolution Pass — Unified Cross-Package Symbol Resolution
 
 ## Status: Done (Phase 1-3 shipped in v0.18.1, Phase 4 cleanup deferred to cross-package builds)
