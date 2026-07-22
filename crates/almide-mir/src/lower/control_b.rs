@@ -489,8 +489,10 @@ include!("defunc_hof.rs");
 include!("defunc_fold.rs");
 include!("defunc_fold_b.rs");
 include!("defunc_str_acc.rs");
+include!("defunc_str_acc_b.rs");
 include!("defunc_find.rs");
 include!("defunc_tuple_fold.rs");
+include!("defunc_tuple_fold_b.rs");
 include!("control_while.rs");
 
 /// Is `subject` a call to a SELF-HOST Option-returning stdlib fn? Such a call returns a
