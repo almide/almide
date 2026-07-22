@@ -69,11 +69,43 @@ fn constant_fold(program: &mut IrProgram) {
 fn fold_expr(expr: &mut IrExpr) {
     // Recurse first (bottom-up)
     match &mut expr.kind {
+        IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. } => fold_expr_binop(expr),
+        IrExprKind::Block { .. } | IrExprKind::If { .. }
+        | IrExprKind::ForIn { .. } | IrExprKind::While { .. } => fold_expr_control(expr),
+        IrExprKind::Match { .. } => fold_expr_match(expr),
+        IrExprKind::Call { .. } => fold_expr_call(expr),
+        IrExprKind::List { .. } | IrExprKind::Tuple { .. } | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Range { .. } | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::MapLiteral { .. } | IrExprKind::StringInterp { .. } => fold_expr_containers(expr),
+        IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } | IrExprKind::OptionSome { .. }
+        | IrExprKind::Try { .. } | IrExprKind::Await { .. } => fold_expr_wrap(expr),
+        IrExprKind::Lambda { body, .. } => fold_expr(body),
+        _ => {}
+    }
+
+    // Now try to fold this node
+    let replacement = try_fold(expr);
+    if let Some(new_expr) = replacement {
+        *expr = new_expr;
+    }
+}
+
+/// BinOp / UnOp: recurse into operands.
+fn fold_expr_binop(expr: &mut IrExpr) {
+    match &mut expr.kind {
         IrExprKind::BinOp { left, right, .. } => {
             fold_expr(left);
             fold_expr(right);
         }
         IrExprKind::UnOp { operand, .. } => fold_expr(operand),
+        _ => unreachable!(),
+    }
+}
+
+/// Block / If / ForIn / While: recurse into control-flow subexpressions and bodies.
+fn fold_expr_control(expr: &mut IrExpr) {
+    match &mut expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts { fold_stmt(s); }
             if let Some(t) = tail { fold_expr(t); }
@@ -83,26 +115,56 @@ fn fold_expr(expr: &mut IrExpr) {
             fold_expr(then);
             fold_expr(else_);
         }
-        IrExprKind::Call { target, args, .. } => {
-            if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
-                fold_expr(object);
-            }
-            for a in args { fold_expr(a); }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            fold_expr(iterable);
+            for s in body { fold_stmt(s); }
         }
+        IrExprKind::While { cond, body } => {
+            fold_expr(cond);
+            for s in body { fold_stmt(s); }
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Match: recurse into subject, guards, and arm bodies.
+fn fold_expr_match(expr: &mut IrExpr) {
+    let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+    fold_expr(subject);
+    for a in arms {
+        if let Some(g) = &mut a.guard { fold_expr(g); }
+        fold_expr(&mut a.body);
+    }
+}
+
+/// Call: recurse into the receiver (if any) and arguments.
+fn fold_expr_call(expr: &mut IrExpr) {
+    let IrExprKind::Call { target, args, .. } = &mut expr.kind else { unreachable!() };
+    if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
+        fold_expr(object);
+    }
+    for a in args { fold_expr(a); }
+}
+
+/// List/Tuple/Record/SpreadRecord/Range/IndexAccess/MapAccess/Member/TupleIndex/MapLiteral/StringInterp:
+/// recurse into each child expression.
+fn fold_expr_containers(expr: &mut IrExpr) {
+    match &mut expr.kind {
+        IrExprKind::List { .. } | IrExprKind::Tuple { .. } | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::MapLiteral { .. } => fold_expr_containers_literals(expr),
+        IrExprKind::Range { .. } | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::StringInterp { .. } => fold_expr_containers_access(expr),
+        _ => unreachable!(),
+    }
+}
+
+/// List/Tuple/Record/SpreadRecord/MapLiteral: recurse into each element/entry.
+fn fold_expr_containers_literals(expr: &mut IrExpr) {
+    match &mut expr.kind {
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
             for e in elements { fold_expr(e); }
         }
-        IrExprKind::Lambda { body, .. } => fold_expr(body),
-        IrExprKind::Match { subject, arms } => {
-            fold_expr(subject);
-            for a in arms {
-                if let Some(g) = &mut a.guard { fold_expr(g); }
-                fold_expr(&mut a.body);
-            }
-        }
-        IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
-        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Await { expr: e } => fold_expr(e),
         IrExprKind::Record { fields, .. } => {
             for (_, v) in fields { fold_expr(v); }
         }
@@ -110,6 +172,16 @@ fn fold_expr(expr: &mut IrExpr) {
             fold_expr(base);
             for (_, v) in fields { fold_expr(v); }
         }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries { fold_expr(k); fold_expr(v); }
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Range/IndexAccess/MapAccess/Member/TupleIndex/StringInterp: recurse into each accessed sub-expression.
+fn fold_expr_containers_access(expr: &mut IrExpr) {
+    match &mut expr.kind {
         IrExprKind::Range { start, end, .. } => {
             fold_expr(start);
             fold_expr(end);
@@ -125,30 +197,21 @@ fn fold_expr(expr: &mut IrExpr) {
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
             fold_expr(object);
         }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { fold_expr(k); fold_expr(v); }
-        }
         IrExprKind::StringInterp { parts } => {
             for p in parts {
                 if let IrStringPart::Expr { expr: e } = p { fold_expr(e); }
             }
         }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            fold_expr(iterable);
-            for s in body { fold_stmt(s); }
-        }
-        IrExprKind::While { cond, body } => {
-            fold_expr(cond);
-            for s in body { fold_stmt(s); }
-        }
-        _ => {}
+        _ => unreachable!(),
     }
+}
 
-    // Now try to fold this node
-    let replacement = try_fold(expr);
-    if let Some(new_expr) = replacement {
-        *expr = new_expr;
-    }
+/// ResultOk/ResultErr/OptionSome/Try/Await: recurse into the wrapped expression.
+fn fold_expr_wrap(expr: &mut IrExpr) {
+    let (IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Await { expr: e }) = &mut expr.kind else { unreachable!() };
+    fold_expr(e);
 }
 
 /// Try to reduce an expression to a simpler form.
@@ -157,52 +220,13 @@ fn try_fold(expr: &IrExpr) -> Option<IrExpr> {
     match &expr.kind {
         // ── Arithmetic / string / bool on literals ──
         IrExprKind::BinOp { op, left, right } => {
-            let folded_kind = match (&left.kind, &right.kind) {
-                (IrExprKind::LitInt { value: a }, IrExprKind::LitInt { value: b }) => {
-                    match op {
-                        BinOp::AddInt => Some(IrExprKind::LitInt { value: a.wrapping_add(*b) }),
-                        BinOp::SubInt => Some(IrExprKind::LitInt { value: a.wrapping_sub(*b) }),
-                        BinOp::MulInt => Some(IrExprKind::LitInt { value: a.wrapping_mul(*b) }),
-                        BinOp::DivInt if *b != 0 => Some(IrExprKind::LitInt { value: a / b }),
-                        BinOp::ModInt if *b != 0 => Some(IrExprKind::LitInt { value: a % b }),
-                        _ => None,
-                    }
-                }
-                (IrExprKind::LitFloat { value: a }, IrExprKind::LitFloat { value: b }) => {
-                    match op {
-                        BinOp::AddFloat => Some(IrExprKind::LitFloat { value: a + b }),
-                        BinOp::SubFloat => Some(IrExprKind::LitFloat { value: a - b }),
-                        BinOp::MulFloat => Some(IrExprKind::LitFloat { value: a * b }),
-                        BinOp::DivFloat if *b != 0.0 => Some(IrExprKind::LitFloat { value: a / b }),
-                        _ => None,
-                    }
-                }
-                (IrExprKind::LitStr { value: a }, IrExprKind::LitStr { value: b }) => {
-                    match op {
-                        BinOp::ConcatStr => Some(IrExprKind::LitStr { value: format!("{}{}", a, b) }),
-                        _ => None,
-                    }
-                }
-                (IrExprKind::LitBool { value: a }, IrExprKind::LitBool { value: b }) => {
-                    match op {
-                        BinOp::And => Some(IrExprKind::LitBool { value: *a && *b }),
-                        BinOp::Or  => Some(IrExprKind::LitBool { value: *a || *b }),
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
+            let folded_kind = try_fold_binop(*op, &left.kind, &right.kind);
             folded_kind.map(|kind| IrExpr { kind, ty: expr.ty.clone(), span: expr.span, def_id: None })
         }
 
         // ── Unary on literals ──
         IrExprKind::UnOp { op, operand } => {
-            let folded_kind = match (op, &operand.kind) {
-                (UnOp::NegInt,   IrExprKind::LitInt   { value }) => Some(IrExprKind::LitInt   { value: -value }),
-                (UnOp::NegFloat, IrExprKind::LitFloat { value }) => Some(IrExprKind::LitFloat { value: -value }),
-                (UnOp::Not,      IrExprKind::LitBool  { value }) => Some(IrExprKind::LitBool  { value: !value }),
-                _ => None,
-            };
+            let folded_kind = try_fold_unop(*op, &operand.kind);
             folded_kind.map(|kind| IrExpr { kind, ty: expr.ty.clone(), span: expr.span, def_id: None })
         }
 
@@ -215,6 +239,63 @@ fn try_fold(expr: &IrExpr) -> Option<IrExpr> {
             }
         }
 
+        _ => None,
+    }
+}
+
+/// Fold a `BinOp` whose operands are both literals of the same kind, per-operator.
+fn try_fold_binop(op: BinOp, left: &IrExprKind, right: &IrExprKind) -> Option<IrExprKind> {
+    match (left, right) {
+        (IrExprKind::LitInt { value: a }, IrExprKind::LitInt { value: b }) => try_fold_binop_int(op, *a, *b),
+        (IrExprKind::LitFloat { value: a }, IrExprKind::LitFloat { value: b }) => try_fold_binop_float(op, *a, *b),
+        (IrExprKind::LitStr { value: a }, IrExprKind::LitStr { value: b }) => try_fold_binop_str(op, a, b),
+        (IrExprKind::LitBool { value: a }, IrExprKind::LitBool { value: b }) => try_fold_binop_bool(op, *a, *b),
+        _ => None,
+    }
+}
+
+fn try_fold_binop_int(op: BinOp, a: i64, b: i64) -> Option<IrExprKind> {
+    match op {
+        BinOp::AddInt => Some(IrExprKind::LitInt { value: a.wrapping_add(b) }),
+        BinOp::SubInt => Some(IrExprKind::LitInt { value: a.wrapping_sub(b) }),
+        BinOp::MulInt => Some(IrExprKind::LitInt { value: a.wrapping_mul(b) }),
+        BinOp::DivInt if b != 0 => Some(IrExprKind::LitInt { value: a / b }),
+        BinOp::ModInt if b != 0 => Some(IrExprKind::LitInt { value: a % b }),
+        _ => None,
+    }
+}
+
+fn try_fold_binop_float(op: BinOp, a: f64, b: f64) -> Option<IrExprKind> {
+    match op {
+        BinOp::AddFloat => Some(IrExprKind::LitFloat { value: a + b }),
+        BinOp::SubFloat => Some(IrExprKind::LitFloat { value: a - b }),
+        BinOp::MulFloat => Some(IrExprKind::LitFloat { value: a * b }),
+        BinOp::DivFloat if b != 0.0 => Some(IrExprKind::LitFloat { value: a / b }),
+        _ => None,
+    }
+}
+
+fn try_fold_binop_str(op: BinOp, a: &str, b: &str) -> Option<IrExprKind> {
+    match op {
+        BinOp::ConcatStr => Some(IrExprKind::LitStr { value: format!("{}{}", a, b) }),
+        _ => None,
+    }
+}
+
+fn try_fold_binop_bool(op: BinOp, a: bool, b: bool) -> Option<IrExprKind> {
+    match op {
+        BinOp::And => Some(IrExprKind::LitBool { value: a && b }),
+        BinOp::Or  => Some(IrExprKind::LitBool { value: a || b }),
+        _ => None,
+    }
+}
+
+/// Fold a `UnOp` whose operand is a literal, per-operator.
+fn try_fold_unop(op: UnOp, operand: &IrExprKind) -> Option<IrExprKind> {
+    match (op, operand) {
+        (UnOp::NegInt,   IrExprKind::LitInt   { value }) => Some(IrExprKind::LitInt   { value: -value }),
+        (UnOp::NegFloat, IrExprKind::LitFloat { value }) => Some(IrExprKind::LitFloat { value: -value }),
+        (UnOp::Not,      IrExprKind::LitBool  { value }) => Some(IrExprKind::LitBool  { value: !value }),
         _ => None,
     }
 }
