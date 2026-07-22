@@ -453,40 +453,12 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
             substitute_expr_types(then, bindings);
             substitute_expr_types(else_, bindings);
         }
-        IrExprKind::Match { subject, arms } => {
-            substitute_expr_types(subject, bindings);
-            for arm in arms {
-                substitute_pattern_types(&mut arm.pattern, bindings);
-                if let Some(g) = &mut arm.guard { substitute_expr_types(g, bindings); }
-                substitute_expr_types(&mut arm.body, bindings);
-            }
-        }
+        IrExprKind::Match { .. } => substitute_match_types(expr, bindings),
         IrExprKind::Block { stmts, expr } => {
             for s in stmts { substitute_stmt_types(s, bindings); }
             if let Some(e) = expr { substitute_expr_types(e, bindings); }
         }
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, method } => {
-                    substitute_expr_types(object, bindings);
-                    // Rewrite protocol method calls: T.show → Dog.show when T → Dog
-                    if let Some(dot_pos) = method.find('.') {
-                        let tv_name = &method[..dot_pos];
-                        if let Some(concrete_ty) = bindings.get(tv_name) {
-                            if let Some(concrete_name) = ty_to_name(concrete_ty) {
-                                let method_name = &method[dot_pos+1..];
-                                *method = format!("{}.{}", concrete_name, method_name).into();
-                            }
-                        }
-                    }
-                }
-                CallTarget::Computed { callee: object } => {
-                    substitute_expr_types(object, bindings);
-                }
-                _ => {}
-            }
-            for a in args { substitute_expr_types(a, bindings); }
-        }
+        IrExprKind::Call { .. } => substitute_call_types(expr, bindings),
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
             for e in elements { substitute_expr_types(e, bindings); }
         }
@@ -557,6 +529,40 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
         }
         _ => {}
     }
+}
+
+fn substitute_match_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
+    let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+    substitute_expr_types(subject, bindings);
+    for arm in arms {
+        substitute_pattern_types(&mut arm.pattern, bindings);
+        if let Some(g) = &mut arm.guard { substitute_expr_types(g, bindings); }
+        substitute_expr_types(&mut arm.body, bindings);
+    }
+}
+
+fn substitute_call_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
+    let IrExprKind::Call { target, args, .. } = &mut expr.kind else { unreachable!() };
+    match target {
+        CallTarget::Method { object, method } => {
+            substitute_expr_types(object, bindings);
+            // Rewrite protocol method calls: T.show → Dog.show when T → Dog
+            if let Some(dot_pos) = method.find('.') {
+                let tv_name = &method[..dot_pos];
+                if let Some(concrete_ty) = bindings.get(tv_name) {
+                    if let Some(concrete_name) = ty_to_name(concrete_ty) {
+                        let method_name = &method[dot_pos+1..];
+                        *method = format!("{}.{}", concrete_name, method_name).into();
+                    }
+                }
+            }
+        }
+        CallTarget::Computed { callee: object } => {
+            substitute_expr_types(object, bindings);
+        }
+        _ => {}
+    }
+    for a in args { substitute_expr_types(a, bindings); }
 }
 
 fn substitute_pattern_types(pattern: &mut IrPattern, bindings: &HashMap<String, Ty>) {
