@@ -610,9 +610,41 @@ impl Checker {
             return self.check_unresolved_named_call(name, arg_tys);
         };
 
-        // E026: order-sensitive combinators enqueue their subject (or key) for
-        // the post-solve ORDERABLE-element check — see validate_ord_elem_types.
-        let ord_name = qualified_via_direct.as_deref().unwrap_or(name);
+        self.defer_ord_elem_check(name, qualified_via_direct.as_deref(), arg_tys);
+
+        self.last_mut_params = sig.mut_params.clone();
+
+        self.check_effect_isolation(name, &sig);
+        self.check_arg_count(name, &sig, arg_tys);
+
+        let (mut bindings, concrete_args, aligned_raw) = self.build_call_bindings(&sig, arg_tys, type_args);
+        let e005_fired = self.unify_call_args(name, &sig, &concrete_args, &mut bindings);
+
+        // #620: a generic param that NO argument pinned (because the arg was an
+        // unresolved inference var — e.g. `unbox(b)` where `b` is a `list.map`
+        // lambda's not-yet-resolved element) leaves its name UNBOUND in
+        // `bindings`. The back-prop below would then `substitute` the param type
+        // to its LITERAL generic name (`Box[TypeVar("T")]`) and leak it into the
+        // union-find, where it can never be solved to the concrete type that
+        // flows in later (from `list.map`'s collection). Bind each such generic
+        // to a FRESH inference var (shared by the back-prop AND the return type),
+        // so the relation becomes solvable. Generics an argument DID pin keep
+        // their concrete binding; a concrete call is unaffected.
+        for g in &sig.generics {
+            bindings.entry(*g).or_insert_with(|| self.fresh_var());
+        }
+
+        self.check_protocol_bounds(name, &sig, &bindings);
+        self.propagate_call_arg_types(name, &sig, arg_tys, &aligned_raw, &e005_fired, &bindings);
+
+        self.finalize_call_return_ty(name, &sig, bindings)
+    }
+
+    /// E026: order-sensitive combinators enqueue their subject (or key) for
+    /// the post-solve ORDERABLE-element check — see validate_ord_elem_types.
+    /// Verbatim text move out of [`Self::check_named_call_with_type_args`].
+    fn defer_ord_elem_check(&mut self, name: &str, qualified_via_direct: Option<&str>, arg_tys: &[Ty]) {
+        let ord_name = qualified_via_direct.unwrap_or(name);
         if matches!(ord_name, "list.sort" | "list.min" | "list.max") {
             if let Some(a0) = arg_tys.first() {
                 self.deferred_ord_elem_checks.push((a0.clone(), self.current_span, ord_name.to_string()));
@@ -623,10 +655,11 @@ impl Checker {
                 self.deferred_ord_elem_checks.push(((**ret).clone(), self.current_span, ord_name.to_string()));
             }
         }
+    }
 
-        self.last_mut_params = sig.mut_params.clone();
-
-        // Effect isolation: pure fn cannot call effect fn
+    /// Effect isolation: pure fn cannot call effect fn. Verbatim text move
+    /// out of [`Self::check_named_call_with_type_args`].
+    fn check_effect_isolation(&mut self, name: &str, sig: &crate::types::FnSig) {
         if sig.is_effect && !self.env.can_call_effect {
             let mut diag = super::err(
                 format!("cannot call effect function '{}' from a pure function", name),
@@ -637,8 +670,12 @@ impl Checker {
             }
             self.emit(diag);
         }
+    }
 
-        // Validate argument count
+    /// Validate argument count, emitting a placeholder-signature E004 on
+    /// mismatch. Verbatim text move out of
+    /// [`Self::check_named_call_with_type_args`].
+    fn check_arg_count(&mut self, name: &str, sig: &crate::types::FnSig, arg_tys: &[Ty]) {
         let min_params = match name.split_once('.') {
             Some((module, func)) => crate::stdlib::min_params(module, func).unwrap_or(sig.params.len()),
             None => self.env.fn_min_params.get(&sym(name)).copied().unwrap_or(sig.params.len()),
@@ -661,7 +698,16 @@ impl Checker {
                 "Check the number of arguments", format!("call to {}()", name)
             ).with_code("E004").with_try(snippet));
         }
-        // Validate argument types and infer generics
+    }
+
+    /// Seed generic `bindings` from explicit type args, resolve `arg_tys` to
+    /// concrete types, and realign named-call args. Returns
+    /// `(bindings, concrete_args, aligned_raw)` for the caller's unify and
+    /// back-propagation passes. Verbatim text move out of
+    /// [`Self::check_named_call_with_type_args`].
+    fn build_call_bindings(
+        &mut self, sig: &crate::types::FnSig, arg_tys: &[Ty], type_args: Option<&[Ty]>,
+    ) -> (HashMap<Sym, Ty>, Vec<Ty>, Option<Vec<Option<Ty>>>) {
         let mut bindings: HashMap<Sym, Ty> = HashMap::new();
         if let Some(ta) = type_args {
             for (gname, gty) in sig.generics.iter().zip(ta.iter()) {
@@ -669,7 +715,17 @@ impl Checker {
             }
         }
         let mut concrete_args: Vec<Ty> = arg_tys.iter().map(|a| resolve_ty(a, &self.uf)).collect();
-        let aligned_raw = self.realign_named_call_args(&sig, arg_tys, &mut concrete_args);
+        let aligned_raw = self.realign_named_call_args(sig, arg_tys, &mut concrete_args);
+        (bindings, concrete_args, aligned_raw)
+    }
+
+    /// Unify each concrete arg against its parameter type, pointing the
+    /// caret at the exact argument expression for E005. Returns which
+    /// params fired E005 (so the caller skips a redundant E001 constraint).
+    /// Verbatim text move out of [`Self::check_named_call_with_type_args`].
+    fn unify_call_args(
+        &mut self, name: &str, sig: &crate::types::FnSig, concrete_args: &[Ty], bindings: &mut HashMap<Sym, Ty>,
+    ) -> Vec<bool> {
         let mut e005_fired: Vec<bool> = Vec::new();
         for (i, ((pname, pty), aty)) in sig.params.iter().zip(concrete_args.iter()).enumerate() {
             // Point caret at the exact argument expression for E005
@@ -677,25 +733,17 @@ impl Checker {
             if let Some(sp) = self.arg_spans.get(i).copied().flatten() {
                 self.current_span = Some(sp);
             }
-            let fired = self.unify_call_arg(name, pname, pty, aty, &sig.structural_bounds, &mut bindings);
+            let fired = self.unify_call_arg(name, pname, pty, aty, &sig.structural_bounds, bindings);
             if !fired { self.current_span = saved_span; }
             e005_fired.push(fired);
         }
         self.arg_spans.clear();
-        // #620: a generic param that NO argument pinned (because the arg was an
-        // unresolved inference var — e.g. `unbox(b)` where `b` is a `list.map`
-        // lambda's not-yet-resolved element) leaves its name UNBOUND in
-        // `bindings`. The back-prop below would then `substitute` the param type
-        // to its LITERAL generic name (`Box[TypeVar("T")]`) and leak it into the
-        // union-find, where it can never be solved to the concrete type that
-        // flows in later (from `list.map`'s collection). Bind each such generic
-        // to a FRESH inference var (shared by the back-prop AND the return type),
-        // so the relation becomes solvable. Generics an argument DID pin keep
-        // their concrete binding; a concrete call is unaffected.
-        for g in &sig.generics {
-            bindings.entry(*g).or_insert_with(|| self.fresh_var());
-        }
-        // Verify protocol bounds on generic type parameters
+        e005_fired
+    }
+
+    /// Verify protocol bounds on generic type parameters. Verbatim text
+    /// move out of [`Self::check_named_call_with_type_args`].
+    fn check_protocol_bounds(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>) {
         for (tv_name, proto_names) in &sig.protocol_bounds {
             if let Some(concrete_ty) = bindings.get(tv_name) {
                 let type_name = self.resolve_type_name_for_protocol(concrete_ty);
@@ -714,23 +762,38 @@ impl Checker {
                 }
             }
         }
-        // Propagate resolved types back to inference variables
-        // Skip constraint for args where E005 already fired (avoids duplicate E001)
+    }
+
+    /// Propagate resolved types back to inference variables, skipping
+    /// params where E005 already fired (avoids a duplicate E001). Verbatim
+    /// text move out of [`Self::check_named_call_with_type_args`].
+    fn propagate_call_arg_types(
+        &mut self, name: &str, sig: &crate::types::FnSig, arg_tys: &[Ty],
+        aligned_raw: &Option<Vec<Option<Ty>>>, e005_fired: &[bool], bindings: &HashMap<Sym, Ty>,
+    ) {
         for (i, (_, pty)) in sig.params.iter().enumerate() {
             if e005_fired.get(i).copied().unwrap_or(false) { continue; }
             // The arg inference ty for param i — realigned for named calls; a
             // None slot (default-filled) gets no constraint.
-            let aty = match &aligned_raw {
+            let aty = match aligned_raw {
                 Some(raw) => match raw.get(i).and_then(|o| o.clone()) { Some(t) => t, None => continue },
                 None => match arg_tys.get(i) { Some(t) => t.clone(), None => continue },
             };
-            let expected = if bindings.is_empty() { pty.clone() } else { crate::types::substitute(pty, &bindings) };
+            let expected = if bindings.is_empty() { pty.clone() } else { crate::types::substitute(pty, bindings) };
             if expected != Ty::Unknown {
                 self.constrain(expected, aty, format!("call to {}()", name));
             }
         }
+    }
+
+    /// Instantiate unresolved generics with fresh vars and compute the
+    /// call's final return type, wrapping a user-defined effect fn's
+    /// non-Result return in `Result[T, String]` to match ResultPropagation's
+    /// codegen-side lift. Verbatim text move out of
+    /// [`Self::check_named_call_with_type_args`].
+    fn finalize_call_return_ty(&mut self, name: &str, sig: &crate::types::FnSig, bindings: HashMap<Sym, Ty>) -> Ty {
         // Instantiate unresolved generics with fresh vars
-        let mut final_bindings = bindings.clone();
+        let mut final_bindings = bindings;
         for g in &sig.generics {
             if !final_bindings.contains_key(g) {
                 final_bindings.insert(*g, self.fresh_var());
