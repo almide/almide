@@ -10,21 +10,11 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             // But we handle tail detection at the Block level below.
         }
 
-        IrExprKind::Block { stmts, expr: Some(tail) } => {
-            for s in stmts { check_needs_ownership_stmt(s, var, needs); }
-            if is_var(tail, var) { *needs = true; return; }
-            check_needs_ownership(tail, var, needs);
-        }
-        IrExprKind::Block { stmts, expr: None } => {
-            for s in stmts { check_needs_ownership_stmt(s, var, needs); }
-        }
+        IrExprKind::Block { .. } => check_needs_ownership_block(expr, var, needs),
 
         // ── Concatenation consumes operands ──
-        IrExprKind::BinOp { op: BinOp::ConcatStr | BinOp::ConcatList, left, right } => {
-            if is_var(left, var) || is_var(right, var) { *needs = true; return; }
-            check_needs_ownership(left, var, needs);
-            check_needs_ownership(right, var, needs);
-        }
+        IrExprKind::BinOp { op: BinOp::ConcatStr | BinOp::ConcatList, left, right } =>
+            check_needs_ownership_concat(left, right, var, needs),
 
         // ── Function call ──
         // For stdlib Module calls, consult arg_transforms to learn which args
@@ -37,20 +27,11 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         IrExprKind::Call { .. } => check_needs_ownership_call(expr, var, needs),
 
         // ── Collection construction consumes ──
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields { if is_var(v, var) { *needs = true; return; } }
-            for (_, v) in fields { check_needs_ownership(v, var, needs); }
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            for e in elements { if is_var(e, var) { *needs = true; return; } }
-            for e in elements { check_needs_ownership(e, var, needs); }
-        }
-        IrExprKind::SpreadRecord { base, fields } => {
-            if is_var(base, var) { *needs = true; return; }
-            for (_, v) in fields { if is_var(v, var) { *needs = true; return; } }
-            check_needs_ownership(base, var, needs);
-            for (_, v) in fields { check_needs_ownership(v, var, needs); }
-        }
+        IrExprKind::Record { fields, .. } => check_needs_ownership_record(fields, var, needs),
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } =>
+            check_needs_ownership_elements(elements, var, needs),
+        IrExprKind::SpreadRecord { base, fields } =>
+            check_needs_ownership_spread_record(base, fields, var, needs),
         IrExprKind::MapLiteral { entries } => {
             for (k, v) in entries { if is_var(k, var) || is_var(v, var) { *needs = true; return; } }
         }
@@ -68,21 +49,10 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         }
 
         // ── String interpolation consumes ──
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let IrStringPart::Expr { expr } = p {
-                    if is_var(expr, var) { *needs = true; return; }
-                    check_needs_ownership(expr, var, needs);
-                }
-            }
-        }
+        IrExprKind::StringInterp { parts } => check_needs_ownership_string_interp(parts, var, needs),
 
         // ── ForIn: iterable is consumed ──
-        IrExprKind::ForIn { iterable, body, .. } => {
-            if is_var(iterable, var) { *needs = true; return; }
-            check_needs_ownership(iterable, var, needs);
-            for s in body { check_needs_ownership_stmt(s, var, needs); }
-        }
+        IrExprKind::ForIn { iterable, body, .. } => check_needs_ownership_for_in(iterable, body, var, needs),
 
         // ── IterChain: source consumed if consume=true ──
         IrExprKind::IterChain { .. } => check_needs_ownership_iter_chain(expr, var, needs),
@@ -103,12 +73,7 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         }
 
         // ── Control flow: recurse ──
-        IrExprKind::If { cond, then, else_ } => {
-            check_needs_ownership(cond, var, needs);
-            if is_var(then, var) || is_var(else_, var) { *needs = true; return; }
-            check_needs_ownership(then, var, needs);
-            check_needs_ownership(else_, var, needs);
-        }
+        IrExprKind::If { cond, then, else_ } => check_needs_ownership_if(cond, then, else_, var, needs),
         IrExprKind::Match { .. } => check_needs_ownership_match(expr, var, needs),
         IrExprKind::While { cond, body } => {
             check_needs_ownership(cond, var, needs);
@@ -123,25 +88,18 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
             check_needs_ownership(expr, var, needs);
         }
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            // Both the unwrapped value and the `??` fallback flow OUT as the result,
-            // so a param used as either ESCAPES and needs ownership — else the
-            // fallback arm renders as a borrowed `&str`/`&[T]` while the unwrapped
-            // arm is owned, and the lowered match's arms mismatch (#414). Mirrors
-            // the If/Match/Option-wrapping escaping-child handling above.
-            if is_var(expr, var) || is_var(fallback, var) { *needs = true; return; }
-            check_needs_ownership(expr, var, needs);
-            check_needs_ownership(fallback, var, needs);
-        }
+        // Both the unwrapped value and the `??` fallback flow OUT as the result,
+        // so a param used as either ESCAPES and needs ownership — else the
+        // fallback arm renders as a borrowed `&str`/`&[T]` while the unwrapped
+        // arm is owned, and the lowered match's arms mismatch (#414). Mirrors
+        // the If/Match/Option-wrapping escaping-child handling above.
+        IrExprKind::UnwrapOr { expr, fallback } => check_needs_ownership_unwrap_or(expr, fallback, var, needs),
         IrExprKind::OptionalChain { expr, .. } => check_needs_ownership(expr, var, needs),
         IrExprKind::Range { start, end, .. } => {
             check_needs_ownership(start, var, needs);
             check_needs_ownership(end, var, needs);
         }
-        IrExprKind::Fan { exprs } => {
-            for e in exprs { if is_var(e, var) { *needs = true; return; } }
-            for e in exprs { check_needs_ownership(e, var, needs); }
-        }
+        IrExprKind::Fan { exprs } => check_needs_ownership_elements(exprs, var, needs),
         IrExprKind::RustMacro { args, .. } => {
             for a in args { check_needs_ownership(a, var, needs); }
         }
@@ -168,6 +126,96 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
         | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
+}
+
+/// `IrExprKind::Block` case of `check_needs_ownership`, extracted (round 3
+/// of the cog>100 decomposition — same write-only-`needs` safety as the
+/// round 2 arm extractions below: no cross-arm state, only ever writes
+/// `*needs = true` and returns). Handles both the `Some(tail)` and `None`
+/// tail shapes with one `if let` instead of two separate match arms —
+/// semantically identical to the original two-arm form since the `None`
+/// case simply skips the tail check entirely.
+fn check_needs_ownership_block(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    let IrExprKind::Block { stmts, expr: tail } = &expr.kind else { unreachable!() };
+    for s in stmts { check_needs_ownership_stmt(s, var, needs); }
+    if let Some(tail) = tail {
+        if is_var(tail, var) { *needs = true; return; }
+        check_needs_ownership(tail, var, needs);
+    }
+}
+
+/// `IrExprKind::BinOp { op: ConcatStr | ConcatList, .. }` case of
+/// `check_needs_ownership`, extracted verbatim (round 3).
+fn check_needs_ownership_concat(left: &IrExpr, right: &IrExpr, var: VarId, needs: &mut bool) {
+    if is_var(left, var) || is_var(right, var) { *needs = true; return; }
+    check_needs_ownership(left, var, needs);
+    check_needs_ownership(right, var, needs);
+}
+
+/// `IrExprKind::Record` case of `check_needs_ownership`, extracted verbatim
+/// (round 3). Not shared with `SpreadRecord` below despite the same
+/// `Vec<(Sym, IrExpr)>` field shape — `SpreadRecord` interleaves a `base`
+/// check between the fields' var-check and fields' recurse passes, so
+/// factoring out a common fields-only helper would require reordering
+/// those interleaved steps.
+fn check_needs_ownership_record(fields: &[(Sym, IrExpr)], var: VarId, needs: &mut bool) {
+    for (_, v) in fields { if is_var(v, var) { *needs = true; return; } }
+    for (_, v) in fields { check_needs_ownership(v, var, needs); }
+}
+
+/// `IrExprKind::List { elements } | IrExprKind::Tuple { elements }` case of
+/// `check_needs_ownership`, extracted verbatim (round 3). Also reused for
+/// `IrExprKind::Fan { exprs }` below, which has the identical
+/// `Vec<IrExpr>`-of-independent-operands shape and body.
+fn check_needs_ownership_elements(elements: &[IrExpr], var: VarId, needs: &mut bool) {
+    for e in elements { if is_var(e, var) { *needs = true; return; } }
+    for e in elements { check_needs_ownership(e, var, needs); }
+}
+
+/// `IrExprKind::SpreadRecord` case of `check_needs_ownership`, extracted
+/// verbatim (round 3).
+fn check_needs_ownership_spread_record(base: &IrExpr, fields: &[(Sym, IrExpr)], var: VarId, needs: &mut bool) {
+    if is_var(base, var) { *needs = true; return; }
+    for (_, v) in fields { if is_var(v, var) { *needs = true; return; } }
+    check_needs_ownership(base, var, needs);
+    for (_, v) in fields { check_needs_ownership(v, var, needs); }
+}
+
+/// `IrExprKind::StringInterp` case of `check_needs_ownership`, extracted
+/// verbatim (round 3).
+fn check_needs_ownership_string_interp(parts: &[IrStringPart], var: VarId, needs: &mut bool) {
+    for p in parts {
+        if let IrStringPart::Expr { expr } = p {
+            if is_var(expr, var) { *needs = true; return; }
+            check_needs_ownership(expr, var, needs);
+        }
+    }
+}
+
+/// `IrExprKind::ForIn` case of `check_needs_ownership`, extracted verbatim
+/// (round 3).
+fn check_needs_ownership_for_in(iterable: &IrExpr, body: &[IrStmt], var: VarId, needs: &mut bool) {
+    if is_var(iterable, var) { *needs = true; return; }
+    check_needs_ownership(iterable, var, needs);
+    for s in body { check_needs_ownership_stmt(s, var, needs); }
+}
+
+/// `IrExprKind::If` case of `check_needs_ownership`, extracted verbatim
+/// (round 3).
+fn check_needs_ownership_if(cond: &IrExpr, then: &IrExpr, else_: &IrExpr, var: VarId, needs: &mut bool) {
+    check_needs_ownership(cond, var, needs);
+    if is_var(then, var) || is_var(else_, var) { *needs = true; return; }
+    check_needs_ownership(then, var, needs);
+    check_needs_ownership(else_, var, needs);
+}
+
+/// `IrExprKind::UnwrapOr` case of `check_needs_ownership`, extracted
+/// verbatim (round 3). See the router's comment (kept there, at the call
+/// site) for why both branches count as escaping.
+fn check_needs_ownership_unwrap_or(expr: &IrExpr, fallback: &IrExpr, var: VarId, needs: &mut bool) {
+    if is_var(expr, var) || is_var(fallback, var) { *needs = true; return; }
+    check_needs_ownership(expr, var, needs);
+    check_needs_ownership(fallback, var, needs);
 }
 
 // ── `check_needs_ownership` arm extraction (cog>100 decomposition) ──
