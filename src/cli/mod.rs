@@ -371,6 +371,57 @@ pub(crate) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path
 }
 
 /// Build generated Rust code with optional native Rust dependencies and source files.
+/// `cargo_build_generated_with_native`'s dependency-free rlib fast path:
+/// link the precompiled runtime instead of recompiling its ~2000 lines per
+/// build. The runtime is compiled at the same opt-level as the binary (3 for
+/// `--release`, 1 for debug/`almide run`), so it is fully optimized; only
+/// its compilation is amortized. Net: shipping builds drop from ~27-33s to
+/// ~1-2s (~20x).
+///
+/// Tradeoff: because the runtime is a separate crate (no LTO), non-generic
+/// non-#[inline] runtime fns (e.g. string.trim/split) aren't inlined across
+/// the crate boundary, costing up to ~10% runtime on string/list-heavy hot
+/// loops (typically 2-5%). ThinLTO would recover it but erases the build win
+/// (it re-optimizes the runtime at link time). The planned fix is #[inline]
+/// on the hot runtime fns — see docs/roadmap. `ALMIDE_NO_RTLIB=1` forces the
+/// monolithic cargo build (full cross-crate inlining) when a shipped binary
+/// must squeeze out that last few percent (checked by the caller, before
+/// this is even invoked).
+///
+/// Returns `None` on ANY failure (a `?`-propagated missing rlib/slim-main,
+/// a write failure, or a nonzero rustc exit) — the caller falls through to
+/// the cargo-based slow path unconditionally, so correctness never
+/// regresses, only the speedup is forfeited. Extracted verbatim (the
+/// original's `if let (Ok(_), Some(_))` tuple-match + nested `if`s become
+/// this function's `?` chain — same "either piece missing → skip" semantics).
+fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<std::path::PathBuf> {
+    let opt_level = if release { "3" } else { "1" };
+    let rlib = ensure_runtime_rlib(opt_level).ok()?;
+    let mut slim = crate::codegen::slim_main_with_external_runtime(rs_code)?;
+    if !slim.contains("fn main(") && !slim.contains("fn almide_main(") {
+        slim.push_str("\nfn main() {}\n");
+    }
+    let rlib_dir = rlib.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let rs_path = project_dir.join("almide_gen_main.rs");
+    let bin_path = project_dir.join(if cfg!(windows) { "almide-out.exe" } else { "almide-out" });
+    std::fs::write(&rs_path, &slim).ok()?;
+    let mut cmd = std::process::Command::new(crate::find_rustc());
+    cmd.arg(&rs_path)
+        .arg("-o").arg(&bin_path)
+        .arg("--edition").arg("2021")
+        .arg("-C").arg(format!("opt-level={opt_level}"))
+        .arg("--extern").arg(format!("almide_rt={}", rlib.display()))
+        .arg("-L").arg(rlib_dir)
+        .arg("-A").arg("warnings");
+    let output = cmd.output().ok()?;
+    if output.status.success() {
+        Some(bin_path)
+    } else {
+        // else: fall through to the self-contained cargo build
+        None
+    }
+}
+
 fn cargo_build_generated_with_native(
     rs_code: &str,
     project_dir: &std::path::Path,
@@ -382,52 +433,12 @@ fn cargo_build_generated_with_native(
     let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
     let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
 
-    // rlib fast path (dep-free): link the precompiled runtime instead of
-    // recompiling its ~2000 lines per build. The runtime is compiled at the same
-    // opt-level as the binary (3 for `--release`, 1 for debug/`almide run`), so
-    // it is fully optimized; only its compilation is amortized. Net: shipping
-    // builds drop from ~27-33s to ~1-2s (~20x).
-    //
-    // Tradeoff: because the runtime is a separate crate (no LTO), non-generic
-    // non-#[inline] runtime fns (e.g. string.trim/split) aren't inlined across
-    // the crate boundary, costing up to ~10% runtime on string/list-heavy hot
-    // loops (typically 2-5%). ThinLTO would recover it but erases the build win
-    // (it re-optimizes the runtime at link time). The planned fix is #[inline] on
-    // the hot runtime fns — see docs/roadmap. ALMIDE_NO_RTLIB=1 forces the
-    // monolithic cargo build (full cross-crate inlining) when a shipped binary
-    // must squeeze out that last few percent. Any rustc failure also falls
-    // through to the cargo path below, so correctness never regresses.
     if std::env::var_os("ALMIDE_NO_RTLIB").is_none()
         && !uses_matrix && !uses_http && !uses_zlib
         && native_deps.is_empty() && source_root.is_none()
     {
-        let opt_level = if release { "3" } else { "1" };
-        if let (Ok(rlib), Some(mut slim)) = (
-            ensure_runtime_rlib(opt_level),
-            crate::codegen::slim_main_with_external_runtime(rs_code),
-        ) {
-            if !slim.contains("fn main(") && !slim.contains("fn almide_main(") {
-                slim.push_str("\nfn main() {}\n");
-            }
-            let rlib_dir = rlib.parent().unwrap_or_else(|| std::path::Path::new("."));
-            let rs_path = project_dir.join("almide_gen_main.rs");
-            let bin_path = project_dir.join(if cfg!(windows) { "almide-out.exe" } else { "almide-out" });
-            if std::fs::write(&rs_path, &slim).is_ok() {
-                let mut cmd = std::process::Command::new(crate::find_rustc());
-                cmd.arg(&rs_path)
-                    .arg("-o").arg(&bin_path)
-                    .arg("--edition").arg("2021")
-                    .arg("-C").arg(format!("opt-level={opt_level}"))
-                    .arg("--extern").arg(format!("almide_rt={}", rlib.display()))
-                    .arg("-L").arg(rlib_dir)
-                    .arg("-A").arg("warnings");
-                if let Ok(output) = cmd.output() {
-                    if output.status.success() {
-                        return Ok(bin_path);
-                    }
-                    // else: fall through to the self-contained cargo build
-                }
-            }
+        if let Some(bin_path) = try_rlib_fast_build(rs_code, project_dir, release) {
+            return Ok(bin_path);
         }
     }
 
