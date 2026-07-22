@@ -129,6 +129,26 @@ impl LowerCtx {
 
     /// Extracted from `Self::lower_scalar_binop_eq_list_map` (ninth-round split, cog
     /// reduction): the Map/Set deep-equality sub-chain, verbatim.
+    // Is `ty` one of the map/set reprs this deep-equality path admits, and if so which
+    // self-host MODULE ("set"/"map") the eq call routes to? Named (codopsy cc) — collapses
+    // the compound `admitted` boolean (4 ORs) into one predicate call.
+    fn map_set_eq_module_name(ty: &Ty) -> Option<&'static str> {
+        let is_set_str = matches!(ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Set, a)
+                if a.len() == 1 && matches!(a[0], Ty::String));
+        let is_map_skv = matches!(ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                if a.len() == 2 && matches!(a[0], Ty::String) && !crate::lower::is_heap_ty(&a[1]));
+        let admitted = crate::lower::is_map_ivh_ty(ty)
+            || crate::lower::is_map_hval_ty(ty)
+            || is_map_skv
+            || is_set_str;
+        if !admitted {
+            return None;
+        }
+        Some(if is_set_str { "set" } else { "map" })
+    }
+
     fn lower_scalar_binop_eq_map_set(
         &mut self,
         op: &almide_ir::BinOp,
@@ -138,37 +158,23 @@ impl LowerCtx {
         use almide_ir::BinOp;
         // `map_a == map_b` over the two implemented map reprs — a deep
         // order-independent compare call (→ scalar Bool), same shape as list ==.
-        if matches!(op, BinOp::Eq | BinOp::Neq) {
-            let is_set_str = matches!(&left.ty,
-                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Set, a)
-                    if a.len() == 1 && matches!(a[0], Ty::String));
-            let is_map_skv = matches!(&left.ty,
-                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
-                    if a.len() == 2 && matches!(a[0], Ty::String) && !crate::lower::is_heap_ty(&a[1]));
-            let admitted = crate::lower::is_map_ivh_ty(&left.ty)
-                || crate::lower::is_map_hval_ty(&left.ty)
-                || is_map_skv
-                || is_set_str;
-            if admitted {
-                let module = if is_set_str { "set" } else { "map" };
-                // Pass the BARE "eq" — `list_heap_call_name` attaches the repr
-                // suffix (`map.eq_ivh` / `map.eq_hval`) from the subject type,
-                // exactly like every other map call site.
-                let args = [left.clone(), right.clone()];
-                let eq = self
-                    .lower_pure_module_value_call(module, "eq", &args, &Ty::Bool)
-                    .ok()?;
-                if matches!(op, BinOp::Eq) {
-                    return Some(eq);
-                }
-                let one = self.fresh_value();
-                self.ops.push(Op::ConstInt { dst: one, value: 1 });
-                let dst = self.fresh_value();
-                self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
-                return Some(dst);
-            }
+        if !matches!(op, BinOp::Eq | BinOp::Neq) {
+            return None;
         }
-        None
+        let module = Self::map_set_eq_module_name(&left.ty)?;
+        // Pass the BARE "eq" — `list_heap_call_name` attaches the repr suffix
+        // (`map.eq_ivh` / `map.eq_hval`) from the subject type, exactly like every
+        // other map call site.
+        let args = [left.clone(), right.clone()];
+        let eq = self.lower_pure_module_value_call(module, "eq", &args, &Ty::Bool).ok()?;
+        if matches!(op, BinOp::Eq) {
+            return Some(eq);
+        }
+        let one = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+        Some(dst)
     }
 
     /// The String-ordering-cmp case of [`Self::lower_scalar_binop_cmp_and_heap_eq`] below,
