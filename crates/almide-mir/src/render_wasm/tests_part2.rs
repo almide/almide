@@ -742,7 +742,7 @@
             buf }\n\
             fn main() -> Unit = println(to_str(12345))\n";
         let prog = lower_source(src);
-        let f = prog.functions.iter().find(|f| f.name == "to_str").unwrap();
+        let f = prog.functions.iter().find(|f| f.name == "to_str").expect("lowered fn \"to_str\" not found");
         assert!(
             f.ops.iter().any(|op| matches!(op, Op::Alloc { init: Init::DynStr { .. }, .. })),
             "to_str must allocate a DynStr, got {:?}",
