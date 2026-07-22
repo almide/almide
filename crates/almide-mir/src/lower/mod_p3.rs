@@ -101,14 +101,19 @@ impl LowerCtx {
                         // heap_elem_lists membership stays for the bind gates (drop_op_for
                         // consults variant_drop_handles first). A PARAM is never dropped
                         // (it stays in param_values), so the entry is read-inert there.
-                        if let Some(vn) = self.custom_variant_type_name(&a[1]) {
-                            if self.variant_layouts.needs_recursive_drop(&vn, &|rn| {
-                                crate::lower::canonical_record_key(&self.record_layouts, rn)
-                                    .is_some()
-                            }) {
-                                self.variant_drop_handles.insert(v, format!("reserr:{vn}"));
-                            }
+                        // Guard-clause flattening (`return` targets `seed_variant_param` — sound
+                        // because this is the tail of its `match ty { .. }`, the function's last
+                        // statement, so returning early here is identical to falling through to
+                        // the function's end). No behavior change.
+                        let Some(vn) = self.custom_variant_type_name(&a[1]) else {
+                            return;
+                        };
+                        if !self.variant_layouts.needs_recursive_drop(&vn, &|rn| {
+                            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+                        }) {
+                            return;
                         }
+                        self.variant_drop_handles.insert(v, format!("reserr:{vn}"));
                     }
                 } else {
                     // Scalar Ok (`Result[Int, String]`) — len-as-tag, scalar Ok payload. A heap Err
