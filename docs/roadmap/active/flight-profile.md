@@ -1,4 +1,4 @@
-<!-- description: Flight-grade (DO-178C/DO-333/DO-330) gap analysis for the v1 trust spine — the 6 pillars, what the PCC spine already nails, and the two engineering-closeable keystones (lift loops into Coq for WCET-bounding; productionize MIR→Rust to bind the cert to a Ferrocene-qualified flight target) that converge on one flight stack -->
+<!-- description: DO-178C flight-grade gap analysis: 6 pillars status + 2 engineering keystones -->
 # Flight Profile — 航空品質への接地分析と2つのキーストーン
 
 > **Goal**: [v1-proof-architecture](v1-proof-architecture.md) の PCC スパインが
@@ -6,7 +6,7 @@
 > どこが足りないか**を実コードに接地して確定し、**工学で閉じられる2つのキーストーン**
 > を定義する。航空は [trust-layer](trust-layer.md) の北極星であって近接の売り物では
 > ない([v1-kgi-kpi](v1-kgi-kpi.md) の GTM ラダー参照)が、ここで定義する飛行プロ
-> ファイルは ① エージェント市場の wasm 主権と**同じ認証済み MIR witness を共有**する
+> ファイルは エージェント市場の wasm 主権と**同じ認証済み MIR witness を共有**する
 > ので、二者択一ではなく「同じ witness の2人目の消費者を足す」問題になる。
 > **関連**: [certification-grade](certification-grade.md)(規格5メカニズムの分解)/
 > [certificate-format-v1](certificate-format-v1.md)/ [v1-mir-architecture](v1-mir-architecture.md)(§1 wasm 主権・§9 却下案)。
@@ -177,7 +177,7 @@ Almide 飛行サブセット            counted loop / no-alloc-in-loop / static
 ```
 
 各層の信頼が会計されている。**戦略的解放**: 健全性の核がターゲット非依存だから、
-**wasm 主権(① エージェント市場)と Rust 飛行を二者択一にしなくていい** ── 両方が
+**wasm 主権(エージェント市場)と Rust 飛行を二者択一にしなくていい** ── 両方が
 **同じ認証済み MIR witness の別コンシューマ**になる。決定は「どっちを捨てるか」では
 なく「**同じ witness に Rust 飛行レンダラを2人目の消費者として足すか**」。
 
@@ -257,7 +257,7 @@ Almide 飛行サブセット            counted loop / no-alloc-in-loop / static
   飛行実績ゼロ。
 
 → だから [v1-kgi-kpi](v1-kgi-kpi.md) / GTM の通り**航空は北極星・信用の錨であって
-近接の売り物ではない**が正しい。① エージェント・② CRA 市場は本プロファイルの
+近接の売り物ではない**が正しい。エージェント市場・CRA 市場は本プロファイルの
 キーストーンを**閉じずに**解錠する。本プロファイルは「航空に**本気で近づく**ための
 工学的最短路2本」を定義するもので、「航空を取る」工程全体ではない。
 
