@@ -117,7 +117,23 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
     let word = &line_text[start..end];
     if word.is_empty() { return None; }
 
-    // 1. Keywords
+    if let Some(loc) = find_node_keyword(word) { return Some(loc); }
+    if let Some(loc) = find_node_builtin_type(word) { return Some(loc); }
+    if let Some(loc) = find_node_stdlib_call(line_text, word, start, end) { return Some(loc); }
+
+    // 4. AST-based lookup — walk declarations
+    let sym = crate::intern::sym(word);
+
+    find_node_variant_ctor(doc, word)
+        .or_else(|| find_node_type_decl(doc, word))
+        .or_else(|| find_node_fn_decl(doc, sym, word))
+        .or_else(|| find_node_top_let(doc, sym, word))
+        .or_else(|| find_node_param(doc, word, line))
+        .or_else(|| find_node_expr_ident(doc, word))
+}
+
+// 1. Keywords
+fn find_node_keyword(word: &str) -> Option<Located> {
     let kw = match word {
         "fn" => Some("Function declaration"),
         "let" => Some("Immutable binding"),
@@ -143,11 +159,11 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
         "assert_eq" => Some("Test assertion: `assert_eq(actual, expected)` — fails if not equal"),
         _ => None,
     };
-    if let Some(info) = kw {
-        return Some(Located::Keyword { info });
-    }
+    kw.map(|info| Located::Keyword { info })
+}
 
-    // 1b. Primitive / built-in types
+// 1b. Primitive / built-in types
+fn find_node_builtin_type(word: &str) -> Option<Located> {
     let builtin = match word {
         "Int" => Some("64-bit signed integer"),
         "Float" => Some("64-bit floating point (IEEE 754)"),
@@ -162,11 +178,11 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
         "Result" => Some("Success or failure: `Result[T, E]` = `Ok(T)` | `Err(E)`"),
         _ => None,
     };
-    if let Some(info) = builtin {
-        return Some(Located::Keyword { info });
-    }
+    builtin.map(|info| Located::Keyword { info })
+}
 
-    // 2. module.func — cursor on module name
+// 2. module.func — cursor on module name; 3. module.func — cursor on func name
+fn find_node_stdlib_call(line_text: &str, word: &str, start: usize, end: usize) -> Option<Located> {
     if end < line_text.len() && line_text.as_bytes()[end] == b'.' {
         let func_start = end + 1;
         let func_end = func_start + line_text[func_start..].find(|c: char| !c.is_alphanumeric() && c != '_' && c != '?').unwrap_or(line_text.len() - func_start);
@@ -177,7 +193,6 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
         }
     }
 
-    // 3. module.func — cursor on func name
     if start > 0 && line_text.as_bytes()[start - 1] == b'.' {
         let mod_end = start - 1;
         let mod_start = line_text[..mod_end].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
@@ -189,11 +204,11 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             }
         }
     }
+    None
+}
 
-    // 4. AST-based lookup — walk declarations
-    let sym = crate::intern::sym(word);
-
-    // 4a. Variant constructors
+// 4a. Variant constructors
+fn find_node_variant_ctor(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
     for decl in &doc.program.decls {
         if let crate::ast::Decl::Type { name: type_name, ty: crate::ast::TypeExpr::Variant { cases }, .. } = decl {
             for case in cases {
@@ -212,8 +227,11 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             }
         }
     }
+    None
+}
 
-    // 4b. Type declarations — show variants/fields
+// 4b. Type declarations — show variants/fields
+fn find_node_type_decl(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
     for decl in &doc.program.decls {
         if let crate::ast::Decl::Type { name, ty, .. } = decl {
             if name.as_str() == word {
@@ -236,19 +254,24 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             }
         }
     }
+    None
+}
 
-    // 4c. Function declarations
-    if let Some(sig) = doc.checker.env.functions.get(&sym) {
-        let params = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
-        return Some(Located::FnDecl { name: word.to_string(), params, ret: sig.ret.display().to_string() });
-    }
+// 4c. Function declarations
+fn find_node_fn_decl(doc: &AnalyzedDoc, sym: crate::intern::Sym, word: &str) -> Option<Located> {
+    let sig = doc.checker.env.functions.get(&sym)?;
+    let params = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
+    Some(Located::FnDecl { name: word.to_string(), params, ret: sig.ret.display().to_string() })
+}
 
-    // 4c. Top-level lets
-    if let Some(ty) = doc.checker.env.top_lets.get(&sym) {
-        return Some(Located::TopLet { name: word.to_string(), ty: ty.display().to_string() });
-    }
+// 4c. Top-level lets
+fn find_node_top_let(doc: &AnalyzedDoc, sym: crate::intern::Sym, word: &str) -> Option<Located> {
+    let ty = doc.checker.env.top_lets.get(&sym)?;
+    Some(Located::TopLet { name: word.to_string(), ty: ty.display().to_string() })
+}
 
-    // 4d. Function parameters — check if cursor is inside a fn body
+// 4d. Function parameters — check if cursor is inside a fn body
+fn find_node_param(doc: &AnalyzedDoc, word: &str, line: u32) -> Option<Located> {
     for decl in &doc.program.decls {
         if let crate::ast::Decl::Fn { params, span, .. } = decl {
             let fn_line = span.as_ref().map(|s| s.line as u32).unwrap_or(0);
@@ -265,14 +288,16 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             }
         }
     }
+    None
+}
 
-    // 4e. ExprId-based type lookup — walk expressions to find matching Ident
+// 4e. ExprId-based type lookup — walk expressions to find matching Ident
+fn find_node_expr_ident(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
     for decl in &doc.program.decls {
         if let Some(ty) = find_expr_type_by_name(&doc.program, decl, word, &doc.checker.type_map) {
             return Some(Located::UserIdent { name: word.to_string(), ty: ty.display().to_string() });
         }
     }
-
     None
 }
 

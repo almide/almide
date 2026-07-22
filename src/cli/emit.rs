@@ -77,36 +77,11 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
     });
     let mut module_irs = std::collections::HashMap::new();
     if let Some(checker) = &mut checker_opt {
+        // Same per-module type-check + lower steps as try_compile_with_ir's
+        // module loop in main.rs — shared via lower_one_user_module so the
+        // two drivers can't silently drift apart.
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-            if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
-            let saved_self = checker.env.self_module_name;
-            if let Some(pid) = pkg_id.as_ref() {
-                checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
-            }
-            checker.infer_module(mod_prog, name);
-            let versioned = pkg_id.as_ref().map(|pid| {
-                let base = pid.mod_name();
-                if let Some(suffix) = name.strip_prefix(&pid.name) {
-                    format!("{}{}", base, suffix)
-                } else {
-                    base
-                }
-            });
-            if let Some(ref v) = versioned {
-                checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
-            }
-            let self_name = checker.env.self_module_name.map(|s| s.to_string());
-            let import_table_name = self_name.as_deref().unwrap_or(name);
-            let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
-            let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
-            let mod_ir = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
-            checker.env.import_table = saved_table;
-            checker.env.self_module_name = saved_self;
-            module_irs.insert(name.clone(), mod_ir);
-            if let Some(ref mut ir) = ir_program {
-                ir.modules.push(mod_ir_module);
-            }
+            crate::lower_one_user_module(checker, name, mod_prog, pkg_id, &mut module_irs, &mut ir_program);
         }
     }
 
