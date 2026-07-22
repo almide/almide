@@ -45,8 +45,7 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
             unify(&args[0], &Ty::Float, bindings)
         }
         (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 }) => {
-            if p1.len() != p2.len() { return false; }
-            p1.iter().zip(p2.iter()).all(|(a, b)| unify(a, b, bindings)) && unify(r1, r2, bindings)
+            unify_fn(p1, r1, p2, r2, bindings)
         }
         (Ty::Tuple(a), Ty::Tuple(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| unify(x, y, bindings))
@@ -64,6 +63,15 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
         (_, Ty::Union(members)) => unify_union_actual(sig_ty, members, bindings),
         _ => sig_ty.compatible(actual_ty),
     }
+}
+
+/// `Ty::Fn` vs `Ty::Fn` case of `unify`: same arity, then each param and the
+/// return type must unify pairwise.
+fn unify_fn(p1: &[Ty], r1: &Ty, p2: &[Ty], r2: &Ty, bindings: &mut std::collections::HashMap<Sym, Ty>) -> bool {
+    if p1.len() != p2.len() {
+        return false;
+    }
+    p1.iter().zip(p2.iter()).all(|(a, b)| unify(a, b, bindings)) && unify(r1, r2, bindings)
 }
 
 /// TypeVar-on-the-signature-side case of `unify`: bind `name` to `actual_ty` if
