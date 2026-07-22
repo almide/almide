@@ -10,97 +10,21 @@
 /// GENERIC aliases keep their decl (the target mentions type params) — untouched.
 /// Runs on the WHOLE linked program (pipeline + classify — desugar-before-both:
 /// the caps `mir == ir` count sees the erased tree on BOTH sides by construction).
-pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
-    use almide_ir::visit_mut::{walk_expr_mut, walk_pattern_mut, walk_stmt_mut, IrMutVisitor};
-    use almide_ir::{IrExpr, IrPattern, IrStmt, IrTypeDeclKind};
-    use almide_lang::types::{Ty, VariantPayload};
-    use std::collections::HashMap;
-
-    fn collect(decls: &[almide_ir::IrTypeDecl], map: &mut HashMap<String, Ty>) {
-        for td in decls {
-            if let IrTypeDeclKind::Alias { target } = &td.kind {
-                if td.generics.is_none() {
-                    map.insert(td.name.as_str().to_string(), target.clone());
-                }
-            }
-        }
-    }
-    fn subst(ty: &Ty, map: &HashMap<String, Ty>) -> Ty {
-        match ty {
-            Ty::Named(name, args) => {
-                if args.is_empty() {
-                    if let Some(t) = map.get(name.as_str()) {
-                        return t.clone();
-                    }
-                }
-                Ty::Named(*name, args.iter().map(|a| subst(a, map)).collect())
-            }
-            Ty::Applied(id, args) => {
-                Ty::Applied(id.clone(), args.iter().map(|a| subst(a, map)).collect())
-            }
-            Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|a| subst(a, map)).collect()),
-            Ty::Union(ts) => Ty::Union(ts.iter().map(|a| subst(a, map)).collect()),
-            Ty::Record { fields } => Ty::Record {
-                fields: fields.iter().map(|(n, t)| (*n, subst(t, map))).collect(),
-            },
-            Ty::OpenRecord { fields } => Ty::OpenRecord {
-                fields: fields.iter().map(|(n, t)| (*n, subst(t, map))).collect(),
-            },
-            Ty::Fn { params, ret } => Ty::Fn {
-                params: params.iter().map(|a| subst(a, map)).collect(),
-                ret: Box::new(subst(ret, map)),
-            },
-            Ty::Variant { name, cases } => Ty::Variant {
-                name: *name,
-                cases: cases
-                    .iter()
-                    .map(|c| almide_lang::types::VariantCase {
-                        name: c.name,
-                        payload: match &c.payload {
-                            VariantPayload::Unit => VariantPayload::Unit,
-                            VariantPayload::Tuple(ts) => VariantPayload::Tuple(
-                                ts.iter().map(|a| subst(a, map)).collect(),
-                            ),
-                            VariantPayload::Record(fs) => VariantPayload::Record(
-                                fs.iter().map(|(n, t)| (*n, subst(t, map))).collect(),
-                            ),
-                        },
-                    })
-                    .collect(),
-            },
-            Ty::ConstParam { name, ty } => {
-                Ty::ConstParam { name: *name, ty: Box::new(subst(ty, map)) }
-            }
-            Ty::ConstValue { ty, value } => {
-                Ty::ConstValue { ty: Box::new(subst(ty, map)), value: *value }
-            }
-            _ => ty.clone(),
-        }
-    }
-
-    let mut map: HashMap<String, Ty> = HashMap::new();
-    collect(&program.type_decls, &mut map);
-    for m in &program.modules {
-        collect(&m.type_decls, &mut map);
-    }
-    // SELF-HOST REP table: opaque STDLIB nominals whose v1 self-host owns the
-    // representation (`stdlib/json_path.almd` — JsonPath = a List[String] of
-    // segments). Publishing the rep here makes every user-side bind/param of the
-    // opaque type route the CORRECT drop (heap_elem_list str). Only when the
-    // program does not declare its own type of the same name.
-    let declared: std::collections::HashSet<&str> = program
-        .type_decls
-        .iter()
-        .map(|td| td.name.as_str())
-        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter().map(|td| td.name.as_str())))
-        .collect();
+/// The self-host STDLIB opaque-nominal rep table of [`erase_transparent_newtypes`]
+/// — verbatim move (each entry is an independent `if !declared.contains(name) {
+/// map.insert(...) }` gate; none reads another's insert, so they are a pure
+/// name-router with no shared state to thread).
+fn seed_selfhost_newtype_reps(
+    map: &mut std::collections::HashMap<String, almide_lang::types::Ty>,
+    declared: &std::collections::HashSet<&str>,
+) {
+    use almide_lang::types::Ty;
+    // JsonPath — the self-host rep is a List[String] of segments
+    // (stdlib/json_path.almd).
     if !declared.contains("JsonPath") {
         map.insert(
             "JsonPath".to_string(),
-            Ty::Applied(
-                almide_lang::types::constructor::TypeConstructorId::List,
-                vec![Ty::String],
-            ),
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
         );
     }
     // HttpResponse — the self-host rep is `[status, body, k1, v1, …]`
@@ -108,10 +32,7 @@ pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
     if !declared.contains("HttpResponse") {
         map.insert(
             "HttpResponse".to_string(),
-            Ty::Applied(
-                almide_lang::types::constructor::TypeConstructorId::List,
-                vec![Ty::String],
-            ),
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
         );
     }
     // FileStat — the fs.stat Ok payload. Its decl lives in the BUNDLED stdlib fs module,
@@ -153,6 +74,134 @@ pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
             },
         );
     }
+}
+
+/// The `Ty`-substitution core [`erase_transparent_newtypes`] and
+/// [`erase_newtypes_in_type_decls`] both recurse with — module-level (was a
+/// nested fn; hoisted so the type_decls-erasure loop below can share it
+/// without either duplicating it or threading it as a closure param).
+fn subst(ty: &almide_lang::types::Ty, map: &std::collections::HashMap<String, almide_lang::types::Ty>) -> almide_lang::types::Ty {
+    use almide_lang::types::{Ty, VariantPayload};
+    match ty {
+        Ty::Named(name, args) => {
+            if args.is_empty() {
+                if let Some(t) = map.get(name.as_str()) {
+                    return t.clone();
+                }
+            }
+            Ty::Named(*name, args.iter().map(|a| subst(a, map)).collect())
+        }
+        Ty::Applied(id, args) => {
+            Ty::Applied(id.clone(), args.iter().map(|a| subst(a, map)).collect())
+        }
+        Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|a| subst(a, map)).collect()),
+        Ty::Union(ts) => Ty::Union(ts.iter().map(|a| subst(a, map)).collect()),
+        Ty::Record { fields } => Ty::Record {
+            fields: fields.iter().map(|(n, t)| (*n, subst(t, map))).collect(),
+        },
+        Ty::OpenRecord { fields } => Ty::OpenRecord {
+            fields: fields.iter().map(|(n, t)| (*n, subst(t, map))).collect(),
+        },
+        Ty::Fn { params, ret } => Ty::Fn {
+            params: params.iter().map(|a| subst(a, map)).collect(),
+            ret: Box::new(subst(ret, map)),
+        },
+        Ty::Variant { name, cases } => Ty::Variant {
+            name: *name,
+            cases: cases
+                .iter()
+                .map(|c| almide_lang::types::VariantCase {
+                    name: c.name,
+                    payload: match &c.payload {
+                        VariantPayload::Unit => VariantPayload::Unit,
+                        VariantPayload::Tuple(ts) => VariantPayload::Tuple(
+                            ts.iter().map(|a| subst(a, map)).collect(),
+                        ),
+                        VariantPayload::Record(fs) => VariantPayload::Record(
+                            fs.iter().map(|(n, t)| (*n, subst(t, map))).collect(),
+                        ),
+                    },
+                })
+                .collect(),
+        },
+        Ty::ConstParam { name, ty } => {
+            Ty::ConstParam { name: *name, ty: Box::new(subst(ty, map)) }
+        }
+        Ty::ConstValue { ty, value } => {
+            Ty::ConstValue { ty: Box::new(subst(ty, map)), value: *value }
+        }
+        _ => ty.clone(),
+    }
+}
+
+/// Other type decls may carry alias-typed fields (a record holding a
+/// SafeHtml) — the tail loop of [`erase_transparent_newtypes`], verbatim move.
+fn erase_newtypes_in_type_decls(
+    type_decls: &mut [almide_ir::IrTypeDecl],
+    map: &std::collections::HashMap<String, almide_lang::types::Ty>,
+) {
+    for td in type_decls.iter_mut() {
+        match &mut td.kind {
+            almide_ir::IrTypeDeclKind::Record { fields } => {
+                for f in fields.iter_mut() {
+                    f.ty = subst(&f.ty, map);
+                }
+            }
+            almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
+                for c in cases.iter_mut() {
+                    match &mut c.kind {
+                        almide_ir::IrVariantKind::Unit => {}
+                        almide_ir::IrVariantKind::Tuple { fields } => {
+                            for t in fields.iter_mut() {
+                                *t = subst(t, map);
+                            }
+                        }
+                        almide_ir::IrVariantKind::Record { fields } => {
+                            for f in fields.iter_mut() {
+                                f.ty = subst(&f.ty, map);
+                            }
+                        }
+                    }
+                }
+            }
+            almide_ir::IrTypeDeclKind::Alias { .. } => {}
+        }
+    }
+}
+
+pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
+    use almide_ir::visit_mut::{walk_expr_mut, walk_pattern_mut, walk_stmt_mut, IrMutVisitor};
+    use almide_ir::{IrExpr, IrPattern, IrStmt, IrTypeDeclKind};
+    use almide_lang::types::Ty;
+    use std::collections::HashMap;
+
+    fn collect(decls: &[almide_ir::IrTypeDecl], map: &mut HashMap<String, Ty>) {
+        for td in decls {
+            if let IrTypeDeclKind::Alias { target } = &td.kind {
+                if td.generics.is_none() {
+                    map.insert(td.name.as_str().to_string(), target.clone());
+                }
+            }
+        }
+    }
+
+    let mut map: HashMap<String, Ty> = HashMap::new();
+    collect(&program.type_decls, &mut map);
+    for m in &program.modules {
+        collect(&m.type_decls, &mut map);
+    }
+    // SELF-HOST REP table: opaque STDLIB nominals whose v1 self-host owns the
+    // representation (`stdlib/json_path.almd` — JsonPath = a List[String] of
+    // segments). Publishing the rep here makes every user-side bind/param of the
+    // opaque type route the CORRECT drop (heap_elem_list str). Only when the
+    // program does not declare its own type of the same name.
+    let declared: std::collections::HashSet<&str> = program
+        .type_decls
+        .iter()
+        .map(|td| td.name.as_str())
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter().map(|td| td.name.as_str())))
+        .collect();
+    seed_selfhost_newtype_reps(&mut map, &declared);
     if map.is_empty() {
         return;
     }
@@ -296,33 +345,7 @@ pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
         v.visit_expr_mut(&mut tl.value);
     }
     // Other type decls may carry alias-typed fields (a record holding a SafeHtml).
-    for td in program.type_decls.iter_mut() {
-        match &mut td.kind {
-            almide_ir::IrTypeDeclKind::Record { fields } => {
-                for f in fields.iter_mut() {
-                    f.ty = subst(&f.ty, &map);
-                }
-            }
-            almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
-                for c in cases.iter_mut() {
-                    match &mut c.kind {
-                        almide_ir::IrVariantKind::Unit => {}
-                        almide_ir::IrVariantKind::Tuple { fields } => {
-                            for t in fields.iter_mut() {
-                                *t = subst(t, &map);
-                            }
-                        }
-                        almide_ir::IrVariantKind::Record { fields } => {
-                            for f in fields.iter_mut() {
-                                f.ty = subst(&f.ty, &map);
-                            }
-                        }
-                    }
-                }
-            }
-            almide_ir::IrTypeDeclKind::Alias { .. } => {}
-        }
-    }
+    erase_newtypes_in_type_decls(&mut program.type_decls, &map);
 }
 
 /// INLINE-SUBSTITUTE pure call-bearing GLOBAL initializers at their use sites (a
