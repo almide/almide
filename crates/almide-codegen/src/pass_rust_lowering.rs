@@ -571,32 +571,39 @@ fn rewrite_stmts_in_runtime_call_args(args: &mut [IrExpr], vt: &mut VarTable, sh
     changed
 }
 
+/// `IndexAssign { index, value, target }` arm of [`rewrite_stmts_in_stmt`]:
+/// `xs[i] = closure` into a `List[Fn]` boxes the stored closure (the
+/// expr-level boxing pass can't reach a statement value).
+fn rewrite_stmts_in_index_assign(index: &mut IrExpr, value: &mut IrExpr, target: VarId, vt: &mut VarTable, shared: &HashSet<VarId>, changed: &mut bool) {
+    if rewrite_stmts_in_expr(index, vt, shared) { *changed = true; }
+    if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
+    let ety = list_elem_ty(&vt.get(target).ty).cloned();
+    if let Some(et) = ety {
+        if matches!(&et, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &et) { *changed = true; }
+    }
+}
+
+/// `MapInsert { key, value, target }` arm of [`rewrite_stmts_in_stmt`]:
+/// `m[k] = closure` / `m = map.set(m,k,closure)` (lowered to MapInsert)
+/// into a closure-valued map boxes the stored closure, same reasoning as
+/// [`rewrite_stmts_in_index_assign`].
+fn rewrite_stmts_in_map_insert(key: &mut IrExpr, value: &mut IrExpr, target: VarId, vt: &mut VarTable, shared: &HashSet<VarId>, changed: &mut bool) {
+    if rewrite_stmts_in_expr(key, vt, shared) { *changed = true; }
+    if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
+    let vty = map_value_ty(&vt.get(target).ty).cloned();
+    if let Some(vt_) = vty {
+        if matches!(&vt_, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &vt_) { *changed = true; }
+    }
+}
+
 fn rewrite_stmts_in_stmt(stmt: &mut IrStmt, vt: &mut VarTable, shared: &HashSet<VarId>, changed: &mut bool) {
     match &mut stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
             if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
         }
-        IrStmtKind::IndexAssign { index, value, target } => {
-            if rewrite_stmts_in_expr(index, vt, shared) { *changed = true; }
-            if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
-            // `xs[i] = closure` into a `List[Fn]` — box the stored closure.
-            let ety = list_elem_ty(&vt.get(*target).ty).cloned();
-            if let Some(et) = ety {
-                if matches!(&et, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &et) { *changed = true; }
-            }
-        }
-        IrStmtKind::MapInsert { key, value, target } => {
-            if rewrite_stmts_in_expr(key, vt, shared) { *changed = true; }
-            if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
-            // `m[k] = closure` / `m = map.set(m,k,closure)` (lowered to MapInsert)
-            // into a closure-valued map — box the stored closure. The expr-level
-            // boxing pass can't reach a statement value.
-            let vty = map_value_ty(&vt.get(*target).ty).cloned();
-            if let Some(vt_) = vty {
-                if matches!(&vt_, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &vt_) { *changed = true; }
-            }
-        }
+        IrStmtKind::IndexAssign { index, value, target } => rewrite_stmts_in_index_assign(index, value, *target, vt, shared, changed),
+        IrStmtKind::MapInsert { key, value, target } => rewrite_stmts_in_map_insert(key, value, *target, vt, shared, changed),
         IrStmtKind::Guard { cond, else_ } => {
             if rewrite_stmts_in_expr(cond, vt, shared) { *changed = true; }
             if rewrite_stmts_in_expr(else_, vt, shared) { *changed = true; }
