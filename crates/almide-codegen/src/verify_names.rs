@@ -217,6 +217,68 @@ fn check_variant_case_tys(chk: &mut TyChecker, kind: &IrVariantKind) {
     }
 }
 
+/// `IrTypeDeclKind` check of `collect_unresolvable_names`, extracted to a
+/// real top-level fn (cog>30 decomposition) — was a local closure that
+/// captured nothing (took `chk` as an explicit param already), so hoisting
+/// it changes nothing observable, just lets `collect_unresolvable_in_scope`
+/// below call it from outside the old closure's scope.
+fn check_decl_tys(chk: &mut TyChecker, td: &IrTypeDecl) {
+    chk.where_ = format!("type decl `{}`", td.name);
+    match &td.kind {
+        IrTypeDeclKind::Record { fields } => {
+            for f in fields { chk.check_ty(&f.ty); }
+        }
+        IrTypeDeclKind::Variant { cases, .. } => {
+            for c in cases { check_variant_case_tys(chk, &c.kind); }
+        }
+        IrTypeDeclKind::Alias { target } => chk.check_ty(target),
+    }
+}
+
+/// `IrFunction` check of `collect_unresolvable_names`, extracted to a real
+/// top-level fn (cog>30 decomposition) — same non-capturing-closure hoist
+/// as `check_decl_tys` above.
+fn check_fn_tys(chk: &mut TyChecker, func: &IrFunction) {
+    for p in &func.params {
+        chk.where_ = format!("fn `{}` / param `{}`", func.name, p.name);
+        chk.check_ty(&p.ty);
+    }
+    chk.where_ = format!("fn `{}` / return ty", func.name);
+    chk.check_ty(&func.ret_ty);
+    chk.where_ = format!("fn `{}`", func.name);
+    chk.visit_expr(&func.body);
+}
+
+/// One traversal scope (root program or a module) of
+/// `collect_unresolvable_names`, extracted (cog>30 decomposition,
+/// sequential-phase pattern — the same four loops were duplicated verbatim
+/// for `program` and for every entry of `program.modules`; factored into
+/// one fn reused by both call sites). `scope_label` distinguishes the
+/// `where_` diagnostic text ("top-level let" vs. "module `X` top-level
+/// let", etc.) between the two call sites.
+fn collect_unresolvable_in_scope(
+    chk: &mut TyChecker,
+    type_decls: &[IrTypeDecl],
+    functions: &[IrFunction],
+    top_lets: &[IrTopLet],
+    var_table: &VarTable,
+    // Empty at the root scope (matching the original's bare "top-level let"
+    // / "var #{i}" text there); "module `{name}` " at a module scope.
+    scope_prefix: &str,
+) {
+    for td in type_decls { check_decl_tys(chk, td); }
+    for f in functions { check_fn_tys(chk, f); }
+    for tl in top_lets {
+        chk.where_ = format!("{}top-level let", scope_prefix);
+        chk.check_ty(&tl.ty);
+        chk.visit_expr(&tl.value);
+    }
+    for (i, vi) in var_table.entries.iter().enumerate() {
+        chk.where_ = format!("{}var #{} `{}`", scope_prefix, i, vi.name);
+        chk.check_ty(&vi.ty);
+    }
+}
+
 /// Pure detector: every Ty position in the program (type decls, signatures,
 /// var tables, top-lets, expression types) is scanned for bare names whose
 /// only declaration is qualified.
@@ -224,53 +286,9 @@ pub fn collect_unresolvable_names(program: &IrProgram) -> Vec<UnresolvableName> 
     let decls = index_decls(program);
     let mut chk = TyChecker { decls: &decls, offenders: Vec::new(), where_: String::new() };
 
-    let check_decl_tys = |chk: &mut TyChecker, td: &IrTypeDecl| {
-        chk.where_ = format!("type decl `{}`", td.name);
-        match &td.kind {
-            IrTypeDeclKind::Record { fields } => {
-                for f in fields { chk.check_ty(&f.ty); }
-            }
-            IrTypeDeclKind::Variant { cases, .. } => {
-                for c in cases { check_variant_case_tys(chk, &c.kind); }
-            }
-            IrTypeDeclKind::Alias { target } => chk.check_ty(target),
-        }
-    };
-
-    let check_fn = |chk: &mut TyChecker, func: &IrFunction| {
-        for p in &func.params {
-            chk.where_ = format!("fn `{}` / param `{}`", func.name, p.name);
-            chk.check_ty(&p.ty);
-        }
-        chk.where_ = format!("fn `{}` / return ty", func.name);
-        chk.check_ty(&func.ret_ty);
-        chk.where_ = format!("fn `{}`", func.name);
-        chk.visit_expr(&func.body);
-    };
-
-    for td in &program.type_decls { check_decl_tys(&mut chk, td); }
-    for f in &program.functions { check_fn(&mut chk, f); }
-    for tl in &program.top_lets {
-        chk.where_ = "top-level let".to_string();
-        chk.check_ty(&tl.ty);
-        chk.visit_expr(&tl.value);
-    }
-    for (i, vi) in program.var_table.entries.iter().enumerate() {
-        chk.where_ = format!("var #{} `{}`", i, vi.name);
-        chk.check_ty(&vi.ty);
-    }
+    collect_unresolvable_in_scope(&mut chk, &program.type_decls, &program.functions, &program.top_lets, &program.var_table, "");
     for m in &program.modules {
-        for td in &m.type_decls { check_decl_tys(&mut chk, td); }
-        for f in &m.functions { check_fn(&mut chk, f); }
-        for tl in &m.top_lets {
-            chk.where_ = format!("module `{}` top-level let", m.name);
-            chk.check_ty(&tl.ty);
-            chk.visit_expr(&tl.value);
-        }
-        for (i, vi) in m.var_table.entries.iter().enumerate() {
-            chk.where_ = format!("module `{}` var #{} `{}`", m.name, i, vi.name);
-            chk.check_ty(&vi.ty);
-        }
+        collect_unresolvable_in_scope(&mut chk, &m.type_decls, &m.functions, &m.top_lets, &m.var_table, &format!("module `{}` ", m.name));
     }
     chk.offenders
 }
