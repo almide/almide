@@ -340,72 +340,74 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
 /// `is_rich_variant_ty` doc comment; only the LIST case lacked a category at all). Deduped by
 /// instantiation name (a `BTreeMap`, so the output order is a pure function of the program — no
 /// HashMap-iteration-order divergence across native/wasm hosts).
+// The `'discover` guard cascade's decision — a PURE function of `e` and
+// `variant_layouts` (read-only); the scan's `found` map is an OUTPUT written once
+// with the result, never read back mid-decision, so this is safe to pull out whole
+// (same "no shared decision state" reasoning as the other visitor-body extractions
+// in this crate). Top-level (not nested in `discover_generic_variant_list_
+// instantiations`, codopsy cc) alongside its `Scan` visitor below.
+fn discover_one_generic_variant_list_instantiation(
+    e: &almide_ir::IrExpr,
+    variant_layouts: &crate::lower::VariantLayouts,
+) -> Option<(String, String, Vec<Ty>)> {
+    use almide_ir::IrExprKind;
+    use almide_lang::types::constructor::TypeConstructorId;
+    if !matches!(&e.kind, IrExprKind::List { .. }) {
+        return None;
+    }
+    let Ty::Applied(TypeConstructorId::List, a) = &e.ty else { return None };
+    if a.len() != 1 {
+        return None;
+    }
+    let (name, args) = crate::lower::VariantLayouts::variant_name_and_args(&a[0])?;
+    if args.is_empty() {
+        return None;
+    }
+    let layout = variant_layouts.by_type.get(name)?;
+    if layout.generics.is_empty() {
+        return None;
+    }
+    let inst = crate::lower::generic_variant_instantiation_name(name, args)?;
+    Some((inst, name.to_string(), args.to_vec()))
+}
+
+struct GenericVariantListInstantiationScan<'a> {
+    variant_layouts: &'a crate::lower::VariantLayouts,
+    found: std::collections::BTreeMap<String, (String, Vec<Ty>)>,
+}
+impl almide_ir::visit::IrVisitor for GenericVariantListInstantiationScan<'_> {
+    fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+        if let Some((inst, name, args)) =
+            discover_one_generic_variant_list_instantiation(e, self.variant_layouts)
+        {
+            self.found.entry(inst).or_insert_with(|| (name, args));
+        }
+        almide_ir::visit::walk_expr(self, e);
+    }
+}
+
+/// Every top-level expression (fn bodies + top-let inits) in `ir`, main AND every
+/// module, in the SAME order the original 4-loop nest visited them (main functions,
+/// main top-lets, then per module: that module's functions, that module's
+/// top-lets) — an iterator-chain rewrite of nested `for` loops (codopsy cog: nested
+/// `for` costs more cognitive complexity per level than a flat `.chain()`/
+/// `.flat_map()` pipeline, which this crate's Op-rendering code already prefers for
+/// exactly that reason). A plain iteration helper, no decision logic.
+fn for_each_program_expr(ir: &almide_ir::IrProgram, mut visit: impl FnMut(&almide_ir::IrExpr)) {
+    let main = ir.functions.iter().map(|f| &f.body).chain(ir.top_lets.iter().map(|tl| &tl.value));
+    let modules = ir.modules.iter().flat_map(|m| {
+        m.functions.iter().map(|f| &f.body).chain(m.top_lets.iter().map(|tl| &tl.value))
+    });
+    main.chain(modules).for_each(visit);
+}
+
 pub fn discover_generic_variant_list_instantiations(
     ir: &almide_ir::IrProgram,
     variant_layouts: &crate::lower::VariantLayouts,
 ) -> Vec<(String, String, Vec<Ty>)> {
-    use almide_ir::visit::{walk_expr, IrVisitor};
-    use almide_ir::{IrExpr, IrExprKind};
-    use almide_lang::types::constructor::TypeConstructorId;
-
-    struct Scan<'a> {
-        variant_layouts: &'a crate::lower::VariantLayouts,
-        found: std::collections::BTreeMap<String, (String, Vec<Ty>)>,
-    }
-    impl IrVisitor for Scan<'_> {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            // Guard-clause flattening of the former 6-deep nested-if (no `else` anywhere: any
-            // unmet condition just skips the discovery below — `break` exits the labeled block
-            // and falls through to the unconditional `walk_expr` after it, exactly as the
-            // original fell out of the if-pyramid to the same unconditional call). No behavior
-            // change — see docs/roadmap/active/code-health-codopsy.md.
-            'discover: {
-                if !matches!(&e.kind, IrExprKind::List { .. }) {
-                    break 'discover;
-                }
-                let Ty::Applied(TypeConstructorId::List, a) = &e.ty else {
-                    break 'discover;
-                };
-                if a.len() != 1 {
-                    break 'discover;
-                }
-                let Some((name, args)) = crate::lower::VariantLayouts::variant_name_and_args(&a[0])
-                else {
-                    break 'discover;
-                };
-                if args.is_empty() {
-                    break 'discover;
-                }
-                let Some(layout) = self.variant_layouts.by_type.get(name) else {
-                    break 'discover;
-                };
-                if layout.generics.is_empty() {
-                    break 'discover;
-                }
-                let Some(inst) = crate::lower::generic_variant_instantiation_name(name, args)
-                else {
-                    break 'discover;
-                };
-                self.found.entry(inst.clone()).or_insert_with(|| (name.to_string(), args.to_vec()));
-            }
-            walk_expr(self, e);
-        }
-    }
-    let mut scan = Scan { variant_layouts, found: Default::default() };
-    for f in &ir.functions {
-        scan.visit_expr(&f.body);
-    }
-    for tl in &ir.top_lets {
-        scan.visit_expr(&tl.value);
-    }
-    for m in &ir.modules {
-        for f in &m.functions {
-            scan.visit_expr(&f.body);
-        }
-        for tl in &m.top_lets {
-            scan.visit_expr(&tl.value);
-        }
-    }
+    use almide_ir::visit::IrVisitor;
+    let mut scan = GenericVariantListInstantiationScan { variant_layouts, found: Default::default() };
+    for_each_program_expr(ir, |e| scan.visit_expr(e));
     scan.found.into_iter().map(|(inst, (base, args))| (base, inst, args)).collect()
 }
 
@@ -429,82 +431,113 @@ pub fn discover_generic_variant_list_instantiations(
 /// name` / an already-declared non-generic variant) is silently skipped — `is_rich_variant_ty`
 /// (mod_p2.rs) gates on the SAME set before ever admitting an instantiation, so this should never
 /// actually skip a name that reached here, but the check is re-verified rather than assumed.
+// ONE case's field list, rendered to (subst'd tys, source-text names) or `None` if
+// any field's substituted type isn't in the supported-renderable set. The
+// innermost loop's `ok`/`break` flag is purely LOCAL to this fn (communicated
+// back to the caller as `Option`, never shared state threaded across case
+// iterations).
+fn render_generic_variant_case_fields(
+    fields: &[(almide_lang::intern::Sym, Ty)],
+    subst: &std::collections::HashMap<almide_lang::intern::Sym, Ty>,
+    variant_layouts: &crate::lower::VariantLayouts,
+) -> Option<(Vec<Ty>, Vec<String>)> {
+    let mut field_tys: Vec<Ty> = Vec::with_capacity(fields.len());
+    let mut field_src_parts: Vec<String> = Vec::with_capacity(fields.len());
+    for (_, fty) in fields {
+        let sub = substitute_generic_ty(fty, subst);
+        let rendered = crate::lower::generic_variant_instantiation_scalar_name(&sub)
+            .map(|s| s.to_string())
+            .or_else(|| {
+                // An already-declared NON-GENERIC user variant field — reference it by
+                // its own real name (it needs no shadow, it isn't generic).
+                variant_layouts.field_is_variant(&sub).then(|| match &sub {
+                    Ty::Named(n, _) => n.as_str().to_string(),
+                    _ => String::new(),
+                })
+            });
+        let rendered = rendered.filter(|s| !s.is_empty())?;
+        field_src_parts.push(rendered);
+        field_tys.push(sub);
+    }
+    Some((field_tys, field_src_parts))
+}
+
+/// ONE instantiation's shadow `type` decl (source line + `IrTypeDecl`), or `None` if
+/// the base variant is unknown or any case's fields don't render (the whole
+/// instantiation is skipped then — the original's `ok = false` semantics, now just
+/// "this fn returns `None`"). Extracted out of the per-instantiation loop below
+/// (codopsy cc) — the same "outer loop calls a per-item helper" split used
+/// throughout this crate.
+fn generate_one_generic_variant_instantiation_type_decl(
+    base: &str,
+    inst_name: &str,
+    args: &[Ty],
+    variant_layouts: &crate::lower::VariantLayouts,
+) -> Option<(String, almide_ir::IrTypeDecl)> {
+    use almide_lang::intern::sym;
+    let layout = variant_layouts.by_type.get(base)?;
+    let subst: std::collections::HashMap<almide_lang::intern::Sym, Ty> =
+        layout.generics.iter().copied().zip(args.iter().cloned()).collect();
+    let mut cases: Vec<almide_ir::IrVariantDecl> = Vec::with_capacity(layout.cases.len());
+    let mut case_src_parts: Vec<String> = Vec::with_capacity(layout.cases.len());
+    for c in &layout.cases {
+        let (field_tys, field_src_parts) =
+            render_generic_variant_case_fields(&c.fields, &subst, variant_layouts)?;
+        // MUST start uppercase — the parser rejects a lowercase/underscore ctor name
+        // ("Expected type name"), which silently killed the whole shadow `type` line
+        // and cascaded to "unknown type '<inst>'" at every generated reference.
+        let ctor_name = format!("C__{inst_name}_{}", c.tag);
+        case_src_parts.push(if field_src_parts.is_empty() {
+            ctor_name.clone()
+        } else {
+            format!("{ctor_name}({})", field_src_parts.join(", "))
+        });
+        cases.push(almide_ir::IrVariantDecl {
+            name: sym(&ctor_name),
+            kind: if field_tys.is_empty() {
+                almide_ir::IrVariantKind::Unit
+            } else {
+                almide_ir::IrVariantKind::Tuple { fields: field_tys }
+            },
+        });
+    }
+    if cases.is_empty() {
+        return None;
+    }
+    let src_line = format!("type {inst_name} = {}\n", case_src_parts.join(" | "));
+    let decl = almide_ir::IrTypeDecl {
+        name: sym(inst_name),
+        kind: almide_ir::IrTypeDeclKind::Variant {
+            cases,
+            is_generic: false,
+            boxed_args: Default::default(),
+            boxed_record_fields: Default::default(),
+        },
+        deriving: None,
+        generics: None,
+        visibility: almide_ir::IrVisibility::Private,
+        doc: None,
+        blank_lines_before: 0,
+    };
+    Some((src_line, decl))
+}
+
 pub fn generate_generic_variant_instantiation_type_decls(
     instantiations: &[(String, String, Vec<Ty>)],
     variant_layouts: &crate::lower::VariantLayouts,
 ) -> (String, Vec<almide_ir::IrTypeDecl>) {
-    use almide_lang::intern::sym;
-
     let mut type_decl_src = String::new();
     let mut synthetic_decls: Vec<almide_ir::IrTypeDecl> = Vec::new();
     for (base, inst_name, args) in instantiations {
-        let Some(layout) = variant_layouts.by_type.get(base) else { continue };
-        let subst: std::collections::HashMap<almide_lang::intern::Sym, Ty> =
-            layout.generics.iter().copied().zip(args.iter().cloned()).collect();
-        let mut cases: Vec<almide_ir::IrVariantDecl> = Vec::with_capacity(layout.cases.len());
-        let mut case_src_parts: Vec<String> = Vec::with_capacity(layout.cases.len());
-        let mut ok = true;
-        for c in &layout.cases {
-            let mut field_tys: Vec<Ty> = Vec::with_capacity(c.fields.len());
-            let mut field_src_parts: Vec<String> = Vec::with_capacity(c.fields.len());
-            for (_, fty) in &c.fields {
-                let sub = substitute_generic_ty(fty, &subst);
-                let rendered = crate::lower::generic_variant_instantiation_scalar_name(&sub)
-                    .map(|s| s.to_string())
-                    .or_else(|| {
-                        // An already-declared NON-GENERIC user variant field — reference it by
-                        // its own real name (it needs no shadow, it isn't generic).
-                        variant_layouts.field_is_variant(&sub).then(|| match &sub {
-                            Ty::Named(n, _) => n.as_str().to_string(),
-                            _ => String::new(),
-                        })
-                    });
-                let Some(rendered) = rendered.filter(|s| !s.is_empty()) else {
-                    ok = false;
-                    break;
-                };
-                field_src_parts.push(rendered);
-                field_tys.push(sub);
-            }
-            if !ok {
-                break;
-            }
-            // MUST start uppercase — the parser rejects a lowercase/underscore ctor name
-            // ("Expected type name"), which silently killed the whole shadow `type` line
-            // and cascaded to "unknown type '<inst>'" at every generated reference.
-            let ctor_name = format!("C__{inst_name}_{}", c.tag);
-            case_src_parts.push(if field_src_parts.is_empty() {
-                ctor_name.clone()
-            } else {
-                format!("{ctor_name}({})", field_src_parts.join(", "))
-            });
-            cases.push(almide_ir::IrVariantDecl {
-                name: sym(&ctor_name),
-                kind: if field_tys.is_empty() {
-                    almide_ir::IrVariantKind::Unit
-                } else {
-                    almide_ir::IrVariantKind::Tuple { fields: field_tys }
-                },
-            });
+        if let Some((src_line, decl)) = generate_one_generic_variant_instantiation_type_decl(
+            base,
+            inst_name,
+            args,
+            variant_layouts,
+        ) {
+            type_decl_src.push_str(&src_line);
+            synthetic_decls.push(decl);
         }
-        if !ok || cases.is_empty() {
-            continue;
-        }
-        type_decl_src.push_str(&format!("type {inst_name} = {}\n", case_src_parts.join(" | ")));
-        synthetic_decls.push(almide_ir::IrTypeDecl {
-            name: sym(inst_name),
-            kind: almide_ir::IrTypeDeclKind::Variant {
-                cases,
-                is_generic: false,
-                boxed_args: Default::default(),
-                boxed_record_fields: Default::default(),
-            },
-            deriving: None,
-            generics: None,
-            visibility: almide_ir::IrVisibility::Private,
-            doc: None,
-            blank_lines_before: 0,
-        });
     }
     (type_decl_src, synthetic_decls)
 }
