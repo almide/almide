@@ -101,6 +101,41 @@ pub(crate) fn float_lit_bits(value: f64, ty: &Ty) -> i64 {
 /// data: a string literal, an all-int-literal `List[Int]`, and `bytes.from_list([int literals])`.
 /// Anything COMPUTED (a `string.from_codepoint(..)` / user call) returns `None` and keeps walling —
 /// materializing it would inject a `CallFn` the gate's IR-side `count_ir_calls` cannot see (mir>ir).
+// Pure guards, no recursion — named so the two Module-call arms of
+// `const_global_init` below read as one condition instead of three inlined
+// clauses each (same "extract the boolean, keep the shape" refactor as the
+// guard predicates in `lower/binds_p4_b_b.rs`).
+fn is_string_from_codepoint_call(module: &str, func: &str, arg_count: usize) -> bool {
+    module == "string" && func == "from_codepoint" && arg_count == 1
+}
+fn is_bytes_from_list_call(module: &str, func: &str, arg_count: usize) -> bool {
+    module == "bytes" && func == "from_list" && arg_count == 1
+}
+
+/// `string.from_codepoint(<int literal>)` (`let NL = string.from_codepoint(10)` —
+/// the stringify-escape test globals) CONST-FOLDS to its one-char string at
+/// lowering time: zero calls injected, so the count gate stays exact. An invalid
+/// codepoint keeps walling (never a wrong byte).
+fn const_fold_string_from_codepoint(args: &[IrExpr]) -> Option<crate::Init> {
+    let IrExprKind::LitInt { value } = &args[0].kind else { return None };
+    u32::try_from(*value)
+        .ok()
+        .and_then(char::from_u32)
+        .map(|c| crate::Init::Str(c.to_string()))
+}
+
+fn const_fold_bytes_from_list(args: &[IrExpr]) -> Option<crate::Init> {
+    let IrExprKind::List { elements } = &args[0].kind else { return None };
+    let bytes: Option<Vec<u8>> = elements
+        .iter()
+        .map(|e| match &e.kind {
+            IrExprKind::LitInt { value } => Some(*value as u8),
+            _ => None,
+        })
+        .collect();
+    bytes.map(crate::Init::Bytes)
+}
+
 fn const_global_init(init: &IrExpr) -> Option<crate::Init> {
     match &init.kind {
         IrExprKind::LitStr { value } => Some(crate::Init::Str(value.clone())),
@@ -114,33 +149,15 @@ fn const_global_init(init: &IrExpr) -> Option<crate::Init> {
                 .collect();
             ints.map(crate::Init::IntList)
         }
-        // `string.from_codepoint(<int literal>)` (`let NL = string.from_codepoint(10)` —
-        // the stringify-escape test globals) CONST-FOLDS to its one-char string at
-        // lowering time: zero calls injected, so the count gate stays exact. An invalid
-        // codepoint keeps walling (never a wrong byte).
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-            if module.as_str() == "string"
-                && func.as_str() == "from_codepoint"
-                && args.len() == 1 =>
+            if is_string_from_codepoint_call(module.as_str(), func.as_str(), args.len()) =>
         {
-            let IrExprKind::LitInt { value } = &args[0].kind else { return None };
-            u32::try_from(*value)
-                .ok()
-                .and_then(char::from_u32)
-                .map(|c| crate::Init::Str(c.to_string()))
+            const_fold_string_from_codepoint(args)
         }
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-            if module.as_str() == "bytes" && func.as_str() == "from_list" && args.len() == 1 =>
+            if is_bytes_from_list_call(module.as_str(), func.as_str(), args.len()) =>
         {
-            let IrExprKind::List { elements } = &args[0].kind else { return None };
-            let bytes: Option<Vec<u8>> = elements
-                .iter()
-                .map(|e| match &e.kind {
-                    IrExprKind::LitInt { value } => Some(*value as u8),
-                    _ => None,
-                })
-                .collect();
-            bytes.map(crate::Init::Bytes)
+            const_fold_bytes_from_list(args)
         }
         _ => None,
     }
@@ -677,6 +694,15 @@ fn bridge_cross_module_toplets_build_lookup(
 /// (module-raw, possibly colliding) entry — callers order the composition as: module
 /// union → this bridge → main top-lets re-inserted last, so the precedence is main >
 /// bridged-name > raw module id. Verbatim.
+/// The three accumulator maps [`bridge_cross_module_toplets_apply_one`] writes into,
+/// bundled so the per-entry helper stays under the max-params budget (7 → 5 — `id`,
+/// `info`, `by_name`, `by_bare`, `targets`).
+struct BridgeApplyTargets<'a> {
+    globals: &'a mut std::collections::HashMap<almide_ir::VarId, Ty>,
+    global_inits: &'a mut std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    mutable_aliases: &'a mut std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
+}
+
 #[allow(clippy::type_complexity)]
 fn bridge_cross_module_toplets_apply(
     ir: &almide_ir::IrProgram,
@@ -686,6 +712,11 @@ fn bridge_cross_module_toplets_apply(
     global_inits: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
     mutable_aliases: &mut std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
 ) {
+    let mut targets = BridgeApplyTargets { globals, global_inits, mutable_aliases };
+    // Each iteration writes only its OWN entry's keys (`id`) into the three maps — no
+    // iteration reads back another iteration's write — so the loop body is a fold of
+    // independent writes and factoring it into a per-entry helper changes nothing
+    // observable (same split family as the fold-independent-writes passes elsewhere).
     for (i, info) in ir.var_table.entries.iter().enumerate() {
         let id = almide_ir::VarId(i as u32);
         // Only the frontend-synthesized cross-module reference entries participate
@@ -694,42 +725,49 @@ fn bridge_cross_module_toplets_apply(
         if info.module_origin.is_none() {
             continue;
         }
-        let looked_up = info
-            .module_origin
-            .as_ref()
-            .and_then(|mo| by_name.get(&(mo.clone(), info.name.as_str().to_uppercase())))
-            .or_else(|| by_bare.get(&info.name.as_str().to_uppercase()));
-        match looked_up {
-            // An UNKNOWN-typed reference entry (the frontend leaves an alias-let's
-            // synthesized ref un-inferred — `let white = _white` read as `v.white`,
-            // the ceangal theme class) takes the MODULE side's type: the name is
-            // unique (the ambiguity arm below dropped collisions), so the module
-            // top-let IS the referent. A concretely-typed ref still must agree.
-            Some(Some((ty, init, mutable, _mod_id)))
-                if !mutable && bridged_ref_ty_agrees(ty, &info.ty) =>
-            {
-                globals.insert(id, ty.clone());
-                global_inits.insert(id, (*init).clone());
-            }
-            // #782: a MUTABLE cross-module reference aliases onto the module
-            // var's storage slot instead of walling (the v0 fallback that used
-            // to absorb it is retired). The init is never shipped — only the
-            // slot identity — so the const-fold hazard that justified the old
-            // exclusion cannot occur.
-            Some(Some((ty, _init, true, mod_id)))
-                if bridged_ref_ty_agrees(ty, &info.ty) =>
-            {
-                mutable_aliases.insert(id, *mod_id);
-                globals.remove(&id);
-                global_inits.remove(&id);
-            }
-            _ => {
-                // Unmatched reference: purge any raw module-id numeric collision
-                // so the reference is honestly unbound (a diagnosed wall), never
-                // an unrelated init.
-                globals.remove(&id);
-                global_inits.remove(&id);
-            }
+        bridge_cross_module_toplets_apply_one(id, info, by_name, by_bare, &mut targets);
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn bridge_cross_module_toplets_apply_one(
+    id: almide_ir::VarId,
+    info: &almide_ir::VarInfo,
+    by_name: &std::collections::HashMap<(String, String), Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>>,
+    by_bare: &std::collections::HashMap<String, Option<(Ty, &almide_ir::IrExpr, bool, almide_ir::VarId)>>,
+    targets: &mut BridgeApplyTargets<'_>,
+) {
+    let looked_up = info
+        .module_origin
+        .as_ref()
+        .and_then(|mo| by_name.get(&(mo.clone(), info.name.as_str().to_uppercase())))
+        .or_else(|| by_bare.get(&info.name.as_str().to_uppercase()));
+    match looked_up {
+        // An UNKNOWN-typed reference entry (the frontend leaves an alias-let's
+        // synthesized ref un-inferred — `let white = _white` read as `v.white`,
+        // the ceangal theme class) takes the MODULE side's type: the name is
+        // unique (the ambiguity arm below dropped collisions), so the module
+        // top-let IS the referent. A concretely-typed ref still must agree.
+        Some(Some((ty, init, mutable, _mod_id))) if !mutable && bridged_ref_ty_agrees(ty, &info.ty) => {
+            targets.globals.insert(id, ty.clone());
+            targets.global_inits.insert(id, (*init).clone());
+        }
+        // #782: a MUTABLE cross-module reference aliases onto the module
+        // var's storage slot instead of walling (the v0 fallback that used
+        // to absorb it is retired). The init is never shipped — only the
+        // slot identity — so the const-fold hazard that justified the old
+        // exclusion cannot occur.
+        Some(Some((ty, _init, true, mod_id))) if bridged_ref_ty_agrees(ty, &info.ty) => {
+            targets.mutable_aliases.insert(id, *mod_id);
+            targets.globals.remove(&id);
+            targets.global_inits.remove(&id);
+        }
+        _ => {
+            // Unmatched reference: purge any raw module-id numeric collision
+            // so the reference is honestly unbound (a diagnosed wall), never
+            // an unrelated init.
+            targets.globals.remove(&id);
+            targets.global_inits.remove(&id);
         }
     }
 }
