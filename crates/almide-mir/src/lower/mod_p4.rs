@@ -2029,93 +2029,111 @@ fn list_call_name_source_keyed(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Op
 }
 
 fn list_call_name_ordering(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    let _ = result_ty; // unused (kept for the shared `.or_else()` router signature)
+    if matches!(func, "sort" | "min" | "max") {
+        if let Some(r) = list_call_name_sort_min_max(func, arg_tys) {
+            return Some(r);
+        }
+    }
+    if func == "sort_by" {
+        if let Some(r) = list_call_name_sort_by(arg_tys) {
+            return Some(r);
+        }
+    }
+    None
+}
+
+/// The `sort`/`min`/`max` arm of [`list_call_name_ordering`] — verbatim move.
+fn list_call_name_sort_min_max(func: &str, arg_tys: &[Ty]) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
     // List[Float] ordering uses IEEE-754 totalOrder (f64::total_cmp), NOT a signed-int slot
     // compare. Float is SCALAR (is_heap_ty false), so the heap routes below never fire for it —
     // route sort/min/max explicitly on the element being Ty::Float (C-055). sort_by keys on the
     // CLOSURE (arg 1) RETURN type being Float — the element list may be any type (e.g. List[R]).
-    if matches!(func, "sort" | "min" | "max") {
-        if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
-            if a.len() == 1 && a[0] == Ty::Float {
-                return Some(format!("list.{func}_float"));
-            }
-            // list.sort/min/max over a List[String] compare by CONTENT, not the i64 handle the
-            // generic impls compare (→ arbitrary/handle order or wrong element, a silent bug).
-            // _str variants do a lexicographic byte compare.
-            if a.len() == 1 && matches!(a[0], Ty::String) {
-                return Some(format!("list.{func}_str"));
-            }
-            // COMPOUND elements (the C-053 lattice) — type-directed comparators
-            // (list_ord_compound.almd): scalar/String 2-tuples, List[Int/Bool],
-            // List[String], Option[scalar]. Float components are EXCLUDED (IEEE
-            // totalOrder ≠ an i64 slot compare). Any OTHER heap element walls (`_x`):
-            // the generic twin would compare handle addresses AND raw-copy without
-            // rc_inc — a silent wrong order plus a double-free, never acceptable.
-            if a.len() == 1 && is_heap_ty(&a[0]) {
-                let scalar_nf = |t: &Ty| matches!(t, Ty::Int | Ty::Bool);
-                let suffix = match &a[0] {
-                    Ty::Tuple(ts) if ts.len() == 2 && scalar_nf(&ts[0]) && scalar_nf(&ts[1]) => {
-                        Some("tss")
-                    }
-                    Ty::Tuple(ts)
-                        if ts.len() == 2 && scalar_nf(&ts[0]) && matches!(ts[1], Ty::String) =>
-                    {
-                        Some("tsstr")
-                    }
-                    Ty::Applied(TypeConstructorId::List, e)
-                        if e.len() == 1 && scalar_nf(&e[0]) =>
-                    {
-                        Some("lint")
-                    }
-                    Ty::Applied(TypeConstructorId::List, e)
-                        if e.len() == 1 && matches!(e[0], Ty::String) =>
-                    {
-                        Some("lstr")
-                    }
-                    Ty::Applied(TypeConstructorId::Option, o)
-                        if o.len() == 1 && scalar_nf(&o[0]) =>
-                    {
-                        Some("oint")
-                    }
-                    _ => None,
-                };
-                return Some(match suffix {
-                    // sort_lstr has no twin yet — only min/max are implemented for
-                    // the List[String] element family; sort keeps the honest wall.
-                    Some("lstr") if func == "sort" => "list.sort_x".to_string(),
-                    Some(s) => format!("list.{func}_{s}"),
-                    None => format!("list.{func}_x"),
-                });
-            }
+    if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+        if a.len() == 1 && a[0] == Ty::Float {
+            return Some(format!("list.{func}_float"));
+        }
+        // list.sort/min/max over a List[String] compare by CONTENT, not the i64 handle the
+        // generic impls compare (→ arbitrary/handle order or wrong element, a silent bug).
+        // _str variants do a lexicographic byte compare.
+        if a.len() == 1 && matches!(a[0], Ty::String) {
+            return Some(format!("list.{func}_str"));
+        }
+        // COMPOUND elements (the C-053 lattice) — type-directed comparators
+        // (list_ord_compound.almd): scalar/String 2-tuples, List[Int/Bool],
+        // List[String], Option[scalar]. Float components are EXCLUDED (IEEE
+        // totalOrder ≠ an i64 slot compare). Any OTHER heap element walls (`_x`):
+        // the generic twin would compare handle addresses AND raw-copy without
+        // rc_inc — a silent wrong order plus a double-free, never acceptable.
+        if a.len() == 1 && is_heap_ty(&a[0]) {
+            let scalar_nf = |t: &Ty| matches!(t, Ty::Int | Ty::Bool);
+            let suffix = match &a[0] {
+                Ty::Tuple(ts) if ts.len() == 2 && scalar_nf(&ts[0]) && scalar_nf(&ts[1]) => {
+                    Some("tss")
+                }
+                Ty::Tuple(ts)
+                    if ts.len() == 2 && scalar_nf(&ts[0]) && matches!(ts[1], Ty::String) =>
+                {
+                    Some("tsstr")
+                }
+                Ty::Applied(TypeConstructorId::List, e)
+                    if e.len() == 1 && scalar_nf(&e[0]) =>
+                {
+                    Some("lint")
+                }
+                Ty::Applied(TypeConstructorId::List, e)
+                    if e.len() == 1 && matches!(e[0], Ty::String) =>
+                {
+                    Some("lstr")
+                }
+                Ty::Applied(TypeConstructorId::Option, o)
+                    if o.len() == 1 && scalar_nf(&o[0]) =>
+                {
+                    Some("oint")
+                }
+                _ => None,
+            };
+            return Some(match suffix {
+                // sort_lstr has no twin yet — only min/max are implemented for
+                // the List[String] element family; sort keeps the honest wall.
+                Some("lstr") if func == "sort" => "list.sort_x".to_string(),
+                Some(s) => format!("list.{func}_{s}"),
+                None => format!("list.{func}_x"),
+            });
         }
     }
-    if func == "sort_by" {
-        if let Some(Ty::Fn { ret, .. }) = arg_tys.get(1) {
-            // A HEAP element (List[String]/List[R]) must be CO-OWNED by the
-            // result list (rc_inc per copied handle) — the raw-copy variants
-            // share without acquiring and the two recursive drops double-free.
-            let heap_elem = matches!(arg_tys.first(),
-                Some(Ty::Applied(TypeConstructorId::List, a)) if a.len() == 1 && is_heap_ty(&a[0]));
-            if **ret == Ty::Float {
-                return Some(if heap_elem {
-                    "list.sort_by_float_rc".to_string()
-                } else {
-                    "list.sort_by_float".to_string()
-                });
+    None
+}
+
+/// The `sort_by` arm of [`list_call_name_ordering`] — verbatim move.
+fn list_call_name_sort_by(arg_tys: &[Ty]) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    if let Some(Ty::Fn { ret, .. }) = arg_tys.get(1) {
+        // A HEAP element (List[String]/List[R]) must be CO-OWNED by the
+        // result list (rc_inc per copied handle) — the raw-copy variants
+        // share without acquiring and the two recursive drops double-free.
+        let heap_elem = matches!(arg_tys.first(),
+            Some(Ty::Applied(TypeConstructorId::List, a)) if a.len() == 1 && is_heap_ty(&a[0]));
+        if **ret == Ty::Float {
+            return Some(if heap_elem {
+                "list.sort_by_float_rc".to_string()
+            } else {
+                "list.sort_by_float".to_string()
+            });
+        }
+        // A STRING-key sort_by over SCALAR elements routes to the cached-key
+        // stable twin (byte-lexicographic via string.cmp — #560/C-055). A HEAP
+        // element still walls (`_x`): the copied handles would need the rc_inc
+        // co-own leg the scalar twin doesn't carry.
+        if **ret == Ty::String {
+            if !heap_elem {
+                return Some("list.sort_by_str_key".to_string());
             }
-            // A STRING-key sort_by over SCALAR elements routes to the cached-key
-            // stable twin (byte-lexicographic via string.cmp — #560/C-055). A HEAP
-            // element still walls (`_x`): the copied handles would need the rc_inc
-            // co-own leg the scalar twin doesn't carry.
-            if **ret == Ty::String {
-                if !heap_elem {
-                    return Some("list.sort_by_str_key".to_string());
-                }
-                return Some("list.sort_by_str_key_x".to_string());
-            }
-            if heap_elem {
-                return Some("list.sort_by_rc".to_string());
-            }
+            return Some("list.sort_by_str_key_x".to_string());
+        }
+        if heap_elem {
+            return Some("list.sort_by_rc".to_string());
         }
     }
     None
