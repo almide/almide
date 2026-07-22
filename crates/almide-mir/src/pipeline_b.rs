@@ -20,85 +20,15 @@ struct PipelineLayouts {
 /// references, and build the record/variant layout registries (aliasing each
 /// UNIQUELY-owned base name onto its qualified layout).
 fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
-    let mut globals: HashMap<almide_ir::VarId, almide_lang::types::Ty> = HashMap::new();
-    let mut global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr> = HashMap::new();
-    // An UNANNOTATED option-ctor top-let (`let MAYBE = some(Cfg { .. })`) leaves
-    // tl.ty Unknown(-payload) — refine it from the ctor's payload type so the
-    // reference site materializes a REAL tracked Option (see
-    // `refine_option_toplet_ty`; the same repair the crossmod bridge applies).
-    let toplet_ty = |tl: &almide_ir::IrTopLet| {
-        crate::lower::refine_option_toplet_ty(&tl.ty, &tl.value).unwrap_or_else(|| tl.ty.clone())
-    };
-    for tl in &ir.top_lets {
-        globals.insert(tl.var, toplet_ty(tl));
-        global_inits.insert(tl.var, tl.value.clone());
-    }
-    for m in &ir.modules {
-        for tl in &m.top_lets {
-            globals.insert(tl.var, toplet_ty(tl));
-            global_inits.insert(tl.var, tl.value.clone());
-        }
-    }
-    // PER-REGION globals: the shared union above keys BOTH the main program's and each
-    // module's top-let VarIds — two PRIVATE numbering regions that can COLLIDE (main-side
-    // VarId(2) vs a module's VarId(2) are unrelated). MAIN functions must resolve through
-    // main's own entries first (re-inserted last, winning collisions) plus the cross-module
-    // NAME bridge (`toplib.SYSTEM` referenced through a main-side id); MODULE functions keep
-    // the module-entries-win union (their region, as today).
-    let mut main_globals = globals.clone();
-    let mut main_global_inits = global_inits.clone();
-    let mut mutable_toplet_aliases: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId> =
-        std::collections::HashMap::new();
-    crate::lower::bridge_cross_module_toplets(ir, &mut main_globals, &mut main_global_inits, &mut mutable_toplet_aliases);
-    for tl in &ir.top_lets {
-        main_globals.insert(tl.var, toplet_ty(tl));
-        main_global_inits.insert(tl.var, tl.value.clone());
-    }
-
-    // Record-layout registry (type name → fields) for the VALUE MODEL.
-    let mut record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
-    for m in &ir.modules {
-        record_layouts.extend(crate::lower::build_record_layouts(&m.type_decls));
-    }
-    // Alias each UNIQUELY-owned base name to its qualified layout (a bare `Named` reference to a
-    // module record must resolve its field layout); an ambiguous base stays qualified-only.
-    {
-        let mut owners: std::collections::HashMap<String, Vec<String>> = Default::default();
-        for k in record_layouts.keys() {
-            if let Some((_, base)) = k.rsplit_once('.') {
-                owners.entry(base.to_string()).or_default().push(k.clone());
-            }
-        }
-        for (base, ks) in owners {
-            if ks.len() == 1 && !record_layouts.contains_key(&base) {
-                let v = record_layouts.get(&ks[0]).cloned().expect("ks[0] came from record_layouts.keys() above, so the key is guaranteed present");
-                record_layouts.insert(base, v);
-            }
-        }
-    }
-
-    // Variant-layout registry (type name → tag + per-constructor fields) for custom ADTs.
-    let mut variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
-    for m in &ir.modules {
-        let m_vl = crate::lower::build_variant_layouts(&m.type_decls);
-        variant_layouts.by_type.extend(m_vl.by_type);
-        variant_layouts.ctor_to_type.extend(m_vl.ctor_to_type);
-        variant_layouts.ctor_field_defaults.extend(m_vl.ctor_field_defaults);
-    }
-    {
-        let mut owners: std::collections::HashMap<String, Vec<String>> = Default::default();
-        for k in variant_layouts.by_type.keys() {
-            if let Some((_, base)) = k.rsplit_once('.') {
-                owners.entry(base.to_string()).or_default().push(k.clone());
-            }
-        }
-        for (base, ks) in owners {
-            if ks.len() == 1 && !variant_layouts.by_type.contains_key(&base) {
-                let v = variant_layouts.by_type.get(&ks[0]).cloned().expect("ks[0] came from variant_layouts.by_type.keys() above, so the key is guaranteed present");
-                variant_layouts.by_type.insert(base, v);
-            }
-        }
-    }
+    // Sequential-phase split (codopsy8 complexity sweep): the 4 phases below each build
+    // ONE independent table (globals, then main-region globals — reads phase 1's finished
+    // tables, then record layouts, then variant layouts) — a pure text-move of the
+    // original top-to-bottom structure, no logic change.
+    let (globals, global_inits) = collect_pipeline_globals(ir);
+    let (main_globals, main_global_inits, mutable_toplet_aliases) =
+        collect_pipeline_main_globals(ir, &globals, &global_inits);
+    let record_layouts = collect_pipeline_record_layouts(ir);
+    let variant_layouts = collect_pipeline_variant_layouts(ir);
 
     PipelineLayouts {
         globals,
@@ -109,6 +39,114 @@ fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
         record_layouts,
         variant_layouts,
     }
+}
+
+/// Extracted from `collect_pipeline_layouts` (codopsy8 complexity sweep): an UNANNOTATED
+/// option-ctor top-let (`let MAYBE = some(Cfg { .. })`) leaves `tl.ty` Unknown(-payload) —
+/// refine it from the ctor's payload type so the reference site materializes a REAL
+/// tracked Option (see [`crate::lower::refine_option_toplet_ty`]; the same repair the
+/// crossmod bridge applies). Shared by phases 1 and 2. Verbatim.
+fn collect_pipeline_toplet_ty(tl: &almide_ir::IrTopLet) -> almide_lang::types::Ty {
+    crate::lower::refine_option_toplet_ty(&tl.ty, &tl.value).unwrap_or_else(|| tl.ty.clone())
+}
+
+/// Extracted from `collect_pipeline_layouts` (codopsy8 complexity sweep, phase 1 of 4):
+/// the shared globals union (main program + every module's top-lets, module entries win a
+/// VarId collision — the pre-existing per-region behavior). Verbatim.
+fn collect_pipeline_globals(
+    ir: &almide_ir::IrProgram,
+) -> (HashMap<almide_ir::VarId, almide_lang::types::Ty>, HashMap<almide_ir::VarId, almide_ir::IrExpr>) {
+    let mut globals: HashMap<almide_ir::VarId, almide_lang::types::Ty> = HashMap::new();
+    let mut global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr> = HashMap::new();
+    for tl in &ir.top_lets {
+        globals.insert(tl.var, collect_pipeline_toplet_ty(tl));
+        global_inits.insert(tl.var, tl.value.clone());
+    }
+    for m in &ir.modules {
+        for tl in &m.top_lets {
+            globals.insert(tl.var, collect_pipeline_toplet_ty(tl));
+            global_inits.insert(tl.var, tl.value.clone());
+        }
+    }
+    (globals, global_inits)
+}
+
+/// Extracted from `collect_pipeline_layouts` (codopsy8 complexity sweep, phase 2 of 4):
+/// PER-REGION globals — the shared union from phase 1 keys BOTH the main program's and
+/// each module's top-let VarIds — two PRIVATE numbering regions that can COLLIDE (main-side
+/// VarId(2) vs a module's VarId(2) are unrelated). MAIN functions must resolve through
+/// main's own entries first (re-inserted last, winning collisions) plus the cross-module
+/// NAME bridge (`toplib.SYSTEM` referenced through a main-side id); MODULE functions keep
+/// the module-entries-win union (their region, as today). Verbatim.
+fn collect_pipeline_main_globals(
+    ir: &almide_ir::IrProgram,
+    globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    global_inits: &HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+) -> (
+    HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
+) {
+    let mut main_globals = globals.clone();
+    let mut main_global_inits = global_inits.clone();
+    let mut mutable_toplet_aliases: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId> =
+        std::collections::HashMap::new();
+    crate::lower::bridge_cross_module_toplets(ir, &mut main_globals, &mut main_global_inits, &mut mutable_toplet_aliases);
+    for tl in &ir.top_lets {
+        main_globals.insert(tl.var, collect_pipeline_toplet_ty(tl));
+        main_global_inits.insert(tl.var, tl.value.clone());
+    }
+    (main_globals, main_global_inits, mutable_toplet_aliases)
+}
+
+/// Extracted from `collect_pipeline_layouts` (codopsy8 complexity sweep, phase 3 of 4):
+/// the record-layout registry (type name → fields) for the VALUE MODEL, aliasing each
+/// UNIQUELY-owned base name to its qualified layout (a bare `Named` reference to a module
+/// record must resolve its field layout); an ambiguous base stays qualified-only. Verbatim.
+fn collect_pipeline_record_layouts(ir: &almide_ir::IrProgram) -> crate::lower::RecordLayouts {
+    let mut record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
+    for m in &ir.modules {
+        record_layouts.extend(crate::lower::build_record_layouts(&m.type_decls));
+    }
+    let mut owners: std::collections::HashMap<String, Vec<String>> = Default::default();
+    for k in record_layouts.keys() {
+        if let Some((_, base)) = k.rsplit_once('.') {
+            owners.entry(base.to_string()).or_default().push(k.clone());
+        }
+    }
+    for (base, ks) in owners {
+        if ks.len() == 1 && !record_layouts.contains_key(&base) {
+            let v = record_layouts.get(&ks[0]).cloned().expect("ks[0] came from record_layouts.keys() above, so the key is guaranteed present");
+            record_layouts.insert(base, v);
+        }
+    }
+    record_layouts
+}
+
+/// Extracted from `collect_pipeline_layouts` (codopsy8 complexity sweep, phase 4 of 4):
+/// the variant-layout registry (type name → tag + per-constructor fields) for custom ADTs,
+/// aliased the SAME way as [`collect_pipeline_record_layouts`]. Verbatim.
+fn collect_pipeline_variant_layouts(ir: &almide_ir::IrProgram) -> crate::lower::VariantLayouts {
+    let mut variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
+    for m in &ir.modules {
+        let m_vl = crate::lower::build_variant_layouts(&m.type_decls);
+        variant_layouts.by_type.extend(m_vl.by_type);
+        variant_layouts.ctor_to_type.extend(m_vl.ctor_to_type);
+        variant_layouts.ctor_field_defaults.extend(m_vl.ctor_field_defaults);
+    }
+    let mut owners: std::collections::HashMap<String, Vec<String>> = Default::default();
+    for k in variant_layouts.by_type.keys() {
+        if let Some((_, base)) = k.rsplit_once('.') {
+            owners.entry(base.to_string()).or_default().push(k.clone());
+        }
+    }
+    for (base, ks) in owners {
+        if ks.len() == 1 && !variant_layouts.by_type.contains_key(&base) {
+            let v = variant_layouts.by_type.get(&ks[0]).cloned().expect("ks[0] came from variant_layouts.by_type.keys() above, so the key is guaranteed present");
+            variant_layouts.by_type.insert(base, v);
+        }
+    }
+    variant_layouts
 }
 
 /// The [`inline_and_classify_cross_module_fns`] outputs: the mangled linked-module
