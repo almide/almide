@@ -373,29 +373,41 @@ impl LowerCtx {
         })
     }
 
-    /// The comparison-op case (ordering + equality, INT/BOOL-operand-gated) of
-    /// [`Self::scalar_binop_int_op`] below — split out (codopsy cc), disjoint
-    /// `BinOp` patterns from the arithmetic half.
-    fn scalar_binop_int_cmp_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
+    // Ordering comparisons (the `if` condition) — INT or BOOL operands (Bool is an i64 0/1,
+    // and v0's bool Ord is false < true = 0 < 1, so the i64 compare is bit-exact). A Float
+    // compare uses the prim float floor above; String ordering is the cmp-call above. Gate on
+    // the operand type. Disjoint `BinOp` case, split out (codopsy cc) of
+    // `scalar_binop_int_cmp_op` below.
+    fn scalar_binop_int_ord_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
         use almide_ir::BinOp;
         Some(match op {
-            // Ordering comparisons (the `if` condition) — INT or BOOL operands (Bool is an i64
-            // 0/1, and v0's bool Ord is false < true = 0 < 1, so the i64 compare is bit-exact).
-            // A Float compare uses the prim float floor above; String ordering is the cmp-call
-            // above. Gate on the operand type.
             BinOp::Lt if Self::int_ord_operand_ty(left_ty) => crate::IntOp::Lt,
             BinOp::Lte if Self::int_ord_operand_ty(left_ty) => crate::IntOp::Le,
             BinOp::Gt if Self::int_ord_operand_ty(left_ty) => crate::IntOp::Gt,
             BinOp::Gte if Self::int_ord_operand_ty(left_ty) => crate::IntOp::Ge,
-            // Equality — INT or BOOL operands. A `Bool` is an i64 0/1 (a Var loads
-            // its 0/1, a `LitBool` materializes `ConstInt 0/1` above), so the SAME
-            // `IntOp::Eq`/`Ne` render is bit-exact for `b == false` / `b1 != b2` as
-            // for `n == 0`. (Ordering on Bool is undefined in v0, so it is NOT
-            // admitted; a Float/String/compound `==` still needs a distinct op.)
+            _ => return None,
+        })
+    }
+
+    // Equality — INT or BOOL operands. A `Bool` is an i64 0/1 (a Var loads its 0/1, a
+    // `LitBool` materializes `ConstInt 0/1` above), so the SAME `IntOp::Eq`/`Ne` render is
+    // bit-exact for `b == false` / `b1 != b2` as for `n == 0`. (Ordering on Bool is undefined
+    // in v0, so it is NOT admitted; a Float/String/compound `==` still needs a distinct op.)
+    // Disjoint `BinOp` case, split out (codopsy cc) of `scalar_binop_int_cmp_op` below.
+    fn scalar_binop_int_eq_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
+        use almide_ir::BinOp;
+        Some(match op {
             BinOp::Eq if Self::int_eq_operand_ty(left_ty) => crate::IntOp::Eq,
             BinOp::Neq if Self::int_eq_operand_ty(left_ty) => crate::IntOp::Ne,
             _ => return None,
         })
+    }
+
+    /// The comparison-op case (ordering + equality, INT/BOOL-operand-gated) of
+    /// [`Self::scalar_binop_int_op`] below — a thin router over the two disjoint-guard
+    /// helpers above (disjoint `BinOp` patterns from the arithmetic half too).
+    fn scalar_binop_int_cmp_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
+        Self::scalar_binop_int_ord_op(op, left_ty).or_else(|| Self::scalar_binop_int_eq_op(op, left_ty))
     }
 
     // (Logical `and`/`or` are SHORT-CIRCUITED via control flow above — they never reach this
