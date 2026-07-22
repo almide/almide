@@ -83,44 +83,56 @@ pub fn interp_synthetic_call_names(parts: &[IrStringPart], registry: &RecordLayo
     for _ in 0..parts.len() {
         names.push("__str_concat".to_string());
     }
+    // Per-part accumulation: each `p` writes only its own additions to the shared
+    // `names` accumulator (a fold, not a router with cross-iteration state) — the
+    // established safe pattern for extracting a loop body into a helper.
     for p in parts {
-        let IrStringPart::Expr { expr } = p else {
-            continue;
-        };
-        if matches!(expr.ty, Ty::String) {
-            continue; // a String part is a no-call passthrough
-        }
-        // A TOP-LEVEL record/tuple part mirrors `interp_part_leaf`'s decision tree
-        // EXACTLY (the mir == ir contract): an ANON record is ALWAYS one generated
-        // `__repr_anonrec_<hash>` call; an expand-foldable named/tuple part credits the
-        // full recursive tree; a non-expandable NAMED record one `__repr_rec_<R>`; any
-        // other non-expandable aggregate one `compound.to_string` (the wall).
-        if matches!(expr.ty, Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..))
-            && resolve_aggregate(&expr.ty, registry).is_some()
-        {
-            if let Ty::Record { fields } = &expr.ty {
-                names.push(format!(
-                    "__repr_{}",
-                    crate::lower::anon_record_drop_name(fields)
-                ));
-            } else if aggregate_part_expandable(expr, registry) {
-                aggregate_synthetic_names(&expr.ty, registry, &mut names);
-            } else if let Ty::Named(name, _) = &expr.ty {
-                names.push(format!(
-                    "__repr_rec_{}",
-                    crate::lower::drop_fn_ident(name.as_str())
-                ));
-            } else {
-                names.push("compound.to_string".to_string());
-            }
-        } else if let Some(n) = container_repr_name(&expr.ty, registry) {
-            // Mirrors `interp_part_leaf`'s container-repr arm: ONE generated call node.
-            names.push(n);
-        } else {
-            value_synthetic_names(&expr.ty, registry, &mut names);
-        }
+        push_synthetic_call_names_for_part(p, registry, &mut names);
     }
     names
+}
+
+/// One part's contribution to [`interp_synthetic_call_names`] — extracted loop body.
+fn push_synthetic_call_names_for_part(p: &IrStringPart, registry: &RecordLayouts, names: &mut Vec<String>) {
+    let IrStringPart::Expr { expr } = p else {
+        return;
+    };
+    if matches!(expr.ty, Ty::String) {
+        return; // a String part is a no-call passthrough
+    }
+    // A TOP-LEVEL record/tuple part mirrors `interp_part_leaf`'s decision tree
+    // EXACTLY (the mir == ir contract): an ANON record is ALWAYS one generated
+    // `__repr_anonrec_<hash>` call; an expand-foldable named/tuple part credits the
+    // full recursive tree; a non-expandable NAMED record one `__repr_rec_<R>`; any
+    // other non-expandable aggregate one `compound.to_string` (the wall).
+    if matches!(expr.ty, Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..))
+        && resolve_aggregate(&expr.ty, registry).is_some()
+    {
+        push_synthetic_call_names_for_aggregate_part(expr, registry, names);
+    } else if let Some(n) = container_repr_name(&expr.ty, registry) {
+        // Mirrors `interp_part_leaf`'s container-repr arm: ONE generated call node.
+        names.push(n);
+    } else {
+        value_synthetic_names(&expr.ty, registry, names);
+    }
+}
+
+fn push_synthetic_call_names_for_aggregate_part(expr: &IrExpr, registry: &RecordLayouts, names: &mut Vec<String>) {
+    if let Ty::Record { fields } = &expr.ty {
+        names.push(format!(
+            "__repr_{}",
+            crate::lower::anon_record_drop_name(fields)
+        ));
+    } else if aggregate_part_expandable(expr, registry) {
+        aggregate_synthetic_names(&expr.ty, registry, names);
+    } else if let Ty::Named(name, _) = &expr.ty {
+        names.push(format!(
+            "__repr_rec_{}",
+            crate::lower::drop_fn_ident(name.as_str())
+        ));
+    } else {
+        names.push("compound.to_string".to_string());
+    }
 }
 
 /// Is a WHOLE interpolation DESUGARABLE (every part has an admitted Display)? When true, the
