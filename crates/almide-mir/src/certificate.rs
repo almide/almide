@@ -186,127 +186,153 @@ fn funcref_name(func: &MirFunction, v: ValueId) -> Option<&str> {
 }
 
 pub fn cap_witness(func: &MirFunction) -> CapWitness {
+    // Fold-with-independent-accumulator-writes split (codopsy8 complexity sweep): each op is
+    // visited by 3 groups of INDEPENDENT `if let` checks (none of them are alternative
+    // branches of one `match` — the original code already ran them as a top-to-bottom
+    // sequence of separate `if let`s on the SAME `op`, so this is a pure text-move of that
+    // existing structure into named helpers, no logic change, no exhaustiveness guarantee
+    // lost — these were never an exhaustive `match Op { .. }` to begin with).
     let mut used: Vec<Capability> = Vec::new();
     for op in &func.ops {
-        if let Op::Call { func: rt, .. } = op {
-            if let Some(cap) = rt.capability() {
-                used.push(cap);
-            }
-        }
-        // The `fd_write` primitive is the host-effect floor op — it reaches Stdout, so
-        // a self-hosted runtime fn using it (print_str) must declare Stdout, exactly
-        // like a `PrintStr` runtime call (this keeps the sandbox accounting complete).
-        if let Op::Prim { kind: crate::PrimKind::FdWrite, .. } = op {
-            used.push(Capability::Stdout);
-        }
-        // The `random_get` primitive is the ENTROPY floor op — reached by the self-hosted
-        // `random.int`, so a fn using it must declare Entropy (the same accounting as FdWrite →
-        // Stdout). The transitive `reachable_caps` follows the CallFn edge into `random.int`, so a
-        // caller (pkcs1v15_pad) inherits this Entropy and is caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::RandomGet, .. } = op {
-            used.push(Capability::Entropy);
-        }
-        // The `args_get_list` primitive is the CLI-ARGS floor op — reached by the self-hosted
-        // `env.args`, so a fn using it must declare CliArgs (the same accounting as RandomGet →
-        // Entropy). The transitive `reachable_caps` follows the CallFn edge into `env.args`, so a
-        // caller inherits this CliArgs and is caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::ArgsGetList | crate::PrimKind::ArgsGetListFull, .. } = op {
-            used.push(Capability::CliArgs);
-        }
-        // The `env_get` primitive is the ENVIRON floor op — reached by the self-hosted
-        // `env.get`, so a fn using it must declare the Env profile's CliArgs (argv and
-        // environ are the same process-initial-state class; the profile map already
-        // binds `"Env" => CliArgs`). Transitive exactly like ArgsGetList.
-        if let Op::Prim { kind: crate::PrimKind::EnvGet, .. } = op {
-            used.push(Capability::CliArgs);
-        }
-        // The `read_text_file` primitive is the FS-READ floor op — reached by the self-hosted
-        // `fs.read_text`, so a fn using it must declare FsRead (the same accounting as ArgsGetList →
-        // CliArgs). The transitive `reachable_caps` follows the CallFn edge into `fs.read_text`, so a
-        // caller inherits this FsRead and is caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::ReadTextFile, .. } = op {
-            used.push(Capability::FsRead);
-        }
-        // The `read_dir` primitive is the FS-READ floor op for directory listing — reached by
-        // the self-hosted `fs.list_dir`, so a fn using it must declare FsRead (the SAME
-        // accounting as ReadTextFile → FsRead; both are filesystem reads). The transitive
-        // `reachable_caps` follows the CallFn edge into `fs.list_dir`, so a caller inherits this
-        // FsRead and is caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::ReadDir, .. } = op {
-            used.push(Capability::FsRead);
-        }
-        // The `path_exists` primitive is the FS-READ floor op for an existence stat — reached by
-        // the self-hosted `fs.exists`. A stat IS a filesystem read, so it REUSES Capability::FsRead
-        // (NOT a new capability — the SAME accounting as ReadTextFile → FsRead). The transitive
-        // `reachable_caps` follows the CallFn edge into `fs.exists`, so a caller inherits this
-        // FsRead and is caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::PathExists, .. } = op {
-            used.push(Capability::FsRead);
-        }
-        // The `path_filestat` primitive is the FULL-stat FS-READ floor op — reached by the
-        // self-hosted `fs.stat`. A stat IS a filesystem read, so it REUSES Capability::FsRead
-        // (the SAME accounting as PathExists); counted transitively through the CallFn edge
-        // into `fs.stat`, so a caller is caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::PathFilestat, .. } = op {
-            used.push(Capability::FsRead);
-        }
-        // The `write_text_file` primitive is the FS-WRITE floor op — reached by the self-hosted
-        // `fs.write`, so a fn using it must declare FsWrite (a DISTINCT capability from FsRead — a
-        // write is strictly greater authority; the same accounting as ReadTextFile → FsRead). The
-        // transitive `reachable_caps` follows the CallFn edge into `fs.write`, so a caller inherits
-        // this FsWrite and is caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::WriteTextFile, .. } = op {
-            used.push(Capability::FsWrite);
-        }
-        // The `make_dir` primitive is ALSO an FS-WRITE floor op — reached by the self-hosted
-        // `fs.mkdir_p`. A mkdir IS a filesystem write, so it REUSES Capability::FsWrite (NOT a
-        // new capability — the SAME accounting as WriteTextFile → FsWrite). The transitive
-        // `reachable_caps` follows the CallFn edge into `fs.mkdir_p`, so a caller inherits this
-        // FsWrite and is caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::MakeDir, .. } = op {
-            used.push(Capability::FsWrite);
-        }
-        // The `clock_time_get` primitive is the WALL-CLOCK floor op — reached by the self-hosted
-        // `env.unix_timestamp`, so a fn using it must declare Clock (a DISTINCT capability: a
-        // clock read is neither a filesystem nor an entropy effect; the same accounting as
-        // RandomGet → Entropy). The transitive `reachable_caps` follows the CallFn edge into
-        // `env.unix_timestamp`, so a caller inherits this Clock and is caps-verified against its
-        // declared bound.
-        if let Op::Prim { kind: crate::PrimKind::ClockTimeGet, .. } = op {
-            used.push(Capability::Clock);
-        }
-        // The `remove_all` primitive is ALSO an FS-WRITE floor op — reached by the self-hosted
-        // `fs.remove_all`. A recursive remove IS a filesystem write, so it REUSES
-        // Capability::FsWrite (NOT a new capability — the SAME accounting as WriteTextFile →
-        // FsWrite). The transitive `reachable_caps` follows the CallFn edge into `fs.remove_all`,
-        // so a caller inherits this FsWrite and is caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::RemoveAll, .. } = op {
-            used.push(Capability::FsWrite);
-        }
-        // The `read_line` primitive is the STANDARD-INPUT floor op — reached by the self-hosted
-        // `io.read_line`, so a fn using it must declare Stdin (a DISTINCT capability: reading the
-        // operator's input stream is neither a write, a filesystem, an entropy, nor a clock
-        // effect; the same accounting as RandomGet → Entropy). The transitive `reachable_caps`
-        // follows the CallFn edge into `io.read_line`, so a caller inherits this Stdin and is
-        // caps-verified against its declared bound.
-        if let Op::Prim { kind: crate::PrimKind::ReadLine | crate::PrimKind::ReadNBytes, .. } = op {
-            used.push(Capability::Stdin);
-        }
-        // SOUNDNESS CRUX: a CallIndirect invokes a closure that may reach ANY capability.
-        // When the table index resolves to a KNOWN lifted lambda (a `FuncRef` in THIS
-        // function), its REAL caps are folded transitively by `reachable_caps` (which
-        // follows the same `FuncRef` edge) — no conservative taint needed, so a non-printing
-        // closure stays caps-verified. Only a DYNAMIC closure (table_idx not a local
-        // `FuncRef` — e.g. a closure PARAMETER) is unanalyzable here, so it conservatively
-        // marks Stdout used: such a fn is caps-verified ONLY if it DECLARES it (a closure
-        // that secretly writes Stdout can never pass un-witnessed — accept-but-unsafe).
-        if let Op::CallIndirect { table_idx, .. } = op {
-            if funcref_name(func, *table_idx).is_none() {
-                used.push(Capability::Stdout);
-            }
-        }
+        cap_witness_op_call(op, &mut used);
+        cap_witness_op_prim_floor(op, &mut used);
+        cap_witness_op_call_indirect(func, op, &mut used);
     }
     CapWitness { allowed: func.declared_caps.clone(), used }
+}
+
+/// Extracted from `cap_witness` (codopsy8 complexity sweep, group 1 of 3): a direct runtime
+/// `Op::Call` that reaches a capability-bearing intrinsic. Verbatim.
+fn cap_witness_op_call(op: &Op, used: &mut Vec<Capability>) {
+    if let Op::Call { func: rt, .. } = op {
+        if let Some(cap) = rt.capability() {
+            used.push(cap);
+        }
+    }
+}
+
+/// Extracted from `cap_witness` (codopsy8 complexity sweep, group 2 of 3): the host-effect
+/// FLOOR primitives — each independently gates its capability; a self-hosted runtime fn
+/// using one of these prims must declare the matching capability (the `reachable_caps`
+/// transitive fold then carries it to every caller through the CallFn edge into the
+/// self-host body). Verbatim.
+fn cap_witness_op_prim_floor(op: &Op, used: &mut Vec<Capability>) {
+    // The `fd_write` primitive is the host-effect floor op — it reaches Stdout, so
+    // a self-hosted runtime fn using it (print_str) must declare Stdout, exactly
+    // like a `PrintStr` runtime call (this keeps the sandbox accounting complete).
+    if let Op::Prim { kind: crate::PrimKind::FdWrite, .. } = op {
+        used.push(Capability::Stdout);
+    }
+    // The `random_get` primitive is the ENTROPY floor op — reached by the self-hosted
+    // `random.int`, so a fn using it must declare Entropy (the same accounting as FdWrite →
+    // Stdout). The transitive `reachable_caps` follows the CallFn edge into `random.int`, so a
+    // caller (pkcs1v15_pad) inherits this Entropy and is caps-verified against its declared bound.
+    if let Op::Prim { kind: crate::PrimKind::RandomGet, .. } = op {
+        used.push(Capability::Entropy);
+    }
+    // The `args_get_list` primitive is the CLI-ARGS floor op — reached by the self-hosted
+    // `env.args`, so a fn using it must declare CliArgs (the same accounting as RandomGet →
+    // Entropy). The transitive `reachable_caps` follows the CallFn edge into `env.args`, so a
+    // caller inherits this CliArgs and is caps-verified against its declared bound.
+    if let Op::Prim { kind: crate::PrimKind::ArgsGetList | crate::PrimKind::ArgsGetListFull, .. } = op {
+        used.push(Capability::CliArgs);
+    }
+    // The `env_get` primitive is the ENVIRON floor op — reached by the self-hosted
+    // `env.get`, so a fn using it must declare the Env profile's CliArgs (argv and
+    // environ are the same process-initial-state class; the profile map already
+    // binds `"Env" => CliArgs`). Transitive exactly like ArgsGetList.
+    if let Op::Prim { kind: crate::PrimKind::EnvGet, .. } = op {
+        used.push(Capability::CliArgs);
+    }
+    // The `read_text_file` primitive is the FS-READ floor op — reached by the self-hosted
+    // `fs.read_text`, so a fn using it must declare FsRead (the same accounting as ArgsGetList →
+    // CliArgs). The transitive `reachable_caps` follows the CallFn edge into `fs.read_text`, so a
+    // caller inherits this FsRead and is caps-verified against its declared bound.
+    if let Op::Prim { kind: crate::PrimKind::ReadTextFile, .. } = op {
+        used.push(Capability::FsRead);
+    }
+    // The `read_dir` primitive is the FS-READ floor op for directory listing — reached by
+    // the self-hosted `fs.list_dir`, so a fn using it must declare FsRead (the SAME
+    // accounting as ReadTextFile → FsRead; both are filesystem reads). The transitive
+    // `reachable_caps` follows the CallFn edge into `fs.list_dir`, so a caller inherits this
+    // FsRead and is caps-verified against its declared bound.
+    if let Op::Prim { kind: crate::PrimKind::ReadDir, .. } = op {
+        used.push(Capability::FsRead);
+    }
+    // The `path_exists` primitive is the FS-READ floor op for an existence stat — reached by
+    // the self-hosted `fs.exists`. A stat IS a filesystem read, so it REUSES Capability::FsRead
+    // (NOT a new capability — the SAME accounting as ReadTextFile → FsRead). The transitive
+    // `reachable_caps` follows the CallFn edge into `fs.exists`, so a caller inherits this
+    // FsRead and is caps-verified against its declared bound.
+    if let Op::Prim { kind: crate::PrimKind::PathExists, .. } = op {
+        used.push(Capability::FsRead);
+    }
+    // The `path_filestat` primitive is the FULL-stat FS-READ floor op — reached by the
+    // self-hosted `fs.stat`. A stat IS a filesystem read, so it REUSES Capability::FsRead
+    // (the SAME accounting as PathExists); counted transitively through the CallFn edge
+    // into `fs.stat`, so a caller is caps-verified against its declared bound.
+    if let Op::Prim { kind: crate::PrimKind::PathFilestat, .. } = op {
+        used.push(Capability::FsRead);
+    }
+    // The `write_text_file` primitive is the FS-WRITE floor op — reached by the self-hosted
+    // `fs.write`, so a fn using it must declare FsWrite (a DISTINCT capability from FsRead — a
+    // write is strictly greater authority; the same accounting as ReadTextFile → FsRead). The
+    // transitive `reachable_caps` follows the CallFn edge into `fs.write`, so a caller inherits
+    // this FsWrite and is caps-verified against its declared bound.
+    if let Op::Prim { kind: crate::PrimKind::WriteTextFile, .. } = op {
+        used.push(Capability::FsWrite);
+    }
+    // The `make_dir` primitive is ALSO an FS-WRITE floor op — reached by the self-hosted
+    // `fs.mkdir_p`. A mkdir IS a filesystem write, so it REUSES Capability::FsWrite (NOT a
+    // new capability — the SAME accounting as WriteTextFile → FsWrite). The transitive
+    // `reachable_caps` follows the CallFn edge into `fs.mkdir_p`, so a caller inherits this
+    // FsWrite and is caps-verified against its declared bound.
+    if let Op::Prim { kind: crate::PrimKind::MakeDir, .. } = op {
+        used.push(Capability::FsWrite);
+    }
+    // The `clock_time_get` primitive is the WALL-CLOCK floor op — reached by the self-hosted
+    // `env.unix_timestamp`, so a fn using it must declare Clock (a DISTINCT capability: a
+    // clock read is neither a filesystem nor an entropy effect; the same accounting as
+    // RandomGet → Entropy). The transitive `reachable_caps` follows the CallFn edge into
+    // `env.unix_timestamp`, so a caller inherits this Clock and is caps-verified against its
+    // declared bound.
+    if let Op::Prim { kind: crate::PrimKind::ClockTimeGet, .. } = op {
+        used.push(Capability::Clock);
+    }
+    // The `remove_all` primitive is ALSO an FS-WRITE floor op — reached by the self-hosted
+    // `fs.remove_all`. A recursive remove IS a filesystem write, so it REUSES
+    // Capability::FsWrite (NOT a new capability — the SAME accounting as WriteTextFile →
+    // FsWrite). The transitive `reachable_caps` follows the CallFn edge into `fs.remove_all`,
+    // so a caller inherits this FsWrite and is caps-verified against its declared bound.
+    if let Op::Prim { kind: crate::PrimKind::RemoveAll, .. } = op {
+        used.push(Capability::FsWrite);
+    }
+    // The `read_line` primitive is the STANDARD-INPUT floor op — reached by the self-hosted
+    // `io.read_line`, so a fn using it must declare Stdin (a DISTINCT capability: reading the
+    // operator's input stream is neither a write, a filesystem, an entropy, nor a clock
+    // effect; the same accounting as RandomGet → Entropy). The transitive `reachable_caps`
+    // follows the CallFn edge into `io.read_line`, so a caller inherits this Stdin and is
+    // caps-verified against its declared bound.
+    if let Op::Prim { kind: crate::PrimKind::ReadLine | crate::PrimKind::ReadNBytes, .. } = op {
+        used.push(Capability::Stdin);
+    }
+}
+
+/// Extracted from `cap_witness` (codopsy8 complexity sweep, group 3 of 3): SOUNDNESS CRUX — a
+/// CallIndirect invokes a closure that may reach ANY capability. When the table index
+/// resolves to a KNOWN lifted lambda (a `FuncRef` in THIS function), its REAL caps are
+/// folded transitively by `reachable_caps` (which follows the same `FuncRef` edge) — no
+/// conservative taint needed, so a non-printing closure stays caps-verified. Only a DYNAMIC
+/// closure (table_idx not a local `FuncRef` — e.g. a closure PARAMETER) is unanalyzable
+/// here, so it conservatively marks Stdout used: such a fn is caps-verified ONLY if it
+/// DECLARES it (a closure that secretly writes Stdout can never pass un-witnessed —
+/// accept-but-unsafe). Verbatim.
+fn cap_witness_op_call_indirect(func: &MirFunction, op: &Op, used: &mut Vec<Capability>) {
+    if let Op::CallIndirect { table_idx, .. } = op {
+        if funcref_name(func, *table_idx).is_none() {
+            used.push(Capability::Stdout);
+        }
+    }
 }
 
 /// Serialize the capability witness in the format `proofs/CapabilityBound.v`'s
@@ -525,100 +551,27 @@ pub fn call_modes_witness(
     program: &BTreeMap<String, MirFunction>,
     is_known_convention: &dyn Fn(&str) -> bool,
 ) -> String {
+    // Sequential-phase split (codopsy8 complexity sweep, helpers in certificate_c.rs to keep
+    // this file under the max-lines threshold): the 3 phases below each build ONE
+    // independent output collection; a later phase only READS an earlier phase's finished
+    // output (never interleaves writes) — the exact "linear waterfall" shape round7/round8
+    // established as safe to decompose (unlike a true state-threading rollback). Pure
+    // text-move, no logic change.
     let names: Vec<&str> = program.keys().map(|s| s.as_str()).collect();
     let index_of: BTreeMap<&str, usize> =
         names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
     let unknown = names.len(); // out of range — the checker rejects any site naming it
-    let sigs: Vec<String> = names
-        .iter()
-        .map(|name| {
-            program[*name]
-                .params
-                .iter()
-                .filter(|p| p.repr.is_heap())
-                .map(|_| MODE_BORROW.to_string())
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-        .collect();
-    // The function TABLE: every FuncRef target anywhere in the program — the
-    // over-approximation of what any CallIndirect can reach. A target that never
-    // lowered (absent from `program`) poisons the table: its signature is
-    // unseeable, so every indirect site becomes unknowable (sentinel).
-    let mut table_targets: Vec<&str> = Vec::new();
-    let mut table_unseeable = false;
-    for name in &names {
-        for op in &program[*name].ops {
-            if let Op::FuncRef { name: target, .. } = op {
-                if program.contains_key(target.as_str()) {
-                    if !table_targets.contains(&target.as_str()) {
-                        table_targets.push(target.as_str());
-                    }
-                } else {
-                    table_unseeable = true;
-                }
-            }
-        }
-    }
-    let mut sites: Vec<String> = Vec::new();
-    for name in &names {
-        for op in &program[*name].ops {
-            match op {
-                Op::CallFn { name: callee, args, .. } => {
-                    let idx = match index_of.get(callee.as_str()) {
-                        Some(&i) => i,
-                        None if is_known_convention(callee) => continue, // renderer-contract callee
-                        None => unknown, // unknown callee — the checker rejects the site
-                    };
-                    let mut site = vec![idx.to_string()];
-                    site.extend(args.iter().filter_map(|a| match a {
-                        CallArg::Handle(_) => Some(MODE_BORROW.to_string()),
-                        CallArg::Scalar(_) | CallArg::Imm(_) | CallArg::Label(_) => None,
-                    }));
-                    sites.push(site.join(" "));
-                }
-                Op::CallIndirect { args, .. } => {
-                    let actual: Vec<String> = args
-                        .iter()
-                        .filter_map(|a| match a {
-                            CallArg::Handle(_) => Some(MODE_BORROW.to_string()),
-                            CallArg::Scalar(_) | CallArg::Imm(_) | CallArg::Label(_) => None,
-                        })
-                        .collect();
-                    // Possible callees: table targets whose param shape matches the
-                    // site (any other target traps at dispatch — excluded soundly).
-                    let possible: Vec<usize> = if table_unseeable {
-                        Vec::new()
-                    } else {
-                        table_targets
-                            .iter()
-                            .filter(|t| {
-                                let f = &program[**t];
-                                f.params.len() == args.len()
-                                    && f.params.iter().zip(args).all(|(p, a)| {
-                                        p.repr.is_heap() == matches!(a, CallArg::Handle(_))
-                                    })
-                            })
-                            .filter_map(|t| index_of.get(*t).copied())
-                            .collect()
-                    };
-                    if possible.is_empty() {
-                        // Unknowable dispatch — the sentinel row rejects the build.
-                        let mut site = vec![unknown.to_string()];
-                        site.extend(actual.iter().cloned());
-                        sites.push(site.join(" "));
-                    } else {
-                        for idx in possible {
-                            let mut site = vec![idx.to_string()];
-                            site.extend(actual.iter().cloned());
-                            sites.push(site.join(" "));
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
+    let sigs = call_modes_witness_sigs(program, &names);
+    let (table_targets, table_unseeable) = call_modes_witness_func_table(program, &names);
+    let sites = call_modes_witness_sites(
+        program,
+        &names,
+        &index_of,
+        unknown,
+        is_known_convention,
+        &table_targets,
+        table_unseeable,
+    );
     format!("{}|{}", sigs.join(";"), sites.join(";"))
 }
 

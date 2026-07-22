@@ -1,4 +1,125 @@
 
+/// Extracted from `call_modes_witness` (codopsy8 complexity sweep, phase 1 of 3): each
+/// function's HEAP-param mode signature (every heap param currently rides `MODE_BORROW` —
+/// the checker widens this once an owning-param convention exists). Verbatim.
+fn call_modes_witness_sigs(program: &BTreeMap<String, MirFunction>, names: &[&str]) -> Vec<String> {
+    names
+        .iter()
+        .map(|name| {
+            program[*name]
+                .params
+                .iter()
+                .filter(|p| p.repr.is_heap())
+                .map(|_| MODE_BORROW.to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect()
+}
+
+/// Extracted from `call_modes_witness` (codopsy8 complexity sweep, phase 2 of 3): the
+/// function TABLE — every FuncRef target anywhere in the program — the over-approximation
+/// of what any CallIndirect can reach. A target that never lowered (absent from `program`)
+/// poisons the table: its signature is unseeable, so every indirect site becomes
+/// unknowable (sentinel). Verbatim.
+fn call_modes_witness_func_table<'p>(
+    program: &'p BTreeMap<String, MirFunction>,
+    names: &[&str],
+) -> (Vec<&'p str>, bool) {
+    let mut table_targets: Vec<&str> = Vec::new();
+    let mut table_unseeable = false;
+    for name in names {
+        for op in &program[*name].ops {
+            if let Op::FuncRef { name: target, .. } = op {
+                if program.contains_key(target.as_str()) {
+                    if !table_targets.contains(&target.as_str()) {
+                        table_targets.push(target.as_str());
+                    }
+                } else {
+                    table_unseeable = true;
+                }
+            }
+        }
+    }
+    (table_targets, table_unseeable)
+}
+
+/// Extracted from `call_modes_witness` (codopsy8 complexity sweep, phase 3 of 3): the
+/// per-call-site rows, one per `Op::CallFn`/`Op::CallIndirect` in the program — reads the
+/// (already-finished) `table_targets`/`table_unseeable` from phase 2, never writes them.
+/// Verbatim.
+#[allow(clippy::too_many_arguments)]
+fn call_modes_witness_sites(
+    program: &BTreeMap<String, MirFunction>,
+    names: &[&str],
+    index_of: &BTreeMap<&str, usize>,
+    unknown: usize,
+    is_known_convention: &dyn Fn(&str) -> bool,
+    table_targets: &[&str],
+    table_unseeable: bool,
+) -> Vec<String> {
+    let mut sites: Vec<String> = Vec::new();
+    for name in names {
+        for op in &program[*name].ops {
+            match op {
+                Op::CallFn { name: callee, args, .. } => {
+                    let idx = match index_of.get(callee.as_str()) {
+                        Some(&i) => i,
+                        None if is_known_convention(callee) => continue, // renderer-contract callee
+                        None => unknown, // unknown callee — the checker rejects the site
+                    };
+                    let mut site = vec![idx.to_string()];
+                    site.extend(args.iter().filter_map(|a| match a {
+                        CallArg::Handle(_) => Some(MODE_BORROW.to_string()),
+                        CallArg::Scalar(_) | CallArg::Imm(_) | CallArg::Label(_) => None,
+                    }));
+                    sites.push(site.join(" "));
+                }
+                Op::CallIndirect { args, .. } => {
+                    let actual: Vec<String> = args
+                        .iter()
+                        .filter_map(|a| match a {
+                            CallArg::Handle(_) => Some(MODE_BORROW.to_string()),
+                            CallArg::Scalar(_) | CallArg::Imm(_) | CallArg::Label(_) => None,
+                        })
+                        .collect();
+                    // Possible callees: table targets whose param shape matches the
+                    // site (any other target traps at dispatch — excluded soundly).
+                    let possible: Vec<usize> = if table_unseeable {
+                        Vec::new()
+                    } else {
+                        table_targets
+                            .iter()
+                            .filter(|t| {
+                                let f = &program[**t];
+                                f.params.len() == args.len()
+                                    && f.params.iter().zip(args).all(|(p, a)| {
+                                        p.repr.is_heap() == matches!(a, CallArg::Handle(_))
+                                    })
+                            })
+                            .filter_map(|t| index_of.get(*t).copied())
+                            .collect()
+                    };
+                    if possible.is_empty() {
+                        // Unknowable dispatch — the sentinel row rejects the build.
+                        let mut site = vec![unknown.to_string()];
+                        site.extend(actual.iter().cloned());
+                        sites.push(site.join(" "));
+                    } else {
+                        for idx in possible {
+                            let mut site = vec![idx.to_string()];
+                            site.extend(actual.iter().cloned());
+                            sites.push(site.join(" "));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    sites
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
