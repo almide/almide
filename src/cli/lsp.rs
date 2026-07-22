@@ -524,7 +524,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let pos = params.text_document_position_params.position;
             let doc = analyzed.get(uri)?;
             let hover = compute_hover(doc, pos);
-            let result = hover.map(|h| serde_json::to_value(h).unwrap()).unwrap_or(serde_json::Value::Null);
+            let result = hover.map(|h| serde_json::to_value(h).unwrap_or(serde_json::Value::Null)).unwrap_or(serde_json::Value::Null);
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/completion" => {
@@ -533,21 +533,21 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let pos = params.text_document_position.position;
             let source = documents.get(uri)?;
             let items = compute_completions(source, pos);
-            let result = serde_json::to_value(CompletionResponse::Array(items)).unwrap();
+            let result = serde_json::to_value(CompletionResponse::Array(items)).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/documentSymbol" => {
             let params: DocumentSymbolParams = serde_json::from_value(req.params.clone()).ok()?;
             let doc = analyzed.get(&params.text_document.uri)?;
             let symbols = compute_document_symbols(doc);
-            let result = serde_json::to_value(DocumentSymbolResponse::Flat(symbols)).unwrap();
+            let result = serde_json::to_value(DocumentSymbolResponse::Flat(symbols)).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/formatting" => {
             let params: DocumentFormattingParams = serde_json::from_value(req.params.clone()).ok()?;
             let doc = analyzed.get(&params.text_document.uri)?;
             let edits = compute_formatting(doc);
-            let result = serde_json::to_value(edits).unwrap();
+            let result = serde_json::to_value(edits).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/definition" => {
@@ -556,7 +556,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let pos = params.text_document_position_params.position;
             let doc = analyzed.get(uri)?;
             let loc = compute_definition(doc, pos, uri);
-            let result = loc.map(|l| serde_json::to_value(GotoDefinitionResponse::Scalar(l)).unwrap())
+            let result = loc.map(|l| serde_json::to_value(GotoDefinitionResponse::Scalar(l)).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
             Some(Response::new_ok(req.id.clone(), result))
         }
@@ -567,13 +567,13 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let source = documents.get(uri)?;
             let doc = analyzed.get(uri);
             let help = compute_signature_help(source, pos, doc);
-            let result = help.map(|h| serde_json::to_value(h).unwrap()).unwrap_or(serde_json::Value::Null);
+            let result = help.map(|h| serde_json::to_value(h).unwrap_or(serde_json::Value::Null)).unwrap_or(serde_json::Value::Null);
             Some(Response::new_ok(req.id.clone(), result))
         }
         "workspace/symbol" => {
             let params: WorkspaceSymbolParams = serde_json::from_value(req.params.clone()).ok()?;
             let symbols = compute_workspace_symbols(&params.query, workspace_root);
-            let result = serde_json::to_value(symbols).unwrap();
+            let result = serde_json::to_value(symbols).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/rename" => {
@@ -582,7 +582,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let pos = params.text_document_position.position;
             let source = documents.get(uri)?;
             let edit = compute_rename(source, pos, uri, &params.new_name);
-            let result = edit.map(|e| serde_json::to_value(e).unwrap()).unwrap_or(serde_json::Value::Null);
+            let result = edit.map(|e| serde_json::to_value(e).unwrap_or(serde_json::Value::Null)).unwrap_or(serde_json::Value::Null);
             Some(Response::new_ok(req.id.clone(), result))
         }
         "textDocument/codeAction" => {
@@ -590,7 +590,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let uri = &params.text_document.uri;
             let source = documents.get(uri)?;
             let actions = compute_code_actions(source, &params.context.diagnostics, uri);
-            let result = serde_json::to_value(actions).unwrap();
+            let result = serde_json::to_value(actions).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
         _ => None,
