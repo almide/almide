@@ -865,5 +865,9 @@ impl LowerCtx {
 }
 
 include!("binds_p2.rs");
+include!("binds_p2_b.rs");
+include!("binds_p2_c.rs");
 include!("binds_p3.rs");
+include!("binds_p3_b.rs");
 include!("binds_p4.rs");
+include!("binds_p4_b.rs");
