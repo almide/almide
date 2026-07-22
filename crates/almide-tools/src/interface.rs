@@ -601,56 +601,66 @@ fn extract_docs(source: &str) -> HashMap<std::string::String, DocInfo> {
     let lines: Vec<&str> = source.lines().collect();
 
     for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-        let name = if let Some(rest) = trimmed.strip_prefix("fn ") {
-            extract_decl_name(rest)
-        } else if let Some(rest) = trimmed.strip_prefix("effect fn ") {
-            extract_decl_name(rest)
-        } else if let Some(rest) = trimmed.strip_prefix("type ") {
-            extract_decl_name(rest)
-        } else if let Some(rest) = trimmed.strip_prefix("let ") {
-            extract_decl_name(rest)
-        } else {
-            None
-        };
-
-        if let Some(name) = name {
-            let mut doc_lines = Vec::new();
-            let mut examples = Vec::new();
-            let mut deprecated = None;
-            let mut j = i;
-            while j > 0 {
-                j -= 1;
-                let prev = lines[j].trim();
-                let comment = if let Some(c) = prev.strip_prefix("// ") {
-                    Some(c)
-                } else if let Some(c) = prev.strip_prefix("//") {
-                    Some(c)
-                } else {
-                    None
-                };
-                match comment {
-                    Some(c) => {
-                        if let Some(ex) = c.strip_prefix("example: ") {
-                            examples.push(ex.trim().to_string());
-                        } else if let Some(dep) = c.strip_prefix("deprecated: ") {
-                            deprecated = Some(dep.trim().to_string());
-                        } else if c.starts_with("deprecated") {
-                            deprecated = Some(String::new());
-                        } else {
-                            doc_lines.push(c.to_string());
-                        }
-                    }
-                    None => break,
-                }
-            }
-            doc_lines.reverse();
-            examples.reverse();
-            let doc = if doc_lines.is_empty() { None } else { Some(doc_lines.join("\n")) };
-            result.insert(name, DocInfo { doc, examples, deprecated });
+        if let Some(name) = detect_decl_name(line.trim()) {
+            result.insert(name, collect_preceding_doc(&lines, i));
         }
     }
     result
+}
+
+/// Recognize a declaration line (`fn`/`effect fn`/`type`/`let`) and pull out
+/// the name it declares.
+fn detect_decl_name(trimmed: &str) -> Option<std::string::String> {
+    if let Some(rest) = trimmed.strip_prefix("fn ") {
+        extract_decl_name(rest)
+    } else if let Some(rest) = trimmed.strip_prefix("effect fn ") {
+        extract_decl_name(rest)
+    } else if let Some(rest) = trimmed.strip_prefix("type ") {
+        extract_decl_name(rest)
+    } else if let Some(rest) = trimmed.strip_prefix("let ") {
+        extract_decl_name(rest)
+    } else {
+        None
+    }
+}
+
+/// Walk backward from the declaration at `lines[i]` over the contiguous run
+/// of `//` comment lines directly above it, splitting them into doc text,
+/// `example:` entries, and a `deprecated[: reason]` marker.
+fn collect_preceding_doc(lines: &[&str], i: usize) -> DocInfo {
+    let mut doc_lines = Vec::new();
+    let mut examples = Vec::new();
+    let mut deprecated = None;
+    let mut j = i;
+    while j > 0 {
+        j -= 1;
+        let prev = lines[j].trim();
+        let comment = if let Some(c) = prev.strip_prefix("// ") {
+            Some(c)
+        } else if let Some(c) = prev.strip_prefix("//") {
+            Some(c)
+        } else {
+            None
+        };
+        match comment {
+            Some(c) => {
+                if let Some(ex) = c.strip_prefix("example: ") {
+                    examples.push(ex.trim().to_string());
+                } else if let Some(dep) = c.strip_prefix("deprecated: ") {
+                    deprecated = Some(dep.trim().to_string());
+                } else if c.starts_with("deprecated") {
+                    deprecated = Some(String::new());
+                } else {
+                    doc_lines.push(c.to_string());
+                }
+            }
+            None => break,
+        }
+    }
+    doc_lines.reverse();
+    examples.reverse();
+    let doc = if doc_lines.is_empty() { None } else { Some(doc_lines.join("\n")) };
+    DocInfo { doc, examples, deprecated }
 }
 
 fn extract_decl_name(rest: &str) -> Option<std::string::String> {
