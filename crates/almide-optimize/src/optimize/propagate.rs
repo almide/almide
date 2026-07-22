@@ -154,6 +154,18 @@ fn propagate_expr_call(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
 /// propagate into each child expression.
 fn propagate_expr_containers(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
     match &mut expr.kind {
+        IrExprKind::List { .. } | IrExprKind::Tuple { .. } | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::MapLiteral { .. } => propagate_expr_containers_literals(expr, constants),
+        IrExprKind::Range { .. } | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::StringInterp { .. } => propagate_expr_containers_access(expr, constants),
+        _ => unreachable!(),
+    }
+}
+
+/// List/Tuple/Record/SpreadRecord/MapLiteral: propagate into each element/entry.
+fn propagate_expr_containers_literals(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
+    match &mut expr.kind {
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
             for e in elements { propagate_expr(e, constants); }
         }
@@ -162,6 +174,16 @@ fn propagate_expr_containers(expr: &mut IrExpr, constants: &HashMap<VarId, IrExp
             propagate_expr(base, constants);
             for (_, v) in fields { propagate_expr(v, constants); }
         }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries { propagate_expr(k, constants); propagate_expr(v, constants); }
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Range/IndexAccess/MapAccess/Member/TupleIndex/StringInterp: propagate into each accessed sub-expression.
+fn propagate_expr_containers_access(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
+    match &mut expr.kind {
         IrExprKind::Range { start, end, .. } => {
             propagate_expr(start, constants);
             propagate_expr(end, constants);
@@ -176,9 +198,6 @@ fn propagate_expr_containers(expr: &mut IrExpr, constants: &HashMap<VarId, IrExp
         }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
             propagate_expr(object, constants);
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { propagate_expr(k, constants); propagate_expr(v, constants); }
         }
         IrExprKind::StringInterp { parts } => {
             for p in parts {

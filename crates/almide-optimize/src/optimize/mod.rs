@@ -150,6 +150,18 @@ fn fold_expr_call(expr: &mut IrExpr) {
 /// recurse into each child expression.
 fn fold_expr_containers(expr: &mut IrExpr) {
     match &mut expr.kind {
+        IrExprKind::List { .. } | IrExprKind::Tuple { .. } | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::MapLiteral { .. } => fold_expr_containers_literals(expr),
+        IrExprKind::Range { .. } | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::StringInterp { .. } => fold_expr_containers_access(expr),
+        _ => unreachable!(),
+    }
+}
+
+/// List/Tuple/Record/SpreadRecord/MapLiteral: recurse into each element/entry.
+fn fold_expr_containers_literals(expr: &mut IrExpr) {
+    match &mut expr.kind {
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
             for e in elements { fold_expr(e); }
         }
@@ -160,6 +172,16 @@ fn fold_expr_containers(expr: &mut IrExpr) {
             fold_expr(base);
             for (_, v) in fields { fold_expr(v); }
         }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries { fold_expr(k); fold_expr(v); }
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Range/IndexAccess/MapAccess/Member/TupleIndex/StringInterp: recurse into each accessed sub-expression.
+fn fold_expr_containers_access(expr: &mut IrExpr) {
+    match &mut expr.kind {
         IrExprKind::Range { start, end, .. } => {
             fold_expr(start);
             fold_expr(end);
@@ -174,9 +196,6 @@ fn fold_expr_containers(expr: &mut IrExpr) {
         }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
             fold_expr(object);
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { fold_expr(k); fold_expr(v); }
         }
         IrExprKind::StringInterp { parts } => {
             for p in parts {
