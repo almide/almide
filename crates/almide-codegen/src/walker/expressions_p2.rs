@@ -607,63 +607,68 @@ fn rc_cow_symbol_is_native_runtime(symbol: &str) -> bool {
         .any(|(m, _)| rest.strip_prefix(m).is_some_and(|r| r.starts_with('_')))
 }
 
-fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
-    // Inline numeric casts
+/// Inline numeric casts. Extracted from `render_runtime_call` (cog>30
+/// decomposition): `Some` mirrors the original's early `return`, `None`
+/// falls through to the next check.
+fn try_render_numeric_cast(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> Option<String> {
     match symbol.as_str() {
         "almide_rt_float_from_int" | "almide_rt_int_to_float" if args.len() == 1 => {
-            return format!("({} as f64)", render_expr(ctx, &args[0]));
+            Some(format!("({} as f64)", render_expr(ctx, &args[0])))
         }
         "almide_rt_float_to_int" if args.len() == 1 => {
-            return format!("({} as i64)", render_expr(ctx, &args[0]));
+            Some(format!("({} as i64)", render_expr(ctx, &args[0])))
         }
-        _ => {}
+        _ => None,
     }
-    // Mutating stdlib calls on a module-level (`ModuleRc`) or `RcCow` var: route
-    // through `Rc::make_mut`/`.make_mut()` so the mutation hits the shared backing
-    // store, not a clone. The mutator set is the one source of truth in
-    // `pass_closure_conversion` (list/map/string/bytes &mut-on-args[0] fns); before
-    // it was only list push/pop/clear, so `map.insert`/`bytes.push`/… on a global
-    // silently mutated a discarded `(**c.borrow()).clone()`.
-    if !args.is_empty() {
-        let is_mutating = crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str());
-        if is_mutating {
-            if let IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } = &args[0].kind {
-                if let IrExprKind::Var { id } = &inner.kind {
-                    let name = ctx.var_name(*id).to_string();
-                    // §4 Stage 2: a global target dispatches on the attribute.
-                    if let Some(info) = ctx.ann.global(*id) {
-                        use almide_ir::top_let_storage::TopLetStorage as Tls;
-                        if matches!(info.storage, Tls::RcRefCell) {
-                            let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
-                                .collect::<Vec<_>>().join(", ");
-                            let rc_mut = "std::rc::Rc::make_mut(&mut *c.borrow_mut())";
-                            let call_args = if rest_args.is_empty() {
-                                rc_mut.to_string()
-                            } else {
-                                format!("{}, {}", rc_mut, rest_args)
-                            };
-                            return format!("{}.with(|c| {}({}))", info.static_name, symbol.as_str(), call_args);
-                        }
-                    }
-                    match ctx.ann.get_var_storage(id) {
-                        VarStorage::RcCow => {
-                            let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
-                                .collect::<Vec<_>>().join(", ");
-                            let call_args = if rest_args.is_empty() {
-                                format!("{}.make_mut()", name)
-                            } else {
-                                format!("{}.make_mut(), {}", name, rest_args)
-                            };
-                            return format!("{}({})", symbol.as_str(), call_args);
-                        }
-                        _ => {}
-                    }
-                }
-            }
+}
+
+/// Mutating stdlib calls on a module-level (`ModuleRc`) or `RcCow` var:
+/// route through `Rc::make_mut`/`.make_mut()` so the mutation hits the
+/// shared backing store, not a clone. The mutator set is the one source of
+/// truth in `pass_closure_conversion` (list/map/string/bytes &mut-on-args[0]
+/// fns); before it was only list push/pop/clear, so `map.insert`/`bytes.push`/…
+/// on a global silently mutated a discarded `(**c.borrow()).clone()`.
+/// Extracted from `render_runtime_call`: `Some` mirrors the original's
+/// early `return`, `None` falls through to the default owned-args render.
+fn try_render_mutating_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> Option<String> {
+    if args.is_empty() { return None; }
+    if !crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str()) { return None; }
+    let (IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner }) = &args[0].kind else { return None; };
+    let IrExprKind::Var { id } = &inner.kind else { return None; };
+    let name = ctx.var_name(*id).to_string();
+    // §4 Stage 2: a global target dispatches on the attribute.
+    if let Some(info) = ctx.ann.global(*id) {
+        use almide_ir::top_let_storage::TopLetStorage as Tls;
+        if matches!(info.storage, Tls::RcRefCell) {
+            let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
+                .collect::<Vec<_>>().join(", ");
+            let rc_mut = "std::rc::Rc::make_mut(&mut *c.borrow_mut())";
+            let call_args = if rest_args.is_empty() {
+                rc_mut.to_string()
+            } else {
+                format!("{}, {}", rc_mut, rest_args)
+            };
+            return Some(format!("{}.with(|c| {}({}))", info.static_name, symbol.as_str(), call_args));
         }
     }
-    // Default: render all args as owned
-    let args_str = args
+    match ctx.ann.get_var_storage(id) {
+        VarStorage::RcCow => {
+            let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
+                .collect::<Vec<_>>().join(", ");
+            let call_args = if rest_args.is_empty() {
+                format!("{}.make_mut()", name)
+            } else {
+                format!("{}.make_mut(), {}", name, rest_args)
+            };
+            Some(format!("{}({})", symbol.as_str(), call_args))
+        }
+        _ => None,
+    }
+}
+
+/// Default: render all args as owned. Extracted from `render_runtime_call`.
+fn render_runtime_call_args_owned(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
+    args
         .iter()
         .map(|a| {
             let r = render_expr_owned(ctx, a);
@@ -687,7 +692,17 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
             }
         })
         .collect::<Vec<_>>()
-        .join(", ");
+        .join(", ")
+}
+
+fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
+    if let Some(rendered) = try_render_numeric_cast(ctx, symbol, args) {
+        return rendered;
+    }
+    if let Some(rendered) = try_render_mutating_runtime_call(ctx, symbol, args) {
+        return rendered;
+    }
+    let args_str = render_runtime_call_args_owned(ctx, symbol, args);
     format!("{}({})", symbol.as_str(), args_str)
 }
 
