@@ -355,17 +355,7 @@ impl Checker {
         // Unwrap postfix operators (??, !, ?) on the RHS so the pipe targets the inner Call.
         // e.g. `xs |> list.find(pred) ?? fallback` → pipe into list.find, then apply ??
         match &mut right.kind {
-            ExprKind::UnwrapOr { expr: inner, fallback, .. } => {
-                let inner_ty = self.infer_pipe(left, inner);
-                let fb_ty = self.infer_expr(fallback);
-                self.unify_infer(&inner_ty, &fb_ty);
-                // UnwrapOr unwraps Option[T]/Result[T,E] → T
-                match &inner_ty {
-                    Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
-                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
-                    _ => inner_ty,
-                }
-            }
+            ExprKind::UnwrapOr { expr: inner, fallback, .. } => self.infer_pipe_unwrap_or(left, inner, fallback),
             ExprKind::Unwrap { expr: inner, .. } => {
                 let inner_ty = self.infer_pipe(left, inner);
                 self.check_unwrap_propagation_context();
@@ -388,6 +378,19 @@ impl Checker {
                 }
             }
             _ => self.infer_pipe_direct(left, right),
+        }
+    }
+
+    /// `ExprKind::UnwrapOr` arm of [`Self::infer_pipe`]. Verbatim text move.
+    fn infer_pipe_unwrap_or(&mut self, left: &mut Box<ast::Expr>, inner: &mut Box<ast::Expr>, fallback: &mut Box<ast::Expr>) -> Ty {
+        let inner_ty = self.infer_pipe(left, inner);
+        let fb_ty = self.infer_expr(fallback);
+        self.unify_infer(&inner_ty, &fb_ty);
+        // UnwrapOr unwraps Option[T]/Result[T,E] → T
+        match &inner_ty {
+            Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+            _ => inner_ty,
         }
     }
 
@@ -656,8 +659,12 @@ impl Checker {
         }
     }
 
-    pub(crate) fn record_int_literal_context(&mut self, value: &ast::Expr, declared: &Ty) {
-        let (lit_id, raw, negated) = match &value.kind {
+    /// Identify the underlying `Int` literal site (id, raw text, negated) of
+    /// `value` — either a bare literal, a `-<literal>` unary, or a
+    /// parenthesized literal. Verbatim text move out of
+    /// [`Self::record_int_literal_context`].
+    fn int_literal_context_site(value: &ast::Expr) -> (Option<almide_lang::ast::ExprId>, Option<String>, bool) {
+        match &value.kind {
             ExprKind::Int { raw, .. } => (Some(value.id), Some(raw.clone()), false),
             ExprKind::Unary { op, operand, .. } if op.as_str() == "-"
                 && matches!(&operand.kind, ExprKind::Int { .. }) =>
@@ -670,7 +677,11 @@ impl Checker {
                 (Some(expr.id), raw, false)
             }
             _ => (None, None, false),
-        };
+        }
+    }
+
+    pub(crate) fn record_int_literal_context(&mut self, value: &ast::Expr, declared: &Ty) {
+        let (lit_id, raw, negated) = Self::int_literal_context_site(value);
         if let Some(id) = lit_id {
             if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == id) {
                 site.context_ty = Some(declared.clone());
