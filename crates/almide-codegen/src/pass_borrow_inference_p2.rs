@@ -599,23 +599,32 @@ fn iter_chain_uses_var(source: &IrExpr, steps: &[IterStep], collector: &IterColl
     }
 }
 
+/// `IrExprKind::Block` case of `uses_var`, extracted verbatim (cog>30
+/// decomposition, pattern 2 — every arm of the router independently
+/// returns a `bool`, no state shared between arms).
+fn uses_var_block(stmts: &[IrStmt], expr: &Option<Box<IrExpr>>, var: VarId) -> bool {
+    stmts.iter().any(|s| stmt_uses_var(s, var))
+    || expr.as_ref().map_or(false, |e| uses_var(e, var))
+}
+
+/// `IrExprKind::Match`'s `arms` case of `uses_var`, extracted verbatim
+/// (cog>30 decomposition).
+fn uses_var_match_arms(arms: &[IrMatchArm], var: VarId) -> bool {
+    arms.iter().any(|a| {
+        a.guard.as_ref().map_or(false, |g| uses_var(g, var)) || uses_var(&a.body, var)
+    })
+}
+
 fn uses_var(expr: &IrExpr, var: VarId) -> bool {
     match &expr.kind {
         IrExprKind::Var { id } => *id == var,
-        IrExprKind::Block { stmts, expr } => {
-            stmts.iter().any(|s| stmt_uses_var(s, var))
-            || expr.as_ref().map_or(false, |e| uses_var(e, var))
-        }
+        IrExprKind::Block { stmts, expr } => uses_var_block(stmts, expr, var),
         IrExprKind::If { cond, then, else_ } => uses_var(cond, var) || uses_var(then, var) || uses_var(else_, var),
         IrExprKind::Call { args, target, .. } => call_uses_var(target, args, var),
         IrExprKind::BinOp { left, right, .. } => uses_var(left, var) || uses_var(right, var),
         IrExprKind::UnOp { operand, .. } => uses_var(operand, var),
         IrExprKind::Lambda { body, .. } => uses_var(body, var),
-        IrExprKind::Match { subject, arms } => {
-            uses_var(subject, var) || arms.iter().any(|a| {
-                a.guard.as_ref().map_or(false, |g| uses_var(g, var)) || uses_var(&a.body, var)
-            })
-        }
+        IrExprKind::Match { subject, arms } => uses_var(subject, var) || uses_var_match_arms(arms, var),
         IrExprKind::ForIn { iterable, body, .. } => {
             uses_var(iterable, var) || body.iter().any(|s| stmt_uses_var(s, var))
         }
