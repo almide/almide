@@ -112,8 +112,9 @@ fn rename_named_calls(expr: &mut IrExpr, from: &str, to: &str) {
 /// unchanged when the pairing already matches (or when the operator
 /// is already kind-neutral like `Eq` / `Lt` / `ConcatStr`).
 fn repair_binop_for_types(op: BinOp, left_ty: &Ty, right_ty: &Ty) -> BinOp {
-    let is_float = |t: &Ty| matches!(t, Ty::Float | Ty::Float32);
-    let float_pair = is_float(left_ty) || is_float(right_ty);
+    if let Some(repaired) = repair_binop_for_float(op, left_ty, right_ty) {
+        return repaired;
+    }
     // `+` on a TypeVar lowered to the default `AddInt` (lower/expressions.rs):
     // when the generic instantiates to String/List, re-dispatch to the
     // overloaded concat — mirroring lowering's own type dispatch. Without this
@@ -121,21 +122,34 @@ fn repair_binop_for_types(op: BinOp, left_ty: &Ty, right_ty: &Ty) -> BinOp {
     // and the IR-verify gate (#532) panicked on the non-Int operands (#558).
     // A genuinely non-concatenable instantiation (e.g. a record) stays `AddInt`
     // and is correctly still rejected by that gate.
+    repair_binop_for_str_or_list(op, left_ty, right_ty)
+}
+
+/// Re-dispatch an `Int`-flavored numeric `BinOp` to its `Float` twin when either
+/// operand resolved to a float type. Returns `None` (no repair) otherwise.
+fn repair_binop_for_float(op: BinOp, left_ty: &Ty, right_ty: &Ty) -> Option<BinOp> {
+    let is_float = |t: &Ty| matches!(t, Ty::Float | Ty::Float32);
+    if !is_float(left_ty) && !is_float(right_ty) { return None; }
+    match op {
+        BinOp::AddInt => Some(BinOp::AddFloat),
+        BinOp::SubInt => Some(BinOp::SubFloat),
+        BinOp::MulInt => Some(BinOp::MulFloat),
+        BinOp::DivInt => Some(BinOp::DivFloat),
+        BinOp::ModInt => Some(BinOp::ModFloat),
+        BinOp::PowInt => Some(BinOp::PowFloat),
+        _ => None,
+    }
+}
+
+/// Re-dispatch `AddInt` to the overloaded concat operator when either operand
+/// resolved to `String` or `List`. Leaves every other operator unchanged.
+fn repair_binop_for_str_or_list(op: BinOp, left_ty: &Ty, right_ty: &Ty) -> BinOp {
+    if !matches!(op, BinOp::AddInt) { return op; }
     let is_str = |t: &Ty| matches!(t, Ty::String);
     let is_list = |t: &Ty| matches!(t, Ty::Applied(almide_lang::types::TypeConstructorId::List, _));
-    let str_pair = is_str(left_ty) || is_str(right_ty);
-    let list_pair = is_list(left_ty) || is_list(right_ty);
-    match op {
-        BinOp::AddInt if float_pair => BinOp::AddFloat,
-        BinOp::SubInt if float_pair => BinOp::SubFloat,
-        BinOp::MulInt if float_pair => BinOp::MulFloat,
-        BinOp::DivInt if float_pair => BinOp::DivFloat,
-        BinOp::ModInt if float_pair => BinOp::ModFloat,
-        BinOp::PowInt if float_pair => BinOp::PowFloat,
-        BinOp::AddInt if str_pair => BinOp::ConcatStr,
-        BinOp::AddInt if list_pair => BinOp::ConcatList,
-        other => other,
-    }
+    if is_str(left_ty) || is_str(right_ty) { return BinOp::ConcatStr; }
+    if is_list(left_ty) || is_list(right_ty) { return BinOp::ConcatList; }
+    op
 }
 
 /// Substitute TypeVars with concrete types.
