@@ -122,14 +122,7 @@ fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
             collect_varids_in_expr(then, out);
             collect_varids_in_expr(else_, out);
         }
-        IrExprKind::Match { subject, arms } => {
-            collect_varids_in_expr(subject, out);
-            for arm in arms {
-                collect_varids_in_pattern(&arm.pattern, out);
-                if let Some(g) = &arm.guard { collect_varids_in_expr(g, out); }
-                collect_varids_in_expr(&arm.body, out);
-            }
-        }
+        IrExprKind::Match { .. } => collect_varids_in_match(expr, out),
         IrExprKind::Block { stmts, expr } => {
             for s in stmts { collect_varids_in_stmt(s, out); }
             if let Some(e) = expr { collect_varids_in_expr(e, out); }
@@ -176,21 +169,7 @@ fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
             for (id, _) in captures { collect_var_id(*id, out); }
         }
         IrExprKind::EnvLoad { env_var, .. } => collect_var_id(*env_var, out),
-        IrExprKind::IterChain { source, steps, collector, .. } => {
-            collect_varids_in_expr(source, out);
-            for step in steps {
-                match step {
-                    IterStep::Map { lambda } | IterStep::Filter { lambda }
-                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => collect_varids_in_expr(lambda, out),
-                }
-            }
-            match collector {
-                IterCollector::Collect => {}
-                IterCollector::Fold { init, lambda } => { collect_varids_in_expr(init, out); collect_varids_in_expr(lambda, out); }
-                IterCollector::Any { lambda } | IterCollector::All { lambda }
-                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => collect_varids_in_expr(lambda, out),
-            }
-        }
+        IrExprKind::IterChain { .. } => collect_varids_in_iter_chain(expr, out),
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
         | IrExprKind::Await { expr } | IrExprKind::Clone { expr }
@@ -204,6 +183,33 @@ fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
         }
         IrExprKind::RustMacro { args, .. } => { for a in args { collect_varids_in_expr(a, out); } }
         _ => {} // literals, unit, break, continue, etc.
+    }
+}
+
+fn collect_varids_in_match(expr: &IrExpr, out: &mut Vec<VarId>) {
+    let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+    collect_varids_in_expr(subject, out);
+    for arm in arms {
+        collect_varids_in_pattern(&arm.pattern, out);
+        if let Some(g) = &arm.guard { collect_varids_in_expr(g, out); }
+        collect_varids_in_expr(&arm.body, out);
+    }
+}
+
+fn collect_varids_in_iter_chain(expr: &IrExpr, out: &mut Vec<VarId>) {
+    let IrExprKind::IterChain { source, steps, collector, .. } = &expr.kind else { unreachable!() };
+    collect_varids_in_expr(source, out);
+    for step in steps {
+        match step {
+            IterStep::Map { lambda } | IterStep::Filter { lambda }
+            | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => collect_varids_in_expr(lambda, out),
+        }
+    }
+    match collector {
+        IterCollector::Collect => {}
+        IterCollector::Fold { init, lambda } => { collect_varids_in_expr(init, out); collect_varids_in_expr(lambda, out); }
+        IterCollector::Any { lambda } | IterCollector::All { lambda }
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => collect_varids_in_expr(lambda, out),
     }
 }
 
