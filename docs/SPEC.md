@@ -95,14 +95,14 @@ Numeric literals support `_` as a visual separator (e.g., `1_000_000`).
 
 Block comments nest: `/* outer /* inner */ still outer */` is valid.
 
-### 1.5 Keywords (34)
+### 1.5 Keywords (35)
 
 ```
 module  import  type    protocol for     in      fn      let
-var     if      then    else     match   ok      err     some
-none    todo    true    false    not     and     or      strict
-pub     effect  test    guard    break   continue while   local
-mod     fan
+var     mut     if      then     else    match   ok      err
+some    none    todo    true     false   not     and     or
+strict  pub     effect  test     guard   break   continue while
+local   mod     fan
 ```
 
 ### 1.6 Operators and Delimiters
@@ -181,7 +181,7 @@ Expr      ::= Literal | Name | InterpolatedStr
             | ForInExpr | WhileExpr | FanExpr
             | BlockExpr | LambdaExpr
             | HoleExpr | TodoExpr
-            | RangeExpr | TupleExpr | UnsafeExpr
+            | RangeExpr | TupleExpr
             | "(" Expr ")"
 ```
 
@@ -454,7 +454,7 @@ FnDecl ::= Visibility? "effect"? "fn" Name GenericParams?
 
 Visibility ::= "local" | "mod"        // default is public
 ParamList  ::= Param ( "," Param )*
-Param      ::= Identifier ":" TypeExpr ( "=" Expr )?   // default value optional
+Param      ::= "mut"? Identifier ":" TypeExpr ( "=" Expr )?   // default value optional
 ```
 
 Modifier order: `[local|mod]? effect? fn`
@@ -546,6 +546,29 @@ For FFI bindings to target-specific functions:
 @extern(ts, "fs", "readFileSync")
 effect fn read_text(path: String) -> Result[String, String] = _
 ```
+
+### 7.8 Mutable Parameters
+
+`mut` on a parameter passes it by mutable reference: an assignment to the
+parameter inside the function is visible to the caller after the call
+returns, in place — there is no return value carrying the new state back.
+
+```
+fn incr(mut x: Int) -> Unit = { x = x + 1 }
+
+fn main() -> Unit = {
+  var n = 5
+  incr(n)
+  println(int.to_string(n))   // 6
+}
+```
+
+The call site must pass a `var` binding — a `let` binding or a temporary
+expression is rejected (E007), since there is nothing to write the mutation
+back into. `mut` may appear on any parameter, not only the first. This is how
+in-place stdlib operations are written (`list.push`, `list.pop`,
+`list.clear`, …) — not via a hidden receiver convention, just an ordinary
+parameter marked `mut`.
 
 ---
 
@@ -834,15 +857,6 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 ```
 
 `_` (hole) and `todo(msg)` accept any expected type. The compiler reports the expected type, available variables, and suggestions.
-
-### 9.19 unsafe Block
-
-```
-fn technically_pure(x: Int) -> Int =
-  unsafe { fs.read_text(cache_path) }    // bypass effect boundary
-```
-
-`unsafe` surfaces "normal rules are being broken here."
 
 ---
 
