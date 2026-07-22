@@ -20,6 +20,9 @@ pub(super) fn mangle_suffix(bindings: &HashMap<String, Ty>) -> String {
 }
 
 pub(super) fn mangle_ty(ty: &Ty) -> String {
+    if let Some(name) = mangle_scalar_ty_name(ty) {
+        return name.to_string();
+    }
     match ty {
         Ty::Named(name, args) => {
             if args.is_empty() { name.to_string() }
@@ -33,21 +36,6 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
             names.sort();
             names.join("_")
         }
-        Ty::Int => "Int".into(),
-        Ty::Float => "Float".into(),
-        Ty::Int8 => "Int8".into(),
-        Ty::Int16 => "Int16".into(),
-        Ty::Int32 => "Int32".into(),
-        Ty::UInt8 => "UInt8".into(),
-        Ty::UInt16 => "UInt16".into(),
-        Ty::UInt32 => "UInt32".into(),
-        Ty::UInt64 => "UInt64".into(),
-        Ty::Float32 => "Float32".into(),
-        Ty::String => "String".into(),
-        Ty::Bool => "Bool".into(),
-        Ty::Bytes => "Bytes".into(),
-        Ty::Matrix => "Matrix".into(),
-        Ty::Unit => "Unit".into(),
         Ty::Applied(almide_lang::types::TypeConstructorId::List, args) if args.len() == 1 => format!("List_{}", mangle_ty(&args[0])),
         Ty::Applied(id, args) => {
             let name = id.to_string();
@@ -58,6 +46,30 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
         }
         _ => "Unknown".into(),
     }
+}
+
+/// Mangled name for a fixed-name scalar `Ty`. Returns `None` for the
+/// structural/compound variants (`Named`, `Record`, `Applied`, ...) that
+/// `mangle_ty` handles itself.
+fn mangle_scalar_ty_name(ty: &Ty) -> Option<&'static str> {
+    Some(match ty {
+        Ty::Int => "Int",
+        Ty::Float => "Float",
+        Ty::Int8 => "Int8",
+        Ty::Int16 => "Int16",
+        Ty::Int32 => "Int32",
+        Ty::UInt8 => "UInt8",
+        Ty::UInt16 => "UInt16",
+        Ty::UInt32 => "UInt32",
+        Ty::UInt64 => "UInt64",
+        Ty::Float32 => "Float32",
+        Ty::String => "String",
+        Ty::Bool => "Bool",
+        Ty::Bytes => "Bytes",
+        Ty::Matrix => "Matrix",
+        Ty::Unit => "Unit",
+        _ => return None,
+    })
 }
 
 /// Extract the concrete type name from a Ty for protocol method rewriting.
