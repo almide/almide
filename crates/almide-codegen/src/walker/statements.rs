@@ -744,48 +744,57 @@ fn guard_shape(ctx: &RenderContext, pat: &IrPattern, counter: &mut usize, subs: 
 /// The guard has already verified the structure, so `else` is dead.
 fn box_extract(ctx: &RenderContext, pat: &IrPattern, move_expr: &str, binds: &mut Vec<String>, counter: &mut usize) {
     match pat {
-        IrPattern::Constructor { name, args } => {
-            let qualified = qualify_ctor(ctx, name.as_str(), None);
-            let mut flat = Vec::with_capacity(args.len());
-            let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
-            for (i, arg) in args.iter().enumerate() {
-                if is_boxed_tuple_field(ctx, name.as_str(), i) && pattern_is_complex(arg) {
-                    let e = fresh_box_var(counter);
-                    flat.push(e.clone());
-                    deeper.push((e, arg));
-                } else {
-                    flat.push(render_pattern_hinted(ctx, arg, None));
-                }
-            }
-            let flat_pat = if args.is_empty() { qualified } else { format!("{}({})", qualified, flat.join(", ")) };
-            binds.push(format!("let {} = {} else {{ unreachable!() }};", flat_pat, move_expr));
-            for (e, sub) in deeper {
-                box_extract(ctx, sub, &format!("*{}", e), binds, counter);
-            }
-        }
-        IrPattern::RecordPattern { name, fields, .. } => {
-            let qualified = qualify_ctor(ctx, name.as_str(), None);
-            let mut flat = Vec::with_capacity(fields.len());
-            let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
-            for fp in fields {
-                match &fp.pattern {
-                    Some(p) if is_boxed_record_field(ctx, name.as_str(), fp.name.as_str())
-                        && pattern_is_complex(p) =>
-                    {
-                        let e = fresh_box_var(counter);
-                        flat.push(format!("{}: {}", fp.name, e));
-                        deeper.push((e, p));
-                    }
-                    Some(p) => flat.push(format!("{}: {}", fp.name, render_pattern_hinted(ctx, p, None))),
-                    None => flat.push(fp.name.to_string()),
-                }
-            }
-            binds.push(format!("let {} {{ {}, .. }} = {} else {{ unreachable!() }};", qualified, flat.join(", "), move_expr));
-            for (e, sub) in deeper {
-                box_extract(ctx, sub, &format!("*{}", e), binds, counter);
-            }
-        }
+        IrPattern::Constructor { name, args } => box_extract_constructor(ctx, name, args, move_expr, binds, counter),
+        IrPattern::RecordPattern { name, fields, .. } => box_extract_record(ctx, name, fields, move_expr, binds, counter),
         _ => {}
+    }
+}
+
+/// `IrPattern::Constructor` case of `box_extract`, extracted verbatim
+/// (cog>30 decomposition, pattern 1 — `binds`/`counter` are write-only
+/// accumulators, same safety class as `check_needs_ownership`'s `needs`).
+fn box_extract_constructor(ctx: &RenderContext, name: &str, args: &[IrPattern], move_expr: &str, binds: &mut Vec<String>, counter: &mut usize) {
+    let qualified = qualify_ctor(ctx, name, None);
+    let mut flat = Vec::with_capacity(args.len());
+    let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
+    for (i, arg) in args.iter().enumerate() {
+        if is_boxed_tuple_field(ctx, name, i) && pattern_is_complex(arg) {
+            let e = fresh_box_var(counter);
+            flat.push(e.clone());
+            deeper.push((e, arg));
+        } else {
+            flat.push(render_pattern_hinted(ctx, arg, None));
+        }
+    }
+    let flat_pat = if args.is_empty() { qualified } else { format!("{}({})", qualified, flat.join(", ")) };
+    binds.push(format!("let {} = {} else {{ unreachable!() }};", flat_pat, move_expr));
+    for (e, sub) in deeper {
+        box_extract(ctx, sub, &format!("*{}", e), binds, counter);
+    }
+}
+
+/// `IrPattern::RecordPattern` case of `box_extract`, extracted verbatim
+/// (cog>30 decomposition).
+fn box_extract_record(ctx: &RenderContext, name: &str, fields: &[IrFieldPattern], move_expr: &str, binds: &mut Vec<String>, counter: &mut usize) {
+    let qualified = qualify_ctor(ctx, name, None);
+    let mut flat = Vec::with_capacity(fields.len());
+    let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
+    for fp in fields {
+        match &fp.pattern {
+            Some(p) if is_boxed_record_field(ctx, name, fp.name.as_str())
+                && pattern_is_complex(p) =>
+            {
+                let e = fresh_box_var(counter);
+                flat.push(format!("{}: {}", fp.name, e));
+                deeper.push((e, p));
+            }
+            Some(p) => flat.push(format!("{}: {}", fp.name, render_pattern_hinted(ctx, p, None))),
+            None => flat.push(fp.name.to_string()),
+        }
+    }
+    binds.push(format!("let {} {{ {}, .. }} = {} else {{ unreachable!() }};", qualified, flat.join(", "), move_expr));
+    for (e, sub) in deeper {
+        box_extract(ctx, sub, &format!("*{}", e), binds, counter);
     }
 }
 
