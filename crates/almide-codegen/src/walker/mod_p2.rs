@@ -77,20 +77,24 @@ fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotat
 /// then imported-module type decls).
 fn register_ctor_to_enum(ctx: &mut RenderContext, program: &IrProgram) {
     for td in &program.type_decls {
-        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-            for c in cases {
-                ctx.ann.ctor_to_enum.insert(c.name.to_string(), td.name.to_string());
-            }
-        }
+        register_type_decl_ctors(ctx, td);
     }
     // Also register constructors from imported modules
     for module in &program.modules {
         for td in &module.type_decls {
-            if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                for c in cases {
-                    ctx.ann.ctor_to_enum.insert(c.name.to_string(), td.name.to_string());
-                }
-            }
+            register_type_decl_ctors(ctx, td);
+        }
+    }
+}
+
+/// Per-`td` body of `register_ctor_to_enum`'s two loops, extracted verbatim
+/// (cog>30 decomposition, sequential-phase pattern — was duplicated
+/// verbatim once for `program.type_decls` and once nested under
+/// `program.modules`).
+fn register_type_decl_ctors(ctx: &mut RenderContext, td: &IrTypeDecl) {
+    if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+        for c in cases {
+            ctx.ann.ctor_to_enum.insert(c.name.to_string(), td.name.to_string());
         }
     }
 }
