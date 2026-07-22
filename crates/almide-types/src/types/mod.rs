@@ -1,6 +1,7 @@
 /// Internal resolved type representation for the Almide type checker.
 /// Distinct from ast::TypeExpr which is a syntactic node.
 
+mod compatibility;
 mod unify;
 pub mod constructor;
 
@@ -166,43 +167,11 @@ impl FnSig {
 
 impl Ty {
     pub fn display(&self) -> String {
+        if let Some(s) = self.display_leaf() {
+            return s.to_string();
+        }
         match self {
-            Ty::Int => "Int".into(),
-            Ty::Float => "Float".into(),
-            Ty::Int8 => "Int8".into(),
-            Ty::Int16 => "Int16".into(),
-            Ty::Int32 => "Int32".into(),
-            Ty::Int64 => "Int64".into(),
-            Ty::UInt8 => "UInt8".into(),
-            Ty::UInt16 => "UInt16".into(),
-            Ty::UInt32 => "UInt32".into(),
-            Ty::UInt64 => "UInt64".into(),
-            Ty::Float32 => "Float32".into(),
-            Ty::Float64 => "Float64".into(),
-            Ty::String => "String".into(),
-            Ty::Bool => "Bool".into(),
-            Ty::Unit => "Unit".into(),
-            Ty::Bytes => "Bytes".into(),
-            Ty::Matrix => "Matrix".into(),
-            Ty::RawPtr => "RawPtr".into(),
-            Ty::Applied(id, args) => {
-                let name = match id {
-                    TypeConstructorId::List => "List",
-                    TypeConstructorId::Option => "Option",
-                    TypeConstructorId::Set => "Set",
-                    TypeConstructorId::Result => "Result",
-                    TypeConstructorId::Map => "Map",
-                    TypeConstructorId::Tuple => "Tuple",
-                    TypeConstructorId::UserDefined(n) => n.as_str(),
-                    _ => return id.to_string(),
-                };
-                if args.is_empty() {
-                    name.to_string()
-                } else {
-                    let ts: Vec<_> = args.iter().map(|t| t.display()).collect();
-                    format!("{}[{}]", name, ts.join(", "))
-                }
-            }
+            Ty::Applied(id, args) => Self::display_applied(id, args),
             Ty::Record { fields } => {
                 let fs: Vec<_> = fields.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect();
                 format!("{{ {} }}", fs.join(", "))
@@ -235,8 +204,73 @@ impl Ty {
             Ty::TypeVar(n) => n.to_string(),
             Ty::ConstParam { name, ty } => format!("const {} : {}", name, ty.display()),
             Ty::ConstValue { ty, value } => format!("{} (= {})", ty.display(), value),
-            Ty::Never => "Never".into(),
-            Ty::Unknown => "Unknown".into(),
+            // Never/Unknown and all unit-like scalars are handled by display_leaf above.
+            _ => unreachable!("display_leaf handles all unit-like scalar variants"),
+        }
+    }
+
+    /// `display()` case for unit-like scalar variants (no payload to render):
+    /// the numeric/String/Bool/Unit/Bytes/Matrix/RawPtr family plus
+    /// Never/Unknown. Returns `None` for every variant that carries data and
+    /// needs the full match in `display()`.
+    fn display_leaf(&self) -> Option<&'static str> {
+        self.display_leaf_sized_numeric().or_else(|| self.display_leaf_core())
+    }
+
+    /// `display_leaf` sub-case: the sized integer/float family (Int8..UInt64,
+    /// Float32, Float64).
+    fn display_leaf_sized_numeric(&self) -> Option<&'static str> {
+        Some(match self {
+            Ty::Int8 => "Int8",
+            Ty::Int16 => "Int16",
+            Ty::Int32 => "Int32",
+            Ty::Int64 => "Int64",
+            Ty::UInt8 => "UInt8",
+            Ty::UInt16 => "UInt16",
+            Ty::UInt32 => "UInt32",
+            Ty::UInt64 => "UInt64",
+            Ty::Float32 => "Float32",
+            Ty::Float64 => "Float64",
+            _ => return None,
+        })
+    }
+
+    /// `display_leaf` sub-case: the remaining unit-like scalars (canonical
+    /// Int/Float, String, Bool, Unit, Bytes, Matrix, RawPtr, Never, Unknown).
+    fn display_leaf_core(&self) -> Option<&'static str> {
+        Some(match self {
+            Ty::Int => "Int",
+            Ty::Float => "Float",
+            Ty::String => "String",
+            Ty::Bool => "Bool",
+            Ty::Unit => "Unit",
+            Ty::Bytes => "Bytes",
+            Ty::Matrix => "Matrix",
+            Ty::RawPtr => "RawPtr",
+            Ty::Never => "Never",
+            Ty::Unknown => "Unknown",
+            _ => return None,
+        })
+    }
+
+    /// `display()` case for `Ty::Applied(id, args)`: resolve the constructor's
+    /// display name, then append `[T, ...]` when it carries type args.
+    fn display_applied(id: &TypeConstructorId, args: &[Ty]) -> String {
+        let name = match id {
+            TypeConstructorId::List => "List",
+            TypeConstructorId::Option => "Option",
+            TypeConstructorId::Set => "Set",
+            TypeConstructorId::Result => "Result",
+            TypeConstructorId::Map => "Map",
+            TypeConstructorId::Tuple => "Tuple",
+            TypeConstructorId::UserDefined(n) => n.as_str(),
+            _ => return id.to_string(),
+        };
+        if args.is_empty() {
+            name.to_string()
+        } else {
+            let ts: Vec<_> = args.iter().map(|t| t.display()).collect();
+            format!("{}[{}]", name, ts.join(", "))
         }
     }
 
@@ -320,131 +354,6 @@ impl Ty {
             0 => Ty::Unit,
             1 => match unique.into_iter().next() { Some(t) => t, None => Ty::Unit },
             _ => Ty::Union(unique),
-        }
-    }
-
-    /// Check if two types are compatible (Unknown and Never match everything)
-    pub fn compatible(&self, other: &Ty) -> bool {
-        if *self == Ty::Unknown || *other == Ty::Unknown
-            || *self == Ty::Never || *other == Ty::Never {
-            return true;
-        }
-        // TypeVars are compatible with anything (they represent polymorphic types)
-        if matches!(self, Ty::TypeVar(_)) || matches!(other, Ty::TypeVar(_)) {
-            return true;
-        }
-        match (self, other) {
-            (Ty::Int, Ty::Int) => true,
-            (Ty::Float, Ty::Float) => true,
-            // Sized numeric types: exact-width match. Cross-width ops
-            // require explicit conversion (Stage 1c will enforce in the
-            // arithmetic dispatch).
-            (Ty::Int8, Ty::Int8) => true,
-            (Ty::Int16, Ty::Int16) => true,
-            (Ty::Int32, Ty::Int32) => true,
-            (Ty::Int64, Ty::Int64) => true,
-            (Ty::UInt8, Ty::UInt8) => true,
-            (Ty::UInt16, Ty::UInt16) => true,
-            (Ty::UInt32, Ty::UInt32) => true,
-            (Ty::UInt64, Ty::UInt64) => true,
-            (Ty::Float32, Ty::Float32) => true,
-            (Ty::Float64, Ty::Float64) => true,
-            // `Int` (canonical, literal slot) ↔ `Int64` (explicit
-            // width). Same 64-bit runtime repr so they freely interop.
-            // The binop `is_sized_scalar` rule still catches
-            // `Int32 + Int64` because `Int64` is *sized*; `Int` is not.
-            (Ty::Int, Ty::Int64) | (Ty::Int64, Ty::Int) => true,
-            (Ty::Float, Ty::Float64) | (Ty::Float64, Ty::Float) => true,
-            // Int64 / Float64 literal-coerce to narrower sized widths,
-            // same as `Int` / `Float`.
-            (Ty::Int64, Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64)
-            | (Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64, Ty::Int64) => true,
-            (Ty::Float64, Ty::Float32) | (Ty::Float32, Ty::Float64) => true,
-            // Literal coercion (Sized Numeric Types Stage 1b): an
-            // integer literal inferred as `Ty::Int` is accepted in a
-            // context that expects any sized integer type. Same for
-            // `Ty::Float` ↔ `Ty::Float32`. The coercion is symmetric
-            // in `compatible` because this pass runs before range
-            // checking; the subsequent arithmetic-dispatch sub-phase
-            // will enforce same-type binary ops, and an explicit
-            // range-check pass (Stage 1b polish) catches `UInt8 = 300`.
-            // Keeping it here (rather than threading an "expected
-            // type" through infer) is a deliberate minimum-viable
-            // choice: it gets `let x: Int32 = 42` working today with
-            // a tight, auditable one-line rule per pairing.
-            (Ty::Int, Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64)
-            | (Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64, Ty::Int) => true,
-            (Ty::Float, Ty::Float32) | (Ty::Float32, Ty::Float) => true,
-            (Ty::String, Ty::String) => true,
-            (Ty::Bool, Ty::Bool) => true,
-            (Ty::Unit, Ty::Unit) => true,
-            (Ty::Bytes, Ty::Bytes) => true,
-            (Ty::Matrix, Ty::Matrix) => true,
-            // Matrix ↔ Matrix[T] — asymmetric discrimination:
-            //   - `Matrix.compatible(Matrix[T])` = true for all T
-            //     (bare param accepts any typed value — pre-P4 stdlib
-            //     `matrix.shape(m: Matrix)` stays usable with
-            //     `matrix.zeros_f32` results).
-            //   - `Matrix[Ty::Float].compatible(Matrix)` = true only
-            //     for the `Float` dtype (`Matrix` is the alias for
-            //     `Matrix[Float]`; bare runtime repr is f64).
-            //   - `Matrix[Ty::Float32].compatible(Matrix)` etc = false,
-            //     enforced by falling through to the default arm: a
-            //     typed-arity fn like `mul_f32(a: Matrix[Float32])`
-            //     REJECTS a bare `Matrix` value, since the bare form
-            //     carries no f32 guarantee.
-            // `types_mismatch` is single-directional so this
-            // asymmetry reaches call-site diagnostics unaltered.
-            (Ty::Matrix, Ty::Applied(TypeConstructorId::Matrix, _)) => true,
-            (Ty::Applied(TypeConstructorId::Matrix, args), Ty::Matrix) => {
-                args.len() == 1 && matches!(args[0], Ty::Float | Ty::Float64)
-            }
-            (Ty::RawPtr, Ty::RawPtr) => true,
-            (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
-                args1.iter().zip(args2.iter()).all(|(a, b)| a.compatible(b))
-            }
-            (Ty::Named(a, _), Ty::Named(b, _)) => names_match(*a, *b),
-            (Ty::Variant { name: a, .. }, Ty::Variant { name: b, .. }) => names_match(*a, *b),
-            (Ty::Named(a, _), Ty::Variant { name: b, .. }) => names_match(*a, *b),
-            (Ty::Variant { name: a, .. }, Ty::Named(b, _)) => names_match(*a, *b),
-            (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 }) => {
-                p1.len() == p2.len()
-                    && p1.iter().zip(p2.iter()).all(|(a, b)| a.compatible(b))
-                    && r1.compatible(r2)
-            }
-            (Ty::Record { fields: f1 }, Ty::Record { fields: f2 }) => {
-                // Both closed: same field SET. Order-independent (by name):
-                // a record's identity is its named fields — source order,
-                // declaration order, and the sorted canonical order all occur
-                // in Ty values, and the solver's unify_structural already
-                // compares by name. A positional zip here rejected
-                // `mix({ g: .., r: .. })` against `{ r, g }` (E005).
-                f1.len() == f2.len()
-                    && f1.iter().all(|(n1, t1)| f2.iter().any(|(n2, t2)| n1 == n2 && t1.compatible(t2)))
-            }
-            (Ty::OpenRecord { fields: required }, Ty::Record { fields: actual })
-            | (Ty::OpenRecord { fields: required }, Ty::OpenRecord { fields: actual }) => {
-                // Open parameter: all required fields must exist in the argument (by name, order-independent)
-                required.iter().all(|(n1, t1)| actual.iter().any(|(n2, t2)| n1 == n2 && t1.compatible(t2)))
-            }
-            (Ty::Record { .. }, Ty::OpenRecord { .. }) => {
-                // Closed parameter × open argument: not allowed
-                false
-            }
-            (Ty::Tuple(a), Ty::Tuple(b)) => {
-                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.compatible(y))
-            }
-            // Named ↔ Record: Named types are compatible with their structural expansion
-            // (this handles the case where one side is resolve_named'd and the other isn't)
-            (Ty::Named(_, _), Ty::Record { .. }) | (Ty::Record { .. }, Ty::Named(_, _)) => true,
-            // Union: a concrete type is compatible with a union if it matches any member
-            (Ty::Union(members), other) => members.iter().any(|m| m.compatible(other)),
-            (other, Ty::Union(members)) => members.iter().any(|m| other.compatible(m)),
-            _ => false,
         }
     }
 
