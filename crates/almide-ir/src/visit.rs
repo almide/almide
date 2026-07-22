@@ -45,37 +45,19 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
             v.visit_expr(then);
             v.visit_expr(else_);
         }
-        IrExprKind::Match { subject, arms } => {
-            v.visit_expr(subject);
-            for arm in arms {
-                v.visit_pattern(&arm.pattern);
-                if let Some(g) = &arm.guard { v.visit_expr(g); }
-                v.visit_expr(&arm.body);
-            }
-        }
+        IrExprKind::Match { subject, arms } => walk_expr_match(v, subject, arms),
         IrExprKind::Block { stmts, expr } => {
             for s in stmts { v.visit_stmt(s); }
             if let Some(e) = expr { v.visit_expr(e); }
         }
 
         // ── Loops ──
-        IrExprKind::ForIn { iterable, body, .. } => {
-            v.visit_expr(iterable);
-            for s in body { v.visit_stmt(s); }
-        }
-        IrExprKind::While { cond, body } => {
-            v.visit_expr(cond);
-            for s in body { v.visit_stmt(s); }
-        }
+        IrExprKind::ForIn { iterable, body, .. } => walk_expr_loop_body(v, iterable, body),
+        IrExprKind::While { cond, body } => walk_expr_loop_body(v, cond, body),
 
         // ── Calls ──
         IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
-            match target {
-                CallTarget::Method { object, .. } => v.visit_expr(object),
-                CallTarget::Computed { callee } => v.visit_expr(callee),
-                _ => {}
-            }
-            for a in args { v.visit_expr(a); }
+            walk_expr_call(v, target, args)
         }
         IrExprKind::RuntimeCall { args, .. } => {
             for a in args { v.visit_expr(a); }
@@ -86,12 +68,10 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
         | IrExprKind::Fan { exprs: elements } => {
             for e in elements { v.visit_expr(e); }
         }
-        IrExprKind::Record { fields, .. } => {
-            for (_, val) in fields { v.visit_expr(val); }
-        }
+        IrExprKind::Record { fields, .. } => walk_expr_fields(v, fields),
         IrExprKind::SpreadRecord { base, fields } => {
             v.visit_expr(base);
-            for (_, val) in fields { v.visit_expr(val); }
+            walk_expr_fields(v, fields);
         }
         IrExprKind::MapLiteral { entries } => {
             for (k, val) in entries { v.visit_expr(k); v.visit_expr(val); }
@@ -121,11 +101,7 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
         }
 
         // ── Strings ──
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let IrStringPart::Expr { expr } = p { v.visit_expr(expr); }
-            }
-        }
+        IrExprKind::StringInterp { parts } => walk_expr_string_interp(v, parts),
 
         // ── Wrappers (single child) ──
         IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
@@ -149,24 +125,74 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
             for (_, a) in args { v.visit_expr(a); }
         }
         IrExprKind::IterChain { source, steps, collector, .. } => {
-            v.visit_expr(source);
-            for step in steps {
-                match step {
-                    IterStep::Map { lambda } | IterStep::Filter { lambda }
-                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
-                        v.visit_expr(lambda);
-                    }
-                }
-            }
-            match collector {
-                IterCollector::Collect => {}
-                IterCollector::Fold { init, lambda } => { v.visit_expr(init); v.visit_expr(lambda); }
-                IterCollector::Any { lambda } | IterCollector::All { lambda }
-                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
-                    v.visit_expr(lambda);
-                }
+            walk_expr_iter_chain(v, source, steps, collector)
+        }
+    }
+}
+
+/// `Match` arm of [`walk_expr`]: subject + per-arm pattern/guard/body.
+fn walk_expr_match<V: IrVisitor>(v: &mut V, subject: &IrExpr, arms: &[IrMatchArm]) {
+    v.visit_expr(subject);
+    for arm in arms {
+        v.visit_pattern(&arm.pattern);
+        if let Some(g) = &arm.guard { v.visit_expr(g); }
+        v.visit_expr(&arm.body);
+    }
+}
+
+/// `Call`/`TailCall` arm of [`walk_expr`]: resolve the call target, then args.
+fn walk_expr_call<V: IrVisitor>(v: &mut V, target: &CallTarget, args: &[IrExpr]) {
+    match target {
+        CallTarget::Method { object, .. } => v.visit_expr(object),
+        CallTarget::Computed { callee } => v.visit_expr(callee),
+        _ => {}
+    }
+    for a in args { v.visit_expr(a); }
+}
+
+/// `IterChain` arm of [`walk_expr`]: source, then each step's lambda, then the collector.
+fn walk_expr_iter_chain<V: IrVisitor>(
+    v: &mut V,
+    source: &IrExpr,
+    steps: &[IterStep],
+    collector: &IterCollector,
+) {
+    v.visit_expr(source);
+    for step in steps {
+        match step {
+            IterStep::Map { lambda } | IterStep::Filter { lambda }
+            | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                v.visit_expr(lambda);
             }
         }
+    }
+    match collector {
+        IterCollector::Collect => {}
+        IterCollector::Fold { init, lambda } => { v.visit_expr(init); v.visit_expr(lambda); }
+        IterCollector::Any { lambda } | IterCollector::All { lambda }
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+            v.visit_expr(lambda);
+        }
+    }
+}
+
+/// `ForIn`/`While` arms of [`walk_expr`]: both are "visit the loop-controlling
+/// expression (iterable / cond), then walk every body statement" — identical
+/// shape, so they share one helper.
+fn walk_expr_loop_body<V: IrVisitor>(v: &mut V, lead: &IrExpr, body: &[IrStmt]) {
+    v.visit_expr(lead);
+    for s in body { v.visit_stmt(s); }
+}
+
+/// `Record`/`SpreadRecord` field-value loop shared by [`walk_expr`].
+fn walk_expr_fields<V: IrVisitor>(v: &mut V, fields: &[(Sym, IrExpr)]) {
+    for (_, val) in fields { v.visit_expr(val); }
+}
+
+/// `StringInterp` arm of [`walk_expr`]: visit each interpolated sub-expression.
+fn walk_expr_string_interp<V: IrVisitor>(v: &mut V, parts: &[IrStringPart]) {
+    for p in parts {
+        if let IrStringPart::Expr { expr } = p { v.visit_expr(expr); }
     }
 }
 
