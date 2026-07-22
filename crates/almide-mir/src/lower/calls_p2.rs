@@ -207,39 +207,65 @@ impl LowerCtx {
         // Mark the heap-element result for the correct RECURSIVE drop (DropListValue per `$__drop_value`
         // for Value, DropListStr per-slot rc_dec for String) so scope-end / loop teardown frees each
         // owned element — the leak-safety the cert-invisible per-element rc_inc relies on the drop for.
+        // Guard-clause flattening of the former else-if chain — each branch now returns
+        // `Some(dst)` directly instead of falling through to the shared tail expression, so
+        // every arm's OUTCOME (which set/map `dst` lands in) is unchanged. No behavior
+        // change — see docs/roadmap/active/code-health-codopsy.md.
         if heap_elem {
             if crate::lower::is_value_ty(&elem_ty) {
                 self.value_elem_lists.insert(dst);
             } else {
                 self.heap_elem_lists.insert(dst);
             }
-        } else if flat_variant_elem {
+            return Some(dst);
+        }
+        if flat_variant_elem {
             // A flat-variant element block owns no inner handle, so the per-element-`rc_dec`
             // `DropListStr` (each element + the list block) IS its full free — the SAME cert as a
             // `List[String]`. (Checked AFTER `heap_elem`, before the tuple/record arms.)
             self.heap_elem_lists.insert(dst);
-        } else if str_value_elem {
+            return Some(dst);
+        }
+        if str_value_elem {
             self.str_value_elem_lists.insert(dst);
-        } else if str_str_elem {
+            return Some(dst);
+        }
+        if str_str_elem {
             self.str_str_elem_lists.insert(dst);
-        } else if int_str_elem {
+            return Some(dst);
+        }
+        if int_str_elem {
             self.variant_drop_handles.insert(dst, "list_int_str".to_string());
-        } else if str_int_elem {
+            return Some(dst);
+        }
+        if str_int_elem {
             self.variant_drop_handles.insert(dst, "list_str_int".to_string());
-        } else if scalar_aggregate_elem {
+            return Some(dst);
+        }
+        if scalar_aggregate_elem {
             self.heap_elem_lists.insert(dst);
-        } else if list_str_elem {
+            return Some(dst);
+        }
+        if list_str_elem {
             self.list_list_str_lists.insert(dst);
-        } else if flat_list_elem {
+            return Some(dst);
+        }
+        if flat_list_elem {
             // Flat inner blocks: per-slot rc_dec is each element's FULL free.
             self.heap_elem_lists.insert(dst);
-        } else if closure_elem {
+            return Some(dst);
+        }
+        if closure_elem {
             // Per-element recursive free via `$__drop_list_closure` → `__drop_closure`.
             self.variant_drop_handles.insert(dst, "list_closure".to_string());
-        } else if let Some(vname) = rich_variant_elem {
+            return Some(dst);
+        }
+        if let Some(vname) = rich_variant_elem {
             // RECURSIVE per-element drop via `$__drop_list_<V>` (the generated variant list drop).
             self.variant_drop_handles.insert(dst, format!("list_{vname}"));
-        } else if let Some(rname) = record_elem {
+            return Some(dst);
+        }
+        if let Some(rname) = record_elem {
             self.variant_drop_handles.insert(dst, format!("list_{rname}"));
         }
         Some(dst)

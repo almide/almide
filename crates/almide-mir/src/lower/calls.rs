@@ -759,6 +759,28 @@ impl LowerCtx {
         }
     }
 
+    /// The heap-typed STATEMENT-position call-result drop-route classification for
+    /// [`Self::lower_effect_call`] — routes `dst`'s scope-end drop based on its static type
+    /// `ty`. Verbatim extraction (guard-clause flattening) of the former inline else-if
+    /// chain, no behavior change — see docs/roadmap/active/code-health-codopsy.md.
+    fn classify_stmt_call_heap_drop(&mut self, dst: ValueId, ty: &Ty) {
+        if crate::lower::is_result_listval_ty(ty) {
+            self.value_result_lists.insert(dst);
+            return;
+        }
+        if crate::lower::is_value_result_ty(ty) {
+            self.value_result_results.insert(dst);
+            return;
+        }
+        if crate::lower::is_lenlist_list_ty(ty) {
+            self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+            return;
+        }
+        if crate::lower::is_heap_elem_list_ty(ty) {
+            self.heap_elem_lists.insert(dst);
+        }
+    }
+
     /// Lower an EFFECT call (a Unit-typed `Call`) to a runtime [`Op::Call`].
     /// Today the recognized set is `println(s)` for a heap string → [`RtFn::PrintStr`],
     /// which BORROWS the string handle (no refcount change; the value stays live
@@ -829,50 +851,59 @@ impl LowerCtx {
                 // no closure object and no lift is needed. Zero-param calls only in this
                 // brick, and the body must not re-enter the same callee (a recursive
                 // lambda would inline forever); failure rolls back to the paths below.
-                if args.is_empty() {
-                    if let IrExprKind::Var { id } = &callee.kind {
-                        let id = *id;
-                        if let Some((params, body)) = self.lambda_bindings.get(&id).cloned() {
-                            let recurses = {
-                                struct R {
-                                    id: almide_ir::VarId,
-                                    found: bool,
+                // Guard-clause flattening of the former 5-deep nested-if (no `else` anywhere:
+                // any unmet condition falls through to the code after this block, unchanged —
+                // `break` exits the labeled block and resumes there, exactly as the original
+                // fell out of the if-pyramid). No behavior change — see
+                // docs/roadmap/active/code-health-codopsy.md.
+                'inline_lambda_call: {
+                    if !args.is_empty() {
+                        break 'inline_lambda_call;
+                    }
+                    let IrExprKind::Var { id } = &callee.kind else {
+                        break 'inline_lambda_call;
+                    };
+                    let id = *id;
+                    let Some((params, body)) = self.lambda_bindings.get(&id).cloned() else {
+                        break 'inline_lambda_call;
+                    };
+                    let recurses = {
+                        struct R {
+                            id: almide_ir::VarId,
+                            found: bool,
+                        }
+                        impl almide_ir::visit::IrVisitor for R {
+                            fn visit_expr(&mut self, e: &IrExpr) {
+                                if matches!(&e.kind, IrExprKind::Var { id } if *id == self.id) {
+                                    self.found = true;
                                 }
-                                impl almide_ir::visit::IrVisitor for R {
-                                    fn visit_expr(&mut self, e: &IrExpr) {
-                                        if matches!(&e.kind, IrExprKind::Var { id } if *id == self.id)
-                                        {
-                                            self.found = true;
-                                        }
-                                        almide_ir::visit::walk_expr(self, e);
-                                    }
-                                }
-                                let mut r = R { id, found: false };
-                                almide_ir::visit::IrVisitor::visit_expr(&mut r, &body);
-                                r.found
-                            };
-                            if params.is_empty() && !recurses {
-                                let ops_mark = self.ops.len();
-                                let lhh_mark = self.live_heap_handles.len();
-                                let stmt = almide_ir::IrStmt {
-                                    kind: almide_ir::IrStmtKind::Expr { expr: body },
-                                    span: None,
-                                };
-                                match self.lower_stmt(&stmt) {
-                                    Ok(()) => return Ok(()),
-                                    Err(e) => {
-                                        if std::env::var("ALMIDE_DBG_ANF").is_ok() {
-                                            eprintln!(
-                                                "[c1-stmt-inline] body failed in {}: {e:?}",
-                                                self.fn_name
-                                            );
-                                        }
-                                    }
-                                }
-                                self.ops.truncate(ops_mark);
-                                self.live_heap_handles.truncate(lhh_mark);
+                                almide_ir::visit::walk_expr(self, e);
                             }
                         }
+                        let mut r = R { id, found: false };
+                        almide_ir::visit::IrVisitor::visit_expr(&mut r, &body);
+                        r.found
+                    };
+                    if params.is_empty() && !recurses {
+                        let ops_mark = self.ops.len();
+                        let lhh_mark = self.live_heap_handles.len();
+                        let stmt = almide_ir::IrStmt {
+                            kind: almide_ir::IrStmtKind::Expr { expr: body },
+                            span: None,
+                        };
+                        match self.lower_stmt(&stmt) {
+                            Ok(()) => return Ok(()),
+                            Err(e) => {
+                                if std::env::var("ALMIDE_DBG_ANF").is_ok() {
+                                    eprintln!(
+                                        "[c1-stmt-inline] body failed in {}: {e:?}",
+                                        self.fn_name
+                                    );
+                                }
+                            }
+                        }
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
                     }
                 }
                 // A Unit-result call THROUGH a lifted lambda value EXECUTES via CallIndirect
@@ -978,15 +1009,7 @@ impl LowerCtx {
                         args: lowered,
                         result: Some(pr),
                     });
-                    if crate::lower::is_result_listval_ty(&call.ty) {
-                        self.value_result_lists.insert(dst);
-                    } else if crate::lower::is_value_result_ty(&call.ty) {
-                        self.value_result_results.insert(dst);
-                    } else if crate::lower::is_lenlist_list_ty(&call.ty) {
-                        self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
-                    } else if crate::lower::is_heap_elem_list_ty(&call.ty) {
-                        self.heap_elem_lists.insert(dst);
-                    }
+                    self.classify_stmt_call_heap_drop(dst, &call.ty);
                     self.live_heap_handles.push(dst);
                 } else {
                     self.ops.push(Op::CallFn {

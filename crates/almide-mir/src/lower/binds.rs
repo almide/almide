@@ -205,18 +205,24 @@ impl LowerCtx {
             }
             if matches!(ty, Ty::Fn { .. }) {
                 closure_caps.push((v, ty));
-            } else if one_level_exact(&ty) {
-                heap_caps.push((v, ty));
-            } else if is_nested_list_str(&ty) || is_nested_result_str(&ty) {
-                nested_heap_caps.push((v, ty));
-            } else if matches!(ty, Ty::Int | Ty::Bool) {
-                scalar_caps.push((v, ty));
-            } else {
-                if std::env::var("ALMIDE_DBG_ANF").is_ok() {
-                    eprintln!("[lift] {}: capture {v:?} outside the class slice ({ty:?})", self.fn_name);
-                }
-                return None;
+                continue;
             }
+            if one_level_exact(&ty) {
+                heap_caps.push((v, ty));
+                continue;
+            }
+            if is_nested_list_str(&ty) || is_nested_result_str(&ty) {
+                nested_heap_caps.push((v, ty));
+                continue;
+            }
+            if matches!(ty, Ty::Int | Ty::Bool) {
+                scalar_caps.push((v, ty));
+                continue;
+            }
+            if std::env::var("ALMIDE_DBG_ANF").is_ok() {
+                eprintln!("[lift] {}: capture {v:?} outside the class slice ({ty:?})", self.fn_name);
+            }
+            return None;
         }
         let n_closure = closure_caps.len();
         let n_heap = heap_caps.len();
@@ -476,6 +482,58 @@ impl LowerCtx {
         Some(blk)
     }
 
+    /// The element-shape → drop-route classification for
+    /// [`Self::try_lower_str_list_literal`]'s freshly-allocated `list`. Verbatim extraction
+    /// (guard-clause flattening) of the former inline else-if chain, no behavior change — see
+    /// docs/roadmap/active/code-health-codopsy.md.
+    #[allow(clippy::too_many_arguments)]
+    fn classify_str_list_literal_drop(
+        &mut self,
+        list: ValueId,
+        elem_value: bool,
+        elem_str_value: bool,
+        elem_int_str: bool,
+        elem_str_int: bool,
+        elem_list_str: bool,
+        elem_list_flat: bool,
+        elem_rich_variant: &Option<String>,
+        elem_recdrop: &Option<String>,
+    ) {
+        if elem_value {
+            self.value_elem_lists.insert(list);
+            return;
+        }
+        if elem_str_value {
+            self.str_value_elem_lists.insert(list);
+            return;
+        }
+        if elem_int_str {
+            self.variant_drop_handles.insert(list, "list_int_str".to_string());
+            return;
+        }
+        if elem_str_int {
+            self.variant_drop_handles.insert(list, "list_str_int".to_string());
+            return;
+        }
+        if elem_list_str || elem_list_flat {
+            // elem_list_flat: each element is a matrix-shaped two-level block — the SAME
+            // DropListListStr sweep (rc_dec each element's flat sub-blocks + the element,
+            // then the list) is its exact recursive free.
+            self.list_list_str_lists.insert(list);
+            return;
+        }
+        if let Some(vname) = elem_rich_variant {
+            // RECURSIVE per-element drop via the generated `$__drop_list_<V>`.
+            self.variant_drop_handles.insert(list, format!("list_{vname}"));
+            return;
+        }
+        if let Some(rname) = elem_recdrop {
+            self.variant_drop_handles.insert(list, format!("list_{rname}"));
+            return;
+        }
+        self.heap_elem_lists.insert(list);
+    }
+
     /// Lower a `List[String]` LITERAL to an alloc_list_str + per-element move-in. Each element is
     /// stored into a nested-ownership `DynListStr` (freed recursively via `DropListStr` at scope end,
     /// cert `i`+`d`). Element ownership by kind:
@@ -670,27 +728,17 @@ impl LowerCtx {
         // A `List[Value]` drops via `Op::DropListValue` (recursive `$__drop_value` per element); a
         // String/aggregate list via the flat-element `Op::DropListStr`. Marking the right set is what
         // makes the scope-end drop reclaim each element's nested payload (no leak).
-        if elem_value {
-            self.value_elem_lists.insert(list);
-        } else if elem_str_value {
-            self.str_value_elem_lists.insert(list);
-        } else if elem_int_str {
-            self.variant_drop_handles.insert(list, "list_int_str".to_string());
-        } else if elem_str_int {
-            self.variant_drop_handles.insert(list, "list_str_int".to_string());
-        } else if elem_list_str || elem_list_flat {
-            // elem_list_flat: each element is a matrix-shaped two-level block — the SAME
-            // DropListListStr sweep (rc_dec each element's flat sub-blocks + the element,
-            // then the list) is its exact recursive free.
-            self.list_list_str_lists.insert(list);
-        } else if let Some(vname) = &elem_rich_variant {
-            // RECURSIVE per-element drop via the generated `$__drop_list_<V>`.
-            self.variant_drop_handles.insert(list, format!("list_{vname}"));
-        } else if let Some(rname) = &elem_recdrop {
-            self.variant_drop_handles.insert(list, format!("list_{rname}"));
-        } else {
-            self.heap_elem_lists.insert(list);
-        }
+        self.classify_str_list_literal_drop(
+            list,
+            elem_value,
+            elem_str_value,
+            elem_int_str,
+            elem_str_int,
+            elem_list_str,
+            elem_list_flat,
+            &elem_rich_variant,
+            &elem_recdrop,
+        );
         self.materialized_lists.insert(list);
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });

@@ -74,11 +74,15 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                         ));
                         idx += 1;
                     }
-                } else if matches!(ty, Ty::String) {
+                    continue;
+                }
+                if matches!(ty, Ty::String) {
                     frees.push_str(&format!(
                         "        prim.rc_dec(prim.load64(h + {off}))\n"
                     ));
-                } else if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                    continue;
+                }
+                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
                     if a.len() == 1 && !is_heap_ty(&a[0]))
                 {
                     // A List[scalar] ctor field — a FLAT block, one rc_dec is its full free.
@@ -86,7 +90,9 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                         "        prim.rc_dec(prim.load64(h + {off}))
 "
                     ));
-                } else if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                    continue;
+                }
+                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
                     if a.len() == 1 && matches!(a[0], Ty::String))
                 {
                     // A `List[String]` ctor field (`Node(String, List[String])`): each element is
@@ -99,7 +105,9 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                         "        let f{idx}: List[String] = prim.load_handle(h + {off})\n        __drop_list_str(f{idx})\n"
                     ));
                     idx += 1;
-                } else if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                    continue;
+                }
+                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
                     if a.len() == 1 && is_flat_variant_elem(&a[0], &flat_names))
                 {
                     // A `List[<flat variant>]` ctor field (`Wrapped(List[Policy])` — #484): each
@@ -111,7 +119,9 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                         "        let f{idx}: List[String] = prim.load_handle(h + {off})\n        __drop_list_str(f{idx})\n"
                     ));
                     idx += 1;
-                } else if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
+                    continue;
+                }
+                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
                     if a.len() == 1 && !is_heap_ty(&a[0]))
                 {
                     // An Option[scalar] ctor field (`Box(Option[Int])`) — the 0-or-1-element
@@ -122,7 +132,9 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                         "        prim.rc_dec(prim.load64(h + {off}))
 "
                     ));
-                } else if matches!(ty, Ty::Fn { .. }) {
+                    continue;
+                }
+                if matches!(ty, Ty::Fn { .. }) {
                     // A CLOSURE ctor field (`Run(() -> Unit)` — the variant-stored closure
                     // class): the slot holds a self-describing closure block whose captured
                     // heap env a flat rc_dec would LEAK — free it via `__drop_closure`, the
@@ -133,7 +145,9 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                         "        let f{idx}: List[Int] = prim.load_handle(h + {off})\n        __drop_closure(f{idx})\n"
                     ));
                     idx += 1;
-                } else if let Some(ev) = list_rich_variant_elem(ty, &rec_variant_names) {
+                    continue;
+                }
+                if let Some(ev) = list_rich_variant_elem(ty, &rec_variant_names) {
                     // A `List[<rich variant>]` ctor field (`Block(_, List[Instr])`): each element is a
                     // recursive-drop variant block, freed per-element by the generated `$__drop_list_<ev>`
                     // (→ `$__drop_<ev>`). A flat `rc_dec` of the list block would leak every element.
@@ -142,25 +156,29 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
                         "        let f{idx}: List[{ev}] = prim.load_handle(h + {off})\n        __drop_list_{ev_fn}(f{idx})\n"
                     ));
                     idx += 1;
-                } else if let Ty::Named(rn, _) = ty {
-                    if all_record_names.contains(rn.as_str()) {
-                        // A RECORD-type ctor field (`Wrap(Color)` / `Box(Inner)`). A recursive-drop
-                        // record (a String / nested-heap field) recurses via `$__drop_<R>`; a
-                        // scalar-only record block is a single owned allocation, one `rc_dec` its full
-                        // free. Either way the ctor stored its HANDLE at this slot.
-                        if rec_record_names.contains(rn.as_str()) {
-                            let rn_fn = drop_fn_ident(rn.as_str());
-                            let rn_s = rn.as_str();
-                            frees.push_str(&format!(
-                                "        let f{idx}: {rn_s} = prim.load_handle(h + {off})\n        __drop_{rn_fn}(f{idx})\n"
-                            ));
-                            idx += 1;
-                        } else {
-                            frees.push_str(&format!(
-                                "        prim.rc_dec(prim.load64(h + {off}))\n"
-                            ));
-                        }
-                    }
+                    continue;
+                }
+                let Ty::Named(rn, _) = ty else {
+                    continue;
+                };
+                if !all_record_names.contains(rn.as_str()) {
+                    continue;
+                }
+                // A RECORD-type ctor field (`Wrap(Color)` / `Box(Inner)`). A recursive-drop
+                // record (a String / nested-heap field) recurses via `$__drop_<R>`; a
+                // scalar-only record block is a single owned allocation, one `rc_dec` its full
+                // free. Either way the ctor stored its HANDLE at this slot.
+                if rec_record_names.contains(rn.as_str()) {
+                    let rn_fn = drop_fn_ident(rn.as_str());
+                    let rn_s = rn.as_str();
+                    frees.push_str(&format!(
+                        "        let f{idx}: {rn_s} = prim.load_handle(h + {off})\n        __drop_{rn_fn}(f{idx})\n"
+                    ));
+                    idx += 1;
+                } else {
+                    frees.push_str(&format!(
+                        "        prim.rc_dec(prim.load64(h + {off}))\n"
+                    ));
                 }
             }
             if frees.is_empty() {
@@ -336,26 +354,39 @@ pub fn discover_generic_variant_list_instantiations(
     }
     impl IrVisitor for Scan<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
-            if matches!(&e.kind, IrExprKind::List { .. }) {
-                if let Ty::Applied(TypeConstructorId::List, a) = &e.ty {
-                    if a.len() == 1 {
-                        if let Some((name, args)) = crate::lower::VariantLayouts::variant_name_and_args(&a[0]) {
-                            if !args.is_empty() {
-                                if let Some(layout) = self.variant_layouts.by_type.get(name) {
-                                    if !layout.generics.is_empty() {
-                                        if let Some(inst) =
-                                            crate::lower::generic_variant_instantiation_name(name, args)
-                                        {
-                                            self.found
-                                                .entry(inst.clone())
-                                                .or_insert_with(|| (name.to_string(), args.to_vec()));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+            // Guard-clause flattening of the former 6-deep nested-if (no `else` anywhere: any
+            // unmet condition just skips the discovery below — `break` exits the labeled block
+            // and falls through to the unconditional `walk_expr` after it, exactly as the
+            // original fell out of the if-pyramid to the same unconditional call). No behavior
+            // change — see docs/roadmap/active/code-health-codopsy.md.
+            'discover: {
+                if !matches!(&e.kind, IrExprKind::List { .. }) {
+                    break 'discover;
                 }
+                let Ty::Applied(TypeConstructorId::List, a) = &e.ty else {
+                    break 'discover;
+                };
+                if a.len() != 1 {
+                    break 'discover;
+                }
+                let Some((name, args)) = crate::lower::VariantLayouts::variant_name_and_args(&a[0])
+                else {
+                    break 'discover;
+                };
+                if args.is_empty() {
+                    break 'discover;
+                }
+                let Some(layout) = self.variant_layouts.by_type.get(name) else {
+                    break 'discover;
+                };
+                if layout.generics.is_empty() {
+                    break 'discover;
+                }
+                let Some(inst) = crate::lower::generic_variant_instantiation_name(name, args)
+                else {
+                    break 'discover;
+                };
+                self.found.entry(inst.clone()).or_insert_with(|| (name.to_string(), args.to_vec()));
             }
             walk_expr(self, e);
         }
@@ -710,6 +741,10 @@ fn record_drop_field_frees(
             Ty::String => {
                 frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
             }
+            // Guard-clause flattening (`continue` re-targets the enclosing `for` loop, exactly
+            // matching this arm's former "fall out of the if-else-if chain, the match arm — and
+            // so this loop iteration — ends" behavior for every branch including the last). No
+            // behavior change — see docs/roadmap/active/code-health-codopsy.md.
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
                 if let Some((rn, src)) = recursive_aggregate_route(&a[0], rec_names, generic_decls) {
                     list_drops.insert(rn.clone());
@@ -723,7 +758,9 @@ fn record_drop_field_frees(
                     frees.push_str(&format!(
                         "    let f{i}: List[{src}] = prim.load_handle(h + {off})\n    __drop_list_{rn_fn}(f{i})\n"
                     ));
-                } else if let Some(ev) = list_rich_variant_elem(ty, rec_variant_names) {
+                    continue;
+                }
+                if let Some(ev) = list_rich_variant_elem(ty, rec_variant_names) {
                     // `List[<rich variant>]` (`Global.init: List[Instr]`): each element is a
                     // recursive-drop variant block, freed per-element by `$__drop_list_<ev>` (→
                     // `$__drop_<ev>`, generated by `generate_variant_drop_sources`). A flat `rc_dec`
@@ -732,7 +769,9 @@ fn record_drop_field_frees(
                     frees.push_str(&format!(
                         "    let f{i}: List[{ev}] = prim.load_handle(h + {off})\n    __drop_list_{ev_fn}(f{i})\n"
                     ));
-                } else if matches!(&a[0], Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _)) {
+                    continue;
+                }
+                if matches!(&a[0], Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _)) {
                     // `List[Matrix]` — each element is a matrix block whose slots hold owned
                     // row blocks: sweep TWO levels via `__drop_list_matrix` (each element
                     // through `__drop_matrix`, then the list). A flat `rc_dec` would leak
@@ -742,7 +781,9 @@ fn record_drop_field_frees(
                     frees.push_str(&format!(
                         "    let f{i}: List[Matrix] = prim.load_handle(h + {off})\n    __drop_list_matrix(f{i})\n"
                     ));
-                } else if matches!(&a[0],
+                    continue;
+                }
+                if matches!(&a[0],
                     Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && !is_heap_ty(&b[0]))
                 {
                     // A matrix-shaped STRUCTURAL field (`List[List[scalar]]`): its slots hold
@@ -752,7 +793,9 @@ fn record_drop_field_frees(
                     frees.push_str(&format!(
                         "    let f{i}: Matrix = prim.load_handle(h + {off})\n    __drop_matrix(f{i})\n"
                     ));
-                } else if matches!(a[0], Ty::String) || is_flat_variant_elem(&a[0], flat_variant_names) {
+                    continue;
+                }
+                if matches!(a[0], Ty::String) || is_flat_variant_elem(&a[0], flat_variant_names) {
                     // `List[String]` OR `List[flat-variant]` (a nullary/scalar-only enum like
                     // `Capability`): each element is a single FLAT block, so `__drop_list_str` frees
                     // them per-element (`rc_dec` of each element handle + the list block). The flat
@@ -762,10 +805,10 @@ fn record_drop_field_frees(
                     frees.push_str(&format!(
                         "    let f{i}: List[String] = prim.load_handle(h + {off})\n    __drop_list_str(f{i})\n"
                     ));
-                } else {
-                    // List[scalar] or List[non-recursive heap]: flat free the block.
-                    frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
+                    continue;
                 }
+                // List[scalar] or List[non-recursive heap]: flat free the block.
+                frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
             }
             // A `Matrix` field (the v1 value model: a List[List[Float]] block whose slots
             // hold owned flat row blocks — nn WhisperWeights.conv1_w): free each row + the

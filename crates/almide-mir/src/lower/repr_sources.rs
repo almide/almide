@@ -24,31 +24,38 @@ pub fn collect_interp_anon_records(
     impl IrVisitor for C {
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
             if let almide_ir::IrExprKind::StringInterp { parts } = &e.kind {
+                // Guard-clause flattening (`continue` re-targets this `for p in parts` loop,
+                // matching the former "nothing else runs for this `p`" fallthrough at every
+                // failed condition — the plain-Record check above stays a bare `if let` since
+                // it runs unconditionally either way, exactly as before). No behavior change —
+                // see docs/roadmap/active/code-health-codopsy.md.
                 for p in parts {
-                    if let almide_ir::IrStringPart::Expr { expr } = p {
-                        if let Ty::Record { fields } = &expr.ty {
-                            let key = anon_record_drop_name(fields);
-                            if self.seen.insert(key) {
-                                self.out.push(fields.clone());
-                            }
+                    let almide_ir::IrStringPart::Expr { expr } = p else {
+                        continue;
+                    };
+                    if let Ty::Record { fields } = &expr.ty {
+                        let key = anon_record_drop_name(fields);
+                        if self.seen.insert(key) {
+                            self.out.push(fields.clone());
                         }
-                        // `${[a]}` — a List[<structural record>] part: collect the
-                        // ELEMENT shape so the generator emits its `__repr_anonrec_<h>`
-                        // plus the `__repr_list_anonrec_<h>` walker the interp routes to.
-                        if let Ty::Applied(
-                            almide_lang::types::constructor::TypeConstructorId::List,
-                            a,
-                        ) = &expr.ty
-                        {
-                            if a.len() == 1 {
-                                if let Ty::Record { fields } = &a[0] {
-                                    let key = anon_record_drop_name(fields);
-                                    if self.seen.insert(key) {
-                                        self.out.push(fields.clone());
-                                    }
-                                }
-                            }
-                        }
+                    }
+                    // `${[a]}` — a List[<structural record>] part: collect the
+                    // ELEMENT shape so the generator emits its `__repr_anonrec_<h>`
+                    // plus the `__repr_list_anonrec_<h>` walker the interp routes to.
+                    let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a) =
+                        &expr.ty
+                    else {
+                        continue;
+                    };
+                    if a.len() != 1 {
+                        continue;
+                    }
+                    let Ty::Record { fields } = &a[0] else {
+                        continue;
+                    };
+                    let key = anon_record_drop_name(fields);
+                    if self.seen.insert(key) {
+                        self.out.push(fields.clone());
                     }
                 }
             }
@@ -132,15 +139,31 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
                     let almide_ir::IrStringPart::Expr { expr } = p else { continue };
                     match &expr.ty {
                         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-                            self.note_list_interp_part(a);
+                            if let Ty::Named(n, args) = &a[0] {
+                                self.track_list_named(*n, args);
+                            }
+                            // `${List[(Int, String)]}` — a scalar-component tuple
+                            // element: the generator emits its `__repr_list_tup_<key>`.
+                            if let Ty::Tuple(ts) = &a[0] {
+                                self.track_list_tuple(ts);
+                            }
                         }
                         Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
-                            self.note_option_interp_part(a);
+                            if let Ty::Named(n, args) = &a[0] {
+                                self.track_option_named(*n, args);
+                            }
+                            // `${Option[(Bool, Bool)]}` (a list.min/max result) — the
+                            // generator emits its `__repr_opt_tup_<key>`.
+                            if let Ty::Tuple(ts) = &a[0] {
+                                self.track_option_tuple(ts);
+                            }
                         }
                         Ty::Applied(TypeConstructorId::Map, a)
                             if a.len() == 2 && matches!(a[0], Ty::String) =>
                         {
-                            self.note_map_interp_part(a);
+                            if let Ty::Named(n, _) = &a[1] {
+                                self.track_map_named(*n);
+                            }
                         }
                         // A GENERIC-variant instance part (`${l}` over
                         // `ReprEither[Int, String]`) — record the instantiation so the
@@ -163,70 +186,79 @@ pub fn collect_interp_repr_containers(program: &almide_ir::IrProgram) -> InterpR
         }
     }
     impl C {
-        /// The `List[_]` interp-part arm of [`C::visit_expr`]'s match — a
-        /// record/variant element type registers its list-repr container, and a
-        /// scalar-component tuple element registers its `__repr_list_tup_<key>`.
-        fn note_list_interp_part(&mut self, a: &[Ty]) {
-            if let Ty::Named(n, args) = &a[0] {
-                if self.rec_names.contains(n.as_str()) {
-                    self.out.rec_lists.insert(n.as_str().to_string());
-                } else if self.var_names.contains(n.as_str()) {
-                    if args.is_empty() {
-                        self.out.var_lists.insert(n.as_str().to_string());
-                    } else {
-                        // A generic-variant INSTANTIATION element
-                        // (`${forest}` over List[Tree[Int]]): the walker
-                        // needs the element's instantiation-keyed repr too.
-                        self.out.var_inst_lists.push((n.as_str().to_string(), args.clone()));
-                        self.out.var_insts.push((n.as_str().to_string(), args.clone()));
-                    }
-                }
+        /// The `List[<Named>]` NAMED-element container-tracking for the `${l}` string-interp
+        /// part scan above. Verbatim extraction (guard-clause flattening) of the former inline
+        /// if-else-if chain, no behavior change — see
+        /// docs/roadmap/active/code-health-codopsy.md.
+        fn track_list_named(&mut self, n: almide_lang::intern::Sym, args: &[Ty]) {
+            if self.rec_names.contains(n.as_str()) {
+                self.out.rec_lists.insert(n.as_str().to_string());
+                return;
             }
-            // `${List[(Int, String)]}` — a scalar-component tuple
-            // element: the generator emits its `__repr_list_tup_<key>`.
-            if let Ty::Tuple(ts) = &a[0] {
-                if let Some(key) = tuple_repr_ident(ts) {
-                    if !self.out.tup_lists.iter().any(|e| tuple_repr_ident(e).as_deref() == Some(&key)) {
-                        self.out.tup_lists.push(ts.clone());
-                    }
-                }
+            if !self.var_names.contains(n.as_str()) {
+                return;
             }
+            if args.is_empty() {
+                self.out.var_lists.insert(n.as_str().to_string());
+                return;
+            }
+            // A generic-variant INSTANTIATION element (`${forest}` over List[Tree[Int]]): the
+            // walker needs the element's instantiation-keyed repr too.
+            self.out.var_inst_lists.push((n.as_str().to_string(), args.to_vec()));
+            self.out.var_insts.push((n.as_str().to_string(), args.to_vec()));
         }
 
-        /// The `Option[_]` interp-part arm of [`C::visit_expr`]'s match —
-        /// the `List[_]` arm's sibling over `Option`.
-        fn note_option_interp_part(&mut self, a: &[Ty]) {
-            if let Ty::Named(n, args) = &a[0] {
-                if self.rec_names.contains(n.as_str()) {
-                    self.out.rec_opts.insert(n.as_str().to_string());
-                } else if self.var_names.contains(n.as_str()) {
-                    if args.is_empty() {
-                        self.out.var_opts.insert(n.as_str().to_string());
-                    } else {
-                        self.out.var_inst_opts.push((n.as_str().to_string(), args.clone()));
-                        self.out.var_insts.push((n.as_str().to_string(), args.clone()));
-                    }
-                }
+        /// The `Option[<Named>]` sibling of [`Self::track_list_named`]. Verbatim extraction,
+        /// no behavior change.
+        fn track_option_named(&mut self, n: almide_lang::intern::Sym, args: &[Ty]) {
+            if self.rec_names.contains(n.as_str()) {
+                self.out.rec_opts.insert(n.as_str().to_string());
+                return;
             }
-            // `${Option[(Bool, Bool)]}` (a list.min/max result) — the
-            // generator emits its `__repr_opt_tup_<key>`.
-            if let Ty::Tuple(ts) = &a[0] {
-                if let Some(key) = tuple_repr_ident(ts) {
-                    if !self.out.tup_opts.iter().any(|e| tuple_repr_ident(e).as_deref() == Some(&key)) {
-                        self.out.tup_opts.push(ts.clone());
-                    }
-                }
+            if !self.var_names.contains(n.as_str()) {
+                return;
             }
+            if args.is_empty() {
+                self.out.var_opts.insert(n.as_str().to_string());
+                return;
+            }
+            self.out.var_inst_opts.push((n.as_str().to_string(), args.to_vec()));
+            self.out.var_insts.push((n.as_str().to_string(), args.to_vec()));
         }
 
-        /// The `Map[String, _]` interp-part arm of [`C::visit_expr`]'s match.
-        fn note_map_interp_part(&mut self, a: &[Ty]) {
-            if let Ty::Named(n, _) = &a[1] {
-                if self.rec_names.contains(n.as_str()) {
-                    self.out.rec_maps.insert(n.as_str().to_string());
-                } else if self.var_names.contains(n.as_str()) {
-                    self.out.var_maps.insert(n.as_str().to_string());
-                }
+        /// `${List[(scalar…)]}` — dedup-push the tuple-component shape into `tup_lists`.
+        /// Verbatim extraction, no behavior change.
+        fn track_list_tuple(&mut self, ts: &[Ty]) {
+            let Some(key) = tuple_repr_ident(ts) else {
+                return;
+            };
+            if self.out.tup_lists.iter().any(|e| tuple_repr_ident(e).as_deref() == Some(&key)) {
+                return;
+            }
+            self.out.tup_lists.push(ts.to_vec());
+        }
+
+        /// The `Option[(scalar…)]` sibling of [`Self::track_list_tuple`]. Verbatim
+        /// extraction, no behavior change.
+        fn track_option_tuple(&mut self, ts: &[Ty]) {
+            let Some(key) = tuple_repr_ident(ts) else {
+                return;
+            };
+            if self.out.tup_opts.iter().any(|e| tuple_repr_ident(e).as_deref() == Some(&key)) {
+                return;
+            }
+            self.out.tup_opts.push(ts.to_vec());
+        }
+
+        /// `${Map[String, <Named>]}` NAMED-value container-tracking. Verbatim extraction
+        /// (guard-clause flattening) of the former inline if-else-if, no behavior change.
+        fn track_map_named(&mut self, n: almide_lang::intern::Sym) {
+            if self.rec_names.contains(n.as_str()) {
+                self.out.rec_maps.insert(n.as_str().to_string());
+                return;
+            }
+            if self.var_names.contains(n.as_str()) {
+                self.out.var_maps.insert(n.as_str().to_string());
             }
         }
     }

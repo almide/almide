@@ -627,6 +627,42 @@ impl LowerCtx {
     ///  - BRANCH OWNERSHIP ISOLATION around the then-arm (snapshot/restore param_values +
     ///    live_heap_handles + materialized_aggregates), so a consume in one alternate arm does not
     ///    leak into the other's lowering view.
+    /// The HEAP-Ok Result SUBJECT drop-route classification for
+    /// [`Self::append_variant_match_to_result_list`] — routes `subj`'s scope-end drop by the
+    /// Ok payload's exact shape. NOT [`Self::track_heap_ok_result_subject_drop`] (control_p2.rs)
+    /// — that sibling ALSO checks `result_ok_record_drop_fn` first (a RECORD-Ok `resrec:`
+    /// route), which this call site's original inline chain never did; reusing it here would
+    /// add new behavior for a record-Ok subject, not just flatten nesting. Verbatim extraction
+    /// (guard-clause flattening) of the former inline if-else-if chain, no behavior change —
+    /// see docs/roadmap/active/code-health-codopsy.md.
+    fn track_heap_ok_result_subj_drop_no_record(&mut self, subj: ValueId, ty: &Ty) {
+        if crate::lower::is_result_listval_ty(ty) {
+            self.value_result_lists.insert(subj);
+            return;
+        }
+        if crate::lower::is_value_result_ty(ty) {
+            self.value_result_results.insert(subj);
+            return;
+        }
+        if crate::lower::is_str_int_result_ty(ty) {
+            self.str_int_result_results.insert(subj);
+            return;
+        }
+        if crate::lower::is_value_int_result_ty(ty) {
+            self.value_int_result_results.insert(subj);
+            return;
+        }
+        if crate::lower::is_list_str_int_result_ty(ty) {
+            self.list_str_int_result_results.insert(subj);
+            return;
+        }
+        if crate::lower::is_list_value_int_result_ty(ty) {
+            self.list_value_int_result_results.insert(subj);
+            return;
+        }
+        self.heap_elem_lists.insert(subj);
+    }
+
     fn append_variant_match_to_result_list(
         &mut self,
         subject: &IrExpr,
@@ -699,21 +735,7 @@ impl LowerCtx {
             || (is_named_call && Self::is_heap_ok_result(&subject.ty))
         {
             self.materialized_results_str.insert(subj);
-            if crate::lower::is_result_listval_ty(&subject.ty) {
-                self.value_result_lists.insert(subj);
-            } else if crate::lower::is_value_result_ty(&subject.ty) {
-                self.value_result_results.insert(subj);
-            } else if crate::lower::is_str_int_result_ty(&subject.ty) {
-                self.str_int_result_results.insert(subj);
-            } else if crate::lower::is_value_int_result_ty(&subject.ty) {
-                self.value_int_result_results.insert(subj);
-            } else if crate::lower::is_list_str_int_result_ty(&subject.ty) {
-                self.list_str_int_result_results.insert(subj);
-            } else if crate::lower::is_list_value_int_result_ty(&subject.ty) {
-                self.list_value_int_result_results.insert(subj);
-            } else {
-                self.heap_elem_lists.insert(subj);
-            }
+            self.track_heap_ok_result_subj_drop_no_record(subj, &subject.ty);
         }
         let is_option = self.materialized_options.contains(&subj);
         let is_result_str = self.materialized_results_str.contains(&subj);

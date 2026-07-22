@@ -297,12 +297,14 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
         let mut p = prog.clone();
         for f in &mut p.functions {
             for op in &mut f.ops {
-                if let Op::CallFn { name, .. } = op {
-                    if !resolvable.contains(name) {
-                        if let Some(alias) = resolve_rt_alias(name, &resolvable) {
-                            *name = alias;
-                        }
-                    }
+                let Op::CallFn { name, .. } = op else {
+                    continue;
+                };
+                if resolvable.contains(name) {
+                    continue;
+                }
+                if let Some(alias) = resolve_rt_alias(name, &resolvable) {
+                    *name = alias;
                 }
             }
         }
@@ -402,17 +404,20 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     let mut cursor = LABELS_ADDR;
     for func in &prog.functions {
         for op in &func.ops {
-            if let Op::Call { args, .. } = op {
-                for a in args {
-                    if let CallArg::Label(label) = a {
-                        if !label_off.contains_key(label) {
-                            let len = label.len() as u32;
-                            label_off.insert(label.clone(), (cursor, len));
-                            data.push_str(&format!("  (data (i32.const {cursor}) {:?})\n", label));
-                            cursor += len;
-                        }
-                    }
+            let Op::Call { args, .. } = op else {
+                continue;
+            };
+            for a in args {
+                let CallArg::Label(label) = a else {
+                    continue;
+                };
+                if label_off.contains_key(label) {
+                    continue;
                 }
+                let len = label.len() as u32;
+                label_off.insert(label.clone(), (cursor, len));
+                data.push_str(&format!("  (data (i32.const {cursor}) {:?})\n", label));
+                cursor += len;
             }
         }
     }
@@ -849,7 +854,7 @@ pub fn render_wasm_fn(
     let mut loop_stack: Vec<u32> = Vec::new();
     let mut fuser = Fuser::new();
     fuser.scan_consts(&func.ops);
-    for (op_idx, op) in func.ops.iter().enumerate() {
+    'op_loop: for (op_idx, op) in func.ops.iter().enumerate() {
         if fused_skip.contains(&op_idx) {
             continue;
         }
@@ -931,14 +936,25 @@ pub fn render_wasm_fn(
                     .collect();
                     fuser.flush_reading(&writes, &consumed, &mut body);
                     // Defer a single-use pure-scalar def (def + 1 use = 2 occurrences).
-                    if let Some(d) = defined_value(op) {
-                        if occ.get(&d).copied() == Some(2) && func.ret != Some(d) {
-                            if let Some((dst, e, reads)) = fusable_expr(op, &mut fuser, &floats) {
-                                fuser.pending.insert(dst, (e, reads));
-                                fuser.order.push(dst);
-                                continue;
-                            }
+                    // Guard-clause flattening of the former 4-deep nested-if (no `else`
+                    // anywhere: any unmet condition falls through to the `body.push_str`
+                    // below, unchanged — `break` exits the labeled block and resumes there;
+                    // `continue` (unlabeled) passes through the non-loop label to the
+                    // enclosing `for`, exactly as the original inline `continue` did). No
+                    // behavior change — see docs/roadmap/active/code-health-codopsy.md.
+                    'try_defer: {
+                        let Some(d) = defined_value(op) else {
+                            break 'try_defer;
+                        };
+                        if occ.get(&d).copied() != Some(2) || func.ret == Some(d) {
+                            break 'try_defer;
                         }
+                        let Some((dst, e, reads)) = fusable_expr(op, &mut fuser, &floats) else {
+                            break 'try_defer;
+                        };
+                        fuser.pending.insert(dst, (e, reads));
+                        fuser.order.push(dst);
+                        continue 'op_loop;
                     }
                     body.push_str(&render_op(op, label_off, func_slots, param_counts, &func.heap_slot_masks, &reprs, &floats, &mut fuser));
                 } else {
