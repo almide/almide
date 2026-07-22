@@ -257,12 +257,7 @@ fn collect_module_refs_variant_case(c: &VariantCase, used: &mut std::collections
 
 fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<String>) {
     match &expr.kind {
-        ExprKind::Member { object, .. } => {
-            if let ExprKind::Ident { name, .. } = &object.kind {
-                used.insert(name.to_string());
-            }
-            collect_module_refs_expr(object, used);
-        }
+        ExprKind::Member { .. } => collect_module_refs_member(expr, used),
         ExprKind::Call { callee, args, .. } => {
             collect_module_refs_expr(callee, used);
             for a in args { collect_module_refs_expr(a, used); }
@@ -279,13 +274,7 @@ fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<St
         ExprKind::Block { stmts, .. } => {
             for s in stmts { collect_module_refs_stmt(s, used); }
         }
-        ExprKind::Match { subject, arms, .. } => {
-            collect_module_refs_expr(subject, used);
-            for arm in arms {
-                collect_module_refs_expr(&arm.body, used);
-                if let Some(g) = &arm.guard { collect_module_refs_expr(g, used); }
-            }
-        }
+        ExprKind::Match { .. } => collect_module_refs_match(expr, used),
         ExprKind::Lambda { body, .. } => collect_module_refs_expr(body, used),
         ExprKind::List { elements, .. } | ExprKind::Tuple { elements, .. } => {
             for e in elements { collect_module_refs_expr(e, used); }
@@ -294,11 +283,7 @@ fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<St
             collect_module_refs_expr(left, used);
             collect_module_refs_expr(right, used);
         }
-        ExprKind::InterpolatedString { parts, .. } => {
-            for p in parts {
-                if let StringPart::Expr { expr } = p { collect_module_refs_expr(expr, used); }
-            }
-        }
+        ExprKind::InterpolatedString { .. } => collect_module_refs_istring(expr, used),
         ExprKind::Record { fields, .. } => {
             for f in fields { collect_module_refs_expr(&f.value, used); }
         }
@@ -324,6 +309,30 @@ fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<St
             for s in body { collect_module_refs_stmt(s, used); }
         }
         _ => {}
+    }
+}
+
+fn collect_module_refs_member(expr: &Expr, used: &mut std::collections::HashSet<String>) {
+    let ExprKind::Member { object, .. } = &expr.kind else { unreachable!() };
+    if let ExprKind::Ident { name, .. } = &object.kind {
+        used.insert(name.to_string());
+    }
+    collect_module_refs_expr(object, used);
+}
+
+fn collect_module_refs_match(expr: &Expr, used: &mut std::collections::HashSet<String>) {
+    let ExprKind::Match { subject, arms, .. } = &expr.kind else { unreachable!() };
+    collect_module_refs_expr(subject, used);
+    for arm in arms {
+        collect_module_refs_expr(&arm.body, used);
+        if let Some(g) = &arm.guard { collect_module_refs_expr(g, used); }
+    }
+}
+
+fn collect_module_refs_istring(expr: &Expr, used: &mut std::collections::HashSet<String>) {
+    let ExprKind::InterpolatedString { parts, .. } = &expr.kind else { unreachable!() };
+    for p in parts {
+        if let StringPart::Expr { expr } = p { collect_module_refs_expr(expr, used); }
     }
 }
 
