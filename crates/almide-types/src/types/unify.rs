@@ -21,16 +21,7 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
     }
     // TypeVar: bind or check consistency
     if let Ty::TypeVar(name) = sig_ty {
-        if let Some(bound) = bindings.get(name) {
-            return bound.compatible(actual_ty);
-        } else {
-            // Occurs check: prevent infinite types like T = List[T]
-            if occurs_in(*name, actual_ty) {
-                return false;
-            }
-            bindings.insert(*name, actual_ty.clone());
-            return true;
-        }
+        return unify_bind_typevar(*name, actual_ty, bindings);
     }
     // When actual is a TypeVar, it represents an unresolved polymorphic type.
     // Accept it (polymorphic types are compatible with anything) but don't bind —
@@ -69,22 +60,51 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
             a_args.iter().zip(b_args.iter()).all(|(x, y)| unify(x, y, bindings))
         }
         // Union: try each member with snapshotted bindings, commit first success
-        (Ty::Union(members), _) => {
-            for m in members {
-                let mut snapshot = bindings.clone();
-                if unify(m, actual_ty, &mut snapshot) { *bindings = snapshot; return true; }
-            }
-            false
-        }
-        (_, Ty::Union(members)) => {
-            for m in members {
-                let mut snapshot = bindings.clone();
-                if unify(sig_ty, m, &mut snapshot) { *bindings = snapshot; return true; }
-            }
-            false
-        }
+        (Ty::Union(members), _) => unify_union_sig(members, actual_ty, bindings),
+        (_, Ty::Union(members)) => unify_union_actual(sig_ty, members, bindings),
         _ => sig_ty.compatible(actual_ty),
     }
+}
+
+/// TypeVar-on-the-signature-side case of `unify`: bind `name` to `actual_ty` if
+/// unbound (subject to the occurs check), or check consistency against an
+/// existing binding.
+fn unify_bind_typevar(name: Sym, actual_ty: &Ty, bindings: &mut std::collections::HashMap<Sym, Ty>) -> bool {
+    if let Some(bound) = bindings.get(&name) {
+        return bound.compatible(actual_ty);
+    }
+    // Occurs check: prevent infinite types like T = List[T]
+    if occurs_in(name, actual_ty) {
+        return false;
+    }
+    bindings.insert(name, actual_ty.clone());
+    true
+}
+
+/// `Ty::Union(members)` on the signature side: try each member with
+/// snapshotted bindings, commit the bindings of the first member that unifies.
+fn unify_union_sig(members: &[Ty], actual_ty: &Ty, bindings: &mut std::collections::HashMap<Sym, Ty>) -> bool {
+    for m in members {
+        let mut snapshot = bindings.clone();
+        if unify(m, actual_ty, &mut snapshot) {
+            *bindings = snapshot;
+            return true;
+        }
+    }
+    false
+}
+
+/// `Ty::Union(members)` on the actual side: same as `unify_union_sig` but with
+/// the union on the other operand.
+fn unify_union_actual(sig_ty: &Ty, members: &[Ty], bindings: &mut std::collections::HashMap<Sym, Ty>) -> bool {
+    for m in members {
+        let mut snapshot = bindings.clone();
+        if unify(sig_ty, m, &mut snapshot) {
+            *bindings = snapshot;
+            return true;
+        }
+    }
+    false
 }
 
 /// Substitute TypeVars in a type using the collected bindings.
