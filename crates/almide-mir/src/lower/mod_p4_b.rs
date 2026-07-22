@@ -10,8 +10,10 @@
 /// fallback.
 fn interp_option_to_string(inner: &Ty) -> (&'static str, &'static str) {
     interp_option_to_string_scalar(inner)
-        .or_else(|| interp_option_to_string_list(inner))
-        .or_else(|| interp_option_to_string_simple_applied(inner))
+        .or_else(|| interp_option_to_string_list_int_string(inner))
+        .or_else(|| interp_option_to_string_list_bool_float(inner))
+        .or_else(|| interp_option_to_string_option_applied(inner))
+        .or_else(|| interp_option_to_string_map_result_applied(inner))
         .or_else(|| interp_option_to_string_nested(inner))
         .unwrap_or(("option", "to_string_x"))
 }
@@ -28,7 +30,7 @@ fn interp_option_to_string_scalar(inner: &Ty) -> Option<(&'static str, &'static 
 
 /// `${Option[List[Int]]}` → `some([1, 2, 3])` / `none` — the inner list renders like
 /// `${list}`, wrapped in `some(…)`. A deeper element routes to the UNLINKED `_x`.
-fn interp_option_to_string_list(inner: &Ty) -> Option<(&'static str, &'static str)> {
+fn interp_option_to_string_list_int_string(inner: &Ty) -> Option<(&'static str, &'static str)> {
     use almide_lang::types::constructor::TypeConstructorId;
     match inner {
         Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::Int) => {
@@ -37,6 +39,13 @@ fn interp_option_to_string_list(inner: &Ty) -> Option<(&'static str, &'static st
         Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::String) => {
             Some(("option", "to_string_ls"))
         }
+        _ => None,
+    }
+}
+
+fn interp_option_to_string_list_bool_float(inner: &Ty) -> Option<(&'static str, &'static str)> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match inner {
         Ty::Applied(TypeConstructorId::List, e) if e.len() == 1 && matches!(e[0], Ty::Bool) => {
             Some(("option", "to_string_lb"))
         }
@@ -47,7 +56,7 @@ fn interp_option_to_string_list(inner: &Ty) -> Option<(&'static str, &'static st
     }
 }
 
-fn interp_option_to_string_simple_applied(inner: &Ty) -> Option<(&'static str, &'static str)> {
+fn interp_option_to_string_option_applied(inner: &Ty) -> Option<(&'static str, &'static str)> {
     use almide_lang::types::constructor::TypeConstructorId;
     match inner {
         Ty::Applied(TypeConstructorId::Option, e) if e.len() == 1 && matches!(e[0], Ty::Int) => {
@@ -59,6 +68,13 @@ fn interp_option_to_string_simple_applied(inner: &Ty) -> Option<(&'static str, &
         Ty::Applied(TypeConstructorId::Option, e) if e.len() == 1 && matches!(e[0], Ty::String) => {
             Some(("option", "to_string_os"))
         }
+        _ => None,
+    }
+}
+
+fn interp_option_to_string_map_result_applied(inner: &Ty) -> Option<(&'static str, &'static str)> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match inner {
         Ty::Applied(TypeConstructorId::Map, e)
             if e.len() == 2 && matches!(e[0], Ty::String) && matches!(e[1], Ty::Int) =>
         {
@@ -79,6 +95,10 @@ fn interp_option_to_string_simple_applied(inner: &Ty) -> Option<(&'static str, &
 }
 
 fn interp_option_to_string_nested(inner: &Ty) -> Option<(&'static str, &'static str)> {
+    interp_option_to_string_nested_option(inner).or_else(|| interp_option_to_string_nested_result(inner))
+}
+
+fn interp_option_to_string_nested_option(inner: &Ty) -> Option<(&'static str, &'static str)> {
     use almide_lang::types::constructor::TypeConstructorId;
     match inner {
         Ty::Applied(TypeConstructorId::Option, e)
@@ -95,6 +115,13 @@ fn interp_option_to_string_nested(inner: &Ty) -> Option<(&'static str, &'static 
         {
             Some(("option", "to_string_ooli"))
         }
+        _ => None,
+    }
+}
+
+fn interp_option_to_string_nested_result(inner: &Ty) -> Option<(&'static str, &'static str)> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match inner {
         Ty::Applied(TypeConstructorId::Result, e)
             if e.len() == 2
                 && matches!(&e[0], Ty::Applied(TypeConstructorId::List, e2)
@@ -112,8 +139,10 @@ fn interp_option_to_string_nested(inner: &Ty) -> Option<(&'static str, &'static 
 /// [`interp_option_to_string`] above, applied to the `(ok, err)` pair table.
 fn interp_result_to_string(ok: &Ty, err: &Ty) -> (&'static str, &'static str) {
     interp_result_to_string_scalar(ok, err)
-        .or_else(|| interp_result_to_string_list(ok, err))
-        .or_else(|| interp_result_to_string_simple_applied(ok, err))
+        .or_else(|| interp_result_to_string_list_int_string(ok, err))
+        .or_else(|| interp_result_to_string_list_bool_float(ok, err))
+        .or_else(|| interp_result_to_string_option_applied(ok, err))
+        .or_else(|| interp_result_to_string_map_applied(ok, err))
         .or_else(|| interp_result_to_string_nested(ok, err))
         .unwrap_or(("result", "to_string_x"))
 }
@@ -129,7 +158,7 @@ fn interp_result_to_string_scalar(ok: &Ty, err: &Ty) -> Option<(&'static str, &'
 }
 
 /// `${Result[List[Int], String]}` → `ok([1, 2, 3])` / `err("<quoted>")`.
-fn interp_result_to_string_list(ok: &Ty, err: &Ty) -> Option<(&'static str, &'static str)> {
+fn interp_result_to_string_list_int_string(ok: &Ty, err: &Ty) -> Option<(&'static str, &'static str)> {
     use almide_lang::types::constructor::TypeConstructorId;
     match (ok, err) {
         (Ty::Applied(TypeConstructorId::List, e), Ty::String)
@@ -142,6 +171,13 @@ fn interp_result_to_string_list(ok: &Ty, err: &Ty) -> Option<(&'static str, &'st
         {
             Some(("result", "to_string_ls"))
         }
+        _ => None,
+    }
+}
+
+fn interp_result_to_string_list_bool_float(ok: &Ty, err: &Ty) -> Option<(&'static str, &'static str)> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match (ok, err) {
         (Ty::Applied(TypeConstructorId::List, e), Ty::String)
             if e.len() == 1 && matches!(e[0], Ty::Bool) =>
         {
@@ -156,7 +192,7 @@ fn interp_result_to_string_list(ok: &Ty, err: &Ty) -> Option<(&'static str, &'st
     }
 }
 
-fn interp_result_to_string_simple_applied(ok: &Ty, err: &Ty) -> Option<(&'static str, &'static str)> {
+fn interp_result_to_string_option_applied(ok: &Ty, err: &Ty) -> Option<(&'static str, &'static str)> {
     use almide_lang::types::constructor::TypeConstructorId;
     match (ok, err) {
         (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
@@ -169,6 +205,13 @@ fn interp_result_to_string_simple_applied(ok: &Ty, err: &Ty) -> Option<(&'static
         {
             Some(("result", "to_string_os"))
         }
+        _ => None,
+    }
+}
+
+fn interp_result_to_string_map_applied(ok: &Ty, err: &Ty) -> Option<(&'static str, &'static str)> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match (ok, err) {
         (Ty::Applied(TypeConstructorId::Map, e), Ty::String)
             if e.len() == 2 && matches!(e[0], Ty::String) && matches!(e[1], Ty::Int) =>
         {
@@ -179,6 +222,10 @@ fn interp_result_to_string_simple_applied(ok: &Ty, err: &Ty) -> Option<(&'static
 }
 
 fn interp_result_to_string_nested(ok: &Ty, err: &Ty) -> Option<(&'static str, &'static str)> {
+    interp_result_to_string_nested_result(ok, err).or_else(|| interp_result_to_string_nested_option(ok, err))
+}
+
+fn interp_result_to_string_nested_result(ok: &Ty, err: &Ty) -> Option<(&'static str, &'static str)> {
     use almide_lang::types::constructor::TypeConstructorId;
     match (ok, err) {
         (Ty::Applied(TypeConstructorId::Result, e), Ty::String)
@@ -186,6 +233,13 @@ fn interp_result_to_string_nested(ok: &Ty, err: &Ty) -> Option<(&'static str, &'
         {
             Some(("result", "to_string_ri"))
         }
+        _ => None,
+    }
+}
+
+fn interp_result_to_string_nested_option(ok: &Ty, err: &Ty) -> Option<(&'static str, &'static str)> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match (ok, err) {
         (Ty::Applied(TypeConstructorId::Option, e), Ty::String)
             if e.len() == 1
                 && matches!(&e[0], Ty::Applied(TypeConstructorId::List, e2)
