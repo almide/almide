@@ -118,10 +118,7 @@ fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
         IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. } | IrExprKind::If { .. }
         | IrExprKind::While { .. } => collect_varids_in_control(expr, out),
         IrExprKind::Match { .. } => collect_varids_in_match(expr, out),
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { collect_varids_in_stmt(s, out); }
-            if let Some(e) = expr { collect_varids_in_expr(e, out); }
-        }
+        IrExprKind::Block { .. } => collect_varids_in_block(expr, out),
         IrExprKind::Call { .. } => collect_varids_in_call(expr, out),
         IrExprKind::ForIn { .. } => collect_varids_in_for_in(expr, out),
         IrExprKind::List { .. } | IrExprKind::Tuple { .. } | IrExprKind::Fan { .. }
@@ -129,14 +126,9 @@ fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
         | IrExprKind::Range { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
         | IrExprKind::OptionalChain { .. } | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
         | IrExprKind::StringInterp { .. } | IrExprKind::RustMacro { .. } => collect_varids_in_containers(expr, out),
-        IrExprKind::Lambda { params, body, .. } => {
-            for (id, _) in params { collect_var_id(*id, out); }
-            collect_varids_in_expr(body, out);
+        IrExprKind::Lambda { .. } | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. } => {
+            collect_varids_in_closure(expr, out)
         }
-        IrExprKind::ClosureCreate { captures, .. } => {
-            for (id, _) in captures { collect_var_id(*id, out); }
-        }
-        IrExprKind::EnvLoad { env_var, .. } => collect_var_id(*env_var, out),
         IrExprKind::IterChain { .. } => collect_varids_in_iter_chain(expr, out),
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
         | IrExprKind::OptionSome { .. } | IrExprKind::Try { .. }
@@ -163,6 +155,28 @@ fn collect_varids_in_control(expr: &IrExpr, out: &mut Vec<VarId>) {
             collect_varids_in_expr(cond, out);
             for s in body { collect_varids_in_stmt(s, out); }
         }
+        _ => unreachable!(),
+    }
+}
+
+/// Block: collect from statements and tail.
+fn collect_varids_in_block(expr: &IrExpr, out: &mut Vec<VarId>) {
+    let IrExprKind::Block { stmts, expr } = &expr.kind else { unreachable!() };
+    for s in stmts { collect_varids_in_stmt(s, out); }
+    if let Some(e) = expr { collect_varids_in_expr(e, out); }
+}
+
+/// Lambda/ClosureCreate/EnvLoad: collect params/captures/env var and the lambda body.
+fn collect_varids_in_closure(expr: &IrExpr, out: &mut Vec<VarId>) {
+    match &expr.kind {
+        IrExprKind::Lambda { params, body, .. } => {
+            for (id, _) in params { collect_var_id(*id, out); }
+            collect_varids_in_expr(body, out);
+        }
+        IrExprKind::ClosureCreate { captures, .. } => {
+            for (id, _) in captures { collect_var_id(*id, out); }
+        }
+        IrExprKind::EnvLoad { env_var, .. } => collect_var_id(*env_var, out),
         _ => unreachable!(),
     }
 }
@@ -324,10 +338,7 @@ fn remap_expr_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
         IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. } | IrExprKind::If { .. }
         | IrExprKind::While { .. } => remap_control_varids(expr, remap),
         IrExprKind::Match { .. } => remap_match_varids(expr, remap),
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { remap_stmt_varids(s, remap); }
-            if let Some(e) = expr { remap_expr_varids(e, remap); }
-        }
+        IrExprKind::Block { .. } => remap_block_varids(expr, remap),
         IrExprKind::Call { .. } => remap_call_varids(expr, remap),
         IrExprKind::ForIn { .. } => remap_for_in_varids(expr, remap),
         IrExprKind::List { .. } | IrExprKind::Tuple { .. } | IrExprKind::Fan { .. }
@@ -339,14 +350,9 @@ fn remap_expr_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
         | IrExprKind::StringInterp { .. } | IrExprKind::RustMacro { .. } => {
             remap_container_access_varids(expr, remap)
         }
-        IrExprKind::Lambda { params, body, .. } => {
-            for (id, _) in params { *id = remap_id(*id, remap); }
-            remap_expr_varids(body, remap);
+        IrExprKind::Lambda { .. } | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. } => {
+            remap_closure_varids(expr, remap)
         }
-        IrExprKind::ClosureCreate { captures, .. } => {
-            for (id, _) in captures { *id = remap_id(*id, remap); }
-        }
-        IrExprKind::EnvLoad { env_var, .. } => *env_var = remap_id(*env_var, remap),
         IrExprKind::IterChain { .. } => remap_iter_chain_varids(expr, remap),
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
         | IrExprKind::OptionSome { .. } | IrExprKind::Try { .. }
@@ -373,6 +379,28 @@ fn remap_control_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
             remap_expr_varids(cond, remap);
             for s in body { remap_stmt_varids(s, remap); }
         }
+        _ => unreachable!(),
+    }
+}
+
+/// Block: remap statements and tail.
+fn remap_block_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
+    let IrExprKind::Block { stmts, expr } = &mut expr.kind else { unreachable!() };
+    for s in stmts { remap_stmt_varids(s, remap); }
+    if let Some(e) = expr { remap_expr_varids(e, remap); }
+}
+
+/// Lambda/ClosureCreate/EnvLoad: remap params/captures/env var and the lambda body.
+fn remap_closure_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
+    match &mut expr.kind {
+        IrExprKind::Lambda { params, body, .. } => {
+            for (id, _) in params { *id = remap_id(*id, remap); }
+            remap_expr_varids(body, remap);
+        }
+        IrExprKind::ClosureCreate { captures, .. } => {
+            for (id, _) in captures { *id = remap_id(*id, remap); }
+        }
+        IrExprKind::EnvLoad { env_var, .. } => *env_var = remap_id(*env_var, remap),
         _ => unreachable!(),
     }
 }
