@@ -95,55 +95,85 @@ fn render_lambda(ctx: &RenderContext, params: &[(VarId, Ty)], body: &IrExpr, ann
         .unwrap_or_else(|| "|_| { }".to_string())
 }
 
+/// `IrExprKind::LitInt` case of `render_expr`, extracted verbatim (cog>30
+/// decomposition, second round on top of round 1's extraction). Pick the
+/// Rust literal suffix from `expr.ty` so sized numeric types (Stage 1a/1b)
+/// emit the right width: `Ty::Int32` → `i32`, `Ty::UInt8` → `u8`, and the
+/// canonical `Ty::Int` keeps the legacy `i64`. Falls through to the
+/// `int_literal` template for backward compatibility when ty is
+/// Int / Unknown.
+fn render_expr_lit_int(ctx: &RenderContext, expr: &IrExpr, value: i64) -> String {
+    let value_s = value.to_string();
+    match &expr.ty {
+        Ty::Int8 => format!("{}i8", value_s),
+        Ty::Int16 => format!("{}i16", value_s),
+        Ty::Int32 => format!("{}i32", value_s),
+        Ty::UInt8 => format!("{}u8", value_s),
+        Ty::UInt16 => format!("{}u16", value_s),
+        Ty::UInt32 => format!("{}u32", value_s),
+        Ty::UInt64 => format!("{}u64", value_s),
+        _ => ctx.templates.render_with("int_literal", None, &[], &[("value", value_s.as_str())])
+            .unwrap_or_else(|| value.to_string()),
+    }
+}
+
+/// `IrExprKind::LitFloat` case of `render_expr`, extracted verbatim.
+fn render_expr_lit_float(ctx: &RenderContext, expr: &IrExpr, value: f64) -> String {
+    // Non-finite floats (a const-fold can produce inf/NaN, e.g.
+    // `1e300 * 1e300`) have no Rust literal form: `format!("{}", inf)`
+    // is the bare identifier `inf`, which the `{value}f64` template
+    // turns into the undefined `inff64` (E0425). Emit the associated
+    // constant directly — it needs no numeric suffix and is valid for
+    // both f64 and f32.
+    if !value.is_finite() {
+        let f32_suffix = matches!(expr.ty, Ty::Float32);
+        let assoc = if f32_suffix { "f32" } else { "f64" };
+        return if value.is_nan() {
+            format!("{}::NAN", assoc)
+        } else if value > 0.0 {
+            format!("{}::INFINITY", assoc)
+        } else {
+            format!("{}::NEG_INFINITY", assoc)
+        };
+    }
+    let value_s = format!("{}", value);
+    if matches!(expr.ty, Ty::Float32) {
+        format!("{}f32", value_s)
+    } else {
+        ctx.templates.render_with("float_literal", None, &[], &[("value", value_s.as_str())])
+            .unwrap_or_else(|| format!("{}", value))
+    }
+}
+
+/// `IrExprKind::Match` case of `render_expr`, extracted verbatim.
+fn render_expr_match(ctx: &RenderContext, expr: &IrExpr) -> String {
+    let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+    // Match subject transforms (.as_str(), .as_deref()) are handled by
+    // MatchSubjectPass nanopass — walker just renders what's in the IR.
+    let subj = render_expr(ctx, subject);
+    // Rust's grammar forbids a bare struct literal in match-subject
+    // position ("struct literals are not allowed here") — a record/
+    // variant brace construction must be parenthesized (#490).
+    let subj = if matches!(&subject.kind, IrExprKind::Record { name: Some(_), .. } | IrExprKind::SpreadRecord { .. }) {
+        format!("({})", subj)
+    } else {
+        subj
+    };
+    let arms_raw = arms.iter()
+        .map(|arm| render_match_arm(ctx, arm, &expr.ty, &subject.ty))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let arms_str = indent_lines(&arms_raw, 4);
+    let fallback = format!("match {} {{\n{}\n}}", &subj, &arms_str);
+    ctx.templates.render_with("match_expr", None, &[], &[("subject", subj.as_str()), ("arms", arms_str.as_str())])
+        .unwrap_or(fallback)
+}
+
 pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
     match &expr.kind {
         // ── Literals ──
-        IrExprKind::LitInt { value } => {
-            let value_s = value.to_string();
-            // Pick the Rust literal suffix from `expr.ty` so sized
-            // numeric types (Stage 1a/1b) emit the right width:
-            // `Ty::Int32` → `i32`, `Ty::UInt8` → `u8`, and the
-            // canonical `Ty::Int` keeps the legacy `i64`. Falls
-            // through to the `int_literal` template for backward
-            // compatibility when ty is Int / Unknown.
-            match &expr.ty {
-                Ty::Int8 => format!("{}i8", value_s),
-                Ty::Int16 => format!("{}i16", value_s),
-                Ty::Int32 => format!("{}i32", value_s),
-                Ty::UInt8 => format!("{}u8", value_s),
-                Ty::UInt16 => format!("{}u16", value_s),
-                Ty::UInt32 => format!("{}u32", value_s),
-                Ty::UInt64 => format!("{}u64", value_s),
-                _ => ctx.templates.render_with("int_literal", None, &[], &[("value", value_s.as_str())])
-                    .unwrap_or_else(|| value.to_string()),
-            }
-        }
-        IrExprKind::LitFloat { value } => {
-            // Non-finite floats (a const-fold can produce inf/NaN, e.g.
-            // `1e300 * 1e300`) have no Rust literal form: `format!("{}", inf)`
-            // is the bare identifier `inf`, which the `{value}f64` template
-            // turns into the undefined `inff64` (E0425). Emit the associated
-            // constant directly — it needs no numeric suffix and is valid for
-            // both f64 and f32.
-            if !value.is_finite() {
-                let f32_suffix = matches!(expr.ty, Ty::Float32);
-                let assoc = if f32_suffix { "f32" } else { "f64" };
-                return if value.is_nan() {
-                    format!("{}::NAN", assoc)
-                } else if *value > 0.0 {
-                    format!("{}::INFINITY", assoc)
-                } else {
-                    format!("{}::NEG_INFINITY", assoc)
-                };
-            }
-            let value_s = format!("{}", value);
-            if matches!(expr.ty, Ty::Float32) {
-                format!("{}f32", value_s)
-            } else {
-                ctx.templates.render_with("float_literal", None, &[], &[("value", value_s.as_str())])
-                    .unwrap_or_else(|| format!("{}", value))
-            }
-        }
+        IrExprKind::LitInt { value } => render_expr_lit_int(ctx, expr, *value),
+        IrExprKind::LitFloat { value } => render_expr_lit_float(ctx, expr, *value),
         IrExprKind::LitStr { value } => {
             let escaped = value.replace('\\', "\\\\").replace('"', "\\\"")
                 .replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r");
@@ -175,27 +205,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Control flow ──
         IrExprKind::If { .. } => render_expr_if(ctx, expr),
 
-        IrExprKind::Match { subject, arms } => {
-            // Match subject transforms (.as_str(), .as_deref()) are handled by
-            // MatchSubjectPass nanopass — walker just renders what's in the IR.
-            let subj = render_expr(ctx, subject);
-            // Rust's grammar forbids a bare struct literal in match-subject
-            // position ("struct literals are not allowed here") — a record/
-            // variant brace construction must be parenthesized (#490).
-            let subj = if matches!(&subject.kind, IrExprKind::Record { name: Some(_), .. } | IrExprKind::SpreadRecord { .. }) {
-                format!("({})", subj)
-            } else {
-                subj
-            };
-            let arms_raw = arms.iter()
-                .map(|arm| render_match_arm(ctx, arm, &expr.ty, &subject.ty))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let arms_str = indent_lines(&arms_raw, 4);
-            let fallback = format!("match {} {{\n{}\n}}", &subj, &arms_str);
-            ctx.templates.render_with("match_expr", None, &[], &[("subject", subj.as_str()), ("arms", arms_str.as_str())])
-                .unwrap_or(fallback)
-        }
+        IrExprKind::Match { .. } => render_expr_match(ctx, expr),
 
         IrExprKind::Block { .. } => render_expr_block(ctx, expr),
 
