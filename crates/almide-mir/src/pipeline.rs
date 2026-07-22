@@ -1294,6 +1294,80 @@ fn repair_and_substitute_globals(
     }
 }
 
+/// Phase 7: lower every non-test MAIN fn to MIR (a fn that walls is silently skipped,
+/// listed to stderr under `verbose`), then lower every linked USER-module sibling the
+/// target's resolved `almide_rt_<m>_<f>` references — under the SAME mangled name, so
+/// every keyed lookup (never-err strip, AUTO_WRAP ABI, `ret_is_result_abi`) sees what
+/// callers use via the combined registry population. Each module fn lowers SEPARATELY
+/// (its own VarId region + shared globals); one already defined (from `inlined_fns`,
+/// the main-region tail-inlining pass) or one that itself walls is silently skipped
+/// (the caller then fails the unlinked-call render wall if it truly needed it — stdlib
+/// modules stay out, self-host-linked below).
+#[allow(clippy::too_many_arguments)]
+fn lower_main_and_sibling_fns(
+    inlined_fns: &[almide_ir::IrFunction],
+    module_fn_sibs: &[almide_ir::IrFunction],
+    main_globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    main_global_inits: &HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    global_inits: &HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    record_layouts: &crate::lower::RecordLayouts,
+    variant_layouts: &crate::lower::VariantLayouts,
+    total_ir_fn_count: usize,
+    verbose: bool,
+) -> Vec<crate::MirFunction> {
+    let mut functions = Vec::new();
+    let mut walled = Vec::new();
+    for func in inlined_fns {
+        // `test "…"` blocks lower to fns calling the test harness (no wasm def) — never reachable
+        // from `_start`/`main`, so skip them (rendering one would pull a dangling `(call $assert_eq)`).
+        if func.is_test {
+            continue;
+        }
+        match crate::lower::lower_function_all_with_globals(
+            func,
+            main_globals,
+            main_global_inits,
+            record_layouts,
+            variant_layouts,
+        ) {
+            Ok(mirs) => functions.extend(mirs),
+            Err(e) => walled.push(format!("{}: {e:?}", func.name.as_str())),
+        }
+    }
+    if !walled.is_empty() && verbose {
+        eprintln!(
+            "[render_program] {} of {} function(s) outside the lowering subset (NOT rendered):",
+            walled.len(),
+            total_ir_fn_count
+        );
+        for w in &walled {
+            eprintln!("  {w}");
+        }
+    }
+
+    let already: std::collections::HashSet<String> =
+        functions.iter().map(|f| f.name.clone()).collect();
+    for func in module_fn_sibs {
+        // ORIGINAL bodies under the mangled name — every keyed lookup (never-err strip,
+        // AUTO_WRAP ABI, `ret_is_result_abi`) sees the SAME name callers use via the
+        // combined registry population above.
+        if already.contains(func.name.as_str()) {
+            continue;
+        }
+        if let Ok(mirs) = crate::lower::lower_function_all_with_globals(
+            func,
+            globals,
+            global_inits,
+            record_layouts,
+            variant_layouts,
+        ) {
+            functions.extend(mirs);
+        }
+    }
+    functions
+}
+
 fn try_render_wasm_source_impl_rest(
     ir: &mut almide_ir::IrProgram,
     verbose: bool,
@@ -1327,59 +1401,18 @@ fn try_render_wasm_source_impl_rest(
         &all_fns,
     );
 
-    let mut functions = Vec::new();
-    let mut walled = Vec::new();
-    for func in &inlined_fns {
-        // `test "…"` blocks lower to fns calling the test harness (no wasm def) — never reachable
-        // from `_start`/`main`, so skip them (rendering one would pull a dangling `(call $assert_eq)`).
-        if func.is_test {
-            continue;
-        }
-        match crate::lower::lower_function_all_with_globals(
-            func,
-            &main_globals,
-            &main_global_inits,
-            &record_layouts,
-            &variant_layouts,
-        ) {
-            Ok(mirs) => functions.extend(mirs),
-            Err(e) => walled.push(format!("{}: {e:?}", func.name.as_str())),
-        }
-    }
-    if !walled.is_empty() && verbose {
-        eprintln!(
-            "[render_program] {} of {} function(s) outside the lowering subset (NOT rendered):",
-            walled.len(),
-            ir.functions.len()
-        );
-        for w in &walled {
-            eprintln!("  {w}");
-        }
-    }
-
-    // Lower the linked USER-module functions the target's resolved `almide_rt_<m>_<f>` references,
-    // renamed to the SAME mangled name. Each lowered SEPARATELY (its own VarId region + shared
-    // globals). A sibling that itself WALLS is silently skipped (the target then fails the
-    // unlinked-call render wall if it truly needed it). Stdlib modules stay out (self-host below).
-    let already: std::collections::HashSet<String> =
-        functions.iter().map(|f| f.name.clone()).collect();
-    for func in &module_fn_sibs {
-        // ORIGINAL bodies under the mangled name — every keyed lookup (never-err strip,
-        // AUTO_WRAP ABI, `ret_is_result_abi`) sees the SAME name callers use via the
-        // combined registry population above.
-        if already.contains(func.name.as_str()) {
-            continue;
-        }
-        if let Ok(mirs) = crate::lower::lower_function_all_with_globals(
-            func,
-            &globals,
-            &global_inits,
-            &record_layouts,
-            &variant_layouts,
-        ) {
-            functions.extend(mirs);
-        }
-    }
+    let mut functions = lower_main_and_sibling_fns(
+        &inlined_fns,
+        &module_fn_sibs,
+        &main_globals,
+        &main_global_inits,
+        &globals,
+        &global_inits,
+        &record_layouts,
+        &variant_layouts,
+        ir.functions.len(),
+        verbose,
+    );
 
     // MUTABLE-GLOBAL INITIALIZATION: synthesize `__mg_init` assigning each mutable
     // top-let its declared initializer (declaration order), lowered through the SAME
