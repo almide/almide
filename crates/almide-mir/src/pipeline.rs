@@ -1362,22 +1362,23 @@ fn try_render_wasm_source_impl(
                 let rt = source_to_ir(rt_source)?;
                 for f in &rt.functions {
                     let lowered = crate::lower::lower_function(f, &globals);
-                    if let Err(e) = &lowered {
-                        if verbose
-                            && (entries.iter().any(|(impl_fn, _)| f.name.as_str() == *impl_fn)
-                                || f.name.as_str().starts_with("__"))
-                        {
-                            eprintln!("[self-host] {} failed to lower: {:?}", f.name.as_str(), e);
-                        }
+                    let debug_this_fn = verbose
+                        && (entries.iter().any(|(impl_fn, _)| f.name.as_str() == *impl_fn)
+                            || f.name.as_str().starts_with("__"));
+                    // A single tuple-pattern `if let` (not two nested ifs) — identical to
+                    // `if debug_this_fn { if let Err(e) = &lowered { .. } }`, just flatter.
+                    if let (true, Err(e)) = (debug_this_fn, &lowered) {
+                        eprintln!("[self-host] {} failed to lower: {:?}", f.name.as_str(), e);
                     }
-                    if let Ok(mut mir) = lowered {
-                        if let Some((_, call)) =
-                            entries.iter().find(|(impl_fn, _)| &mir.name == impl_fn)
-                        {
-                            mir.name = call.to_string();
-                        }
-                        functions.push(mir);
+                    // Guard-clause flattening: `if let Ok(mut mir) = lowered { .. }` was the
+                    // LAST statement in this loop body, so an `Err` falling through to the
+                    // next `f` is unchanged by `continue` here. No behavior change.
+                    let Ok(mut mir) = lowered else { continue };
+                    if let Some((_, call)) = entries.iter().find(|(impl_fn, _)| &mir.name == impl_fn)
+                    {
+                        mir.name = call.to_string();
                     }
+                    functions.push(mir);
                 }
             }
         }

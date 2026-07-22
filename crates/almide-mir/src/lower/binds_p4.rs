@@ -439,6 +439,33 @@ impl LowerCtx {
     /// the container-grain `bind_pattern` (still memory-safe, just imprecise) so we never emit a
     /// dangling borrow. Returns `false` for any non-`Bind`/`Wildcard` sub-pattern (a nested tuple
     /// pattern in ONE statement is deferred — sz4 splits it into two statements, which works).
+    /// The nested-Option/Result-payload seeding for
+    /// [`Self::try_lower_tuple_destructure`]'s per-slot heap bind (`let (a, b) = (some(7),
+    /// some(8))` — a tuple slot that is itself Option/Result): tracks `v`'s READ-shape so a
+    /// later `match a { .. }` BRANCHES instead of LINEARIZING. NOT
+    /// [`Self::seed_nested_option_result_bind_payload`] (control_p2.rs) — that sibling ALSO
+    /// checks `is_lenlist_list_ty` first (routing to a `list_lenlist` `variant_drop_handles`
+    /// entry before the flat `heap_elem_lists` fallback), which this call site's original
+    /// inline chain never did; reusing it here would add new behavior. Verbatim extraction
+    /// (guard-clause flattening) of the former inline if-else-if chain, no behavior change —
+    /// see docs/roadmap/active/code-health-codopsy.md.
+    fn seed_tuple_slot_option_result_bind(&mut self, v: ValueId, ty: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId;
+        if matches!(ty, Ty::Applied(TypeConstructorId::Option, _)) {
+            self.materialized_options.insert(v);
+            if crate::lower::is_heap_elem_list_ty(ty) {
+                self.heap_elem_lists.insert(v);
+            }
+            return;
+        }
+        if crate::lower::is_result_ty(ty) {
+            self.materialized_results.insert(v);
+            if crate::lower::is_heap_elem_list_ty(ty) {
+                self.heap_elem_lists.insert(v);
+            }
+        }
+    }
+
     pub(crate) fn try_lower_tuple_destructure(
         &mut self,
         pats: &[IrPattern],
@@ -512,18 +539,7 @@ impl LowerCtx {
                     // (reads its tag) instead of LINEARIZING (running every arm + a garbage 0). Same
                     // materialized-Option read-shape Batch 2 gave the payload-bound / field-Option match
                     // subjects — a BORROW of the tuple's owned slot, no new ownership.
-                    use almide_lang::types::constructor::TypeConstructorId;
-                    if matches!(ty, Ty::Applied(TypeConstructorId::Option, _)) {
-                        self.materialized_options.insert(v);
-                        if crate::lower::is_heap_elem_list_ty(ty) {
-                            self.heap_elem_lists.insert(v);
-                        }
-                    } else if crate::lower::is_result_ty(ty) {
-                        self.materialized_results.insert(v);
-                        if crate::lower::is_heap_elem_list_ty(ty) {
-                            self.heap_elem_lists.insert(v);
-                        }
-                    }
+                    self.seed_tuple_slot_option_result_bind(v, ty);
                     // A CLOSURE slot (`let (g, _) = pair` where slot 0 is a Fn — the
                     // first-class storage class): the borrowed handle IS a closure
                     // block — admit it to the dispatch set so a later `g()` lowers

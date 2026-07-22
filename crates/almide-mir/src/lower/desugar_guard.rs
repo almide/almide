@@ -375,20 +375,25 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
             if let IrStmtKind::Bind { value, .. } = &mut stmts[i].kind {
                 if let IrExprKind::StringInterp { parts } = &mut value.kind {
                     let mut earlier_pure = true;
+                    // Guard-clause flattening: a non-Block part still needs the
+                    // `is_pure_operand` update before continuing (moved into the `else`
+                    // below); a Block part still unconditionally `break`s after the hoist
+                    // check, exactly as the original nested-if did. No behavior change.
                     for part in parts.iter_mut() {
                         let IrStringPart::Expr { expr } = part else { continue };
-                        if let IrExprKind::Block { stmts: inner, expr: Some(tail) } = &mut expr.kind
-                        {
-                            if earlier_pure && !inner.is_empty() {
-                                hoisted = std::mem::take(inner);
-                                let t = (**tail).clone();
-                                *expr = t;
+                        let IrExprKind::Block { stmts: inner, expr: Some(tail) } = &mut expr.kind
+                        else {
+                            if !is_pure_operand(expr) {
+                                earlier_pure = false;
                             }
-                            break;
+                            continue;
+                        };
+                        if earlier_pure && !inner.is_empty() {
+                            hoisted = std::mem::take(inner);
+                            let t = (**tail).clone();
+                            *expr = t;
                         }
-                        if !is_pure_operand(expr) {
-                            earlier_pure = false;
-                        }
+                        break;
                     }
                 }
             }
@@ -865,45 +870,55 @@ mod hoist_impl {
             match &mut stmts[i].kind {
                 IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
                     rewrite_expr(value, vt);
-                    if is_scalar_ty(&value.ty) {
-                        if let IrExprKind::Call {
+                    // Guard-clause flattening of the former 2-deep nested-if wrapping this
+                    // `for` (no `else` anywhere: an unmet condition just skips the arg-hoist
+                    // below, falling through to the record-FIELD hoist pass after this block
+                    // — unchanged, since `break` exits the labeled block and resumes there).
+                    // No behavior change — see docs/roadmap/active/code-health-codopsy.md.
+                    'call_arg_hoist: {
+                        if !is_scalar_ty(&value.ty) {
+                            break 'call_arg_hoist;
+                        }
+                        let IrExprKind::Call {
                             target: CallTarget::Named { .. } | CallTarget::Module { .. },
                             args,
                             ..
                         } = &mut value.kind
-                        {
-                            for a in args.iter_mut() {
-                                if matches!(
-                                    a.kind,
-                                    IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
-                                ) {
-                                    let aty = a.ty.clone();
-                                    let av = vt.alloc(
-                                        almide_lang::intern::sym("__rec_arg"),
-                                        aty.clone(),
-                                        Mutability::Let,
-                                        None,
-                                    );
-                                    let lit = std::mem::replace(
-                                        a,
-                                        IrExpr {
-                                            kind: IrExprKind::Var { id: av },
-                                            ty: aty.clone(),
-                                            span: None,
-                                            def_id: None,
-                                        },
-                                    );
-                                    hoists.push(IrStmt {
-                                        kind: IrStmtKind::Bind {
-                                            var: av,
-                                            mutability: Mutability::Let,
-                                            ty: aty,
-                                            value: lit,
-                                        },
-                                        span: None,
-                                    });
-                                }
+                        else {
+                            break 'call_arg_hoist;
+                        };
+                        for a in args.iter_mut() {
+                            if !matches!(
+                                a.kind,
+                                IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
+                            ) {
+                                continue;
                             }
+                            let aty = a.ty.clone();
+                            let av = vt.alloc(
+                                almide_lang::intern::sym("__rec_arg"),
+                                aty.clone(),
+                                Mutability::Let,
+                                None,
+                            );
+                            let lit = std::mem::replace(
+                                a,
+                                IrExpr {
+                                    kind: IrExprKind::Var { id: av },
+                                    ty: aty.clone(),
+                                    span: None,
+                                    def_id: None,
+                                },
+                            );
+                            hoists.push(IrStmt {
+                                kind: IrStmtKind::Bind {
+                                    var: av,
+                                    mutability: Mutability::Let,
+                                    ty: aty,
+                                    value: lit,
+                                },
+                                span: None,
+                            });
                         }
                     }
                     // A record-literal BIND whose FIELD is a scalar CALL (`left:

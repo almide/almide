@@ -1257,36 +1257,36 @@ fn classify_file(
                 // escapes to `Ok` — is what keeps (c) == 0 (asserted below).
                 for mir in &mirs {
                     for op in &mir.ops {
-                        if let Op::CallFn { name, .. } = op {
-                            // Unlinkable stdlib call ⟺ a DOTTED name that is neither in the
-                            // self-host registry NOR a function defined in this file (a dotted
-                            // user PROTOCOL METHOD resolves to itself/a sibling, so it is NOT a
-                            // dangling stdlib call). This is exactly the class the render wall
-                            // rejects; a user method / cross-file call is out of scope here.
-                            let unlinkable = name.contains('.')
-                                && !auto_linkable.contains(name)
-                                && !file_fn_names.contains(name);
-                            if unlinkable {
-                                *t.would_wall_callees.entry(name.clone()).or_insert(0) += 1;
-                                t.interp_walled += 1;
-                                // (c) completeness backstop: this site is genuinely unlinkable,
-                                // so the render wall MUST flag it. `unlinked_call_names` is the
-                                // wall's OWN predicate; if it does NOT contain the name, a site
-                                // escaped the wall → a real (c) breach. A single-fn probe is
-                                // sound here: the name is not file-defined, so adding sibling
-                                // functions could not make it resolve (only the registry could,
-                                // which `auto_linkable` already ruled out).
-                                let probe = MirProgram { functions: vec![mir.clone()], exports: vec![], mutable_global_count: 0 };
-                                if !almide_mir::render_wasm::unlinked_call_names(&probe)
-                                    .contains(name)
-                                {
-                                    t.forbidden_unwalled.push(format!(
-                                        "{}::{} -> {name} (escaped the render wall)",
-                                        file.display(),
-                                        mir.name
-                                    ));
-                                }
-                            }
+                        let Op::CallFn { name, .. } = op else {
+                            continue;
+                        };
+                        // Unlinkable stdlib call ⟺ a DOTTED name that is neither in the
+                        // self-host registry NOR a function defined in this file (a dotted
+                        // user PROTOCOL METHOD resolves to itself/a sibling, so it is NOT a
+                        // dangling stdlib call). This is exactly the class the render wall
+                        // rejects; a user method / cross-file call is out of scope here.
+                        let unlinkable = name.contains('.')
+                            && !auto_linkable.contains(name)
+                            && !file_fn_names.contains(name);
+                        if !unlinkable {
+                            continue;
+                        }
+                        *t.would_wall_callees.entry(name.clone()).or_insert(0) += 1;
+                        t.interp_walled += 1;
+                        // (c) completeness backstop: this site is genuinely unlinkable,
+                        // so the render wall MUST flag it. `unlinked_call_names` is the
+                        // wall's OWN predicate; if it does NOT contain the name, a site
+                        // escaped the wall → a real (c) breach. A single-fn probe is
+                        // sound here: the name is not file-defined, so adding sibling
+                        // functions could not make it resolve (only the registry could,
+                        // which `auto_linkable` already ruled out).
+                        let probe = MirProgram { functions: vec![mir.clone()], exports: vec![], mutable_global_count: 0 };
+                        if !almide_mir::render_wasm::unlinked_call_names(&probe).contains(name) {
+                            t.forbidden_unwalled.push(format!(
+                                "{}::{} -> {name} (escaped the render wall)",
+                                file.display(),
+                                mir.name
+                            ));
                         }
                     }
                 }

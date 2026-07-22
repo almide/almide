@@ -580,17 +580,24 @@ pub fn rewrap_never_err_into_result_targets(
             match &mut expr.kind {
                 // `[step(), step()]: List[Result[..]]` — the element slot type is the LIST's
                 // own type's sole type arg (mirrors auto_try.rs's `elem_is_result`).
+                // Guard-clause flattening: this arm is the tail of `visit_expr_mut` (the
+                // last statement in the function, and match arms are mutually exclusive),
+                // so an early `return` on any unmet condition is identical to falling
+                // through to the end of the arm's block. No behavior change.
                 IrExprKind::List { elements } => {
-                    if let Ty::Applied(TypeConstructorId::List, a) = &expr.ty {
-                        if a.len() == 1 {
-                            if let Ty::Applied(TypeConstructorId::Result, _) = &a[0] {
-                                let elem_ty = a[0].clone();
-                                for el in elements.iter_mut() {
-                                    if self.is_raw_never_err_call(el) {
-                                        self.wrap(el, elem_ty.clone());
-                                    }
-                                }
-                            }
+                    let Ty::Applied(TypeConstructorId::List, a) = &expr.ty else {
+                        return;
+                    };
+                    if a.len() != 1 {
+                        return;
+                    }
+                    let Ty::Applied(TypeConstructorId::Result, _) = &a[0] else {
+                        return;
+                    };
+                    let elem_ty = a[0].clone();
+                    for el in elements.iter_mut() {
+                        if self.is_raw_never_err_call(el) {
+                            self.wrap(el, elem_ty.clone());
                         }
                     }
                 }
