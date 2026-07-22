@@ -540,6 +540,20 @@ fn try_render_wasm_source_impl(
     verbose: bool,
     test_mode: bool,
 ) -> Result<String, LowerError> {
+    let mut ir = build_ir_with_drops(source, self_modules, test_mode)?;
+    try_render_wasm_source_impl_rest(&mut ir, verbose)
+}
+
+/// Phase 1: synthesize the recursive-drop / repr source text this program's linked
+/// types need, splice it into the source, and re-lower (v1-trust-spine-only — v0
+/// manages its own memory). In `test_mode`, promote `test "…"` fns to a synthesized
+/// runner `main`. Returns the FINAL linked `IrProgram` the rest of the pipeline
+/// (globals, layouts, MIR lowering) continues from.
+fn build_ir_with_drops(
+    source: &str,
+    self_modules: &[(String, almide_lang::ast::Program, bool)],
+    test_mode: bool,
+) -> Result<almide_ir::IrProgram, LowerError> {
     // STRICT VALUE MODE: this is an OUTPUT path — a deferred Const-0 must never be executable
     // (flight-evidence-gaps F2, the prim.handle literal address-0 class).
     crate::lower::STRICT_VALUES.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -697,7 +711,16 @@ fn try_render_wasm_source_impl(
     if test_mode {
         synthesize_test_runner_main(&mut ir)?;
     }
+    Ok(ir)
+}
 
+/// The rest of the pipeline after [`build_ir_with_drops`]: collect globals/layouts,
+/// lower every fn to MIR (main + linked module siblings), synthesize the global-init
+/// and self-host-runtime auto-link fns, then render the final wasm module.
+fn try_render_wasm_source_impl_rest(
+    ir: &mut almide_ir::IrProgram,
+    verbose: bool,
+) -> Result<String, LowerError> {
     // Top-level `let` globals (VarId -> Ty) + their INITIALIZER exprs, union of program + modules.
     let mut globals: HashMap<almide_ir::VarId, almide_lang::types::Ty> = HashMap::new();
     let mut global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr> = HashMap::new();
