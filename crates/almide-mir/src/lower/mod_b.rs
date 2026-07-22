@@ -89,77 +89,102 @@ pub fn repair_unknown_global_ref_tys(
 }
 
 pub fn build_variant_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> VariantLayouts {
-    use almide_ir::{IrTypeDeclKind, IrVariantKind};
+    // Fold-with-append-only-accumulator split (codopsy8 complexity sweep): each `decl` is
+    // processed independently and only APPENDS to `out` (never reads back an earlier
+    // decl's contribution) — the established "fold is safer than router" pattern
+    // (round5/round7/round8). Pure text-move, no logic change.
     let mut out = VariantLayouts::default();
     for decl in type_decls {
-        // A plain RECORD's field defaults ride the same map, keyed by the record TYPE
-        // name (`AllDefault()` — the paren-empty ctor fills them in
-        // try_lower_record_construct; a variant record-ctor keys by CTOR name below).
-        if let IrTypeDeclKind::Record { fields } = &decl.kind {
+        build_variant_layouts_for_decl(decl, &mut out);
+    }
+    out
+}
+
+/// Extracted from `build_variant_layouts` (codopsy8 complexity sweep, per-decl phase):
+/// a plain RECORD's field defaults ride the same map, keyed by the record TYPE name
+/// (`AllDefault()` — the paren-empty ctor fills them in `try_lower_record_construct`; a
+/// variant record-ctor keys by CTOR name in [`build_variant_layouts_variant_decl`]).
+/// Verbatim.
+fn build_variant_layouts_for_decl(decl: &almide_ir::IrTypeDecl, out: &mut VariantLayouts) {
+    use almide_ir::IrTypeDeclKind;
+    if let IrTypeDeclKind::Record { fields } = &decl.kind {
+        for f in fields {
+            if let Some(d) = &f.default {
+                out.ctor_field_defaults
+                    .entry(decl.name.as_str().to_string())
+                    .or_default()
+                    .insert(f.name.as_str().to_string(), d.clone());
+            }
+        }
+        return;
+    }
+    let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else {
+        return;
+    };
+    build_variant_layouts_variant_decl(decl, cases, out);
+}
+
+/// Extracted from `build_variant_layouts` (codopsy8 complexity sweep, the `Variant` arm of
+/// the per-decl phase): builds one type's [`VariantLayout`] (all its constructor cases +
+/// the shared slot count) and registers each ctor's owning type. Verbatim.
+fn build_variant_layouts_variant_decl(
+    decl: &almide_ir::IrTypeDecl,
+    cases: &[almide_ir::IrVariantDecl],
+    out: &mut VariantLayouts,
+) {
+    let generics =
+        decl.generics.as_ref().map(|gs| gs.iter().map(|g| g.name).collect()).unwrap_or_default();
+    let type_name = decl.name.as_str().to_string();
+    let mut case_layouts = Vec::with_capacity(cases.len());
+    let mut max_arity = 0usize;
+    for (tag, case) in cases.iter().enumerate() {
+        let fields = build_variant_layouts_case_fields(case, out);
+        max_arity = max_arity.max(fields.len());
+        out.ctor_to_type.insert(case.name.as_str().to_string(), type_name.clone());
+        case_layouts.push(VariantCaseLayout { ctor: case.name, tag: tag as u32, fields });
+    }
+    out.by_type.insert(
+        type_name,
+        VariantLayout {
+            generics,
+            cases: case_layouts,
+            // slot 0 is the tag; slots 1.. are the widest constructor's fields, so all
+            // constructors of the type share one block size (uniform alloc + sound `==`).
+            slot_count: 1 + max_arity,
+        },
+    );
+}
+
+/// Extracted from `build_variant_layouts_variant_decl` (codopsy8 complexity sweep): one
+/// constructor CASE's field list, by ctor kind. A `Record` case ALSO registers its field
+/// defaults (keyed by CTOR name, unlike the plain-record arm above which keys by TYPE
+/// name). Verbatim.
+fn build_variant_layouts_case_fields(
+    case: &almide_ir::IrVariantDecl,
+    out: &mut VariantLayouts,
+) -> Vec<(almide_lang::intern::Sym, Ty)> {
+    use almide_ir::IrVariantKind;
+    match &case.kind {
+        IrVariantKind::Unit => Vec::new(),
+        // A tuple constructor's positional fields get the same `_0`, `_1`, …
+        // synthetic names v0 assigns, so field identity is shared across backends.
+        IrVariantKind::Tuple { fields } => fields
+            .iter()
+            .enumerate()
+            .map(|(i, ty)| (almide_lang::intern::sym(&format!("_{i}")), ty.clone()))
+            .collect(),
+        IrVariantKind::Record { fields } => {
             for f in fields {
                 if let Some(d) = &f.default {
                     out.ctor_field_defaults
-                        .entry(decl.name.as_str().to_string())
+                        .entry(case.name.as_str().to_string())
                         .or_default()
                         .insert(f.name.as_str().to_string(), d.clone());
                 }
             }
-            continue;
+            fields.iter().map(|f| (f.name, f.ty.clone())).collect()
         }
-        let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else {
-            continue;
-        };
-        let generics = decl
-            .generics
-            .as_ref()
-            .map(|gs| gs.iter().map(|g| g.name).collect())
-            .unwrap_or_default();
-        let type_name = decl.name.as_str().to_string();
-        let mut case_layouts = Vec::with_capacity(cases.len());
-        let mut max_arity = 0usize;
-        for (tag, case) in cases.iter().enumerate() {
-            let fields: Vec<(almide_lang::intern::Sym, Ty)> = match &case.kind {
-                IrVariantKind::Unit => Vec::new(),
-                // A tuple constructor's positional fields get the same `_0`, `_1`, …
-                // synthetic names v0 assigns, so field identity is shared across backends.
-                IrVariantKind::Tuple { fields } => fields
-                    .iter()
-                    .enumerate()
-                    .map(|(i, ty)| (almide_lang::intern::sym(&format!("_{i}")), ty.clone()))
-                    .collect(),
-                IrVariantKind::Record { fields } => {
-                    for f in fields {
-                        if let Some(d) = &f.default {
-                            out.ctor_field_defaults
-                                .entry(case.name.as_str().to_string())
-                                .or_default()
-                                .insert(f.name.as_str().to_string(), d.clone());
-                        }
-                    }
-                    fields.iter().map(|f| (f.name, f.ty.clone())).collect()
-                }
-            };
-            max_arity = max_arity.max(fields.len());
-            out.ctor_to_type
-                .insert(case.name.as_str().to_string(), type_name.clone());
-            case_layouts.push(VariantCaseLayout {
-                ctor: case.name,
-                tag: tag as u32,
-                fields,
-            });
-        }
-        out.by_type.insert(
-            type_name,
-            VariantLayout {
-                generics,
-                cases: case_layouts,
-                // slot 0 is the tag; slots 1.. are the widest constructor's fields, so all
-                // constructors of the type share one block size (uniform alloc + sound `==`).
-                slot_count: 1 + max_arity,
-            },
-        );
     }
-    out
 }
 
 /// If `ty` names a user VARIANT in `variant_names`, return that name (the recursion target for a
