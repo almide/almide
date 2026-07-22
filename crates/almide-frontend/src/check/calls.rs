@@ -520,12 +520,17 @@ impl Checker {
         ty
     }
 
-    pub(crate) fn check_named_call_with_type_args(&mut self, name: &str, arg_tys: &[Ty], type_args: Option<&[Ty]>) -> Ty {
-        // Try builtin resolution first
-        if let Some(ty) = self.check_builtin_call(name, arg_tys) {
-            return ty;
-        }
-
+    /// Resolve `name` to its `FnSig`, trying (in order) DefId-based lookup on
+    /// the bare name, DefId-based lookup on the import-alias-resolved name
+    /// (`"gpu.create_buffer"` → `"snaidhm.web.gpu.create_buffer"`), a plain
+    /// `env.functions` lookup, stdlib lookup by module/func split, and
+    /// finally stdlib/`env.functions` lookup via the selective-import direct
+    /// map (`import json.{from_string}` lets bare `from_string` resolve as
+    /// `"json.from_string"`). Also returns the selective-import qualified
+    /// name (used by the caller for the used-import mark and E026 ordering
+    /// checks). Verbatim text move out of
+    /// [`Self::check_named_call_with_type_args`].
+    fn resolve_call_sig_and_import(&self, name: &str) -> (Option<crate::types::FnSig>, Option<String>) {
         // Try stdlib lookup for module-qualified calls (e.g. "string.trim").
         // Selective import (`import json.{from_string}`) lets bare `from_string`
         // resolve via direct map → "json.from_string".
@@ -562,6 +567,16 @@ impl Checker {
                 crate::stdlib::lookup_sig(module, func)
                     .or_else(|| self.env.functions.get(&sym(q)).cloned())
             });
+        (sig, qualified_via_direct)
+    }
+
+    pub(crate) fn check_named_call_with_type_args(&mut self, name: &str, arg_tys: &[Ty], type_args: Option<&[Ty]>) -> Ty {
+        // Try builtin resolution first
+        if let Some(ty) = self.check_builtin_call(name, arg_tys) {
+            return ty;
+        }
+
+        let (sig, qualified_via_direct) = self.resolve_call_sig_and_import(name);
 
         // Mark the source module as used (for unused-import diagnostic).
         if qualified_via_direct.is_some() {
@@ -635,47 +650,7 @@ impl Checker {
             }
         }
         let mut concrete_args: Vec<Ty> = arg_tys.iter().map(|a| resolve_ty(a, &self.uf)).collect();
-        // #558: realign named args to the parameter they NAME before validating
-        // (they were appended in source order). Reorder both the arg types and
-        // their spans so E005 points at the right expression. Slots a named call
-        // skips (relying on a default) are filled with the param's own type so
-        // the zip below validates them trivially.
-        // `aligned_raw[i] = Some(arg inference ty)` when param i was supplied
-        // (positional or named); `None` when it relies on a default. The
-        // constraint-propagation loop below uses this so back-propagation
-        // targets the right inference var, and default slots add no constraint.
-        let mut aligned_raw: Option<Vec<Option<Ty>>> = None;
-        if let Some((named_start, ref names)) = self.named_arg_meta {
-            if named_start <= concrete_args.len() {
-                let param_index: std::collections::HashMap<Sym, usize> =
-                    sig.params.iter().enumerate().map(|(i, (pn, _))| (*pn, i)).collect();
-                let mut aligned: Vec<Ty> = sig.params.iter().map(|(_, t)| t.clone()).collect();
-                let mut aligned_spans: Vec<Option<crate::ast::Span>> = vec![None; sig.params.len()];
-                let mut raw: Vec<Option<Ty>> = vec![None; sig.params.len()];
-                let mut ok = true;
-                for i in 0..named_start.min(aligned.len()) {
-                    aligned[i] = concrete_args[i].clone();
-                    aligned_spans[i] = self.arg_spans.get(i).copied().flatten();
-                    raw[i] = arg_tys.get(i).cloned();
-                }
-                for (k, nm) in names.iter().enumerate() {
-                    let src = named_start + k;
-                    match param_index.get(nm) {
-                        Some(&pi) if src < concrete_args.len() => {
-                            aligned[pi] = concrete_args[src].clone();
-                            aligned_spans[pi] = self.arg_spans.get(src).copied().flatten();
-                            raw[pi] = arg_tys.get(src).cloned();
-                        }
-                        _ => { ok = false; break; }
-                    }
-                }
-                if ok {
-                    concrete_args = aligned;
-                    self.arg_spans = aligned_spans;
-                    aligned_raw = Some(raw);
-                }
-            }
-        }
+        let aligned_raw = self.realign_named_call_args(&sig, arg_tys, &mut concrete_args);
         let mut e005_fired: Vec<bool> = Vec::new();
         for (i, ((pname, pty), aty)) in sig.params.iter().zip(concrete_args.iter()).enumerate() {
             // Point caret at the exact argument expression for E005
@@ -776,6 +751,58 @@ impl Checker {
             return Ty::result(ret, Ty::String);
         }
         ret
+    }
+
+    /// #558: realign named args to the parameter they NAME before validating
+    /// (they were appended in source order). Reorders both `concrete_args`
+    /// (in place) and `self.arg_spans` so E005 points at the right
+    /// expression; a slot a named call skips (relying on a default) is
+    /// filled with the param's own type so the caller's zip validates it
+    /// trivially. Returns `aligned_raw[i] = Some(arg inference ty)` when
+    /// param i was supplied (positional or named), `None` when it relies on
+    /// a default — the caller's back-propagation loop uses this so it
+    /// targets the right inference var, and a default slot adds no
+    /// constraint. `None` overall when there's no named-arg realignment to
+    /// do. Verbatim text move out of
+    /// [`Self::check_named_call_with_type_args`].
+    fn realign_named_call_args(
+        &mut self,
+        sig: &crate::types::FnSig,
+        arg_tys: &[Ty],
+        concrete_args: &mut Vec<Ty>,
+    ) -> Option<Vec<Option<Ty>>> {
+        let (named_start, names) = self.named_arg_meta.clone()?;
+        if named_start > concrete_args.len() {
+            return None;
+        }
+        let param_index: std::collections::HashMap<Sym, usize> =
+            sig.params.iter().enumerate().map(|(i, (pn, _))| (*pn, i)).collect();
+        let mut aligned: Vec<Ty> = sig.params.iter().map(|(_, t)| t.clone()).collect();
+        let mut aligned_spans: Vec<Option<crate::ast::Span>> = vec![None; sig.params.len()];
+        let mut raw: Vec<Option<Ty>> = vec![None; sig.params.len()];
+        let mut ok = true;
+        for i in 0..named_start.min(aligned.len()) {
+            aligned[i] = concrete_args[i].clone();
+            aligned_spans[i] = self.arg_spans.get(i).copied().flatten();
+            raw[i] = arg_tys.get(i).cloned();
+        }
+        for (k, nm) in names.iter().enumerate() {
+            let src = named_start + k;
+            match param_index.get(nm) {
+                Some(&pi) if src < concrete_args.len() => {
+                    aligned[pi] = concrete_args[src].clone();
+                    aligned_spans[pi] = self.arg_spans.get(src).copied().flatten();
+                    raw[pi] = arg_tys.get(src).cloned();
+                }
+                _ => { ok = false; break; }
+            }
+        }
+        if !ok {
+            return None;
+        }
+        *concrete_args = aligned;
+        self.arg_spans = aligned_spans;
+        Some(raw)
     }
 
     /// The NO-SIGNATURE fallback of [`Self::check_named_call_with_type_args`]:
