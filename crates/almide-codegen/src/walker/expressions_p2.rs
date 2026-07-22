@@ -1273,52 +1273,53 @@ fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
         .unwrap_or_else(|| format!("{}.clone()", expr_s))
 }
 
+/// Shared-mut non-Copy var (`SharedMut`, Closure v2 P6): borrow through the
+/// `RefCell` rather than the `.get()` clone a bare Var read would emit, so a
+/// mutating call (`list.push(acc, …)` → `&mut *acc.borrow_mut()`) writes the
+/// ONE shared cell the closure also holds. A shared read uses `&*acc.borrow()`
+/// (no clone). Copy shared-mut vars stay on the `Cell` `.get()` path below.
+/// Extracted from `render_expr_borrow` (cog>30 decomposition): `Some`
+/// mirrors the original's early `return`, `None` falls through.
+fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bool) -> Option<String> {
+    let IrExprKind::Var { id } = &inner.kind else { return None; };
+    if !ctx.ann.is_shared_mut(id) { return None; }
+    if almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(*id).ty) { return None; }
+    let var_name = ctx.var_name(*id).to_string();
+    Some(if mutable {
+        // In-place mutation writes the one shared cell.
+        format!("&mut *{}.borrow_mut()", var_name)
+    } else {
+        // A shared read borrows an owned snapshot (`.get()` clones the
+        // cell's value). Unlike `&*x.borrow()`, this owned temporary has
+        // no lifetime tie to `x`, so it is also safe in tail position
+        // where `x` is a block-local (`let outer = () => { var a = …; …; a })`.
+        format!("&{}.get()", var_name)
+    })
+}
+
+/// If the borrowed operand is a Var referencing a fn param already emitted
+/// as a reference (`&T`, `&[T]`, `&str` for a shared borrow; `&mut T` for a
+/// mutable one), skip the outer `&`/`&mut` — Rust auto-reborrows when you
+/// pass the naked var, so this avoids a `&&T`/`&mut &mut T` double-borrow.
+/// Extracted from `render_expr_borrow`.
+fn try_render_borrow_already_ref_param(ctx: &RenderContext, inner: &IrExpr, as_str: bool, mutable: bool) -> Option<String> {
+    let IrExprKind::Var { id } = &inner.kind else { return None; };
+    if !as_str && !mutable && ctx.ref_params.contains(id) {
+        return Some(render_expr(ctx, inner));
+    }
+    if mutable && ctx.ref_mut_params.contains(id) {
+        return Some(render_expr(ctx, inner));
+    }
+    None
+}
+
 fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Borrow { expr: inner, as_str, mutable } = &expr.kind else { unreachable!() };
-    // Shared-mut non-Copy var (`SharedMut`, Closure v2 P6): borrow through the
-    // `RefCell` rather than the `.get()` clone a bare Var read would emit, so a
-    // mutating call (`list.push(acc, …)` → `&mut *acc.borrow_mut()`) writes the
-    // ONE shared cell the closure also holds. A shared read uses `&*acc.borrow()`
-    // (no clone). Copy shared-mut vars stay on the `Cell` `.get()` path below.
-    if let IrExprKind::Var { id } = &inner.kind {
-        if ctx.ann.is_shared_mut(id)
-            && !almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(*id).ty)
-        {
-            let var_name = ctx.var_name(*id).to_string();
-            return if *mutable {
-                // In-place mutation writes the one shared cell.
-                format!("&mut *{}.borrow_mut()", var_name)
-            } else {
-                // A shared read borrows an owned snapshot (`.get()` clones the
-                // cell's value). Unlike `&*x.borrow()`, this owned temporary has
-                // no lifetime tie to `x`, so it is also safe in tail position
-                // where `x` is a block-local (`let outer = () => { var a = …; …; a })`.
-                format!("&{}.get()", var_name)
-            };
-        }
+    if let Some(rendered) = try_render_borrow_shared_mut(ctx, inner, *mutable) {
+        return rendered;
     }
-    // If the borrowed operand is a Var referencing a fn param
-    // already emitted as a reference (`&T`, `&[T]`, `&str`),
-    // skip the outer `&` to avoid `&&T` double-borrow. The
-    // `&*` (deref-then-ref) decoration still renders because
-    // it rewraps via `Deref`.
-    if !*as_str && !*mutable {
-        if let IrExprKind::Var { id } = &inner.kind {
-            if ctx.ref_params.contains(id) {
-                return render_expr(ctx, inner);
-            }
-        }
-    }
-    // Same idea for `&mut b` against a `b: &mut T` param:
-    // Rust auto-reborrows when you pass the naked var, so
-    // dropping the outer `&mut` here keeps the callee's
-    // `&mut T` slot filled without a `&mut &mut T` layer.
-    if *mutable {
-        if let IrExprKind::Var { id } = &inner.kind {
-            if ctx.ref_mut_params.contains(id) {
-                return render_expr(ctx, inner);
-            }
-        }
+    if let Some(rendered) = try_render_borrow_already_ref_param(ctx, inner, *as_str, *mutable) {
+        return rendered;
     }
     if *mutable {
         // Val-wrapped var: .make_mut() for COW semantics
