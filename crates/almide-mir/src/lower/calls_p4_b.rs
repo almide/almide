@@ -171,9 +171,12 @@ impl LowerCtx {
         None
     }
 
-    /// Extracted from `Self::lower_scalar_binop` (seventh-round split, cog reduction):
-    /// the String-ordering-cmp + heap-typed `==`/`!=` sub-chain, verbatim.
-    fn lower_scalar_binop_cmp_and_heap_eq(
+    /// The String-ordering-cmp case of [`Self::lower_scalar_binop_cmp_and_heap_eq`] below,
+    /// split out (codopsy cc) — guarded on `op ∈ {Lt,Lte,Gt,Gte}`, DISJOINT from the heap-eq
+    /// case's `op ∈ {Eq,Neq}` guard, so chaining the two via `.or_else()` is safe (a guard
+    /// match here that then internally fails can never spuriously satisfy the other guard —
+    /// the op value is fixed, and it's provably outside the other case's op set).
+    fn lower_scalar_binop_string_cmp(
         &mut self,
         op: &almide_ir::BinOp,
         left: &IrExpr,
@@ -183,48 +186,70 @@ impl LowerCtx {
         // String ordering `< <= > >=` → `string.cmp(a,b)` (lexicographic, -1/0/1) compared with
         // 0. WITHOUT this the comparison fell through to the i64-handle path → arbitrary order
         // (silent), or the if linearized both arms. Both operands BORROWED (cmp only reads).
-        if matches!(op, BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte)
-            && matches!(left.ty, Ty::String)
-        {
-            let args = [left.clone(), right.clone()];
-            let cmp = self
-                .lower_pure_module_value_call("string", "cmp", &args, &Ty::Int)
-                .ok()?;
-            let zero = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: zero, value: 0 });
-            let iop = match op {
-                BinOp::Lt => crate::IntOp::Lt,
-                BinOp::Lte => crate::IntOp::Le,
-                BinOp::Gt => crate::IntOp::Gt,
-                _ => crate::IntOp::Ge,
-            };
-            let dst = self.fresh_value();
-            self.ops.push(Op::IntBinOp { dst, op: iop, a: cmp, b: zero });
-            return Some(dst);
+        if !(matches!(op, BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte) && matches!(left.ty, Ty::String)) {
+            return None;
         }
+        let args = [left.clone(), right.clone()];
+        let cmp = self.lower_pure_module_value_call("string", "cmp", &args, &Ty::Int).ok()?;
+        let zero = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+        let iop = match op {
+            BinOp::Lt => crate::IntOp::Lt,
+            BinOp::Lte => crate::IntOp::Le,
+            BinOp::Gt => crate::IntOp::Gt,
+            _ => crate::IntOp::Ge,
+        };
+        let dst = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst, op: iop, a: cmp, b: zero });
+        Some(dst)
+    }
+
+    /// The heap-typed `==`/`!=` case of [`Self::lower_scalar_binop_cmp_and_heap_eq`] below,
+    /// split out (codopsy cc) — see that fn's doc for the `.or_else()`-safety argument.
+    fn lower_scalar_binop_heap_eq(
+        &mut self,
+        op: &almide_ir::BinOp,
+        left: &IrExpr,
+        right: &IrExpr,
+    ) -> Option<ValueId> {
+        use almide_ir::BinOp;
         // Heap `==` / `!=` in a VALUE position (Option/Result/tuple/record/custom variant —
         // any layout the recursive typed-eq engine composes): the SAME materialized engine
         // the unit-if cond uses. Operands materialize (a tracked Var borrowed, a fresh
         // ctor/call an owned temp freed at frame teardown); the eq only reads. Was both-arms-
         // linearized (silent). Rolls back fully on a shape outside the engine — the caller
         // then defers/walls (loud, never wrong).
-        if matches!(op, BinOp::Eq | BinOp::Neq) && is_heap_ty(&left.ty) {
-            let ops_mark = self.ops.len();
-            let lhh_mark = self.live_heap_handles.len();
-            if let Some(eq) = self.lower_heap_eq_typed_materialized(left, right, &left.ty) {
-                if matches!(op, BinOp::Eq) {
-                    return Some(eq);
-                }
-                let one = self.fresh_value();
-                self.ops.push(Op::ConstInt { dst: one, value: 1 });
-                let dst = self.fresh_value();
-                self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
-                return Some(dst);
-            }
-            self.ops.truncate(ops_mark);
-            self.live_heap_handles.truncate(lhh_mark);
+        if !(matches!(op, BinOp::Eq | BinOp::Neq) && is_heap_ty(&left.ty)) {
+            return None;
         }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        if let Some(eq) = self.lower_heap_eq_typed_materialized(left, right, &left.ty) {
+            if matches!(op, BinOp::Eq) {
+                return Some(eq);
+            }
+            let one = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: one, value: 1 });
+            let dst = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+            return Some(dst);
+        }
+        self.ops.truncate(ops_mark);
+        self.live_heap_handles.truncate(lhh_mark);
         None
+    }
+
+    /// Extracted from `Self::lower_scalar_binop` (seventh-round split, cog reduction):
+    /// the String-ordering-cmp + heap-typed `==`/`!=` sub-chain, now a thin router over the
+    /// two disjoint-guard helpers above.
+    fn lower_scalar_binop_cmp_and_heap_eq(
+        &mut self,
+        op: &almide_ir::BinOp,
+        left: &IrExpr,
+        right: &IrExpr,
+    ) -> Option<ValueId> {
+        self.lower_scalar_binop_string_cmp(op, left, right)
+            .or_else(|| self.lower_scalar_binop_heap_eq(op, left, right))
     }
 
     /// Extracted from `Self::lower_scalar_binop` (seventh-round split, cog reduction):
@@ -269,47 +294,59 @@ impl LowerCtx {
         // Uses the same IfThen/Else/EndIf scalar markers as `try_lower_scalar_if`; the LHS is a
         // pure Bool scalar, so no per-arm heap frame is needed. A non-lowerable operand rolls
         // back (truncate) and falls through to the deferred path — never both-arms, never wrong.
-        if matches!(op, BinOp::And | BinOp::Or) && matches!(left.ty, Ty::Bool) {
-            let ops_mark = self.ops.len();
-            let lhh_mark = self.live_heap_handles.len();
-            // The RHS is evaluated INSIDE the taken IfThen/Else branch, so use
-            // `lower_scalar_operand` — it wraps the operand in a per-branch frame that frees any
-            // transient heap temp it allocates (a `contains(y, "@")` materializes its String
-            // arg) WITHIN the branch, keeping it `i…d`-balanced. (The eager path used
-            // `lower_scalar_operand` too; using bare `lower_scalar_value` walled those heap-temp
-            // operands → a coverage regression.) The LHS (a pure Bool) is likewise framed.
-            if let Some(lhs) = self.lower_scalar_operand(left) {
-                let dst = self.fresh_value();
-                self.ops.push(Op::IfThen { cond: lhs, dst: Some(dst) });
-                // THEN branch: `and` evaluates RHS here; `or` yields the constant `true`.
-                let then_val = if matches!(op, BinOp::And) {
-                    self.lower_scalar_operand(right)
-                } else {
-                    let t = self.fresh_value();
-                    self.ops.push(Op::ConstInt { dst: t, value: 1 });
-                    Some(t)
-                };
-                if let Some(tv) = then_val {
-                    self.ops.push(Op::Else { val: Some(tv) });
-                    // ELSE branch: `and` yields the constant `false`; `or` evaluates RHS here.
-                    let else_val = if matches!(op, BinOp::And) {
-                        let f = self.fresh_value();
-                        self.ops.push(Op::ConstInt { dst: f, value: 0 });
-                        Some(f)
-                    } else {
-                        self.lower_scalar_operand(right)
-                    };
-                    if let Some(ev) = else_val {
-                        self.ops.push(Op::EndIf { val: Some(ev) });
-                        return Some(dst);
-                    }
-                }
-            }
-            self.ops.truncate(ops_mark);
-            self.live_heap_handles.truncate(lhh_mark);
+        if !(matches!(op, BinOp::And | BinOp::Or) && matches!(left.ty, Ty::Bool)) {
             return None;
         }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        if let Some(dst) = self.try_lower_scalar_binop_shortcircuit_body(op, left, right) {
+            return Some(dst);
+        }
+        // A non-lowerable operand anywhere in the body above rolls back to exactly the state
+        // before this attempt — whatever ops the body already pushed (IfThen alone, or
+        // IfThen+Else) are undone here, regardless of WHICH operand failed.
+        self.ops.truncate(ops_mark);
+        self.live_heap_handles.truncate(lhh_mark);
         None
+    }
+
+    /// The op-emitting body of [`Self::lower_scalar_binop_shortcircuit`], flattened from 3
+    /// levels of `if let Some(..) = .. else { <same tail> }` nesting to `?`-early-return
+    /// (codopsy cog) — same op sequence, same failure points; the caller now owns the ONE
+    /// rollback (previously duplicated implicitly by falling out of each nested `if`).
+    fn try_lower_scalar_binop_shortcircuit_body(
+        &mut self,
+        op: &almide_ir::BinOp,
+        left: &IrExpr,
+        right: &IrExpr,
+    ) -> Option<ValueId> {
+        use almide_ir::BinOp;
+        // The RHS is evaluated INSIDE the taken IfThen/Else branch, so use
+        // `lower_scalar_operand` — it wraps the operand in a per-branch frame that frees any
+        // transient heap temp it allocates (a `contains(y, "@")` materializes its String arg)
+        // WITHIN the branch, keeping it `i…d`-balanced. The LHS (a pure Bool) is likewise framed.
+        let lhs = self.lower_scalar_operand(left)?;
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: lhs, dst: Some(dst) });
+        // THEN branch: `and` evaluates RHS here; `or` yields the constant `true`.
+        let then_val = if matches!(op, BinOp::And) {
+            self.lower_scalar_operand(right)?
+        } else {
+            let t = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: t, value: 1 });
+            t
+        };
+        self.ops.push(Op::Else { val: Some(then_val) });
+        // ELSE branch: `and` yields the constant `false`; `or` evaluates RHS here.
+        let else_val = if matches!(op, BinOp::And) {
+            let f = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: f, value: 0 });
+            f
+        } else {
+            self.lower_scalar_operand(right)?
+        };
+        self.ops.push(Op::EndIf { val: Some(else_val) });
+        Some(dst)
     }
 
     /// Extracted from `Self::lower_scalar_binop_shortcircuit_or_int` (eighth-round split,
@@ -319,7 +356,12 @@ impl LowerCtx {
     /// Extracted from `Self::lower_scalar_binop_int_fallback` (ninth-round split, cog
     /// reduction): the pure `BinOp` + operand-shape → `IntOp` lookup, verbatim (a static
     /// value computation, no `&mut self` needed).
-    fn scalar_binop_int_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
+    /// Disjoint `BinOp` case (the 5 arithmetic ops, unguarded) of
+    /// [`Self::scalar_binop_int_op`] below — split out (codopsy cc); every arm here
+    /// is TOTAL once matched (no internal failure after a guard commits), so unlike
+    /// the guard-then-possibly-fail routers elsewhere, chaining via `.or_else()` is
+    /// safe: neither half can partially match and fall through wrongly.
+    fn scalar_binop_int_arith_op(op: &almide_ir::BinOp) -> Option<crate::IntOp> {
         use almide_ir::BinOp;
         Some(match op {
             BinOp::AddInt => crate::IntOp::Add,
@@ -327,6 +369,16 @@ impl LowerCtx {
             BinOp::MulInt => crate::IntOp::Mul,
             BinOp::DivInt => crate::IntOp::Div,
             BinOp::ModInt => crate::IntOp::Mod,
+            _ => return None,
+        })
+    }
+
+    /// The comparison-op case (ordering + equality, INT/BOOL-operand-gated) of
+    /// [`Self::scalar_binop_int_op`] below — split out (codopsy cc), disjoint
+    /// `BinOp` patterns from the arithmetic half.
+    fn scalar_binop_int_cmp_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
+        use almide_ir::BinOp;
+        Some(match op {
             // Ordering comparisons (the `if` condition) — INT or BOOL operands (Bool is an i64
             // 0/1, and v0's bool Ord is false < true = 0 < 1, so the i64 compare is bit-exact).
             // A Float compare uses the prim float floor above; String ordering is the cmp-call
@@ -342,11 +394,15 @@ impl LowerCtx {
             // admitted; a Float/String/compound `==` still needs a distinct op.)
             BinOp::Eq if Self::int_eq_operand_ty(left_ty) => crate::IntOp::Eq,
             BinOp::Neq if Self::int_eq_operand_ty(left_ty) => crate::IntOp::Ne,
-            // (Logical `and`/`or` are SHORT-CIRCUITED via control flow above — they never
-            // reach this eager `IntBinOp` path. Native + interp evaluate the RHS lazily.)
-            // Pow, Float, concat, non-Int/Bool compares: defer.
             _ => return None,
         })
+    }
+
+    // (Logical `and`/`or` are SHORT-CIRCUITED via control flow above — they never reach this
+    // eager `IntBinOp` path. Native + interp evaluate the RHS lazily. Pow, Float, concat,
+    // non-Int/Bool compares: defer — neither half above matches, so `None` falls through.)
+    fn scalar_binop_int_op(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<crate::IntOp> {
+        Self::scalar_binop_int_arith_op(op).or_else(|| Self::scalar_binop_int_cmp_op(op, left_ty))
     }
 
     fn lower_scalar_binop_int_fallback(
