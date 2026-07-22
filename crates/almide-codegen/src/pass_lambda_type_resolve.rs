@@ -674,33 +674,42 @@ fn extract_applied_arg(ty: &Ty, idx: usize) -> Option<Ty> {
 
 /// Update a Lambda expression's Ty::Fn wrapper to reflect resolved params.
 fn refresh_lambda_fn_ty(expr: &mut IrExpr, _vt: &VarTable) {
-    if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
-        if let Ty::Fn { params: fparams, ret } = &expr.ty {
-            let mut new_fparams = fparams.clone();
-            let mut changed = false;
-            for (i, (_, pty)) in params.iter().enumerate() {
-                if let Some(fp) = new_fparams.get_mut(i) {
-                    if fp.has_unresolved_deep() && !pty.has_unresolved_deep() {
-                        *fp = pty.clone();
-                        changed = true;
-                    }
-                }
-            }
-            let new_ret = if ret.has_unresolved_deep() {
-                if let Some(r) = infer_body_result_ty(body, params) {
-                    changed = true;
-                    Box::new(r)
-                } else {
-                    ret.clone()
-                }
-            } else {
-                ret.clone()
-            };
-            if changed {
-                expr.ty = Ty::Fn { params: new_fparams, ret: new_ret };
+    let IrExprKind::Lambda { params, body, .. } = &expr.kind else { return };
+    let Ty::Fn { params: fparams, ret } = &expr.ty else { return };
+    let (new_fparams, params_changed) = refresh_lambda_fn_ty_params(params, fparams);
+    let (new_ret, ret_changed) = refresh_lambda_fn_ty_ret(ret, body, params);
+    if params_changed || ret_changed {
+        expr.ty = Ty::Fn { params: new_fparams, ret: new_ret };
+    }
+}
+
+/// Param-types phase of `refresh_lambda_fn_ty`, extracted verbatim (cog>30
+/// decomposition): copy each still-unresolved `Ty::Fn` param slot from the
+/// Lambda's own (now-resolved) param type.
+fn refresh_lambda_fn_ty_params(params: &[(VarId, Ty)], fparams: &[Ty]) -> (Vec<Ty>, bool) {
+    let mut new_fparams = fparams.to_vec();
+    let mut changed = false;
+    for (i, (_, pty)) in params.iter().enumerate() {
+        if let Some(fp) = new_fparams.get_mut(i) {
+            if fp.has_unresolved_deep() && !pty.has_unresolved_deep() {
+                *fp = pty.clone();
+                changed = true;
             }
         }
     }
+    (new_fparams, changed)
+}
+
+/// Return-type phase of `refresh_lambda_fn_ty`, extracted verbatim
+/// (cog>30 decomposition): infer the return type from the body when the
+/// `Ty::Fn` wrapper's `ret` is still unresolved.
+fn refresh_lambda_fn_ty_ret(ret: &Ty, body: &IrExpr, params: &[(VarId, Ty)]) -> (Box<Ty>, bool) {
+    if ret.has_unresolved_deep() {
+        if let Some(r) = infer_body_result_ty(body, params) {
+            return (Box::new(r), true);
+        }
+    }
+    (Box::new(ret.clone()), false)
 }
 
 // ── List element type extraction ────────────────────────────────────
