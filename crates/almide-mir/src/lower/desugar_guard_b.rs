@@ -308,45 +308,48 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
 pub fn hoist_spread_call_bases(program: &mut almide_ir::IrProgram) {
     use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, Mutability, VarTable};
 
+    /// Per-statement worker, extracted out of `rewrite_block`'s loop body (the loop
+    /// SKELETON — index bookkeeping + the insert — stays in `rewrite_block`; only the
+    /// "does this ONE statement need a spread-base hoist, and if so what" decision
+    /// moves here). A pure function of one `&mut IrStmt`, no state shared across
+    /// statements, so the split changes nothing observable.
+    fn compute_spread_base_hoist(
+        stmt: &mut IrStmt,
+        vt: &mut VarTable,
+    ) -> Option<(almide_ir::VarId, Ty, IrExpr)> {
+        match &mut stmt.kind {
+            IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
+                // recurse into nested blocks first
+                rewrite_expr(value, vt);
+                let IrExprKind::SpreadRecord { base, .. } = &mut value.kind else { return None };
+                if !matches!(base.kind, IrExprKind::Call { .. }) {
+                    return None;
+                }
+                let bty = base.ty.clone();
+                let sb = vt.alloc(
+                    almide_lang::intern::sym("__spread_base"),
+                    bty.clone(),
+                    Mutability::Let,
+                    None,
+                );
+                let call = std::mem::replace(
+                    &mut **base,
+                    IrExpr { kind: IrExprKind::Var { id: sb }, ty: bty.clone(), span: None, def_id: None },
+                );
+                Some((sb, bty, call))
+            }
+            IrStmtKind::Expr { expr } => {
+                rewrite_expr(expr, vt);
+                None
+            }
+            _ => None,
+        }
+    }
+
     fn rewrite_block(stmts: &mut Vec<IrStmt>, vt: &mut VarTable) {
         let mut i = 0;
         while i < stmts.len() {
-            let hoist = match &mut stmts[i].kind {
-                IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
-                    // recurse into nested blocks first
-                    rewrite_expr(value, vt);
-                    if let IrExprKind::SpreadRecord { base, .. } = &mut value.kind {
-                        if matches!(base.kind, IrExprKind::Call { .. }) {
-                            let bty = base.ty.clone();
-                            let sb = vt.alloc(
-                                almide_lang::intern::sym("__spread_base"),
-                                bty.clone(),
-                                Mutability::Let,
-                                None,
-                            );
-                            let call = std::mem::replace(
-                                &mut **base,
-                                IrExpr {
-                                    kind: IrExprKind::Var { id: sb },
-                                    ty: bty.clone(),
-                                    span: None,
-                                    def_id: None,
-                                },
-                            );
-                            Some((sb, bty, call))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                }
-                IrStmtKind::Expr { expr } => {
-                    rewrite_expr(expr, vt);
-                    None
-                }
-                _ => None,
-            };
+            let hoist = compute_spread_base_hoist(&mut stmts[i], vt);
             if let Some((sb, bty, call)) = hoist {
                 stmts.insert(
                     i,
@@ -669,31 +672,48 @@ pub fn repair_member_field_tys(
 pub fn repair_record_literal_field_tys(func: &mut almide_ir::IrFunction) {
     use almide_ir::{walk_expr_mut, IrExpr, IrExprKind, IrMutVisitor};
     use almide_lang::types::Ty;
+
+    // Pure post-order repair for ONE node — `R` carries no fields, so unlike a
+    // real state-threading walker (an accumulator flag read back across sibling
+    // nodes) this trait method is just "recurse, then run a stateless per-node
+    // check" — extracting the check into its own fn changes nothing observable.
+    // The `Record { fields: tfs }` arm's fill loop, extracted to its own fn so its
+    // 3-deep nesting (for → if → if-let) doesn't stack onto `repair_node`'s own
+    // cognitive-complexity count — a plain data transform, no visitor state.
+    fn fill_unknown_record_field_tys(
+        tfs: &mut [(almide_lang::intern::Sym, Ty)],
+        fields: &[(almide_lang::intern::Sym, IrExpr)],
+    ) {
+        for (tn, tt) in tfs.iter_mut() {
+            if matches!(tt, Ty::Unknown) {
+                if let Some((_, f)) = fields.iter().find(|(n, _)| n == tn) {
+                    *tt = f.ty.clone();
+                }
+            }
+        }
+    }
+
+    fn repair_node(e: &mut IrExpr) {
+        let IrExprKind::Record { name: None, fields } = &e.kind else { return };
+        if fields.iter().any(|(_, f)| matches!(f.ty, Ty::Unknown)) {
+            return;
+        }
+        match &mut e.ty {
+            t @ Ty::Unknown => {
+                *t = Ty::Record {
+                    fields: fields.iter().map(|(n, f)| (*n, f.ty.clone())).collect(),
+                };
+            }
+            Ty::Record { fields: tfs } => fill_unknown_record_field_tys(tfs, fields),
+            _ => {}
+        }
+    }
+
     struct R;
     impl IrMutVisitor for R {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
-            let IrExprKind::Record { name: None, fields } = &e.kind else { return };
-            if fields.iter().any(|(_, f)| matches!(f.ty, Ty::Unknown)) {
-                return;
-            }
-            match &mut e.ty {
-                t @ Ty::Unknown => {
-                    *t = Ty::Record {
-                        fields: fields.iter().map(|(n, f)| (*n, f.ty.clone())).collect(),
-                    };
-                }
-                Ty::Record { fields: tfs } => {
-                    for (tn, tt) in tfs.iter_mut() {
-                        if matches!(tt, Ty::Unknown) {
-                            if let Some((_, f)) = fields.iter().find(|(n, _)| n == tn) {
-                                *tt = f.ty.clone();
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
+            repair_node(e);
         }
     }
     R.visit_expr_mut(&mut func.body);
