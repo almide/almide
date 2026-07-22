@@ -88,53 +88,59 @@ fn build_mutation_map(program: &IrProgram) -> MutationMap {
 
 /// Recursively walk the expression tree looking for loops, hoisting invariants.
 /// Returns true if any hoisting was performed.
-fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm: &MutationMap) -> bool {
+/// `IrExprKind::Block` case of `hoist_loops`, extracted verbatim (cog>30
+/// decomposition, pattern 2: uniform match arms, mirrors the
+/// `lower_expr`/`infer_expr_inner` extraction shape).
+fn hoist_loops_block(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm: &MutationMap) -> bool {
+    let IrExprKind::Block { stmts, expr: tail } = &mut expr.kind else { unreachable!() };
     let mut changed = false;
-    match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            let mut new_stmts: Vec<IrStmt> = Vec::new();
-            for mut stmt in std::mem::take(stmts) {
-                if hoist_loops_stmt(&mut stmt, vt, pure_fns, mm) {
-                    changed = true;
-                }
-                if let IrStmtKind::Expr { expr: ref mut loop_expr } = stmt.kind {
-                    let hoisted = try_hoist_from_loop(loop_expr, vt, pure_fns, mm);
-                    if !hoisted.is_empty() {
-                        changed = true;
-                        new_stmts.extend(hoisted);
-                    }
-                }
-                new_stmts.push(stmt);
-            }
-            *stmts = new_stmts;
-            if let Some(e) = tail {
-                if hoist_loops(e, vt, pure_fns, mm) { changed = true; }
+    let mut new_stmts: Vec<IrStmt> = Vec::new();
+    for mut stmt in std::mem::take(stmts) {
+        changed |= hoist_loops_stmt(&mut stmt, vt, pure_fns, mm);
+        if let IrStmtKind::Expr { expr: ref mut loop_expr } = stmt.kind {
+            let hoisted = try_hoist_from_loop(loop_expr, vt, pure_fns, mm);
+            if !hoisted.is_empty() {
+                changed = true;
+                new_stmts.extend(hoisted);
             }
         }
+        new_stmts.push(stmt);
+    }
+    *stmts = new_stmts;
+    if let Some(e) = tail {
+        changed |= hoist_loops(e, vt, pure_fns, mm);
+    }
+    changed
+}
+
+fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm: &MutationMap) -> bool {
+    match &mut expr.kind {
+        IrExprKind::Block { .. } => hoist_loops_block(expr, vt, pure_fns, mm),
         IrExprKind::If { cond, then, else_ } => {
-            if hoist_loops(cond, vt, pure_fns, mm) { changed = true; }
-            if hoist_loops(then, vt, pure_fns, mm) { changed = true; }
-            if hoist_loops(else_, vt, pure_fns, mm) { changed = true; }
+            hoist_loops(cond, vt, pure_fns, mm)
+                | hoist_loops(then, vt, pure_fns, mm)
+                | hoist_loops(else_, vt, pure_fns, mm)
         }
         IrExprKind::Match { subject, arms } => {
-            if hoist_loops(subject, vt, pure_fns, mm) { changed = true; }
+            let mut changed = hoist_loops(subject, vt, pure_fns, mm);
             for arm in arms {
                 if let Some(g) = &mut arm.guard {
-                    if hoist_loops(g, vt, pure_fns, mm) { changed = true; }
+                    changed |= hoist_loops(g, vt, pure_fns, mm);
                 }
-                if hoist_loops(&mut arm.body, vt, pure_fns, mm) { changed = true; }
+                changed |= hoist_loops(&mut arm.body, vt, pure_fns, mm);
             }
+            changed
         }
-        IrExprKind::Lambda { body, .. } => {
-            if hoist_loops(body, vt, pure_fns, mm) { changed = true; }
-        }
+        IrExprKind::Lambda { body, .. } => hoist_loops(body, vt, pure_fns, mm),
         IrExprKind::ForIn { body, iterable, .. } => {
-            if hoist_loops(iterable, vt, pure_fns, mm) { changed = true; }
-            for s in body { if hoist_loops_stmt(s, vt, pure_fns, mm) { changed = true; } }
+            let mut changed = hoist_loops(iterable, vt, pure_fns, mm);
+            for s in body { changed |= hoist_loops_stmt(s, vt, pure_fns, mm); }
+            changed
         }
         IrExprKind::While { cond, body } => {
-            if hoist_loops(cond, vt, pure_fns, mm) { changed = true; }
-            for s in body { if hoist_loops_stmt(s, vt, pure_fns, mm) { changed = true; } }
+            let mut changed = hoist_loops(cond, vt, pure_fns, mm);
+            for s in body { changed |= hoist_loops_stmt(s, vt, pure_fns, mm); }
+            changed
         }
         // Explicit-preserve: hoisting is selective — these node kinds are
         // not descended for loop discovery here. Listing every remaining
@@ -163,9 +169,8 @@ fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm
         | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
         | IrExprKind::IterChain { .. } | IrExprKind::Hole
-        | IrExprKind::Todo { .. } => {}
+        | IrExprKind::Todo { .. } => false,
     }
-    changed
 }
 
 fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm: &MutationMap) -> bool {
@@ -335,6 +340,70 @@ fn collect_pattern_defined_vars(pat: &IrPattern, defined: &mut HashSet<VarId>) {
     }
 }
 
+/// Walk through Member/TupleIndex/IndexAccess wrappers to the root Var of
+/// a place expression (`b.xs` / `b[i]` → `b`). Extracted from
+/// `collect_defined_vars_expr`'s Call and RuntimeCall arms, which shared
+/// this exact loop verbatim (cog>30 decomposition, second round).
+fn root_var_of_place(expr_kind: &IrExprKind) -> Option<VarId> {
+    let mut root = expr_kind;
+    while let IrExprKind::Member { object, .. }
+        | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::IndexAccess { object, .. } = root
+    {
+        root = &object.kind;
+    }
+    if let IrExprKind::Var { id } = root {
+        Some(*id)
+    } else {
+        None
+    }
+}
+
+/// Mutating-stdlib-Module-call case of `collect_defined_vars_expr`,
+/// extracted verbatim. `&mut {name}` in the bundled `@inline_rust`
+/// template means the runtime mutates that param in place (`list.push`,
+/// `map.insert`, ...). Mark the caller-side Var as defined so LICM
+/// doesn't wrongly hoist something that depends on it.
+fn collect_defined_vars_module_call(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &MutationMap) {
+    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &expr.kind else { unreachable!() };
+    // A mutated arg's heap backing is written in place; if that arg (or a
+    // place rooted at it) is hoisted out of the loop as a CLONE, the
+    // mutation is lost. Two mutator sources: user fns (per-param `mut`
+    // flags in `mm`) and stdlib in-place mutators (`list.push`, …) whose
+    // args[0] is keyed by the mangled runtime symbol (mm only covers user
+    // fns). Without the latter `list.push(b.xs, …)` had `b.xs` hoisted to
+    // a clone and never grew `b.xs` (#712, after #703).
+    let stdlib_sym = format!("almide_rt_{}_{}", module.as_str(), func.as_str());
+    let stdlib_mutates_arg0 =
+        crate::pass_closure_conversion::is_inplace_mutator(&stdlib_sym);
+    for (i, arg) in args.iter().enumerate() {
+        let mutated = (i == 0 && stdlib_mutates_arg0)
+            || mm.get(&(*module, *func)).map_or(false, |mp| mp.contains(&i));
+        if mutated {
+            // Mark the ROOT var (bare `out`, or `b` in `b.xs` / `b[i]`)
+            // loop-variant so LICM never hoists an expression on it.
+            if let Some(id) = root_var_of_place(&arg.kind) {
+                defined.insert(id);
+            }
+        }
+    }
+}
+
+/// `IrExprKind::RuntimeCall` case of `collect_defined_vars_expr`,
+/// extracted verbatim. The wasm pipeline lowers `list.push` etc. to
+/// RuntimeCall BEFORE LICM, so the Module-call case above never sees
+/// them — handle the same stdlib in-place-mutator escape here (#712 wasm:
+/// without it `b.xs` was hoisted to a clone and the push never grew it,
+/// so the loop read len 0).
+fn collect_defined_vars_runtime_call(expr: &IrExpr, defined: &mut HashSet<VarId>) {
+    let IrExprKind::RuntimeCall { symbol, args } = &expr.kind else { unreachable!() };
+    if !crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str()) { return; }
+    let Some(arg0) = args.first() else { return; };
+    if let Some(id) = root_var_of_place(&arg0.kind) {
+        defined.insert(id);
+    }
+}
+
 fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &MutationMap) {
     match &expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
@@ -373,56 +442,12 @@ fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &M
         // param in place (`list.push`, `map.insert`, ...). Mark the
         // caller-side Var as defined so LICM doesn't wrongly hoist
         // something that depends on it.
-        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
-            // A mutated arg's heap backing is written in place; if that arg (or a
-            // place rooted at it) is hoisted out of the loop as a CLONE, the
-            // mutation is lost. Two mutator sources: user fns (per-param `mut`
-            // flags in `mm`) and stdlib in-place mutators (`list.push`, …) whose
-            // args[0] is keyed by the mangled runtime symbol (mm only covers user
-            // fns). Without the latter `list.push(b.xs, …)` had `b.xs` hoisted to
-            // a clone and never grew `b.xs` (#712, after #703).
-            let stdlib_sym = format!("almide_rt_{}_{}", module.as_str(), func.as_str());
-            let stdlib_mutates_arg0 =
-                crate::pass_closure_conversion::is_inplace_mutator(&stdlib_sym);
-            for (i, arg) in args.iter().enumerate() {
-                let mutated = (i == 0 && stdlib_mutates_arg0)
-                    || mm.get(&(*module, *func)).map_or(false, |mp| mp.contains(&i));
-                if mutated {
-                    // Mark the ROOT var (bare `out`, or `b` in `b.xs` / `b[i]`)
-                    // loop-variant so LICM never hoists an expression on it.
-                    let mut root = &arg.kind;
-                    while let IrExprKind::Member { object, .. }
-                        | IrExprKind::TupleIndex { object, .. }
-                        | IrExprKind::IndexAccess { object, .. } = root
-                    {
-                        root = &object.kind;
-                    }
-                    if let IrExprKind::Var { id } = root {
-                        defined.insert(*id);
-                    }
-                }
-            }
-        }
+        IrExprKind::Call { target: CallTarget::Module { .. }, .. } => collect_defined_vars_module_call(expr, defined, mm),
         // The wasm pipeline lowers `list.push` etc. to RuntimeCall BEFORE LICM, so
         // the Module arm above never sees them — handle the same stdlib in-place-
         // mutator escape here (#712 wasm: without it `b.xs` was hoisted to a clone
         // and the push never grew it, so the loop read len 0).
-        IrExprKind::RuntimeCall { symbol, args } => {
-            if crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str()) {
-                if let Some(arg0) = args.first() {
-                    let mut root = &arg0.kind;
-                    while let IrExprKind::Member { object, .. }
-                        | IrExprKind::TupleIndex { object, .. }
-                        | IrExprKind::IndexAccess { object, .. } = root
-                    {
-                        root = &object.kind;
-                    }
-                    if let IrExprKind::Var { id } = root {
-                        defined.insert(*id);
-                    }
-                }
-            }
-        }
+        IrExprKind::RuntimeCall { .. } => collect_defined_vars_runtime_call(expr, defined),
         // Explicit-preserve: only the scopes/loops/mutating calls above define
         // variables relevant to LICM. Every other node (including Call with a
         // non-Module target) defines nothing. Listing each variant turns a new

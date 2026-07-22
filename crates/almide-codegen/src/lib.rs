@@ -537,62 +537,74 @@ fn resolve_runtime_deps(needed: &mut std::collections::HashSet<&str>) {
 /// Collect the runtime module bodies for the `needed` set: hoist top-level `use`
 /// to the front, deduplicate, and skip struct definitions the walker already
 /// emitted (present in `user_code`) to avoid E0428. Returns the assembled block.
-fn rust_runtime_modules(needed: &std::collections::HashSet<&str>, user_code: &str) -> String {
-    let mut use_set = std::collections::HashSet::new();
-    let mut use_lines = Vec::new();
-    let mut body_lines = Vec::new();
-    for (name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
-        if needed.contains(name) {
-            let stripped = strip_test_blocks(source);
-            let lines: Vec<&str> = stripped.lines().collect();
-            let mut i = 0;
-            while i < lines.len() {
-                let line = lines[i];
-                let trimmed = line.trim();
-                // Top-level use: not indented and starts with "use "
-                if !line.starts_with(' ') && !line.starts_with('\t')
-                    && trimmed.starts_with("use ") && trimmed.ends_with(';')
-                {
-                    if use_set.insert(trimmed.to_string()) {
-                        use_lines.push(trimmed.to_string());
-                    }
-                    i += 1;
-                    continue;
-                }
-                // Detect struct definitions: #[derive(...)] followed by pub struct Name
-                // Skip the block if user_code already contains that struct (walker emitted it).
-                if trimmed.starts_with("#[derive(") {
-                    if let Some(next) = lines.get(i + 1) {
-                        if let Some(struct_name) = next.trim().strip_prefix("pub struct ")
-                            .and_then(|s| s.split_whitespace().next())
-                            .map(|s| s.trim_end_matches('{').trim())
-                        {
-                            let needle = format!("struct {}", struct_name);
-                            if user_code.contains(&needle) {
-                                // Skip derive + struct + fields + closing brace
-                                i += 1; // skip #[derive]
-                                let mut depth = 0u32;
-                                while i < lines.len() {
-                                    if lines[i].contains('{') { depth += 1; }
-                                    if lines[i].contains('}') {
-                                        depth = depth.saturating_sub(1);
-                                        if depth == 0 { i += 1; break; }
-                                    }
-                                    i += 1;
-                                }
-                                continue;
-                            }
-                        }
-                    }
-                }
-                body_lines.push(line.to_string());
-                i += 1;
+/// Process one runtime module's (already-test-block-stripped) source lines,
+/// appending top-level `use` lines into `use_set`/`use_lines` (deduped) and
+/// everything else into `body_lines` — skipping a `#[derive(...)] pub
+/// struct Name { ... }` block whose struct the walker already emitted into
+/// `user_code`. Extracted from `rust_runtime_modules` (cog>30
+/// decomposition, second round): a write-only accumulator over
+/// `use_set`/`use_lines`/`body_lines`, never read back to change its own
+/// branching within this call.
+fn append_runtime_module_lines(
+    source: &str,
+    user_code: &str,
+    use_set: &mut std::collections::HashSet<String>,
+    use_lines: &mut Vec<String>,
+    body_lines: &mut Vec<String>,
+) {
+    let stripped = strip_test_blocks(source);
+    let lines: Vec<&str> = stripped.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+        // Top-level use: not indented and starts with "use "
+        if !line.starts_with(' ') && !line.starts_with('\t')
+            && trimmed.starts_with("use ") && trimmed.ends_with(';')
+        {
+            if use_set.insert(trimmed.to_string()) {
+                use_lines.push(trimmed.to_string());
             }
-            body_lines.push(String::new());
+            i += 1;
+            continue;
         }
+        // Detect struct definitions: #[derive(...)] followed by pub struct Name
+        // Skip the block if user_code already contains that struct (walker emitted it).
+        if trimmed.starts_with("#[derive(") {
+            if let Some(next) = lines.get(i + 1) {
+                if let Some(struct_name) = next.trim().strip_prefix("pub struct ")
+                    .and_then(|s| s.split_whitespace().next())
+                    .map(|s| s.trim_end_matches('{').trim())
+                {
+                    let needle = format!("struct {}", struct_name);
+                    if user_code.contains(&needle) {
+                        // Skip derive + struct + fields + closing brace
+                        i += 1; // skip #[derive]
+                        let mut depth = 0u32;
+                        while i < lines.len() {
+                            if lines[i].contains('{') { depth += 1; }
+                            if lines[i].contains('}') {
+                                depth = depth.saturating_sub(1);
+                                if depth == 0 { i += 1; break; }
+                            }
+                            i += 1;
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+        body_lines.push(line.to_string());
+        i += 1;
     }
-    // Remove single-item `use a::b::X;` when a group `use a::b::{..., X, ...};` exists
-    let use_lines: Vec<String> = use_lines.into_iter().filter(|line| {
+    body_lines.push(String::new());
+}
+
+/// Remove single-item `use a::b::X;` lines when a group `use
+/// a::b::{..., X, ...};` already covers them. Extracted from
+/// `rust_runtime_modules`.
+fn dedup_use_lines(use_lines: Vec<String>, use_set: &std::collections::HashSet<String>) -> Vec<String> {
+    use_lines.into_iter().filter(|line| {
         // Parse: use path::Item;
         if let Some(rest) = line.strip_prefix("use ").and_then(|s| s.strip_suffix(';')) {
             if !rest.contains('{') {
@@ -617,7 +629,19 @@ fn rust_runtime_modules(needed: &std::collections::HashSet<&str>, user_code: &st
             }
         }
         true
-    }).collect();
+    }).collect()
+}
+
+fn rust_runtime_modules(needed: &std::collections::HashSet<&str>, user_code: &str) -> String {
+    let mut use_set = std::collections::HashSet::new();
+    let mut use_lines = Vec::new();
+    let mut body_lines = Vec::new();
+    for (name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
+        if needed.contains(name) {
+            append_runtime_module_lines(source, user_code, &mut use_set, &mut use_lines, &mut body_lines);
+        }
+    }
+    let use_lines = dedup_use_lines(use_lines, &use_set);
     let mut out = String::new();
     for u in &use_lines { out.push_str(u); out.push('\n'); }
     for line in &body_lines { out.push_str(line); out.push('\n'); }
@@ -762,107 +786,25 @@ fn collect_used_modules(program: &IrProgram) -> std::collections::HashSet<String
     used
 }
 
+/// Scan an expression tree for `CallTarget::Module` references, recording
+/// every module name touched. Rewritten (cog>30 decomposition) onto the
+/// shared `almide_ir::visit::IrVisitor`/`walk_expr` exhaustive traversal —
+/// the same infrastructure `contains_aborting_int_div` uses elsewhere in
+/// this crate — instead of a 90-line hand-rolled recursive match. `used`
+/// is a write-only accumulator. `scan_stmt_modules` (the old hand-rolled
+/// statement-level counterpart) is gone: `IrVisitor`'s default
+/// `visit_stmt` → `walk_stmt` already routes every statement's
+/// sub-expressions back through `visit_expr` below.
 fn scan_expr_modules(expr: &IrExpr, used: &mut std::collections::HashSet<String>) {
-    match &expr.kind {
-        IrExprKind::Call { target, args, .. } => {
-            if let CallTarget::Module { module, .. } = target {
-                used.insert(module.to_string());
+    use almide_ir::visit::{IrVisitor, walk_expr};
+    struct ModuleScanner<'a> { used: &'a mut std::collections::HashSet<String> }
+    impl IrVisitor for ModuleScanner<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Module { module, .. }, .. } = &expr.kind {
+                self.used.insert(module.to_string());
             }
-            if let CallTarget::Method { object, .. } = target {
-                scan_expr_modules(object, used);
-            }
-            for a in args { scan_expr_modules(a, used); }
+            walk_expr(self, expr);
         }
-        IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts { scan_stmt_modules(s, used); }
-            if let Some(e) = tail { scan_expr_modules(e, used); }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            scan_expr_modules(cond, used);
-            scan_expr_modules(then, used);
-            scan_expr_modules(else_, used);
-        }
-        IrExprKind::Lambda { body, .. } => scan_expr_modules(body, used),
-        IrExprKind::BinOp { left, right, .. } => {
-            scan_expr_modules(left, used);
-            scan_expr_modules(right, used);
-        }
-        IrExprKind::UnOp { operand, .. } => scan_expr_modules(operand, used),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { scan_expr_modules(e, used); }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            scan_expr_modules(iterable, used);
-            for s in body { scan_stmt_modules(s, used); }
-        }
-        IrExprKind::While { cond, body } => {
-            scan_expr_modules(cond, used);
-            for s in body { scan_stmt_modules(s, used); }
-        }
-        IrExprKind::Match { subject, arms } => {
-            scan_expr_modules(subject, used);
-            for arm in arms {
-                scan_expr_modules(&arm.body, used);
-                if let Some(g) = &arm.guard { scan_expr_modules(g, used); }
-            }
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::OptionalChain { expr: object, .. } => {
-            scan_expr_modules(object, used);
-        }
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields { scan_expr_modules(v, used); }
-        }
-        IrExprKind::SpreadRecord { base, fields } => {
-            scan_expr_modules(base, used);
-            for (_, v) in fields { scan_expr_modules(v, used); }
-        }
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let IrStringPart::Expr { expr } = p { scan_expr_modules(expr, used); }
-            }
-        }
-        IrExprKind::ResultOk { expr: inner } | IrExprKind::ResultErr { expr: inner }
-        | IrExprKind::OptionSome { expr: inner } | IrExprKind::Try { expr: inner }
-        | IrExprKind::Unwrap { expr: inner } | IrExprKind::ToOption { expr: inner } => {
-            scan_expr_modules(inner, used);
-        }
-        IrExprKind::UnwrapOr { expr: inner, fallback } => {
-            scan_expr_modules(inner, used);
-            scan_expr_modules(fallback, used);
-        }
-        IrExprKind::IndexAccess { object, index } => {
-            scan_expr_modules(object, used);
-            scan_expr_modules(index, used);
-        }
-        IrExprKind::MapAccess { object, key } => {
-            scan_expr_modules(object, used);
-            scan_expr_modules(key, used);
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { scan_expr_modules(k, used); scan_expr_modules(v, used); }
-        }
-        IrExprKind::Range { start, end, .. } => {
-            scan_expr_modules(start, used);
-            scan_expr_modules(end, used);
-        }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { scan_expr_modules(a, used); }
-        }
-        IrExprKind::TupleIndex { object, .. } => scan_expr_modules(object, used),
-        _ => {}
     }
-}
-
-fn scan_stmt_modules(stmt: &IrStmt, used: &mut std::collections::HashSet<String>) {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } => scan_expr_modules(value, used),
-        IrStmtKind::Assign { value, .. } => scan_expr_modules(value, used),
-        IrStmtKind::Expr { expr } => scan_expr_modules(expr, used),
-        IrStmtKind::Guard { cond, else_ } => {
-            scan_expr_modules(cond, used);
-            scan_expr_modules(else_, used);
-        }
-        IrStmtKind::BindDestructure { value, .. } => scan_expr_modules(value, used),
-        _ => {}
-    }
+    ModuleScanner { used }.visit_expr(expr);
 }

@@ -237,153 +237,182 @@ impl NanoPass for StdlibLoweringPass {
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
     fn depends_on(&self) -> Vec<&'static str> { vec!["EffectInference"] }
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        // Every fn in every bundled stdlib IR module is bundled-only
-        // now: the TOML-backed runtime table was retired with the
-        // Stdlib Declarative Unification arc, so no overlap check
-        // is needed.
-        let bundled_fns: HashSet<(Sym, Sym)> = program.modules.iter()
-            .filter(|m| almide_lang::stdlib_info::is_bundled_module(m.name.as_str()))
-            .flat_map(|m| {
-                let mname = m.name;
-                m.functions.iter().map(move |f| (mname, f.name))
-            })
-            .collect();
-        BUNDLED_FNS.with(|s| *s.borrow_mut() = bundled_fns);
+        seed_bundled_fns(&program);
+        seed_inline_rust_table(&program);
+        rewrite_all_bodies(&mut program);
+        resolve_module_ufcs(&mut program);
+        rewrite_versioned_module_names(&mut program);
+        prefix_intra_module_named_calls(&mut program);
+        PassResult { program, changed: true }
+    }
+}
 
-        // Build the @inline_rust dispatch table. Two sources feed it:
-        //
-        // 1. `program.modules` — the frontend-loaded bundled stdlib
-        //    modules (the normal compile path routes through
-        //    `resolve.rs` which parses + lowers each bundled `.almd`).
-        //    These land as full `IrModule` entries; we read the
-        //    `@inline_rust` attribute directly off `IrFunction.attrs`.
-        //
-        // 2. Bundled source fallback — code paths that bypass
-        //    `resolve.rs` (unit tests using `canonicalize_program` +
-        //    `lower_program` directly, e.g. the snapshot test suite)
-        //    never get bundled modules into `program.modules`. For
-        //    those, re-parse the embedded `stdlib/<m>.almd` source so
-        //    every @inline_rust fn is reachable. Skipping this would
-        //    make pass_stdlib_lowering silently fall back to the
-        //    legacy `arg_transforms::lookup` path for migrated fns,
-        //    which now returns `None` and emits invalid Rust.
-        //
-        // The merge policy is "IR wins" — if a bundled module is
-        // fully loaded, we take its IR-level signature (param names,
-        // attribute values). Source fallback only fills in modules
-        // that IR didn't provide.
-        // Scan ALL modules (bundled + packages) for @inline_rust templates.
-        let mut inline_rust: HashMap<(Sym, Sym), InlineRustSpec> = HashMap::new();
-        for m in &program.modules {
+// ── `run` step extraction (cog>100 decomposition, pattern 2) ──
+//
+// Each of these is a 1:1 text-move of one independent step from the
+// original `run` body. The steps only ever run in this fixed order and
+// none reads a value a LATER step produces, so splitting them into
+// top-level functions called in the same order changes nothing observable.
+
+/// Every fn in every bundled stdlib IR module is bundled-only now: the
+/// TOML-backed runtime table was retired with the Stdlib Declarative
+/// Unification arc, so no overlap check is needed.
+fn seed_bundled_fns(program: &IrProgram) {
+    let bundled_fns: HashSet<(Sym, Sym)> = program.modules.iter()
+        .filter(|m| almide_lang::stdlib_info::is_bundled_module(m.name.as_str()))
+        .flat_map(|m| {
             let mname = m.name;
-            // A USER package's template references its OWN structs by their
-            // package-local bare names (`Cfb8State { .. }`), but post-flatten
-            // those structs are mangled (`almide_rt_aes_Cfb8State`) — the
-            // pasted text failed as E0422 when the call site was in ANOTHER
-            // module (aes cfb8 via `import self`). Requalify bare type tokens
-            // to the decl's canonical dotted name while the owning module is
-            // still known; the flatten pass rewrites dotted → mangled inside
-            // templates like every other reference. Bundled stdlib types stay
-            // bare — they are never mangled.
-            let own_types: Vec<(String, &str)> = if almide_lang::stdlib_info::is_bundled_module(mname.as_str()) {
-                Vec::new()
-            } else {
-                m.type_decls.iter().filter_map(|td| {
-                    let full = td.name.as_str();
-                    full.rsplit_once('.').map(|(_, base)| (base.to_string(), full))
-                }).collect()
-            };
-            for f in &m.functions {
-                let Some(mut template) = find_inline_rust_template(f) else { continue };
-                for (base, full) in &own_types {
-                    template = replace_ident_token(&template, base, full);
-                }
-                let param_names = f.params.iter().map(|p| p.name).collect();
-                let defaults = f.params.iter()
-                    .map(|p| p.default.as_ref().map(|d| (**d).clone()))
-                    .collect();
-                inline_rust.insert((mname, f.name), InlineRustSpec { template, param_names, defaults });
-            }
-        }
-        let loaded_bundled_modules: std::collections::HashSet<Sym> = program.modules.iter()
-            .map(|m| m.name)
-            .collect();
-        for name in almide_lang::stdlib_info::BUNDLED_MODULES {
-            let mname = almide_base::intern::sym(name);
-            if loaded_bundled_modules.contains(&mname) {
-                continue;
-            }
-            for (fname, spec) in parse_bundled_inline_rust(name) {
-                inline_rust.entry((mname, fname)).or_insert(spec);
-            }
-        }
-        INLINE_RUST.with(|s| *s.borrow_mut() = inline_rust);
+            m.functions.iter().map(move |f| (mname, f.name))
+        })
+        .collect();
+    BUNDLED_FNS.with(|s| *s.borrow_mut() = bundled_fns);
+}
 
-        for func in &mut program.functions {
+/// Build the @inline_rust dispatch table. Two sources feed it:
+///
+/// 1. `program.modules` — the frontend-loaded bundled stdlib
+///    modules (the normal compile path routes through
+///    `resolve.rs` which parses + lowers each bundled `.almd`).
+///    These land as full `IrModule` entries; we read the
+///    `@inline_rust` attribute directly off `IrFunction.attrs`.
+///
+/// 2. Bundled source fallback — code paths that bypass
+///    `resolve.rs` (unit tests using `canonicalize_program` +
+///    `lower_program` directly, e.g. the snapshot test suite)
+///    never get bundled modules into `program.modules`. For
+///    those, re-parse the embedded `stdlib/<m>.almd` source so
+///    every @inline_rust fn is reachable. Skipping this would
+///    make pass_stdlib_lowering silently fall back to the
+///    legacy `arg_transforms::lookup` path for migrated fns,
+///    which now returns `None` and emits invalid Rust.
+///
+/// The merge policy is "IR wins" — if a bundled module is
+/// fully loaded, we take its IR-level signature (param names,
+/// attribute values). Source fallback only fills in modules
+/// that IR didn't provide.
+fn seed_inline_rust_table(program: &IrProgram) {
+    // Scan ALL modules (bundled + packages) for @inline_rust templates.
+    let mut inline_rust: HashMap<(Sym, Sym), InlineRustSpec> = HashMap::new();
+    for m in &program.modules {
+        let mname = m.name;
+        // A USER package's template references its OWN structs by their
+        // package-local bare names (`Cfb8State { .. }`), but post-flatten
+        // those structs are mangled (`almide_rt_aes_Cfb8State`) — the
+        // pasted text failed as E0422 when the call site was in ANOTHER
+        // module (aes cfb8 via `import self`). Requalify bare type tokens
+        // to the decl's canonical dotted name while the owning module is
+        // still known; the flatten pass rewrites dotted → mangled inside
+        // templates like every other reference. Bundled stdlib types stay
+        // bare — they are never mangled.
+        let own_types: Vec<(String, &str)> = if almide_lang::stdlib_info::is_bundled_module(mname.as_str()) {
+            Vec::new()
+        } else {
+            m.type_decls.iter().filter_map(|td| {
+                let full = td.name.as_str();
+                full.rsplit_once('.').map(|(_, base)| (base.to_string(), full))
+            }).collect()
+        };
+        for f in &m.functions {
+            let Some(mut template) = find_inline_rust_template(f) else { continue };
+            for (base, full) in &own_types {
+                template = replace_ident_token(&template, base, full);
+            }
+            let param_names = f.params.iter().map(|p| p.name).collect();
+            let defaults = f.params.iter()
+                .map(|p| p.default.as_ref().map(|d| (**d).clone()))
+                .collect();
+            inline_rust.insert((mname, f.name), InlineRustSpec { template, param_names, defaults });
+        }
+    }
+    let loaded_bundled_modules: std::collections::HashSet<Sym> = program.modules.iter()
+        .map(|m| m.name)
+        .collect();
+    for name in almide_lang::stdlib_info::BUNDLED_MODULES {
+        let mname = almide_base::intern::sym(name);
+        if loaded_bundled_modules.contains(&mname) {
+            continue;
+        }
+        for (fname, spec) in parse_bundled_inline_rust(name) {
+            inline_rust.entry((mname, fname)).or_insert(spec);
+        }
+    }
+    INLINE_RUST.with(|s| *s.borrow_mut() = inline_rust);
+}
+
+fn rewrite_all_bodies(program: &mut IrProgram) {
+    for func in &mut program.functions {
+        func.body = rewrite_expr(std::mem::take(&mut func.body));
+    }
+    for tl in &mut program.top_lets {
+        tl.value = rewrite_expr(std::mem::take(&mut tl.value));
+    }
+    // Process module functions and top_lets
+    for module in &mut program.modules {
+        for func in &mut module.functions {
             func.body = rewrite_expr(std::mem::take(&mut func.body));
         }
-        for tl in &mut program.top_lets {
+        for tl in &mut module.top_lets {
             tl.value = rewrite_expr(std::mem::take(&mut tl.value));
         }
-        // Process module functions and top_lets
-        for module in &mut program.modules {
-            for func in &mut module.functions {
-                func.body = rewrite_expr(std::mem::take(&mut func.body));
-            }
-            for tl in &mut module.top_lets {
-                tl.value = rewrite_expr(std::mem::take(&mut tl.value));
-            }
-        }
-        // Resolve remaining bare UFCS calls in module bodies (checker doesn't fully type them)
-        for module in &mut program.modules {
-            let sibling_names: Vec<String> = module.functions.iter()
-                .map(|f| f.name.to_string())
-                .collect();
-            for func in &mut module.functions {
-                func.body = resolve_unresolved_ufcs(std::mem::take(&mut func.body), &sibling_names);
-            }
-            for tl in &mut module.top_lets {
-                tl.value = resolve_unresolved_ufcs(std::mem::take(&mut tl.value), &sibling_names);
-            }
-        }
-        // Build versioned name mapping: original module name → versioned name
-        // e.g., "json" → "json_v2" when versioned_name is set
-        let version_map: std::collections::HashMap<String, String> = program.modules.iter()
-            .filter_map(|m| m.versioned_name.map(|v| (m.name.to_string(), v.to_string())))
+    }
+}
+
+/// Resolve remaining bare UFCS calls in module bodies (checker doesn't fully type them).
+fn resolve_module_ufcs(program: &mut IrProgram) {
+    for module in &mut program.modules {
+        let sibling_names: Vec<String> = module.functions.iter()
+            .map(|f| f.name.to_string())
             .collect();
-        // Rewrite CallTarget::Module names to versioned names in all function bodies
-        if !version_map.is_empty() {
-            for func in &mut program.functions {
-                func.body = rewrite_module_names(std::mem::take(&mut func.body), &version_map);
-            }
-            for tl in &mut program.top_lets {
-                tl.value = rewrite_module_names(std::mem::take(&mut tl.value), &version_map);
-            }
-            for module in &mut program.modules {
-                for func in &mut module.functions {
-                    func.body = rewrite_module_names(std::mem::take(&mut func.body), &version_map);
-                }
-                for tl in &mut module.top_lets {
-                    tl.value = rewrite_module_names(std::mem::take(&mut tl.value), &version_map);
-                }
-            }
+        for func in &mut module.functions {
+            func.body = resolve_unresolved_ufcs(std::mem::take(&mut func.body), &sibling_names);
         }
-        // Prefix intra-module Named calls to match renamed definitions
-        for module in &mut program.modules {
-            let sibling_names: Vec<String> = module.functions.iter()
-                .map(|f| f.name.to_string())
-                .collect();
-            let mod_name = module.versioned_name
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| module.name.to_string());
-            for func in &mut module.functions {
-                func.body = prefix_intra_module_calls(std::mem::take(&mut func.body), &mod_name, &sibling_names);
-            }
-            for tl in &mut module.top_lets {
-                tl.value = prefix_intra_module_calls(std::mem::take(&mut tl.value), &mod_name, &sibling_names);
-            }
+        for tl in &mut module.top_lets {
+            tl.value = resolve_unresolved_ufcs(std::mem::take(&mut tl.value), &sibling_names);
         }
-        PassResult { program, changed: true }
+    }
+}
+
+/// Build versioned name mapping (original module name → versioned name,
+/// e.g. "json" → "json_v2" when `versioned_name` is set) and rewrite
+/// `CallTarget::Module` names to versioned names in all function bodies.
+fn rewrite_versioned_module_names(program: &mut IrProgram) {
+    let version_map: std::collections::HashMap<String, String> = program.modules.iter()
+        .filter_map(|m| m.versioned_name.map(|v| (m.name.to_string(), v.to_string())))
+        .collect();
+    if version_map.is_empty() {
+        return;
+    }
+    for func in &mut program.functions {
+        func.body = rewrite_module_names(std::mem::take(&mut func.body), &version_map);
+    }
+    for tl in &mut program.top_lets {
+        tl.value = rewrite_module_names(std::mem::take(&mut tl.value), &version_map);
+    }
+    for module in &mut program.modules {
+        for func in &mut module.functions {
+            func.body = rewrite_module_names(std::mem::take(&mut func.body), &version_map);
+        }
+        for tl in &mut module.top_lets {
+            tl.value = rewrite_module_names(std::mem::take(&mut tl.value), &version_map);
+        }
+    }
+}
+
+/// Prefix intra-module Named calls to match renamed definitions.
+fn prefix_intra_module_named_calls(program: &mut IrProgram) {
+    for module in &mut program.modules {
+        let sibling_names: Vec<String> = module.functions.iter()
+            .map(|f| f.name.to_string())
+            .collect();
+        let mod_name = module.versioned_name
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| module.name.to_string());
+        for func in &mut module.functions {
+            func.body = prefix_intra_module_calls(std::mem::take(&mut func.body), &mod_name, &sibling_names);
+        }
+        for tl in &mut module.top_lets {
+            tl.value = prefix_intra_module_calls(std::mem::take(&mut tl.value), &mod_name, &sibling_names);
+        }
     }
 }
 

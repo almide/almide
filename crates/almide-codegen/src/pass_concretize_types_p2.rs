@@ -73,46 +73,143 @@ impl<'a> Concretizer<'a> {
             }
         }
     }
+
+    // ── `visit_expr_mut` step extraction (cog>100 decomposition, pattern 2) ──
+    //
+    // Each of these is a 1:1 text-move of one independent step from the
+    // original `visit_expr_mut` body. None of them read a value another step
+    // wrote earlier in the same call (they all read fresh from `expr`/`self`),
+    // so splitting them into named methods called in the same original order
+    // changes nothing observable.
+
+    /// Custom Match handling: propagate subject ty into pattern bindings
+    /// (updating both the pattern's declared ty and the VarTable entry)
+    /// BEFORE visiting arm bodies, so Var references to pattern-bound
+    /// names pick up the refreshed ty during the bottom-up walk. Only
+    /// called by `visit_expr_mut` once it has confirmed `expr` is a Match
+    /// (mirrors the original's `if let ... { ...; return; }` early exit).
+    fn visit_match_expr(&mut self, expr: &mut IrExpr) {
+        let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+        self.visit_expr_mut(subject);
+        let sty = subject.ty.clone();
+        if !sty.has_unresolved_deep() {
+            for arm in arms.iter_mut() {
+                propagate_pattern_ty(&mut arm.pattern, &sty, self.vt);
+            }
+        }
+        for arm in arms.iter_mut() {
+            if let Some(g) = &mut arm.guard { self.visit_expr_mut(g); }
+            self.visit_expr_mut(&mut arm.body);
+        }
+        // After arms are fully resolved, push any concrete arm body ty
+        // into sibling arms whose body is an unresolved shape wrapper
+        // (e.g. `none => none` has body ty Option[Unknown] but the
+        // sibling `some(...)` arm resolves to Option[List[String]]).
+        let concrete_arm_ty = arms.iter().find_map(|arm| {
+            if !arm.body.ty.has_unresolved_deep() { Some(arm.body.ty.clone()) } else { None }
+        });
+        if let Some(cty) = concrete_arm_ty {
+            for arm in arms.iter_mut() {
+                if arm.body.ty.has_unresolved_deep() {
+                    propagate_ty_down(&mut arm.body, &cty);
+                }
+            }
+        }
+        // Resolve the Match node itself
+        if expr.ty.has_unresolved_deep() {
+            if let Some(ty) = resolve_node_ty(expr, self.vt, self.symbols) {
+                expr.ty = ty;
+            }
+        }
+    }
+
+    /// Resolve Unknown lambda params from body usage (e.g. `(a,b) => a + b` → Int).
+    fn resolve_lambda_param_tys(&mut self, expr: &mut IrExpr) {
+        let IrExprKind::Lambda { params, body, .. } = &mut expr.kind else { return };
+        let mut patched = false;
+        for (var_id, var_ty) in params.iter_mut() {
+            if matches!(var_ty, Ty::Unknown) {
+                if let Some(inferred) = infer_var_type_from_body(body, *var_id) {
+                    *var_ty = inferred.clone();
+                    self.vt.entries[var_id.0 as usize].ty = inferred;
+                    patched = true;
+                }
+            }
+        }
+        // Re-visit body to propagate patched param types into Var nodes
+        if patched { walk_expr_mut(self, body); }
+    }
+
+    /// Record literal construction: push the declared field types from the
+    /// registered type down into field value expressions whose own
+    /// inference left them unresolved (typically `Applied(List, [Unknown])`
+    /// for a field defaulted to `[]`). The checker sees `items: []` and can
+    /// only type it `List[Unknown]`; we know from the record decl that
+    /// `items: List[Int]`, so substitute.
+    fn propagate_record_field_tys(&mut self, expr: &mut IrExpr) {
+        let IrExprKind::Record { name: Some(name), fields } = &mut expr.kind else { return };
+        let rname = name.to_string();
+        for (fname, fvalue) in fields.iter_mut() {
+            if fvalue.ty.has_unresolved_deep() {
+                if let Some(expected) = self.symbols.lookup_field(&rname, fname.as_str()) {
+                    if !expected.has_unresolved_deep() {
+                        propagate_expected_ty(fvalue, expected);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Generic-accumulator back-propagation for `list.fold` / `list.scan`:
+    /// both `init` arg and lambda `body.ty` represent the accumulator A.
+    /// After the bottom-up walk, body.ty may be strictly more concrete
+    /// than init.ty (because init started from a literal like `some([])`
+    /// whose empty list has element type Unknown). Merge, push the merged
+    /// shape back into init's sub-expressions, and update the lambda's acc
+    /// param + VarTable so arm Var refs refresh on the re-visit below.
+    fn back_propagate_fold_acc_ty(&mut self, expr: &mut IrExpr) {
+        if !is_fold_like_call(expr) { return; }
+        if !back_propagate_fold_acc(expr, self.vt) { return; }
+        // Re-visit the lambda body so pattern bindings and Var
+        // references pick up the refreshed acc type.
+        let IrExprKind::Call { args, .. } = &mut expr.kind else { return };
+        let Some(lambda) = args.get_mut(2) else { return };
+        let IrExprKind::Lambda { body, .. } = &mut lambda.kind else { return };
+        self.visit_expr_mut(body);
+    }
+
+    /// Second chance for Member: resolve the field's type from the object's
+    /// (now bottom-up-resolved) record/named type when the generic
+    /// `resolve_node_ty` pass didn't manage to pin it.
+    fn resolve_member_ty_fallback(&mut self, expr: &mut IrExpr) {
+        if !(expr.ty).has_unresolved_deep() { return; }
+        let IrExprKind::Member { object, field } = &expr.kind else { return };
+        let obj_ty = effective_ty(object, self.vt);
+        let resolved = match &obj_ty {
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                fields.iter().find(|(n, _)| n == field.as_str()).map(|(_, t)| t.clone())
+                    .filter(|t| !t.has_unresolved_deep())
+            }
+            Ty::Named(name, _) => {
+                let r = self.symbols.lookup_field(name.as_str(), field.as_str());
+                r.filter(|t| !t.has_unresolved_deep()).cloned()
+            }
+            _ => {
+                None
+            }
+        };
+        if let Some(ty) = resolved {
+            expr.ty = ty;
+        }
+    }
 }
 
 impl<'a> IrMutVisitor for Concretizer<'a> {
     fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
         // Custom Match handling: propagate subject ty into pattern bindings
-        // (updating both the pattern's declared ty and the VarTable entry)
-        // BEFORE visiting arm bodies, so Var references to pattern-bound
-        // names pick up the refreshed ty during the bottom-up walk.
-        if let IrExprKind::Match { subject, arms } = &mut expr.kind {
-            self.visit_expr_mut(subject);
-            let sty = subject.ty.clone();
-            if !sty.has_unresolved_deep() {
-                for arm in arms.iter_mut() {
-                    propagate_pattern_ty(&mut arm.pattern, &sty, self.vt);
-                }
-            }
-            for arm in arms.iter_mut() {
-                if let Some(g) = &mut arm.guard { self.visit_expr_mut(g); }
-                self.visit_expr_mut(&mut arm.body);
-            }
-            // After arms are fully resolved, push any concrete arm body ty
-            // into sibling arms whose body is an unresolved shape wrapper
-            // (e.g. `none => none` has body ty Option[Unknown] but the
-            // sibling `some(...)` arm resolves to Option[List[String]]).
-            let concrete_arm_ty = arms.iter().find_map(|arm| {
-                if !arm.body.ty.has_unresolved_deep() { Some(arm.body.ty.clone()) } else { None }
-            });
-            if let Some(cty) = concrete_arm_ty {
-                for arm in arms.iter_mut() {
-                    if arm.body.ty.has_unresolved_deep() {
-                        propagate_ty_down(&mut arm.body, &cty);
-                    }
-                }
-            }
-            // Resolve the Match node itself
-            if expr.ty.has_unresolved_deep() {
-                if let Some(ty) = resolve_node_ty(expr, self.vt, self.symbols) {
-                    expr.ty = ty;
-                }
-            }
+        // BEFORE visiting arm bodies. See `visit_match_expr`.
+        if matches!(&expr.kind, IrExprKind::Match { .. }) {
+            self.visit_match_expr(expr);
             return;
         }
 
@@ -120,21 +217,7 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
         // concrete before we use them here.
         walk_expr_mut(self, expr);
 
-        // Resolve Unknown lambda params from body usage (e.g. `(a,b) => a + b` → Int)
-        if let IrExprKind::Lambda { params, body, .. } = &mut expr.kind {
-            let mut patched = false;
-            for (var_id, var_ty) in params.iter_mut() {
-                if matches!(var_ty, Ty::Unknown) {
-                    if let Some(inferred) = infer_var_type_from_body(body, *var_id) {
-                        *var_ty = inferred.clone();
-                        self.vt.entries[var_id.0 as usize].ty = inferred;
-                        patched = true;
-                    }
-                }
-            }
-            // Re-visit body to propagate patched param types into Var nodes
-            if patched { walk_expr_mut(self, body); }
-        }
+        self.resolve_lambda_param_tys(expr);
 
         // Rewrite BinOp when operand types disagree with the op kind.
         // Type checker may have picked `AddInt` for polymorphic code that
@@ -175,46 +258,8 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
             self.pin_from_list_arg_elem(&ret_ty, expr);
         }
 
-        // Record literal construction: push the declared field types from
-        // the registered type down into field value expressions whose own
-        // inference left them unresolved (typically `Applied(List,
-        // [Unknown])` for a field defaulted to `[]`). The checker sees
-        // `items: []` and can only type it `List[Unknown]`; we know from
-        // the record decl that `items: List[Int]`, so substitute.
-        if let IrExprKind::Record { name: Some(name), fields } = &mut expr.kind {
-            let rname = name.to_string();
-            for (fname, fvalue) in fields.iter_mut() {
-                if fvalue.ty.has_unresolved_deep() {
-                    if let Some(expected) = self.symbols.lookup_field(&rname, fname.as_str()) {
-                        if !expected.has_unresolved_deep() {
-                            propagate_expected_ty(fvalue, expected);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Generic-accumulator back-propagation for `list.fold` / `list.scan`:
-        // both `init` arg and lambda `body.ty` represent the accumulator A.
-        // After the bottom-up walk, body.ty may be strictly more concrete
-        // than init.ty (because init started from a literal like `some([])`
-        // whose empty list has element type Unknown). Merge, push the
-        // merged shape back into init's sub-expressions, and update the
-        // lambda's acc param + VarTable so arm Var refs refresh on the
-        // re-visit below.
-        if is_fold_like_call(expr) {
-            if back_propagate_fold_acc(expr, self.vt) {
-                // Re-visit the lambda body so pattern bindings and Var
-                // references pick up the refreshed acc type.
-                if let IrExprKind::Call { args, .. } = &mut expr.kind {
-                    if let Some(lambda) = args.get_mut(2) {
-                        if let IrExprKind::Lambda { body, .. } = &mut lambda.kind {
-                            self.visit_expr_mut(body);
-                        }
-                    }
-                }
-            }
-        }
+        self.propagate_record_field_tys(expr);
+        self.back_propagate_fold_acc_ty(expr);
 
         // Now resolve this node's type from child types + VarTable + symbols.
         if (expr.ty).has_unresolved_deep() {
@@ -225,28 +270,7 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
                 // so Member visits AFTER this. Make sure we updated expr.ty.
             }
         }
-        // Second chance for Member: debug why it fails
-        if (expr.ty).has_unresolved_deep() {
-            if let IrExprKind::Member { object, field } = &expr.kind {
-                let obj_ty = effective_ty(object, self.vt);
-                let resolved = match &obj_ty {
-                    Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                        fields.iter().find(|(n, _)| n == field.as_str()).map(|(_, t)| t.clone())
-                            .filter(|t| !t.has_unresolved_deep())
-                    }
-                    Ty::Named(name, _) => {
-                        let r = self.symbols.lookup_field(name.as_str(), field.as_str());
-                        r.filter(|t| !t.has_unresolved_deep()).cloned()
-                    }
-                    _ => {
-                        None
-                    }
-                };
-                if let Some(ty) = resolved {
-                    expr.ty = ty;
-                }
-            }
-        }
+        self.resolve_member_ty_fallback(expr);
     }
 
     fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {

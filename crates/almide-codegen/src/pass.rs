@@ -238,6 +238,126 @@ impl Pipeline {
         self
     }
 
+    // ── `Pipeline::run` main-loop-body extraction (cog>100 decomposition,
+    // pattern 2) ──
+    //
+    // Each of these is a 1:1 text-move of one step of the per-pass loop
+    // body. `executed`/`program` are threaded through explicitly (by `&`/
+    // `&mut`/return-and-reassign) exactly as the inline loop did — nothing
+    // reads a value a LATER iteration's step produces, and within one
+    // iteration the steps run in the same fixed order as before.
+
+    /// Validate a pass's declared `depends_on`/`run_before` dependency
+    /// edges against what has executed so far. Panics on violation exactly
+    /// like the original inline checks. `executed`/`in_pipeline` are
+    /// read-only here.
+    fn validate_pass_deps(
+        pass: &dyn NanoPass,
+        all_passes: &[Box<dyn NanoPass>],
+        target: Target,
+        executed: &[&str],
+        in_pipeline: &std::collections::HashSet<&str>,
+    ) {
+        // After-deps: every declared dep PRESENT in this pipeline must
+        // already have executed (target-conditional, #559).
+        for dep in pass.depends_on() {
+            if in_pipeline.contains(dep) && !executed.contains(&dep) {
+                panic!(
+                    "Pass '{}' depends on '{}', but '{}' has not been executed. \
+                     Check pipeline ordering.",
+                    pass.name(), dep, dep
+                );
+            }
+        }
+        // Before-deps: any PRESENT pass declaring `run_before(this)` must
+        // already have executed when `this` runs (#559).
+        let this_name = pass.name();
+        for other in all_passes {
+            if !other.targets().map_or(true, |ts| ts.contains(&target)) { continue; }
+            if other.run_before().contains(&this_name) && !executed.contains(&other.name()) {
+                panic!(
+                    "Pass '{}' declares run_before('{}'), but it has not executed \
+                     before '{}'. Check pipeline ordering.",
+                    other.name(), this_name, this_name
+                );
+            }
+        }
+    }
+
+    /// Run one pass with profiling + optional IR dump.
+    fn run_pass_with_dump(
+        pass: &dyn NanoPass,
+        program: IrProgram,
+        target: Target,
+        dump_all: bool,
+        dump_passes: &[&str],
+    ) -> IrProgram {
+        let pass_name = pass.name();
+        // Debug aid: name each pass BEFORE it runs, so a pass that never
+        // returns (infinite recursion → stack overflow) is identifiable —
+        // the ALMIDE_PROFILE line only prints on completion.
+        if std::env::var_os("ALMIDE_TRACE_PASSES").is_some() {
+            eprintln!("[pass:start] {}", pass_name);
+        }
+        // Time only through the wasm-safe shim (raw std::time is forbidden in
+        // this crate — it panics on the wasm32-unknown-unknown playground).
+        let _pass_t = almide_base::profile::ProfileTimer::start(
+            std::env::var_os("ALMIDE_PROFILE").is_some(),
+        );
+        let result = pass.run(program, target);
+        if let Some(t) = &_pass_t {
+            let dt = t.elapsed_secs();
+            if dt > 0.01 { eprintln!("[prof:pass] {:30} {:.3}s", pass_name, dt); }
+        }
+        let program = result.program;
+
+        // IR dump (opt-in via ALMIDE_DUMP_IR=all or ALMIDE_DUMP_IR=pass1,pass2)
+        if dump_all || dump_passes.iter().any(|p| p.eq_ignore_ascii_case(pass_name)) {
+            eprintln!("── IR after {} ──{}──",
+                pass_name,
+                if result.changed { " (changed) " } else { " (unchanged) " });
+            if let Ok(json) = serde_json::to_string_pretty(&program) {
+                eprintln!("{}", json);
+            } else {
+                // Fallback: debug format
+                eprintln!("{:#?}", program);
+            }
+            eprintln!("── end {} ──\n", pass_name);
+        }
+        program
+    }
+
+    /// Inter-pass IR verification (debug / opt-in only — see `verify_ir`
+    /// in `run`).
+    fn verify_after_pass(pass: &dyn NanoPass, program: &IrProgram) {
+        let pass_name = pass.name();
+        let errors = almide_ir::verify_program(program);
+        if !errors.is_empty() {
+            eprintln!("[IR CHECK] {} error(s) after pass '{}':", errors.len(), pass_name);
+            for e in &errors {
+                eprintln!("  {}", e);
+            }
+            // No warn-mode: a DETECTED violation is fatal in every
+            // profile (release-parity §10 — the v0.25.0 lesson:
+            // a warning's audience cannot fix a compiler bug).
+            // Release cost is unchanged: the verifier itself stays
+            // debug/opt-in (the measured ~1.2s/file walk).
+            panic!("IR verification failed after pass '{}'", pass_name);
+        }
+
+        // Postcondition verification.
+        let postconds = pass.postconditions();
+        if !postconds.is_empty() {
+            let violations = verify_postconditions(pass_name, program, &postconds);
+            for v in &violations {
+                eprintln!("[POSTCONDITION VIOLATION] {}", v);
+            }
+            if !violations.is_empty() {
+                panic!("Postcondition violation after pass '{}'", pass_name);
+            }
+        }
+    }
+
     pub fn run(&self, program: IrProgram, target: Target) -> IrProgram {
         let mut program = program;
         let mut executed: Vec<&str> = Vec::new();
@@ -281,91 +401,14 @@ impl Pipeline {
                     continue;
                 }
             }
-            // After-deps: every declared dep PRESENT in this pipeline must
-            // already have executed (target-conditional, #559).
-            for dep in pass.depends_on() {
-                if in_pipeline.contains(dep) && !executed.contains(&dep) {
-                    panic!(
-                        "Pass '{}' depends on '{}', but '{}' has not been executed. \
-                         Check pipeline ordering.",
-                        pass.name(), dep, dep
-                    );
-                }
-            }
-            // Before-deps: any PRESENT pass declaring `run_before(this)` must
-            // already have executed when `this` runs (#559).
-            let this_name = pass.name();
-            for other in &self.passes {
-                if !other.targets().map_or(true, |ts| ts.contains(&target)) { continue; }
-                if other.run_before().contains(&this_name) && !executed.contains(&other.name()) {
-                    panic!(
-                        "Pass '{}' declares run_before('{}'), but it has not executed \
-                         before '{}'. Check pipeline ordering.",
-                        other.name(), this_name, this_name
-                    );
-                }
-            }
+            Self::validate_pass_deps(pass.as_ref(), &self.passes, target, &executed, &in_pipeline);
 
             let pass_name = pass.name();
-            // Debug aid: name each pass BEFORE it runs, so a pass that never
-            // returns (infinite recursion → stack overflow) is identifiable —
-            // the ALMIDE_PROFILE line only prints on completion.
-            if std::env::var_os("ALMIDE_TRACE_PASSES").is_some() {
-                eprintln!("[pass:start] {}", pass_name);
-            }
-            // Time only through the wasm-safe shim (raw std::time is forbidden in
-            // this crate — it panics on the wasm32-unknown-unknown playground).
-            let _pass_t = almide_base::profile::ProfileTimer::start(
-                std::env::var_os("ALMIDE_PROFILE").is_some(),
-            );
-            let result = pass.run(program, target);
-            if let Some(t) = &_pass_t {
-                let dt = t.elapsed_secs();
-                if dt > 0.01 { eprintln!("[prof:pass] {:30} {:.3}s", pass_name, dt); }
-            }
-            program = result.program;
-
-            // IR dump (opt-in via ALMIDE_DUMP_IR=all or ALMIDE_DUMP_IR=pass1,pass2)
-            if dump_all || dump_passes.iter().any(|p| p.eq_ignore_ascii_case(pass_name)) {
-                eprintln!("── IR after {} ──{}──",
-                    pass_name,
-                    if result.changed { " (changed) " } else { " (unchanged) " });
-                if let Ok(json) = serde_json::to_string_pretty(&program) {
-                    eprintln!("{}", json);
-                } else {
-                    // Fallback: debug format
-                    eprintln!("{:#?}", program);
-                }
-                eprintln!("── end {} ──\n", pass_name);
-            }
+            program = Self::run_pass_with_dump(pass.as_ref(), program, target, dump_all, &dump_passes);
 
             // Inter-pass IR verification (debug / opt-in only — see verify_ir).
             if verify_ir {
-                let errors = almide_ir::verify_program(&program);
-                if !errors.is_empty() {
-                    eprintln!("[IR CHECK] {} error(s) after pass '{}':", errors.len(), pass_name);
-                    for e in &errors {
-                        eprintln!("  {}", e);
-                    }
-                    // No warn-mode: a DETECTED violation is fatal in every
-                    // profile (release-parity §10 — the v0.25.0 lesson:
-                    // a warning's audience cannot fix a compiler bug).
-                    // Release cost is unchanged: the verifier itself stays
-                    // debug/opt-in (the measured ~1.2s/file walk).
-                    panic!("IR verification failed after pass '{}'", pass_name);
-                }
-
-                // Postcondition verification.
-                let postconds = pass.postconditions();
-                if !postconds.is_empty() {
-                    let violations = verify_postconditions(pass_name, &program, &postconds);
-                    for v in &violations {
-                        eprintln!("[POSTCONDITION VIOLATION] {}", v);
-                    }
-                    if !violations.is_empty() {
-                        panic!("Postcondition violation after pass '{}'", pass_name);
-                    }
-                }
+                Self::verify_after_pass(pass.as_ref(), &program);
             }
 
             executed.push(pass_name);

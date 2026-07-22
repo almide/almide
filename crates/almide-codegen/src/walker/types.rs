@@ -4,6 +4,74 @@ use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
 use super::helpers::template_or;
 
+/// `Ty::Named` case of `render_type`, extracted verbatim (cog>30
+/// decomposition, second round on top of round 1's).
+fn render_type_named(ctx: &RenderContext, name: &almide_base::intern::Sym, args: &[Ty]) -> String {
+    // Set type → template
+    if name == "Set" && args.len() == 1 {
+        let inner = render_type(ctx, &args[0]);
+        return ctx.templates.render_with("type_set", None, &[], &[("inner", &inner)])
+            .unwrap_or_else(|| format!("Set<{}>", inner));
+    }
+    // Expand type aliases transparently
+    if args.is_empty() {
+        if let Some(target) = ctx.type_aliases.get(name) {
+            return render_type(ctx, target);
+        }
+    }
+    if args.is_empty() {
+        // If the type has generic parameters but no type arguments,
+        // emit `_` to let Rust infer the concrete type
+        if ctx.generic_types.contains(name) {
+            return "_".to_string();
+        }
+        // Strip module qualifier: module.Type → Type
+        // (all modules flatten into one file in generated Rust)
+        let bare = name.rsplit('.').next().unwrap_or(name);
+        bare.to_string()
+    } else {
+        let bare = name.rsplit('.').next().unwrap_or(name);
+        // A fully-phantom record's struct is emitted WITHOUT generics
+        // (#621), so a reference must drop its type args too.
+        if ctx.ann.phantom_param_structs.contains(name.as_str())
+            || ctx.ann.phantom_param_structs.contains(bare)
+        {
+            return bare.to_string();
+        }
+        let args_str = args.iter().map(|a| render_type(ctx, a)).collect::<Vec<_>>().join(", ");
+        format!("{}<{}>", bare, args_str)
+    }
+}
+
+/// `Ty::Record | Ty::OpenRecord` case of `render_type`, extracted verbatim.
+fn render_type_record(ctx: &RenderContext, fields: &[(almide_base::intern::Sym, Ty)]) -> String {
+    let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
+    names.sort();
+    // Check named records first (user-defined types)
+    if let Some(n) = ctx.ann.named_records.get(&names) {
+        // If the struct is generic but no type args are present, let Rust infer
+        if ctx.generic_types.contains(&almide_base::intern::sym(n)) {
+            return "_".to_string();
+        }
+        return n.clone();
+    }
+    // Check anonymous records
+    if let Some(n) = ctx.ann.anon_records.get(&names) {
+        // Generic anonymous record: AlmdRec0<Type0, Type1, ...>
+        let mut sorted_fields: Vec<_> = fields.iter().collect();
+        sorted_fields.sort_by(|a, b| a.0.cmp(&b.0));
+        let args: Vec<String> = sorted_fields.iter().map(|(_, t)| render_type(ctx, t)).collect();
+        if args.is_empty() {
+            n.clone()
+        } else {
+            format!("{}<{}>", n, args.join(", "))
+        }
+    } else {
+        // Fallback: sorted field names
+        names.join("_")
+    }
+}
+
 pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
     match ty {
         Ty::Int => template_or(ctx, "type_int", &[], "i64"),
@@ -68,69 +136,8 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             ctx.templates.render_with("type_list", None, &[], &[("inner", inner_s.as_str())])
                 .unwrap_or_else(|| format!("Vec<{}>", inner_s))
         }
-        Ty::Named(name, args) => {
-            // Set type → template
-            if name == "Set" && args.len() == 1 {
-                let inner = render_type(ctx, &args[0]);
-                return ctx.templates.render_with("type_set", None, &[], &[("inner", &inner)])
-                    .unwrap_or_else(|| format!("Set<{}>", inner));
-            }
-            // Expand type aliases transparently
-            if args.is_empty() {
-                if let Some(target) = ctx.type_aliases.get(name) {
-                    return render_type(ctx, target);
-                }
-            }
-            if args.is_empty() {
-                // If the type has generic parameters but no type arguments,
-                // emit `_` to let Rust infer the concrete type
-                if ctx.generic_types.contains(name) {
-                    return "_".to_string();
-                }
-                // Strip module qualifier: module.Type → Type
-                // (all modules flatten into one file in generated Rust)
-                let bare = name.rsplit('.').next().unwrap_or(name);
-                bare.to_string()
-            } else {
-                let bare = name.rsplit('.').next().unwrap_or(name);
-                // A fully-phantom record's struct is emitted WITHOUT generics
-                // (#621), so a reference must drop its type args too.
-                if ctx.ann.phantom_param_structs.contains(name.as_str())
-                    || ctx.ann.phantom_param_structs.contains(bare)
-                {
-                    return bare.to_string();
-                }
-                let args_str = args.iter().map(|a| render_type(ctx, a)).collect::<Vec<_>>().join(", ");
-                format!("{}<{}>", bare, args_str)
-            }
-        }
-        Ty::Record { fields } | Ty::OpenRecord { fields } => {
-            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
-            names.sort();
-            // Check named records first (user-defined types)
-            if let Some(n) = ctx.ann.named_records.get(&names) {
-                // If the struct is generic but no type args are present, let Rust infer
-                if ctx.generic_types.contains(&almide_base::intern::sym(n)) {
-                    return "_".to_string();
-                }
-                return n.clone();
-            }
-            // Check anonymous records
-            if let Some(n) = ctx.ann.anon_records.get(&names) {
-                // Generic anonymous record: AlmdRec0<Type0, Type1, ...>
-                let mut sorted_fields: Vec<_> = fields.iter().collect();
-                sorted_fields.sort_by(|a, b| a.0.cmp(&b.0));
-                let args: Vec<String> = sorted_fields.iter().map(|(_, t)| render_type(ctx, t)).collect();
-                if args.is_empty() {
-                    n.clone()
-                } else {
-                    format!("{}<{}>", n, args.join(", "))
-                }
-            } else {
-                // Fallback: sorted field names
-                names.join("_")
-            }
-        }
+        Ty::Named(name, args) => render_type_named(ctx, name, args),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => render_type_record(ctx, fields),
         Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
             let (k, v) = (&args[0], &args[1]);
             let key_s = render_type(ctx, k);

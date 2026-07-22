@@ -68,24 +68,46 @@ struct TyChecker<'a> {
 }
 
 impl TyChecker<'_> {
+    /// `Ty::Named` case of `check_ty`, extracted verbatim (cog>30
+    /// decomposition, pattern 2: uniform match arms as inherent methods —
+    /// mirrors the `Concretizer`/`BranchBalance` extraction shape since
+    /// the arm body uses `self.*` fields).
+    fn check_ty_named(&mut self, n: &Sym, args: &[Ty]) {
+        let s = n.as_str();
+        if !s.contains('.') && !self.decls.bare.contains(n) {
+            if let Some(cands) = self.decls.qualified.get(s) {
+                // Cap per-site duplicates: one report per (name, where) is enough.
+                if !self.offenders.iter().any(|o| o.bare == s && o.where_ == self.where_) {
+                    self.offenders.push(UnresolvableName {
+                        bare: s.to_string(),
+                        qualified_candidates: cands.clone(),
+                        where_: self.where_.clone(),
+                    });
+                }
+            }
+        }
+        for a in args { self.check_ty(a); }
+    }
+
+    /// `Ty::Variant` case of `check_ty`, extracted verbatim. Variant cases
+    /// inside a Ty value carry payload tys.
+    fn check_ty_variant(&mut self, cases: &[almide_lang::types::VariantCase]) {
+        for c in cases {
+            match &c.payload {
+                almide_lang::types::VariantPayload::Tuple(ts) => {
+                    for t in ts { self.check_ty(t); }
+                }
+                almide_lang::types::VariantPayload::Record(fs) => {
+                    for (_, t) in fs { self.check_ty(t); }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn check_ty(&mut self, ty: &Ty) {
         match ty {
-            Ty::Named(n, args) => {
-                let s = n.as_str();
-                if !s.contains('.') && !self.decls.bare.contains(n) {
-                    if let Some(cands) = self.decls.qualified.get(s) {
-                        // Cap per-site duplicates: one report per (name, where) is enough.
-                        if !self.offenders.iter().any(|o| o.bare == s && o.where_ == self.where_) {
-                            self.offenders.push(UnresolvableName {
-                                bare: s.to_string(),
-                                qualified_candidates: cands.clone(),
-                                where_: self.where_.clone(),
-                            });
-                        }
-                    }
-                }
-                for a in args { self.check_ty(a); }
-            }
+            Ty::Named(n, args) => self.check_ty_named(n, args),
             Ty::Applied(_, args) | Ty::Tuple(args) => {
                 for a in args { self.check_ty(a); }
             }
@@ -96,20 +118,7 @@ impl TyChecker<'_> {
             Ty::Record { fields } | Ty::OpenRecord { fields } => {
                 for (_, t) in fields { self.check_ty(t); }
             }
-            // Variant cases inside a Ty value carry payload tys
-            Ty::Variant { cases, .. } => {
-                for c in cases {
-                    match &c.payload {
-                        almide_lang::types::VariantPayload::Tuple(ts) => {
-                            for t in ts { self.check_ty(t); }
-                        }
-                        almide_lang::types::VariantPayload::Record(fs) => {
-                            for (_, t) in fs { self.check_ty(t); }
-                        }
-                        _ => {}
-                    }
-                }
-            }
+            Ty::Variant { cases, .. } => self.check_ty_variant(cases),
             // Scalars / TypeVar / Unknown / Never etc. carry no Named children.
             _ => {}
         }

@@ -27,6 +27,67 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
 
 // ── Binary operator rendering ──
 
+/// #617: the matrix operators return a RAW AlmideMatrix from the runtime —
+/// wrap into the RcCow value shape like every runtime-call result.
+/// Extracted from `render_binop`'s BinOp::{Mul,Add,Sub,Scale}Matrix arms
+/// (cog>30 decomposition, pattern 2, uniform-shaped arms grouped by a
+/// shared theme). Only ever called for those four ops.
+fn render_binop_matrix(ctx: &RenderContext, op: BinOp, left: &IrExpr, l: &str, r: &str) -> String {
+    match op {
+        BinOp::MulMatrix => rc_cow_result_glue(
+            ctx.templates.render_with("matrix_mul", None, &[], &[("left", l), ("right", r)])
+                .unwrap_or_else(|| format!("almide_rt_matrix_mul(&{}, &{})", l, r)),
+            &Ty::Matrix,
+        ),
+        BinOp::AddMatrix => rc_cow_result_glue(
+            ctx.templates.render_with("matrix_add", None, &[], &[("left", l), ("right", r)])
+                .unwrap_or_else(|| format!("almide_rt_matrix_add(&{}, &{})", l, r)),
+            &Ty::Matrix,
+        ),
+        BinOp::SubMatrix => rc_cow_result_glue(
+            ctx.templates.render_with("matrix_sub", None, &[], &[("left", l), ("right", r)])
+                .unwrap_or_else(|| format!("almide_rt_matrix_sub(&{}, &{})", l, r)),
+            &Ty::Matrix,
+        ),
+        BinOp::ScaleMatrix => {
+            // Ensure matrix is first arg, scalar is second
+            let (mat, scalar) = if matches!(&left.ty, Ty::Matrix) {
+                (l, r)
+            } else {
+                (r, l)
+            };
+            rc_cow_result_glue(
+                ctx.templates.render_with("matrix_scale", None, &[], &[("left", mat), ("right", scalar)])
+                    .unwrap_or_else(|| format!("almide_rt_matrix_scale(&{}, {})", mat, scalar)),
+                &Ty::Matrix,
+            )
+        }
+        _ => unreachable!("render_binop_matrix called for non-matrix BinOp"),
+    }
+}
+
+/// Bare infix operator string for ops that render via the generic
+/// `binary_op` template (not one with dedicated totality-macro/matrix
+/// handling above). Extracted from `render_binop`'s fallback arm.
+fn binop_symbol(op: BinOp) -> &'static str {
+    match op {
+        BinOp::AddInt | BinOp::AddFloat => "+",
+        BinOp::SubInt | BinOp::SubFloat => "-",
+        BinOp::MulInt | BinOp::MulFloat => "*",
+        // DivInt/ModInt are matched above (totality macros) and must never
+        // reach this bare-operator fallback — fall to "??" loudly if they do.
+        BinOp::DivFloat => "/",
+        BinOp::ModFloat => "%",
+        BinOp::Lt => "<",
+        BinOp::Gt => ">",
+        BinOp::Lte => "<=",
+        BinOp::Gte => ">=",
+        BinOp::And => "&&",
+        BinOp::Or => "||",
+        _ => "??",
+    }
+}
+
 fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _ty: &Ty) -> String {
     let l = render_expr(ctx, left);
     let r = render_expr(ctx, right);
@@ -41,36 +102,8 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             ctx.templates.render_with("concat_expr", Some(ty_tag), &[], &[("left", lo.as_str()), ("right", ro.as_str())])
                 .unwrap_or_else(|| format!("concat(_, _)"))
         }
-        // #617: the matrix operators return a RAW AlmideMatrix from the runtime —
-        // wrap into the RcCow value shape like every runtime-call result.
-        BinOp::MulMatrix => rc_cow_result_glue(
-            ctx.templates.render_with("matrix_mul", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
-                .unwrap_or_else(|| format!("almide_rt_matrix_mul(&{}, &{})", l, r)),
-            &Ty::Matrix,
-        ),
-        BinOp::AddMatrix => rc_cow_result_glue(
-            ctx.templates.render_with("matrix_add", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
-                .unwrap_or_else(|| format!("almide_rt_matrix_add(&{}, &{})", l, r)),
-            &Ty::Matrix,
-        ),
-        BinOp::SubMatrix => rc_cow_result_glue(
-            ctx.templates.render_with("matrix_sub", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
-                .unwrap_or_else(|| format!("almide_rt_matrix_sub(&{}, &{})", l, r)),
-            &Ty::Matrix,
-        ),
-        BinOp::ScaleMatrix => {
-            // Ensure matrix is first arg, scalar is second
-            let (mat, scalar) = if matches!(&left.ty, Ty::Matrix) {
-                (l.as_str(), r.as_str())
-            } else {
-                (r.as_str(), l.as_str())
-            };
-            rc_cow_result_glue(
-                ctx.templates.render_with("matrix_scale", None, &[], &[("left", mat), ("right", scalar)])
-                    .unwrap_or_else(|| format!("almide_rt_matrix_scale(&{}, {})", mat, scalar)),
-                &Ty::Matrix,
-            )
-        }
+        BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix =>
+            render_binop_matrix(ctx, op, left, l.as_str(), r.as_str()),
         BinOp::Eq => {
             ctx.templates.render_with("eq_expr", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("_ == _"))
@@ -102,22 +135,7 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
                 .unwrap_or_else(|| format!("pow(_, _)"))
         }
         _ => {
-            let op_str = match op {
-                BinOp::AddInt | BinOp::AddFloat => "+",
-                BinOp::SubInt | BinOp::SubFloat => "-",
-                BinOp::MulInt | BinOp::MulFloat => "*",
-                // DivInt/ModInt are matched above (totality macros) and must never
-                // reach this bare-operator fallback — fall to "??" loudly if they do.
-                BinOp::DivFloat => "/",
-                BinOp::ModFloat => "%",
-                BinOp::Lt => "<",
-                BinOp::Gt => ">",
-                BinOp::Lte => "<=",
-                BinOp::Gte => ">=",
-                BinOp::And => "&&",
-                BinOp::Or => "||",
-                _ => "??",
-            };
+            let op_str = binop_symbol(op);
             let op_s = op_str.to_string();
             ctx.templates.render_with("binary_op", None, &[], &[("left", l.as_str()), ("op", op_s.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("({} {} {})", "l", op_str, "r"))
@@ -126,118 +144,13 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
 }
 
 /// Render a generic call expression (Named, Method, or Computed target).
-fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr], result_ty: &almide_lang::types::Ty) -> String {
-    let callee = match target {
-        CallTarget::Named { name } => {
-            // Invariant: NormalizeRuntimeCallsPass collapses every
-            // `Named { "almide_rt_*" }` into `RuntimeCall { symbol }`.
-            // A `Named` target reaching the walker therefore must
-            // refer to a user-defined or external function — never
-            // a runtime helper. If this assertion fires, a generator
-            // produced a `Named { "almide_rt_*" }` after the
-            // normalize pass, or the pass was removed from the
-            // pipeline.
-            assert!(
-                !name.as_str().starts_with("almide_rt_"),
-                "walker received Named call with reserved runtime prefix: {} \
-                 (expected RuntimeCall — see pass_normalize_runtime_calls)",
-                name.as_str()
-            );
-            if let Some(mapped) = ctx.ann.ctor_to_enum.get(name.as_str()) {
-                // `name` is a variant constructor. The global `ctor_to_enum` map
-                // collapses a constructor name shared across packages to the
-                // last-registered enum (#413). When the construction's RESOLVED
-                // type (`.ty`, disambiguated by the type checker) names a DIFFERENT
-                // but valid enum, prefer it; otherwise keep the mapped enum (no
-                // change for the common, non-colliding case — and for non-variant
-                // ctors like newtypes where `.ty` isn't a known enum).
-                let enum_name = match result_ty {
-                    almide_lang::types::Ty::Named(n, _)
-                        if n.as_str() != mapped.as_str()
-                           && ctx.ann.ctor_to_enum.values().any(|e| e.as_str() == n.as_str())
-                        => n.to_string(),
-                    _ => mapped.clone(),
-                };
-                return render_enum_constructor(ctx, name, &enum_name, args);
-            }
-            // Convention methods: "Type.method" → "Type_method" (free functions in all targets)
-            if name.contains('.') {
-                name.replace('.', "_")
-            } else {
-                // A user fn named `box`/`move`/`dyn`/… is escaped at its
-                // definition; the call site must match or rustc rejects `box(…)`
-                // as a reserved keyword (#659).
-                super::escape_rust_ident(name.as_str(), ctx.templates)
-            }
-        }
-        CallTarget::Method { object, method } => {
-            if let Some(full) = render_method_call_full(ctx, object, method, args) {
-                return full;
-            }
-            // Val-wrapped var: mutating method calls need .make_mut()
-            if let IrExprKind::Var { id } = &object.kind {
-                if ctx.ann.is_rc_cow(id) {
-                    let is_mutating_method = matches!(method.as_str(),
-                        "push" | "pop" | "clear" | "extend" | "insert" | "remove"
-                        | "sort" | "sort_by" | "reverse" | "truncate" | "retain");
-                    if is_mutating_method {
-                        let var_name = ctx.var_name(*id).to_string();
-                        let args_str = args.iter().map(|a| render_expr(ctx, a))
-                            .collect::<Vec<_>>().join(", ");
-                        if args_str.is_empty() {
-                            return format!("{}.make_mut().{}()", var_name, method);
-                        } else {
-                            return format!("{}.make_mut().{}({})", var_name, method, args_str);
-                        }
-                    }
-                }
-            }
-            {
-                let obj_str = render_expr(ctx, object);
-                // Wrap in parens if the object expression needs it for method call precedence
-                let needs_parens = matches!(&object.kind,
-                    IrExprKind::UnOp { .. } | IrExprKind::BinOp { .. }
-                    | IrExprKind::If { .. } | IrExprKind::Match { .. }
-                ) || matches!(&object.kind, IrExprKind::LitFloat { value } if *value < 0.0)
-                  || matches!(&object.kind, IrExprKind::LitInt { value } if *value < 0);
-                if needs_parens {
-                    format!("({}).{}", obj_str, method)
-                } else {
-                    format!("{}.{}", obj_str, method)
-                }
-            }
-        }
-        CallTarget::Computed { callee } => {
-            // Pipe terminus case: `expr |> (lambda)` lowers to `(lambda)(expr)`.
-            // The lambda is the computed callee. Here — and ONLY here — we
-            // annotate the lambda's params so rustc can infer types.
-            // (Lambda elsewhere, e.g. as arg to `.filter(...)`, must stay
-            // unannotated because iterator adapters want `&T` not `T`.)
-            if let IrExprKind::Lambda { params, body, .. } = &callee.kind {
-                let params_str = params.iter()
-                    .map(|(id, ty)| {
-                        let name = ctx.var_name(*id).to_string();
-                        if ty.has_unresolved_deep() {
-                            name
-                        } else {
-                            let ty_str = super::types::render_type(ctx, ty);
-                            format!("{}: {}", name, ty_str)
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let body_str = render_expr(ctx, body);
-                format!("(move |{}| {})", params_str, body_str)
-            } else {
-                // Parenthesize ANY computed callee: a `Member` (h.run)("x"), a
-                // `??`/`match`/`if` that yields a closure — `match … {}(x)` is
-                // invalid Rust ("expected ;"), `(match … {})(x)` is correct — and a
-                // bare `(f)(x)` is harmless.
-                format!("({})", render_expr(ctx, callee))
-            }
-        }
-        CallTarget::Module { .. } => unreachable!(),
-    };
+/// Shared trailing step of every `render_generic_call` arm: given a
+/// fully-resolved callee expression string, render `callee(args...)` via
+/// the `call_expr` template. Extracted from `render_generic_call`'s
+/// post-match tail (cog>30 decomposition): each arm below now calls this
+/// itself instead of falling through to one shared tail, since several
+/// arms also need to bypass it entirely via an early `return`.
+fn render_call_expr(ctx: &RenderContext, callee: &str, args: &[IrExpr]) -> String {
     // A closure ARG is already `Rc<dyn Fn>`: the box-by-default pass boxed every
     // closure literal where it sits — including a Named user-HOF arg, whose param
     // is `Rc<dyn Fn>` under the uniform repr (top-level fns no longer take
@@ -245,8 +158,136 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
     // `{ let __cap; lambda }` arg (kind `Block`, not `RcWrap`) double-boxed it.
     let args_str = args.iter().map(|a| render_expr_owned(ctx, a))
         .collect::<Vec<_>>().join(", ");
-    ctx.templates.render_with("call_expr", None, &[], &[("callee", callee.as_str()), ("args", args_str.as_str())])
+    ctx.templates.render_with("call_expr", None, &[], &[("callee", callee), ("args", args_str.as_str())])
         .unwrap_or_else(|| format!("call(...)"))
+}
+
+/// `CallTarget::Named` case of `render_generic_call`, extracted verbatim
+/// (cog>30 decomposition, pattern 2: uniform match arms on `CallTarget`,
+/// mirrors the `lower_expr`/`infer_expr_inner` extraction shape).
+fn render_generic_call_named(ctx: &RenderContext, name: almide_base::intern::Sym, args: &[IrExpr], result_ty: &almide_lang::types::Ty) -> String {
+    // Invariant: NormalizeRuntimeCallsPass collapses every
+    // `Named { "almide_rt_*" }` into `RuntimeCall { symbol }`.
+    // A `Named` target reaching the walker therefore must
+    // refer to a user-defined or external function — never
+    // a runtime helper. If this assertion fires, a generator
+    // produced a `Named { "almide_rt_*" }` after the
+    // normalize pass, or the pass was removed from the
+    // pipeline.
+    assert!(
+        !name.as_str().starts_with("almide_rt_"),
+        "walker received Named call with reserved runtime prefix: {} \
+         (expected RuntimeCall — see pass_normalize_runtime_calls)",
+        name.as_str()
+    );
+    if let Some(mapped) = ctx.ann.ctor_to_enum.get(name.as_str()) {
+        // `name` is a variant constructor. The global `ctor_to_enum` map
+        // collapses a constructor name shared across packages to the
+        // last-registered enum (#413). When the construction's RESOLVED
+        // type (`.ty`, disambiguated by the type checker) names a DIFFERENT
+        // but valid enum, prefer it; otherwise keep the mapped enum (no
+        // change for the common, non-colliding case — and for non-variant
+        // ctors like newtypes where `.ty` isn't a known enum).
+        let enum_name = match result_ty {
+            almide_lang::types::Ty::Named(n, _)
+                if n.as_str() != mapped.as_str()
+                   && ctx.ann.ctor_to_enum.values().any(|e| e.as_str() == n.as_str())
+                => n.to_string(),
+            _ => mapped.clone(),
+        };
+        return render_enum_constructor(ctx, &name, &enum_name, args);
+    }
+    // Convention methods: "Type.method" → "Type_method" (free functions in all targets)
+    let callee = if name.contains('.') {
+        name.replace('.', "_")
+    } else {
+        // A user fn named `box`/`move`/`dyn`/… is escaped at its
+        // definition; the call site must match or rustc rejects `box(…)`
+        // as a reserved keyword (#659).
+        super::escape_rust_ident(name.as_str(), ctx.templates)
+    };
+    render_call_expr(ctx, &callee, args)
+}
+
+/// `CallTarget::Method` case of `render_generic_call`, extracted verbatim.
+fn render_generic_call_method(ctx: &RenderContext, object: &IrExpr, method: almide_base::intern::Sym, args: &[IrExpr]) -> String {
+    if let Some(full) = render_method_call_full(ctx, object, &method, args) {
+        return full;
+    }
+    // Val-wrapped var: mutating method calls need .make_mut()
+    if let IrExprKind::Var { id } = &object.kind {
+        if ctx.ann.is_rc_cow(id) {
+            let is_mutating_method = matches!(method.as_str(),
+                "push" | "pop" | "clear" | "extend" | "insert" | "remove"
+                | "sort" | "sort_by" | "reverse" | "truncate" | "retain");
+            if is_mutating_method {
+                let var_name = ctx.var_name(*id).to_string();
+                let args_str = args.iter().map(|a| render_expr(ctx, a))
+                    .collect::<Vec<_>>().join(", ");
+                if args_str.is_empty() {
+                    return format!("{}.make_mut().{}()", var_name, method);
+                } else {
+                    return format!("{}.make_mut().{}({})", var_name, method, args_str);
+                }
+            }
+        }
+    }
+    let callee = {
+        let obj_str = render_expr(ctx, object);
+        // Wrap in parens if the object expression needs it for method call precedence
+        let needs_parens = matches!(&object.kind,
+            IrExprKind::UnOp { .. } | IrExprKind::BinOp { .. }
+            | IrExprKind::If { .. } | IrExprKind::Match { .. }
+        ) || matches!(&object.kind, IrExprKind::LitFloat { value } if *value < 0.0)
+          || matches!(&object.kind, IrExprKind::LitInt { value } if *value < 0);
+        if needs_parens {
+            format!("({}).{}", obj_str, method)
+        } else {
+            format!("{}.{}", obj_str, method)
+        }
+    };
+    render_call_expr(ctx, &callee, args)
+}
+
+/// `CallTarget::Computed` case of `render_generic_call`, extracted verbatim.
+fn render_generic_call_computed(ctx: &RenderContext, callee_expr: &IrExpr, args: &[IrExpr]) -> String {
+    // Pipe terminus case: `expr |> (lambda)` lowers to `(lambda)(expr)`.
+    // The lambda is the computed callee. Here — and ONLY here — we
+    // annotate the lambda's params so rustc can infer types.
+    // (Lambda elsewhere, e.g. as arg to `.filter(...)`, must stay
+    // unannotated because iterator adapters want `&T` not `T`.)
+    let callee = if let IrExprKind::Lambda { params, body, .. } = &callee_expr.kind {
+        let params_str = params.iter()
+            .map(|(id, ty)| {
+                let name = ctx.var_name(*id).to_string();
+                if ty.has_unresolved_deep() {
+                    name
+                } else {
+                    let ty_str = super::types::render_type(ctx, ty);
+                    format!("{}: {}", name, ty_str)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let body_str = render_expr(ctx, body);
+        format!("(move |{}| {})", params_str, body_str)
+    } else {
+        // Parenthesize ANY computed callee: a `Member` (h.run)("x"), a
+        // `??`/`match`/`if` that yields a closure — `match … {}(x)` is
+        // invalid Rust ("expected ;"), `(match … {})(x)` is correct — and a
+        // bare `(f)(x)` is harmless.
+        format!("({})", render_expr(ctx, callee_expr))
+    };
+    render_call_expr(ctx, &callee, args)
+}
+
+fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr], result_ty: &almide_lang::types::Ty) -> String {
+    match target {
+        CallTarget::Named { name } => render_generic_call_named(ctx, *name, args, result_ty),
+        CallTarget::Method { object, method } => render_generic_call_method(ctx, object, *method, args),
+        CallTarget::Computed { callee } => render_generic_call_computed(ctx, callee, args),
+        CallTarget::Module { .. } => unreachable!(),
+    }
 }
 
 /// Render a method call as a full expression for UFCS and module.func patterns.
@@ -566,63 +607,68 @@ fn rc_cow_symbol_is_native_runtime(symbol: &str) -> bool {
         .any(|(m, _)| rest.strip_prefix(m).is_some_and(|r| r.starts_with('_')))
 }
 
-fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
-    // Inline numeric casts
+/// Inline numeric casts. Extracted from `render_runtime_call` (cog>30
+/// decomposition): `Some` mirrors the original's early `return`, `None`
+/// falls through to the next check.
+fn try_render_numeric_cast(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> Option<String> {
     match symbol.as_str() {
         "almide_rt_float_from_int" | "almide_rt_int_to_float" if args.len() == 1 => {
-            return format!("({} as f64)", render_expr(ctx, &args[0]));
+            Some(format!("({} as f64)", render_expr(ctx, &args[0])))
         }
         "almide_rt_float_to_int" if args.len() == 1 => {
-            return format!("({} as i64)", render_expr(ctx, &args[0]));
+            Some(format!("({} as i64)", render_expr(ctx, &args[0])))
         }
-        _ => {}
+        _ => None,
     }
-    // Mutating stdlib calls on a module-level (`ModuleRc`) or `RcCow` var: route
-    // through `Rc::make_mut`/`.make_mut()` so the mutation hits the shared backing
-    // store, not a clone. The mutator set is the one source of truth in
-    // `pass_closure_conversion` (list/map/string/bytes &mut-on-args[0] fns); before
-    // it was only list push/pop/clear, so `map.insert`/`bytes.push`/… on a global
-    // silently mutated a discarded `(**c.borrow()).clone()`.
-    if !args.is_empty() {
-        let is_mutating = crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str());
-        if is_mutating {
-            if let IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } = &args[0].kind {
-                if let IrExprKind::Var { id } = &inner.kind {
-                    let name = ctx.var_name(*id).to_string();
-                    // §4 Stage 2: a global target dispatches on the attribute.
-                    if let Some(info) = ctx.ann.global(*id) {
-                        use almide_ir::top_let_storage::TopLetStorage as Tls;
-                        if matches!(info.storage, Tls::RcRefCell) {
-                            let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
-                                .collect::<Vec<_>>().join(", ");
-                            let rc_mut = "std::rc::Rc::make_mut(&mut *c.borrow_mut())";
-                            let call_args = if rest_args.is_empty() {
-                                rc_mut.to_string()
-                            } else {
-                                format!("{}, {}", rc_mut, rest_args)
-                            };
-                            return format!("{}.with(|c| {}({}))", info.static_name, symbol.as_str(), call_args);
-                        }
-                    }
-                    match ctx.ann.get_var_storage(id) {
-                        VarStorage::RcCow => {
-                            let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
-                                .collect::<Vec<_>>().join(", ");
-                            let call_args = if rest_args.is_empty() {
-                                format!("{}.make_mut()", name)
-                            } else {
-                                format!("{}.make_mut(), {}", name, rest_args)
-                            };
-                            return format!("{}({})", symbol.as_str(), call_args);
-                        }
-                        _ => {}
-                    }
-                }
-            }
+}
+
+/// Mutating stdlib calls on a module-level (`ModuleRc`) or `RcCow` var:
+/// route through `Rc::make_mut`/`.make_mut()` so the mutation hits the
+/// shared backing store, not a clone. The mutator set is the one source of
+/// truth in `pass_closure_conversion` (list/map/string/bytes &mut-on-args[0]
+/// fns); before it was only list push/pop/clear, so `map.insert`/`bytes.push`/…
+/// on a global silently mutated a discarded `(**c.borrow()).clone()`.
+/// Extracted from `render_runtime_call`: `Some` mirrors the original's
+/// early `return`, `None` falls through to the default owned-args render.
+fn try_render_mutating_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> Option<String> {
+    if args.is_empty() { return None; }
+    if !crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str()) { return None; }
+    let (IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner }) = &args[0].kind else { return None; };
+    let IrExprKind::Var { id } = &inner.kind else { return None; };
+    let name = ctx.var_name(*id).to_string();
+    // §4 Stage 2: a global target dispatches on the attribute.
+    if let Some(info) = ctx.ann.global(*id) {
+        use almide_ir::top_let_storage::TopLetStorage as Tls;
+        if matches!(info.storage, Tls::RcRefCell) {
+            let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
+                .collect::<Vec<_>>().join(", ");
+            let rc_mut = "std::rc::Rc::make_mut(&mut *c.borrow_mut())";
+            let call_args = if rest_args.is_empty() {
+                rc_mut.to_string()
+            } else {
+                format!("{}, {}", rc_mut, rest_args)
+            };
+            return Some(format!("{}.with(|c| {}({}))", info.static_name, symbol.as_str(), call_args));
         }
     }
-    // Default: render all args as owned
-    let args_str = args
+    match ctx.ann.get_var_storage(id) {
+        VarStorage::RcCow => {
+            let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
+                .collect::<Vec<_>>().join(", ");
+            let call_args = if rest_args.is_empty() {
+                format!("{}.make_mut()", name)
+            } else {
+                format!("{}.make_mut(), {}", name, rest_args)
+            };
+            Some(format!("{}({})", symbol.as_str(), call_args))
+        }
+        _ => None,
+    }
+}
+
+/// Default: render all args as owned. Extracted from `render_runtime_call`.
+fn render_runtime_call_args_owned(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
+    args
         .iter()
         .map(|a| {
             let r = render_expr_owned(ctx, a);
@@ -646,7 +692,17 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
             }
         })
         .collect::<Vec<_>>()
-        .join(", ");
+        .join(", ")
+}
+
+fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
+    if let Some(rendered) = try_render_numeric_cast(ctx, symbol, args) {
+        return rendered;
+    }
+    if let Some(rendered) = try_render_mutating_runtime_call(ctx, symbol, args) {
+        return rendered;
+    }
+    let args_str = render_runtime_call_args_owned(ctx, symbol, args);
     format!("{}({})", symbol.as_str(), args_str)
 }
 
@@ -890,6 +946,54 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
         .unwrap_or_else(|| format!("for _ in _ {{ }}"))
 }
 
+/// Rewrite legacy AlmdRec{N} references to field-name-based names.
+/// @inline_rust templates in dependency packages may contain hardcoded
+/// AlmdRec0, AlmdRec1 etc. that no longer match the current naming.
+/// Extract all AlmdRec{digits} tokens, then resolve each by matching
+/// the constructor's field names against the anon_records map. Extracted
+/// from `render_expr_inline_rust` (cog>30 decomposition): a `&mut String`
+/// output param that's only written to, never read back to change its own
+/// branching — safe to thread out.
+fn rewrite_legacy_almd_rec_names(ctx: &RenderContext, out: &mut String) {
+    if !out.contains("AlmdRec") { return; }
+    let mut legacy_names: Vec<String> = Vec::new();
+    let bytes = out.as_bytes();
+    let prefix = b"AlmdRec";
+    let mut pos = 0;
+    while pos + prefix.len() < bytes.len() {
+        if bytes[pos..].starts_with(prefix) {
+            let start = pos;
+            pos += prefix.len();
+            // Consume trailing digits
+            let digit_start = pos;
+            while pos < bytes.len() && bytes[pos].is_ascii_digit() { pos += 1; }
+            if pos > digit_start {
+                let name = std::str::from_utf8(&bytes[start..pos]).unwrap().to_string();
+                // Skip names that are already field-based (contain '_' after "AlmdRec")
+                if !name.contains('_') {
+                    legacy_names.push(name);
+                }
+            }
+        } else {
+            pos += 1;
+        }
+    }
+    legacy_names.sort();
+    legacy_names.dedup();
+    for legacy in &legacy_names {
+        let matched = ctx.ann.anon_records.iter().find(|(field_names, _)| {
+            field_names.iter().all(|f| {
+                let pattern = format!("{} {{ {}: ", legacy, f);
+                let pattern2 = format!(", {}: ", f);
+                out.contains(&pattern) || out.contains(&pattern2)
+            })
+        });
+        if let Some((_, struct_name)) = matched {
+            *out = out.replace(legacy, struct_name);
+        }
+    }
+}
+
 fn render_expr_inline_rust(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::InlineRust { template, args } = &expr.kind else { unreachable!() };
     let mut out = template.clone();
@@ -898,49 +1002,7 @@ fn render_expr_inline_rust(ctx: &RenderContext, expr: &IrExpr) -> String {
         let placeholder = format!("{{{}}}", name.as_str());
         out = out.replace(&placeholder, &rendered);
     }
-    // Rewrite legacy AlmdRec{N} references to field-name-based names.
-    // @inline_rust templates in dependency packages may contain hardcoded
-    // AlmdRec0, AlmdRec1 etc. that no longer match the current naming.
-    // Extract all AlmdRec{digits} tokens, then resolve each by matching
-    // the constructor's field names against the anon_records map.
-    if out.contains("AlmdRec") {
-        let mut legacy_names: Vec<String> = Vec::new();
-        let bytes = out.as_bytes();
-        let prefix = b"AlmdRec";
-        let mut pos = 0;
-        while pos + prefix.len() < bytes.len() {
-            if bytes[pos..].starts_with(prefix) {
-                let start = pos;
-                pos += prefix.len();
-                // Consume trailing digits
-                let digit_start = pos;
-                while pos < bytes.len() && bytes[pos].is_ascii_digit() { pos += 1; }
-                if pos > digit_start {
-                    let name = std::str::from_utf8(&bytes[start..pos]).unwrap().to_string();
-                    // Skip names that are already field-based (contain '_' after "AlmdRec")
-                    if !name.contains('_') {
-                        legacy_names.push(name);
-                    }
-                }
-            } else {
-                pos += 1;
-            }
-        }
-        legacy_names.sort();
-        legacy_names.dedup();
-        for legacy in &legacy_names {
-            let matched = ctx.ann.anon_records.iter().find(|(field_names, _)| {
-                field_names.iter().all(|f| {
-                    let pattern = format!("{} {{ {}: ", legacy, f);
-                    let pattern2 = format!(", {}: ", f);
-                    out.contains(&pattern) || out.contains(&pattern2)
-                })
-            });
-            if let Some((_, struct_name)) = matched {
-                out = out.replace(legacy, struct_name);
-            }
-        }
-    }
+    rewrite_legacy_almd_rec_names(ctx, &mut out);
     out
 }
 
@@ -1211,52 +1273,53 @@ fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
         .unwrap_or_else(|| format!("{}.clone()", expr_s))
 }
 
+/// Shared-mut non-Copy var (`SharedMut`, Closure v2 P6): borrow through the
+/// `RefCell` rather than the `.get()` clone a bare Var read would emit, so a
+/// mutating call (`list.push(acc, …)` → `&mut *acc.borrow_mut()`) writes the
+/// ONE shared cell the closure also holds. A shared read uses `&*acc.borrow()`
+/// (no clone). Copy shared-mut vars stay on the `Cell` `.get()` path below.
+/// Extracted from `render_expr_borrow` (cog>30 decomposition): `Some`
+/// mirrors the original's early `return`, `None` falls through.
+fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bool) -> Option<String> {
+    let IrExprKind::Var { id } = &inner.kind else { return None; };
+    if !ctx.ann.is_shared_mut(id) { return None; }
+    if almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(*id).ty) { return None; }
+    let var_name = ctx.var_name(*id).to_string();
+    Some(if mutable {
+        // In-place mutation writes the one shared cell.
+        format!("&mut *{}.borrow_mut()", var_name)
+    } else {
+        // A shared read borrows an owned snapshot (`.get()` clones the
+        // cell's value). Unlike `&*x.borrow()`, this owned temporary has
+        // no lifetime tie to `x`, so it is also safe in tail position
+        // where `x` is a block-local (`let outer = () => { var a = …; …; a })`.
+        format!("&{}.get()", var_name)
+    })
+}
+
+/// If the borrowed operand is a Var referencing a fn param already emitted
+/// as a reference (`&T`, `&[T]`, `&str` for a shared borrow; `&mut T` for a
+/// mutable one), skip the outer `&`/`&mut` — Rust auto-reborrows when you
+/// pass the naked var, so this avoids a `&&T`/`&mut &mut T` double-borrow.
+/// Extracted from `render_expr_borrow`.
+fn try_render_borrow_already_ref_param(ctx: &RenderContext, inner: &IrExpr, as_str: bool, mutable: bool) -> Option<String> {
+    let IrExprKind::Var { id } = &inner.kind else { return None; };
+    if !as_str && !mutable && ctx.ref_params.contains(id) {
+        return Some(render_expr(ctx, inner));
+    }
+    if mutable && ctx.ref_mut_params.contains(id) {
+        return Some(render_expr(ctx, inner));
+    }
+    None
+}
+
 fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Borrow { expr: inner, as_str, mutable } = &expr.kind else { unreachable!() };
-    // Shared-mut non-Copy var (`SharedMut`, Closure v2 P6): borrow through the
-    // `RefCell` rather than the `.get()` clone a bare Var read would emit, so a
-    // mutating call (`list.push(acc, …)` → `&mut *acc.borrow_mut()`) writes the
-    // ONE shared cell the closure also holds. A shared read uses `&*acc.borrow()`
-    // (no clone). Copy shared-mut vars stay on the `Cell` `.get()` path below.
-    if let IrExprKind::Var { id } = &inner.kind {
-        if ctx.ann.is_shared_mut(id)
-            && !almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(*id).ty)
-        {
-            let var_name = ctx.var_name(*id).to_string();
-            return if *mutable {
-                // In-place mutation writes the one shared cell.
-                format!("&mut *{}.borrow_mut()", var_name)
-            } else {
-                // A shared read borrows an owned snapshot (`.get()` clones the
-                // cell's value). Unlike `&*x.borrow()`, this owned temporary has
-                // no lifetime tie to `x`, so it is also safe in tail position
-                // where `x` is a block-local (`let outer = () => { var a = …; …; a })`.
-                format!("&{}.get()", var_name)
-            };
-        }
+    if let Some(rendered) = try_render_borrow_shared_mut(ctx, inner, *mutable) {
+        return rendered;
     }
-    // If the borrowed operand is a Var referencing a fn param
-    // already emitted as a reference (`&T`, `&[T]`, `&str`),
-    // skip the outer `&` to avoid `&&T` double-borrow. The
-    // `&*` (deref-then-ref) decoration still renders because
-    // it rewraps via `Deref`.
-    if !*as_str && !*mutable {
-        if let IrExprKind::Var { id } = &inner.kind {
-            if ctx.ref_params.contains(id) {
-                return render_expr(ctx, inner);
-            }
-        }
-    }
-    // Same idea for `&mut b` against a `b: &mut T` param:
-    // Rust auto-reborrows when you pass the naked var, so
-    // dropping the outer `&mut` here keeps the callee's
-    // `&mut T` slot filled without a `&mut &mut T` layer.
-    if *mutable {
-        if let IrExprKind::Var { id } = &inner.kind {
-            if ctx.ref_mut_params.contains(id) {
-                return render_expr(ctx, inner);
-            }
-        }
+    if let Some(rendered) = try_render_borrow_already_ref_param(ctx, inner, *as_str, *mutable) {
+        return rendered;
     }
     if *mutable {
         // Val-wrapped var: .make_mut() for COW semantics
