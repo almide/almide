@@ -223,39 +223,11 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
 
     let (mut program, source_text, parse_errors) = parse_file(test_file);
     if prof { marks.push(("parse", std::time::Instant::now())); }
-    if source_text.lines().take(3).any(|line| line.contains("// wasm:skip")) {
-        return skip("wasm:skip".to_string());
-    }
-    // A parse error leaves an error-recovered (partial) AST. Compiling and
-    // running that mangled module would report a PASS, so a broken file looked
-    // green on the WASM path (only the rust path surfaced it). It is a real
-    // failure — NOT a benign skip like `// wasm:skip` — so report it as Fail:
-    // `cmd_test_wasm` then counts it failed, and `cmd_test_fast` routes it to the
-    // authoritative native fallback, which prints the full diagnostics.
-    if parse_errors.iter().any(|d| d.level == diagnostic::Level::Error) {
-        let mut detail = String::new();
-        for d in parse_errors.iter().filter(|d| d.level == diagnostic::Level::Error).take(3) {
-            detail.push_str(&format!("  parse error: {}\n", d.message));
-        }
-        return WasmTestOutcome::Fail { file: test_file.to_string(), detail };
-    }
-    // A file with BOTH `main` and `test` blocks: the v1 wasm test-mode renderer
-    // (almide_mir::pipeline::synthesize_test_runner_main) intentionally leaves
-    // `main`-bearing files on the ordinary `__main_runner` protocol and never
-    // synthesizes the `__test_runner` — so the wasm leg compiles and runs ONLY
-    // `main`, never the `test` blocks, and reports the whole file Pass as long
-    // as `main` exits cleanly. A file's tests can be silently unexecuted (not
-    // merely mis-scored) on this leg — the false-green class in
-    // feedback_wasm_test_parse_error_false_pass, a fresh trigger (runtime
-    // assertions, not parse errors). Skip straight to the authoritative native
-    // fallback rather than trust a Pass that never checked the tests at all.
-    let has_main = program
-        .decls
-        .iter()
-        .any(|d| matches!(d, almide_lang::ast::Decl::Fn { name, .. } if name.as_str() == "main"));
-    let has_test = program.decls.iter().any(|d| matches!(d, almide_lang::ast::Decl::Test { .. }));
-    if has_main && has_test {
-        return skip("main + test blocks: wasm test-mode runs main only, not the tests".to_string());
+    // `// wasm:skip` marker / parse errors (a real Fail, not a benign skip —
+    // see `wasm_test_preflight_outcome`'s doc comment) / the main+test
+    // co-presence gap in the v1 test-mode runner.
+    if let Some(outcome) = wasm_test_preflight_outcome(test_file, &program, &source_text, &parse_errors) {
+        return outcome;
     }
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> =
