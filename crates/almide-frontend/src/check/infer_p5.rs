@@ -35,24 +35,31 @@ fn collect_in_stmt(stmt: &ast::Stmt, out: &mut std::collections::HashSet<Sym>) {
 // from under the match (porta mcp: the match sat inside an `ok(...)` tail,
 // the old Match/Block/If-only walk never saw it, and the Bind lost its
 // Result → invalid native Rust).
+/// The `Match { subject, arms }` arm of [`collect_in_expr`]: if any arm
+/// pattern-matches `Ok`/`Err`, the subject Ident (when it's a bare Ident)
+/// is a Result being inspected, so its name goes into `out`; either way,
+/// the subject and every arm's guard/body are still walked recursively.
+/// Verbatim text move.
+fn collect_in_match_expr(subject: &ast::Expr, arms: &[ast::MatchArm], out: &mut std::collections::HashSet<Sym>) {
+    let arms_match_result = arms.iter().any(|a| matches!(
+        &a.pattern,
+        ast::Pattern::Ok { .. } | ast::Pattern::Err { .. }
+    ));
+    if arms_match_result {
+        if let ExprKind::Ident { name, .. } = &subject.kind {
+            out.insert(*name);
+        }
+    }
+    collect_in_expr(subject, out);
+    for arm in arms {
+        if let Some(g) = &arm.guard { collect_in_expr(g, out); }
+        collect_in_expr(&arm.body, out);
+    }
+}
+
 fn collect_in_expr(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) {
     match &expr.kind {
-        ExprKind::Match { subject, arms, .. } => {
-            let arms_match_result = arms.iter().any(|a| matches!(
-                &a.pattern,
-                ast::Pattern::Ok { .. } | ast::Pattern::Err { .. }
-            ));
-            if arms_match_result {
-                if let ExprKind::Ident { name, .. } = &subject.kind {
-                    out.insert(*name);
-                }
-            }
-            collect_in_expr(subject, out);
-            for arm in arms {
-                if let Some(g) = &arm.guard { collect_in_expr(g, out); }
-                collect_in_expr(&arm.body, out);
-            }
-        }
+        ExprKind::Match { subject, arms, .. } => collect_in_match_expr(subject, arms, out),
         ExprKind::Block { stmts, expr: tail, .. } => {
             for s in stmts { collect_in_stmt(s, out); }
             if let Some(t) = tail { collect_in_expr(t, out); }
