@@ -149,31 +149,43 @@ fn concretize_top_lets(program: &mut IrProgram, prog_vt: &mut VarTable, symbols:
 
 /// Phase 1b: Propagate top_let types by name into VarTable entries
 /// that are cross-module synthetic references (different VarId, same name).
-fn propagate_top_let_types_by_name(program: &IrProgram, prog_vt: &mut VarTable) {
+/// Insert `name` → `ty` under both its source spelling and its
+/// SCREAMING_CASE const spelling. The use-site synthetic Var carries the
+/// SCREAMING_CASE spelling (`lower/expressions.rs` `field.to_uppercase()`)
+/// while the definition keeps the source name — bridge BOTH spellings, or
+/// a lowercase module top-let never propagates (#502 fix C). Extracted
+/// from `propagate_top_let_types_by_name` (cog>25 decomposition): was a
+/// local closure, promoted to a named function.
+fn insert_top_let_ty_both_spellings(name: String, ty: &Ty, map: &mut std::collections::HashMap<String, Ty>) {
+    let upper = name.to_uppercase();
+    if upper != name { map.entry(upper).or_insert_with(|| ty.clone()); }
+    map.insert(name, ty.clone());
+}
+
+/// Collect every resolved top-let's type (top-level and per-module), keyed
+/// by name (both spellings — see [`insert_top_let_ty_both_spellings`]).
+/// Extracted from `propagate_top_let_types_by_name` (cog>25 decomposition).
+fn collect_top_let_types(program: &IrProgram, prog_vt: &VarTable) -> std::collections::HashMap<String, Ty> {
     let mut top_let_types: std::collections::HashMap<String, Ty> = std::collections::HashMap::new();
-    // The use-site synthetic Var carries the SCREAMING_CASE const
-    // spelling (lower/expressions.rs `field.to_uppercase()`) while the
-    // definition keeps the source name — bridge BOTH spellings, or a
-    // lowercase module top-let never propagates (#502 fix C).
-    let mut insert_both = |name: String, ty: &Ty, map: &mut std::collections::HashMap<String, Ty>| {
-        let upper = name.to_uppercase();
-        if upper != name { map.entry(upper).or_insert_with(|| ty.clone()); }
-        map.insert(name, ty.clone());
-    };
     for tl in &program.top_lets {
         if !tl.ty.has_unresolved_deep() {
             let name = prog_vt.get(tl.var).name.to_string();
-            insert_both(name, &tl.ty, &mut top_let_types);
+            insert_top_let_ty_both_spellings(name, &tl.ty, &mut top_let_types);
         }
     }
     for module in &program.modules {
         for tl in &module.top_lets {
             if !tl.ty.has_unresolved_deep() {
                 let name = prog_vt.get(tl.var).name.to_string();
-                insert_both(name, &tl.ty, &mut top_let_types);
+                insert_top_let_ty_both_spellings(name, &tl.ty, &mut top_let_types);
             }
         }
     }
+    top_let_types
+}
+
+fn propagate_top_let_types_by_name(program: &IrProgram, prog_vt: &mut VarTable) {
+    let top_let_types = collect_top_let_types(program, prog_vt);
     if !top_let_types.is_empty() {
         for entry in &mut prog_vt.entries {
             if entry.ty.has_unresolved_deep() {
@@ -438,8 +450,11 @@ fn erase_pattern(pat: &mut IrPattern, aliases: &HashMap<String, Ty>) {
     }
 }
 
-fn build_symbol_table(program: &IrProgram) -> SymbolTable {
-    let mut sigs = std::collections::HashMap::new();
+/// Register top-level and module function return-type signatures (keyed by
+/// `(module_name_or_empty, fn_name)`) into `sigs`. Extracted from
+/// `build_symbol_table` (cog>25 decomposition): a write-only accumulator
+/// loop, never read back within this function.
+fn register_named_fn_sigs(program: &IrProgram, sigs: &mut std::collections::HashMap<(String, String), Ty>) {
     // Top-level functions (Named call targets)
     for func in &program.functions {
         if !func.ret_ty.has_unresolved_deep() {
@@ -456,34 +471,47 @@ fn build_symbol_table(program: &IrProgram) -> SymbolTable {
             }
         }
     }
-    let mut record_fields = std::collections::HashMap::new();
-    let mut register_type_decl = |decl: &almide_ir::IrTypeDecl| {
-        match &decl.kind {
-            almide_ir::IrTypeDeclKind::Record { fields } => {
-                let fs: Vec<_> = fields.iter()
-                    .map(|f| (f.name, f.ty.clone()))
-                    .collect();
-                record_fields.insert(decl.name.to_string(), fs);
-            }
-            almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
-                for case in cases {
-                    if let almide_ir::IrVariantKind::Record { fields } = &case.kind {
-                        let v: Vec<_> = fields.iter()
-                            .map(|f| (f.name, f.ty.clone()))
-                            .collect();
-                        record_fields.insert(case.name.to_string(), v);
-                    }
+}
+
+/// Register a single type declaration's record field list(s) into
+/// `record_fields` — a plain record's own fields, or every Record-shaped
+/// variant case's fields. Extracted from `build_symbol_table` (cog>25
+/// decomposition): was a local closure, promoted to a named function so
+/// its own complexity is independently measured (never wrap in a closure
+/// to dodge measurement).
+fn register_type_decl_fields(decl: &almide_ir::IrTypeDecl, record_fields: &mut std::collections::HashMap<String, Vec<(almide_base::intern::Sym, Ty)>>) {
+    match &decl.kind {
+        almide_ir::IrTypeDeclKind::Record { fields } => {
+            let fs: Vec<_> = fields.iter()
+                .map(|f| (f.name, f.ty.clone()))
+                .collect();
+            record_fields.insert(decl.name.to_string(), fs);
+        }
+        almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
+            for case in cases {
+                if let almide_ir::IrVariantKind::Record { fields } = &case.kind {
+                    let v: Vec<_> = fields.iter()
+                        .map(|f| (f.name, f.ty.clone()))
+                        .collect();
+                    record_fields.insert(case.name.to_string(), v);
                 }
             }
-            _ => {}
         }
-    };
+        _ => {}
+    }
+}
+
+fn build_symbol_table(program: &IrProgram) -> SymbolTable {
+    let mut sigs = std::collections::HashMap::new();
+    register_named_fn_sigs(program, &mut sigs);
+
+    let mut record_fields = std::collections::HashMap::new();
     for decl in &program.type_decls {
-        register_type_decl(decl);
+        register_type_decl_fields(decl, &mut record_fields);
     }
     for module in &program.modules {
         for decl in &module.type_decls {
-            register_type_decl(decl);
+            register_type_decl_fields(decl, &mut record_fields);
         }
     }
     SymbolTable { sigs, record_fields }
@@ -592,6 +620,25 @@ fn merge_more_concrete(a: &Ty, b: &Ty) -> Option<Ty> {
     }
 }
 
+/// `(List { elements }, Applied(List, [elem_ty]))` arm of [`propagate_ty_down`].
+fn propagate_ty_down_list(elements: &mut [IrExpr], elem_ty: &Ty) {
+    for e in elements.iter_mut() { propagate_ty_down(e, elem_ty); }
+}
+
+/// `(Tuple { elements }, Tuple(ts))` arm of [`propagate_ty_down`].
+fn propagate_ty_down_tuple(elements: &mut [IrExpr], ts: &[Ty]) {
+    for (e, t) in elements.iter_mut().zip(ts.iter()) {
+        propagate_ty_down(e, t);
+    }
+}
+
+/// `(Match { arms, .. }, _)` arm of [`propagate_ty_down`].
+fn propagate_ty_down_match_arms(arms: &mut [IrMatchArm], expected: &Ty) {
+    for arm in arms.iter_mut() {
+        propagate_ty_down(&mut arm.body, expected);
+    }
+}
+
 /// Push `expected` down into `expr`, recursing into wrappers (OptionSome,
 /// Result*, List, Tuple). Updates expr.ty and any matching sub-expressions
 /// whose own types have unresolved slots compatible with `expected`.
@@ -619,12 +666,10 @@ fn propagate_ty_down(expr: &mut IrExpr, expected: &Ty) {
         (IrExprKind::List { elements }, Ty::Applied(TCI::List, args))
             if args.len() == 1 =>
         {
-            for e in elements.iter_mut() { propagate_ty_down(e, &args[0]); }
+            propagate_ty_down_list(elements, &args[0]);
         }
         (IrExprKind::Tuple { elements }, Ty::Tuple(ts)) if elements.len() == ts.len() => {
-            for (e, t) in elements.iter_mut().zip(ts.iter()) {
-                propagate_ty_down(e, t);
-            }
+            propagate_ty_down_tuple(elements, ts);
         }
         (IrExprKind::If { then, else_, .. }, _) => {
             propagate_ty_down(then, expected);
@@ -633,11 +678,7 @@ fn propagate_ty_down(expr: &mut IrExpr, expected: &Ty) {
         (IrExprKind::Block { expr: Some(tail), .. }, _) => {
             propagate_ty_down(tail, expected);
         }
-        (IrExprKind::Match { arms, .. }, _) => {
-            for arm in arms.iter_mut() {
-                propagate_ty_down(&mut arm.body, expected);
-            }
-        }
+        (IrExprKind::Match { arms, .. }, _) => propagate_ty_down_match_arms(arms, expected),
         // Explicit-preserve (total-by-construction). The guarded arms above
         // handle the wrapper/branch shapes whose `expr.kind` and `expected`
         // line up; every other (kind, expected) pairing — including a
@@ -725,48 +766,28 @@ fn is_fold_like_call(expr: &IrExpr) -> bool {
     }
 }
 
-/// For `list.fold(xs, init, f)` where `f: (acc, t) -> acc`: the accumulator
-/// type `A` has two sources — `init.ty` and `f.body.ty` — which must agree.
-/// Pick the most concrete form available, then push it back into the init
-/// sub-expression, the lambda's acc parameter (IR annotation + VarTable),
-/// the Ty::Fn wrapper, and the Call's own ty. Returns true when changes
-/// were made.
-fn back_propagate_fold_acc(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
-    let args = match &mut expr.kind {
-        IrExprKind::Call { args, .. } => args,
-        _ => return false,
-    };
-    if args.len() < 3 { return false; }
-
-    let body_ty = match &args[2].kind {
-        IrExprKind::Lambda { body, .. } => body.ty.clone(),
-        _ => return false,
-    };
-    let init_ty = args[1].ty.clone();
-
-    // Accumulator type: merge init and body, picking the most concrete
-    // shape when both are known and compatible. Fall back to whichever is
-    // concrete when only one side has a type.
-    let acc_ty = if !init_ty.has_unresolved_deep() && !body_ty.has_unresolved_deep() {
-        merge_more_concrete(&init_ty, &body_ty)
+/// Accumulator type for `list.fold(xs, init, f)`: merge `init_ty` and
+/// `body_ty`, picking the most concrete shape when both are known and
+/// compatible, falling back to whichever side is concrete when only one
+/// is. Extracted from `back_propagate_fold_acc` (cog>25 decomposition).
+fn compute_fold_acc_ty(init_ty: &Ty, body_ty: &Ty) -> Option<Ty> {
+    if !init_ty.has_unresolved_deep() && !body_ty.has_unresolved_deep() {
+        merge_more_concrete(init_ty, body_ty)
     } else if !init_ty.has_unresolved_deep() {
         Some(init_ty.clone())
     } else if !body_ty.has_unresolved_deep() {
         Some(body_ty.clone())
     } else {
         None
-    };
-    let Some(acc_ty) = acc_ty else { return false; };
-
-    let mut changed = false;
-
-    // Push acc_ty into the init sub-expression when init has weaker shape
-    if init_ty != acc_ty {
-        propagate_ty_down(&mut args[1], &acc_ty);
-        changed = true;
     }
+}
 
-    // Update lambda's acc param (IR + VarTable) and the Ty::Fn wrapper
+/// Update the fold lambda's acc param (IR annotation + VarTable) and its
+/// `Ty::Fn` wrapper to `acc_ty`, wherever still unresolved. `args[2]` is
+/// the fold lambda arg. Extracted from `back_propagate_fold_acc` (cog>25
+/// decomposition). Returns true when a change was made.
+fn update_fold_lambda_acc(args: &mut [IrExpr], acc_ty: &Ty, vt: &mut VarTable) -> bool {
+    let mut changed = false;
     if let IrExprKind::Lambda { params, .. } = &mut args[2].kind {
         if let Some((vid, pty)) = params.get_mut(0) {
             if pty.has_unresolved_deep() {
@@ -790,6 +811,39 @@ fn back_propagate_fold_acc(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
             changed = true;
         }
     }
+    changed
+}
+
+/// For `list.fold(xs, init, f)` where `f: (acc, t) -> acc`: the accumulator
+/// type `A` has two sources — `init.ty` and `f.body.ty` — which must agree.
+/// Pick the most concrete form available, then push it back into the init
+/// sub-expression, the lambda's acc parameter (IR annotation + VarTable),
+/// the Ty::Fn wrapper, and the Call's own ty. Returns true when changes
+/// were made.
+fn back_propagate_fold_acc(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
+    let args = match &mut expr.kind {
+        IrExprKind::Call { args, .. } => args,
+        _ => return false,
+    };
+    if args.len() < 3 { return false; }
+
+    let body_ty = match &args[2].kind {
+        IrExprKind::Lambda { body, .. } => body.ty.clone(),
+        _ => return false,
+    };
+    let init_ty = args[1].ty.clone();
+
+    let Some(acc_ty) = compute_fold_acc_ty(&init_ty, &body_ty) else { return false; };
+
+    let mut changed = false;
+
+    // Push acc_ty into the init sub-expression when init has weaker shape
+    if init_ty != acc_ty {
+        propagate_ty_down(&mut args[1], &acc_ty);
+        changed = true;
+    }
+
+    if update_fold_lambda_acc(args, &acc_ty, vt) { changed = true; }
 
     // Update Call's own ty if it's still unresolved
     if expr.ty.has_unresolved_deep() {
