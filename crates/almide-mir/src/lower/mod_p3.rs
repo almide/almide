@@ -1738,6 +1738,10 @@ impl LowerCtx {
         None
     }
 
+    /// Guard-clause flattening of the former (nested, then outer) else-if chains — every branch
+    /// still returns the SAME `Op` value it evaluated to before, just via an early `return`
+    /// instead of an `if`/`else if` tail expression. No behavior change — see
+    /// docs/roadmap/active/code-health-codopsy.md.
     pub(crate) fn drop_op_for(&self, v: ValueId) -> Op {
         if let Some(ty) = self.variant_drop_handles.get(&v) {
             // `List[(Int, String)]` was routed here as a pseudo-"variant" but has no generated
@@ -1745,69 +1749,100 @@ impl LowerCtx {
             // invalid wat). Route it to the dedicated INLINE `DropListIntStr` (frees each tuple's
             // String slot + block, then the list). Every real user-ADT variant keeps `DropVariant`.
             if ty == "list_int_str" {
-                Op::DropListIntStr { v }
-            } else if ty == "list_str_int" {
-                Op::DropListStrInt { v }
-            } else if let Some(drop_fn) = ty.strip_prefix("optrec:") {
+                return Op::DropListIntStr { v };
+            }
+            if ty == "list_str_int" {
+                return Op::DropListStrInt { v };
+            }
+            if let Some(drop_fn) = ty.strip_prefix("optrec:") {
                 // An Option WRAPPER holding a heap RECORD payload (`some({key, val})`): recurse into
                 // the @12 record via `$__drop_<drop_fn>` at the wrapper's last ref, then free the
                 // wrapper block. The `optrec:` prefix is injected by `materialize_opt_aggregate_some`.
-                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: false, err_rec: false }
-            } else if let Some(drop_fn) = ty.strip_prefix("resrec:") {
+                return Op::DropWrapperRec {
+                    v,
+                    drop_fn: drop_fn.to_string(),
+                    is_result: false,
+                    err_rec: false,
+                };
+            }
+            if let Some(drop_fn) = ty.strip_prefix("resrec:") {
                 // A Result WRAPPER holding a heap RECORD Ok payload (`ok({val, next})`): recurse into
                 // the @12 record (tag@16==0) via `$__drop_<drop_fn>`, else `rc_dec` the @12 Err
                 // String, then free the wrapper. Injected by `materialize_result_aggregate`.
-                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: true, err_rec: false }
-            } else if let Some(drop_fn) = ty.strip_prefix("reserr:") {
+                return Op::DropWrapperRec {
+                    v,
+                    drop_fn: drop_fn.to_string(),
+                    is_result: true,
+                    err_rec: false,
+                };
+            }
+            if let Some(drop_fn) = ty.strip_prefix("reserr:") {
                 // The heap-Ok × variant-ERR wrapper (`Result[String, MathError]` — the
                 // `err(NegativeInput(x))` class): recurse into the @12 VARIANT (tag@16==1)
                 // via `$__drop_<drop_fn>`, else `rc_dec` the @12 Ok payload, then free the
                 // wrapper. Injected by `try_lower_result_err_variant_ctor_heap_ok` and the
                 // both-heap `seed_variant_param` branch (rich-variant Err types).
-                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: true, err_rec: true }
-            } else {
-                Op::DropVariant { v, ty: ty.clone() }
+                return Op::DropWrapperRec {
+                    v,
+                    drop_fn: drop_fn.to_string(),
+                    is_result: true,
+                    err_rec: true,
+                };
             }
-        } else if self.value_result_lists.contains(&v) {
-            Op::DropResultListValue { v }
-        } else if self.value_result_results.contains(&v) {
-            Op::DropResultValue { v }
-        } else if self.str_int_result_results.contains(&v) {
-            Op::DropResultStrInt { v }
-        } else if self.value_int_result_results.contains(&v) {
-            Op::DropResultValueInt { v }
-        } else if self.list_value_int_result_results.contains(&v) {
-            Op::DropResultListValueInt { v }
-        } else if self.list_str_int_result_results.contains(&v) {
-            Op::DropResultListStrInt { v }
-        } else if self.list_str_result_results.contains(&v) {
-            Op::DropResultListStr { v }
-        } else if self.value_elem_lists.contains(&v) {
-            Op::DropListValue { v }
-        } else if self.str_value_elem_lists.contains(&v) {
-            Op::DropListStrValue { v }
-        } else if self.str_str_elem_lists.contains(&v) {
-            Op::DropListStrStr { v }
-        } else if self.list_list_str_lists.contains(&v) {
+            return Op::DropVariant { v, ty: ty.clone() };
+        }
+        if self.value_result_lists.contains(&v) {
+            return Op::DropResultListValue { v };
+        }
+        if self.value_result_results.contains(&v) {
+            return Op::DropResultValue { v };
+        }
+        if self.str_int_result_results.contains(&v) {
+            return Op::DropResultStrInt { v };
+        }
+        if self.value_int_result_results.contains(&v) {
+            return Op::DropResultValueInt { v };
+        }
+        if self.list_value_int_result_results.contains(&v) {
+            return Op::DropResultListValueInt { v };
+        }
+        if self.list_str_int_result_results.contains(&v) {
+            return Op::DropResultListStrInt { v };
+        }
+        if self.list_str_result_results.contains(&v) {
+            return Op::DropResultListStr { v };
+        }
+        if self.value_elem_lists.contains(&v) {
+            return Op::DropListValue { v };
+        }
+        if self.str_value_elem_lists.contains(&v) {
+            return Op::DropListStrValue { v };
+        }
+        if self.str_str_elem_lists.contains(&v) {
+            return Op::DropListStrStr { v };
+        }
+        if self.list_list_str_lists.contains(&v) {
             // `List[List[String]]` — checked BEFORE heap_elem_lists (it also matches
             // is_heap_elem_list_ty): the nested loop frees each inner row's cell Strings, which a
             // flat DropListStr would leak.
-            Op::DropListListStr { v }
-        } else if self.heap_elem_lists.contains(&v) || self.record_masks.contains_key(&v) {
-            Op::DropListStr { v }
-        } else if self.value_handles.contains(&v) {
-            Op::DropValue { v }
-        } else if self.closure_values.contains(&v) {
+            return Op::DropListListStr { v };
+        }
+        if self.heap_elem_lists.contains(&v) || self.record_masks.contains_key(&v) {
+            return Op::DropListStr { v };
+        }
+        if self.value_handles.contains(&v) {
+            return Op::DropValue { v };
+        }
+        if self.closure_values.contains(&v) {
             // A CLOSURE BLOCK frees through the uniform, SELF-DESCRIBING
             // `$__drop_closure` (fixed runtime): at the last ref it reads the drop
             // header (slot 1), recursively drops the captured-closure slots, rc_decs
             // the captured-heap slots, and NEVER touches slot 0 (the fnidx — a table
             // index, not a pointer). Works for any closure value regardless of where
             // it was created (a call-result's captures are unknowable here).
-            Op::DropVariant { v, ty: "closure".to_string() }
-        } else {
-            Op::Drop { v }
+            return Op::DropVariant { v, ty: "closure".to_string() };
         }
+        Op::Drop { v }
     }
 
     pub(crate) fn emit_scope_end_drops(&mut self) {
