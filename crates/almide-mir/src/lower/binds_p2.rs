@@ -552,12 +552,42 @@ impl LowerCtx {
     /// Extracted from `Self::lower_bind_heap` (pattern-2 uniform-arm split, cog reduction):
     /// the arm body verbatim, re-narrowed via `let-else`. Pure text move.
     fn lower_bind_heap_fresh(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+        if self.try_lower_bind_heap_fresh_quick(var, ty, value)? {
+            return Ok(());
+        }
+        if self.try_lower_bind_heap_fresh_variant_honest_wall(var, ty, value)? {
+            return Ok(());
+        }
+        if self.try_lower_bind_heap_fresh_tuple(var, value)? {
+            return Ok(());
+        }
+        if self.try_lower_bind_heap_fresh_record(var, value)? {
+            return Ok(());
+        }
+        if self.try_lower_bind_heap_fresh_spread_record(var, value)? {
+            return Ok(());
+        }
+        if self.try_lower_bind_heap_fresh_scalar_list(var, ty, value)? {
+            return Ok(());
+        }
+        self.lower_bind_heap_fresh_opaque(var, ty, value)
+    }
+
+    /// Extracted from `Self::lower_bind_heap_fresh` (second-round split, cog reduction):
+    /// the concat/interp/str-list/option-ctor quick wins, verbatim. `Ok(true)` means the
+    /// caller already bound `var` and should return immediately.
+    fn try_lower_bind_heap_fresh_quick(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        value: &IrExpr,
+    ) -> Result<bool, LowerError> {
         // `let s = a + b` — a string concat EXECUTES to a fresh owned String (via the
         // self-host __str_concat), held by the binding and dropped at scope end.
         if let Some(dst) = self.try_lower_concat_str(value) {
             self.value_of.insert(var, dst);
             self.live_heap_handles.push(dst);
-            return Ok(());
+            return Ok(true);
         }
         // `let ys = xs + [7]` — a SCALAR-element list concat EXECUTES to a fresh owned list
         // (via the self-host __list_concat), held by the binding and dropped at scope end.
@@ -568,7 +598,7 @@ impl LowerCtx {
             self.value_of.insert(var, dst);
             self.live_heap_handles.push(dst);
             self.materialized_lists.insert(dst);
-            return Ok(());
+            return Ok(true);
         }
         // `let s = "x=${n} y=${t}"` — a STRING INTERPOLATION over the executable
         // subset (Lit / String Var/LitStr / Int Var/LitInt parts) EXECUTES to a
@@ -580,7 +610,7 @@ impl LowerCtx {
             if let Some(dst) = self.try_lower_string_interp(parts) {
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
-                return Ok(());
+                return Ok(true);
             }
             // STRICT value mode: an interp the executable subset declined (a
             // BLOCK-bodied operand — `${int.to_string({ let x = …; x * 3 })}` —
@@ -603,7 +633,7 @@ impl LowerCtx {
         if let Some(dst) = self.try_lower_str_list_literal(value) {
             self.value_of.insert(var, dst);
             self.live_heap_handles.push(dst);
-            return Ok(());
+            return Ok(true);
         }
         // An Option ctor in the executable subset (`Some(scalar)` / `None`) is
         // MATERIALIZED + tracked so a later `match` over the bound var executes;
@@ -611,8 +641,21 @@ impl LowerCtx {
         if let Some(dst) = self.try_lower_option_ctor(value, ty) {
             self.value_of.insert(var, dst);
             self.live_heap_handles.push(dst);
-            return Ok(());
+            return Ok(true);
         }
+        Ok(false)
+    }
+
+    /// Extracted from `Self::lower_bind_heap_fresh` (second-round split, cog reduction):
+    /// the OptionSome/ResultOk/ResultErr honest-wall safety net, verbatim (the outer `if
+    /// let` guard now doubles as the "not applicable" fallthrough). `Ok(true)` means the
+    /// caller already bound `var` and should return immediately.
+    fn try_lower_bind_heap_fresh_variant_honest_wall(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        value: &IrExpr,
+    ) -> Result<bool, LowerError> {
         // HONEST-WALL SAFETY NET: a `some(<list>)` / `ok(<list>)` whose LIST payload the ctor
         // materializer DECLINED (an exotic element the scalar/String/literal arms don't cover —
         // e.g. a computed List[record]/List[List]) must NOT fall to the deferred Opaque `Alloc`
@@ -704,7 +747,7 @@ impl LowerCtx {
                 if let Some(dst) = self.try_lower_option_ctor(&rebuilt, ty) {
                     self.value_of.insert(var, dst);
                     self.live_heap_handles.push(dst);
-                    return Ok(());
+                    return Ok(true);
                 }
                 return Err(LowerError::Unsupported(
                     "some/ok/err of an un-admitted heap call payload cannot be \
@@ -714,6 +757,13 @@ impl LowerCtx {
                 ));
             }
         }
+        Ok(false)
+    }
+
+    /// Extracted from `Self::lower_bind_heap_fresh` (second-round split, cog reduction):
+    /// the scalar/heap tuple construction, verbatim. `Ok(true)` means the caller already
+    /// bound `var` and should return immediately.
+    fn try_lower_bind_heap_fresh_tuple(&mut self, var: VarId, value: &IrExpr) -> Result<bool, LowerError> {
         // A scalar-field tuple `(a, b)` of NON-LITERAL fields (vars / scalar exprs) — a
         // literal `(3, 7)` is already an `Init::IntList` below. Construct the 2-slot block
         // and store each field's computed value (the tuple-machinery construction sibling
@@ -722,7 +772,7 @@ impl LowerCtx {
             if let Some(dst) = self.try_lower_scalar_tuple_construct(elements) {
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
-                return Ok(());
+                return Ok(true);
             }
             // A HEAP-element tuple (`(1, "a")`, `(p, 9)`) — materialize the mixed block
             // + track its heap-slot mask, so `t.0`/`${tuple}` execute and the block (with
@@ -733,11 +783,18 @@ impl LowerCtx {
             if let Some(dst) = self.try_lower_tuple_construct(elements) {
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
-                return Ok(());
+                return Ok(true);
             }
             self.ops.truncate(mark);
             self.live_heap_handles.truncate(lhh_mark);
         }
+        Ok(false)
+    }
+
+    /// Extracted from `Self::lower_bind_heap_fresh` (second-round split, cog reduction):
+    /// the scalar/heap record construction, verbatim. `Ok(true)` means the caller already
+    /// bound `var` and should return immediately.
+    fn try_lower_bind_heap_fresh_record(&mut self, var: VarId, value: &IrExpr) -> Result<bool, LowerError> {
         // A SCALAR-only record `R { x: 3, y: 4 }` — build the tight-packed,
         // width-aware block + store each field at its layout slot (the VALUE
         // MODEL: `r.x`/`r.y` read back exactly what was stored). A HEAP-field
@@ -748,7 +805,7 @@ impl LowerCtx {
             if let Some(dst) = self.try_lower_scalar_record_construct(value) {
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
-                return Ok(());
+                return Ok(true);
             }
             // A VARIANT record-ctor literal (`Data { … }`) outside the builder's
             // subset must WALL, not defer: a deferred Opaque variant read through a
@@ -775,11 +832,22 @@ impl LowerCtx {
             if let Some(dst) = self.try_lower_record_construct(value) {
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
-                return Ok(());
+                return Ok(true);
             }
             self.ops.truncate(mark);
             self.live_heap_handles.truncate(lhh_mark);
         }
+        Ok(false)
+    }
+
+    /// Extracted from `Self::lower_bind_heap_fresh` (second-round split, cog reduction):
+    /// the spread-record construction, verbatim. `Ok(true)` means the caller already
+    /// bound `var` and should return immediately.
+    fn try_lower_bind_heap_fresh_spread_record(
+        &mut self,
+        var: VarId,
+        value: &IrExpr,
+    ) -> Result<bool, LowerError> {
         // A SPREAD record `R { ...base, f: override }` — build a fresh block of the
         // same layout, COPYING each non-overridden field from `base` (a scalar load,
         // a heap-handle Dup so both records own a distinct reference) and storing the
@@ -793,18 +861,30 @@ impl LowerCtx {
             if let Some(dst) = self.try_lower_spread_record_construct(value) {
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
-                return Ok(());
+                return Ok(true);
             }
             self.ops.truncate(mark);
             self.live_heap_handles.truncate(lhh_mark);
         }
+        Ok(false)
+    }
+
+    /// Extracted from `Self::lower_bind_heap_fresh` (second-round split, cog reduction):
+    /// the scalar-list construct + non-empty heap-element-list honest wall, verbatim.
+    /// `Ok(true)` means the caller already bound `var` and should return immediately.
+    fn try_lower_bind_heap_fresh_scalar_list(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        value: &IrExpr,
+    ) -> Result<bool, LowerError> {
         // A scalar `List[Int/Float/Bool]` literal with COMPUTED elements (`[1.0, inf, 0.5]`,
         // `[a, a]`) — build the block + store each slot (an all-literal list is the IntList
         // path in `alloc_init` below; a computed element can't fold to a constant).
         if let Some(dst) = self.try_lower_scalar_list_construct(value) {
             self.value_of.insert(var, dst);
             self.live_heap_handles.push(dst);
-            return Ok(());
+            return Ok(true);
         }
         // A NON-EMPTY `List[heap]` LITERAL that NONE of the materialization paths above
         // could build — a list of heap-FIELD records/tuples (`[R{name:String,…}, …]`), a
@@ -828,7 +908,7 @@ impl LowerCtx {
                 // $__drop_list_<R>); other nested-ownership element lists stay walled.
                 if let Some(dst) = self.try_lower_record_list_literal(value) {
                     self.value_of.insert(var, dst);
-                    return Ok(());
+                    return Ok(true);
                 }
                 return Err(LowerError::Unsupported(
                     "non-empty List[heap] literal with nested-ownership elements \
@@ -838,6 +918,12 @@ impl LowerCtx {
                 ));
             }
         }
+        Ok(false)
+    }
+
+    /// Extracted from `Self::lower_bind_heap_fresh` (second-round split, cog reduction):
+    /// the terminal `Alloc{Opaque}`-or-real-list fallback, verbatim.
+    fn lower_bind_heap_fresh_opaque(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         let dst = self.fresh_value();
         let repr = repr_of(ty)?;
         let init = alloc_init(value);
