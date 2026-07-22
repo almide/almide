@@ -301,6 +301,83 @@ fn repr_nty(repr: &Repr, borrowed: bool) -> Result<NTy, LowerError> {
     }
 }
 
+/// The per-argument render for a `render_fn` call to a LOWERED USER callee — coerces `code`
+/// (already rendered) from its actual repr `got` to the callee param's declared `want`, or
+/// walls with a precise mismatch message. Verbatim extraction (guard-clause flattening) of
+/// the former inline `match want { .. }` in `render_fn`'s callee-call arm, no behavior
+/// change — see docs/roadmap/active/code-health-codopsy.md. NOT shared with
+/// [`render_native_shim_call_arg`] despite the similar shape — the shim path has no
+/// `VecRef`/`Vec` arm and uses different error text, so a merge would change behavior.
+fn render_native_callee_call_arg(
+    code: &str,
+    got: NTy,
+    want: NTy,
+    name: &str,
+) -> Result<String, LowerError> {
+    match want {
+        NTy::F64 => as_f64_arg(code, got),
+        NTy::I64 => {
+            if got != NTy::I64 {
+                return Err(wall(format!("native: heap arg to scalar param of `{name}`")));
+            }
+            Ok(code.to_string())
+        }
+        NTy::VecRef | NTy::Vec => {
+            if !got.is_veccy() {
+                return Err(wall(format!("native: non-list arg to list param of `{name}`")));
+            }
+            Ok(match got {
+                NTy::Vec => format!("&{code}"),
+                _ => code.to_string(),
+            })
+        }
+        _ => {
+            if !got.is_stringy() {
+                return Err(wall(format!("native: scalar arg to heap param of `{name}`")));
+            }
+            Ok(as_str_arg(code, got))
+        }
+    }
+}
+
+/// The per-argument render for a `render_fn` call to a runtime SHIM — see
+/// [`render_native_callee_call_arg`]'s doc for why this is a separate function.
+fn render_native_shim_call_arg(
+    code: &str,
+    got: NTy,
+    want: NTy,
+    name: &str,
+) -> Result<String, LowerError> {
+    match want {
+        NTy::F64 => as_f64_arg(code, got),
+        NTy::I64 => {
+            if got != NTy::I64 {
+                return Err(wall(format!("native: shim `{name}` arg type mismatch")));
+            }
+            Ok(code.to_string())
+        }
+        _ => {
+            if !got.is_stringy() {
+                return Err(wall(format!("native: shim `{name}` arg type mismatch")));
+            }
+            // Heap args are BORROWED at the MIR level — by reference.
+            Ok(as_str_arg(code, got))
+        }
+    }
+}
+
+/// The Rust type name for a shim call's SCALAR/String result — extracted (not the depth
+/// culprit itself, but the enclosing `render_fn` match/if nesting was) so the call site is a
+/// flat expression instead of an inline `if`/`else` at an already-deep nesting level.
+/// Verbatim logic, no behavior change — see docs/roadmap/active/code-health-codopsy.md.
+fn shim_result_ty_name(t: NTy) -> &'static str {
+    if t == NTy::Str {
+        "String"
+    } else {
+        "i64"
+    }
+}
+
 fn render_fn(
     func: &MirFunction,
     user_fns: &BTreeMap<&str, &MirFunction>,
@@ -623,38 +700,7 @@ fn render_fn(
                             None => repr_nty(&p.repr, true)?,
                         };
                         let (code, got) = call_arg(a, &tys)?;
-                        match want {
-                            NTy::F64 => {
-                                rendered_args.push(as_f64_arg(&code, got)?);
-                            }
-                            NTy::I64 => {
-                                if got != NTy::I64 {
-                                    return Err(wall(format!(
-                                        "native: heap arg to scalar param of `{name}`"
-                                    )));
-                                }
-                                rendered_args.push(code);
-                            }
-                            NTy::VecRef | NTy::Vec => {
-                                if !got.is_veccy() {
-                                    return Err(wall(format!(
-                                        "native: non-list arg to list param of `{name}`"
-                                    )));
-                                }
-                                rendered_args.push(match got {
-                                    NTy::Vec => format!("&{code}"),
-                                    _ => code,
-                                });
-                            }
-                            _ => {
-                                if !got.is_stringy() {
-                                    return Err(wall(format!(
-                                        "native: scalar arg to heap param of `{name}`"
-                                    )));
-                                }
-                                rendered_args.push(as_str_arg(&code, got));
-                            }
-                        }
+                        rendered_args.push(render_native_callee_call_arg(&code, got, want, name)?);
                     }
                     let call = format!("{}({})", mangle(name), rendered_args.join(", "));
                     match (dst, result) {
@@ -691,32 +737,14 @@ fn render_fn(
                     let mut rendered_args = Vec::new();
                     for (a, want) in args.iter().zip(param_tys) {
                         let (code, got) = call_arg(a, &tys)?;
-                        match want {
-                            NTy::F64 => {
-                                rendered_args.push(as_f64_arg(&code, got)?);
-                            }
-                            NTy::I64 => {
-                                if got != NTy::I64 {
-                                    return Err(wall(format!("native: shim `{name}` arg type mismatch")));
-                                }
-                                rendered_args.push(code);
-                            }
-                            _ => {
-                                if !got.is_stringy() {
-                                    return Err(wall(format!("native: shim `{name}` arg type mismatch")));
-                                }
-                                // Heap args are BORROWED at the MIR level — by reference.
-                                rendered_args.push(as_str_arg(&code, got));
-                            }
-                        }
+                        rendered_args.push(render_native_shim_call_arg(&code, got, *want, name)?);
                     }
                     used_shims.push(shim_src);
                     let call = format!("{}({})", shim_rust_name(name), rendered_args.join(", "));
                     match (dst, ret_ty) {
                         (Some(d), Some(t)) => {
                             tys.insert(*d, t);
-                            let ty_name = if t == NTy::Str { "String" } else { "i64" };
-                            line!("let mut {}: {} = {};", var(*d), ty_name, call);
+                            line!("let mut {}: {} = {};", var(*d), shim_result_ty_name(t), call);
                         }
                         (None, _) => line!("{call};"),
                         (Some(_), None) => {
