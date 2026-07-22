@@ -291,6 +291,20 @@ impl LowerCtx {
     /// The HEAP half of [`Self::lower_bind`]: the heap-`??` executable subset,
     /// then the fresh-vs-alias match over every heap producer. Verbatim text move.
     fn lower_bind_heap(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+        if self.try_lower_bind_heap_unwrap_or_precheck(var, value)? {
+            return Ok(());
+        }
+        self.lower_bind_heap_kind(var, ty, value)
+    }
+
+    /// Extracted from `Self::lower_bind_heap` (third-round split, cog reduction): the
+    /// leading heap `??` executable-subset precheck, verbatim. `Ok(true)` means the
+    /// caller already bound `var` and should return immediately.
+    fn try_lower_bind_heap_unwrap_or_precheck(
+        &mut self,
+        var: VarId,
+        value: &IrExpr,
+    ) -> Result<bool, LowerError> {
         // `let s = opt ?? "default"` — a HEAP-String `??` over a materialized Option[String]
         // EXECUTES via the self-host `option.unwrap_or_str` CALL (try_lower_option_unwrap_or's heap
         // branch): a fresh owned String, bound + dropped like any heap value. This CLOSES the
@@ -301,7 +315,7 @@ impl LowerCtx {
         if let IrExprKind::UnwrapOr { expr, fallback } = &value.kind {
             if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, true) {
                 self.value_of.insert(var, dst);
-                return Ok(());
+                return Ok(true);
             }
             // A HEAP-result `??` over an Option/Result operand that `try_lower_option_unwrap_or`
             // declined (e.g. `Option[record]` — no faithful record-payload unwrap-or yet) must
@@ -316,6 +330,13 @@ impl LowerCtx {
                 ));
             }
         }
+        Ok(false)
+    }
+
+    /// Extracted from `Self::lower_bind_heap` (third-round split, cog reduction): the
+    /// `value.kind` dispatch match, verbatim (the router now only handles the `??`
+    /// precheck above it).
+    fn lower_bind_heap_kind(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         match &value.kind {
             // Alias: `var b = a` — b is a NEW handle denoting the SAME heap
             // object as a, acquiring its own owned reference (the single
@@ -323,53 +344,7 @@ impl LowerCtx {
             // `let x = toplib.SYSTEM` aliases a MODULE-LEVEL global — the global
             // materializes its cached fresh owned copy (const-init only, zero
             // calls injected), and the Dup below co-owns it (#486 bind shape).
-            IrExprKind::Var { id } => {
-                let src = self.value_or_global(*id)?;
-                let dst = self.fresh_value();
-                self.value_of.insert(var, dst);
-                self.ops.push(Op::Dup { dst, src });
-                self.live_heap_handles.push(dst);
-                // The alias denotes the SAME block: a materialized aggregate/option/
-                // result source keeps those properties through the Dup (`let x =
-                // toplib.CFG; { ...x, name: "y" }` — the #502 rebound spread base).
-                // The LIST registrations propagate too: `mains = mains2` then
-                // `mains[i]` gated on `materialized_lists` declined on the fresh Dup
-                // vid (the whole enclosing loop then rolled back to the strict wall —
-                // the ceangal resolve_line_flex class), and the DROP-ROUTE sets must
-                // follow the alias so the dup'd reference frees its block by the same
-                // recursive route when it happens to be the last one (a flat rc_dec
-                // of a heap-element list's final ref leaks the elements).
-                if self.materialized_aggregates.contains(&src) {
-                    self.materialized_aggregates.insert(dst);
-                }
-                if self.materialized_lists.contains(&src) {
-                    self.materialized_lists.insert(dst);
-                }
-                // An alias of a BORROWED param/slot handle (`v = __mp_buf` — the C-132
-                // write-back Assign, where `__mp_buf` is a destructured tuple slot in
-                // `param_values`) denotes the same GENUINE block the borrow does, so a
-                // scalar-element list alias is directly indexable. The Dup above is the
-                // new owned reference; only the read-shape knowledge is added here.
-                if self.param_values.contains(&src) && is_scalar_elem_list_ty(ty) {
-                    self.materialized_lists.insert(dst);
-                }
-                if self.heap_elem_lists.contains(&src) {
-                    self.heap_elem_lists.insert(dst);
-                }
-                if self.str_str_elem_lists.contains(&src) {
-                    self.str_str_elem_lists.insert(dst);
-                }
-                if self.value_handles.contains(&src) {
-                    self.value_handles.insert(dst);
-                }
-                if let Some(mask) = self.record_masks.get(&src).cloned() {
-                    self.record_masks.insert(dst, mask);
-                }
-                if let Some(route) = self.variant_drop_handles.get(&src).cloned() {
-                    self.variant_drop_handles.insert(dst, route);
-                }
-                Ok(())
-            }
+            IrExprKind::Var { .. } => self.lower_bind_heap_var_alias(var, ty, value),
             // A fresh heap value (literal container / string / Option·Result
             // variant). Constructors lower like a container literal: a fresh
             // `Alloc` (value-semantics — the payload is copied, not consumed), the
@@ -389,36 +364,7 @@ impl LowerCtx {
             // lambda (its body references an enclosing local) needs an environment the
             // proven model has no representation for, so it falls through to the deferred
             // `Alloc{Opaque}` (its calls elided ⇒ honest caps taint), unchanged.
-            IrExprKind::Lambda { params, body, .. } => {
-                // C1 DIRECT-CALL INLINE: record the lambda (params + body) so a later DIRECT
-                // call `f(args)` to this `var` is DEFUNCTIONALIZED (the body inlined with the
-                // params bound to the args, captures resolved through `value_of`). Recorded
-                // for BOTH the liftable and the capturing case — the call site prefers inline.
-                self.lambda_bindings.insert(var, (params.clone(), (**body).clone()));
-                if let Some(dst) = self.lift_lambda(params, body) {
-                    self.value_of.insert(var, dst);
-                    return Ok(());
-                }
-                // A CAPTURING / non-liftable lambda — NO `Op::FuncRef` slot exists, but the
-                // direct-call inline above can still EXECUTE a `f(args)`. Bind a placeholder
-                // value so `f` is in `value_of` (a lone `f` never invoked carries no
-                // observable, and a captured-`f`-passed-to-a-HOF is the C2 first-class case
-                // that WALLS at that HOF). The deferred Opaque keeps the value memory-safe.
-                let dst = self.fresh_value();
-                let repr = repr_of(ty)?;
-                let init = alloc_init(value);
-                // A DEFERRED Opaque bind is an EMPTY block — record it so a custom-variant
-                // `match` over this var WALLS instead of reading a garbage tag (the
-                // record-ctor mt2 miscompile class).
-                if matches!(init, Init::Opaque) {
-                    self.deferred_opaque_binds.insert(dst);
-                }
-                self.value_of.insert(var, dst);
-                self.ops.push(Op::Alloc { dst, repr, init });
-                self.live_heap_handles.push(dst);
-                self.record_elided_calls(value);
-                Ok(())
-            }
+            IrExprKind::Lambda { .. } => self.lower_bind_heap_lambda(var, ty, value),
             IrExprKind::List { .. }
             | IrExprKind::MapLiteral { .. }
             | IrExprKind::EmptyMap
@@ -460,24 +406,7 @@ impl LowerCtx {
             IrExprKind::Member { .. }
             | IrExprKind::IndexAccess { .. }
             | IrExprKind::MapAccess { .. }
-            | IrExprKind::TupleIndex { .. } => {
-                let dst = self.lower_heap_extraction(value)?;
-                self.value_of.insert(var, dst);
-                // A Fn-typed field extraction (`let f = h.run` — the record_fn_field
-                // "field access then call" shape): the borrowed slot handle IS a closure
-                // block — track it so a later `f("world")` dispatches via the closure
-                // machinery (closure_value_of) instead of walling as unresolvable.
-                if matches!(ty, Ty::Fn { .. }) {
-                    self.closure_values.insert(dst);
-                }
-                // A precise heap-field BORROW (a `LoadHandle` of a slot in a still-owning
-                // container) is in `param_values` — it is NOT a second owner, so it must NOT
-                // join the scope-end drop set (the container's masked drop frees the field).
-                if !self.param_values.contains(&dst) {
-                    self.live_heap_handles.push(dst);
-                }
-                Ok(())
-            }
+            | IrExprKind::TupleIndex { .. } => self.lower_bind_heap_extraction_arm(var, ty, value),
             // `var x = f(...)` — a USER call returning a heap value. The result is
             // a FRESH OWNED heap value (the callee's return-mode signature, read
             // from the bind's heap type — the checker need not open the callee).
@@ -547,6 +476,114 @@ impl LowerCtx {
                 kind_name(other)
             ))),
         }
+    }
+
+    /// Extracted from `Self::lower_bind_heap` (third-round split, cog reduction): the
+    /// Var-alias arm body, verbatim, re-narrowed via `let-else`.
+    fn lower_bind_heap_var_alias(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+        let IrExprKind::Var { id } = &value.kind else { unreachable!() };
+        let src = self.value_or_global(*id)?;
+        let dst = self.fresh_value();
+        self.value_of.insert(var, dst);
+        self.ops.push(Op::Dup { dst, src });
+        self.live_heap_handles.push(dst);
+        // The alias denotes the SAME block: a materialized aggregate/option/
+        // result source keeps those properties through the Dup (`let x =
+        // toplib.CFG; { ...x, name: "y" }` — the #502 rebound spread base).
+        // The LIST registrations propagate too: `mains = mains2` then
+        // `mains[i]` gated on `materialized_lists` declined on the fresh Dup
+        // vid (the whole enclosing loop then rolled back to the strict wall —
+        // the ceangal resolve_line_flex class), and the DROP-ROUTE sets must
+        // follow the alias so the dup'd reference frees its block by the same
+        // recursive route when it happens to be the last one (a flat rc_dec
+        // of a heap-element list's final ref leaks the elements).
+        if self.materialized_aggregates.contains(&src) {
+            self.materialized_aggregates.insert(dst);
+        }
+        if self.materialized_lists.contains(&src) {
+            self.materialized_lists.insert(dst);
+        }
+        // An alias of a BORROWED param/slot handle (`v = __mp_buf` — the C-132
+        // write-back Assign, where `__mp_buf` is a destructured tuple slot in
+        // `param_values`) denotes the same GENUINE block the borrow does, so a
+        // scalar-element list alias is directly indexable. The Dup above is the
+        // new owned reference; only the read-shape knowledge is added here.
+        if self.param_values.contains(&src) && is_scalar_elem_list_ty(ty) {
+            self.materialized_lists.insert(dst);
+        }
+        if self.heap_elem_lists.contains(&src) {
+            self.heap_elem_lists.insert(dst);
+        }
+        if self.str_str_elem_lists.contains(&src) {
+            self.str_str_elem_lists.insert(dst);
+        }
+        if self.value_handles.contains(&src) {
+            self.value_handles.insert(dst);
+        }
+        if let Some(mask) = self.record_masks.get(&src).cloned() {
+            self.record_masks.insert(dst, mask);
+        }
+        if let Some(route) = self.variant_drop_handles.get(&src).cloned() {
+            self.variant_drop_handles.insert(dst, route);
+        }
+        Ok(())
+    }
+
+    /// Extracted from `Self::lower_bind_heap` (third-round split, cog reduction): the
+    /// Lambda arm body, verbatim, re-narrowed via `let-else`.
+    fn lower_bind_heap_lambda(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+        let IrExprKind::Lambda { params, body, .. } = &value.kind else { unreachable!() };
+        // C1 DIRECT-CALL INLINE: record the lambda (params + body) so a later DIRECT
+        // call `f(args)` to this `var` is DEFUNCTIONALIZED (the body inlined with the
+        // params bound to the args, captures resolved through `value_of`). Recorded
+        // for BOTH the liftable and the capturing case — the call site prefers inline.
+        self.lambda_bindings.insert(var, (params.clone(), (**body).clone()));
+        if let Some(dst) = self.lift_lambda(params, body) {
+            self.value_of.insert(var, dst);
+            return Ok(());
+        }
+        // A CAPTURING / non-liftable lambda — NO `Op::FuncRef` slot exists, but the
+        // direct-call inline above can still EXECUTE a `f(args)`. Bind a placeholder
+        // value so `f` is in `value_of` (a lone `f` never invoked carries no
+        // observable, and a captured-`f`-passed-to-a-HOF is the C2 first-class case
+        // that WALLS at that HOF). The deferred Opaque keeps the value memory-safe.
+        let dst = self.fresh_value();
+        let repr = repr_of(ty)?;
+        let init = alloc_init(value);
+        // A DEFERRED Opaque bind is an EMPTY block — record it so a custom-variant
+        // `match` over this var WALLS instead of reading a garbage tag (the
+        // record-ctor mt2 miscompile class).
+        if matches!(init, Init::Opaque) {
+            self.deferred_opaque_binds.insert(dst);
+        }
+        self.value_of.insert(var, dst);
+        self.ops.push(Op::Alloc { dst, repr, init });
+        self.live_heap_handles.push(dst);
+        self.record_elided_calls(value);
+        Ok(())
+    }
+
+    /// Extracted from `Self::lower_bind_heap` (third-round split, cog reduction): the
+    /// Member/IndexAccess/MapAccess/TupleIndex heap-extraction arm body, verbatim (the
+    /// arm never destructured `value.kind` beyond the top-level match, so this helper
+    /// doesn't either).
+    fn lower_bind_heap_extraction_arm(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+        let dst = self.lower_heap_extraction(value)?;
+        self.value_of.insert(var, dst);
+        // A Fn-typed field extraction (`let f = h.run` — the record_fn_field
+        // "field access then call" shape): the borrowed slot handle IS a closure
+        // block — track it so a later `f("world")` dispatches via the closure
+        // machinery (closure_value_of) instead of walling as unresolvable.
+        if matches!(ty, Ty::Fn { .. }) {
+            self.closure_values.insert(dst);
+        }
+        // A precise heap-field BORROW (a `LoadHandle` of a slot in a still-owning
+        // container) is in `param_values` — it is NOT a second owner, so it must NOT
+        // join the scope-end drop set (the container's masked drop frees the field).
+        if !self.param_values.contains(&dst) {
+            self.live_heap_handles.push(dst);
+        }
+        Ok(())
     }
 
     /// Extracted from `Self::lower_bind_heap` (pattern-2 uniform-arm split, cog reduction):
