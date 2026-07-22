@@ -180,6 +180,50 @@ impl IrVisitor for DecCollector<'_> {
     }
 }
 
+/// `IrExprKind::Block { expr: Some(tail), .. }` case of
+/// `collect_all_tail_vars`, extracted verbatim (cog>30 decomposition,
+/// pattern 2). NOT merged with the `None`-tail arm below despite the
+/// surface similarity — they treat `IrStmtKind::Assign` differently
+/// (recurse here, no-op there), a deliberate tail-context distinction, not
+/// incidental duplication.
+fn collect_all_tail_vars_block_with_tail(stmts: &[IrStmt], tail: &IrExpr, vars: &mut HashSet<VarId>) {
+    // Variables in this block's tail
+    collect_var_refs_expr(tail, vars);
+    // Recurse into statements' values
+    for stmt in stmts {
+        match &stmt.kind {
+            IrStmtKind::Bind { value, .. } => collect_all_tail_vars(value, vars),
+            IrStmtKind::Assign { value, .. } => collect_all_tail_vars(value, vars),
+            IrStmtKind::Expr { expr } => collect_all_tail_vars(expr, vars),
+            IrStmtKind::BindDestructure { .. } | IrStmtKind::FieldAssign { .. }
+            | IrStmtKind::Guard { .. } | IrStmtKind::IndexAssign { .. }
+            | IrStmtKind::MapInsert { .. } | IrStmtKind::ListSwap { .. }
+            | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
+            | IrStmtKind::ListCopySlice { .. } | IrStmtKind::RcInc { .. }
+            | IrStmtKind::RcDec { .. } | IrStmtKind::Comment { .. } => {}
+        }
+    }
+    collect_all_tail_vars(tail, vars);
+}
+
+/// `IrExprKind::Block { expr: None, .. }` case of `collect_all_tail_vars`,
+/// extracted verbatim (cog>30 decomposition, pattern 2). See the
+/// `with_tail` sibling above for why this is NOT merged with it.
+fn collect_all_tail_vars_block_no_tail(stmts: &[IrStmt], vars: &mut HashSet<VarId>) {
+    for stmt in stmts {
+        match &stmt.kind {
+            IrStmtKind::Bind { value, .. } => collect_all_tail_vars(value, vars),
+            IrStmtKind::Assign { .. } | IrStmtKind::Expr { .. }
+            | IrStmtKind::BindDestructure { .. } | IrStmtKind::FieldAssign { .. }
+            | IrStmtKind::Guard { .. } | IrStmtKind::IndexAssign { .. }
+            | IrStmtKind::MapInsert { .. } | IrStmtKind::ListSwap { .. }
+            | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
+            | IrStmtKind::ListCopySlice { .. } | IrStmtKind::RcInc { .. }
+            | IrStmtKind::RcDec { .. } | IrStmtKind::Comment { .. } => {}
+        }
+    }
+}
+
 /// Recursively collect all variables used in tail expressions at any nesting level.
 fn collect_all_tail_vars(expr: &IrExpr, vars: &mut HashSet<VarId>) {
     // Tail-CONTEXT analysis: only positions that flow to a return are walked. A
@@ -188,39 +232,8 @@ fn collect_all_tail_vars(expr: &IrExpr, vars: &mut HashSet<VarId>) {
     // listed as explicit no-ops, not recursed — total by construction, semantics
     // unchanged.
     match &expr.kind {
-        IrExprKind::Block { stmts, expr: Some(tail) } => {
-            // Variables in this block's tail
-            collect_var_refs_expr(tail, vars);
-            // Recurse into statements' values
-            for stmt in stmts {
-                match &stmt.kind {
-                    IrStmtKind::Bind { value, .. } => collect_all_tail_vars(value, vars),
-                    IrStmtKind::Assign { value, .. } => collect_all_tail_vars(value, vars),
-                    IrStmtKind::Expr { expr } => collect_all_tail_vars(expr, vars),
-                    IrStmtKind::BindDestructure { .. } | IrStmtKind::FieldAssign { .. }
-                    | IrStmtKind::Guard { .. } | IrStmtKind::IndexAssign { .. }
-                    | IrStmtKind::MapInsert { .. } | IrStmtKind::ListSwap { .. }
-                    | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
-                    | IrStmtKind::ListCopySlice { .. } | IrStmtKind::RcInc { .. }
-                    | IrStmtKind::RcDec { .. } | IrStmtKind::Comment { .. } => {}
-                }
-            }
-            collect_all_tail_vars(tail, vars);
-        }
-        IrExprKind::Block { stmts, expr: None } => {
-            for stmt in stmts {
-                match &stmt.kind {
-                    IrStmtKind::Bind { value, .. } => collect_all_tail_vars(value, vars),
-                    IrStmtKind::Assign { .. } | IrStmtKind::Expr { .. }
-                    | IrStmtKind::BindDestructure { .. } | IrStmtKind::FieldAssign { .. }
-                    | IrStmtKind::Guard { .. } | IrStmtKind::IndexAssign { .. }
-                    | IrStmtKind::MapInsert { .. } | IrStmtKind::ListSwap { .. }
-                    | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
-                    | IrStmtKind::ListCopySlice { .. } | IrStmtKind::RcInc { .. }
-                    | IrStmtKind::RcDec { .. } | IrStmtKind::Comment { .. } => {}
-                }
-            }
-        }
+        IrExprKind::Block { stmts, expr: Some(tail) } => collect_all_tail_vars_block_with_tail(stmts, tail, vars),
+        IrExprKind::Block { stmts, expr: None } => collect_all_tail_vars_block_no_tail(stmts, vars),
         IrExprKind::If { cond, then, else_ } => {
             collect_all_tail_vars(cond, vars);
             collect_all_tail_vars(then, vars);

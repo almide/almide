@@ -5,6 +5,7 @@
 // After this, program.modules is empty. Walker renders flat program.
 
 use almide_ir::*;
+use almide_ir::annotations::CodegenAnnotations;
 use almide_base::intern::{sym, Sym};
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
@@ -39,18 +40,7 @@ impl NanoPass for IrLinkFlattenPass {
             // If both an alias and a non-alias exist for the same name,
             // keep the alias (so type_aliases expansion works).
             for td in module.type_decls {
-                let name = td.name.as_str().to_string();
-                if !emitted_types.contains(&name) {
-                    emitted_types.insert(name.clone());
-                    program.type_decls.push(td);
-                } else if matches!(&td.kind, IrTypeDeclKind::Alias { .. }) {
-                    // Replace non-alias with alias
-                    if let Some(pos) = program.type_decls.iter().position(|t| t.name.as_str() == name) {
-                        if !matches!(&program.type_decls[pos].kind, IrTypeDeclKind::Alias { .. }) {
-                            program.type_decls[pos] = td;
-                        }
-                    }
-                }
+                merge_module_type_decl(td, &mut emitted_types, &mut program.type_decls);
             }
 
             // Merge functions with module_origin (no renaming in IR)
@@ -77,41 +67,27 @@ impl NanoPass for IrLinkFlattenPass {
     }
 }
 
-fn mangle_qualified_type_names(program: &mut IrProgram) {
-    // STRUCTURAL TWINS — the checker unifies two record/variant decls that share
-    // the same BASE name and the same shape (almai: the root `Message` and every
-    // provider's `Message` are byte-identical and flow into each other freely,
-    // and `check` accepts). Which nominal name a given SITE resolves to is then
-    // an accident of constraint order, so mangling each twin to its own struct
-    // produced `expected almide_rt_openai_Message, found Message` (E0308) on
-    // whichever sites landed on the other twin. Realize the checker's semantics:
-    // map every dotted twin to ONE canonical name — the bare root decl when one
-    // exists with the same fingerprint, else the first twin (sorted) — and
-    // dedup the now-identical decls. Types with a unique shape keep the plain
-    // per-module mangle, so genuinely distinct same-name types stay distinct.
-    // Group decls by (base name, fingerprint).
-    let mut groups: HashMap<(String, String), Vec<String>> = HashMap::new();
-    for td in &program.type_decls {
-        let n = td.name.as_str();
-        let base = n.rsplit('.').next().unwrap_or(n).to_string();
-        groups.entry((base, td.structural_fingerprint())).or_default().push(n.to_string());
-    }
-
-    let mut map: HashMap<String, Sym> = HashMap::new();
-    for ((_base, _fp), mut members) in groups {
-        members.sort();
-        // Canonical target: the bare member if present, else the first dotted
-        // member's standard mangle.
-        let canonical: Sym = match members.iter().find(|m| !m.contains('.')) {
-            Some(bare) => sym(bare),
-            None => sym(&format!("almide_rt_{}", members[0].replace('.', "_"))),
-        };
-        for m in &members {
-            if m.contains('.') {
-                map.insert(m.clone(), canonical);
+/// Per-`td` body of `IrLinkFlattenPass::run`'s type-decl merge loop,
+/// extracted verbatim (cog>30 decomposition). Deduplicates by name,
+/// preferring an `Alias` over a non-alias when both exist for the same
+/// name (so `type_aliases` expansion works).
+fn merge_module_type_decl(td: IrTypeDecl, emitted_types: &mut HashSet<String>, type_decls: &mut Vec<IrTypeDecl>) {
+    let name = td.name.as_str().to_string();
+    if !emitted_types.contains(&name) {
+        emitted_types.insert(name.clone());
+        type_decls.push(td);
+    } else if matches!(&td.kind, IrTypeDeclKind::Alias { .. }) {
+        // Replace non-alias with alias
+        if let Some(pos) = type_decls.iter().position(|t| t.name.as_str() == name) {
+            if !matches!(&type_decls[pos].kind, IrTypeDeclKind::Alias { .. }) {
+                type_decls[pos] = td;
             }
         }
     }
+}
+
+fn mangle_qualified_type_names(program: &mut IrProgram) {
+    let map = build_type_rename_map(&program.type_decls);
     if map.is_empty() {
         return;
     }
@@ -147,14 +123,62 @@ fn mangle_qualified_type_names(program: &mut IrProgram) {
     for d in &mut program.def_table.entries {
         d.ty = rename_ty(&d.ty, &map);
     }
-    // The flatten rename must reach every NAME-KEYED annotation too: the walker
-    // looks up default/boxed fields by the ctor name it sees POST-flatten
-    // (`almide_rt_mod_Type`), while the producing passes registered the
-    // pre-flatten `mod.Type` — so a flattened module type's field DEFAULTS were
-    // silently skipped (almai: `Message { role, content }` missing its
-    // defaulted `tool_calls` → generated-Rust E0063).
+    remap_codegen_annotations(&mut program.codegen_annotations, &map);
+}
+
+/// Reference-graph "type name → its group's canonical name" map-building
+/// phase of `mangle_qualified_type_names`, extracted verbatim (cog>30
+/// decomposition, sequential-phase pattern — every later phase only reads
+/// this map, never feeds back into it). STRUCTURAL TWINS — the checker
+/// unifies two record/variant decls that share the same BASE name and the
+/// same shape (almai: the root `Message` and every provider's `Message`
+/// are byte-identical and flow into each other freely, and `check`
+/// accepts). Which nominal name a given SITE resolves to is then an
+/// accident of constraint order, so mangling each twin to its own struct
+/// produced `expected almide_rt_openai_Message, found Message` (E0308) on
+/// whichever sites landed on the other twin. Realize the checker's
+/// semantics: map every dotted twin to ONE canonical name — the bare root
+/// decl when one exists with the same fingerprint, else the first twin
+/// (sorted) — and dedup the now-identical decls. Types with a unique shape
+/// keep the plain per-module mangle, so genuinely distinct same-name types
+/// stay distinct.
+fn build_type_rename_map(type_decls: &[IrTypeDecl]) -> HashMap<String, Sym> {
+    // Group decls by (base name, fingerprint).
+    let mut groups: HashMap<(String, String), Vec<String>> = HashMap::new();
+    for td in type_decls {
+        let n = td.name.as_str();
+        let base = n.rsplit('.').next().unwrap_or(n).to_string();
+        groups.entry((base, td.structural_fingerprint())).or_default().push(n.to_string());
+    }
+
+    let mut map: HashMap<String, Sym> = HashMap::new();
+    for ((_base, _fp), mut members) in groups {
+        members.sort();
+        // Canonical target: the bare member if present, else the first dotted
+        // member's standard mangle.
+        let canonical: Sym = match members.iter().find(|m| !m.contains('.')) {
+            Some(bare) => sym(bare),
+            None => sym(&format!("almide_rt_{}", members[0].replace('.', "_"))),
+        };
+        for m in &members {
+            if m.contains('.') {
+                map.insert(m.clone(), canonical);
+            }
+        }
+    }
+    map
+}
+
+/// NAME-KEYED-annotation remap phase of `mangle_qualified_type_names`,
+/// extracted verbatim (cog>30 decomposition). The flatten rename must
+/// reach every NAME-KEYED annotation too: the walker looks up
+/// default/boxed fields by the ctor name it sees POST-flatten
+/// (`almide_rt_mod_Type`), while the producing passes registered the
+/// pre-flatten `mod.Type` — so a flattened module type's field DEFAULTS
+/// were silently skipped (almai: `Message { role, content }` missing its
+/// defaulted `tool_calls` → generated-Rust E0063).
+fn remap_codegen_annotations(ann: &mut CodegenAnnotations, map: &HashMap<String, Sym>) {
     let remap = |n: &str| map.get(n).map(|s| s.as_str().to_string()).unwrap_or_else(|| n.to_string());
-    let ann = &mut program.codegen_annotations;
     ann.default_fields = std::mem::take(&mut ann.default_fields).into_iter()
         .map(|((c, f), e)| ((remap(&c), f), e)).collect();
     ann.boxed_fields = std::mem::take(&mut ann.boxed_fields).into_iter()
@@ -175,19 +199,25 @@ fn rename_type_decl_kind(kind: &mut IrTypeDeclKind, map: &HashMap<String, Sym>) 
         }
         IrTypeDeclKind::Variant { cases, .. } => {
             for c in cases {
-                match &mut c.kind {
-                    IrVariantKind::Unit => {}
-                    IrVariantKind::Tuple { fields } => {
-                        for t in fields {
-                            *t = rename_ty(t, map);
-                        }
-                    }
-                    IrVariantKind::Record { fields } => {
-                        for f in fields {
-                            f.ty = rename_ty(&f.ty, map);
-                        }
-                    }
-                }
+                rename_variant_case_kind(&mut c.kind, map);
+            }
+        }
+    }
+}
+
+/// `IrVariantKind` case of `rename_type_decl_kind`'s `Variant` arm,
+/// extracted verbatim (cog>30 decomposition).
+fn rename_variant_case_kind(kind: &mut IrVariantKind, map: &HashMap<String, Sym>) {
+    match kind {
+        IrVariantKind::Unit => {}
+        IrVariantKind::Tuple { fields } => {
+            for t in fields {
+                *t = rename_ty(t, map);
+            }
+        }
+        IrVariantKind::Record { fields } => {
+            for f in fields {
+                f.ty = rename_ty(&f.ty, map);
             }
         }
     }

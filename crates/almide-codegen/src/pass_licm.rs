@@ -32,18 +32,7 @@ impl NanoPass for LICMPass {
         // Analyze purity: user functions (fixpoint) + stdlib modules (IR attrs)
         let mut pure_fns = analyze_pure_functions(&program);
         // Add pure stdlib module functions as "module.func" keys
-        for module in &program.modules {
-            for func in &module.functions {
-                if !func.is_effect && !func.is_async
-                    && func.mutated_params.is_empty()
-                    && !has_mut_in_inline_rust(&func.attrs)
-                {
-                    pure_fns.insert(almide_base::intern::sym(
-                        &format!("{}.{}", module.name, func.name),
-                    ));
-                }
-            }
-        }
+        collect_pure_stdlib_module_fns(&program, &mut pure_fns);
         let mut changed = false;
         let IrProgram { functions, modules, var_table, .. } = &mut program;
         for func in functions.iter_mut() {
@@ -62,6 +51,24 @@ impl NanoPass for LICMPass {
             program.codegen_annotations.always_clone_vars.insert(VarId(i as u32));
         }
         PassResult { program, changed }
+    }
+}
+
+/// Stdlib-module purity scan phase of `LICMPass::run`, extracted verbatim
+/// (cog>30 decomposition, pattern 1 — `pure_fns` is a write-only
+/// accumulator, same safety class as `check_needs_ownership`'s `needs`).
+fn collect_pure_stdlib_module_fns(program: &IrProgram, pure_fns: &mut HashSet<Sym>) {
+    for module in &program.modules {
+        for func in &module.functions {
+            if !func.is_effect && !func.is_async
+                && func.mutated_params.is_empty()
+                && !has_mut_in_inline_rust(&func.attrs)
+            {
+                pure_fns.insert(almide_base::intern::sym(
+                    &format!("{}.{}", module.name, func.name),
+                ));
+            }
+        }
     }
 }
 
@@ -404,35 +411,51 @@ fn collect_defined_vars_runtime_call(expr: &IrExpr, defined: &mut HashSet<VarId>
     }
 }
 
+/// `IrExprKind::Block` case of `collect_defined_vars_expr`, extracted
+/// verbatim (cog>30 decomposition, pattern 1 — `defined` is a write-only
+/// accumulator).
+fn collect_defined_vars_block(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &MutationMap) {
+    let IrExprKind::Block { stmts, expr: tail } = &expr.kind else { unreachable!() };
+    collect_defined_vars_stmts(stmts, defined, mm);
+    if let Some(e) = tail { collect_defined_vars_expr(e, defined, mm); }
+}
+
+/// `IrExprKind::ForIn` case of `collect_defined_vars_expr`, extracted
+/// verbatim (cog>30 decomposition).
+fn collect_defined_vars_for_in(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &MutationMap) {
+    let IrExprKind::ForIn { var, var_tuple, body, iterable } = &expr.kind else { unreachable!() };
+    defined.insert(*var);
+    if let Some(vars) = var_tuple {
+        for v in vars { defined.insert(*v); }
+    }
+    collect_defined_vars_expr(iterable, defined, mm);
+    collect_defined_vars_stmts(body, defined, mm);
+}
+
+/// `IrExprKind::Match` case of `collect_defined_vars_expr`, extracted
+/// verbatim (cog>30 decomposition).
+fn collect_defined_vars_match(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &MutationMap) {
+    let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+    collect_defined_vars_expr(subject, defined, mm);
+    for arm in arms {
+        collect_defined_vars_expr(&arm.body, defined, mm);
+    }
+}
+
 fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &MutationMap) {
     match &expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            collect_defined_vars_stmts(stmts, defined, mm);
-            if let Some(e) = tail { collect_defined_vars_expr(e, defined, mm); }
-        }
+        IrExprKind::Block { .. } => collect_defined_vars_block(expr, defined, mm),
         IrExprKind::If { cond, then, else_ } => {
             collect_defined_vars_expr(cond, defined, mm);
             collect_defined_vars_expr(then, defined, mm);
             collect_defined_vars_expr(else_, defined, mm);
         }
-        IrExprKind::ForIn { var, var_tuple, body, iterable } => {
-            defined.insert(*var);
-            if let Some(vars) = var_tuple {
-                for v in vars { defined.insert(*v); }
-            }
-            collect_defined_vars_expr(iterable, defined, mm);
-            collect_defined_vars_stmts(body, defined, mm);
-        }
+        IrExprKind::ForIn { .. } => collect_defined_vars_for_in(expr, defined, mm),
         IrExprKind::While { cond, body } => {
             collect_defined_vars_expr(cond, defined, mm);
             collect_defined_vars_stmts(body, defined, mm);
         }
-        IrExprKind::Match { subject, arms } => {
-            collect_defined_vars_expr(subject, defined, mm);
-            for arm in arms {
-                collect_defined_vars_expr(&arm.body, defined, mm);
-            }
-        }
+        IrExprKind::Match { .. } => collect_defined_vars_match(expr, defined, mm),
         IrExprKind::Lambda { body, params, .. } => {
             for (v, _) in params { defined.insert(*v); }
             collect_defined_vars_expr(body, defined, mm);

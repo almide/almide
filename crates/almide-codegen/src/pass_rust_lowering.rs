@@ -272,13 +272,25 @@ fn box_closures_expr(expr: IrExpr, box_here: bool, changed: &mut bool) -> IrExpr
 
 /// Box closures in THIS node's type-erased slots (non-recursive).
 fn box_node(expr: &mut IrExpr) -> bool {
+    if let Some(result) = try_box_closure_literal(expr) { return result; }
+    if let Some(result) = try_box_fan_thunks(expr) { return result; }
+    box_node_unbox_consumed(expr)
+}
+
+/// Closure-LITERAL boxing check of `box_node`, extracted (cog>30
+/// decomposition, pattern 1 — independent checks in sequence, each
+/// unconditionally decides the whole function's result once its own
+/// pattern matches, `None` otherwise so the caller falls through to the
+/// next check). UNIFORM-REPR: box every fresh closure LITERAL by
+/// default — a closure value is `Rc<dyn Fn>` everywhere it is
+/// stored/passed. Closures CONSUMED in place (combinators / IterChain /
+/// fan, which take `impl Fn`) are un-boxed at their consumer node instead
+/// (see `box_node_unbox_consumed`) — that is exact for nesting (a closure
+/// STORED inside a consumed lambda's body stays boxed), unlike
+/// subtree-wide `box_here` clearing.
+fn try_box_closure_literal(expr: &mut IrExpr) -> Option<bool> {
     use almide_lang::types::Ty;
     let node_ty = expr.ty.clone();
-    // UNIFORM-REPR: box every fresh closure LITERAL by default — a closure value
-    // is `Rc<dyn Fn>` everywhere it is stored/passed. Closures CONSUMED in place
-    // (combinators / IterChain / fan, which take `impl Fn`) are un-boxed below at
-    // their consumer node — that is exact for nesting (a closure STORED inside a
-    // consumed lambda's body stays boxed), unlike subtree-wide box_here clearing.
     if matches!(&expr.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. })
         && matches!(&node_ty, Ty::Fn { .. })
     {
@@ -286,43 +298,52 @@ fn box_node(expr: &mut IrExpr) -> bool {
         // — box it too so it unifies with closures in the same slot
         // (`[dbl, (x) => …]`, a user-HOF arg). As a CALLEE it lives in `CallTarget`,
         // not as an expr node, so a direct call `dbl(x)` is never boxed.
-        return box_closure_value(expr, &node_ty);
+        return Some(box_closure_value(expr, &node_ty));
     }
-    // fan.* thread-thunk boxing. The whole fan subtree was left RAW (box_here
-    // cleared in box_closures_expr), so each thunk here is a bare Lambda / FnRef /
-    // capture-clone `{ …; <lambda> }` block. Box per fan API (fan is still a
-    // `Module{fan}` / `RuntimeCall{fan}` call here — FanLowering runs later):
-    //   race/any/settle → `Box<dyn Fn + Send + Sync>`: distinct CAPTURING thunks
-    //     cannot share one `impl Fn` type (E0308), but `Box<dyn Fn + Send + Sync>`
-    //     is itself `Fn + Send + Sync`, so they unify as one element type AND
-    //     satisfy the runtime's `Vec<impl Fn() -> _ + Send + Sync>` thunk bound.
-    //   map → `Rc<dyn Fn>`: the runtime runs it SEQUENTIALLY over an `Rc<dyn Fn>`,
-    //     which also accepts a closure VALUE in a var — a `Send + Sync` box can't,
-    //     since the uniform repr of a stored closure is `Rc` (neither Send nor Sync).
-    if let Some(method) = fan_method(expr) {
-        let args = match &mut expr.kind {
-            IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => args,
-            _ => return false,
-        };
-        return match method.as_str() {
-            "race" | "any" | "settle" => args.first_mut()
-                .map(|a| box_fan_thunk_list(a, FnBox::BoxSendSync))
-                .unwrap_or(false),
-            "map" => args.get_mut(1)
-                .map(|f| box_fan_thunk(f, FnBox::Rc))
-                .unwrap_or(false),
-            _ => false,
-        };
-    }
-    // Storage of a closure (in a list/map/tuple/record/field/`if`-`match` join/
-    // `??` fallback) needs NO rule — the default arm already boxed every closure
-    // literal where it sits, and a `Var` holding a closure is already
-    // `Rc<dyn Fn>`. Runtime HOFs take `Rc<dyn Fn>` too, so a boxed closure passed
-    // to `almide_rt_list_map`/`_fold`/`unwrap_or`/… needs NO un-box. The ONLY
-    // place a raw `impl Fn` is required is a FUSED `IterChain` step (below) and a
-    // `fan.*` arg (above). This REPLACES the former ~14 per-position boxing rules
-    // (and the consumed-vs-value allow-list) with: box by default, un-box only
-    // the two structural bare-closure sites.
+    None
+}
+
+/// `fan.*` thread-thunk boxing check of `box_node`, extracted (cog>30
+/// decomposition). The whole fan subtree was left RAW (box_here cleared in
+/// box_closures_expr), so each thunk here is a bare Lambda / FnRef /
+/// capture-clone `{ …; <lambda> }` block. Box per fan API (fan is still a
+/// `Module{fan}` / `RuntimeCall{fan}` call here — FanLowering runs later):
+///   race/any/settle → `Box<dyn Fn + Send + Sync>`: distinct CAPTURING thunks
+///     cannot share one `impl Fn` type (E0308), but `Box<dyn Fn + Send + Sync>`
+///     is itself `Fn + Send + Sync`, so they unify as one element type AND
+///     satisfy the runtime's `Vec<impl Fn() -> _ + Send + Sync>` thunk bound.
+///   map → `Rc<dyn Fn>`: the runtime runs it SEQUENTIALLY over an `Rc<dyn Fn>`,
+///     which also accepts a closure VALUE in a var — a `Send + Sync` box can't,
+///     since the uniform repr of a stored closure is `Rc` (neither Send nor Sync).
+fn try_box_fan_thunks(expr: &mut IrExpr) -> Option<bool> {
+    let method = fan_method(expr)?;
+    let args = match &mut expr.kind {
+        IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => args,
+        _ => return Some(false),
+    };
+    Some(match method.as_str() {
+        "race" | "any" | "settle" => args.first_mut()
+            .map(|a| box_fan_thunk_list(a, FnBox::BoxSendSync))
+            .unwrap_or(false),
+        "map" => args.get_mut(1)
+            .map(|f| box_fan_thunk(f, FnBox::Rc))
+            .unwrap_or(false),
+        _ => false,
+    })
+}
+
+/// Structural bare-closure un-box check of `box_node`, extracted (cog>30
+/// decomposition). Storage of a closure (in a list/map/tuple/record/field/
+/// `if`-`match` join/ `??` fallback) needs NO rule — the default arm
+/// already boxed every closure literal where it sits, and a `Var` holding
+/// a closure is already `Rc<dyn Fn>`. Runtime HOFs take `Rc<dyn Fn>` too,
+/// so a boxed closure passed to `almide_rt_list_map`/`_fold`/`unwrap_or`/…
+/// needs NO un-box. The ONLY place a raw `impl Fn` is required is a FUSED
+/// `IterChain` step and a `fan.*` arg (handled by `try_box_fan_thunks`
+/// above). This REPLACES the former ~14 per-position boxing rules (and the
+/// consumed-vs-value allow-list) with: box by default, un-box only the two
+/// structural bare-closure sites.
+fn box_node_unbox_consumed(expr: &mut IrExpr) -> bool {
     match &mut expr.kind {
         // Fused combinator chain: un-box every consumed step lambda. Closures the
         // map PRODUCES (nested in the body) are already boxed by the default arm.

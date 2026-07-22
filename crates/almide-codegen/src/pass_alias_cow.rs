@@ -203,6 +203,51 @@ impl<'a> AliasAnalysis<'a> {
         }
     }
 
+    /// `IrExprKind::RuntimeCall` in-place-mutator check of `visit_expr`,
+    /// extracted verbatim (cog>30 decomposition, pattern 1 — independent
+    /// checks in sequence, each only ever calls `mark_mutated`, no state
+    /// shared between them). In-place stdlib mutator: `list.push(a, x)`,
+    /// `map.insert(a, k, v)`, …
+    fn mark_mutated_from_runtime_call(&mut self, expr: &IrExpr) {
+        if let IrExprKind::RuntimeCall { symbol, args } = &expr.kind {
+            if is_inplace_mutator(symbol.as_str()) || symbol.as_str() == "almide_rt_bytes_set" {
+                if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
+                    self.mark_mutated(*id);
+                }
+            }
+        }
+    }
+
+    /// `IrExprKind::Call { target: Module, .. }` in-place-mutator check of
+    /// `visit_expr`, extracted verbatim (cog>30 decomposition).
+    /// `bytes.set(x, i, v)` is VALUE-returning in the oracle (native clones),
+    /// but the wasm emitter's `x = bytes.set(x, …)` Assign peephole stores in
+    /// place — count it as a mutation of `x` so an aliased/param-reachable
+    /// target lands in needs_cow and VETOES that fast path (the general emit
+    /// then clones, mirroring native).
+    ///
+    /// The whole &mut bytes family (`set_at`/`push`/`fill`/`write_*`/…) can ALSO
+    /// arrive in this MODULE-call spelling (the wasm dispatcher emits it
+    /// directly), not just as a RuntimeCall — mark those through the same
+    /// `is_inplace_mutator` truth the RuntimeCall arm uses, or an aliased
+    /// `var b = a; bytes.set_at(b, …)` writes through `a` on wasm while native
+    /// keeps value semantics (found by spec/lang/rccow_value_semantics_test).
+    fn mark_mutated_from_module_call(&mut self, expr: &IrExpr) {
+        if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &expr.kind {
+            let mutates = (module.as_str() == "bytes" && func.as_str() == "set")
+                || is_inplace_mutator(&format!(
+                    "almide_rt_{}_{}",
+                    module.as_str(),
+                    func.as_str()
+                ));
+            if mutates {
+                if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
+                    self.mark_mutated(*id);
+                }
+            }
+        }
+    }
+
     /// If `value` is a bare/derived reference to a single heap var, return its id.
     /// Recognizes `x`, `x.clone()` (Clone), `*x` (Deref), and `r.field`/tuple-index
     /// provenance — the binding `y = value` then aliases `y` to that var.
@@ -325,38 +370,8 @@ impl IrVisitor for AliasAnalysis<'_> {
             return;
         }
         // In-place stdlib mutator: `list.push(a, x)`, `map.insert(a, k, v)`, …
-        if let IrExprKind::RuntimeCall { symbol, args } = &expr.kind {
-            if is_inplace_mutator(symbol.as_str()) || symbol.as_str() == "almide_rt_bytes_set" {
-                if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
-                    self.mark_mutated(*id);
-                }
-            }
-        }
-        // `bytes.set(x, i, v)` is VALUE-returning in the oracle (native clones),
-        // but the wasm emitter's `x = bytes.set(x, …)` Assign peephole stores in
-        // place — count it as a mutation of `x` so an aliased/param-reachable
-        // target lands in needs_cow and VETOES that fast path (the general emit
-        // then clones, mirroring native).
-        //
-        // The whole &mut bytes family (`set_at`/`push`/`fill`/`write_*`/…) can ALSO
-        // arrive in this MODULE-call spelling (the wasm dispatcher emits it
-        // directly), not just as a RuntimeCall — mark those through the same
-        // `is_inplace_mutator` truth the RuntimeCall arm uses, or an aliased
-        // `var b = a; bytes.set_at(b, …)` writes through `a` on wasm while native
-        // keeps value semantics (found by spec/lang/rccow_value_semantics_test).
-        if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &expr.kind {
-            let mutates = (module.as_str() == "bytes" && func.as_str() == "set")
-                || is_inplace_mutator(&format!(
-                    "almide_rt_{}_{}",
-                    module.as_str(),
-                    func.as_str()
-                ));
-            if mutates {
-                if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
-                    self.mark_mutated(*id);
-                }
-            }
-        }
+        self.mark_mutated_from_runtime_call(expr);
+        self.mark_mutated_from_module_call(expr);
         walk_expr(self, expr);
     }
 

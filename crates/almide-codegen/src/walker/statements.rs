@@ -318,6 +318,41 @@ fn try_render_bind_rc_cow(ctx: &RenderContext, var: &VarId, name_s: &str, type_s
         .unwrap_or_else(|| if name_s == "_" { format!("let {}: {} = {};", name_s, val_type, val_value) } else { format!("let mut {}: {} = {};", name_s, val_type, val_value) }))
 }
 
+/// `render_stmt_bind`'s RcCow-clone type/value adjustment, extracted
+/// verbatim (cog>30 decomposition) — if `value` comes from an RcCow-wrapped
+/// var (`Clone` or direct `Var`), re-derive the rendered `(type, value)`
+/// pair to wrap in `RcCow<..>`; otherwise pass `type_s`/`value_s` through
+/// unchanged.
+fn rc_cow_clone_bind_type_value(ctx: &RenderContext, value: &IrExpr, type_s: String, value_s: String) -> (String, String) {
+    // Check if value comes from a RcCow-wrapped var (Clone or direct)
+    let is_val_clone = match &value.kind {
+        IrExprKind::Clone { expr: inner } => {
+            if let IrExprKind::Var { id } = &inner.kind {
+                ctx.ann.is_rc_cow(id)
+            } else { false }
+        }
+        IrExprKind::Var { id } => ctx.ann.is_rc_cow(id),
+        _ => false,
+    };
+    if !is_val_clone {
+        return (type_s, value_s);
+    }
+    match &value.kind {
+        // Direct Var from RcCow: use .clone() (Rc::clone O(1))
+        IrExprKind::Var { .. } => {
+            let val_type = format!("RcCow<{}>", type_s);
+            let val_value = format!("{}.clone()", value_s);
+            (val_type, val_value)
+        }
+        // Clone of RcCow var: deref+clone returned T, re-wrap
+        _ => {
+            let val_type = format!("RcCow<{}>", type_s);
+            let val_value = format!("RcCow::new({})", value_s);
+            (val_type, val_value)
+        }
+    }
+}
+
 fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::Bind { var, ty, value, mutability } = &stmt.kind else { unreachable!() };
     if let Some(rendered) = try_render_bind_shared_mut(ctx, var, ty, value) {
@@ -332,34 +367,7 @@ fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let ty = &ty_owned;
     let type_s = render_type(ctx, ty);
     let value_s = render_bind_value_str(ctx, ty, value);
-    // Check if value comes from a RcCow-wrapped var (Clone or direct)
-    let is_val_clone = match &value.kind {
-        IrExprKind::Clone { expr: inner } => {
-            if let IrExprKind::Var { id } = &inner.kind {
-                ctx.ann.is_rc_cow(id)
-            } else { false }
-        }
-        IrExprKind::Var { id } => ctx.ann.is_rc_cow(id),
-        _ => false,
-    };
-    let (type_s, value_s) = if is_val_clone {
-        match &value.kind {
-            // Direct Var from RcCow: use .clone() (Rc::clone O(1))
-            IrExprKind::Var { .. } => {
-                let val_type = format!("RcCow<{}>", type_s);
-                let val_value = format!("{}.clone()", value_s);
-                (val_type, val_value)
-            }
-            // Clone of RcCow var: deref+clone returned T, re-wrap
-            _ => {
-                let val_type = format!("RcCow<{}>", type_s);
-                let val_value = format!("RcCow::new({})", value_s);
-                (val_type, val_value)
-            }
-        }
-    } else {
-        (type_s, value_s)
-    };
+    let (type_s, value_s) = rc_cow_clone_bind_type_value(ctx, value, type_s, value_s);
     let needs_mut = matches!(mutability, Mutability::Let) && {
         let ty_str = type_s.as_str();
         ty_str == "Vec<u8>"
@@ -744,48 +752,57 @@ fn guard_shape(ctx: &RenderContext, pat: &IrPattern, counter: &mut usize, subs: 
 /// The guard has already verified the structure, so `else` is dead.
 fn box_extract(ctx: &RenderContext, pat: &IrPattern, move_expr: &str, binds: &mut Vec<String>, counter: &mut usize) {
     match pat {
-        IrPattern::Constructor { name, args } => {
-            let qualified = qualify_ctor(ctx, name.as_str(), None);
-            let mut flat = Vec::with_capacity(args.len());
-            let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
-            for (i, arg) in args.iter().enumerate() {
-                if is_boxed_tuple_field(ctx, name.as_str(), i) && pattern_is_complex(arg) {
-                    let e = fresh_box_var(counter);
-                    flat.push(e.clone());
-                    deeper.push((e, arg));
-                } else {
-                    flat.push(render_pattern_hinted(ctx, arg, None));
-                }
-            }
-            let flat_pat = if args.is_empty() { qualified } else { format!("{}({})", qualified, flat.join(", ")) };
-            binds.push(format!("let {} = {} else {{ unreachable!() }};", flat_pat, move_expr));
-            for (e, sub) in deeper {
-                box_extract(ctx, sub, &format!("*{}", e), binds, counter);
-            }
-        }
-        IrPattern::RecordPattern { name, fields, .. } => {
-            let qualified = qualify_ctor(ctx, name.as_str(), None);
-            let mut flat = Vec::with_capacity(fields.len());
-            let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
-            for fp in fields {
-                match &fp.pattern {
-                    Some(p) if is_boxed_record_field(ctx, name.as_str(), fp.name.as_str())
-                        && pattern_is_complex(p) =>
-                    {
-                        let e = fresh_box_var(counter);
-                        flat.push(format!("{}: {}", fp.name, e));
-                        deeper.push((e, p));
-                    }
-                    Some(p) => flat.push(format!("{}: {}", fp.name, render_pattern_hinted(ctx, p, None))),
-                    None => flat.push(fp.name.to_string()),
-                }
-            }
-            binds.push(format!("let {} {{ {}, .. }} = {} else {{ unreachable!() }};", qualified, flat.join(", "), move_expr));
-            for (e, sub) in deeper {
-                box_extract(ctx, sub, &format!("*{}", e), binds, counter);
-            }
-        }
+        IrPattern::Constructor { name, args } => box_extract_constructor(ctx, name, args, move_expr, binds, counter),
+        IrPattern::RecordPattern { name, fields, .. } => box_extract_record(ctx, name, fields, move_expr, binds, counter),
         _ => {}
+    }
+}
+
+/// `IrPattern::Constructor` case of `box_extract`, extracted verbatim
+/// (cog>30 decomposition, pattern 1 — `binds`/`counter` are write-only
+/// accumulators, same safety class as `check_needs_ownership`'s `needs`).
+fn box_extract_constructor(ctx: &RenderContext, name: &str, args: &[IrPattern], move_expr: &str, binds: &mut Vec<String>, counter: &mut usize) {
+    let qualified = qualify_ctor(ctx, name, None);
+    let mut flat = Vec::with_capacity(args.len());
+    let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
+    for (i, arg) in args.iter().enumerate() {
+        if is_boxed_tuple_field(ctx, name, i) && pattern_is_complex(arg) {
+            let e = fresh_box_var(counter);
+            flat.push(e.clone());
+            deeper.push((e, arg));
+        } else {
+            flat.push(render_pattern_hinted(ctx, arg, None));
+        }
+    }
+    let flat_pat = if args.is_empty() { qualified } else { format!("{}({})", qualified, flat.join(", ")) };
+    binds.push(format!("let {} = {} else {{ unreachable!() }};", flat_pat, move_expr));
+    for (e, sub) in deeper {
+        box_extract(ctx, sub, &format!("*{}", e), binds, counter);
+    }
+}
+
+/// `IrPattern::RecordPattern` case of `box_extract`, extracted verbatim
+/// (cog>30 decomposition).
+fn box_extract_record(ctx: &RenderContext, name: &str, fields: &[IrFieldPattern], move_expr: &str, binds: &mut Vec<String>, counter: &mut usize) {
+    let qualified = qualify_ctor(ctx, name, None);
+    let mut flat = Vec::with_capacity(fields.len());
+    let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
+    for fp in fields {
+        match &fp.pattern {
+            Some(p) if is_boxed_record_field(ctx, name, fp.name.as_str())
+                && pattern_is_complex(p) =>
+            {
+                let e = fresh_box_var(counter);
+                flat.push(format!("{}: {}", fp.name, e));
+                deeper.push((e, p));
+            }
+            Some(p) => flat.push(format!("{}: {}", fp.name, render_pattern_hinted(ctx, p, None))),
+            None => flat.push(fp.name.to_string()),
+        }
+    }
+    binds.push(format!("let {} {{ {}, .. }} = {} else {{ unreachable!() }};", qualified, flat.join(", "), move_expr));
+    for (e, sub) in deeper {
+        box_extract(ctx, sub, &format!("*{}", e), binds, counter);
     }
 }
 

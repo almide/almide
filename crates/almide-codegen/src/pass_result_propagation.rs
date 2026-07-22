@@ -59,10 +59,7 @@ fn lift_effect_fn_signatures(program: &mut IrProgram, wrap_non_result: bool) -> 
     let mut lifted_fns: HashMap<String, Ty> = HashMap::new();
 
     for func in &mut program.functions {
-        if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
-            && func.extern_attrs.is_empty()
-            && !is_template_dispatch(&func.attrs)
-        {
+        if should_lift_effect_fn_ret(func, wrap_non_result) {
             let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
             func.ret_ty = Ty::result(orig, Ty::String);
             lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
@@ -70,29 +67,42 @@ fn lift_effect_fn_signatures(program: &mut IrProgram, wrap_non_result: bool) -> 
     }
 
     for module in &mut program.modules {
-        let mod_name = module.versioned_name
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| module.name.to_string());
-        let mod_ident = mod_name.replace('.', "_");
-        for func in &mut module.functions {
-            if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
-                && func.extern_attrs.is_empty()
-                && !is_template_dispatch(&func.attrs)
-            {
-                let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
-                func.ret_ty = Ty::result(orig, Ty::String);
-                let bare = func.name.to_string();
-                lifted_fns.insert(bare.clone(), func.ret_ty.clone());
-                let sanitized = bare
-                    .replace(' ', "_")
-                    .replace('-', "_")
-                    .replace('.', "_");
-                let mangled = format!("almide_rt_{}_{}", mod_ident, sanitized);
-                lifted_fns.insert(mangled, func.ret_ty.clone());
-            }
-        }
+        lift_module_effect_fn_signatures(module, wrap_non_result, &mut lifted_fns);
     }
     lifted_fns
+}
+
+/// Shared predicate of `lift_effect_fn_signatures`'s two loops, extracted
+/// verbatim (cog>30 decomposition) — the two loops' `if` conditions were
+/// byte-identical.
+fn should_lift_effect_fn_ret(func: &IrFunction, wrap_non_result: bool) -> bool {
+    func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
+        && func.extern_attrs.is_empty()
+        && !is_template_dispatch(&func.attrs)
+}
+
+/// Module-scope loop body of `lift_effect_fn_signatures`, extracted
+/// verbatim (cog>30 decomposition, sequential-phase pattern — `lifted_fns`
+/// is a write-only accumulator shared with the root-scope loop above).
+fn lift_module_effect_fn_signatures(module: &mut IrModule, wrap_non_result: bool, lifted_fns: &mut HashMap<String, Ty>) {
+    let mod_name = module.versioned_name
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| module.name.to_string());
+    let mod_ident = mod_name.replace('.', "_");
+    for func in &mut module.functions {
+        if should_lift_effect_fn_ret(func, wrap_non_result) {
+            let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
+            func.ret_ty = Ty::result(orig, Ty::String);
+            let bare = func.name.to_string();
+            lifted_fns.insert(bare.clone(), func.ret_ty.clone());
+            let sanitized = bare
+                .replace(' ', "_")
+                .replace('-', "_")
+                .replace('.', "_");
+            let mangled = format!("almide_rt_{}_{}", mod_ident, sanitized);
+            lifted_fns.insert(mangled, func.ret_ty.clone());
+        }
+    }
 }
 
 /// An `@intrinsic effect fn` (e.g. `http.serve`) compiles to a runtime
@@ -235,42 +245,54 @@ fn resolve_err_types(body: &mut IrExpr, ok_ty: &Ty) {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
             // Bottom-up: resolve children first
             walk_expr_mut(self, expr);
-
-            // ResultErr with unresolved Ok slot → fill from function ret_ty
-            if matches!(&expr.kind, IrExprKind::ResultErr { .. }) {
-                if expr.ty.has_unresolved_deep() {
-                    expr.ty = Ty::result(self.ok_ty.clone(), Ty::String);
-                }
-            }
-
-            // Try/Unwrap wrapping ResultErr: Ok type is unresolved → fill
-            match &expr.kind {
-                IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner } => {
-                    if matches!(&inner.kind, IrExprKind::ResultErr { .. }) && expr.ty.has_unresolved_deep() {
-                        expr.ty = self.ok_ty.clone();
-                    }
-                }
-                _ => {}
-            }
-
-            // Block wrapping a single Try/Unwrap { ResultErr } or bare ResultErr
-            if let IrExprKind::Block { stmts, expr: Some(tail) } = &expr.kind {
-                if stmts.is_empty() && expr.ty.has_unresolved_deep() {
-                    let is_err_wrapper = match &tail.kind {
-                        IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
-                            => matches!(&inner.kind, IrExprKind::ResultErr { .. }),
-                        IrExprKind::ResultErr { .. } => true,
-                        _ => false,
-                    };
-                    if is_err_wrapper {
-                        expr.ty = tail.ty.clone();
-                    }
-                }
-            }
+            resolve_err_ty_direct(expr, self.ok_ty);
+            resolve_err_ty_try_unwrap(expr, self.ok_ty);
+            resolve_err_ty_block_wrapper(expr);
         }
     }
 
     ErrResolver { ok_ty }.visit_expr_mut(body);
+}
+
+/// `ResultErr`-with-unresolved-Ok-slot check of `resolve_err_types`'s
+/// visitor, extracted verbatim (cog>30 decomposition, pattern 1 — three
+/// independent checks in sequence, each only ever writes `expr.ty`, no
+/// state shared between them).
+fn resolve_err_ty_direct(expr: &mut IrExpr, ok_ty: &Ty) {
+    if matches!(&expr.kind, IrExprKind::ResultErr { .. }) && expr.ty.has_unresolved_deep() {
+        expr.ty = Ty::result(ok_ty.clone(), Ty::String);
+    }
+}
+
+/// `Try`/`Unwrap`-wrapping-`ResultErr` check of `resolve_err_types`'s
+/// visitor, extracted verbatim (cog>30 decomposition).
+fn resolve_err_ty_try_unwrap(expr: &mut IrExpr, ok_ty: &Ty) {
+    match &expr.kind {
+        IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner } => {
+            if matches!(&inner.kind, IrExprKind::ResultErr { .. }) && expr.ty.has_unresolved_deep() {
+                expr.ty = ok_ty.clone();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Block-wrapping-a-single-`Try`/`Unwrap`{`ResultErr`}-or-bare-`ResultErr`
+/// check of `resolve_err_types`'s visitor, extracted verbatim (cog>30
+/// decomposition).
+fn resolve_err_ty_block_wrapper(expr: &mut IrExpr) {
+    let IrExprKind::Block { stmts, expr: Some(tail) } = &expr.kind else { return };
+    if stmts.is_empty() && expr.ty.has_unresolved_deep() {
+        let is_err_wrapper = match &tail.kind {
+            IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
+                => matches!(&inner.kind, IrExprKind::ResultErr { .. }),
+            IrExprKind::ResultErr { .. } => true,
+            _ => false,
+        };
+        if is_err_wrapper {
+            expr.ty = tail.ty.clone();
+        }
+    }
 }
 
 /// Wrap the tail expression of an effect fn body in Ok(...).

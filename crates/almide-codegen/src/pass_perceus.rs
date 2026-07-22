@@ -402,92 +402,106 @@ fn collect_ret_vars(fb: &FnBody) -> HashSet<VarId> {
     }
 }
 
+/// `FnBody::Ret` terminal case of `insert_decs_before_ret`, extracted
+/// verbatim (cog>30 decomposition, pattern 2 — the terminal-node match's
+/// only two arms, `Ret`/`Nop`, are each a self-contained "compute one
+/// `FnBody` value" case with no state shared between them).
+fn insert_decs_ret_terminal(mut expr: IrExpr, heap_vars: &[VarId], ret_vars: &HashSet<VarId>, var_table: &mut VarTable) -> FnBody {
+    // F2 (#527): the RET EXPRESSION's interior gets the FULL rule
+    // set. Until now the terminal was returned untouched and nothing
+    // ever perceus_expr'd it — a tail-position Match/If/Block
+    // subtree (the dominant fn shape `fn f() { stmts; match … }`)
+    // received ZERO rc processing: no Rule-1 incs, no capture incs,
+    // no temp decs. Leak-direction, but it disabled reclamation
+    // across the most common code shape and masked the lift's
+    // ordering hazard below.
+    perceus_expr(&mut expr, var_table);
+    // Variables used inside the return expression (but not AS the return value)
+    // need tail lift: let __ret = expr; Dec(vars); Ret(__ret)
+    let vars_to_dec: Vec<VarId> = heap_vars.iter()
+        .filter(|v| !ret_vars.contains(v) || {
+            // If var is in ret_vars AND the ret is NOT just Var(v), it's used inside
+            !matches!(&expr.kind, IrExprKind::Var { id } if *id == **v)
+        })
+        .filter(|v| {
+            let info = var_table.get(**v);
+            let name = info.name.as_str();
+            // Skip TCO/branch/perceus temporaries (their own RC management)
+            !name.starts_with("__tco_") && !name.starts_with("__br_")
+            && !name.starts_with("__perceus_old")
+        })
+        .copied()
+        .collect();
+
+    if vars_to_dec.is_empty() {
+        FnBody::Ret { expr }
+    } else {
+        // Check if any var_to_dec is used inside the ret expr
+        let needs_lift = vars_to_dec.iter().any(|v| ret_vars.contains(v));
+        if needs_lift && !matches!(&expr.kind, IrExprKind::Var { .. }) {
+            insert_decs_ret_lift(expr, vars_to_dec, var_table)
+        } else {
+            // No lift needed — just insert Decs before Ret
+            let mut res = FnBody::Ret { expr };
+            for var in vars_to_dec.iter().rev() {
+                res = FnBody::Dec { var: *var, body: Box::new(res) };
+            }
+            res
+        }
+    }
+}
+
+/// Tail-lift branch of `insert_decs_ret_terminal`, extracted verbatim
+/// (further split of the same decomposition): `let __ret = expr; Dec(vars);
+/// Ret(__ret)`, used when a var being Dec'd is also referenced inside the
+/// return expression (so the plain "Dec-then-Ret" order would free it
+/// before use).
+fn insert_decs_ret_lift(expr: IrExpr, vars_to_dec: Vec<VarId>, var_table: &mut VarTable) -> FnBody {
+    let ret_ty = expr.ty.clone();
+    let ret_var = var_table.alloc(
+        almide_base::intern::sym("__perceus_ret"),
+        ret_ty.clone(),
+        Mutability::Let,
+        None,
+    );
+    let mut res = FnBody::Ret {
+        expr: IrExpr { kind: IrExprKind::Var { id: ret_var }, ty: ret_ty.clone(), span: None, def_id: None }
+    };
+    for var in vars_to_dec.iter().rev() {
+        res = FnBody::Dec { var: *var, body: Box::new(res) };
+    }
+    // Rule 1 applies HERE too: this hand-built VDecl bypasses
+    // the ChainHead::VDecl arm, so a ret expr that ALIASES one
+    // of the locals being Dec'd below (e.g. `if filled then
+    // base + "…" else base` with `Dec base` following) needs
+    // its own reference or the function returns a freed
+    // pointer. This under-count was masked for years by the
+    // chain-temp over-incs the alias-gated hoist removed
+    // (caught by the byte gate as a resurrection trap,
+    // default_fields_test).
+    //
+    // SUPPRESSION (same rule as the VDecl arm's hoist): with
+    // F2 processing the expr's interior, a Block whose tail
+    // var was bound inside already received the inner
+    // Rule-1 Inc — a second one here would double-apply.
+    let inner_already_inc = matches!(&expr.kind,
+        IrExprKind::Block { stmts, expr: Some(tail) }
+            if matches!(&tail.kind, IrExprKind::Var { id }
+                if stmts.iter().any(|st| matches!(&st.kind,
+                    IrStmtKind::Bind { var: bv, .. } if bv == id))));
+    if is_heap_type(&ret_ty) && yields_borrowed_alias(&expr) && !inner_already_inc {
+        res = FnBody::Inc { var: ret_var, body: Box::new(res) };
+    }
+    FnBody::VDecl { var: ret_var, ty: ret_ty, mutability: Mutability::Let, expr, body: Box::new(res) }
+}
+
 fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<VarId>, var_table: &mut VarTable) -> FnBody {
     // Iterative over the chain (see [`ChainHead`]): the non-terminal nodes are
     // pass-throughs (the former recursion only rebuilt them around the processed
     // remainder), and the Dec-insertion logic runs at the terminal (`Ret`/`Nop`).
     let (heads, terminal) = split_chain(fb);
     let mut result = match terminal {
-        FnBody::Ret { mut expr } => {
-            // F2 (#527): the RET EXPRESSION's interior gets the FULL rule
-            // set. Until now the terminal was returned untouched and nothing
-            // ever perceus_expr'd it — a tail-position Match/If/Block
-            // subtree (the dominant fn shape `fn f() { stmts; match … }`)
-            // received ZERO rc processing: no Rule-1 incs, no capture incs,
-            // no temp decs. Leak-direction, but it disabled reclamation
-            // across the most common code shape and masked the lift's
-            // ordering hazard below.
-            perceus_expr(&mut expr, var_table);
-            // Variables used inside the return expression (but not AS the return value)
-            // need tail lift: let __ret = expr; Dec(vars); Ret(__ret)
-            let vars_to_dec: Vec<VarId> = heap_vars.iter()
-                .filter(|v| !ret_vars.contains(v) || {
-                    // If var is in ret_vars AND the ret is NOT just Var(v), it's used inside
-                    !matches!(&expr.kind, IrExprKind::Var { id } if *id == **v)
-                })
-                .filter(|v| {
-                    let info = var_table.get(**v);
-                    let name = info.name.as_str();
-                    // Skip TCO/branch/perceus temporaries (their own RC management)
-                    !name.starts_with("__tco_") && !name.starts_with("__br_")
-                    && !name.starts_with("__perceus_old")
-                })
-                .copied()
-                .collect();
-
-            if vars_to_dec.is_empty() {
-                FnBody::Ret { expr }
-            } else {
-                // Check if any var_to_dec is used inside the ret expr
-                let needs_lift = vars_to_dec.iter().any(|v| ret_vars.contains(v));
-                if needs_lift && !matches!(&expr.kind, IrExprKind::Var { .. }) {
-                    // Tail lift: let __ret = expr; Dec(vars); Ret(__ret)
-                    let ret_ty = expr.ty.clone();
-                    let ret_var = var_table.alloc(
-                        almide_base::intern::sym("__perceus_ret"),
-                        ret_ty.clone(),
-                        Mutability::Let,
-                        None,
-                    );
-                    let mut res = FnBody::Ret {
-                        expr: IrExpr { kind: IrExprKind::Var { id: ret_var }, ty: ret_ty.clone(), span: None, def_id: None }
-                    };
-                    for var in vars_to_dec.iter().rev() {
-                        res = FnBody::Dec { var: *var, body: Box::new(res) };
-                    }
-                    // Rule 1 applies HERE too: this hand-built VDecl bypasses
-                    // the ChainHead::VDecl arm, so a ret expr that ALIASES one
-                    // of the locals being Dec'd below (e.g. `if filled then
-                    // base + "…" else base` with `Dec base` following) needs
-                    // its own reference or the function returns a freed
-                    // pointer. This under-count was masked for years by the
-                    // chain-temp over-incs the alias-gated hoist removed
-                    // (caught by the byte gate as a resurrection trap,
-                    // default_fields_test).
-                    //
-                    // SUPPRESSION (same rule as the VDecl arm's hoist): with
-                    // F2 processing the expr's interior, a Block whose tail
-                    // var was bound inside already received the inner
-                    // Rule-1 Inc — a second one here would double-apply.
-                    let inner_already_inc = matches!(&expr.kind,
-                        IrExprKind::Block { stmts, expr: Some(tail) }
-                            if matches!(&tail.kind, IrExprKind::Var { id }
-                                if stmts.iter().any(|st| matches!(&st.kind,
-                                    IrStmtKind::Bind { var: bv, .. } if bv == id))));
-                    if is_heap_type(&ret_ty) && yields_borrowed_alias(&expr) && !inner_already_inc {
-                        res = FnBody::Inc { var: ret_var, body: Box::new(res) };
-                    }
-                    FnBody::VDecl { var: ret_var, ty: ret_ty, mutability: Mutability::Let, expr, body: Box::new(res) }
-                } else {
-                    // No lift needed — just insert Decs before Ret
-                    let mut res = FnBody::Ret { expr };
-                    for var in vars_to_dec.iter().rev() {
-                        res = FnBody::Dec { var: *var, body: Box::new(res) };
-                    }
-                    res
-                }
-            }
-        }
+        FnBody::Ret { expr } => insert_decs_ret_terminal(expr, heap_vars, ret_vars, var_table),
         FnBody::Nop => {
             // While/for body: insert Dec for heap vars bound in this body.
             let mut res = FnBody::Nop;

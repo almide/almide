@@ -200,60 +200,75 @@ fn extract_raw_fn_last_arg_helpers(content: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cursor = 0;
     while let Some(rel) = content[cursor..].find("pub fn ") {
-        let name_start = cursor + rel + "pub fn ".len();
-        let name_end = content[name_start..]
-            .find(|c: char| !(c.is_alphanumeric() || c == '_'))
-            .map(|i| name_start + i)
-            .unwrap_or(content.len());
-        let name = content[name_start..name_end].to_string();
-        cursor = name_end;
-
-        let rest = content[name_end..].trim_start();
-        // Optional `<generics>` then `(params)`.
-        let (generics, after) = if rest.starts_with('<') {
-            match balanced(rest, '<', '>') {
-                Some(end) => (&rest[1..end], rest[end + 1..].trim_start()),
-                None => continue,
-            }
-        } else {
-            ("", rest)
-        };
-        if !after.starts_with('(') {
-            continue;
-        }
-        let params = match balanced(after, '(', ')') {
-            Some(end) => &after[1..end],
-            None => continue,
-        };
-
-        // Generics with a `Fn` bound: `F: Fn(...) -> _`.
-        let fn_generics: Vec<&str> = split_top_level(generics)
-            .into_iter()
-            .filter_map(|g| {
-                let g = g.trim();
-                let colon = g.find(':')?;
-                if g[colon + 1..].trim_start().starts_with("Fn") {
-                    Some(g[..colon].trim())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        if fn_generics.is_empty() {
-            continue;
-        }
-
-        // Last param's type is exactly one of those Fn generics.
-        if let Some(last) = split_top_level(params).last() {
-            if let Some(colon) = last.rfind(':') {
-                let ty = last[colon + 1..].trim();
-                if fn_generics.contains(&ty) {
-                    out.push(name);
-                }
-            }
+        let (new_cursor, matched) = try_raw_fn_last_arg_helper_at(content, cursor, rel);
+        cursor = new_cursor;
+        if let Some(name) = matched {
+            out.push(name);
         }
     }
     out
+}
+
+/// One `while` iteration of `extract_raw_fn_last_arg_helpers`, extracted
+/// (cog>30 decomposition). The original's mid-loop `continue`s only ever
+/// skipped pushing to `out` for THIS `pub fn` — `cursor` was already
+/// advanced past its name before any of them — so this helper returns
+/// `(new_cursor, Option<matched_name>)` instead: same "advance, maybe
+/// record" shape, not an early-exit-the-whole-function hazard.
+fn try_raw_fn_last_arg_helper_at(content: &str, cursor: usize, rel: usize) -> (usize, Option<String>) {
+    let name_start = cursor + rel + "pub fn ".len();
+    let name_end = content[name_start..]
+        .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .map(|i| name_start + i)
+        .unwrap_or(content.len());
+    let name = content[name_start..name_end].to_string();
+    let new_cursor = name_end;
+
+    let rest = content[name_end..].trim_start();
+    // Optional `<generics>` then `(params)`.
+    let (generics, after) = if rest.starts_with('<') {
+        match balanced(rest, '<', '>') {
+            Some(end) => (&rest[1..end], rest[end + 1..].trim_start()),
+            None => return (new_cursor, None),
+        }
+    } else {
+        ("", rest)
+    };
+    if !after.starts_with('(') {
+        return (new_cursor, None);
+    }
+    let params = match balanced(after, '(', ')') {
+        Some(end) => &after[1..end],
+        None => return (new_cursor, None),
+    };
+
+    // Generics with a `Fn` bound: `F: Fn(...) -> _`.
+    let fn_generics: Vec<&str> = split_top_level(generics)
+        .into_iter()
+        .filter_map(|g| {
+            let g = g.trim();
+            let colon = g.find(':')?;
+            if g[colon + 1..].trim_start().starts_with("Fn") {
+                Some(g[..colon].trim())
+            } else {
+                None
+            }
+        })
+        .collect();
+    if fn_generics.is_empty() {
+        return (new_cursor, None);
+    }
+
+    // Last param's type is exactly one of those Fn generics.
+    if let Some(last) = split_top_level(params).last() {
+        if let Some(colon) = last.rfind(':') {
+            let ty = last[colon + 1..].trim();
+            if fn_generics.contains(&ty) {
+                return (new_cursor, Some(name));
+            }
+        }
+    }
+    (new_cursor, None)
 }
 
 /// Index of the close delimiter matching the open at `s[0]` (`s` must start with

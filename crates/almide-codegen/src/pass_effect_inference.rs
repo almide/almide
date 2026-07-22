@@ -51,83 +51,104 @@ impl NanoPass for EffectInferencePass {
         let mut effect_map = EffectMap::default();
 
         // Step 1: Collect direct effects for each function
-        for func in &program.functions {
-            let direct = collect_direct_effects(&func.body);
-            let is_effect = func.is_effect;
-            effect_map.functions.insert(func.name.to_string(), FunctionEffects {
-                direct: direct.clone(),
-                transitive: direct,
-                is_effect,
-            });
-        }
-
-        // Also scan module functions
-        for module in &program.modules {
-            for func in &module.functions {
-                let direct = collect_direct_effects(&func.body);
-                let qualified = format!("{}.{}", module.name, func.name);
-                let is_effect = func.is_effect;
-                effect_map.functions.insert(qualified, FunctionEffects {
-                    direct: direct.clone(),
-                    transitive: direct,
-                    is_effect,
-                });
-            }
-        }
+        seed_function_effects(&program, &mut effect_map);
 
         // Step 2: Build call graph
         let call_graph = build_call_graph(&program);
 
         // Step 3: Transitive closure (fixpoint iteration)
-        let max_iterations = 20;
-        for _ in 0..max_iterations {
-            let mut changed = false;
-            for (caller, callees) in &call_graph {
-                let callee_effects: HashSet<Effect> = callees.iter()
-                    .filter_map(|callee| effect_map.functions.get(callee))
-                    .flat_map(|fe| fe.transitive.iter().copied())
-                    .collect();
-
-                if let Some(fe) = effect_map.functions.get_mut(caller) {
-                    let before = fe.transitive.len();
-                    fe.transitive.extend(callee_effects);
-                    if fe.transitive.len() > before {
-                        changed = true;
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
+        close_effects_transitively(&call_graph, &mut effect_map);
 
         // Debug output
         if std::env::var("ALMIDE_DEBUG_EFFECTS").is_ok() {
-            let mut entries: Vec<_> = effect_map.functions.iter().collect();
-            entries.sort_by_key(|(name, _)| (*name).clone());
-            for (name, fe) in &entries {
-                if !fe.transitive.is_empty() {
-                    eprintln!(
-                        "[EffectInference] {} → {} {}",
-                        name,
-                        EffectMap::format_effects(&fe.transitive),
-                        if fe.is_effect { "(effect fn)" } else { "" }
-                    );
-                }
-            }
-            // Summary
-            let pure_count = entries.iter().filter(|(_, fe)| fe.transitive.is_empty()).count();
-            let effect_count = entries.len() - pure_count;
-            eprintln!(
-                "[EffectInference] {} functions analyzed: {} pure, {} with effects",
-                entries.len(), pure_count, effect_count
-            );
+            debug_print_effects(&effect_map);
         }
 
         program.effect_map = effect_map;
 
         PassResult { program, changed: true }
     }
+}
+
+/// Step 1 of `EffectInferencePass::run`, extracted verbatim (cog>30
+/// decomposition, sequential-phase pattern — `effect_map` is a write-only
+/// accumulator w.r.t. this phase). Collects each function's direct effects
+/// (top-level, then module-scoped).
+fn seed_function_effects(program: &IrProgram, effect_map: &mut EffectMap) {
+    for func in &program.functions {
+        let direct = collect_direct_effects(&func.body);
+        let is_effect = func.is_effect;
+        effect_map.functions.insert(func.name.to_string(), FunctionEffects {
+            direct: direct.clone(),
+            transitive: direct,
+            is_effect,
+        });
+    }
+
+    // Also scan module functions
+    for module in &program.modules {
+        for func in &module.functions {
+            let direct = collect_direct_effects(&func.body);
+            let qualified = format!("{}.{}", module.name, func.name);
+            let is_effect = func.is_effect;
+            effect_map.functions.insert(qualified, FunctionEffects {
+                direct: direct.clone(),
+                transitive: direct,
+                is_effect,
+            });
+        }
+    }
+}
+
+/// Step 3 of `EffectInferencePass::run`, extracted verbatim (cog>30
+/// decomposition): fixpoint-iterate the call graph until every caller's
+/// `transitive` effect set has absorbed every (already-seeded) callee's.
+fn close_effects_transitively(call_graph: &HashMap<String, HashSet<String>>, effect_map: &mut EffectMap) {
+    let max_iterations = 20;
+    for _ in 0..max_iterations {
+        let mut changed = false;
+        for (caller, callees) in call_graph {
+            let callee_effects: HashSet<Effect> = callees.iter()
+                .filter_map(|callee| effect_map.functions.get(callee))
+                .flat_map(|fe| fe.transitive.iter().copied())
+                .collect();
+
+            if let Some(fe) = effect_map.functions.get_mut(caller) {
+                let before = fe.transitive.len();
+                fe.transitive.extend(callee_effects);
+                if fe.transitive.len() > before {
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+/// `ALMIDE_DEBUG_EFFECTS` debug-output phase of `EffectInferencePass::run`,
+/// extracted verbatim (cog>30 decomposition).
+fn debug_print_effects(effect_map: &EffectMap) {
+    let mut entries: Vec<_> = effect_map.functions.iter().collect();
+    entries.sort_by_key(|(name, _)| (*name).clone());
+    for (name, fe) in &entries {
+        if !fe.transitive.is_empty() {
+            eprintln!(
+                "[EffectInference] {} → {} {}",
+                name,
+                EffectMap::format_effects(&fe.transitive),
+                if fe.is_effect { "(effect fn)" } else { "" }
+            );
+        }
+    }
+    // Summary
+    let pure_count = entries.iter().filter(|(_, fe)| fe.transitive.is_empty()).count();
+    let effect_count = entries.len() - pure_count;
+    eprintln!(
+        "[EffectInference] {} functions analyzed: {} pure, {} with effects",
+        entries.len(), pure_count, effect_count
+    );
 }
 
 /// Collect direct effects from stdlib calls in an expression.

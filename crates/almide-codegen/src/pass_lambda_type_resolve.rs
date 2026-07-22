@@ -130,7 +130,25 @@ fn resolve_expr_call(expr: &mut IrExpr, vt: &mut VarTable) {
 fn resolve_expr_lambda(expr: &mut IrExpr, vt: &mut VarTable) {
     let IrExprKind::Lambda { params, .. } = &mut expr.kind else { unreachable!() };
     // Sync param types: VarTable ↔ IR annotation (concrete wins)
-    // Use .has_unresolved_deep() to catch Applied(List, [TypeVar(A)])
+    sync_lambda_param_types(params, vt);
+    // Update Ty::Fn wrapper to match resolved params
+    refresh_lambda_fn_ty(expr, vt);
+    // Recurse into body (params are now resolved for inner lambdas to see)
+    if let IrExprKind::Lambda { body, .. } = &mut expr.kind {
+        resolve_expr(body, vt);
+    }
+    // Bottom-up: infer still-Unknown params from body usage
+    if let IrExprKind::Lambda { params, body, .. } = &mut expr.kind {
+        infer_lambda_params_from_body(params, body, vt);
+        refresh_lambda_fn_ty(expr, vt);
+    }
+}
+
+/// Param-sync phase of `resolve_expr_lambda`, extracted verbatim (cog>30
+/// decomposition, sequential-phase pattern). Syncs `VarTable` ↔ IR
+/// annotation (concrete wins) — uses `.has_unresolved_deep()` to catch
+/// `Applied(List, [TypeVar(A)])`.
+fn sync_lambda_param_types(params: &mut [(VarId, Ty)], vt: &mut VarTable) {
     for (vid, pty) in params.iter_mut() {
         if (vid.0 as usize) < vt.len() {
             let vt_ty = vt.get(*vid).ty.clone();
@@ -141,23 +159,19 @@ fn resolve_expr_lambda(expr: &mut IrExpr, vt: &mut VarTable) {
             }
         }
     }
-    // Update Ty::Fn wrapper to match resolved params
-    refresh_lambda_fn_ty(expr, vt);
-    // Recurse into body (params are now resolved for inner lambdas to see)
-    if let IrExprKind::Lambda { body, .. } = &mut expr.kind {
-        resolve_expr(body, vt);
-    }
-    // Bottom-up: infer still-Unknown params from body usage
-    if let IrExprKind::Lambda { params, body, .. } = &mut expr.kind {
-        for (vid, pty) in params.iter_mut() {
-            if pty.has_unresolved_deep() {
-                if let Some(inferred) = super::pass_concretize_types::infer_var_type_from_body(body, *vid) {
-                    *pty = inferred.clone();
-                    vt.entries[vid.0 as usize].ty = inferred;
-                }
+}
+
+/// Bottom-up param-inference phase of `resolve_expr_lambda`, extracted
+/// verbatim (cog>30 decomposition) — infer still-Unknown params from body
+/// usage.
+fn infer_lambda_params_from_body(params: &mut [(VarId, Ty)], body: &IrExpr, vt: &mut VarTable) {
+    for (vid, pty) in params.iter_mut() {
+        if pty.has_unresolved_deep() {
+            if let Some(inferred) = super::pass_concretize_types::infer_var_type_from_body(body, *vid) {
+                *pty = inferred.clone();
+                vt.entries[vid.0 as usize].ty = inferred;
             }
         }
-        refresh_lambda_fn_ty(expr, vt);
     }
 }
 
@@ -529,8 +543,25 @@ fn apply_lambda_param_types(
     vt: &mut VarTable,
 ) {
     let IrExprKind::Lambda { params, body, .. } = &mut arg.kind else { return };
-    // Update designated param(s) — use has_deep_unresolved to catch
-    // Applied(List, [TypeVar(A)]) which is_unresolved_structural() misses.
+    apply_lambda_param_types_update_params(params, elem_param_indices, elem_ty, acc_ty, vt);
+    // Infer return type from body + resolved params
+    let body_ret = infer_body_result_ty(body, params);
+    apply_lambda_fn_ty_wrapper(&mut arg.ty, elem_param_indices, elem_ty, acc_ty, body_ret);
+}
+
+/// First phase of `apply_lambda_param_types`: update the Lambda's own
+/// param bindings (and their `VarTable` entries) — extracted verbatim
+/// (cog>30 decomposition, sequential-phase pattern, no match statement so
+/// no arm-count floor concern). Uses `has_unresolved_deep` (not
+/// `is_unresolved_structural`) to catch `Applied(List, [TypeVar(A)])`.
+fn apply_lambda_param_types_update_params(
+    params: &mut [(VarId, Ty)],
+    elem_param_indices: &[usize],
+    elem_ty: &Ty,
+    acc_ty: &Option<Ty>,
+    vt: &mut VarTable,
+) {
+    // Update designated param(s).
     for &pidx in elem_param_indices {
         if let Some((vid, pty)) = params.get_mut(pidx) {
             if pty.has_unresolved_deep() {
@@ -552,25 +583,34 @@ fn apply_lambda_param_types(
             }
         }
     }
-    // Infer return type from body + resolved params
-    let body_ret = infer_body_result_ty(body, params);
-    // Update Ty::Fn wrapper
-    if let Ty::Fn { params: fparams, ret } = &mut arg.ty {
-        for &pidx in elem_param_indices {
-            if let Some(fp) = fparams.get_mut(pidx) {
-                if fp.has_unresolved_deep() { *fp = elem_ty.clone(); }
-            }
+}
+
+/// Second phase of `apply_lambda_param_types`: update the Lambda arg's own
+/// `Ty::Fn` wrapper to match — extracted verbatim (cog>30 decomposition).
+/// One-way dependency on phase 1 only through the already-computed
+/// `body_ret` value, not through any shared mutable state.
+fn apply_lambda_fn_ty_wrapper(
+    arg_ty: &mut Ty,
+    elem_param_indices: &[usize],
+    elem_ty: &Ty,
+    acc_ty: &Option<Ty>,
+    body_ret: Option<Ty>,
+) {
+    let Ty::Fn { params: fparams, ret } = arg_ty else { return };
+    for &pidx in elem_param_indices {
+        if let Some(fp) = fparams.get_mut(pidx) {
+            if fp.has_unresolved_deep() { *fp = elem_ty.clone(); }
         }
-        if let Some(a_ty) = acc_ty {
-            if let Some(fp) = fparams.get_mut(0) {
-                if fp.has_unresolved_deep() { *fp = a_ty.clone(); }
-            }
-            // The lambda's return is also the accumulator type.
-            if ret.has_unresolved_deep() { **ret = a_ty.clone(); }
+    }
+    if let Some(a_ty) = acc_ty {
+        if let Some(fp) = fparams.get_mut(0) {
+            if fp.has_unresolved_deep() { *fp = a_ty.clone(); }
         }
-        if ret.has_unresolved_deep() {
-            if let Some(r) = body_ret { **ret = r; }
-        }
+        // The lambda's return is also the accumulator type.
+        if ret.has_unresolved_deep() { **ret = a_ty.clone(); }
+    }
+    if ret.has_unresolved_deep() {
+        if let Some(r) = body_ret { **ret = r; }
     }
 }
 
@@ -648,33 +688,42 @@ fn extract_applied_arg(ty: &Ty, idx: usize) -> Option<Ty> {
 
 /// Update a Lambda expression's Ty::Fn wrapper to reflect resolved params.
 fn refresh_lambda_fn_ty(expr: &mut IrExpr, _vt: &VarTable) {
-    if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
-        if let Ty::Fn { params: fparams, ret } = &expr.ty {
-            let mut new_fparams = fparams.clone();
-            let mut changed = false;
-            for (i, (_, pty)) in params.iter().enumerate() {
-                if let Some(fp) = new_fparams.get_mut(i) {
-                    if fp.has_unresolved_deep() && !pty.has_unresolved_deep() {
-                        *fp = pty.clone();
-                        changed = true;
-                    }
-                }
-            }
-            let new_ret = if ret.has_unresolved_deep() {
-                if let Some(r) = infer_body_result_ty(body, params) {
-                    changed = true;
-                    Box::new(r)
-                } else {
-                    ret.clone()
-                }
-            } else {
-                ret.clone()
-            };
-            if changed {
-                expr.ty = Ty::Fn { params: new_fparams, ret: new_ret };
+    let IrExprKind::Lambda { params, body, .. } = &expr.kind else { return };
+    let Ty::Fn { params: fparams, ret } = &expr.ty else { return };
+    let (new_fparams, params_changed) = refresh_lambda_fn_ty_params(params, fparams);
+    let (new_ret, ret_changed) = refresh_lambda_fn_ty_ret(ret, body, params);
+    if params_changed || ret_changed {
+        expr.ty = Ty::Fn { params: new_fparams, ret: new_ret };
+    }
+}
+
+/// Param-types phase of `refresh_lambda_fn_ty`, extracted verbatim (cog>30
+/// decomposition): copy each still-unresolved `Ty::Fn` param slot from the
+/// Lambda's own (now-resolved) param type.
+fn refresh_lambda_fn_ty_params(params: &[(VarId, Ty)], fparams: &[Ty]) -> (Vec<Ty>, bool) {
+    let mut new_fparams = fparams.to_vec();
+    let mut changed = false;
+    for (i, (_, pty)) in params.iter().enumerate() {
+        if let Some(fp) = new_fparams.get_mut(i) {
+            if fp.has_unresolved_deep() && !pty.has_unresolved_deep() {
+                *fp = pty.clone();
+                changed = true;
             }
         }
     }
+    (new_fparams, changed)
+}
+
+/// Return-type phase of `refresh_lambda_fn_ty`, extracted verbatim
+/// (cog>30 decomposition): infer the return type from the body when the
+/// `Ty::Fn` wrapper's `ret` is still unresolved.
+fn refresh_lambda_fn_ty_ret(ret: &Ty, body: &IrExpr, params: &[(VarId, Ty)]) -> (Box<Ty>, bool) {
+    if ret.has_unresolved_deep() {
+        if let Some(r) = infer_body_result_ty(body, params) {
+            return (Box::new(r), true);
+        }
+    }
+    (Box::new(ret.clone()), false)
 }
 
 // ── List element type extraction ────────────────────────────────────
@@ -683,37 +732,54 @@ fn refresh_lambda_fn_ty(expr: &mut IrExpr, _vt: &VarTable) {
 /// Checks: direct expr.ty → VarTable → list.zip inference.
 /// Rejects types with deep unresolved components.
 fn resolve_list_elem_ty(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
-    // Direct type
-    if let Some(elem) = extract_list_elem(&expr.ty) {
-        if !(elem).has_unresolved_deep() { return Some(elem); }
-    }
-    // VarTable lookup for Var/EnvLoad
+    resolve_list_elem_ty_direct(expr)
+        .or_else(|| resolve_list_elem_ty_var_table(expr, vt))
+        .or_else(|| resolve_list_elem_ty_tuple_index(expr, vt))
+        .or_else(|| resolve_list_elem_ty_zip(expr, vt))
+}
+
+/// Direct-type phase of `resolve_list_elem_ty`, extracted verbatim (cog>30
+/// decomposition, pattern 1 — the four phases share no state and each
+/// independently returns `Some`/`None`).
+fn resolve_list_elem_ty_direct(expr: &IrExpr) -> Option<Ty> {
+    let elem = extract_list_elem(&expr.ty)?;
+    if elem.has_unresolved_deep() { return None; }
+    Some(elem)
+}
+
+/// VarTable-lookup phase (for `Var`/`EnvLoad`) of `resolve_list_elem_ty`,
+/// extracted verbatim (cog>30 decomposition).
+fn resolve_list_elem_ty_var_table(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
     let vid = match &expr.kind {
         IrExprKind::Var { id } => Some(*id),
         IrExprKind::EnvLoad { env_var, .. } => Some(*env_var),
         _ => None,
     };
-    if let Some(id) = vid {
-        if (id.0 as usize) < vt.len() {
-            if let Some(elem) = extract_list_elem(&vt.get(id).ty) {
-                if !(elem).has_unresolved_deep() { return Some(elem); }
-            }
-        }
-    }
-    // TupleIndex: `pair.0` where pair: Tuple([List[A], List[B]]) → List[A]'s elem = A
-    if let IrExprKind::TupleIndex { object, index } = &expr.kind {
-        if let Some(tuple_elem) = resolve_tuple_elem_ty(object, *index, vt) {
-            if let Some(elem) = extract_list_elem(&tuple_elem) {
-                if !(elem).has_unresolved_deep() { return Some(elem); }
-            }
-        }
-    }
-    // list.zip(xs, ys) → Tuple(xs_elem, ys_elem).
-    // Match every call-target shape the frontend / ResolveCalls /
-    // IntrinsicLowering produce for stdlib `list.zip`: pre-lowering
-    // `Module { list, zip }`, frontend-mangled or post-ResolveCalls
-    // `Named { "almide_rt_list_zip" }`, and post-IntrinsicLowering
-    // `RuntimeCall { symbol: "almide_rt_list_zip", .. }`.
+    let id = vid?;
+    if !((id.0 as usize) < vt.len()) { return None; }
+    let elem = extract_list_elem(&vt.get(id).ty)?;
+    if elem.has_unresolved_deep() { return None; }
+    Some(elem)
+}
+
+/// `TupleIndex` phase of `resolve_list_elem_ty`, extracted verbatim
+/// (cog>30 decomposition): `pair.0` where `pair: Tuple([List[A], List[B]])`
+/// → `List[A]`'s elem = `A`.
+fn resolve_list_elem_ty_tuple_index(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
+    let IrExprKind::TupleIndex { object, index } = &expr.kind else { return None };
+    let tuple_elem = resolve_tuple_elem_ty(object, *index, vt)?;
+    let elem = extract_list_elem(&tuple_elem)?;
+    if elem.has_unresolved_deep() { return None; }
+    Some(elem)
+}
+
+/// `list.zip` phase of `resolve_list_elem_ty`, extracted verbatim (cog>30
+/// decomposition): `list.zip(xs, ys)` → `Tuple(xs_elem, ys_elem)`. Matches
+/// every call-target shape the frontend / ResolveCalls / IntrinsicLowering
+/// produce for stdlib `list.zip`: pre-lowering `Module { list, zip }`,
+/// frontend-mangled or post-ResolveCalls `Named { "almide_rt_list_zip" }`,
+/// and post-IntrinsicLowering `RuntimeCall { symbol: "almide_rt_list_zip", .. }`.
+fn resolve_list_elem_ty_zip(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
     let zip_args: Option<&Vec<IrExpr>> = match &expr.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
             if module.as_str() == "list" && func.as_str() == "zip" => Some(args),
@@ -723,16 +789,15 @@ fn resolve_list_elem_ty(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
             if symbol.as_str() == "almide_rt_list_zip" => Some(args),
         _ => None,
     };
-    if let Some(args) = zip_args {
-        if args.len() >= 2 {
-            let a = resolve_list_elem_ty(&args[0], vt);
-            let b = resolve_list_elem_ty(&args[1], vt);
-            if let (Some(a), Some(b)) = (a, b) {
-                return Some(Ty::Tuple(vec![a, b]));
-            }
-        }
+    let args = zip_args?;
+    if args.len() < 2 { return None; }
+    let a = resolve_list_elem_ty(&args[0], vt);
+    let b = resolve_list_elem_ty(&args[1], vt);
+    if let (Some(a), Some(b)) = (a, b) {
+        Some(Ty::Tuple(vec![a, b]))
+    } else {
+        None
     }
-    None
 }
 
 /// Extract element type from Applied(List, [elem]).

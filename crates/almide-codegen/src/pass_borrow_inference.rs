@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::cell::RefCell;
 use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId};
-use almide_base::intern::sym;
+use almide_base::intern::{sym, Sym};
 
 /// `true` if the bundled `module.func`'s `@inline_rust` template
 /// borrows the param at position `pos` (`&{name}`, `&*{name}`,

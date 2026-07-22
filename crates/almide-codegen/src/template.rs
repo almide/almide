@@ -113,6 +113,20 @@ impl TemplateSet {
     }
 }
 
+/// Placeholder-name-collection sub-loop of `fill_template`, extracted
+/// verbatim (cog>30 decomposition) — consumes chars up to (and including)
+/// the closing `}`, standard tokenizer sub-extraction idiom.
+fn read_placeholder_name(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
+    let mut name = String::new();
+    for inner in chars.by_ref() {
+        if inner == '}' {
+            break;
+        }
+        name.push(inner);
+    }
+    name
+}
+
 /// Fill `{placeholder}` holes in a template string.
 /// `{{` and `}}` are escape sequences for literal `{` and `}`.
 fn fill_template(template: &str, bindings: &[(&str, &str)]) -> String {
@@ -126,14 +140,7 @@ fn fill_template(template: &str, bindings: &[(&str, &str)]) -> String {
                 chars.next();
                 result.push('{');
             } else {
-                // Collect placeholder name until '}'
-                let mut name = String::new();
-                for inner in chars.by_ref() {
-                    if inner == '}' {
-                        break;
-                    }
-                    name.push(inner);
-                }
+                let name = read_placeholder_name(&mut chars);
                 // Look up binding; if not found, keep placeholder as-is
                 if let Some(value) = bindings.iter().find(|(k, _)| *k == name.as_str()).map(|(_, v)| *v) {
                     result.push_str(value);
@@ -166,52 +173,58 @@ pub fn load_from_toml(target_name: &str, toml_str: &str) -> TemplateSet {
     let table: toml::Table = toml_str.parse().expect("invalid template TOML");
 
     for (key, value) in &table {
-        let mut rules = Vec::new();
-
-        match value {
-            // Single rule: [construct_name]
-            toml::Value::Table(t) => {
-                if let Some(rule) = parse_rule(t) {
-                    rules.push(rule);
-                }
-            }
-            // Array of rules: [[construct_name]]
-            toml::Value::Array(arr) => {
-                for item in arr {
-                    if let toml::Value::Table(t) = item {
-                        if let Some(rule) = parse_rule(t) {
-                            rules.push(rule);
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        if !rules.is_empty() {
-            // Merge with existing entry (allows [[construct]] to extend [construct])
-            let entry = ts.entries.entry(key.clone()).or_insert_with(|| TemplateEntry {
-                rules: Vec::new(),
-            });
-            // Guarded rules first, default rules last
-            let mut guarded: Vec<TemplateRule> = Vec::new();
-            let mut defaults: Vec<TemplateRule> = Vec::new();
-            for r in rules {
-                if r.when_type.is_some() || r.when_attr.is_some() {
-                    guarded.push(r);
-                } else {
-                    defaults.push(r);
-                }
-            }
-            // Prepend guarded rules (checked first), then append defaults
-            let mut merged = guarded;
-            merged.append(&mut defaults);
-            merged.append(&mut entry.rules);
-            entry.rules = merged;
-        }
+        load_toml_entry(&mut ts, key, value);
     }
 
     ts
+}
+
+/// Per-`(key, value)` body of `load_from_toml`'s loop, extracted verbatim
+/// (cog>30 decomposition, pattern 1 — `ts` is a write-only accumulator).
+fn load_toml_entry(ts: &mut TemplateSet, key: &str, value: &toml::Value) {
+    let mut rules = Vec::new();
+
+    match value {
+        // Single rule: [construct_name]
+        toml::Value::Table(t) => {
+            if let Some(rule) = parse_rule(t) {
+                rules.push(rule);
+            }
+        }
+        // Array of rules: [[construct_name]]
+        toml::Value::Array(arr) => {
+            for item in arr {
+                if let toml::Value::Table(t) = item {
+                    if let Some(rule) = parse_rule(t) {
+                        rules.push(rule);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
+    if !rules.is_empty() {
+        // Merge with existing entry (allows [[construct]] to extend [construct])
+        let entry = ts.entries.entry(key.to_string()).or_insert_with(|| TemplateEntry {
+            rules: Vec::new(),
+        });
+        // Guarded rules first, default rules last
+        let mut guarded: Vec<TemplateRule> = Vec::new();
+        let mut defaults: Vec<TemplateRule> = Vec::new();
+        for r in rules {
+            if r.when_type.is_some() || r.when_attr.is_some() {
+                guarded.push(r);
+            } else {
+                defaults.push(r);
+            }
+        }
+        // Prepend guarded rules (checked first), then append defaults
+        let mut merged = guarded;
+        merged.append(&mut defaults);
+        merged.append(&mut entry.rules);
+        entry.rules = merged;
+    }
 }
 
 fn parse_rule(t: &toml::Table) -> Option<TemplateRule> {

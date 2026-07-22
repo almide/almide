@@ -380,7 +380,16 @@ impl NanoPass for AnfPass {
 // ── Postcondition: verify all heap-typed args are Var after ANF ──────
 
 fn expr_kind_name(kind: &IrExprKind) -> &'static str {
-    match kind {
+    expr_kind_name_group_a(kind)
+        .or_else(|| expr_kind_name_group_b(kind))
+        .unwrap_or_else(|| expr_kind_name_group_c(kind))
+}
+
+/// First third of `expr_kind_name`'s arms, extracted (cog>30 decomposition,
+/// pattern 1 — independent name-router arms split into groups; mirrors the
+/// `list_call_name` recipe).
+fn expr_kind_name_group_a(kind: &IrExprKind) -> Option<&'static str> {
+    Some(match kind {
         IrExprKind::Var { .. } => "Var",
         IrExprKind::LitInt { .. } => "LitInt",
         IrExprKind::LitFloat { .. } => "LitFloat",
@@ -391,6 +400,13 @@ fn expr_kind_name(kind: &IrExprKind) -> &'static str {
         IrExprKind::RuntimeCall { .. } => "RuntimeCall",
         IrExprKind::BinOp { .. } => "BinOp",
         IrExprKind::UnOp { .. } => "UnOp",
+        _ => return None,
+    })
+}
+
+/// Second third of `expr_kind_name`'s arms, extracted (cog>30 decomposition).
+fn expr_kind_name_group_b(kind: &IrExprKind) -> Option<&'static str> {
+    Some(match kind {
         IrExprKind::If { .. } => "If",
         IrExprKind::Match { .. } => "Match",
         IrExprKind::Block { .. } => "Block",
@@ -401,6 +417,13 @@ fn expr_kind_name(kind: &IrExprKind) -> &'static str {
         IrExprKind::MapLiteral { .. } => "MapLiteral",
         IrExprKind::StringInterp { .. } => "StringInterp",
         IrExprKind::ClosureCreate { .. } => "ClosureCreate",
+        _ => return None,
+    })
+}
+
+/// Final third of `expr_kind_name`'s arms, extracted (cog>30 decomposition).
+fn expr_kind_name_group_c(kind: &IrExprKind) -> &'static str {
+    match kind {
         IrExprKind::EnvLoad { .. } => "EnvLoad",
         IrExprKind::Member { .. } => "Member",
         IrExprKind::IndexAccess { .. } => "IndexAccess",
