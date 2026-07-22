@@ -123,6 +123,33 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// The `list.eq_*` self-host call-name variant for a `List[T] == List[T]` scalar
+    /// comparison, keyed purely by the element type `es` — a pure, `self`-free lookup.
+    /// Verbatim extraction (guard-clause flattening) of the former inline if-else-if chain
+    /// in [`Self::lower_scalar_value_inner`]'s `BinOp` arm, no behavior change — see
+    /// docs/roadmap/active/code-health-codopsy.md.
+    fn list_eq_variant_name(es: &[Ty]) -> Option<&'static str> {
+        if es.len() != 1 {
+            return None;
+        }
+        if matches!(es[0], Ty::Int) {
+            return Some("eq_int");
+        }
+        if matches!(es[0], Ty::String) {
+            return Some("eq_str");
+        }
+        if crate::lower::is_value_ty(&es[0]) {
+            return Some("eq_value");
+        }
+        if matches!(es[0], Ty::Float) {
+            return Some("eq_float");
+        }
+        if matches!(es[0], Ty::Bool) {
+            return Some("eq_bool");
+        }
+        None
+    }
+
     fn lower_scalar_value_inner(&mut self, expr: &IrExpr) -> Option<ValueId> {
         match &expr.kind {
             IrExprKind::Var { id } => self.value_or_global(*id).ok(),
@@ -540,21 +567,7 @@ impl LowerCtx {
             if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, es) =
                 &left.ty
             {
-                let variant = if es.len() != 1 {
-                    None
-                } else if matches!(es[0], Ty::Int) {
-                    Some("eq_int")
-                } else if matches!(es[0], Ty::String) {
-                    Some("eq_str")
-                } else if crate::lower::is_value_ty(&es[0]) {
-                    Some("eq_value")
-                } else if matches!(es[0], Ty::Float) {
-                    Some("eq_float")
-                } else if matches!(es[0], Ty::Bool) {
-                    Some("eq_bool")
-                } else {
-                    None
-                };
+                let variant = Self::list_eq_variant_name(es);
                 if let Some(v) = variant {
                     let args = [left.clone(), right.clone()];
                     let eq = self
@@ -1286,6 +1299,82 @@ impl LowerCtx {
         Ok(dst)
     }
 
+    /// The heap-typed call-argument temp drop-route classification for
+    /// [`Self::materialized_call_arg`] — routes `dst`'s scope-end drop for a call-argument
+    /// temp based on its static type `ty`. Verbatim extraction (guard-clause flattening) of
+    /// the former inline else-if chain, no behavior change — see
+    /// docs/roadmap/active/code-health-codopsy.md.
+    fn classify_call_arg_drop(&mut self, dst: ValueId, ty: &Ty) {
+        if crate::lower::is_result_listval_ty(ty) {
+            self.value_result_lists.insert(dst);
+            return;
+        }
+        if crate::lower::is_list_list_str_ty(ty) {
+            self.list_list_str_lists.insert(dst);
+            return;
+        }
+        if crate::lower::is_list_str_str_ty(ty) {
+            // `List[(String,String)]` (map.entries) arg temp — DropListStrStr frees each tuple's
+            // two Strings; the flat heap_elem_lists fallback would leak them.
+            self.str_str_elem_lists.insert(dst);
+            return;
+        }
+        if crate::lower::is_lenlist_list_ty(ty) {
+            self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
+            return;
+        }
+        if crate::lower::is_map_fn_ty(ty) {
+            // `Map[String, <Fn>]` arg temp — `$__drop_map_mclo` frees each value via
+            // `__drop_closure` (a flat sweep would leak every captured env slot).
+            self.variant_drop_handles.insert(dst, "map_mclo".to_string());
+            return;
+        }
+        if let Some(hname) = self.map_named_value_drop(ty) {
+            self.variant_drop_handles.insert(dst, hname);
+            return;
+        }
+        if crate::lower::is_map_msv_ty(ty) {
+            // `Map[String, Map[String, String]]` arg temp (the inline nested-map literal
+            // fed straight to `map.get_or` — map_fold_heap_acc's r7): `$__drop_map_msv`
+            // sweeps each last-ref inner map; the flat fallback leaked the whole nested
+            // map per iteration (loop OOM).
+            self.variant_drop_handles.insert(dst, "map_msv".to_string());
+            return;
+        }
+        if crate::lower::is_map_mlo_ty(ty) {
+            // `Map[String, List[Option[Int]]]` arg temp — `$__drop_map_mlo` (the
+            // bind-site route, mirrored; the flat fallback would leak the value lists).
+            self.variant_drop_handles.insert(dst, "map_mlo".to_string());
+            return;
+        }
+        if let Some(rname) = (match ty {
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                if a.len() == 1 =>
+            {
+                self.record_or_anon_drop_type_name(&a[0])
+            }
+            _ => None,
+        }) {
+            // A `List[<recursive-drop record>]` arg temp — `$__drop_list_<R>` (the
+            // bind-site route, mirrored; the flat fallback leaked each element's
+            // String fields — the krec-unique residue).
+            self.variant_drop_handles.insert(dst, format!("list_{rname}"));
+            return;
+        }
+        if matches!(ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
+                if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
+        {
+            // `Map[String, <scalar>]` arg temp — the key-slot sweep (split layout, @4 = n),
+            // mirroring the bind-site fix; the flat fallback leaked every key copy.
+            self.heap_elem_lists.insert(dst);
+            return;
+        }
+        if crate::lower::is_heap_elem_list_ty(ty) {
+            self.heap_elem_lists.insert(dst);
+        }
+    }
+
     /// Register a freshly-materialized call-result temp used as a call argument: a
     /// HEAP temp is BORROWED into the call (`Handle`) and added to the scope-end
     /// drop set (it is owned by THIS scope, not moved out, so it is released after
@@ -1307,54 +1396,7 @@ impl LowerCtx {
             // (A Result[Value,String]'s Ok Value is CO-OWNED — value.get Dup's the object's slot, which
             // keeps its ref — so the flat rc_dec drop is correct there; a recursive free would
             // double-free the still-referenced slot. So only the list case is reclassified here.)
-            if crate::lower::is_result_listval_ty(ty) {
-                self.value_result_lists.insert(dst);
-            } else if crate::lower::is_list_list_str_ty(ty) {
-                self.list_list_str_lists.insert(dst);
-            } else if crate::lower::is_list_str_str_ty(ty) {
-                // `List[(String,String)]` (map.entries) arg temp — DropListStrStr frees each tuple's
-                // two Strings; the flat heap_elem_lists fallback would leak them.
-                self.str_str_elem_lists.insert(dst);
-            } else if crate::lower::is_lenlist_list_ty(ty) {
-                self.variant_drop_handles.insert(dst, "list_lenlist".to_string());
-            } else if crate::lower::is_map_fn_ty(ty) {
-                // `Map[String, <Fn>]` arg temp — `$__drop_map_mclo` frees each value via
-                // `__drop_closure` (a flat sweep would leak every captured env slot).
-                self.variant_drop_handles.insert(dst, "map_mclo".to_string());
-            } else if let Some(hname) = self.map_named_value_drop(ty) {
-                self.variant_drop_handles.insert(dst, hname);
-            } else if crate::lower::is_map_msv_ty(ty) {
-                // `Map[String, Map[String, String]]` arg temp (the inline nested-map literal
-                // fed straight to `map.get_or` — map_fold_heap_acc's r7): `$__drop_map_msv`
-                // sweeps each last-ref inner map; the flat fallback leaked the whole nested
-                // map per iteration (loop OOM).
-                self.variant_drop_handles.insert(dst, "map_msv".to_string());
-            } else if crate::lower::is_map_mlo_ty(ty) {
-                // `Map[String, List[Option[Int]]]` arg temp — `$__drop_map_mlo` (the
-                // bind-site route, mirrored; the flat fallback would leak the value lists).
-                self.variant_drop_handles.insert(dst, "map_mlo".to_string());
-            } else if let Some(rname) = (match ty {
-                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                    if a.len() == 1 =>
-                {
-                    self.record_or_anon_drop_type_name(&a[0])
-                }
-                _ => None,
-            }) {
-                // A `List[<recursive-drop record>]` arg temp — `$__drop_list_<R>` (the
-                // bind-site route, mirrored; the flat fallback leaked each element's
-                // String fields — the krec-unique residue).
-                self.variant_drop_handles.insert(dst, format!("list_{rname}"));
-            } else if matches!(ty,
-                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, a)
-                    if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
-            {
-                // `Map[String, <scalar>]` arg temp — the key-slot sweep (split layout, @4 = n),
-                // mirroring the bind-site fix; the flat fallback leaked every key copy.
-                self.heap_elem_lists.insert(dst);
-            } else if crate::lower::is_heap_elem_list_ty(ty) {
-                self.heap_elem_lists.insert(dst);
-            }
+            self.classify_call_arg_drop(dst, ty);
             // A `Value` call-argument temp (`f(value.array([…]))`, `f(value.str(s))`) drops via the
             // runtime-tag-dispatched `Op::DropValue` (recursive — an Array frees its element Values, a
             // Str its String), NOT a flat `Op::Drop` (which would leak the nested payload). Without
