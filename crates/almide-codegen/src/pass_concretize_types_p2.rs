@@ -25,51 +25,36 @@ impl<'a> Concretizer<'a> {
     fn pin_from_list_arg_elem(&mut self, ret: &Ty, value: &mut IrExpr) {
         use almide_lang::types::constructor::TypeConstructorId as TCI;
         if ret.has_unresolved_deep() { return; }
-        // `map.from_list` canonicalizes to `map.from_entries`, and by the WASM
-        // emit passes it is a `RuntimeCall` (`almide_rt_map_from_entries`), not a
-        // `Module` call — match both forms for each module (set keeps `from_list`).
-        let from_list_kind = |module: &str, func: &str| -> (bool, bool) {
-            let fl = func == "from_list" || func == "from_entries";
-            (module == "map" && fl, module == "set" && fl)
-        };
-        let (is_map, is_set) = match &value.kind {
-            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } =>
-                from_list_kind(module.as_str(), func.as_str()),
-            IrExprKind::RuntimeCall { symbol, .. } => {
-                let s = symbol.as_str();
-                (s.contains("map_from_entries") || s.contains("map_from_list"),
-                 s.contains("set_from_entries") || s.contains("set_from_list"))
-            }
-            _ => return,
-        };
-        let elem = if is_map {
-            match ret { Ty::Applied(TCI::Map, kv) if kv.len() == 2 => Ty::Tuple(vec![kv[0].clone(), kv[1].clone()]), _ => return }
-        } else if is_set {
-            match ret { Ty::Applied(TCI::Set, e) if e.len() == 1 => e[0].clone(), _ => return }
-        } else { return };
+        let (is_map, is_set) = detect_from_list_call_kind(value);
+        let Some(elem) = from_list_elem_ty(ret, is_map, is_set) else { return };
         let list_ty = Ty::Applied(TCI::List, vec![elem]);
         let args = match &mut value.kind {
             IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => args,
             _ => return,
         };
-        {
-            if args.len() != 1 || !args[0].ty.has_unresolved_deep() { return; }
-            propagate_expected_ty(&mut args[0], &list_ty);
-            // Walk through wrappers to the Var, pinning each ty and the VarTable.
-            let mut node = &mut args[0];
-            loop {
-                if node.ty.has_unresolved_deep() { node.ty = list_ty.clone(); }
-                match &mut node.kind {
-                    IrExprKind::Borrow { expr, .. } | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } => node = expr,
-                    IrExprKind::Var { id } => {
-                        let i = id.0 as usize;
-                        if i < self.vt.entries.len() && self.vt.entries[i].ty.has_unresolved_deep() {
-                            self.vt.entries[i].ty = list_ty.clone();
-                        }
-                        break;
+        if args.len() != 1 || !args[0].ty.has_unresolved_deep() { return; }
+        propagate_expected_ty(&mut args[0], &list_ty);
+        self.pin_list_ty_through_wrappers(&mut args[0], &list_ty);
+    }
+
+    /// `pin_from_list_arg_elem` step: walk through `Borrow`/`Clone`/`Deref`
+    /// wrappers to the underlying `Var`, pinning each node's `ty` and (for
+    /// the `Var`) its VarTable entry to `list_ty` — extracted verbatim
+    /// (cog>25 decomposition).
+    fn pin_list_ty_through_wrappers(&mut self, arg: &mut IrExpr, list_ty: &Ty) {
+        let mut node = arg;
+        loop {
+            if node.ty.has_unresolved_deep() { node.ty = list_ty.clone(); }
+            match &mut node.kind {
+                IrExprKind::Borrow { expr, .. } | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } => node = expr,
+                IrExprKind::Var { id } => {
+                    let i = id.0 as usize;
+                    if i < self.vt.entries.len() && self.vt.entries[i].ty.has_unresolved_deep() {
+                        self.vt.entries[i].ty = list_ty.clone();
                     }
-                    _ => break,
+                    break;
                 }
+                _ => break,
             }
         }
     }
@@ -316,6 +301,44 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
     }
 }
 
+/// `pin_from_list_arg_elem` step: identify whether `value` is a
+/// `map.from_list`/`map.from_entries` or `set.from_list`/`set.from_entries`
+/// call, returning `(is_map, is_set)`. `map.from_list` canonicalizes to
+/// `map.from_entries`, and by the WASM emit passes it is a `RuntimeCall`
+/// (`almide_rt_map_from_entries`), not a `Module` call — match both forms
+/// for each module (set keeps `from_list`). Extracted verbatim (cog>25
+/// decomposition).
+fn detect_from_list_call_kind(value: &IrExpr) -> (bool, bool) {
+    match &value.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
+            let fl = func.as_str() == "from_list" || func.as_str() == "from_entries";
+            (module.as_str() == "map" && fl, module.as_str() == "set" && fl)
+        }
+        IrExprKind::RuntimeCall { symbol, .. } => {
+            let s = symbol.as_str();
+            (s.contains("map_from_entries") || s.contains("map_from_list"),
+             s.contains("set_from_entries") || s.contains("set_from_list"))
+        }
+        _ => (false, false),
+    }
+}
+
+/// `pin_from_list_arg_elem` step: compute the empty-list arg's element type
+/// from the call's resolved return type, given which of `map`/`set` it is
+/// (from `detect_from_list_call_kind`). `None` when `ret` isn't the
+/// expected `Map`/`Set` shape, or when neither flag is set. Extracted
+/// verbatim (cog>25 decomposition).
+fn from_list_elem_ty(ret: &Ty, is_map: bool, is_set: bool) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    if is_map {
+        match ret { Ty::Applied(TCI::Map, kv) if kv.len() == 2 => Some(Ty::Tuple(vec![kv[0].clone(), kv[1].clone()])), _ => None }
+    } else if is_set {
+        match ret { Ty::Applied(TCI::Set, e) if e.len() == 1 => Some(e[0].clone()), _ => None }
+    } else {
+        None
+    }
+}
+
 // ── Resolution logic ───────────────────────────────────────────────
 
 /// Infer a lambda param's type by scanning how it's used in the body.
@@ -439,7 +462,20 @@ fn resolve_map_access_ty(object: &IrExpr, vt: &VarTable) -> Option<Ty> {
     } else { None }
 }
 
+/// `resolve_node_ty` router (cog>25 decomposition, second round): each
+/// `resolve_node_ty_*` group already ends in its own `_ => None`, so trying
+/// them in sequence via `or_else` is behavior-preserving — a group that
+/// doesn't own `expr`'s variant just falls through its own catch-all to
+/// `None`, same as the original single match's `_ => None` would have.
 fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Option<Ty> {
+    resolve_node_ty_access(expr, vt, symbols)
+        .or_else(|| resolve_node_ty_control(expr, vt))
+        .or_else(|| resolve_node_ty_container(expr, vt, symbols))
+}
+
+/// `resolve_node_ty` group: variable/path access nodes (Var, EnvLoad,
+/// TupleIndex, Member, IndexAccess, MapAccess, SpreadRecord).
+fn resolve_node_ty_access(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Option<Ty> {
     match &expr.kind {
         IrExprKind::Var { id } => if_concrete(&vt.get(*id).ty),
         IrExprKind::EnvLoad { env_var, .. } => if_concrete(&vt.get(*env_var).ty),
@@ -450,6 +486,26 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
             } else { None }
         }
         IrExprKind::Member { object, field } => resolve_member_ty(object, field, vt, symbols),
+        IrExprKind::IndexAccess { object, .. } => resolve_index_access_ty(object, vt),
+        // MapAccess: Map[K,V] → Option[V]
+        IrExprKind::MapAccess { object, .. } => resolve_map_access_ty(object, vt),
+        // A spread copies its base's record type — the checker's own rule
+        // (infer's SpreadRecord = base passthrough). Without this arm a
+        // cross-module spread base whose type lands late (module top-lets
+        // are checked AFTER main) bottomed out at `_ => None` and was
+        // refused by the AllTypesConcrete gate (#502).
+        IrExprKind::SpreadRecord { base, .. } => {
+            let base_ty = effective_ty(base, vt);
+            if !base_ty.has_unresolved_deep() { Some(base_ty) } else { None }
+        }
+        _ => None,
+    }
+}
+
+/// `resolve_node_ty` group: control-flow / operator / literal nodes (BinOp,
+/// UnOp, Block, If, Match, Lambda, literals, StringInterp).
+fn resolve_node_ty_control(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
+    match &expr.kind {
         IrExprKind::BinOp { op, left, right } => {
             op.result_ty().or_else(|| if_concrete(&left.ty).or_else(|| if_concrete(&right.ty)))
         }
@@ -461,7 +517,25 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
             arms.iter().find_map(|arm| if_concrete(&arm.body.ty))
         }
         IrExprKind::Lambda { params, body, .. } => resolve_lambda_ty(params, body),
-        IrExprKind::IndexAccess { object, .. } => resolve_index_access_ty(object, vt),
+        IrExprKind::LitInt { .. } => Some(Ty::Int),
+        IrExprKind::LitFloat { .. } => Some(Ty::Float),
+        IrExprKind::LitBool { .. } => Some(Ty::Bool),
+        IrExprKind::LitStr { .. } => Some(Ty::String),
+        IrExprKind::Unit => Some(Ty::Unit),
+        // StringInterp always produces String
+        IrExprKind::StringInterp { .. } => Some(Ty::String),
+        _ => {
+            let _ = vt; // kept for signature symmetry with the other groups
+            None
+        }
+    }
+}
+
+/// `resolve_node_ty` group: container / layout-transparent-wrapper / call
+/// nodes (List, Tuple, OptionSome, Clone, Deref/BoxNew/ToVec/Borrow/Await,
+/// Range, ResultOk, Call, RuntimeCall).
+fn resolve_node_ty_container(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Option<Ty> {
+    match &expr.kind {
         IrExprKind::List { elements } => {
             // List[T] where T = first element's type
             elements.first()
@@ -478,13 +552,6 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
         // payloads built from pattern-bound names).
         IrExprKind::OptionSome { expr } => if_concrete(&expr.ty)
             .map(|t| Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, vec![t])),
-        IrExprKind::LitInt { .. } => Some(Ty::Int),
-        IrExprKind::LitFloat { .. } => Some(Ty::Float),
-        IrExprKind::LitBool { .. } => Some(Ty::Bool),
-        IrExprKind::LitStr { .. } => Some(Ty::String),
-        IrExprKind::Unit => Some(Ty::Unit),
-        // StringInterp always produces String
-        IrExprKind::StringInterp { .. } => Some(Ty::String),
         // Clone preserves the inner type
         IrExprKind::Clone { expr } => if_concrete(&expr.ty),
         // Layout-transparent codegen wrappers: the node's value type is the
@@ -504,8 +571,6 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
         IrExprKind::Range { .. } => Some(Ty::Applied(
             almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Int],
         )),
-        // MapAccess: Map[K,V] → Option[V]
-        IrExprKind::MapAccess { object, .. } => resolve_map_access_ty(object, vt),
         // ResultOk wraps in Result[T, E]
         IrExprKind::ResultOk { expr } => if_concrete(&expr.ty)
             .map(|t| Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, vec![t, Ty::String])),
@@ -518,15 +583,6 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
             // firing for post-lowering shape.
             let target = CallTarget::Named { name: *symbol };
             resolve_call_ret_ty(&target, args, vt, symbols)
-        }
-        // A spread copies its base's record type — the checker's own rule
-        // (infer's SpreadRecord = base passthrough). Without this arm a
-        // cross-module spread base whose type lands late (module top-lets
-        // are checked AFTER main) bottomed out at `_ => None` and was
-        // refused by the AllTypesConcrete gate (#502).
-        IrExprKind::SpreadRecord { base, .. } => {
-            let base_ty = effective_ty(base, vt);
-            if !base_ty.has_unresolved_deep() { Some(base_ty) } else { None }
         }
         _ => None,
     }

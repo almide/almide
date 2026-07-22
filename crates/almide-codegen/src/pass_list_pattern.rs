@@ -329,6 +329,99 @@ fn build_list_if_chain_list_pattern(
 /// `IrPattern::Tuple { .. }` (containing a list pattern) case of
 /// `build_list_if_chain`, extracted verbatim. Extract conditions for list
 /// elements within the tuple.
+/// `build_list_if_chain_tuple_pattern` per-element loop body: for tuple
+/// element `i` matched against `elem_pat`, push a length-check condition
+/// (and inner-element binds) onto `conds`/`stmts` for a `List` sub-pattern,
+/// or a single bind for a `Bind` sub-pattern. `conds`/`stmts` are
+/// write-only accumulators shared across all elements — extracted verbatim
+/// (cog>20 decomposition, same safety class as `check_needs_ownership`'s
+/// `needs`).
+fn process_tuple_element_pattern(
+    subject: &IrExpr,
+    elem_pat: &IrPattern,
+    i: usize,
+    tuple_tys: &[Ty],
+    conds: &mut Vec<IrExpr>,
+    stmts: &mut Vec<IrStmt>,
+) {
+    let elem_access = IrExpr {
+        kind: IrExprKind::TupleIndex {
+            object: Box::new(subject.clone()),
+            index: i,
+        },
+        ty: tuple_tys.get(i).cloned().unwrap_or(Ty::Unknown),
+        span: None, def_id: None,
+    };
+    match elem_pat {
+        IrPattern::List { elements: list_elems } => {
+            // Length check
+            let len_call = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module { module: sym("list"), func: sym("len"), def_id: None },
+                    args: vec![elem_access.clone()],
+                    type_args: vec![],
+                },
+                ty: Ty::Int,
+                span: None, def_id: None,
+            };
+            conds.push(IrExpr {
+                kind: IrExprKind::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(len_call),
+                    right: Box::new(IrExpr {
+                        kind: IrExprKind::LitInt { value: list_elems.len() as i64 },
+                        ty: Ty::Int,
+                        span: None, def_id: None,
+                    }),
+                },
+                ty: Ty::Bool,
+                span: None, def_id: None,
+            });
+            // Bind list elements
+            let inner_elem_ty = match tuple_tys.get(i) {
+                Some(Ty::Applied(TypeConstructorId::List, args)) if !args.is_empty() => args[0].clone(),
+                _ => Ty::Unknown,
+            };
+            for (j, lp) in list_elems.iter().enumerate() {
+                if let IrPattern::Bind { var, .. } = lp {
+                    stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: *var,
+                            mutability: Mutability::Let,
+                            ty: inner_elem_ty.clone(),
+                            value: IrExpr {
+                                kind: IrExprKind::IndexAccess {
+                                    object: Box::new(elem_access.clone()),
+                                    index: Box::new(IrExpr {
+                                        kind: IrExprKind::LitInt { value: j as i64 },
+                                        ty: Ty::Int,
+                                        span: None, def_id: None,
+                                    }),
+                                },
+                                ty: inner_elem_ty.clone(),
+                                span: None, def_id: None,
+                            },
+                        },
+                        span: None,
+                    });
+                }
+            }
+        }
+        IrPattern::Bind { var, .. } => {
+            stmts.push(IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: *var,
+                    mutability: Mutability::Let,
+                    ty: tuple_tys.get(i).cloned().unwrap_or(Ty::Unknown),
+                    value: elem_access,
+                },
+                span: None,
+            });
+        }
+        _ => {} // Wildcard — no action
+    }
+}
+
 fn build_list_if_chain_tuple_pattern(
     subject: &IrExpr,
     elements: &[IrPattern],
@@ -345,82 +438,7 @@ fn build_list_if_chain_tuple_pattern(
             let mut stmts: Vec<IrStmt> = Vec::new();
 
             for (i, elem_pat) in elements.iter().enumerate() {
-                let elem_access = IrExpr {
-                    kind: IrExprKind::TupleIndex {
-                        object: Box::new(subject.clone()),
-                        index: i,
-                    },
-                    ty: tuple_tys.get(i).cloned().unwrap_or(Ty::Unknown),
-                    span: None, def_id: None,
-                };
-                match elem_pat {
-                    IrPattern::List { elements: list_elems } => {
-                        // Length check
-                        let len_call = IrExpr {
-                            kind: IrExprKind::Call {
-                                target: CallTarget::Module { module: sym("list"), func: sym("len"), def_id: None },
-                                args: vec![elem_access.clone()],
-                                type_args: vec![],
-                            },
-                            ty: Ty::Int,
-                            span: None, def_id: None,
-                        };
-                        conds.push(IrExpr {
-                            kind: IrExprKind::BinOp {
-                                op: BinOp::Eq,
-                                left: Box::new(len_call),
-                                right: Box::new(IrExpr {
-                                    kind: IrExprKind::LitInt { value: list_elems.len() as i64 },
-                                    ty: Ty::Int,
-                                    span: None, def_id: None,
-                                }),
-                            },
-                            ty: Ty::Bool,
-                            span: None, def_id: None,
-                        });
-                        // Bind list elements
-                        let inner_elem_ty = match tuple_tys.get(i) {
-                            Some(Ty::Applied(TypeConstructorId::List, args)) if !args.is_empty() => args[0].clone(),
-                            _ => Ty::Unknown,
-                        };
-                        for (j, lp) in list_elems.iter().enumerate() {
-                            if let IrPattern::Bind { var, .. } = lp {
-                                stmts.push(IrStmt {
-                                    kind: IrStmtKind::Bind {
-                                        var: *var,
-                                        mutability: Mutability::Let,
-                                        ty: inner_elem_ty.clone(),
-                                        value: IrExpr {
-                                            kind: IrExprKind::IndexAccess {
-                                                object: Box::new(elem_access.clone()),
-                                                index: Box::new(IrExpr {
-                                                    kind: IrExprKind::LitInt { value: j as i64 },
-                                                    ty: Ty::Int,
-                                                    span: None, def_id: None,
-                                                }),
-                                            },
-                                            ty: inner_elem_ty.clone(),
-                                            span: None, def_id: None,
-                                        },
-                                    },
-                                    span: None,
-                                });
-                            }
-                        }
-                    }
-                    IrPattern::Bind { var, .. } => {
-                        stmts.push(IrStmt {
-                            kind: IrStmtKind::Bind {
-                                var: *var,
-                                mutability: Mutability::Let,
-                                ty: tuple_tys.get(i).cloned().unwrap_or(Ty::Unknown),
-                                value: elem_access,
-                            },
-                            span: None,
-                        });
-                    }
-                    _ => {} // Wildcard — no action
-                }
+                process_tuple_element_pattern(subject, elem_pat, i, &tuple_tys, &mut conds, &mut stmts);
             }
 
             // Combine conditions
