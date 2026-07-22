@@ -102,23 +102,10 @@ fn span_contains(span: &crate::ast::Span, line: u32, col: u32) -> bool {
     sl == line + 1 && col >= sc && col < ec
 }
 
-fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
-    let source = &doc.source;
-    let lines: Vec<&str> = source.lines().collect();
-    let line_text = lines.get(line as usize)?;
-    let col_usize = col as usize;
-    if col_usize >= line_text.len() { return None; }
-
-    // Extract word at cursor
-    let start = line_text[..col_usize].rfind(|c: char| !c.is_alphanumeric() && c != '_')
-        .map(|i| i + 1).unwrap_or(0);
-    let end = col_usize + line_text[col_usize..].find(|c: char| !c.is_alphanumeric() && c != '_')
-        .unwrap_or(line_text.len() - col_usize);
-    let word = &line_text[start..end];
-    if word.is_empty() { return None; }
-
-    // 1. Keywords
-    let kw = match word {
+/// Step 1 of `find_node`: language keyword hover info. Extracted verbatim —
+/// a pure lookup table with no shared state.
+fn lookup_keyword_info(word: &str) -> Option<&'static str> {
+    match word {
         "fn" => Some("Function declaration"),
         "let" => Some("Immutable binding"),
         "var" => Some("Mutable binding"),
@@ -142,13 +129,13 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
         "assert" => Some("Test assertion: `assert(condition)` — fails the test if false"),
         "assert_eq" => Some("Test assertion: `assert_eq(actual, expected)` — fails if not equal"),
         _ => None,
-    };
-    if let Some(info) = kw {
-        return Some(Located::Keyword { info });
     }
+}
 
-    // 1b. Primitive / built-in types
-    let builtin = match word {
+/// Step 1b of `find_node`: primitive/built-in type hover info. Extracted
+/// verbatim — a pure lookup table with no shared state.
+fn lookup_builtin_type_info(word: &str) -> Option<&'static str> {
+    match word {
         "Int" => Some("64-bit signed integer"),
         "Float" => Some("64-bit floating point (IEEE 754)"),
         "String" => Some("UTF-8 string (immutable, reference-counted)"),
@@ -161,12 +148,12 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
         "Option" => Some("Optional value: `Option[T]` = `Some(T)` | `None`"),
         "Result" => Some("Success or failure: `Result[T, E]` = `Ok(T)` | `Err(E)`"),
         _ => None,
-    };
-    if let Some(info) = builtin {
-        return Some(Located::Keyword { info });
     }
+}
 
-    // 2. module.func — cursor on module name
+/// Step 2 of `find_node`: cursor is on the module name of `module.func`.
+/// Extracted verbatim — reads only its parameters.
+fn find_stdlib_call_on_module(line_text: &str, word: &str, end: usize) -> Option<Located> {
     if end < line_text.len() && line_text.as_bytes()[end] == b'.' {
         let func_start = end + 1;
         let func_end = func_start + line_text[func_start..].find(|c: char| !c.is_alphanumeric() && c != '_' && c != '?').unwrap_or(line_text.len() - func_start);
@@ -176,8 +163,12 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             return Some(Located::StdlibCall { module: word.to_string(), func: func.to_string(), params, ret: sig.ret.display().to_string() });
         }
     }
+    None
+}
 
-    // 3. module.func — cursor on func name
+/// Step 3 of `find_node`: cursor is on the func name of `module.func`.
+/// Extracted verbatim — reads only its parameters.
+fn find_stdlib_call_on_func(line_text: &str, word: &str, start: usize) -> Option<Located> {
     if start > 0 && line_text.as_bytes()[start - 1] == b'.' {
         let mod_end = start - 1;
         let mod_start = line_text[..mod_end].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
@@ -189,11 +180,11 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             }
         }
     }
+    None
+}
 
-    // 4. AST-based lookup — walk declarations
-    let sym = crate::intern::sym(word);
-
-    // 4a. Variant constructors
+/// Step 4a of `find_node`: variant constructor lookup. Extracted verbatim.
+fn find_variant_constructor(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
     for decl in &doc.program.decls {
         if let crate::ast::Decl::Type { name: type_name, ty: crate::ast::TypeExpr::Variant { cases }, .. } = decl {
             for case in cases {
@@ -212,8 +203,12 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             }
         }
     }
+    None
+}
 
-    // 4b. Type declarations — show variants/fields
+/// Step 4b of `find_node`: type declaration hover (shows variants/fields).
+/// Extracted verbatim.
+fn find_type_decl(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
     for decl in &doc.program.decls {
         if let crate::ast::Decl::Type { name, ty, .. } = decl {
             if name.as_str() == word {
@@ -236,19 +231,26 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             }
         }
     }
+    None
+}
 
-    // 4c. Function declarations
-    if let Some(sig) = doc.checker.env.functions.get(&sym) {
-        let params = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
-        return Some(Located::FnDecl { name: word.to_string(), params, ret: sig.ret.display().to_string() });
-    }
+/// Step 4c (function half) of `find_node`. Extracted verbatim.
+fn find_fn_decl(doc: &AnalyzedDoc, word: &str, sym: &crate::intern::Sym) -> Option<Located> {
+    let sig = doc.checker.env.functions.get(sym)?;
+    let params = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
+    Some(Located::FnDecl { name: word.to_string(), params, ret: sig.ret.display().to_string() })
+}
 
-    // 4c. Top-level lets
-    if let Some(ty) = doc.checker.env.top_lets.get(&sym) {
-        return Some(Located::TopLet { name: word.to_string(), ty: ty.display().to_string() });
-    }
+/// Step 4c (top-level-let half) of `find_node`. Extracted verbatim.
+fn find_top_let(doc: &AnalyzedDoc, word: &str, sym: &crate::intern::Sym) -> Option<Located> {
+    let ty = doc.checker.env.top_lets.get(sym)?;
+    Some(Located::TopLet { name: word.to_string(), ty: ty.display().to_string() })
+}
 
-    // 4d. Function parameters — check if cursor is inside a fn body
+/// Step 4d of `find_node`: function-parameter lookup (cursor inside a fn
+/// body, heuristically within ~100 lines of its declaration). Extracted
+/// verbatim.
+fn find_fn_param(doc: &AnalyzedDoc, word: &str, line: u32) -> Option<Located> {
     for decl in &doc.program.decls {
         if let crate::ast::Decl::Fn { params, span, .. } = decl {
             let fn_line = span.as_ref().map(|s| s.line as u32).unwrap_or(0);
@@ -265,15 +267,85 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
             }
         }
     }
+    None
+}
 
-    // 4e. ExprId-based type lookup — walk expressions to find matching Ident
+/// Step 4e of `find_node`: ExprId-based type lookup by walking expressions
+/// for a matching `Ident`. Extracted verbatim.
+fn find_user_ident(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
     for decl in &doc.program.decls {
         if let Some(ty) = find_expr_type_by_name(&doc.program, decl, word, &doc.checker.type_map) {
             return Some(Located::UserIdent { name: word.to_string(), ty: ty.display().to_string() });
         }
     }
-
     None
+}
+
+fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
+    let source = &doc.source;
+    let lines: Vec<&str> = source.lines().collect();
+    let line_text = lines.get(line as usize)?;
+    let col_usize = col as usize;
+    if col_usize >= line_text.len() { return None; }
+
+    // Extract word at cursor
+    let start = line_text[..col_usize].rfind(|c: char| !c.is_alphanumeric() && c != '_')
+        .map(|i| i + 1).unwrap_or(0);
+    let end = col_usize + line_text[col_usize..].find(|c: char| !c.is_alphanumeric() && c != '_')
+        .unwrap_or(line_text.len() - col_usize);
+    let word = &line_text[start..end];
+    if word.is_empty() { return None; }
+
+    // 1. Keywords
+    if let Some(info) = lookup_keyword_info(word) {
+        return Some(Located::Keyword { info });
+    }
+
+    // 1b. Primitive / built-in types
+    if let Some(info) = lookup_builtin_type_info(word) {
+        return Some(Located::Keyword { info });
+    }
+
+    // 2. module.func — cursor on module name
+    if let Some(loc) = find_stdlib_call_on_module(line_text, word, end) {
+        return Some(loc);
+    }
+
+    // 3. module.func — cursor on func name
+    if let Some(loc) = find_stdlib_call_on_func(line_text, word, start) {
+        return Some(loc);
+    }
+
+    // 4. AST-based lookup — walk declarations
+    let sym = crate::intern::sym(word);
+
+    // 4a. Variant constructors
+    if let Some(loc) = find_variant_constructor(doc, word) {
+        return Some(loc);
+    }
+
+    // 4b. Type declarations — show variants/fields
+    if let Some(loc) = find_type_decl(doc, word) {
+        return Some(loc);
+    }
+
+    // 4c. Function declarations
+    if let Some(loc) = find_fn_decl(doc, word, &sym) {
+        return Some(loc);
+    }
+
+    // 4c. Top-level lets
+    if let Some(loc) = find_top_let(doc, word, &sym) {
+        return Some(loc);
+    }
+
+    // 4d. Function parameters — check if cursor is inside a fn body
+    if let Some(loc) = find_fn_param(doc, word, line) {
+        return Some(loc);
+    }
+
+    // 4e. ExprId-based type lookup — walk expressions to find matching Ident
+    find_user_ident(doc, word)
 }
 
 fn find_expr_type_by_name(
