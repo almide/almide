@@ -48,56 +48,6 @@ pub struct Block {
 pub fn compute_use_counts(module: &Module) -> std::collections::HashMap<ValueId, usize> {
     let mut counts: std::collections::HashMap<ValueId, usize> = std::collections::HashMap::new();
 
-    fn count_in_blocks(blocks: &[Block], counts: &mut std::collections::HashMap<ValueId, usize>) {
-        for block in blocks {
-            for op in &block.ops {
-                count_in_op(&op.kind, counts);
-            }
-            match &block.terminator {
-                ops::Terminator::Yield(v) | ops::Terminator::Return(v) => { *counts.entry(*v).or_default() += 1; }
-                ops::Terminator::CondBranch { cond, .. } => { *counts.entry(*cond).or_default() += 1; }
-                ops::Terminator::Branch(_, args) => { for a in args { *counts.entry(*a).or_default() += 1; } }
-                _ => {}
-            }
-        }
-    }
-
-    fn count_in_op(kind: &ops::OpKind, counts: &mut std::collections::HashMap<ValueId, usize>) {
-        use ops::OpKind::*;
-        match kind {
-            BinOp { lhs, rhs, .. } => { *counts.entry(*lhs).or_default() += 1; *counts.entry(*rhs).or_default() += 1; }
-            UnOp { operand, .. } => { *counts.entry(*operand).or_default() += 1; }
-            CallOp { args, .. } | IntrinsicCallOp { args, .. } => { for a in args { *counts.entry(*a).or_default() += 1; } }
-            IfOp { cond, then_region, else_region } => {
-                *counts.entry(*cond).or_default() += 1;
-                count_in_blocks(then_region, counts);
-                count_in_blocks(else_region, counts);
-            }
-            MatchOp { subject, arms } => {
-                *counts.entry(*subject).or_default() += 1;
-                for arm in arms { count_in_blocks(&arm.body, counts); }
-            }
-            ListOp { elements } | TupleOp { elements } => { for e in elements { *counts.entry(*e).or_default() += 1; } }
-            MapOp { entries } => { for (k, v) in entries { *counts.entry(*k).or_default() += 1; *counts.entry(*v).or_default() += 1; } }
-            RecordOp { fields, .. } => { for (_, v) in fields { *counts.entry(*v).or_default() += 1; } }
-            MemberOp { object, .. } | TupleIndexOp { object, .. } => { *counts.entry(*object).or_default() += 1; }
-            IndexOp { object, index } | MapAccessOp { object, key: index } => {
-                *counts.entry(*object).or_default() += 1; *counts.entry(*index).or_default() += 1;
-            }
-            ResultOkOp { value } | ResultErrOp { value } | OptionSomeOp { value }
-            | TryOp { value } | UnwrapOp { value } => { *counts.entry(*value).or_default() += 1; }
-            UnwrapOrOp { value, fallback } => { *counts.entry(*value).or_default() += 1; *counts.entry(*fallback).or_default() += 1; }
-            AllocVar { init, .. } => { *counts.entry(*init).or_default() += 1; }
-            LoadVar { slot } => { *counts.entry(*slot).or_default() += 1; }
-            StoreVar { slot, value } => { *counts.entry(*slot).or_default() += 1; *counts.entry(*value).or_default() += 1; }
-            LambdaOp { body, .. } => { count_in_blocks(body, counts); }
-            FanOp { regions } => { for r in regions { count_in_blocks(r, counts); } }
-            ForOp { iterable, body, .. } => { *counts.entry(*iterable).or_default() += 1; count_in_blocks(body, counts); }
-            WhileOp { cond_region, body } => { count_in_blocks(cond_region, counts); count_in_blocks(body, counts); }
-            _ => {}
-        }
-    }
-
     for f in &module.functions {
         count_in_blocks(&f.body, &mut counts);
     }
@@ -105,6 +55,100 @@ pub fn compute_use_counts(module: &Module) -> std::collections::HashMap<ValueId,
         count_in_blocks(&g.init, &mut counts);
     }
     counts
+}
+
+fn count_in_blocks(blocks: &[Block], counts: &mut std::collections::HashMap<ValueId, usize>) {
+    for block in blocks {
+        for op in &block.ops {
+            count_in_op(&op.kind, counts);
+        }
+        match &block.terminator {
+            ops::Terminator::Yield(v) | ops::Terminator::Return(v) => { *counts.entry(*v).or_default() += 1; }
+            ops::Terminator::CondBranch { cond, .. } => { *counts.entry(*cond).or_default() += 1; }
+            ops::Terminator::Branch(_, args) => { for a in args { *counts.entry(*a).or_default() += 1; } }
+            _ => {}
+        }
+    }
+}
+
+/// Count ValueId references produced by a single op: dispatch to the
+/// non-recursive group (records direct refs only) or the region-recursive
+/// group (records direct refs, then walks nested blocks).
+fn count_in_op(kind: &ops::OpKind, counts: &mut std::collections::HashMap<ValueId, usize>) {
+    use ops::OpKind::*;
+    match kind {
+        BinOp { .. } | UnOp { .. } | CallOp { .. } | IntrinsicCallOp { .. }
+        | ListOp { .. } | TupleOp { .. } | MapOp { .. } | RecordOp { .. }
+        | MemberOp { .. } | TupleIndexOp { .. } | IndexOp { .. } | MapAccessOp { .. }
+        | ResultOkOp { .. } | ResultErrOp { .. } | OptionSomeOp { .. } | TryOp { .. }
+        | UnwrapOp { .. } | UnwrapOrOp { .. } | AllocVar { .. } | LoadVar { .. } | StoreVar { .. } =>
+            count_in_op_scalar(kind, counts),
+        IfOp { .. } | MatchOp { .. } | LambdaOp { .. } | FanOp { .. } | ForOp { .. } | WhileOp { .. } =>
+            count_in_op_recursive(kind, counts),
+        _ => {}
+    }
+}
+
+fn count_in_op_scalar(kind: &ops::OpKind, counts: &mut std::collections::HashMap<ValueId, usize>) {
+    use ops::OpKind::*;
+    match kind {
+        CallOp { .. } | IntrinsicCallOp { .. } | ListOp { .. } | TupleOp { .. }
+        | MapOp { .. } | RecordOp { .. } => count_in_op_scalar_collection(kind, counts),
+        _ => count_in_op_scalar_refs(kind, counts),
+    }
+}
+
+/// Scalar op kinds whose ValueId references live in `Vec`/list-like fields —
+/// each needs a loop to walk.
+fn count_in_op_scalar_collection(kind: &ops::OpKind, counts: &mut std::collections::HashMap<ValueId, usize>) {
+    use ops::OpKind::*;
+    match kind {
+        CallOp { args, .. } | IntrinsicCallOp { args, .. } => { for a in args { *counts.entry(*a).or_default() += 1; } }
+        ListOp { elements } | TupleOp { elements } => { for e in elements { *counts.entry(*e).or_default() += 1; } }
+        MapOp { entries } => { for (k, v) in entries { *counts.entry(*k).or_default() += 1; *counts.entry(*v).or_default() += 1; } }
+        RecordOp { fields, .. } => { for (_, v) in fields { *counts.entry(*v).or_default() += 1; } }
+        _ => {}
+    }
+}
+
+/// Scalar op kinds whose ValueId references are direct fields (no loop needed).
+fn count_in_op_scalar_refs(kind: &ops::OpKind, counts: &mut std::collections::HashMap<ValueId, usize>) {
+    use ops::OpKind::*;
+    match kind {
+        BinOp { lhs, rhs, .. } => { *counts.entry(*lhs).or_default() += 1; *counts.entry(*rhs).or_default() += 1; }
+        UnOp { operand, .. } => { *counts.entry(*operand).or_default() += 1; }
+        MemberOp { object, .. } | TupleIndexOp { object, .. } => { *counts.entry(*object).or_default() += 1; }
+        IndexOp { object, index } | MapAccessOp { object, key: index } => {
+            *counts.entry(*object).or_default() += 1; *counts.entry(*index).or_default() += 1;
+        }
+        ResultOkOp { value } | ResultErrOp { value } | OptionSomeOp { value }
+        | TryOp { value } | UnwrapOp { value } => { *counts.entry(*value).or_default() += 1; }
+        UnwrapOrOp { value, fallback } => { *counts.entry(*value).or_default() += 1; *counts.entry(*fallback).or_default() += 1; }
+        AllocVar { init, .. } => { *counts.entry(*init).or_default() += 1; }
+        LoadVar { slot } => { *counts.entry(*slot).or_default() += 1; }
+        StoreVar { slot, value } => { *counts.entry(*slot).or_default() += 1; *counts.entry(*value).or_default() += 1; }
+        _ => {}
+    }
+}
+
+fn count_in_op_recursive(kind: &ops::OpKind, counts: &mut std::collections::HashMap<ValueId, usize>) {
+    use ops::OpKind::*;
+    match kind {
+        IfOp { cond, then_region, else_region } => {
+            *counts.entry(*cond).or_default() += 1;
+            count_in_blocks(then_region, counts);
+            count_in_blocks(else_region, counts);
+        }
+        MatchOp { subject, arms } => {
+            *counts.entry(*subject).or_default() += 1;
+            for arm in arms { count_in_blocks(&arm.body, counts); }
+        }
+        LambdaOp { body, .. } => { count_in_blocks(body, counts); }
+        FanOp { regions } => { for r in regions { count_in_blocks(r, counts); } }
+        ForOp { iterable, body, .. } => { *counts.entry(*iterable).or_default() += 1; count_in_blocks(body, counts); }
+        WhileOp { cond_region, body } => { count_in_blocks(cond_region, counts); count_in_blocks(body, counts); }
+        _ => {}
+    }
 }
 
 /// Generator for fresh ValueIds and BlockIds.
