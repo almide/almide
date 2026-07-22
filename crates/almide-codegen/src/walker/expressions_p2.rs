@@ -946,6 +946,54 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
         .unwrap_or_else(|| format!("for _ in _ {{ }}"))
 }
 
+/// Rewrite legacy AlmdRec{N} references to field-name-based names.
+/// @inline_rust templates in dependency packages may contain hardcoded
+/// AlmdRec0, AlmdRec1 etc. that no longer match the current naming.
+/// Extract all AlmdRec{digits} tokens, then resolve each by matching
+/// the constructor's field names against the anon_records map. Extracted
+/// from `render_expr_inline_rust` (cog>30 decomposition): a `&mut String`
+/// output param that's only written to, never read back to change its own
+/// branching — safe to thread out.
+fn rewrite_legacy_almd_rec_names(ctx: &RenderContext, out: &mut String) {
+    if !out.contains("AlmdRec") { return; }
+    let mut legacy_names: Vec<String> = Vec::new();
+    let bytes = out.as_bytes();
+    let prefix = b"AlmdRec";
+    let mut pos = 0;
+    while pos + prefix.len() < bytes.len() {
+        if bytes[pos..].starts_with(prefix) {
+            let start = pos;
+            pos += prefix.len();
+            // Consume trailing digits
+            let digit_start = pos;
+            while pos < bytes.len() && bytes[pos].is_ascii_digit() { pos += 1; }
+            if pos > digit_start {
+                let name = std::str::from_utf8(&bytes[start..pos]).unwrap().to_string();
+                // Skip names that are already field-based (contain '_' after "AlmdRec")
+                if !name.contains('_') {
+                    legacy_names.push(name);
+                }
+            }
+        } else {
+            pos += 1;
+        }
+    }
+    legacy_names.sort();
+    legacy_names.dedup();
+    for legacy in &legacy_names {
+        let matched = ctx.ann.anon_records.iter().find(|(field_names, _)| {
+            field_names.iter().all(|f| {
+                let pattern = format!("{} {{ {}: ", legacy, f);
+                let pattern2 = format!(", {}: ", f);
+                out.contains(&pattern) || out.contains(&pattern2)
+            })
+        });
+        if let Some((_, struct_name)) = matched {
+            *out = out.replace(legacy, struct_name);
+        }
+    }
+}
+
 fn render_expr_inline_rust(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::InlineRust { template, args } = &expr.kind else { unreachable!() };
     let mut out = template.clone();
@@ -954,49 +1002,7 @@ fn render_expr_inline_rust(ctx: &RenderContext, expr: &IrExpr) -> String {
         let placeholder = format!("{{{}}}", name.as_str());
         out = out.replace(&placeholder, &rendered);
     }
-    // Rewrite legacy AlmdRec{N} references to field-name-based names.
-    // @inline_rust templates in dependency packages may contain hardcoded
-    // AlmdRec0, AlmdRec1 etc. that no longer match the current naming.
-    // Extract all AlmdRec{digits} tokens, then resolve each by matching
-    // the constructor's field names against the anon_records map.
-    if out.contains("AlmdRec") {
-        let mut legacy_names: Vec<String> = Vec::new();
-        let bytes = out.as_bytes();
-        let prefix = b"AlmdRec";
-        let mut pos = 0;
-        while pos + prefix.len() < bytes.len() {
-            if bytes[pos..].starts_with(prefix) {
-                let start = pos;
-                pos += prefix.len();
-                // Consume trailing digits
-                let digit_start = pos;
-                while pos < bytes.len() && bytes[pos].is_ascii_digit() { pos += 1; }
-                if pos > digit_start {
-                    let name = std::str::from_utf8(&bytes[start..pos]).unwrap().to_string();
-                    // Skip names that are already field-based (contain '_' after "AlmdRec")
-                    if !name.contains('_') {
-                        legacy_names.push(name);
-                    }
-                }
-            } else {
-                pos += 1;
-            }
-        }
-        legacy_names.sort();
-        legacy_names.dedup();
-        for legacy in &legacy_names {
-            let matched = ctx.ann.anon_records.iter().find(|(field_names, _)| {
-                field_names.iter().all(|f| {
-                    let pattern = format!("{} {{ {}: ", legacy, f);
-                    let pattern2 = format!(", {}: ", f);
-                    out.contains(&pattern) || out.contains(&pattern2)
-                })
-            });
-            if let Some((_, struct_name)) = matched {
-                out = out.replace(legacy, struct_name);
-            }
-        }
-    }
+    rewrite_legacy_almd_rec_names(ctx, &mut out);
     out
 }
 
