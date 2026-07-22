@@ -367,19 +367,13 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
         }
         // Recurse into sub-expressions but don't double-count nested loops
         // (they'll handle their own bumping)
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { bump_vars_in_stmt(s, locals, table); }
-            if let Some(e) = expr { bump_vars_in_expr(e, locals, table); }
-        }
+        IrExprKind::Block { stmts, expr } => bump_vars_in_block(stmts, expr.as_deref(), locals, table),
         IrExprKind::If { cond, then, else_ } => {
             bump_vars_in_expr(cond, locals, table);
             bump_vars_in_expr(then, locals, table);
             bump_vars_in_expr(else_, locals, table);
         }
-        IrExprKind::Match { subject, arms } => {
-            bump_vars_in_expr(subject, locals, table);
-            for a in arms { bump_vars_in_expr(&a.body, locals, table); }
-        }
+        IrExprKind::Match { subject, arms } => bump_vars_in_match(subject, arms, locals, table),
         IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. }
         | IrExprKind::RuntimeCall { args, .. } => { for a in args { bump_vars_in_expr(a, locals, table); } }
         IrExprKind::BinOp { left, right, .. } => {
@@ -387,9 +381,7 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
             bump_vars_in_expr(right, locals, table);
         }
         IrExprKind::UnOp { operand, .. } => bump_vars_in_expr(operand, locals, table),
-        IrExprKind::StringInterp { parts } => {
-            for p in parts { if let IrStringPart::Expr { expr } = p { bump_vars_in_expr(expr, locals, table); } }
-        }
+        IrExprKind::StringInterp { parts } => bump_vars_in_string_interp(parts, locals, table),
         IrExprKind::Lambda { body, .. } => bump_vars_in_expr(body, locals, table),
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
@@ -412,23 +404,15 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
         | IrExprKind::Fan { exprs: elements } => {
             for e in elements { bump_vars_in_expr(e, locals, table); }
         }
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields { bump_vars_in_expr(v, locals, table); }
-        }
+        IrExprKind::Record { fields, .. } => bump_vars_in_fields(fields, locals, table),
         IrExprKind::SpreadRecord { base, fields } => {
             bump_vars_in_expr(base, locals, table);
-            for (_, v) in fields { bump_vars_in_expr(v, locals, table); }
+            bump_vars_in_fields(fields, locals, table);
         }
-        // Nested loops: bump outer vars in iterable AND body.
-        // The iterable is re-evaluated each iteration of the enclosing loop.
-        IrExprKind::ForIn { iterable, body, .. } => {
-            bump_vars_in_expr(iterable, locals, table);
-            for s in body { bump_vars_in_stmt(s, locals, table); }
-        }
-        IrExprKind::While { cond, body } => {
-            bump_vars_in_expr(cond, locals, table);
-            for s in body { bump_vars_in_stmt(s, locals, table); }
-        }
+        // Nested loops: bump outer vars in iterable/cond AND body. The lead
+        // expression is re-evaluated each iteration of the enclosing loop.
+        IrExprKind::ForIn { iterable, body, .. } => bump_vars_in_loop_body(iterable, body, locals, table),
+        IrExprKind::While { cond, body } => bump_vars_in_loop_body(cond, body, locals, table),
         IrExprKind::Range { start, end, .. } => {
             bump_vars_in_expr(start, locals, table);
             bump_vars_in_expr(end, locals, table);
@@ -444,6 +428,41 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
         }
         _ => {}
     }
+}
+
+/// `Block` arm of [`bump_vars_in_expr`]: statements, then the optional tail expr.
+fn bump_vars_in_block(
+    stmts: &[IrStmt],
+    tail: Option<&IrExpr>,
+    locals: &HashSet<u32>,
+    table: &mut VarTable,
+) {
+    for s in stmts { bump_vars_in_stmt(s, locals, table); }
+    if let Some(e) = tail { bump_vars_in_expr(e, locals, table); }
+}
+
+/// `Match` arm of [`bump_vars_in_expr`]: subject, then each arm's body.
+fn bump_vars_in_match(subject: &IrExpr, arms: &[IrMatchArm], locals: &HashSet<u32>, table: &mut VarTable) {
+    bump_vars_in_expr(subject, locals, table);
+    for a in arms { bump_vars_in_expr(&a.body, locals, table); }
+}
+
+/// `StringInterp` arm of [`bump_vars_in_expr`]: each interpolated sub-expression.
+fn bump_vars_in_string_interp(parts: &[IrStringPart], locals: &HashSet<u32>, table: &mut VarTable) {
+    for p in parts { if let IrStringPart::Expr { expr } = p { bump_vars_in_expr(expr, locals, table); } }
+}
+
+/// `Record`/`SpreadRecord` field-value loop shared by [`bump_vars_in_expr`].
+fn bump_vars_in_fields(fields: &[(Sym, IrExpr)], locals: &HashSet<u32>, table: &mut VarTable) {
+    for (_, v) in fields { bump_vars_in_expr(v, locals, table); }
+}
+
+/// `ForIn`/`While` arms of [`bump_vars_in_expr`]: bump the lead expression
+/// (iterable / cond, re-evaluated every enclosing-loop iteration), then the
+/// body statements — identical shape for both, so they share one helper.
+fn bump_vars_in_loop_body(lead: &IrExpr, body: &[IrStmt], locals: &HashSet<u32>, table: &mut VarTable) {
+    bump_vars_in_expr(lead, locals, table);
+    for s in body { bump_vars_in_stmt(s, locals, table); }
 }
 
 fn bump_vars_in_stmt(stmt: &IrStmt, locals: &HashSet<u32>, table: &mut VarTable) {
