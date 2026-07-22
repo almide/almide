@@ -1,5 +1,38 @@
 use crate::{parse_file, canonicalize, check as check_mod, diagnostic, resolve, project, project_fetch, out, err};
 
+/// `cmd_check`'s combined parse+checker error reporting and
+/// `--deny-warnings` gate. Extracted verbatim — exits the process exactly
+/// where the original code did.
+fn report_check_errors_or_exit(
+    parse_errors: &[diagnostic::Diagnostic],
+    diagnostics: &[diagnostic::Diagnostic],
+    warnings: &[&diagnostic::Diagnostic],
+    source_text: &str,
+    deny_warnings: bool,
+) {
+    let mut all_errors: Vec<&diagnostic::Diagnostic> = parse_errors.iter().collect();
+    let checker_errors: Vec<_> = diagnostics.iter()
+        .filter(|d| d.level == diagnostic::Level::Error)
+        .collect();
+    all_errors.extend(checker_errors);
+    if deny_warnings && !warnings.is_empty() {
+        // Treat warnings as errors
+        for d in &all_errors {
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, source_text)));
+        }
+        let total = all_errors.len() + warnings.len();
+        err(&format!("\n{} error(s) found (--deny-warnings: {} warning(s) treated as errors)", total, warnings.len()));
+        std::process::exit(1);
+    }
+    if !all_errors.is_empty() {
+        for d in &all_errors {
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, source_text)));
+        }
+        err(&format!("\n{} error(s) found", all_errors.len()));
+        std::process::exit(1);
+    }
+}
+
 pub fn cmd_check(file: &str, deny_warnings: bool) {
     let (mut program, source_text, parse_errors) = parse_file(file);
 
@@ -53,27 +86,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     }
 
     // Combine parse errors + checker errors
-    let mut all_errors: Vec<&diagnostic::Diagnostic> = parse_errors.iter().collect();
-    let checker_errors: Vec<_> = diagnostics.iter()
-        .filter(|d| d.level == diagnostic::Level::Error)
-        .collect();
-    all_errors.extend(checker_errors);
-    if deny_warnings && !warnings.is_empty() {
-        // Treat warnings as errors
-        for d in &all_errors {
-            err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
-        }
-        let total = all_errors.len() + warnings.len();
-        err(&format!("\n{} error(s) found (--deny-warnings: {} warning(s) treated as errors)", total, warnings.len()));
-        std::process::exit(1);
-    }
-    if !all_errors.is_empty() {
-        for d in &all_errors {
-            err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
-        }
-        err(&format!("\n{} error(s) found", all_errors.len()));
-        std::process::exit(1);
-    }
+    report_check_errors_or_exit(&parse_errors, &diagnostics, &warnings, &source_text, deny_warnings);
 
     // Security Layer 2: check permissions if defined in almide.toml
     if std::path::Path::new("almide.toml").exists() {
