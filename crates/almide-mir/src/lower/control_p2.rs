@@ -1,4 +1,34 @@
 impl LowerCtx {
+    /// The nested-Option/Result-payload seeding for [`Self::try_lower_result_match`]'s Ok-arm
+    /// bind (`ok(m) => …` where `m: Option[_]`/`Result[_, _]` — a NESTED variant payload):
+    /// tracks `payload`'s READ-shape so an inner `match` EXECUTES instead of falling to the
+    /// both-arms linearization. NOT [`Self::seed_nested_option_bind_payload`] — that sibling
+    /// (used by `try_lower_unit_if`'s Some-bind) ALSO seeds a RECORD/TUPLE aggregate payload,
+    /// which this call site's original inline code never did; reusing it here would add new
+    /// behavior for a record-payload Ok-bind, not just flatten nesting. Verbatim extraction
+    /// (guard-clause flattening) of the former inline if-else-if chain, no behavior change —
+    /// see docs/roadmap/active/code-health-codopsy.md.
+    fn seed_nested_option_result_bind_payload(&mut self, payload: ValueId, bind_ty: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId;
+        if matches!(bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
+            self.materialized_options.insert(payload);
+            if crate::lower::is_lenlist_list_ty(bind_ty) {
+                self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+            } else if crate::lower::is_heap_elem_list_ty(bind_ty) {
+                self.heap_elem_lists.insert(payload);
+            }
+            return;
+        }
+        if crate::lower::is_result_ty(bind_ty) {
+            self.materialized_results.insert(payload);
+            if crate::lower::is_lenlist_list_ty(bind_ty) {
+                self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+            } else if crate::lower::is_heap_elem_list_ty(bind_ty) {
+                self.heap_elem_lists.insert(payload);
+            }
+        }
+    }
+
     /// EXECUTE a `match r { Ok(v) => …, Err(e) => … }` over a MATERIALIZED Result — only the taken
     /// arm runs. The Result analogue of [`Self::try_lower_variant_match`], reusing the same
     /// per-arm-balanced cert: the markers no-op in `verify_ownership`, each arm is a per-arm frame,
@@ -146,22 +176,7 @@ impl LowerCtx {
                 // { some(req)/none }`). Track the BORROWED payload like the
                 // Some-bind path above does, so the INNER match BRANCHES on
                 // its tag instead of hitting the (walled) linearization.
-                use almide_lang::types::constructor::TypeConstructorId;
-                if matches!(&bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
-                    self.materialized_options.insert(payload);
-                    if crate::lower::is_lenlist_list_ty(&bind_ty) {
-                        self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
-                    } else if crate::lower::is_heap_elem_list_ty(&bind_ty) {
-                        self.heap_elem_lists.insert(payload);
-                    }
-                } else if crate::lower::is_result_ty(&bind_ty) {
-                    self.materialized_results.insert(payload);
-                    if crate::lower::is_lenlist_list_ty(&bind_ty) {
-                        self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
-                    } else if crate::lower::is_heap_elem_list_ty(&bind_ty) {
-                        self.heap_elem_lists.insert(payload);
-                    }
-                }
+                self.seed_nested_option_result_bind_payload(payload, &bind_ty);
             } else {
                 let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
                 self.value_of.insert(bind_var, payload);
@@ -565,6 +580,62 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// The HEAP-Ok Result SUBJECT drop-route classification for
+    /// [`Self::variant_match_subject`] — routes `subj`'s scope-end drop by the Ok payload's
+    /// exact shape (a recursive `resrec:`/`DropResult*` class) instead of the flat
+    /// `heap_elem_lists`/`DropListStr` fallback. Verbatim extraction (guard-clause
+    /// flattening) of the former inline if-else-if chain, no behavior change — see
+    /// docs/roadmap/active/code-health-codopsy.md.
+    fn track_heap_ok_result_subject_drop(&mut self, subj: ValueId, ty: &Ty) {
+        if let Some(drop_fn) = self.result_ok_record_drop_fn(ty) {
+            // RECORD-Ok `Result[<record>, String]`: route the subject's scope-end drop through the
+            // recursive `Op::DropWrapperRec` (resrec:) — NOT the flat `heap_elem_lists` DropListStr
+            // that leaks the record's nested heap (HOLE-1). `drop_op_for` checks `variant_drop_handles`
+            // FIRST, so this wins over the `else` below; the Ok/Err arm binds the @12 handle as a
+            // BORROW and the subject drops once AFTER the arms (`str_heap_bind`).
+            self.variant_drop_handles.insert(subj, format!("resrec:{drop_fn}"));
+            return;
+        }
+        if crate::lower::is_result_listval_ty(ty) {
+            self.value_result_lists.insert(subj);
+            return;
+        }
+        if crate::lower::is_value_result_ty(ty) {
+            // `Result[Value, String]` (value.get): the Ok payload is a single dynamic Value —
+            // its drop is the RECURSIVE `Op::DropResultValue` (Ok → `$__drop_value`), distinct
+            // from a String-Ok's flat DropListStr.
+            self.value_result_results.insert(subj);
+            return;
+        }
+        if crate::lower::is_str_int_result_ty(ty) {
+            // `Result[(String, Int), String]` (toml parse_key_part): the Ok payload is a
+            // (String, Int) tuple — its drop is the RECURSIVE `Op::DropResultStrInt` (frees the
+            // tuple's String + tuple block), distinct from a flat DropListStr which would leak
+            // the tuple's String (it would rc_dec the @12 tuple HANDLE only).
+            self.str_int_result_results.insert(subj);
+            return;
+        }
+        if crate::lower::is_value_int_result_ty(ty) {
+            // `Result[(Value, Int), String]` (toml parse_val): the Ok tuple's Value slot is freed
+            // recursively via `Op::DropResultValueInt` (`$__drop_value_tuple`).
+            self.value_int_result_results.insert(subj);
+            return;
+        }
+        if crate::lower::is_list_str_int_result_ty(ty) {
+            // `Result[(List[String], Int), String]` (toml parse_key): the Ok tuple's List slot is
+            // freed recursively via `Op::DropResultListStrInt`.
+            self.list_str_int_result_results.insert(subj);
+            return;
+        }
+        if crate::lower::is_list_value_int_result_ty(ty) {
+            // `Result[(List[Value], Int), String]` (toml collect_array_items): recursive
+            // `Op::DropResultListValueInt` (`$__drop_list_value_tuple`).
+            self.list_value_int_result_results.insert(subj);
+            return;
+        }
+        self.heap_elem_lists.insert(subj);
+    }
+
     /// The SUBJECT phase of [`Self::try_lower_variant_value_match`]: materialize/
     /// borrow + track the match subject (effect-result, self-host call, user call,
     /// member, tracked var …) and classify its Option/Result repr. Returns `None`
@@ -701,41 +772,7 @@ impl LowerCtx {
             || (is_self_host_result_call(subject) && Self::is_heap_ok_result(&subject.ty))
         {
             self.materialized_results_str.insert(subj);
-            if let Some(drop_fn) = self.result_ok_record_drop_fn(&subject.ty) {
-                // RECORD-Ok `Result[<record>, String]`: route the subject's scope-end drop through the
-                // recursive `Op::DropWrapperRec` (resrec:) — NOT the flat `heap_elem_lists` DropListStr
-                // that leaks the record's nested heap (HOLE-1). `drop_op_for` checks `variant_drop_handles`
-                // FIRST, so this wins over the `else` below; the Ok/Err arm binds the @12 handle as a
-                // BORROW and the subject drops once AFTER the arms (`str_heap_bind`).
-                self.variant_drop_handles.insert(subj, format!("resrec:{drop_fn}"));
-            } else if crate::lower::is_result_listval_ty(&subject.ty) {
-                self.value_result_lists.insert(subj);
-            } else if crate::lower::is_value_result_ty(&subject.ty) {
-                // `Result[Value, String]` (value.get): the Ok payload is a single dynamic Value —
-                // its drop is the RECURSIVE `Op::DropResultValue` (Ok → `$__drop_value`), distinct
-                // from a String-Ok's flat DropListStr.
-                self.value_result_results.insert(subj);
-            } else if crate::lower::is_str_int_result_ty(&subject.ty) {
-                // `Result[(String, Int), String]` (toml parse_key_part): the Ok payload is a
-                // (String, Int) tuple — its drop is the RECURSIVE `Op::DropResultStrInt` (frees the
-                // tuple's String + tuple block), distinct from a flat DropListStr which would leak
-                // the tuple's String (it would rc_dec the @12 tuple HANDLE only).
-                self.str_int_result_results.insert(subj);
-            } else if crate::lower::is_value_int_result_ty(&subject.ty) {
-                // `Result[(Value, Int), String]` (toml parse_val): the Ok tuple's Value slot is freed
-                // recursively via `Op::DropResultValueInt` (`$__drop_value_tuple`).
-                self.value_int_result_results.insert(subj);
-            } else if crate::lower::is_list_str_int_result_ty(&subject.ty) {
-                // `Result[(List[String], Int), String]` (toml parse_key): the Ok tuple's List slot is
-                // freed recursively via `Op::DropResultListStrInt`.
-                self.list_str_int_result_results.insert(subj);
-            } else if crate::lower::is_list_value_int_result_ty(&subject.ty) {
-                // `Result[(List[Value], Int), String]` (toml collect_array_items): recursive
-                // `Op::DropResultListValueInt` (`$__drop_list_value_tuple`).
-                self.list_value_int_result_results.insert(subj);
-            } else {
-                self.heap_elem_lists.insert(subj);
-            }
+            self.track_heap_ok_result_subject_drop(subj, &subject.ty);
         }
         // Dispatch on the tracking set. An Option reads len-as-tag (Some=len≠0); a scalar
         // Result reads len-as-tag INVERSE (Err=len≠0, Ok=len0). The if-skeleton is uniform
@@ -2058,37 +2095,50 @@ impl LowerCtx {
         let mut stripped: Vec<IrMatchArm>;
         let mut arms: &[IrMatchArm] = arms;
         let mut unwrap_single = false;
-        if layout.cases.len() == 1 {
-            let case = &layout.cases[0];
-            if case.fields.len() == 1 {
-                let all_nested = arms.iter().all(|a| matches!(&a.pattern,
-                    IrPattern::Constructor { name, args }
-                        if *name == case.ctor && args.len() == 1
-                            && matches!(args[0], IrPattern::Constructor { .. })));
-                let inner_ty = case.fields[0].1.clone();
-                if all_nested {
-                    if let Some(inner_name) = self.custom_variant_type_name(&inner_ty) {
-                        if let Some(inner_layout) =
-                            self.variant_layouts.by_type.get(&inner_name).cloned()
-                        {
-                            stripped = Vec::with_capacity(arms.len());
-                            for a in arms {
-                                let IrPattern::Constructor { args, .. } = &a.pattern else {
-                                    unreachable!("gated above")
-                                };
-                                stripped.push(IrMatchArm {
-                                    pattern: args[0].clone(),
-                                    guard: a.guard.clone(),
-                                    body: a.body.clone(),
-                                });
-                            }
-                            layout = inner_layout;
-                            arms = &stripped;
-                            unwrap_single = true;
-                        }
-                    }
-                }
+        // Guard-clause flattening of the former 6-deep nested-if (no `else` anywhere: any
+        // unmet condition falls through to the code after this block, unchanged, exactly as
+        // the original fell out of the if-pyramid — `break` exits the labeled block and
+        // resumes there). `case`'s borrow of the OLD `layout` still ends before `layout =
+        // inner_layout` reassigns it (its last use, inside `all_nested`, is unchanged and
+        // stays textually before the reassignment). No behavior change — see
+        // docs/roadmap/active/code-health-codopsy.md.
+        'single_ctor_strip: {
+            if layout.cases.len() != 1 {
+                break 'single_ctor_strip;
             }
+            let case = &layout.cases[0];
+            if case.fields.len() != 1 {
+                break 'single_ctor_strip;
+            }
+            let all_nested = arms.iter().all(|a| matches!(&a.pattern,
+                IrPattern::Constructor { name, args }
+                    if *name == case.ctor && args.len() == 1
+                        && matches!(args[0], IrPattern::Constructor { .. })));
+            if !all_nested {
+                break 'single_ctor_strip;
+            }
+            let inner_ty = case.fields[0].1.clone();
+            let Some(inner_name) = self.custom_variant_type_name(&inner_ty) else {
+                break 'single_ctor_strip;
+            };
+            let Some(inner_layout) = self.variant_layouts.by_type.get(&inner_name).cloned()
+            else {
+                break 'single_ctor_strip;
+            };
+            stripped = Vec::with_capacity(arms.len());
+            for a in arms {
+                let IrPattern::Constructor { args, .. } = &a.pattern else {
+                    unreachable!("gated above")
+                };
+                stripped.push(IrMatchArm {
+                    pattern: args[0].clone(),
+                    guard: a.guard.clone(),
+                    body: a.body.clone(),
+                });
+            }
+            layout = inner_layout;
+            arms = &stripped;
+            unwrap_single = true;
         }
         let plans = self.parse_variant_arms(&layout, arms)?;
         // A SINGLE-arm HEAP-result match (a 1-ctor newtype `unbox`, `match b { B(x) => x }`) that
