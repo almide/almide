@@ -177,24 +177,36 @@ impl LowerCtx {
                 && matches!(&arms[0].pattern, almide_ir::IrPattern::Tuple { .. })
                 && !is_heap_ty(ty)
             {
-                if let almide_ir::IrPattern::Tuple { elements } = &arms[0].pattern {
-                    let mark = self.ops.len();
-                    let lhh = self.live_heap_handles.len();
+                // Guard-clause flattening (codopsy7 max-depth sweep): the original nested
+                // `if let`/`if` chain is rewritten as `let-else` guards inside a labeled block —
+                // any failure `break`s straight to the SAME rollback (`ops`/`live_heap_handles`
+                // truncate) the original chain's implicit fall-through reached, then falls
+                // through to the next match strategy below. Same check order, same rollback,
+                // same success path (`return Ok(())`); pure control-flow rewrite.
+                let almide_ir::IrPattern::Tuple { elements } = &arms[0].pattern else {
+                    unreachable!("matches! above already proved this arm's pattern is Tuple")
+                };
+                let mark = self.ops.len();
+                let lhh = self.live_heap_handles.len();
+                'single_arm_tuple: {
                     // Materialize the tuple subject as a borrowed handle (its slots are real).
-                    if let Ok(Some(CallArg::Handle(subj))) = self
+                    let Ok(Some(CallArg::Handle(subj))) = self
                         .lower_call_args(std::slice::from_ref(subject))
                         .map(|v| v.into_iter().next())
-                    {
-                        if self.try_lower_tuple_destructure(elements, subj, Some(&subject.ty)) {
-                            if let Some(dst) = self.lower_scalar_value(&arms[0].body) {
-                                self.value_of.insert(var, dst);
-                                return Ok(());
-                            }
-                        }
+                    else {
+                        break 'single_arm_tuple;
+                    };
+                    if !self.try_lower_tuple_destructure(elements, subj, Some(&subject.ty)) {
+                        break 'single_arm_tuple;
                     }
-                    self.ops.truncate(mark);
-                    self.live_heap_handles.truncate(lhh);
+                    let Some(dst) = self.lower_scalar_value(&arms[0].body) else {
+                        break 'single_arm_tuple;
+                    };
+                    self.value_of.insert(var, dst);
+                    return Ok(());
                 }
+                self.ops.truncate(mark);
+                self.live_heap_handles.truncate(lhh);
             }
             if let Some(if_expr) = self.desugar_match_to_if(subject, arms, ty) {
                 // `If` (literal arms) OR `Block` (`{ let x = subj; if … }` for a

@@ -330,6 +330,47 @@ impl LowerCtx {
     /// `Else`/`EndIf` so one arm runs. SCALAR payload only (a heap bind would alias the
     /// element — a later refinement); UNIT arm bodies only (a value result is a later
     /// refinement). The subject was already materialized/borrowed by the caller.
+    /// Extracted from `Self::try_lower_variant_match` (codopsy7 max-depth sweep): the
+    /// nested-Option/Result/aggregate read-shape seeding for a HEAP `some(payload)` bind,
+    /// verbatim (pure text move — was nested 2 levels deeper inside the caller's
+    /// `if let Some(..) = some_bind { if is_heap { .. } }`, which alone pushed every arm of
+    /// this classification past the depth threshold). The Some payload is itself an
+    /// Option/Result (`some(inner)` where `inner: Option[Int]` — a NESTED match): track it
+    /// so an INNER `match inner {…}` BRANCHES (reads its tag @4) instead of LINEARIZING
+    /// (running every arm). The payload is a BORROWED handle of the OUTER Option's owned
+    /// inner block — the same materialized-Option read-shape, no new ownership. Without
+    /// this the nested match fell to the both-arms linearization (printing every arm + a
+    /// garbage 0).
+    fn seed_option_some_payload_read_shape(&mut self, payload: ValueId, bind_ty: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId;
+        if matches!(bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
+            self.materialized_options.insert(payload);
+            if crate::lower::is_lenlist_list_ty(bind_ty) {
+                self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+            } else if crate::lower::is_heap_elem_list_ty(bind_ty) {
+                self.heap_elem_lists.insert(payload);
+            }
+            return;
+        }
+        if crate::lower::is_result_ty(bind_ty) {
+            self.materialized_results.insert(payload);
+            if crate::lower::is_lenlist_list_ty(bind_ty) {
+                self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
+            } else if crate::lower::is_heap_elem_list_ty(bind_ty) {
+                self.heap_elem_lists.insert(payload);
+            }
+            return;
+        }
+        if self.aggregate_field_tys(bind_ty).is_some() {
+            // A RECORD/TUPLE payload (`some(p) => … p.name …` — the optional-chain
+            // heap-field projection): seed its aggregate READ-shape so a field
+            // access inside the arm loads the real slot (a borrowed handle of the
+            // Option's owned payload block — no ownership event, exactly the
+            // seed_variant_param aggregate discipline).
+            self.materialized_aggregates.insert(payload);
+        }
+    }
+
     pub(crate) fn try_lower_variant_match(
         &mut self,
         subject_value: Option<ValueId>,
@@ -418,35 +459,7 @@ impl LowerCtx {
             self.value_of.insert(bind_var, payload);
             if is_heap {
                 self.param_values.insert(payload);
-                // The Some payload is itself an Option/Result (`some(inner)` where
-                // `inner: Option[Int]` — a NESTED match): track it so an INNER `match inner {…}`
-                // BRANCHES (reads its tag @4) instead of LINEARIZING (running every arm). The
-                // payload is a BORROWED handle of the OUTER Option's owned inner block — the same
-                // materialized-Option read-shape, no new ownership. Without this the nested match
-                // fell to the both-arms linearization (printing every arm + a garbage 0).
-                use almide_lang::types::constructor::TypeConstructorId;
-                if matches!(&bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
-                    self.materialized_options.insert(payload);
-                    if crate::lower::is_lenlist_list_ty(&bind_ty) {
-                        self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
-                    } else if crate::lower::is_heap_elem_list_ty(&bind_ty) {
-                        self.heap_elem_lists.insert(payload);
-                    }
-                } else if crate::lower::is_result_ty(&bind_ty) {
-                    self.materialized_results.insert(payload);
-                    if crate::lower::is_lenlist_list_ty(&bind_ty) {
-                        self.variant_drop_handles.insert(payload, "list_lenlist".to_string());
-                    } else if crate::lower::is_heap_elem_list_ty(&bind_ty) {
-                        self.heap_elem_lists.insert(payload);
-                    }
-                } else if self.aggregate_field_tys(&bind_ty).is_some() {
-                    // A RECORD/TUPLE payload (`some(p) => … p.name …` — the optional-chain
-                    // heap-field projection): seed its aggregate READ-shape so a field
-                    // access inside the arm loads the real slot (a borrowed handle of the
-                    // Option's owned payload block — no ownership event, exactly the
-                    // seed_variant_param aggregate discipline).
-                    self.materialized_aggregates.insert(payload);
-                }
+                self.seed_option_some_payload_read_shape(payload, &bind_ty);
             }
         }
         // Exactly ONE arm runs at runtime (the unit-if discipline): an outer var's

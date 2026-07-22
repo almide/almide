@@ -70,21 +70,27 @@ impl LowerCtx {
     /// reduction): the element-type → `list.eq_*` callee-name lookup, verbatim (a static
     /// value computation, no `&mut self` needed).
     fn list_eq_call_variant(es: &[Ty]) -> Option<&'static str> {
+        // Guard-clause flattening (codopsy7 max-depth sweep): independent early-return checks
+        // in the SAME order as the original `if/else if` chain (pure control-flow rewrite).
         if es.len() != 1 {
-            None
-        } else if matches!(es[0], Ty::Int) {
-            Some("eq_int")
-        } else if matches!(es[0], Ty::String) {
-            Some("eq_str")
-        } else if crate::lower::is_value_ty(&es[0]) {
-            Some("eq_value")
-        } else if matches!(es[0], Ty::Float) {
-            Some("eq_float")
-        } else if matches!(es[0], Ty::Bool) {
-            Some("eq_bool")
-        } else {
-            None
+            return None;
         }
+        if matches!(es[0], Ty::Int) {
+            return Some("eq_int");
+        }
+        if matches!(es[0], Ty::String) {
+            return Some("eq_str");
+        }
+        if crate::lower::is_value_ty(&es[0]) {
+            return Some("eq_value");
+        }
+        if matches!(es[0], Ty::Float) {
+            return Some("eq_float");
+        }
+        if matches!(es[0], Ty::Bool) {
+            return Some("eq_bool");
+        }
+        None
     }
 
     fn lower_scalar_binop_eq_list(

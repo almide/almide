@@ -5,6 +5,42 @@
 /// accumulated into; `file_mirs`/`elided_call_fns` are appended/inserted into
 /// by every arm (never read back here), so no state threads BETWEEN calls
 /// beyond straightforward accumulation.
+/// Extracted from `classify_lower_one_fn` (codopsy7 max-depth sweep): the per-`CallFn`-op
+/// unlinkable-stdlib-call check + (c)-completeness backstop, verbatim (pure text move — was
+/// nested inside `for mir in &mirs { for op in &mir.ops { if let CallFn { name, .. } = op {
+/// .. } } }`, so the loop/if-let nesting alone pushed this classification past the depth
+/// threshold). Same order, same bucket-(b)/(c) accounting, no behavior change.
+fn classify_check_unlinkable_call(ctx: &FileCtx, t: &mut Tally, mir: &MirFunction, name: &str) {
+    // Unlinkable stdlib call ⟺ a DOTTED name that is neither in the
+    // self-host registry NOR a function defined in this file (a dotted
+    // user PROTOCOL METHOD resolves to itself/a sibling, so it is NOT a
+    // dangling stdlib call). This is exactly the class the render wall
+    // rejects; a user method / cross-file call is out of scope here.
+    let unlinkable = name.contains('.')
+        && !ctx.auto_linkable.contains(name)
+        && !ctx.file_fn_names.contains(name);
+    if !unlinkable {
+        return;
+    }
+    *t.would_wall_callees.entry(name.to_string()).or_insert(0) += 1;
+    t.interp_walled += 1;
+    // (c) completeness backstop: this site is genuinely unlinkable,
+    // so the render wall MUST flag it. `unlinked_call_names` is the
+    // wall's OWN predicate; if it does NOT contain the name, a site
+    // escaped the wall → a real (c) breach. A single-fn probe is
+    // sound here: the name is not file-defined, so adding sibling
+    // functions could not make it resolve (only the registry could,
+    // which `ctx.auto_linkable` already ruled out).
+    let probe = MirProgram { functions: vec![mir.clone()], exports: vec![], mutable_global_count: 0 };
+    if !almide_mir::render_wasm::unlinked_call_names(&probe).contains(name) {
+        t.forbidden_unwalled.push(format!(
+            "{}::{} -> {name} (escaped the render wall)",
+            ctx.file.display(),
+            mir.name
+        ));
+    }
+}
+
 fn classify_lower_one_fn(
     ctx: &FileCtx,
     func: &almide_ir::IrFunction,
@@ -77,35 +113,7 @@ fn classify_lower_one_fn(
             for mir in &mirs {
                 for op in &mir.ops {
                     if let Op::CallFn { name, .. } = op {
-                        // Unlinkable stdlib call ⟺ a DOTTED name that is neither in the
-                        // self-host registry NOR a function defined in this file (a dotted
-                        // user PROTOCOL METHOD resolves to itself/a sibling, so it is NOT a
-                        // dangling stdlib call). This is exactly the class the render wall
-                        // rejects; a user method / cross-file call is out of scope here.
-                        let unlinkable = name.contains('.')
-                            && !ctx.auto_linkable.contains(name)
-                            && !ctx.file_fn_names.contains(name);
-                        if unlinkable {
-                            *t.would_wall_callees.entry(name.clone()).or_insert(0) += 1;
-                            t.interp_walled += 1;
-                            // (c) completeness backstop: this site is genuinely unlinkable,
-                            // so the render wall MUST flag it. `unlinked_call_names` is the
-                            // wall's OWN predicate; if it does NOT contain the name, a site
-                            // escaped the wall → a real (c) breach. A single-fn probe is
-                            // sound here: the name is not file-defined, so adding sibling
-                            // functions could not make it resolve (only the registry could,
-                            // which `ctx.auto_linkable` already ruled out).
-                            let probe = MirProgram { functions: vec![mir.clone()], exports: vec![], mutable_global_count: 0 };
-                            if !almide_mir::render_wasm::unlinked_call_names(&probe)
-                                .contains(name)
-                            {
-                                t.forbidden_unwalled.push(format!(
-                                    "{}::{} -> {name} (escaped the render wall)",
-                                    ctx.file.display(),
-                                    mir.name
-                                ));
-                            }
-                        }
+                        classify_check_unlinkable_call(ctx, t, mir, name);
                     }
                 }
             }

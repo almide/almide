@@ -10,6 +10,36 @@
 /// another registered impl by its IMPL name (pre-rename) is rewritten to the call name
 /// afterward, and `print_str` is force-linked last (`println` → `PrintStr` → `(call
 /// $print_str)`).
+/// Extracted from `Self::synthesize_and_link_runtime_fns` (codopsy7 max-depth sweep): lower
+/// ONE self-hosted runtime fn and link it in, verbatim (pure text move — was nested inside
+/// `loop { for (rt_source, entries) in .. { if any_called && !any_defined { let rt = ..;
+/// for f in &rt.functions { .. } } } }`, so even a single-level `if let Err`/`if let Ok`
+/// pushed past the depth threshold purely from the surrounding context). Same order, same
+/// verbose-eprintln gate, same call-name rewrite, same push — no behavior change.
+fn lower_and_link_one_runtime_fn(
+    f: &almide_ir::IrFunction,
+    layouts: &PipelineLayouts,
+    entries: &[(&str, &str)],
+    verbose: bool,
+    functions: &mut Vec<crate::MirFunction>,
+) {
+    let lowered = crate::lower::lower_function(f, &layouts.globals);
+    if let Err(e) = &lowered {
+        if verbose
+            && (entries.iter().any(|(impl_fn, _)| f.name.as_str() == *impl_fn)
+                || f.name.as_str().starts_with("__"))
+        {
+            eprintln!("[self-host] {} failed to lower: {:?}", f.name.as_str(), e);
+        }
+    }
+    if let Ok(mut mir) = lowered {
+        if let Some((_, call)) = entries.iter().find(|(impl_fn, _)| &mir.name == impl_fn) {
+            mir.name = call.to_string();
+        }
+        functions.push(mir);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn synthesize_and_link_runtime_fns(
     functions: &mut Vec<crate::MirFunction>,
@@ -111,23 +141,7 @@ fn synthesize_and_link_runtime_fns(
             if any_called && !any_defined {
                 let rt = source_to_ir(rt_source)?;
                 for f in &rt.functions {
-                    let lowered = crate::lower::lower_function(f, &layouts.globals);
-                    if let Err(e) = &lowered {
-                        if verbose
-                            && (entries.iter().any(|(impl_fn, _)| f.name.as_str() == *impl_fn)
-                                || f.name.as_str().starts_with("__"))
-                        {
-                            eprintln!("[self-host] {} failed to lower: {:?}", f.name.as_str(), e);
-                        }
-                    }
-                    if let Ok(mut mir) = lowered {
-                        if let Some((_, call)) =
-                            entries.iter().find(|(impl_fn, _)| &mir.name == impl_fn)
-                        {
-                            mir.name = call.to_string();
-                        }
-                        functions.push(mir);
-                    }
+                    lower_and_link_one_runtime_fn(f, layouts, entries, verbose, functions);
                 }
             }
         }
