@@ -75,19 +75,7 @@ impl NanoPass for ConcretizeTypesPass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        // Build type alias map: alias_name → underlying type.
-        // mod type SafeHtml = String → aliases["SafeHtml"] = String
-        // Erase aliases throughout the IR so downstream codegen never sees them.
-        let mut aliases: HashMap<String, Ty> = HashMap::new();
-        for td in program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter())) {
-            if let almide_ir::IrTypeDeclKind::Alias { target } = &td.kind {
-                aliases.insert(td.name.to_string(), target.clone());
-            }
-        }
-        // Erase aliases only for WASM target — Rust codegen handles newtypes natively.
-        if !aliases.is_empty() && _target == Target::Wasm {
-            erase_type_aliases(&mut program, &aliases);
-        }
+        erase_wasm_type_aliases(&mut program, _target);
 
         let symbols = build_symbol_table(&program);
 
@@ -97,88 +85,118 @@ impl NanoPass for ConcretizeTypesPass {
         // bindings; downstream passes expect the updates to persist.
         let mut prog_vt = std::mem::take(&mut program.var_table);
 
-        // Phase 1: Resolve top_lets first so their types are available
-        // when functions reference cross-module let values.
-        for tl in &mut program.top_lets {
-            concretize_expr(&mut tl.value, &mut prog_vt, &symbols, &Ty::Unknown);
-            if !tl.value.ty.has_unresolved_deep() {
-                if tl.ty.has_unresolved_deep() {
-                    tl.ty = tl.value.ty.clone();
-                }
-                if (tl.var.0 as usize) < prog_vt.len()
-                    && prog_vt.get(tl.var).ty.has_unresolved_deep()
-                {
-                    prog_vt.entries[tl.var.0 as usize].ty = tl.value.ty.clone();
-                }
-            }
-        }
-        for module in &mut program.modules {
-            for tl in &mut module.top_lets {
-                concretize_expr(&mut tl.value, &mut prog_vt, &symbols, &Ty::Unknown);
-                if !tl.value.ty.has_unresolved_deep() {
-                    if tl.ty.has_unresolved_deep() {
-                        tl.ty = tl.value.ty.clone();
-                    }
-                    if (tl.var.0 as usize) < prog_vt.len()
-                        && prog_vt.get(tl.var).ty.has_unresolved_deep()
-                    {
-                        prog_vt.entries[tl.var.0 as usize].ty = tl.value.ty.clone();
-                    }
-                }
-            }
-        }
+        concretize_top_lets(&mut program, &mut prog_vt, &symbols);
+        propagate_top_let_types_by_name(&program, &mut prog_vt);
+        concretize_fn_bodies(&mut program, &mut prog_vt, &symbols);
 
-        // Phase 1b: Propagate top_let types by name into VarTable entries
-        // that are cross-module synthetic references (different VarId, same name).
-        let mut top_let_types: std::collections::HashMap<String, Ty> = std::collections::HashMap::new();
-        // The use-site synthetic Var carries the SCREAMING_CASE const
-        // spelling (lower/expressions.rs `field.to_uppercase()`) while the
-        // definition keeps the source name — bridge BOTH spellings, or a
-        // lowercase module top-let never propagates (#502 fix C).
-        let mut insert_both = |name: String, ty: &Ty, map: &mut std::collections::HashMap<String, Ty>| {
-            let upper = name.to_uppercase();
-            if upper != name { map.entry(upper).or_insert_with(|| ty.clone()); }
-            map.insert(name, ty.clone());
-        };
-        for tl in &program.top_lets {
+        program.var_table = prog_vt;
+        PassResult { program, changed: true }
+    }
+}
+
+// ── `run` phase extraction (cog>100 decomposition, pattern 2) ──
+//
+// Each of these is a 1:1 text-move of one of `run`'s sequential,
+// independent phases. None reads a value a LATER phase produces.
+
+/// Build type alias map: alias_name → underlying type.
+/// `mod type SafeHtml = String` → `aliases["SafeHtml"] = String`.
+/// Erase aliases throughout the IR (WASM target only — Rust codegen
+/// handles newtypes natively) so downstream codegen never sees them.
+fn erase_wasm_type_aliases(program: &mut IrProgram, target: Target) {
+    let mut aliases: HashMap<String, Ty> = HashMap::new();
+    for td in program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter())) {
+        if let almide_ir::IrTypeDeclKind::Alias { target: alias_target } = &td.kind {
+            aliases.insert(td.name.to_string(), alias_target.clone());
+        }
+    }
+    if !aliases.is_empty() && target == Target::Wasm {
+        erase_type_aliases(program, &aliases);
+    }
+}
+
+/// Concretize a single top-let's value, then push its type into the
+/// declared `ty` and VarTable entry if both were still unresolved.
+/// Extracted from `concretize_top_lets` (cog>30 decomposition, second
+/// round): the top-level and module loops called the exact same
+/// per-top-let body.
+fn concretize_top_let(tl: &mut IrTopLet, prog_vt: &mut VarTable, symbols: &SymbolTable) {
+    concretize_expr(&mut tl.value, prog_vt, symbols, &Ty::Unknown);
+    if !tl.value.ty.has_unresolved_deep() {
+        if tl.ty.has_unresolved_deep() {
+            tl.ty = tl.value.ty.clone();
+        }
+        if (tl.var.0 as usize) < prog_vt.len()
+            && prog_vt.get(tl.var).ty.has_unresolved_deep()
+        {
+            prog_vt.entries[tl.var.0 as usize].ty = tl.value.ty.clone();
+        }
+    }
+}
+
+/// Phase 1: Resolve top_lets first so their types are available
+/// when functions reference cross-module let values.
+fn concretize_top_lets(program: &mut IrProgram, prog_vt: &mut VarTable, symbols: &SymbolTable) {
+    for tl in &mut program.top_lets {
+        concretize_top_let(tl, prog_vt, symbols);
+    }
+    for module in &mut program.modules {
+        for tl in &mut module.top_lets {
+            concretize_top_let(tl, prog_vt, symbols);
+        }
+    }
+}
+
+/// Phase 1b: Propagate top_let types by name into VarTable entries
+/// that are cross-module synthetic references (different VarId, same name).
+fn propagate_top_let_types_by_name(program: &IrProgram, prog_vt: &mut VarTable) {
+    let mut top_let_types: std::collections::HashMap<String, Ty> = std::collections::HashMap::new();
+    // The use-site synthetic Var carries the SCREAMING_CASE const
+    // spelling (lower/expressions.rs `field.to_uppercase()`) while the
+    // definition keeps the source name — bridge BOTH spellings, or a
+    // lowercase module top-let never propagates (#502 fix C).
+    let mut insert_both = |name: String, ty: &Ty, map: &mut std::collections::HashMap<String, Ty>| {
+        let upper = name.to_uppercase();
+        if upper != name { map.entry(upper).or_insert_with(|| ty.clone()); }
+        map.insert(name, ty.clone());
+    };
+    for tl in &program.top_lets {
+        if !tl.ty.has_unresolved_deep() {
+            let name = prog_vt.get(tl.var).name.to_string();
+            insert_both(name, &tl.ty, &mut top_let_types);
+        }
+    }
+    for module in &program.modules {
+        for tl in &module.top_lets {
             if !tl.ty.has_unresolved_deep() {
                 let name = prog_vt.get(tl.var).name.to_string();
                 insert_both(name, &tl.ty, &mut top_let_types);
             }
         }
-        for module in &program.modules {
-            for tl in &module.top_lets {
-                if !tl.ty.has_unresolved_deep() {
-                    let name = prog_vt.get(tl.var).name.to_string();
-                    insert_both(name, &tl.ty, &mut top_let_types);
+    }
+    if !top_let_types.is_empty() {
+        for entry in &mut prog_vt.entries {
+            if entry.ty.has_unresolved_deep() {
+                if let Some(ty) = top_let_types.get(entry.name.as_str()) {
+                    entry.ty = ty.clone();
                 }
             }
         }
-        if !top_let_types.is_empty() {
-            for entry in &mut prog_vt.entries {
-                if entry.ty.has_unresolved_deep() {
-                    if let Some(ty) = top_let_types.get(entry.name.as_str()) {
-                        entry.ty = ty.clone();
-                    }
-                }
-            }
-        }
+    }
+}
 
-        // Phase 2: Now resolve functions (which may reference cross-module lets
-        // whose VarTable types are now populated).
-        for func in &mut program.functions {
+/// Phase 2: Now resolve functions (which may reference cross-module lets
+/// whose VarTable types are now populated).
+fn concretize_fn_bodies(program: &mut IrProgram, prog_vt: &mut VarTable, symbols: &SymbolTable) {
+    for func in &mut program.functions {
+        let ret = func.ret_ty.clone();
+        concretize_expr(&mut func.body, prog_vt, symbols, &ret);
+    }
+    for module in &mut program.modules {
+        for func in &mut module.functions {
             let ret = func.ret_ty.clone();
-            concretize_expr(&mut func.body, &mut prog_vt, &symbols, &ret);
+            concretize_expr(&mut func.body, prog_vt, symbols, &ret);
         }
-        for module in &mut program.modules {
-            for func in &mut module.functions {
-                let ret = func.ret_ty.clone();
-                concretize_expr(&mut func.body, &mut prog_vt, &symbols, &ret);
-            }
-        }
-
-        program.var_table = prog_vt;
-        PassResult { program, changed: true }
     }
 }
 
