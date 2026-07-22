@@ -537,53 +537,77 @@ pub fn generate_krec_sources(
         uses: Uses,
     }
     impl Scan<'_> {
+        /// Pattern-1/2 split (codopsy8 complexity sweep): the 3 groups below are
+        /// independent, self-contained classifications of `ty` (a Map/Set/List shape are
+        /// mutually exclusive, so calling all 3 in sequence is behaviorally identical to
+        /// the original `match ty { .. }`, which already had a `_ => {}` fallback — no
+        /// exhaustiveness guarantee lost). Pure text-move, no logic change.
         fn note(&mut self, ty: &Ty) {
-            match ty {
-                Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 => {
-                    if let Ty::Named(n, _) = &a[0] {
-                        if self.recs.contains_key(n.as_str()) {
-                            match &a[1] {
-                                Ty::Int | Ty::Bool => {
-                                    self.uses.map_iv.insert(n.as_str().to_string());
-                                }
-                                Ty::String => {
-                                    self.uses.map_sv.insert(n.as_str().to_string());
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
+            self.note_map(ty);
+            self.note_set(ty);
+            self.note_list(ty);
+        }
+
+        /// Extracted from `note` (codopsy8 complexity sweep, group 1 of 3): `Map[<record>,
+        /// Int/Bool/String]` — the `_iv`/`_sv` value-class split. Verbatim.
+        fn note_map(&mut self, ty: &Ty) {
+            let Ty::Applied(TypeConstructorId::Map, a) = ty else { return };
+            if a.len() != 2 {
+                return;
+            }
+            let Ty::Named(n, _) = &a[0] else { return };
+            if !self.recs.contains_key(n.as_str()) {
+                return;
+            }
+            match &a[1] {
+                Ty::Int | Ty::Bool => {
+                    self.uses.map_iv.insert(n.as_str().to_string());
                 }
-                Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 => {
-                    if let Ty::Named(n, _) = &a[0] {
-                        if self.recs.contains_key(n.as_str()) {
-                            self.uses.sets.insert(n.as_str().to_string());
-                        }
-                    }
-                }
-                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-                    if let Ty::Named(n, _) = &a[0] {
-                        if self.recs.contains_key(n.as_str()) {
-                            self.uses.uniques.insert(n.as_str().to_string());
-                        }
-                    }
-                    // An UNANNOTATED literal's STRUCTURAL record element — keyed by
-                    // the anon hash, fields in the block's SOURCE order (r5 lesson).
-                    if let Ty::Record { fields } = &a[0] {
-                        if !fields.is_empty()
-                            && fields
-                                .iter()
-                                .all(|(_, t)| matches!(t, Ty::Int | Ty::Bool | Ty::String))
-                            && fields.iter().any(|(_, t)| matches!(t, Ty::String))
-                        {
-                            self.uses.uniq_structs.insert(
-                                crate::lower::anon_record_drop_name(fields),
-                                fields.iter().map(|(_, t)| t.clone()).collect(),
-                            );
-                        }
-                    }
+                Ty::String => {
+                    self.uses.map_sv.insert(n.as_str().to_string());
                 }
                 _ => {}
+            }
+        }
+
+        /// Extracted from `note` (codopsy8 complexity sweep, group 2 of 3): `Set[<record>]`.
+        /// Verbatim.
+        fn note_set(&mut self, ty: &Ty) {
+            let Ty::Applied(TypeConstructorId::Set, a) = ty else { return };
+            if a.len() != 1 {
+                return;
+            }
+            if let Ty::Named(n, _) = &a[0] {
+                if self.recs.contains_key(n.as_str()) {
+                    self.uses.sets.insert(n.as_str().to_string());
+                }
+            }
+        }
+
+        /// Extracted from `note` (codopsy8 complexity sweep, group 3 of 3): `List[<record>]`
+        /// (`list.unique` element) — both the DECLARED-record case and an UNANNOTATED
+        /// literal's STRUCTURAL record element (keyed by the anon hash, fields in the
+        /// block's SOURCE order — the r5 lesson). Verbatim.
+        fn note_list(&mut self, ty: &Ty) {
+            let Ty::Applied(TypeConstructorId::List, a) = ty else { return };
+            if a.len() != 1 {
+                return;
+            }
+            if let Ty::Named(n, _) = &a[0] {
+                if self.recs.contains_key(n.as_str()) {
+                    self.uses.uniques.insert(n.as_str().to_string());
+                }
+            }
+            if let Ty::Record { fields } = &a[0] {
+                if !fields.is_empty()
+                    && fields.iter().all(|(_, t)| matches!(t, Ty::Int | Ty::Bool | Ty::String))
+                    && fields.iter().any(|(_, t)| matches!(t, Ty::String))
+                {
+                    self.uses.uniq_structs.insert(
+                        crate::lower::anon_record_drop_name(fields),
+                        fields.iter().map(|(_, t)| t.clone()).collect(),
+                    );
+                }
             }
         }
     }
