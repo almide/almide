@@ -318,6 +318,41 @@ fn try_render_bind_rc_cow(ctx: &RenderContext, var: &VarId, name_s: &str, type_s
         .unwrap_or_else(|| if name_s == "_" { format!("let {}: {} = {};", name_s, val_type, val_value) } else { format!("let mut {}: {} = {};", name_s, val_type, val_value) }))
 }
 
+/// `render_stmt_bind`'s RcCow-clone type/value adjustment, extracted
+/// verbatim (cog>30 decomposition) — if `value` comes from an RcCow-wrapped
+/// var (`Clone` or direct `Var`), re-derive the rendered `(type, value)`
+/// pair to wrap in `RcCow<..>`; otherwise pass `type_s`/`value_s` through
+/// unchanged.
+fn rc_cow_clone_bind_type_value(ctx: &RenderContext, value: &IrExpr, type_s: String, value_s: String) -> (String, String) {
+    // Check if value comes from a RcCow-wrapped var (Clone or direct)
+    let is_val_clone = match &value.kind {
+        IrExprKind::Clone { expr: inner } => {
+            if let IrExprKind::Var { id } = &inner.kind {
+                ctx.ann.is_rc_cow(id)
+            } else { false }
+        }
+        IrExprKind::Var { id } => ctx.ann.is_rc_cow(id),
+        _ => false,
+    };
+    if !is_val_clone {
+        return (type_s, value_s);
+    }
+    match &value.kind {
+        // Direct Var from RcCow: use .clone() (Rc::clone O(1))
+        IrExprKind::Var { .. } => {
+            let val_type = format!("RcCow<{}>", type_s);
+            let val_value = format!("{}.clone()", value_s);
+            (val_type, val_value)
+        }
+        // Clone of RcCow var: deref+clone returned T, re-wrap
+        _ => {
+            let val_type = format!("RcCow<{}>", type_s);
+            let val_value = format!("RcCow::new({})", value_s);
+            (val_type, val_value)
+        }
+    }
+}
+
 fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::Bind { var, ty, value, mutability } = &stmt.kind else { unreachable!() };
     if let Some(rendered) = try_render_bind_shared_mut(ctx, var, ty, value) {
@@ -332,34 +367,7 @@ fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let ty = &ty_owned;
     let type_s = render_type(ctx, ty);
     let value_s = render_bind_value_str(ctx, ty, value);
-    // Check if value comes from a RcCow-wrapped var (Clone or direct)
-    let is_val_clone = match &value.kind {
-        IrExprKind::Clone { expr: inner } => {
-            if let IrExprKind::Var { id } = &inner.kind {
-                ctx.ann.is_rc_cow(id)
-            } else { false }
-        }
-        IrExprKind::Var { id } => ctx.ann.is_rc_cow(id),
-        _ => false,
-    };
-    let (type_s, value_s) = if is_val_clone {
-        match &value.kind {
-            // Direct Var from RcCow: use .clone() (Rc::clone O(1))
-            IrExprKind::Var { .. } => {
-                let val_type = format!("RcCow<{}>", type_s);
-                let val_value = format!("{}.clone()", value_s);
-                (val_type, val_value)
-            }
-            // Clone of RcCow var: deref+clone returned T, re-wrap
-            _ => {
-                let val_type = format!("RcCow<{}>", type_s);
-                let val_value = format!("RcCow::new({})", value_s);
-                (val_type, val_value)
-            }
-        }
-    } else {
-        (type_s, value_s)
-    };
+    let (type_s, value_s) = rc_cow_clone_bind_type_value(ctx, value, type_s, value_s);
     let needs_mut = matches!(mutability, Mutability::Let) && {
         let ty_str = type_s.as_str();
         ty_str == "Vec<u8>"
