@@ -21,7 +21,7 @@ mod cargo_build;
 // visible to `cli`'s descendants) so those call sites don't need to change.
 use cargo_build::{cargo_build_cdylib, cargo_build_generated, cargo_build_generated_with_native, cargo_build_test_with_native};
 
-pub use run::{cmd_run, cmd_run_inner};
+pub use run::{cmd_run, cmd_run_inner, RunArgs};
 pub use build::{cmd_build, BuildArgs};
 pub use compile::cmd_compile;
 pub use emit::{cmd_emit, EmitArgs};

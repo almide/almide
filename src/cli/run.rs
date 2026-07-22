@@ -223,7 +223,21 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_m
     }
 }
 
-pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: bool, target: Option<&str>, verified: bool, native_verified: bool) {
+/// Flags for [`cmd_run`] — bundled into one struct (was 7 positional
+/// params, a max-params violation) so the function signature stays under
+/// the params threshold. Field names match `dispatch_run`'s locals 1:1.
+pub struct RunArgs<'a> {
+    pub file: &'a str,
+    pub program_args: &'a [String],
+    pub no_check: bool,
+    pub release: bool,
+    pub target: Option<&'a str>,
+    pub verified: bool,
+    pub native_verified: bool,
+}
+
+pub fn cmd_run(args: RunArgs) {
+    let RunArgs { file, program_args, no_check, release, target, verified, native_verified } = args;
     let code = match target {
         // Default and explicit native target: the cargo/rustc path.
         None | Some("rust") | Some("native") => cmd_run_inner(file, program_args, no_check, false, release, native_verified),

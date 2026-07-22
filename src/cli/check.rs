@@ -1,4 +1,4 @@
-use crate::{parse_file, canonicalize, check as check_mod, diagnostic, resolve, project, project_fetch, out, err};
+use crate::{parse_file, canonicalize, check as check_mod, diagnostic, resolve, project, out, err};
 
 /// `cmd_check`'s combined parse+checker error reporting and
 /// `--deny-warnings` gate. Extracted verbatim — exits the process exactly
@@ -33,38 +33,40 @@ fn report_check_errors_or_exit(
     }
 }
 
-pub fn cmd_check(file: &str, deny_warnings: bool) {
-    let (mut program, source_text, parse_errors) = parse_file(file);
+/// Resolve dependencies, resolve imports, canonicalize, and type-check an
+/// already-parsed program — the common middle section shared by
+/// `cmd_check`/`cmd_check_json`/`cmd_check_effects`, which had near-
+/// identical copies of this pipeline. Exits the process on a dependency-
+/// fetch or import-resolution failure (matching the original
+/// `.unwrap_or_else(|e| {err;exit;})` chain at each call site). Doesn't
+/// call `parse_file` itself so each caller keeps its own parse + any
+/// pre-resolve early-exit check (`cmd_check_effects`'s parse-error gate)
+/// at exactly its original point in the control flow.
+fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Program, source_text: &str) -> (Vec<diagnostic::Diagnostic>, check_mod::Checker) {
+    let dep_paths = super::dep_paths_from_cwd_toml();
 
-    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
-                .into_iter()
-                .map(|fd| (fd.pkg_id, fd.source_dir))
-                .collect()
-        } else {
-            vec![]
-        }
-    } else {
-        vec![]
-    };
-
-    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+    let resolved = resolve::resolve_imports_with_deps(file, program, &dep_paths)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
 
     let canon = canonicalize::canonicalize_program(
-        &program,
+        program,
         resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
     );
     let mut checker = check_mod::Checker::from_env(canon.env);
-    checker.set_source(file, &source_text);
+    checker.set_source(file, source_text);
     checker.diagnostics = canon.diagnostics;
     // #785: module top-let types must be fully inferred before the entry
     // program reads them (drivers infer the entry FIRST; without this the
     // readers see the registration seed — Unknown for non-literal inits).
     almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
-    let diagnostics = checker.infer_program(&mut program);
+    let diagnostics = checker.infer_program(program);
+
+    (diagnostics, checker)
+}
+
+pub fn cmd_check(file: &str, deny_warnings: bool) {
+    let (mut program, source_text, parse_errors) = parse_file(file);
+    let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text);
 
     // Lower to IR for unused variable analysis (only if no parse or type errors)
     let has_type_errors = diagnostics.iter().any(|d| d.level == diagnostic::Level::Error);
@@ -105,36 +107,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
 
 pub fn cmd_check_json(file: &str) {
     let (mut program, source_text, parse_errors) = parse_file(file);
-
-    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
-                .into_iter()
-                .map(|fd| (fd.pkg_id, fd.source_dir))
-                .collect()
-        } else {
-            vec![]
-        }
-    } else {
-        vec![]
-    };
-
-    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
-        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
-
-    let canon = canonicalize::canonicalize_program(
-        &program,
-        resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
-    );
-    let mut checker = check_mod::Checker::from_env(canon.env);
-    checker.set_source(file, &source_text);
-    checker.diagnostics = canon.diagnostics;
-    // #785: module top-let types must be fully inferred before the entry
-    // program reads them (drivers infer the entry FIRST; without this the
-    // readers see the registration seed — Unknown for non-literal inits).
-    almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
-    let diagnostics = checker.infer_program(&mut program);
+    let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text);
 
     // Output each diagnostic as JSON (one per line)
     for d in &parse_errors {
@@ -213,35 +186,7 @@ pub fn cmd_check_effects(file: &str) {
         std::process::exit(1);
     }
 
-    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
-                .into_iter()
-                .map(|fd| (fd.pkg_id, fd.source_dir))
-                .collect()
-        } else {
-            vec![]
-        }
-    } else {
-        vec![]
-    };
-
-    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
-        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
-
-    let canon = canonicalize::canonicalize_program(
-        &program,
-        resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
-    );
-    let mut checker = check_mod::Checker::from_env(canon.env);
-    checker.set_source(file, &source_text);
-    checker.diagnostics = canon.diagnostics;
-    // #785: module top-let types must be fully inferred before the entry
-    // program reads them (drivers infer the entry FIRST; without this the
-    // readers see the registration seed — Unknown for non-literal inits).
-    almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
-    let diagnostics = checker.infer_program(&mut program);
+    let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text);
 
     let errors: Vec<_> = diagnostics.iter()
         .filter(|d| d.level == diagnostic::Level::Error)

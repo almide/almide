@@ -351,9 +351,15 @@ fn build_interface(file: &str) -> Result<almide::interface::ModuleInterface, Str
     Ok(almide::interface::extract(&ir, &module_name, Some(&source_text)))
 }
 
-fn format_tref(ty: &almide::interface::TypeRef) -> String {
+/// `format_tref`'s scalar-variant half (no recursion). Returns `None` for
+/// the compound variants `format_compound_tref` handles — the two halves
+/// together are exhaustive over `TypeRef` (same split technique as
+/// `format_type_ref` in `compile.rs`: cyclomatic complexity counts one
+/// branch per match arm, so splitting a flat 14-arm match into two smaller
+/// matches genuinely lowers it).
+fn format_scalar_tref(ty: &almide::interface::TypeRef) -> Option<String> {
     use almide::interface::TypeRef;
-    match ty {
+    Some(match ty {
         TypeRef::Int => "Int".into(),
         TypeRef::Float => "Float".into(),
         TypeRef::String => "String".into(),
@@ -361,6 +367,17 @@ fn format_tref(ty: &almide::interface::TypeRef) -> String {
         TypeRef::Unit => "Unit".into(),
         TypeRef::Bytes => "Bytes".into(),
         TypeRef::Matrix => "Matrix".into(),
+        TypeRef::TypeVar { name } => name.clone(),
+        TypeRef::Unknown => "?".into(),
+        _ => return None,
+    })
+}
+
+/// `format_tref`'s compound-variant half (recurses via `format_tref`). Only
+/// ever reached for variants `format_scalar_tref` doesn't handle.
+fn format_compound_tref(ty: &almide::interface::TypeRef) -> String {
+    use almide::interface::TypeRef;
+    match ty {
         TypeRef::List { inner } => format!("List[{}]", format_tref(inner)),
         TypeRef::Option { inner } => format!("Option[{}]", format_tref(inner)),
         TypeRef::Set { inner } => format!("Set[{}]", format_tref(inner)),
@@ -379,7 +396,13 @@ fn format_tref(ty: &almide::interface::TypeRef) -> String {
             let ps: Vec<_> = params.iter().map(format_tref).collect();
             format!("fn({}) -> {}", ps.join(", "), format_tref(ret))
         }
-        TypeRef::TypeVar { name } => name.clone(),
-        TypeRef::Unknown => "?".into(),
+        // Every scalar variant returns early via `format_scalar_tref` in
+        // `format_tref` below, so this match is only ever reached with one
+        // of the compound variants above.
+        _ => unreachable!("format_scalar_tref should have handled this TypeRef variant"),
     }
+}
+
+fn format_tref(ty: &almide::interface::TypeRef) -> String {
+    format_scalar_tref(ty).unwrap_or_else(|| format_compound_tref(ty))
 }

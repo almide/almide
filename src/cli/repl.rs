@@ -38,31 +38,46 @@ pub fn run_repl() {
 
 enum Kind { TopLevel, Body, Expr }
 
-fn classify(input: &str) -> Kind {
-    let t = input.trim_start();
-    if t.starts_with("fn ") || t.starts_with("effect fn ")
-        || t.starts_with("type ") || t.starts_with("mod type ")
-        || t.starts_with("import ")
-    {
-        return Kind::TopLevel;
-    }
-    if t.starts_with("let ") || t.starts_with("var ") || t.starts_with("for ") {
-        return Kind::Body;
-    }
-    // Assignment: `ident = expr` (not `==` or `=>`)
+/// `classify`'s top-level-declaration prefix check. Converted to a data
+/// table + linear scan (same technique as `lookup_keyword_info` in
+/// lsp_p2.rs) — cyclomatic complexity counts each `||` branch, so a flat
+/// table genuinely lowers it rather than just moving it around.
+fn is_top_level_prefix(t: &str) -> bool {
+    const PREFIXES: &[&str] = &["fn ", "effect fn ", "type ", "mod type ", "import "];
+    PREFIXES.iter().any(|p| t.starts_with(p))
+}
+
+/// `classify`'s statement-prefix check (`let`/`var`/`for`). Same table
+/// technique as `is_top_level_prefix`.
+fn is_body_prefix(t: &str) -> bool {
+    const PREFIXES: &[&str] = &["let ", "var ", "for "];
+    PREFIXES.iter().any(|p| t.starts_with(p))
+}
+
+/// `classify`'s assignment-detection scan: `ident = expr` (not `==` or
+/// `=>`). Extracted verbatim.
+fn looks_like_assignment(t: &str) -> bool {
     let bytes = t.as_bytes();
     let mut i = 0;
     while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'.') {
         i += 1;
     }
-    if i > 0 {
-        while i < bytes.len() && bytes[i] == b' ' { i += 1; }
-        if i < bytes.len() && bytes[i] == b'='
-            && bytes.get(i + 1) != Some(&b'=')
-            && bytes.get(i + 1) != Some(&b'>')
-        {
-            return Kind::Body;
-        }
+    if i == 0 {
+        return false;
+    }
+    while i < bytes.len() && bytes[i] == b' ' { i += 1; }
+    i < bytes.len() && bytes[i] == b'='
+        && bytes.get(i + 1) != Some(&b'=')
+        && bytes.get(i + 1) != Some(&b'>')
+}
+
+fn classify(input: &str) -> Kind {
+    let t = input.trim_start();
+    if is_top_level_prefix(t) {
+        return Kind::TopLevel;
+    }
+    if is_body_prefix(t) || looks_like_assignment(t) {
+        return Kind::Body;
     }
     Kind::Expr
 }
