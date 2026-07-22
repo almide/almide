@@ -18,6 +18,7 @@
 use std::collections::HashSet;
 use almide_ir::*;
 use almide_lang::types::Ty;
+use almide_base::intern::Sym;
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -221,96 +222,175 @@ fn collect_pattern_bindings_into(pattern: &IrPattern, out: &mut HashSet<VarId>) 
     }
 }
 
+/// Transform every child of a list of independent expressions (args, list
+/// elements, ...). Uses `|=` (non-short-circuiting) so every element is
+/// always visited regardless of earlier results.
+fn transform_expr_list(exprs: &mut [IrExpr], vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    for e in exprs { changed |= transform_expr(e, vt, scope_vars); }
+    changed
+}
+
+/// Transform the `IrExpr` half of a `(Sym, IrExpr)` pair list (Record
+/// fields, InlineRust args).
+fn transform_expr_pairs(pairs: &mut [(Sym, IrExpr)], vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    for (_, e) in pairs { changed |= transform_expr(e, vt, scope_vars); }
+    changed
+}
+
+/// Transform both sides of a `(IrExpr, IrExpr)` pair list (MapLiteral entries).
+fn transform_expr_kv_pairs(entries: &mut [(IrExpr, IrExpr)], vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    for (k, v) in entries {
+        changed |= transform_expr(k, vt, scope_vars);
+        changed |= transform_expr(v, vt, scope_vars);
+    }
+    changed
+}
+
+/// Shared by `Call` and `TailCall`: only `Method`/`Computed` targets carry a
+/// child `IrExpr` to descend into.
+fn transform_call_target(target: &mut CallTarget, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+    match target {
+        CallTarget::Method { object, .. } => transform_expr(object, vt, scope_vars),
+        CallTarget::Computed { callee } => transform_expr(callee, vt, scope_vars),
+        CallTarget::Named { .. } | CallTarget::Module { .. } => false,
+    }
+}
+
+fn transform_expr_block(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+    let IrExprKind::Block { stmts, expr: tail } = &mut expr.kind else { unreachable!() };
+    // Collect vars defined in this block to extend scope
+    let mut local_scope = scope_vars.clone();
+    for stmt in stmts.iter() {
+        collect_stmt_bindings(stmt, &mut local_scope);
+    }
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        changed |= transform_stmt(stmt, vt, &local_scope);
+    }
+    if let Some(e) = tail {
+        changed |= transform_expr(e, vt, &local_scope);
+    }
+    changed
+}
+
+fn transform_expr_match(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+    let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+    let mut changed = transform_expr(subject, vt, scope_vars);
+    for arm in arms {
+        if let Some(g) = &mut arm.guard {
+            changed |= transform_expr(g, vt, scope_vars);
+        }
+        changed |= transform_expr(&mut arm.body, vt, scope_vars);
+    }
+    changed
+}
+
+fn transform_expr_for_in(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+    let IrExprKind::ForIn { iterable, body, var, var_tuple, .. } = &mut expr.kind else { unreachable!() };
+    let mut changed = transform_expr(iterable, vt, scope_vars);
+    let mut loop_scope = scope_vars.clone();
+    loop_scope.insert(*var);
+    if let Some(vt_) = var_tuple { for v in vt_.iter() { loop_scope.insert(*v); } }
+    // Collect vars defined in loop body so lambdas can see sibling bindings
+    for s in body.iter() { collect_stmt_bindings(s, &mut loop_scope); }
+    for s in body.iter_mut() { changed |= transform_stmt(s, vt, &loop_scope); }
+    changed
+}
+
+fn transform_expr_while(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+    let IrExprKind::While { cond, body } = &mut expr.kind else { unreachable!() };
+    let mut changed = transform_expr(cond, vt, scope_vars);
+    let mut loop_scope = scope_vars.clone();
+    // Collect vars defined in loop body so lambdas can see sibling bindings
+    for s in body.iter() { collect_stmt_bindings(s, &mut loop_scope); }
+    for s in body.iter_mut() { changed |= transform_stmt(s, vt, &loop_scope); }
+    changed
+}
+
+fn transform_string_parts(parts: &mut [IrStringPart], vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    for p in parts {
+        if let IrStringPart::Expr { expr: e } = p {
+            changed |= transform_expr(e, vt, scope_vars);
+        }
+    }
+    changed
+}
+
+// A fused iterator chain (produced by stream fusion) hides its step and
+// collector lambdas from the generic recursion in `transform_expr`. Without
+// descending here, a `move` step closure that captures a non-Copy outer var
+// (e.g. a map used inside `keys |> map(k => …get(g,k)…)`) never gets the
+// pre-clone wrap, so the chain moves the var and a later use of it fails to
+// compile (E0382). Recurse into the source and every embedded lambda.
+// `replace_vars` already mirrors this shape, so a wrapped lambda's `__cap`
+// renames carry through correctly.
+fn transform_expr_iter_chain(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+    let IrExprKind::IterChain { source, steps, collector, .. } = &mut expr.kind else { unreachable!() };
+    let mut changed = transform_expr(source, vt, scope_vars);
+    for step in steps.iter_mut() {
+        match step {
+            IterStep::Map { lambda } | IterStep::Filter { lambda }
+            | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                changed |= transform_expr(lambda, vt, scope_vars);
+            }
+        }
+    }
+    match collector {
+        IterCollector::Collect => {}
+        IterCollector::Fold { init, lambda } => {
+            changed |= transform_expr(init, vt, scope_vars);
+            changed |= transform_expr(lambda, vt, scope_vars);
+        }
+        IterCollector::Any { lambda } | IterCollector::All { lambda }
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+            changed |= transform_expr(lambda, vt, scope_vars);
+        }
+    }
+    changed
+}
+
 /// Walk the IR tree. When we find a Lambda that captures clone-worthy outer
 /// variables, wrap it in a block with pre-clone bindings.
 fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
-    let mut changed = false;
-
-    // First, recurse into children (bottom-up so inner lambdas are processed first)
-    match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            // Collect vars defined in this block to extend scope
-            let mut local_scope = scope_vars.clone();
-            for stmt in stmts.iter() {
-                collect_stmt_bindings(stmt, &mut local_scope);
-            }
-            for stmt in stmts.iter_mut() {
-                if transform_stmt(stmt, vt, &local_scope) { changed = true; }
-            }
-            if let Some(e) = tail {
-                if transform_expr(e, vt, &local_scope) { changed = true; }
-            }
-        }
+    // First, recurse into children (bottom-up so inner lambdas are processed first).
+    // Every arm uses `|` (non-short-circuiting bool-or), never `||` — all
+    // children must always be visited so their captures get pre-cloned,
+    // regardless of what an earlier sibling returned.
+    let mut changed = match &mut expr.kind {
+        IrExprKind::Block { .. } => transform_expr_block(expr, vt, scope_vars),
         IrExprKind::If { cond, then, else_ } => {
-            if transform_expr(cond, vt, scope_vars) { changed = true; }
-            if transform_expr(then, vt, scope_vars) { changed = true; }
-            if transform_expr(else_, vt, scope_vars) { changed = true; }
+            transform_expr(cond, vt, scope_vars)
+                | transform_expr(then, vt, scope_vars)
+                | transform_expr(else_, vt, scope_vars)
         }
-        IrExprKind::Match { subject, arms } => {
-            if transform_expr(subject, vt, scope_vars) { changed = true; }
-            for arm in arms {
-                if let Some(g) = &mut arm.guard {
-                    if transform_expr(g, vt, scope_vars) { changed = true; }
-                }
-                if transform_expr(&mut arm.body, vt, scope_vars) { changed = true; }
-            }
-        }
+        IrExprKind::Match { .. } => transform_expr_match(expr, vt, scope_vars),
         IrExprKind::Lambda { body, params, .. } => {
             let mut inner_scope = scope_vars.clone();
             for (v, _) in params.iter() { inner_scope.insert(*v); }
-            if transform_expr(body, vt, &inner_scope) { changed = true; }
+            transform_expr(body, vt, &inner_scope)
         }
         IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, .. } => { if transform_expr(object, vt, scope_vars) { changed = true; } }
-                CallTarget::Computed { callee } => { if transform_expr(callee, vt, scope_vars) { changed = true; } }
-                _ => {}
-            }
-            for a in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
+            transform_call_target(target, vt, scope_vars) | transform_expr_list(args, vt, scope_vars)
         }
-        IrExprKind::RuntimeCall { args, .. } => {
-            for a in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
-        }
+        IrExprKind::RuntimeCall { args, .. } => transform_expr_list(args, vt, scope_vars),
         IrExprKind::BinOp { left, right, .. } => {
-            if transform_expr(left, vt, scope_vars) { changed = true; }
-            if transform_expr(right, vt, scope_vars) { changed = true; }
+            transform_expr(left, vt, scope_vars) | transform_expr(right, vt, scope_vars)
         }
-        IrExprKind::UnOp { operand, .. } => {
-            if transform_expr(operand, vt, scope_vars) { changed = true; }
-        }
+        IrExprKind::UnOp { operand, .. } => transform_expr(operand, vt, scope_vars),
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { if transform_expr(e, vt, scope_vars) { changed = true; } }
+            transform_expr_list(elements, vt, scope_vars)
         }
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields { if transform_expr(v, vt, scope_vars) { changed = true; } }
-        }
+        IrExprKind::Record { fields, .. } => transform_expr_pairs(fields, vt, scope_vars),
         IrExprKind::SpreadRecord { base, fields } => {
-            if transform_expr(base, vt, scope_vars) { changed = true; }
-            for (_, v) in fields { if transform_expr(v, vt, scope_vars) { changed = true; } }
+            transform_expr(base, vt, scope_vars) | transform_expr_pairs(fields, vt, scope_vars)
         }
-        IrExprKind::ForIn { iterable, body, var, var_tuple, .. } => {
-            if transform_expr(iterable, vt, scope_vars) { changed = true; }
-            let mut loop_scope = scope_vars.clone();
-            loop_scope.insert(*var);
-            if let Some(vt_) = var_tuple { for v in vt_.iter() { loop_scope.insert(*v); } }
-            // Collect vars defined in loop body so lambdas can see sibling bindings
-            for s in body.iter() { collect_stmt_bindings(s, &mut loop_scope); }
-            for s in body { if transform_stmt(s, vt, &loop_scope) { changed = true; } }
-        }
-        IrExprKind::While { cond, body } => {
-            if transform_expr(cond, vt, scope_vars) { changed = true; }
-            let mut loop_scope = scope_vars.clone();
-            // Collect vars defined in loop body so lambdas can see sibling bindings
-            for s in body.iter() { collect_stmt_bindings(s, &mut loop_scope); }
-            for s in body { if transform_stmt(s, vt, &loop_scope) { changed = true; } }
-        }
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let IrStringPart::Expr { expr: e } = p {
-                    if transform_expr(e, vt, scope_vars) { changed = true; }
-                }
-            }
-        }
+        IrExprKind::ForIn { .. } => transform_expr_for_in(expr, vt, scope_vars),
+        IrExprKind::While { .. } => transform_expr_while(expr, vt, scope_vars),
+        IrExprKind::StringInterp { parts } => transform_string_parts(parts, vt, scope_vars),
         IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
         | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
         | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
@@ -324,75 +404,27 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         // so the walk and the rename now agree.
         | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
         | IrExprKind::ToVec { expr: e } | IrExprKind::Await { expr: e } => {
-            if transform_expr(e, vt, scope_vars) { changed = true; }
+            transform_expr(e, vt, scope_vars)
         }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
-        }
+        IrExprKind::RustMacro { args, .. } => transform_expr_list(args, vt, scope_vars),
         IrExprKind::UnwrapOr { expr: e, fallback: f } => {
-            if transform_expr(e, vt, scope_vars) { changed = true; }
-            if transform_expr(f, vt, scope_vars) { changed = true; }
+            transform_expr(e, vt, scope_vars) | transform_expr(f, vt, scope_vars)
         }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            if transform_expr(object, vt, scope_vars) { changed = true; }
-            if transform_expr(index, vt, scope_vars) { changed = true; }
+            transform_expr(object, vt, scope_vars) | transform_expr(index, vt, scope_vars)
         }
         IrExprKind::Range { start, end, .. } => {
-            if transform_expr(start, vt, scope_vars) { changed = true; }
-            if transform_expr(end, vt, scope_vars) { changed = true; }
+            transform_expr(start, vt, scope_vars) | transform_expr(end, vt, scope_vars)
         }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries {
-                if transform_expr(k, vt, scope_vars) { changed = true; }
-                if transform_expr(v, vt, scope_vars) { changed = true; }
-            }
-        }
+        IrExprKind::MapLiteral { entries } => transform_expr_kv_pairs(entries, vt, scope_vars),
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => {
-            if transform_expr(object, vt, scope_vars) { changed = true; }
-        }
-        // A fused iterator chain (produced by stream fusion) hides its step and
-        // collector lambdas from the generic recursion above. Without descending
-        // here, a `move` step closure that captures a non-Copy outer var (e.g. a
-        // map used inside `keys |> map(k => …get(g,k)…)`) never gets the pre-clone
-        // wrap, so the chain moves the var and a later use of it fails to compile
-        // (E0382). Recurse into the source and every embedded lambda. `replace_vars`
-        // already mirrors this shape, so a wrapped lambda's `__cap` renames carry
-        // through correctly.
-        IrExprKind::IterChain { source, steps, collector, .. } => {
-            if transform_expr(source, vt, scope_vars) { changed = true; }
-            for step in steps.iter_mut() {
-                match step {
-                    IterStep::Map { lambda } | IterStep::Filter { lambda }
-                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
-                        if transform_expr(lambda, vt, scope_vars) { changed = true; }
-                    }
-                }
-            }
-            match collector {
-                IterCollector::Collect => {}
-                IterCollector::Fold { init, lambda } => {
-                    if transform_expr(init, vt, scope_vars) { changed = true; }
-                    if transform_expr(lambda, vt, scope_vars) { changed = true; }
-                }
-                IterCollector::Any { lambda } | IterCollector::All { lambda }
-                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
-                    if transform_expr(lambda, vt, scope_vars) { changed = true; }
-                }
-            }
-        }
+        | IrExprKind::OptionalChain { expr: object, .. } => transform_expr(object, vt, scope_vars),
+        IrExprKind::IterChain { .. } => transform_expr_iter_chain(expr, vt, scope_vars),
         IrExprKind::TailCall { target, args } => {
-            match target {
-                CallTarget::Method { object, .. } => { if transform_expr(object, vt, scope_vars) { changed = true; } }
-                CallTarget::Computed { callee } => { if transform_expr(callee, vt, scope_vars) { changed = true; } }
-                CallTarget::Named { .. } | CallTarget::Module { .. } => {}
-            }
-            for a in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
+            transform_call_target(target, vt, scope_vars) | transform_expr_list(args, vt, scope_vars)
         }
-        IrExprKind::RcWrap { expr: e, .. } => { if transform_expr(e, vt, scope_vars) { changed = true; } }
-        IrExprKind::InlineRust { args, .. } => {
-            for (_, a) in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
-        }
+        IrExprKind::RcWrap { expr: e, .. } => transform_expr(e, vt, scope_vars),
+        IrExprKind::InlineRust { args, .. } => transform_expr_pairs(args, vt, scope_vars),
         // True leaves (no child `IrExpr`). Listed explicitly so a new
         // child-bearing IrExprKind is a compile error here, not a silently
         // dropped subtree (the native↔WASM capture-divergence class).
@@ -401,8 +433,8 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         | IrExprKind::FnRef { .. } | IrExprKind::Break | IrExprKind::Continue
         | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::RenderedCall { .. }
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
-        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
-    }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => false,
+    };
 
     // Now check: is this expr itself a Lambda with captured vars that need cloning?
     if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
