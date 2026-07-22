@@ -1,12 +1,11 @@
 impl LowerCtx {
+    /// Name router — arm bodies (2 of the 4 arms have real bodies; the other
+    /// 2 already delegate to a single named call) moved to helpers, same
+    /// "uniform match arm" split as binds_p4_b.rs above.
     fn try_lower_result_small_arms(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
         match &value.kind {
             IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => {
-                let payload = self.lower_scalar_value(expr)?;
-                let repr = repr_of(ty).ok()?;
-                let dst = self.materialize_result_ok(payload, repr);
-                self.materialized_results.insert(dst);
-                Some(dst)
+                self.try_lower_result_ok_scalar(expr, ty)
             }
             IrExprKind::ResultErr { expr }
                 if !is_heap_ty(&expr.ty)
@@ -14,11 +13,7 @@ impl LowerCtx {
                         Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
                             if a.len() == 2 && !is_heap_ty(&a[0]) && !is_heap_ty(&a[1])) =>
             {
-                let payload = self.lower_scalar_value(expr)?;
-                let repr = repr_of(ty).ok()?;
-                let dst = self.materialize_result_err_scalar(payload, repr);
-                self.materialized_results.insert(dst);
-                Some(dst)
+                self.try_lower_result_err_scalar(expr, ty)
             }
             IrExprKind::ResultErr { .. } if self.is_scalar_ok_variant_err_result(ty) => {
                 self.try_lower_result_err_variant_ctor(value, ty)
@@ -32,6 +27,22 @@ impl LowerCtx {
             }
             _ => None,
         }
+    }
+
+    fn try_lower_result_ok_scalar(&mut self, expr: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        let payload = self.lower_scalar_value(expr)?;
+        let repr = repr_of(ty).ok()?;
+        let dst = self.materialize_result_ok(payload, repr);
+        self.materialized_results.insert(dst);
+        Some(dst)
+    }
+
+    fn try_lower_result_err_scalar(&mut self, expr: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        let payload = self.lower_scalar_value(expr)?;
+        let repr = repr_of(ty).ok()?;
+        let dst = self.materialize_result_err_scalar(payload, repr);
+        self.materialized_results.insert(dst);
+        Some(dst)
     }
 
     /// Outer name router — unchanged. The guarded arm's WHOLE body (not just
