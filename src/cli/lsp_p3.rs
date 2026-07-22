@@ -3,61 +3,76 @@
 // Code Actions
 // ══════════════════════════════════════════════════════════════
 
+/// `compute_code_actions`'s E003 (unknown module) quickfix: suggest an
+/// `import X` insertion after the last existing import. Extracted verbatim.
+fn code_action_for_e003(diag: &Diagnostic, lines: &[&str], uri: &Uri) -> Option<CodeActionOrCommand> {
+    let module = extract_quoted_name(&diag.message)?;
+    let known = ["io", "json", "env", "fs", "http", "regex", "random", "testing", "datetime", "bytes", "html", "path", "channel"];
+    if !known.contains(&module.as_str()) {
+        return None;
+    }
+    let insert_line = lines.iter().enumerate()
+        .filter(|(_, l)| l.trim().starts_with("import "))
+        .map(|(i, _)| (i + 1) as u32).last().unwrap_or(0);
+    Some(CodeActionOrCommand::CodeAction(CodeAction {
+        title: format!("Import '{}'", module),
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: Some(vec![diag.clone()]),
+        edit: Some(WorkspaceEdit {
+            changes: Some(HashMap::from([(uri.clone(), vec![TextEdit {
+                range: Range { start: Position { line: insert_line, character: 0 }, end: Position { line: insert_line, character: 0 } },
+                new_text: format!("import {}\n", module),
+            }])])),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }))
+}
+
+/// `compute_code_actions`'s E006 (non-effect fn) quickfix: mark the nearest
+/// enclosing `fn` (scanning backward from the diagnostic) as `effect fn`.
+/// Extracted verbatim — the backward scan + nested checks were also the
+/// max-depth-7 nesting site; isolating it into its own function resets
+/// that count. Once the first `fn `-without-`effect fn` line is found the
+/// scan always stops there (action-or-not), matching the original's
+/// unconditional `break` on that condition.
+fn code_action_for_e006(diag: &Diagnostic, lines: &[&str], uri: &Uri) -> Option<CodeActionOrCommand> {
+    for i in (0..=diag.range.start.line as usize).rev() {
+        let lt = lines.get(i)?;
+        if !lt.contains("fn ") || lt.contains("effect fn") {
+            continue;
+        }
+        let c = lt.find("fn ")?;
+        return Some(CodeActionOrCommand::CodeAction(CodeAction {
+            title: "Mark as effect fn".to_string(),
+            kind: Some(CodeActionKind::QUICKFIX),
+            diagnostics: Some(vec![diag.clone()]),
+            edit: Some(WorkspaceEdit {
+                changes: Some(HashMap::from([(uri.clone(), vec![TextEdit {
+                    range: Range { start: Position { line: i as u32, character: c as u32 }, end: Position { line: i as u32, character: c as u32 + 2 } },
+                    new_text: "effect fn".to_string(),
+                }])])),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+    }
+    None
+}
+
 fn compute_code_actions(source: &str, diagnostics: &[Diagnostic], uri: &Uri) -> Vec<CodeActionOrCommand> {
     let mut actions = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
 
     for diag in diagnostics {
         let code = diag.code.as_ref().and_then(|c| match c { NumberOrString::String(s) => Some(s.as_str()), _ => None });
-        match code {
-            Some("E003") => {
-                if let Some(module) = extract_quoted_name(&diag.message) {
-                    let known = ["io", "json", "env", "fs", "http", "regex", "random", "testing", "datetime", "bytes", "html", "path", "channel"];
-                    if known.contains(&module.as_str()) {
-                        let insert_line = lines.iter().enumerate()
-                            .filter(|(_, l)| l.trim().starts_with("import "))
-                            .map(|(i, _)| (i + 1) as u32).last().unwrap_or(0);
-                        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                            title: format!("Import '{}'", module),
-                            kind: Some(CodeActionKind::QUICKFIX),
-                            diagnostics: Some(vec![diag.clone()]),
-                            edit: Some(WorkspaceEdit {
-                                changes: Some(HashMap::from([(uri.clone(), vec![TextEdit {
-                                    range: Range { start: Position { line: insert_line, character: 0 }, end: Position { line: insert_line, character: 0 } },
-                                    new_text: format!("import {}\n", module),
-                                }])])),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
-                        }));
-                    }
-                }
-            }
-            Some("E006") => {
-                for i in (0..=diag.range.start.line as usize).rev() {
-                    if let Some(lt) = lines.get(i) {
-                        if lt.contains("fn ") && !lt.contains("effect fn") {
-                            if let Some(c) = lt.find("fn ") {
-                                actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                                    title: "Mark as effect fn".to_string(),
-                                    kind: Some(CodeActionKind::QUICKFIX),
-                                    diagnostics: Some(vec![diag.clone()]),
-                                    edit: Some(WorkspaceEdit {
-                                        changes: Some(HashMap::from([(uri.clone(), vec![TextEdit {
-                                            range: Range { start: Position { line: i as u32, character: c as u32 }, end: Position { line: i as u32, character: c as u32 + 2 } },
-                                            new_text: "effect fn".to_string(),
-                                        }])])),
-                                        ..Default::default()
-                                    }),
-                                    ..Default::default()
-                                }));
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            _ => {}
+        let action = match code {
+            Some("E003") => code_action_for_e003(diag, &lines, uri),
+            Some("E006") => code_action_for_e006(diag, &lines, uri),
+            _ => None,
+        };
+        if let Some(a) = action {
+            actions.push(a);
         }
     }
     actions
@@ -74,6 +89,35 @@ fn extract_quoted_name(msg: &str) -> Option<String> {
 // Workspace Symbols
 // ══════════════════════════════════════════════════════════════
 
+/// `compute_workspace_symbols`'s per-file body: parse one `.almd` file and
+/// append every decl whose name matches `query`/`query_lower` to `results`.
+/// Extracted verbatim.
+fn collect_workspace_symbols_from_file(file_path: &std::path::Path, query: &str, query_lower: &str, results: &mut Vec<SymbolInformation>) {
+    let source = match std::fs::read_to_string(file_path) { Ok(s) => s, Err(_) => return };
+    let tokens = crate::lexer::Lexer::tokenize(&source);
+    let mut parser = crate::parser::Parser::new(tokens);
+    let prog = match parser.parse() { Ok(p) => p, Err(_) => return };
+    let file_uri = match Uri::from_str(&format!("file://{}", file_path.display())) { Ok(u) => u, Err(_) => return };
+    for decl in &prog.decls {
+        let (name, kind, span) = match decl {
+            crate::ast::Decl::Fn { name, span, .. } => (name.as_str(), SymbolKind::FUNCTION, span),
+            crate::ast::Decl::Type { name, span, .. } => (name.as_str(), SymbolKind::STRUCT, span),
+            crate::ast::Decl::TopLet { name, span, .. } => (name.as_str(), SymbolKind::VARIABLE, span),
+            _ => continue,
+        };
+        if !query.is_empty() && !name.to_lowercase().contains(query_lower) { continue; }
+        let line = span.as_ref().map(|s| s.line.saturating_sub(1) as u32).unwrap_or(0);
+        let col = span.as_ref().map(|s| s.col.saturating_sub(1) as u32).unwrap_or(0);
+        #[allow(deprecated)]
+        results.push(SymbolInformation {
+            name: name.to_string(), kind,
+            location: Location { uri: file_uri.clone(), range: Range { start: Position { line, character: col }, end: Position { line, character: col + name.len() as u32 } } },
+            tags: None, deprecated: None,
+            container_name: file_path.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string()),
+        });
+    }
+}
+
 fn compute_workspace_symbols(query: &str, workspace_root: &Option<std::path::PathBuf>) -> Vec<SymbolInformation> {
     let root = match workspace_root { Some(r) => r, None => return vec![] };
     let mut files = Vec::new();
@@ -81,29 +125,7 @@ fn compute_workspace_symbols(query: &str, workspace_root: &Option<std::path::Pat
     let query_lower = query.to_lowercase();
     let mut results = Vec::new();
     for file_path in &files {
-        let source = match std::fs::read_to_string(file_path) { Ok(s) => s, Err(_) => continue };
-        let tokens = crate::lexer::Lexer::tokenize(&source);
-        let mut parser = crate::parser::Parser::new(tokens);
-        let prog = match parser.parse() { Ok(p) => p, Err(_) => continue };
-        let file_uri = match Uri::from_str(&format!("file://{}", file_path.display())) { Ok(u) => u, Err(_) => continue };
-        for decl in &prog.decls {
-            let (name, kind, span) = match decl {
-                crate::ast::Decl::Fn { name, span, .. } => (name.as_str(), SymbolKind::FUNCTION, span),
-                crate::ast::Decl::Type { name, span, .. } => (name.as_str(), SymbolKind::STRUCT, span),
-                crate::ast::Decl::TopLet { name, span, .. } => (name.as_str(), SymbolKind::VARIABLE, span),
-                _ => continue,
-            };
-            if !query.is_empty() && !name.to_lowercase().contains(&query_lower) { continue; }
-            let line = span.as_ref().map(|s| s.line.saturating_sub(1) as u32).unwrap_or(0);
-            let col = span.as_ref().map(|s| s.col.saturating_sub(1) as u32).unwrap_or(0);
-            #[allow(deprecated)]
-            results.push(SymbolInformation {
-                name: name.to_string(), kind,
-                location: Location { uri: file_uri.clone(), range: Range { start: Position { line, character: col }, end: Position { line, character: col + name.len() as u32 } } },
-                tags: None, deprecated: None,
-                container_name: file_path.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string()),
-            });
-        }
+        collect_workspace_symbols_from_file(file_path, query, &query_lower, &mut results);
     }
     results
 }
