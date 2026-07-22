@@ -433,7 +433,17 @@ impl Checker {
                     (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| *name)
                 })
             }
-            // Numeric primitive types — canonicalised so `T: Numeric` bounds can look them up in `env.type_protocols` (the `register_builtin_protocols` pass seeds this table with the primitive ↔ `Numeric` links).
+            // TypeVars and inference vars are not concrete — skip protocol checking
+            Ty::TypeVar(_) | Ty::Unknown => None,
+            _ => Self::primitive_protocol_type_name(ty),
+        }
+    }
+
+    // Numeric primitive types — canonicalised so `T: Numeric` bounds can look
+    // them up in `env.type_protocols` (the `register_builtin_protocols` pass
+    // seeds this table with the primitive ↔ `Numeric` links).
+    fn primitive_protocol_type_name(ty: &Ty) -> Option<Sym> {
+        match ty {
             Ty::Int => Some(sym("Int")),
             Ty::Float => Some(sym("Float")),
             Ty::Int8 => Some(sym("Int8")),
@@ -449,8 +459,6 @@ impl Checker {
             Ty::Bytes => Some(sym("Bytes")),
             Ty::Matrix => Some(sym("Matrix")),
             Ty::Unit => Some(sym("Unit")),
-            // TypeVars and inference vars are not concrete — skip protocol checking
-            Ty::TypeVar(_) | Ty::Unknown => None,
             _ => None,
         }
     }
@@ -737,62 +745,70 @@ impl Checker {
     fn check_unresolved_named_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {
         self.last_mut_params = vec![];
         // No function signature found — try constructor, variable, or report error
+        if let Some(ty) = self.try_unresolved_call_ctor_or_var(name, arg_tys) {
+            return ty;
+        }
+        self.emit_unresolved_call_diagnostic(name)
+    }
+
+    // Try resolving `name(...)` as a variant constructor or a callable
+    // variable — the two success paths of `check_unresolved_named_call`.
+    // Returns `None` when neither claims the name, so the caller falls
+    // through to the undefined-function diagnostic.
+    fn try_unresolved_call_ctor_or_var(&mut self, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
         if let Some((type_name, case)) = self.env.lookup_ctor(&sym(name)) {
             self.check_constructor_args(name, &case, arg_tys);
             let generic_args = self.instantiate_type_generics(type_name.as_str());
-            return Ty::Named(type_name, generic_args);
+            return Some(Ty::Named(type_name, generic_args));
         }
-        if let Some(ty) = self.env.lookup_var(name).cloned() {
-            if let Ty::Fn { params, ret } = &ty {
-                arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
-                    self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
-                });
-                return ret.as_ref().clone();
-            }
-            // #558: `n(args)` where `n` is a NON-function local — the call position makes this an error. Previously this returned the var's own type unchecked, so the program passed `check` and then ICE'd in the wasm emitter (`call target not in func_map`) / leaked a raw rustc E0425 natively.
-            let rty = resolve_ty(&ty, &self.uf);
-            if !matches!(rty, Ty::Unknown | Ty::TypeVar(_)) {
-                self.emit(super::err(
-                    format!("`{}` is not a function — it has type {}", name, rty.display()),
-                    format!("`{}` is a value; only functions and closures can be called", name),
-                    format!("call to {}()", name)).with_code("E002"));
-                return Ty::Unknown;
-            }
-            // #623: `f` is an as-yet-unresolved inference var being CALLED — so it MUST be a function. Constrain it to `(arg_tys) -> ?ret` and return `?ret`, not `f`'s own type. Returning `ty` typed the call result as f's CLOSURE type (e.g. `(f) => f(10)` in a `list.map` lambda became `((Int)->Int) -> ((Int)->Int)` instead of `((Int)->Int) -> Int`), so codegen emitted a closure body that returns a closure where it returns the call result (invalid Rust / wrong wasm). `?ret` is resolved from context — e.g. the element type `(Int)->Int` flowing in from `list.map` pins `?ret = Int`.
-            let ret = self.fresh_var();
-            let fn_ty = Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) };
-            self.constrain(fn_ty, ty, format!("call to {}()", name));
-            return ret;
+        let ty = self.env.lookup_var(name).cloned()?;
+        if let Ty::Fn { params, ret } = &ty {
+            arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
+                self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
+            });
+            return Some(ret.as_ref().clone());
         }
-        // Triple: (hint, clean fn-name fix for simple try:, rich multi-line snippet). `rich_snippet` overrides `fix_name` when present — used for hallucinations that need a conversion wrapper or operator rewrite rather than a rename.
-        let (hint, fix_name, rich_snippet): (String, Option<String>, Option<&'static str>) = {
-            // For module-qualified calls (e.g. "string.uppercase"), narrow candidates to the same module and compare only the function part for better suggestions.
-            if let Some((module, func)) = name.split_once('.') {
-                // Use the *full* surface (TOML + bundled) so diagnostic suggestions see fns migrated to `stdlib/<m>.almd` even after their TOML entries have been deleted.
-                let module_funcs = crate::stdlib::module_functions_all(module);
-                if !module_funcs.is_empty() {
-                    // Check known alias map first (catches common hallucinations)
-                    if let Some(alias) = crate::stdlib::suggest_alias(module, func) {
-                        // Aliases can be free text like "xs + [x]"; only treat as a copy-pasteable fn name if it matches `module.func` form.
-                        let fix = is_clean_fn_name(alias).then(|| alias.to_string());
-                        let rich = crate::stdlib::try_snippet_for_alias(module, func);
-                        (format!("Did you mean `{}`?", alias), fix, rich)
-                    } else if let Some(suggestion) = almide_base::diagnostic::suggest(func, module_funcs.iter().copied()) {
-                        let full = format!("{}.{}", module, suggestion);
-                        (format!("Did you mean `{}`?", full), Some(full), None)
-                    } else {
-                        (format!("No function '{}' in module '{}'. See docs/CHEATSHEET.md for available functions", func, module), None, None)
-                    }
+        // #558: `n(args)` where `n` is a NON-function local — the call position makes this an error. Previously this returned the var's own type unchecked, so the program passed `check` and then ICE'd in the wasm emitter (`call target not in func_map`) / leaked a raw rustc E0425 natively.
+        let rty = resolve_ty(&ty, &self.uf);
+        if !matches!(rty, Ty::Unknown | Ty::TypeVar(_)) {
+            self.emit(super::err(
+                format!("`{}` is not a function — it has type {}", name, rty.display()),
+                format!("`{}` is a value; only functions and closures can be called", name),
+                format!("call to {}()", name)).with_code("E002"));
+            return Some(Ty::Unknown);
+        }
+        // #623: `f` is an as-yet-unresolved inference var being CALLED — so it MUST be a function. Constrain it to `(arg_tys) -> ?ret` and return `?ret`, not `f`'s own type. Returning `ty` typed the call result as f's CLOSURE type (e.g. `(f) => f(10)` in a `list.map` lambda became `((Int)->Int) -> ((Int)->Int)` instead of `((Int)->Int) -> Int`), so codegen emitted a closure body that returns a closure where it returns the call result (invalid Rust / wrong wasm). `?ret` is resolved from context — e.g. the element type `(Int)->Int` flowing in from `list.map` pins `?ret = Int`.
+        let ret = self.fresh_var();
+        let fn_ty = Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) };
+        self.constrain(fn_ty, ty, format!("call to {}()", name));
+        Some(ret)
+    }
+
+    // Rename/conversion hint for an undefined call `name(...)`: (hint text,
+    // clean fn-name fix for a simple `try:`, rich multi-line snippet).
+    // `rich_snippet` overrides `fix_name` when present — used for
+    // hallucinations that need a conversion wrapper or operator rewrite
+    // rather than a rename.
+    fn unresolved_call_hint(&self, name: &str) -> (String, Option<String>, Option<&'static str>) {
+        // For module-qualified calls (e.g. "string.uppercase"), narrow candidates to the same module and compare only the function part for better suggestions.
+        if let Some((module, func)) = name.split_once('.') {
+            // Use the *full* surface (TOML + bundled) so diagnostic suggestions see fns migrated to `stdlib/<m>.almd` even after their TOML entries have been deleted.
+            let module_funcs = crate::stdlib::module_functions_all(module);
+            if !module_funcs.is_empty() {
+                // Check known alias map first (catches common hallucinations)
+                if let Some(alias) = crate::stdlib::suggest_alias(module, func) {
+                    // Aliases can be free text like "xs + [x]"; only treat as a copy-pasteable fn name if it matches `module.func` form.
+                    let fix = is_clean_fn_name(alias).then(|| alias.to_string());
+                    let rich = crate::stdlib::try_snippet_for_alias(module, func);
+                    (format!("Did you mean `{}`?", alias), fix, rich)
+                } else if let Some(suggestion) = almide_base::diagnostic::suggest(func, module_funcs.iter().copied()) {
+                    let full = format!("{}.{}", module, suggestion);
+                    (format!("Did you mean `{}`?", full), Some(full), None)
                 } else {
-                    // Unknown module — suggest across all candidates
-                    let candidates = self.env.all_visible_names();
-                    if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
-                        (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()), None)
-                    } else {
-                        ("Check the function name".to_string(), None, None)
-                    }
+                    (format!("No function '{}' in module '{}'. See docs/CHEATSHEET.md for available functions", func, module), None, None)
                 }
             } else {
+                // Unknown module — suggest across all candidates
                 let candidates = self.env.all_visible_names();
                 if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
                     (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()), None)
@@ -800,7 +816,22 @@ impl Checker {
                     ("Check the function name".to_string(), None, None)
                 }
             }
-        };
+        } else {
+            let candidates = self.env.all_visible_names();
+            if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
+                (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()), None)
+            } else {
+                ("Check the function name".to_string(), None, None)
+            }
+        }
+    }
+
+    // Undefined-function diagnostic path of `check_unresolved_named_call`:
+    // computes a rename/conversion hint, then emits E002 (unless suppressed
+    // by cascade-failure detection).
+    fn emit_unresolved_call_diagnostic(&mut self, name: &str) -> Ty {
+        // Triple: (hint, clean fn-name fix for simple try:, rich multi-line snippet). `rich_snippet` overrides `fix_name` when present — used for hallucinations that need a conversion wrapper or operator rewrite rather than a rename.
+        let (hint, fix_name, rich_snippet) = self.unresolved_call_hint(name);
         // Cascade suppression: if `name` belongs to a fn whose body failed to parse, the real error is already on top. Skip emitting E002 so the LLM focuses on the parse error, not N identical cascades.
         if self.env.failed_fn_names.contains(name) {
             return Ty::Unknown;
