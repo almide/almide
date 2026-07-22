@@ -1,5 +1,6 @@
 use std::process::Command;
 use crate::try_compile;
+use crate::err;
 use super::{hash64, cargo_build_generated_with_native, cargo_build_test_with_native};
 
 /// Cross-process advisory lock on a shared build scratch dir.
@@ -71,13 +72,13 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
         match almide_mir::pipeline::try_render_rust_source(&source_text) {
             Ok(v1_code) => {
                 if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-                    eprintln!("native: v1 trust-spine render");
+                    err(&format!("native: v1 trust-spine render"));
                 }
                 v1_code
             }
             Err(e) => {
                 if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-                    eprintln!("native: v1 walled ({e:?}) — falling back to v0 codegen");
+                    err(&format!("native: v1 walled ({e:?}) — falling back to v0 codegen"));
                 }
                 rs_code
             }
@@ -102,7 +103,7 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
         // package name errored in parse_toml and rusqlite never reached the
         // generated Cargo.toml).
         crate::project::parse_toml(&toml_path)
-            .map_err(|e| eprintln!("warning: {} ignored: {}", toml_path.display(), e))
+            .map_err(|e| err(&format!("warning: {} ignored: {}", toml_path.display(), e)))
             .ok()
     }).flatten();
     let native_deps = parsed.as_ref().map(|p| p.native_deps.as_slice()).unwrap_or(&[]);
@@ -239,12 +240,12 @@ pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
                 delay *= 2;
             }
             Err(e) => {
-                eprintln!("Failed to execute: {}", e);
+                err(&format!("Failed to execute: {}", e));
                 std::process::exit(1);
             }
         }
     }
-    eprintln!("Failed to execute: Text file busy (persisted after retries)");
+    err(&format!("Failed to execute: Text file busy (persisted after retries)"));
     1
 }
 
@@ -252,7 +253,7 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_m
     match compile_to_binary_with(file, no_check, test_mode, release, None, native_verified) {
         Ok(bin) => run_binary(&bin, program_args),
         Err(e) => {
-            eprintln!("Compile error:\n{}", e);
+            err(&format!("Compile error:\n{}", e));
             1
         }
     }
@@ -267,13 +268,13 @@ pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: boo
         // produce byte-identical stdout/stderr/exit — the cross-target gate.
         Some("wasm") | Some("wasm32") | Some("wasi") => cmd_run_wasm(file, program_args, verified),
         Some(other) => {
-            eprintln!(
+            err(&format!(
                 "error: unknown run target '{}'\n  \
                  in `almide run --target {}`\n  \
                  supported targets: rust (default, native binary), wasm (wasmtime)\n  \
                  hint: drop --target to run natively, or use `--target wasm`",
                 other, other
-            );
+            ));
             1
         }
     };
@@ -302,7 +303,7 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool) -> i32 {
     let wasm_name = format!("almide-run-{:016x}.wasm", hash64(&bytes));
     let wasm_path = std::env::temp_dir().join(wasm_name);
     if let Err(e) = std::fs::write(&wasm_path, &bytes) {
-        eprintln!("error: failed to stage wasm module {}: {}", wasm_path.display(), e);
+        err(&format!("error: failed to stage wasm module {}: {}", wasm_path.display(), e));
         return 1;
     }
 
@@ -323,13 +324,13 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool) -> i32 {
     match status {
         Ok(s) => s.code().unwrap_or(1),
         Err(e) => {
-            eprintln!(
+            err(&format!(
                 "error: failed to run wasm module on wasmtime: {}\n  \
                  in `almide run --target wasm {}`\n  \
                  hint: the `wasmtime` CLI must be on PATH to execute wasm \
                  (install: https://wasmtime.dev) — or run natively without --target",
                 e, file
-            );
+            ));
             1
         }
     }
