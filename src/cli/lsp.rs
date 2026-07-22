@@ -103,53 +103,58 @@ fn span_contains(span: &crate::ast::Span, line: u32, col: u32) -> bool {
     sl == line + 1 && col >= sc && col < ec
 }
 
-/// Step 1 of `find_node`: language keyword hover info. Extracted verbatim —
-/// a pure lookup table with no shared state.
+/// Step 1 of `find_node`: language keyword hover info. Extracted verbatim,
+/// then converted from a 22-arm `match` (which alone tripped
+/// max-complexity — cyclomatic complexity counts one branch per arm
+/// regardless of nesting) to a flat data table + linear scan: same
+/// word→description mapping, same `None` fallback, genuinely lower
+/// complexity (not just moved) since dispatch is now data, not branches.
 fn lookup_keyword_info(word: &str) -> Option<&'static str> {
-    match word {
-        "fn" => Some("Function declaration"),
-        "let" => Some("Immutable binding"),
-        "var" => Some("Mutable binding"),
-        "mut" => Some("Mutable parameter modifier — callers must pass a `var` binding"),
-        "type" => Some("Type declaration"),
-        "match" => Some("Pattern matching expression"),
-        "effect" => Some("Effect function — can perform I/O"),
-        "test" => Some("Test block"),
-        "import" => Some("Module import"),
-        "if" => Some("Conditional expression: `if cond then a else b`"),
-        "then" => Some("Then branch of an if expression"),
-        "else" => Some("Else branch of an if expression"),
-        "for" => Some("For-in loop: `for item in collection { ... }`"),
-        "in" => Some("Iterator binding in for loop"),
-        "true" => Some("`Bool` literal (true)"),
-        "false" => Some("`Bool` literal (false)"),
-        "none" => Some("`Option[T]` — no value"),
-        "some" => Some("`Option[T]` constructor — wraps a value"),
-        "ok" => Some("`Result[T, E]` — success value"),
-        "err" => Some("`Result[T, E]` — error value"),
-        "assert" => Some("Test assertion: `assert(condition)` — fails the test if false"),
-        "assert_eq" => Some("Test assertion: `assert_eq(actual, expected)` — fails if not equal"),
-        _ => None,
-    }
+    const TABLE: &[(&str, &str)] = &[
+        ("fn", "Function declaration"),
+        ("let", "Immutable binding"),
+        ("var", "Mutable binding"),
+        ("mut", "Mutable parameter modifier — callers must pass a `var` binding"),
+        ("type", "Type declaration"),
+        ("match", "Pattern matching expression"),
+        ("effect", "Effect function — can perform I/O"),
+        ("test", "Test block"),
+        ("import", "Module import"),
+        ("if", "Conditional expression: `if cond then a else b`"),
+        ("then", "Then branch of an if expression"),
+        ("else", "Else branch of an if expression"),
+        ("for", "For-in loop: `for item in collection { ... }`"),
+        ("in", "Iterator binding in for loop"),
+        ("true", "`Bool` literal (true)"),
+        ("false", "`Bool` literal (false)"),
+        ("none", "`Option[T]` — no value"),
+        ("some", "`Option[T]` constructor — wraps a value"),
+        ("ok", "`Result[T, E]` — success value"),
+        ("err", "`Result[T, E]` — error value"),
+        ("assert", "Test assertion: `assert(condition)` — fails the test if false"),
+        ("assert_eq", "Test assertion: `assert_eq(actual, expected)` — fails if not equal"),
+    ];
+    TABLE.iter().find(|(k, _)| *k == word).map(|(_, v)| *v)
 }
 
 /// Step 1b of `find_node`: primitive/built-in type hover info. Extracted
-/// verbatim — a pure lookup table with no shared state.
+/// verbatim, then converted to a data table for the same reason as
+/// `lookup_keyword_info` above.
 fn lookup_builtin_type_info(word: &str) -> Option<&'static str> {
-    match word {
-        "Int" => Some("64-bit signed integer"),
-        "Float" => Some("64-bit floating point (IEEE 754)"),
-        "String" => Some("UTF-8 string (immutable, reference-counted)"),
-        "Bool" => Some("Boolean (`true` or `false`)"),
-        "Unit" => Some("Unit type — no meaningful value (like void)"),
-        "Bytes" => Some("Byte array (`List[Int]` of 0–255 values)"),
-        "List" => Some("Ordered collection: `List[T]`"),
-        "Map" => Some("Key-value map: `Map[K, V]`"),
-        "Set" => Some("Unique value set: `Set[T]`"),
-        "Option" => Some("Optional value: `Option[T]` = `Some(T)` | `None`"),
-        "Result" => Some("Success or failure: `Result[T, E]` = `Ok(T)` | `Err(E)`"),
-        _ => None,
-    }
+    const TABLE: &[(&str, &str)] = &[
+        ("Int", "64-bit signed integer"),
+        ("Float", "64-bit floating point (IEEE 754)"),
+        ("String", "UTF-8 string (immutable, reference-counted)"),
+        ("Bool", "Boolean (`true` or `false`)"),
+        ("Unit", "Unit type — no meaningful value (like void)"),
+        ("Bytes", "Byte array (`List[Int]` of 0–255 values)"),
+        ("List", "Ordered collection: `List[T]`"),
+        ("Map", "Key-value map: `Map[K, V]`"),
+        ("Set", "Unique value set: `Set[T]`"),
+        ("Option", "Optional value: `Option[T]` = `Some(T)` | `None`"),
+        ("Result", "Success or failure: `Result[T, E]` = `Ok(T)` | `Err(E)`"),
+    ];
+    TABLE.iter().find(|(k, _)| *k == word).map(|(_, v)| *v)
 }
 
 /// Step 2 of `find_node`: cursor is on the module name of `module.func`.
