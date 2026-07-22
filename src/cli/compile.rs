@@ -185,6 +185,109 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
     }
 }
 
+/// `print_human_readable`'s types section. Extracted verbatim — reads only
+/// `iface.types`, writes only to stdout.
+fn print_iface_types(iface: &almide::interface::ModuleInterface) {
+    if iface.types.is_empty() { return; }
+    for t in &iface.types {
+        if let Some(ref doc) = t.doc {
+            for line in doc.lines() {
+                println!("  // {}", line);
+            }
+        }
+        let generics = t.generics.as_ref()
+            .filter(|g| !g.is_empty())
+            .map(|g| format!("[{}]", g.join(", ")))
+            .unwrap_or_default();
+        match &t.kind {
+            almide::interface::TypeKindExport::Record { fields } => {
+                println!("  type {}{} {{", t.name, generics);
+                for f in fields {
+                    println!("    {}: {}", f.name, format_type_ref(&f.ty));
+                }
+                println!("  }}");
+            }
+            almide::interface::TypeKindExport::Variant { cases } => {
+                println!("  type {}{}", t.name, generics);
+                for c in cases {
+                    match &c.payload {
+                        None => println!("    | {}", c.name),
+                        Some(almide::interface::CasePayload::Tuple { fields }) => {
+                            let types: Vec<_> = fields.iter().map(|f| format_type_ref(f)).collect();
+                            println!("    | {}({})", c.name, types.join(", "));
+                        }
+                        Some(almide::interface::CasePayload::Record { fields }) => {
+                            let fs: Vec<_> = fields.iter().map(|f| format!("{}: {}", f.name, format_type_ref(&f.ty))).collect();
+                            println!("    | {} {{ {} }}", c.name, fs.join(", "));
+                        }
+                    }
+                }
+            }
+            almide::interface::TypeKindExport::Alias { target } => {
+                println!("  type {}{} = {}", t.name, generics, format_type_ref(target));
+            }
+        }
+        println!();
+    }
+}
+
+/// `print_human_readable`'s functions section. Extracted verbatim — reads
+/// only `iface.functions`, writes only to stdout.
+fn print_iface_functions(iface: &almide::interface::ModuleInterface) {
+    if iface.functions.is_empty() { return; }
+    for f in &iface.functions {
+        if let Some(ref doc) = f.doc {
+            for line in doc.lines() {
+                println!("  // {}", line);
+            }
+        }
+        let effect = if f.effect { "effect " } else { "" };
+        let generics = f.generics.as_ref()
+            .filter(|g| !g.is_empty())
+            .map(|g| format!("[{}]", g.join(", ")))
+            .unwrap_or_default();
+        let params: Vec<_> = f.params.iter()
+            .map(|p| format!("{}: {}", p.name, format_type_ref(&p.ty)))
+            .collect();
+        let ret = format_type_ref(&f.ret);
+        let error = if let Some(ref e) = f.error {
+            format!(" ! {}", format_type_ref(e))
+        } else {
+            String::new()
+        };
+        println!("  {}fn {}{}({}) -> {}{}", effect, f.name, generics, params.join(", "), ret, error);
+    }
+    println!();
+}
+
+/// `print_human_readable`'s constants section. Extracted verbatim — reads
+/// only `iface.constants`, writes only to stdout.
+fn print_iface_constants(iface: &almide::interface::ModuleInterface) {
+    if iface.constants.is_empty() { return; }
+    for c in &iface.constants {
+        let val = c.value.as_ref().map(|v| match v {
+            almide::interface::ConstValue::Int(n) => format!(" = {}", n),
+            almide::interface::ConstValue::Float(n) => format!(" = {}", n),
+            almide::interface::ConstValue::String(s) => format!(" = \"{}\"", s),
+            almide::interface::ConstValue::Bool(b) => format!(" = {}", b),
+        }).unwrap_or_default();
+        println!("  let {}: {}{}", c.name, format_type_ref(&c.ty), val);
+    }
+    println!();
+}
+
+/// `print_human_readable`'s dependencies section. Extracted verbatim — reads
+/// only `iface.dependencies`, writes only to stdout.
+fn print_iface_dependencies(iface: &almide::interface::ModuleInterface) {
+    if iface.dependencies.is_empty() { return; }
+    println!("  imports:");
+    for d in &iface.dependencies {
+        let tag = if d.stdlib { " (stdlib)" } else { "" };
+        println!("    {}{}", d.module, tag);
+    }
+    println!();
+}
+
 fn print_human_readable(iface: &almide::interface::ModuleInterface) {
     println!("module {}", iface.module);
     if let Some(ref v) = iface.version {
@@ -192,96 +295,10 @@ fn print_human_readable(iface: &almide::interface::ModuleInterface) {
     }
     println!();
 
-    if !iface.types.is_empty() {
-        for t in &iface.types {
-            if let Some(ref doc) = t.doc {
-                for line in doc.lines() {
-                    println!("  // {}", line);
-                }
-            }
-            let generics = t.generics.as_ref()
-                .filter(|g| !g.is_empty())
-                .map(|g| format!("[{}]", g.join(", ")))
-                .unwrap_or_default();
-            match &t.kind {
-                almide::interface::TypeKindExport::Record { fields } => {
-                    println!("  type {}{} {{", t.name, generics);
-                    for f in fields {
-                        println!("    {}: {}", f.name, format_type_ref(&f.ty));
-                    }
-                    println!("  }}");
-                }
-                almide::interface::TypeKindExport::Variant { cases } => {
-                    println!("  type {}{}", t.name, generics);
-                    for c in cases {
-                        match &c.payload {
-                            None => println!("    | {}", c.name),
-                            Some(almide::interface::CasePayload::Tuple { fields }) => {
-                                let types: Vec<_> = fields.iter().map(|f| format_type_ref(f)).collect();
-                                println!("    | {}({})", c.name, types.join(", "));
-                            }
-                            Some(almide::interface::CasePayload::Record { fields }) => {
-                                let fs: Vec<_> = fields.iter().map(|f| format!("{}: {}", f.name, format_type_ref(&f.ty))).collect();
-                                println!("    | {} {{ {} }}", c.name, fs.join(", "));
-                            }
-                        }
-                    }
-                }
-                almide::interface::TypeKindExport::Alias { target } => {
-                    println!("  type {}{} = {}", t.name, generics, format_type_ref(target));
-                }
-            }
-            println!();
-        }
-    }
-
-    if !iface.functions.is_empty() {
-        for f in &iface.functions {
-            if let Some(ref doc) = f.doc {
-                for line in doc.lines() {
-                    println!("  // {}", line);
-                }
-            }
-            let effect = if f.effect { "effect " } else { "" };
-            let generics = f.generics.as_ref()
-                .filter(|g| !g.is_empty())
-                .map(|g| format!("[{}]", g.join(", ")))
-                .unwrap_or_default();
-            let params: Vec<_> = f.params.iter()
-                .map(|p| format!("{}: {}", p.name, format_type_ref(&p.ty)))
-                .collect();
-            let ret = format_type_ref(&f.ret);
-            let error = if let Some(ref e) = f.error {
-                format!(" ! {}", format_type_ref(e))
-            } else {
-                String::new()
-            };
-            println!("  {}fn {}{}({}) -> {}{}", effect, f.name, generics, params.join(", "), ret, error);
-        }
-        println!();
-    }
-
-    if !iface.constants.is_empty() {
-        for c in &iface.constants {
-            let val = c.value.as_ref().map(|v| match v {
-                almide::interface::ConstValue::Int(n) => format!(" = {}", n),
-                almide::interface::ConstValue::Float(n) => format!(" = {}", n),
-                almide::interface::ConstValue::String(s) => format!(" = \"{}\"", s),
-                almide::interface::ConstValue::Bool(b) => format!(" = {}", b),
-            }).unwrap_or_default();
-            println!("  let {}: {}{}", c.name, format_type_ref(&c.ty), val);
-        }
-        println!();
-    }
-
-    if !iface.dependencies.is_empty() {
-        println!("  imports:");
-        for d in &iface.dependencies {
-            let tag = if d.stdlib { " (stdlib)" } else { "" };
-            println!("    {}{}", d.module, tag);
-        }
-        println!();
-    }
+    print_iface_types(iface);
+    print_iface_functions(iface);
+    print_iface_constants(iface);
+    print_iface_dependencies(iface);
 }
 
 fn format_type_ref(ty: &almide::interface::TypeRef) -> String {
