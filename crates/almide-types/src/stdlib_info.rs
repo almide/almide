@@ -251,6 +251,16 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
 /// Methods shared by more than one stdlib module where the caller's type
 /// disambiguates (string/list overlap, numeric overlap, etc).
 fn resolve_ufcs_ambiguous(method: &str) -> Vec<&'static str> {
+    let r = resolve_ufcs_ambiguous_string_list(method);
+    if !r.is_empty() {
+        return r;
+    }
+    resolve_ufcs_ambiguous_container(method)
+}
+
+/// Ambiguous methods where the overlap is anchored on `string` and/or `list`
+/// (plus their map/set siblings for the container-shaped ones).
+fn resolve_ufcs_ambiguous_string_list(method: &str) -> Vec<&'static str> {
     match method {
         // ── ambiguous: string + list ──
         "first" | "last" => vec!["string", "list"],
@@ -269,6 +279,14 @@ fn resolve_ufcs_ambiguous(method: &str) -> Vec<&'static str> {
         // ── ambiguous: string + list + map ──
         "count" => vec!["string", "list", "map"],
 
+        _ => vec![],
+    }
+}
+
+/// Ambiguous methods anchored on container/numeric overlaps (list+result+
+/// option, list+map+set, int+float, ...) rather than on `string`.
+fn resolve_ufcs_ambiguous_container(method: &str) -> Vec<&'static str> {
+    match method {
         // ── ambiguous: list + result + option ──
         "flat_map" => vec!["list", "result", "option"],
         "unwrap_or" | "unwrap_or_else" => vec!["result", "option"],
