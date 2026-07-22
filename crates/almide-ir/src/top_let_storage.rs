@@ -274,8 +274,17 @@ pub fn dependency_init_order(
     program: &IrProgram,
     alias: &HashMap<VarId, VarId>,
 ) -> Vec<VarId> {
-    // 1. The legacy emission order: (decl VarId, owning module, &initializer).
-    //    None module = root.
+    let decl_order = build_decl_order(program);
+    let decls: HashSet<VarId> = decl_order.iter().map(|(v, _, _)| *v).collect();
+    let (fn_reads, fn_calls) = build_fn_index(program, alias, &decls);
+    let module_globals = build_module_globals(&decl_order);
+    let deps = compute_dependency_sets(&decl_order, alias, &decls, &fn_reads, &fn_calls, &module_globals);
+    topo_sort_emit(&decl_order, &deps)
+}
+
+/// Step 1: the legacy emission order — (decl VarId, owning module, &initializer).
+/// `None` module = root.
+fn build_decl_order(program: &IrProgram) -> Vec<(VarId, Option<&str>, &IrExpr)> {
     let mut decl_order: Vec<(VarId, Option<&str>, &IrExpr)> = Vec::new();
     for tl in &program.top_lets {
         decl_order.push((tl.var, None, &tl.value));
@@ -285,95 +294,150 @@ pub fn dependency_init_order(
             decl_order.push((tl.var, Some(m.name.as_str()), &tl.value));
         }
     }
-    let decls: HashSet<VarId> = decl_order.iter().map(|(v, _, _)| *v).collect();
+    decl_order
+}
 
-    // 2. Index every user function by identity, with the globals it reads
-    //    directly and the callees it invokes.
+/// Scan one function's body and fold its reads/calls into the running index.
+fn index_fn_reads_calls(
+    f: &IrFunction,
+    alias: &HashMap<VarId, VarId>,
+    decls: &HashSet<VarId>,
+    fn_reads: &mut HashMap<FnKey, Vec<VarId>>,
+    fn_calls: &mut HashMap<FnKey, Vec<FnKey>>,
+) {
+    let (reads, calls) = scan_reads_and_calls(&f.body, alias, decls);
+    let key = fn_key_of_function(f);
+    fn_reads.entry(key.clone()).or_default().extend(reads);
+    fn_calls.entry(key).or_default().extend(calls);
+}
+
+/// Step 2: index every user function by identity, with the globals it reads
+/// directly and the callees it invokes.
+fn build_fn_index(
+    program: &IrProgram,
+    alias: &HashMap<VarId, VarId>,
+    decls: &HashSet<VarId>,
+) -> (HashMap<FnKey, Vec<VarId>>, HashMap<FnKey, Vec<FnKey>>) {
     let mut fn_reads: HashMap<FnKey, Vec<VarId>> = HashMap::new();
     let mut fn_calls: HashMap<FnKey, Vec<FnKey>> = HashMap::new();
-    let mut index_fn = |f: &IrFunction| {
-        let (reads, calls) = scan_reads_and_calls(&f.body, alias, &decls);
-        let key = fn_key_of_function(f);
-        fn_reads.entry(key.clone()).or_default().extend(reads);
-        fn_calls.entry(key).or_default().extend(calls);
-    };
-    for f in &program.functions { index_fn(f); }
+    for f in &program.functions {
+        index_fn_reads_calls(f, alias, decls, &mut fn_reads, &mut fn_calls);
+    }
     for m in &program.modules {
-        for f in &m.functions { index_fn(f); }
-    }
-
-    // 3. Transitive global read-set per function (fixpoint over the call graph;
-    //    cycle-safe via the visited set).
-    fn fn_global_reads(
-        key: &FnKey,
-        fn_reads: &HashMap<FnKey, Vec<VarId>>,
-        fn_calls: &HashMap<FnKey, Vec<FnKey>>,
-        seen: &mut HashSet<FnKey>,
-        out: &mut Vec<VarId>,
-    ) {
-        if !seen.insert(key.clone()) { return; }
-        if let Some(rs) = fn_reads.get(key) {
-            for &r in rs { if !out.contains(&r) { out.push(r); } }
-        }
-        if let Some(cs) = fn_calls.get(key) {
-            for c in cs { fn_global_reads(c, fn_reads, fn_calls, seen, out); }
+        for f in &m.functions {
+            index_fn_reads_calls(f, alias, decls, &mut fn_reads, &mut fn_calls);
         }
     }
+    (fn_reads, fn_calls)
+}
 
-    // 4. Module → its top-let global decls (for the coarse safety net).
+/// Step 3: transitive global read-set per function (fixpoint over the call
+/// graph; cycle-safe via the visited set).
+fn fn_global_reads(
+    key: &FnKey,
+    fn_reads: &HashMap<FnKey, Vec<VarId>>,
+    fn_calls: &HashMap<FnKey, Vec<FnKey>>,
+    seen: &mut HashSet<FnKey>,
+    out: &mut Vec<VarId>,
+) {
+    if !seen.insert(key.clone()) { return; }
+    if let Some(rs) = fn_reads.get(key) {
+        for &r in rs { if !out.contains(&r) { out.push(r); } }
+    }
+    if let Some(cs) = fn_calls.get(key) {
+        for c in cs { fn_global_reads(c, fn_reads, fn_calls, seen, out); }
+    }
+}
+
+/// Step 4: module → its top-let global decls (for the coarse safety net).
+fn build_module_globals<'a>(
+    decl_order: &[(VarId, Option<&'a str>, &IrExpr)],
+) -> HashMap<&'a str, Vec<VarId>> {
     let mut module_globals: HashMap<&str, Vec<VarId>> = HashMap::new();
-    for &(v, m, _) in &decl_order {
+    for &(v, m, _) in decl_order {
         if let Some(mn) = m { module_globals.entry(mn).or_default().push(v); }
     }
+    module_globals
+}
 
-    // 5. Per-top-let dependency set.
+/// Interprocedural half of step 5: fold globals read (transitively) through
+/// every callee of a single top-let's initializer into `dep`.
+fn add_transitive_callee_reads(
+    calls: &[FnKey],
+    fn_reads: &HashMap<FnKey, Vec<VarId>>,
+    fn_calls: &HashMap<FnKey, Vec<FnKey>>,
+    dep: &mut Vec<VarId>,
+) {
+    for c in calls {
+        let mut seen = HashSet::new();
+        let mut reads = Vec::new();
+        fn_global_reads(c, fn_reads, fn_calls, &mut seen, &mut reads);
+        for r in reads { if !dep.contains(&r) { dep.push(r); } }
+    }
+}
+
+/// Safety-net half of step 5: a root top-let depends on every module global;
+/// this is sound because submodules are always dependencies of the root (the
+/// root imports them, never vice versa). Catches reads reachable only
+/// through method/computed/stdlib-HOF callees that step 2 can't name.
+fn add_module_globals_safety_net(module_globals: &HashMap<&str, Vec<VarId>>, dep: &mut Vec<VarId>) {
+    for (_, gs) in module_globals {
+        for &g in gs { if !dep.contains(&g) { dep.push(g); } }
+    }
+}
+
+/// Step 5: per-top-let dependency set.
+fn compute_dependency_sets(
+    decl_order: &[(VarId, Option<&str>, &IrExpr)],
+    alias: &HashMap<VarId, VarId>,
+    decls: &HashSet<VarId>,
+    fn_reads: &HashMap<FnKey, Vec<VarId>>,
+    fn_calls: &HashMap<FnKey, Vec<FnKey>>,
+    module_globals: &HashMap<&str, Vec<VarId>>,
+) -> HashMap<VarId, Vec<VarId>> {
     let mut deps: HashMap<VarId, Vec<VarId>> = HashMap::new();
-    for &(v, owner, expr) in &decl_order {
-        let (direct, calls) = scan_reads_and_calls(expr, alias, &decls);
+    for &(v, owner, expr) in decl_order {
+        let (direct, calls) = scan_reads_and_calls(expr, alias, decls);
         let mut dep: Vec<VarId> = direct;
-        // Interprocedural: globals read through every callee.
-        for c in &calls {
-            let mut seen = HashSet::new();
-            let mut reads = Vec::new();
-            fn_global_reads(c, &fn_reads, &fn_calls, &mut seen, &mut reads);
-            for r in reads { if !dep.contains(&r) { dep.push(r); } }
-        }
-        // Safety net: a root top-let depends on every module global; this is
-        // sound because submodules are always dependencies of the root (the
-        // root imports them, never vice versa). Catches reads reachable only
-        // through method/computed/stdlib-HOF callees that step 2 can't name.
+        add_transitive_callee_reads(&calls, fn_reads, fn_calls, &mut dep);
         if owner.is_none() {
-            for (_, gs) in &module_globals {
-                for &g in gs { if !dep.contains(&g) { dep.push(g); } }
-            }
+            add_module_globals_safety_net(module_globals, &mut dep);
         }
         dep.retain(|d| *d != v);
         deps.insert(v, dep);
     }
+    deps
+}
 
-    // 6. Stable topological emit: walk the legacy order; before emitting a
-    //    node, emit its not-yet-emitted dependencies (depth-first). `on_stack`
-    //    breaks cycles by emitting the node anyway in its legacy slot.
+/// Depth-first dependency visit used by [`topo_sort_emit`]. `on_stack` breaks
+/// cycles by emitting the node anyway in its legacy slot.
+fn topo_visit(
+    v: VarId,
+    deps: &HashMap<VarId, Vec<VarId>>,
+    done: &mut HashSet<VarId>,
+    on_stack: &mut HashSet<VarId>,
+    emitted: &mut Vec<VarId>,
+) {
+    if done.contains(&v) || on_stack.contains(&v) { return; }
+    on_stack.insert(v);
+    if let Some(ds) = deps.get(&v) {
+        for &d in ds { topo_visit(d, deps, done, on_stack, emitted); }
+    }
+    on_stack.remove(&v);
+    if done.insert(v) { emitted.push(v); }
+}
+
+/// Step 6: stable topological emit — walk the legacy order; before emitting a
+/// node, emit its not-yet-emitted dependencies (depth-first).
+fn topo_sort_emit(
+    decl_order: &[(VarId, Option<&str>, &IrExpr)],
+    deps: &HashMap<VarId, Vec<VarId>>,
+) -> Vec<VarId> {
     let mut emitted: Vec<VarId> = Vec::with_capacity(decl_order.len());
     let mut done: HashSet<VarId> = HashSet::new();
     let mut on_stack: HashSet<VarId> = HashSet::new();
-    fn visit(
-        v: VarId,
-        deps: &HashMap<VarId, Vec<VarId>>,
-        done: &mut HashSet<VarId>,
-        on_stack: &mut HashSet<VarId>,
-        emitted: &mut Vec<VarId>,
-    ) {
-        if done.contains(&v) || on_stack.contains(&v) { return; }
-        on_stack.insert(v);
-        if let Some(ds) = deps.get(&v) {
-            for &d in ds { visit(d, deps, done, on_stack, emitted); }
-        }
-        on_stack.remove(&v);
-        if done.insert(v) { emitted.push(v); }
-    }
-    for &(v, _, _) in &decl_order {
-        visit(v, &deps, &mut done, &mut on_stack, &mut emitted);
+    for &(v, _, _) in decl_order {
+        topo_visit(v, deps, &mut done, &mut on_stack, &mut emitted);
     }
     emitted
 }
