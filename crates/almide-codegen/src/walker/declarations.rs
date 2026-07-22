@@ -432,31 +432,21 @@ fn collect_anon_from_variant_case(kind: &IrVariantKind, named: &HashSet<Vec<Stri
 fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
     collect_anon_from_ty(&expr.ty, named, seen);
     match &expr.kind {
-        IrExprKind::Block { stmts, expr: e } => {
-            for s in stmts { collect_anon_from_stmt(s, named, seen); }
-            if let Some(e) = e { collect_anon_from_expr(e, named, seen); }
-        }
+        IrExprKind::Block { .. } => collect_anon_from_block(expr, named, seen),
         IrExprKind::If { cond, then, else_ } => {
             collect_anon_from_expr(cond, named, seen);
             collect_anon_from_expr(then, named, seen);
             collect_anon_from_expr(else_, named, seen);
         }
-        IrExprKind::Match { subject, arms } => {
-            collect_anon_from_expr(subject, named, seen);
-            for arm in arms { collect_anon_from_expr(&arm.body, named, seen); }
-        }
-        IrExprKind::Call { args, target, .. } => {
-            if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
-                collect_anon_from_expr(object, named, seen);
-            }
-            for a in args { collect_anon_from_expr(a, named, seen); }
-        }
+        IrExprKind::Match { .. } => collect_anon_from_match(expr, named, seen),
+        IrExprKind::Call { .. } => collect_anon_from_call(expr, named, seen),
         IrExprKind::BinOp { left, right, .. } => {
             collect_anon_from_expr(left, named, seen);
             collect_anon_from_expr(right, named, seen);
         }
         IrExprKind::UnOp { operand, .. } => collect_anon_from_expr(operand, named, seen),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
+        | IrExprKind::RustMacro { args: elements, .. } => {
             for e in elements { collect_anon_from_expr(e, named, seen); }
         }
         IrExprKind::Lambda { body, .. } => collect_anon_from_expr(body, named, seen),
@@ -466,14 +456,8 @@ fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mu
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
             collect_anon_from_expr(object, named, seen);
         }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            collect_anon_from_expr(iterable, named, seen);
-            for s in body { collect_anon_from_stmt(s, named, seen); }
-        }
-        IrExprKind::While { cond, body } => {
-            collect_anon_from_expr(cond, named, seen);
-            for s in body { collect_anon_from_stmt(s, named, seen); }
-        }
+        IrExprKind::ForIn { iterable, body, .. } => collect_anon_from_loop_body(iterable, body, named, seen),
+        IrExprKind::While { cond, body } => collect_anon_from_loop_body(cond, body, named, seen),
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
         | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
@@ -495,11 +479,43 @@ fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mu
         | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
             collect_anon_from_expr(expr, named, seen);
         }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { collect_anon_from_expr(a, named, seen); }
-        }
         _ => {}
     }
+}
+
+/// `IrExprKind::Block` case of `collect_anon_from_expr`, extracted verbatim
+/// (cog>30 decomposition).
+fn collect_anon_from_block(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    let IrExprKind::Block { stmts, expr: e } = &expr.kind else { unreachable!() };
+    for s in stmts { collect_anon_from_stmt(s, named, seen); }
+    if let Some(e) = e { collect_anon_from_expr(e, named, seen); }
+}
+
+/// `IrExprKind::Match` case of `collect_anon_from_expr`, extracted verbatim
+/// (cog>30 decomposition).
+fn collect_anon_from_match(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+    collect_anon_from_expr(subject, named, seen);
+    for arm in arms { collect_anon_from_expr(&arm.body, named, seen); }
+}
+
+/// `IrExprKind::Call` case of `collect_anon_from_expr`, extracted verbatim
+/// (cog>30 decomposition).
+fn collect_anon_from_call(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    let IrExprKind::Call { args, target, .. } = &expr.kind else { unreachable!() };
+    if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
+        collect_anon_from_expr(object, named, seen);
+    }
+    for a in args { collect_anon_from_expr(a, named, seen); }
+}
+
+/// `IrExprKind::ForIn` / `IrExprKind::While` case of `collect_anon_from_expr`,
+/// extracted verbatim — both arms shared the identical "recurse the head
+/// expr, then walk body stmts" shape (`iterable`/`cond` as the head), so
+/// they now share one helper instead of two copies.
+fn collect_anon_from_loop_body(head: &IrExpr, body: &[IrStmt], named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    collect_anon_from_expr(head, named, seen);
+    for s in body { collect_anon_from_stmt(s, named, seen); }
 }
 
 fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
