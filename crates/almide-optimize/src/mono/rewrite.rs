@@ -74,61 +74,74 @@ impl<'a> RewriteVisitor<'a> {
         type_args: &[Ty],
         expr_ty: &mut Ty,
     ) {
-        if let CallTarget::Named { name } = target {
-            if let Some(bounded_params) = self.bound_fns.get(name.as_str()) {
-                let pt = self.fn_param_types.get(name.as_str())
-                    .map(|pts| pts.as_slice()).unwrap_or(&[]);
-                let mut bindings = collect_mono_bindings(bounded_params, args, pt);
+        match target {
+            CallTarget::Named { .. } => self.rewrite_named_call(target, args, type_args, expr_ty),
+            CallTarget::Method { .. } => self.rewrite_method_call(target, args, expr_ty),
+            _ => {}
+        }
+    }
 
-                // Supplement from explicit type_args
-                if !type_args.is_empty() {
-                    if let Some(gnames) = self.fn_generics.get(name.as_str()) {
-                        for (gname, ta) in gnames.iter().zip(type_args.iter()) {
-                            if !bindings.contains_key(gname) || matches!(bindings.get(gname), Some(Ty::Unknown)) {
-                                bindings.insert(gname.clone(), ta.clone());
-                            }
-                        }
-                    }
-                }
+    /// `CallTarget::Named`: bind type-vars from args + explicit type_args + return type,
+    /// then redirect to the matching specialized instance if one was created.
+    fn rewrite_named_call(&self, target: &mut CallTarget, args: &mut [IrExpr], type_args: &[Ty], expr_ty: &mut Ty) {
+        let CallTarget::Named { name } = target else { unreachable!() };
+        let Some(bounded_params) = self.bound_fns.get(name.as_str()) else { return };
+        let pt = self.fn_param_types.get(name.as_str())
+            .map(|pts| pts.as_slice()).unwrap_or(&[]);
+        let mut bindings = collect_mono_bindings(bounded_params, args, pt);
 
-                // Infer from return type
-                self.infer_from_return_type(name.as_str(), expr_ty, &mut bindings);
-
-                if !bindings.is_empty() {
-                    let suffix = mangle_suffix(&bindings);
-                    if self.instances.contains_key(&(name.to_string(), suffix.clone())) {
-                        *name = format!("{}__{}", name, suffix).into();
-                        *expr_ty = substitute_ty(expr_ty, &bindings);
+        // Supplement from explicit type_args
+        if !type_args.is_empty() {
+            if let Some(gnames) = self.fn_generics.get(name.as_str()) {
+                for (gname, ta) in gnames.iter().zip(type_args.iter()) {
+                    if !bindings.contains_key(gname) || matches!(bindings.get(gname), Some(Ty::Unknown)) {
+                        bindings.insert(gname.clone(), ta.clone());
                     }
                 }
             }
-        } else if let CallTarget::Method { object, method } = target {
-            if let Some(bounded_params) = self.bound_fns.get(method.as_str()) {
-                let pt = self.fn_param_types.get(method.as_str())
-                    .map(|pts| pts.as_slice()).unwrap_or(&[]);
-                let mut ufcs_args: Vec<IrExpr> = vec![(**object).clone()];
-                ufcs_args.extend(args.iter().cloned());
-                let mut bindings = collect_mono_bindings(bounded_params, &ufcs_args, pt);
+        }
 
-                // Infer from return type
-                self.infer_from_return_type(method.as_str(), expr_ty, &mut bindings);
+        // Infer from return type
+        self.infer_from_return_type(name.as_str(), expr_ty, &mut bindings);
 
-                let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
-                    !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
-                    && !matches!(ty, Ty::TypeVar(_)) && !ty.contains_typevar()
-                );
-                if all_concrete {
-                    let suffix = mangle_suffix(&bindings);
-                    if self.instances.contains_key(&(method.to_string(), suffix.clone())) {
-                        let mono_name = format!("{}__{}", method, suffix);
-                        let obj_expr = (**object).clone();
-                        let mut new_args: Vec<IrExpr> = vec![obj_expr];
-                        new_args.extend(args.drain(..));
-                        *args = new_args;
-                        *target = CallTarget::Named { name: mono_name.into() };
-                        *expr_ty = substitute_ty(expr_ty, &bindings);
-                    }
-                }
+        if !bindings.is_empty() {
+            let suffix = mangle_suffix(&bindings);
+            if self.instances.contains_key(&(name.to_string(), suffix.clone())) {
+                *name = format!("{}__{}", name, suffix).into();
+                *expr_ty = substitute_ty(expr_ty, &bindings);
+            }
+        }
+    }
+
+    /// `CallTarget::Method`: bind type-vars from the UFCS-expanded args (receiver + args)
+    /// + return type, then rewrite to a `Named` call on the specialized instance if one
+    /// was created and every binding resolved to a concrete type.
+    fn rewrite_method_call(&self, target: &mut CallTarget, args: &mut Vec<IrExpr>, expr_ty: &mut Ty) {
+        let CallTarget::Method { object, method } = target else { unreachable!() };
+        let Some(bounded_params) = self.bound_fns.get(method.as_str()) else { return };
+        let pt = self.fn_param_types.get(method.as_str())
+            .map(|pts| pts.as_slice()).unwrap_or(&[]);
+        let mut ufcs_args: Vec<IrExpr> = vec![(**object).clone()];
+        ufcs_args.extend(args.iter().cloned());
+        let mut bindings = collect_mono_bindings(bounded_params, &ufcs_args, pt);
+
+        // Infer from return type
+        self.infer_from_return_type(method.as_str(), expr_ty, &mut bindings);
+
+        let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
+            !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
+            && !matches!(ty, Ty::TypeVar(_)) && !ty.contains_typevar()
+        );
+        if all_concrete {
+            let suffix = mangle_suffix(&bindings);
+            if self.instances.contains_key(&(method.to_string(), suffix.clone())) {
+                let mono_name = format!("{}__{}", method, suffix);
+                let obj_expr = (**object).clone();
+                let mut new_args: Vec<IrExpr> = vec![obj_expr];
+                new_args.extend(args.drain(..));
+                *args = new_args;
+                *target = CallTarget::Named { name: mono_name.into() };
+                *expr_ty = substitute_ty(expr_ty, &bindings);
             }
         }
     }
