@@ -1,4 +1,42 @@
 impl LowerCtx {
+    /// Which self-host `??` unwrap-or helper handles a HEAP-Value Result/Option `??` payload
+    /// type, keyed purely by `expr_ty` — a pure classification (no ownership/rollback state,
+    /// unlike the rest of [`Self::try_lower_option_unwrap_or`]). Verbatim extraction
+    /// (guard-clause flattening) of the former inline if-else-if chain, no behavior change —
+    /// see docs/roadmap/active/code-health-codopsy.md.
+    fn value_unwrap_or_helper_name(expr_ty: &Ty) -> Option<&'static str> {
+        if crate::lower::is_result_listval_ty(expr_ty) {
+            return Some("result.list_value_unwrap_or");
+        }
+        if crate::lower::is_value_result_ty(expr_ty) {
+            return Some("result.value_unwrap_or");
+        }
+        if crate::lower::is_result_str_str_ty(expr_ty) {
+            return Some("result.str_unwrap_or");
+        }
+        if crate::lower::is_option_value_ty(expr_ty) {
+            return Some("option.value_unwrap_or");
+        }
+        if crate::lower::is_option_liststr_ty(expr_ty) {
+            return Some("option.liststr_unwrap_or");
+        }
+        if crate::lower::is_option_listscalar_ty(expr_ty) {
+            // `map.get(groups, k) ?? []` — Option[List[<scalar>]] (the group_by class):
+            // the FLAT sibling (scalar elements own nothing; flat rc drop is exact).
+            return Some("option.listint_unwrap_or");
+        }
+        if crate::lower::is_option_listvalue_ty(expr_ty) {
+            return Some("option.listvalue_unwrap_or");
+        }
+        // An `Option[record]` payload (`list.get(tools, i) ?? { name: "", … }`) is NOT
+        // routed to `option.value_unwrap_or`: that helper does a VALUE-shaped handle select
+        // (it reads a tagged Value block), which CORRUPTS a plain record field block — BOTH
+        // the Some and the None arm printed garbage (0x18 0x20…) vs v0's real field (a
+        // pre-existing miscompile the mir>ir gate flagged on porta parse_manifest). Decline
+        // here so the `??` walls cleanly; a correct record-payload unwrap-or is a follow-up.
+        None
+    }
+
     /// Try to EXECUTE `<materialized Option> ?? <scalar fallback>` to a SCALAR value: read
     /// the tag (len) and yield the payload (`data[0]`) when Some, else the fallback. Gated
     /// to a DIRECT self-host Option call — every such fn returns `Option[Int]`, so the
@@ -177,31 +215,7 @@ impl LowerCtx {
         // a `List[Value]` (`value.as_array`) → `result.list_value_unwrap_or` (recursive list drop).
         // Both reuse the working heap-Ok match read; a call returning a fresh owned heap value
         // sidesteps the bind-position rc bookkeeping, like `option.unwrap_or_str` for the String case.
-        let value_unwrap_helper = if crate::lower::is_result_listval_ty(&expr.ty) {
-            Some("result.list_value_unwrap_or")
-        } else if crate::lower::is_value_result_ty(&expr.ty) {
-            Some("result.value_unwrap_or")
-        } else if crate::lower::is_result_str_str_ty(&expr.ty) {
-            Some("result.str_unwrap_or")
-        } else if crate::lower::is_option_value_ty(&expr.ty) {
-            Some("option.value_unwrap_or")
-        } else if crate::lower::is_option_liststr_ty(&expr.ty) {
-            Some("option.liststr_unwrap_or")
-        } else if crate::lower::is_option_listscalar_ty(&expr.ty) {
-            // `map.get(groups, k) ?? []` — Option[List[<scalar>]] (the group_by class):
-            // the FLAT sibling (scalar elements own nothing; flat rc drop is exact).
-            Some("option.listint_unwrap_or")
-        } else if crate::lower::is_option_listvalue_ty(&expr.ty) {
-            Some("option.listvalue_unwrap_or")
-        } else {
-            // An `Option[record]` payload (`list.get(tools, i) ?? { name: "", … }`) is NOT
-            // routed to `option.value_unwrap_or`: that helper does a VALUE-shaped handle select
-            // (it reads a tagged Value block), which CORRUPTS a plain record field block — BOTH
-            // the Some and the None arm printed garbage (0x18 0x20…) vs v0's real field (a
-            // pre-existing miscompile the mir>ir gate flagged on porta parse_manifest). Decline
-            // here so the `??` walls cleanly; a correct record-payload unwrap-or is a follow-up.
-            None
-        };
+        let value_unwrap_helper = Self::value_unwrap_or_helper_name(&expr.ty);
         if let Some(helper) = value_unwrap_helper {
             if is_heap_ty(&fallback.ty) {
                 let fb_args = match self.lower_call_args(std::slice::from_ref(fallback)) {
@@ -245,52 +259,66 @@ impl LowerCtx {
         // `EndIf` heap-result-if skeleton (the SAME shape the scalar path below uses for
         // scalar payloads) — never the scalar `Load{width:8}` fallback further down, which
         // would misread the payload HANDLE as a raw i64 scalar.
-        if !is_result {
-            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) =
+        // Guard-clause flattening of the former 6-deep nested-if (no `else` anywhere: any
+        // unmet condition falls through to the NEXT `??` shape check below, same as before
+        // — `break` exits the labeled block and resumes after it; `return` still targets
+        // the ENCLOSING FUNCTION exactly as it did inline, so the ops-emitting/rollback tail
+        // is byte-for-byte unchanged). No behavior change — see
+        // docs/roadmap/active/code-health-codopsy.md.
+        'variant_ctor_fallback: {
+            if is_result {
+                break 'variant_ctor_fallback;
+            }
+            let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) =
                 &expr.ty
-            {
-                if a.len() == 1 {
-                    if let Ty::Named(tn, _) = &a[0] {
-                        if self.variant_layouts.by_type.contains_key(tn.as_str()) {
-                            let is_ctor_fallback = matches!(
-                                &fallback.kind,
-                                IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                                    if self.variant_layouts.ctor_to_type.contains_key(name.as_str())
-                            ) || matches!(
-                                &fallback.kind,
-                                IrExprKind::Record { name: Some(n), .. }
-                                    if self.variant_layouts.ctor_to_type.contains_key(n.as_str())
-                            );
-                            if is_ctor_fallback {
-                                use crate::PrimKind;
-                                let h = self.fresh_value();
-                                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![handle] });
-                                let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
-                                let result = self.fresh_value();
-                                self.ops.push(Op::IfThen { cond: tag, dst: Some(result) });
-                                let borrowed = self.load_at_offset(h, 12, PrimKind::LoadHandle);
-                                let owned = self.fresh_value();
-                                self.ops.push(Op::Dup { dst: owned, src: borrowed });
-                                self.ops.push(Op::Else { val: Some(owned) });
-                                match self.try_lower_variant_ctor(fallback) {
-                                    Some(fb) => {
-                                        self.ops.push(Op::EndIf { val: Some(fb) });
-                                    }
-                                    None => {
-                                        self.ops.truncate(ops_mark);
-                                        self.live_heap_handles.truncate(lhh_mark);
-                                        return None;
-                                    }
-                                }
-                                if track_result {
-                                    self.live_heap_handles.push(result);
-                                }
-                                return Some(result);
-                            }
-                        }
-                    }
+            else {
+                break 'variant_ctor_fallback;
+            };
+            if a.len() != 1 {
+                break 'variant_ctor_fallback;
+            }
+            let Ty::Named(tn, _) = &a[0] else {
+                break 'variant_ctor_fallback;
+            };
+            if !self.variant_layouts.by_type.contains_key(tn.as_str()) {
+                break 'variant_ctor_fallback;
+            }
+            let is_ctor_fallback = matches!(
+                &fallback.kind,
+                IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if self.variant_layouts.ctor_to_type.contains_key(name.as_str())
+            ) || matches!(
+                &fallback.kind,
+                IrExprKind::Record { name: Some(n), .. }
+                    if self.variant_layouts.ctor_to_type.contains_key(n.as_str())
+            );
+            if !is_ctor_fallback {
+                break 'variant_ctor_fallback;
+            }
+            use crate::PrimKind;
+            let h = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![handle] });
+            let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+            let result = self.fresh_value();
+            self.ops.push(Op::IfThen { cond: tag, dst: Some(result) });
+            let borrowed = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+            let owned = self.fresh_value();
+            self.ops.push(Op::Dup { dst: owned, src: borrowed });
+            self.ops.push(Op::Else { val: Some(owned) });
+            match self.try_lower_variant_ctor(fallback) {
+                Some(fb) => {
+                    self.ops.push(Op::EndIf { val: Some(fb) });
+                }
+                None => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
                 }
             }
+            if track_result {
+                self.live_heap_handles.push(result);
+            }
+            return Some(result);
         }
         // `Option[<Fn>] ?? <lambda>` (`map.get(m, "add") ?? ((x) => x)` — the
         // closure-valued map coalesce): Some → BORROW the payload handle @12 (the
