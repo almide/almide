@@ -210,19 +210,10 @@ fn collect_module_refs_decl(decl: &Decl, used: &mut std::collections::HashSet<St
 /// without this walk, an import used ONLY in type position was deleted as
 /// "unused", silently breaking the file.
 fn collect_module_refs_type(te: &TypeExpr, used: &mut std::collections::HashSet<String>) {
-    let insert_prefix = |name: &str, used: &mut std::collections::HashSet<String>| {
-        if let Some((prefix, _)) = name.rsplit_once('.') {
-            used.insert(prefix.to_string());
-            // Submodule path (`a.b.Type`): the import binds the LAST segment.
-            if let Some((_, last)) = prefix.rsplit_once('.') {
-                used.insert(last.to_string());
-            }
-        }
-    };
     match te {
-        TypeExpr::Simple { name } => insert_prefix(name.as_str(), used),
+        TypeExpr::Simple { name } => insert_type_name_prefix(name.as_str(), used),
         TypeExpr::Generic { name, args } => {
-            insert_prefix(name.as_str(), used);
+            insert_type_name_prefix(name.as_str(), used);
             for a in args { collect_module_refs_type(a, used); }
         }
         TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
@@ -236,19 +227,31 @@ fn collect_module_refs_type(te: &TypeExpr, used: &mut std::collections::HashSet<
             for e in elements { collect_module_refs_type(e, used); }
         }
         TypeExpr::Variant { cases } => {
-            for c in cases {
-                match c {
-                    VariantCase::Unit { .. } => {}
-                    VariantCase::Tuple { fields, .. } => {
-                        for f in fields { collect_module_refs_type(f, used); }
-                    }
-                    VariantCase::Record { fields, .. } => {
-                        for f in fields { collect_module_refs_type(&f.ty, used); }
-                    }
-                }
-            }
+            for c in cases { collect_module_refs_variant_case(c, used); }
         }
         TypeExpr::ConstLit { .. } => {}
+    }
+}
+
+fn insert_type_name_prefix(name: &str, used: &mut std::collections::HashSet<String>) {
+    if let Some((prefix, _)) = name.rsplit_once('.') {
+        used.insert(prefix.to_string());
+        // Submodule path (`a.b.Type`): the import binds the LAST segment.
+        if let Some((_, last)) = prefix.rsplit_once('.') {
+            used.insert(last.to_string());
+        }
+    }
+}
+
+fn collect_module_refs_variant_case(c: &VariantCase, used: &mut std::collections::HashSet<String>) {
+    match c {
+        VariantCase::Unit { .. } => {}
+        VariantCase::Tuple { fields, .. } => {
+            for f in fields { collect_module_refs_type(f, used); }
+        }
+        VariantCase::Record { fields, .. } => {
+            for f in fields { collect_module_refs_type(&f.ty, used); }
+        }
     }
 }
 
