@@ -150,19 +150,7 @@ impl<'a> LowerCtx<'a> {
                     else_region: vec![else_block],
                 })
             }
-            IrExprKind::Match { subject, arms } => {
-                let subj = self.lower_expr_into(subject, ops);
-                let dialect_arms = arms.iter().map(|arm| {
-                    let pattern = self.lower_pattern(&arm.pattern);
-                    let guard = arm.guard.as_ref().map(|g| {
-                        let mut guard_ops = Vec::new();
-                        self.lower_expr_into(g, &mut guard_ops)
-                    });
-                    let body_block = self.lower_to_block(&arm.body);
-                    MatchArm { pattern, guard, body: vec![body_block] }
-                }).collect();
-                self.emit(ops, result_ty, OpKind::MatchOp { subject: subj, arms: dialect_arms })
-            }
+            IrExprKind::Match { .. } => self.lower_match_expr(expr, result_ty, ops),
             IrExprKind::Block { stmts, expr } => {
                 for stmt in stmts {
                     self.lower_stmt(stmt, ops);
@@ -175,27 +163,7 @@ impl<'a> LowerCtx<'a> {
             }
 
             // ── Calls ──
-            IrExprKind::Call { target, args, .. } => {
-                let arg_vals: Vec<ValueId> = args.iter()
-                    .map(|a| self.lower_expr_into(a, ops))
-                    .collect();
-                match target {
-                    CallTarget::Module { module, func, .. } => {
-                        let callee = almide_base::intern::sym(&format!("{}.{}", module, func));
-                        self.emit(ops, result_ty, OpKind::CallOp { callee, args: arg_vals })
-                    }
-                    CallTarget::Named { name } => {
-                        self.emit(ops, result_ty, OpKind::CallOp { callee: *name, args: arg_vals })
-                    }
-                    CallTarget::Method { method, .. } => {
-                        self.emit(ops, result_ty, OpKind::CallOp { callee: *method, args: arg_vals })
-                    }
-                    CallTarget::Computed { callee } => {
-                        let callee_val = self.lower_expr_into(callee, ops);
-                        self.emit(ops, result_ty, OpKind::ComputedCallOp { callee: callee_val, args: arg_vals })
-                    }
-                }
-            }
+            IrExprKind::Call { .. } => self.lower_call_expr(expr, result_ty, ops),
             IrExprKind::RuntimeCall { symbol, args } => {
                 let arg_vals: Vec<ValueId> = args.iter()
                     .map(|a| self.lower_expr_into(a, ops))
@@ -334,6 +302,44 @@ impl<'a> LowerCtx<'a> {
 
             // Fallback for nodes not yet handled
             _ => self.emit(ops, result_ty, OpKind::ConstUnit),
+        }
+    }
+
+    fn lower_match_expr(&mut self, expr: &IrExpr, result_ty: DialectType, ops: &mut Vec<Operation>) -> ValueId {
+        let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+        let subj = self.lower_expr_into(subject, ops);
+        let dialect_arms = arms.iter().map(|arm| {
+            let pattern = self.lower_pattern(&arm.pattern);
+            let guard = arm.guard.as_ref().map(|g| {
+                let mut guard_ops = Vec::new();
+                self.lower_expr_into(g, &mut guard_ops)
+            });
+            let body_block = self.lower_to_block(&arm.body);
+            MatchArm { pattern, guard, body: vec![body_block] }
+        }).collect();
+        self.emit(ops, result_ty, OpKind::MatchOp { subject: subj, arms: dialect_arms })
+    }
+
+    fn lower_call_expr(&mut self, expr: &IrExpr, result_ty: DialectType, ops: &mut Vec<Operation>) -> ValueId {
+        let IrExprKind::Call { target, args, .. } = &expr.kind else { unreachable!() };
+        let arg_vals: Vec<ValueId> = args.iter()
+            .map(|a| self.lower_expr_into(a, ops))
+            .collect();
+        match target {
+            CallTarget::Module { module, func, .. } => {
+                let callee = almide_base::intern::sym(&format!("{}.{}", module, func));
+                self.emit(ops, result_ty, OpKind::CallOp { callee, args: arg_vals })
+            }
+            CallTarget::Named { name } => {
+                self.emit(ops, result_ty, OpKind::CallOp { callee: *name, args: arg_vals })
+            }
+            CallTarget::Method { method, .. } => {
+                self.emit(ops, result_ty, OpKind::CallOp { callee: *method, args: arg_vals })
+            }
+            CallTarget::Computed { callee } => {
+                let callee_val = self.lower_expr_into(callee, ops);
+                self.emit(ops, result_ty, OpKind::ComputedCallOp { callee: callee_val, args: arg_vals })
+            }
         }
     }
 
