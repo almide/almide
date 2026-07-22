@@ -8,8 +8,8 @@ use std::rc::Rc;
 
 use almide_base::intern::Sym;
 use almide_ir::{
-    BinOp, IrExpr, IrExprKind, IrMatchArm, IrPattern, IrStmt, IrStmtKind, IrStringPart, UnOp,
-    VarId,
+    BinOp, IrExpr, IrExprKind, IrFieldPattern, IrMatchArm, IrPattern, IrStmt, IrStmtKind,
+    IrStringPart, UnOp, VarId,
 };
 use almide_lang::types::Ty;
 
