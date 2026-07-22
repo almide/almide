@@ -703,8 +703,19 @@ impl<'a> Interpreter<'a> {
                  interp args are by-value so the binding cannot be written back)"
             )));
         }
+        match module {
+            "list" => self.eval_container_op_list(module, func, args),
+            "map" => self.eval_container_op_map(module, func, args),
+            "set" => self.eval_container_op_set(module, func, args),
+            "option" => self.eval_container_op_option(module, func, args),
+            "result" => self.eval_container_op_result(module, func, args),
+            _ => None,
+        }
+    }
+
+    // ── list container ops ─────────────────────────────────────
+    fn eval_container_op_list(&mut self, module: &str, func: &str, args: &[Value]) -> Option<Flow> {
         match (module, func) {
-            // ── list ──
             ("list", "len") | ("list", "length") => Some(match args.first() {
                 Some(v) => match v.as_iter_items() {
                     Some(items) => Flow::val(Value::Int(items.len() as i64)),
@@ -793,7 +804,13 @@ impl<'a> Interpreter<'a> {
                 None => Flow::Abort("internal: list.enumerate on non-list".into()),
             }),
 
-            // ── map ──
+            _ => None,
+        }
+    }
+
+    // ── map container ops ──────────────────────────────────────
+    fn eval_container_op_map(&mut self, module: &str, func: &str, args: &[Value]) -> Option<Flow> {
+        match (module, func) {
             ("map", "len") | ("map", "size") => Some(match args.first() {
                 Some(Value::Map(e)) => Flow::val(Value::Int(e.len() as i64)),
                 _ => Flow::Abort("internal: map.len on non-map".into()),
@@ -834,7 +851,13 @@ impl<'a> Interpreter<'a> {
                 _ => Flow::Abort("internal: map.values on non-map".into()),
             }),
 
-            // ── set ──
+            _ => None,
+        }
+    }
+
+    // ── set container ops ──────────────────────────────────────
+    fn eval_container_op_set(&mut self, module: &str, func: &str, args: &[Value]) -> Option<Flow> {
+        match (module, func) {
             ("set", "len") | ("set", "size") => Some(match args.first() {
                 Some(Value::Set(e)) => Flow::val(Value::Int(e.len() as i64)),
                 _ => Flow::Abort("internal: set.len on non-set".into()),
@@ -858,7 +881,13 @@ impl<'a> Interpreter<'a> {
                 _ => Flow::Abort("internal: set.to_list on non-set".into()),
             }),
 
-            // ── option ──
+            _ => None,
+        }
+    }
+
+    // ── option container ops ───────────────────────────────────
+    fn eval_container_op_option(&mut self, module: &str, func: &str, args: &[Value]) -> Option<Flow> {
+        match (module, func) {
             ("option", "is_some") => Some(match args.first() {
                 Some(Value::Option(o)) => Flow::val(Value::Bool(o.is_some())),
                 _ => Flow::Abort("internal: option.is_some on non-option".into()),
@@ -871,21 +900,6 @@ impl<'a> Interpreter<'a> {
                 (Some(Value::Option(Some(v))), _) => Flow::val((**v).clone()),
                 (Some(Value::Option(None)), Some(d)) => Flow::val(d.clone()),
                 _ => Flow::Abort("internal: option.unwrap_or bad args".into()),
-            }),
-
-            // ── result ──
-            ("result", "is_ok") => Some(match args.first() {
-                Some(Value::Result(r)) => Flow::val(Value::Bool(r.is_ok())),
-                _ => Flow::Abort("internal: result.is_ok on non-result".into()),
-            }),
-            ("result", "is_err") => Some(match args.first() {
-                Some(Value::Result(r)) => Flow::val(Value::Bool(r.is_err())),
-                _ => Flow::Abort("internal: result.is_err on non-result".into()),
-            }),
-            ("result", "unwrap_or") => Some(match (args.first(), args.get(1)) {
-                (Some(Value::Result(Ok(v))), _) => Flow::val((**v).clone()),
-                (Some(Value::Result(Err(_))), Some(d)) => Flow::val(d.clone()),
-                _ => Flow::Abort("internal: result.unwrap_or bad args".into()),
             }),
             // some(v) → [v], none → [] (runtime/rs option.rs to_list)
             ("option", "to_list") => Some(match args.first() {
@@ -900,6 +914,27 @@ impl<'a> Interpreter<'a> {
                     Flow::val(Value::Result(Err(Box::new(msg.clone()))))
                 }
                 _ => Flow::Abort("internal: option.to_result bad args".into()),
+            }),
+
+            _ => None,
+        }
+    }
+
+    // ── result container ops ───────────────────────────────────
+    fn eval_container_op_result(&mut self, module: &str, func: &str, args: &[Value]) -> Option<Flow> {
+        match (module, func) {
+            ("result", "is_ok") => Some(match args.first() {
+                Some(Value::Result(r)) => Flow::val(Value::Bool(r.is_ok())),
+                _ => Flow::Abort("internal: result.is_ok on non-result".into()),
+            }),
+            ("result", "is_err") => Some(match args.first() {
+                Some(Value::Result(r)) => Flow::val(Value::Bool(r.is_err())),
+                _ => Flow::Abort("internal: result.is_err on non-result".into()),
+            }),
+            ("result", "unwrap_or") => Some(match (args.first(), args.get(1)) {
+                (Some(Value::Result(Ok(v))), _) => Flow::val((**v).clone()),
+                (Some(Value::Result(Err(_))), Some(d)) => Flow::val(d.clone()),
+                _ => Flow::Abort("internal: result.unwrap_or bad args".into()),
             }),
             // ok(v) → some(v), err(_) → none (runtime/rs result.rs to_option)
             ("result", "to_option") => Some(match args.first() {

@@ -95,46 +95,60 @@ impl<'a> Interpreter<'a> {
                 _ => false,
             },
             IrPattern::RecordPattern { name, fields, rest } => {
-                let (obj_name, obj_fields): (Option<Sym>, &Vec<(Sym, Value)>) = match value {
-                    Value::Record { name, fields } => (*name, fields),
-                    Value::Variant { ctor, payload: VariantPayload::Record(fields), .. } => {
-                        (Some(*ctor), fields)
-                    }
-                    _ => return false,
-                };
-                // Name must match when the pattern names a constructor.
-                if !name.is_empty() {
-                    match obj_name {
-                        Some(n) if n.as_str() == name => {}
-                        _ => return false,
-                    }
-                }
-                if !rest && fields.len() != obj_fields.len() {
-                    return false;
-                }
-                for fp in fields {
-                    let fname = fp.name.as_str();
-                    let fv = match obj_fields.iter().find(|(k, _)| k.as_str() == fname) {
-                        Some((_, v)) => v,
-                        None => return false,
-                    };
-                    match &fp.pattern {
-                        // Shorthand `{ x, y }` lowers to explicit `Bind`
-                        // sub-patterns (verified via IR dump), so binding is
-                        // handled here uniformly.
-                        Some(sub) => {
-                            if !self.try_match(sub, fv, binds) {
-                                return false;
-                            }
-                        }
-                        // A field with no sub-pattern is a structural-only
-                        // match (the field must exist, but binds nothing).
-                        None => {}
-                    }
-                }
-                true
+                self.try_match_record(name, fields, *rest, value, binds)
             }
         }
+    }
+
+    /// The `RecordPattern` arm of `try_match`: matches a record/record-variant
+    /// value's fields against the pattern's field list (structurally when a
+    /// field has no sub-pattern, recursively otherwise).
+    fn try_match_record(
+        &mut self,
+        name: &str,
+        fields: &[IrFieldPattern],
+        rest: bool,
+        value: &Value,
+        binds: &mut Vec<(VarId, Value)>,
+    ) -> bool {
+        let (obj_name, obj_fields): (Option<Sym>, &Vec<(Sym, Value)>) = match value {
+            Value::Record { name, fields } => (*name, fields),
+            Value::Variant { ctor, payload: VariantPayload::Record(fields), .. } => {
+                (Some(*ctor), fields)
+            }
+            _ => return false,
+        };
+        // Name must match when the pattern names a constructor.
+        if !name.is_empty() {
+            match obj_name {
+                Some(n) if n.as_str() == name => {}
+                _ => return false,
+            }
+        }
+        if !rest && fields.len() != obj_fields.len() {
+            return false;
+        }
+        for fp in fields {
+            let fname = fp.name.as_str();
+            let fv = match obj_fields.iter().find(|(k, _)| k.as_str() == fname) {
+                Some((_, v)) => v,
+                None => return false,
+            };
+            match &fp.pattern {
+                // Shorthand `{ x, y }` lowers to explicit `Bind`
+                // sub-patterns (verified via IR dump), so binding is
+                // handled here uniformly.
+                Some(sub) => {
+                    if !self.try_match(sub, fv, binds) {
+                        return false;
+                    }
+                }
+                // A field with no sub-pattern is a structural-only
+                // match (the field must exist, but binds nothing).
+                None => {}
+            }
+        }
+        true
     }
 
     // ── Operators ───────────────────────────────────────────────
