@@ -18,21 +18,22 @@
 //! - CLI reference extraction from clap.
 
 use std::path::{Path, PathBuf};
+use crate::{err, out};
 
 const LLMS_TXT: &str = "llms.txt";
 const DIAGNOSTICS_DIR: &str = "docs/diagnostics";
 
 pub fn cmd_docs_gen(check: bool) {
     if !check {
-        eprintln!("error: `almide docs-gen` currently only supports `--check`.");
-        eprintln!("       Full regeneration is planned — see docs/roadmap/active/llms-txt-autogen.md");
+        err(&format!("error: `almide docs-gen` currently only supports `--check`."));
+        err(&format!("       Full regeneration is planned — see docs/roadmap/active/llms-txt-autogen.md"));
         std::process::exit(2);
     }
 
     let llms = match std::fs::read_to_string(LLMS_TXT) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("error: cannot read `{}`: {}", LLMS_TXT, e);
+            err(&format!("error: cannot read `{}`: {}", LLMS_TXT, e));
             std::process::exit(2);
         }
     };
@@ -45,15 +46,15 @@ pub fn cmd_docs_gen(check: bool) {
     drifts.extend(check_diagnostic_registry_bijection());
 
     if drifts.is_empty() {
-        println!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection)");
+        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection)"));
         return;
     }
 
-    eprintln!("docs-gen: {} drift(s) detected in `{}`:", drifts.len(), LLMS_TXT);
+    err(&format!("docs-gen: {} drift(s) detected in `{}`:", drifts.len(), LLMS_TXT));
     for d in &drifts {
-        eprintln!("  - {}", d);
+        err(&format!("  - {}", d));
     }
-    eprintln!("\nEdit `llms.txt` to match, or bump the source if the doc is the authority.");
+    err(&format!("\nEdit `llms.txt` to match, or bump the source if the doc is the authority."));
     std::process::exit(1);
 }
 

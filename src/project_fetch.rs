@@ -2,6 +2,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use crate::project::{Dependency, FetchedDep, Project, LockedDep, PkgId, cache_dir, parse_lock_file, parse_toml, write_lock_file};
+use crate::err;
 
 /// Get the current HEAD commit hash in a git repo
 fn git_head_hash(repo_dir: &Path) -> Result<String, String> {
@@ -43,7 +44,7 @@ pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Res
         // Clone and checkout exact commit
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("Failed to create cache dir: {}", e))?;
-        eprintln!("Fetching {} from {} (locked: {})", dep.name, dep.git, &commit[..8.min(commit.len())]);
+        err(&format!("Fetching {} from {} (locked: {})", dep.name, dep.git, &commit[..8.min(commit.len())]));
         let output = Command::new("git")
             .arg("clone").arg(&dep.git).arg(&dir)
             .output()
@@ -73,7 +74,7 @@ pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Res
     std::fs::create_dir_all(&dep_dir)
         .map_err(|e| format!("Failed to create cache dir: {}", e))?;
 
-    eprintln!("Fetching {} from {} ({})", dep.name, dep.git, ref_name);
+    err(&format!("Fetching {} from {} ({})", dep.name, dep.git, ref_name));
 
     let mut cmd = Command::new("git");
     cmd.arg("clone")
@@ -187,10 +188,10 @@ fn fetch_deps_recursive(
 
         // Detect different major versions of the same package (diamond with version split)
         if let Some(existing) = fetched.iter().find(|f| f.pkg_id.name == pkg_id.name && f.pkg_id.major != pkg_id.major) {
-            eprintln!("warning: package '{}' required at two different major versions", pkg_id.name);
-            eprintln!("  → {} (already loaded)", existing.pkg_id);
-            eprintln!("  → {} (newly required)", pkg_id);
-            eprintln!("  Both versions will coexist. Types from v{} and v{} are incompatible.", existing.pkg_id.major, pkg_id.major);
+            err(&format!("warning: package '{}' required at two different major versions", pkg_id.name));
+            err(&format!("  → {} (already loaded)", existing.pkg_id));
+            err(&format!("  → {} (newly required)", pkg_id));
+            err(&format!("  Both versions will coexist. Types from v{} and v{} are incompatible.", existing.pkg_id.major, pkg_id.major));
         }
 
         let visit_key = if let Some(ref p) = dep.path {
@@ -301,6 +302,6 @@ pub fn add_dep_to_toml(name: &str, git: &str, tag: Option<&str>) -> Result<(), S
     std::fs::write(toml_path, content)
         .map_err(|e| format!("Failed to write almide.toml: {}", e))?;
 
-    eprintln!("Added {} to almide.toml", name);
+    err(&format!("Added {} to almide.toml", name));
     Ok(())
 }

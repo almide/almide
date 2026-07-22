@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use crate::project::Dependency;
 use crate::project_fetch;
+use crate::err;
 
 pub fn cmd_install(
     spec: &str,
@@ -26,23 +27,23 @@ pub fn cmd_install(
     let src_dir = match resolve_source(spec, tag, branch) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("error: {}", e);
+            err(&format!("error: {}", e));
             std::process::exit(1);
         }
     };
 
     let almide_toml = src_dir.join("almide.toml");
     if !almide_toml.is_file() {
-        eprintln!(
+        err(&format!(
             "error: {} is not an Almide project (no almide.toml)",
             src_dir.display()
-        );
+        ));
         std::process::exit(1);
     }
     let project = match crate::project::parse_toml(&almide_toml) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("error: failed to read {}: {}", almide_toml.display(), e);
+            err(&format!("error: failed to read {}: {}", almide_toml.display(), e));
             std::process::exit(1);
         }
     };
@@ -51,9 +52,9 @@ pub fn cmd_install(
         .map(String::from)
         .unwrap_or_else(|| project.package.name.clone());
     if bin_name.is_empty() {
-        eprintln!(
+        err(&format!(
             "error: package has no name; pass --name or set [package].name in almide.toml"
-        );
+        ));
         std::process::exit(1);
     }
 
@@ -61,11 +62,11 @@ pub fn cmd_install(
         .map(|p| p.to_path_buf())
         .unwrap_or_else(default_install_dir);
     if let Err(e) = std::fs::create_dir_all(&install_dir) {
-        eprintln!(
+        err(&format!(
             "error: failed to create {}: {}",
             install_dir.display(),
             e
-        );
+        ));
         std::process::exit(1);
     }
     let install_path = install_dir.join(&bin_name);
@@ -73,19 +74,19 @@ pub fn cmd_install(
     let entry_rel = "src/main.almd";
     let entry = src_dir.join(entry_rel);
     if !entry.is_file() {
-        eprintln!(
+        err(&format!(
             "error: entry point {}/{} not found",
             src_dir.display(),
             entry_rel
-        );
+        ));
         std::process::exit(1);
     }
 
-    eprintln!(
+    err(&format!(
         "Installing {} from {}...",
         bin_name,
         src_dir.display()
-    );
+    ));
 
     // `cmd_build` resolves paths relative to the current working directory
     // (it discovers `almide.toml` in the cwd). Chdir into the source so
@@ -93,40 +94,40 @@ pub fn cmd_install(
     // the user's terminal is left untouched.
     let prev_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     if let Err(e) = std::env::set_current_dir(&src_dir) {
-        eprintln!(
+        err(&format!(
             "error: failed to chdir to {}: {}",
             src_dir.display(),
             e
-        );
+        ));
         std::process::exit(1);
     }
 
     let install_path_str = install_path.to_string_lossy().to_string();
-    crate::cli::cmd_build(
-        entry_rel,
-        Some(&install_path_str),
+    crate::cli::cmd_build(crate::cli::BuildArgs {
+        file: entry_rel,
+        output: Some(&install_path_str),
         target,
-        true,  // release
-        false, // fast
-        false, // unchecked_index
-        false, // no_check
-        false, // repr_c
-        false, // cdylib
-        false, // emit_unverified
-        false, // verified (v0 codegen for install)
-        false, // native_verified (v0 codegen for install)
-    );
+        release: true,
+        fast: false,
+        unchecked_index: false,
+        no_check: false,
+        repr_c: false,
+        cdylib: false,
+        emit_unverified: false,
+        verified: false,         // v0 codegen for install
+        native_verified: false,  // v0 codegen for install
+    });
 
     let _ = std::env::set_current_dir(&prev_cwd);
 
     if install_path.is_file() {
-        eprintln!();
-        eprintln!("✓ Installed {} to {}", bin_name, install_path.display());
+        err("");
+        err(&format!("✓ Installed {} to {}", bin_name, install_path.display()));
     } else {
-        eprintln!(
+        err(&format!(
             "error: build appeared to succeed but {} was not produced",
             install_path.display()
-        );
+        ));
         std::process::exit(1);
     }
 }

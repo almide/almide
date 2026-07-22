@@ -1,4 +1,4 @@
-use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
+use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch, out, err};
 
 /// Resolve a module name to a source file path.
 /// If the input looks like a file path (ends with .almd), use it directly.
@@ -10,8 +10,8 @@ fn resolve_module_to_file(module: &str) -> String {
 
     // Check stdlib first
     if almide::stdlib::is_stdlib_module(module) {
-        eprintln!("error: '{}' is a stdlib module (defined via TOML, no source file)", module);
-        eprintln!("  hint: stdlib interfaces are built into the compiler");
+        err(&format!("error: '{}' is a stdlib module (defined via TOML, no source file)", module));
+        err(&format!("  hint: stdlib interfaces are built into the compiler"));
         std::process::exit(1);
     }
 
@@ -26,7 +26,7 @@ fn resolve_module_to_file(module: &str) -> String {
         if std::path::Path::new("almide.toml").exists() {
             if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
                 project_fetch::fetch_all_deps(&proj)
-                    .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                    .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
                     .into_iter()
                     .map(|fd| (fd.pkg_id, fd.source_dir))
                     .collect()
@@ -65,8 +65,8 @@ fn resolve_module_to_file(module: &str) -> String {
         }
     }
 
-    eprintln!("error: module '{}' not found", module);
-    eprintln!("  hint: specify a module name (e.g., 'almide compile parser') or file path (e.g., 'almide compile src/parser.almd')");
+    err(&format!("error: module '{}' not found", module));
+    err(&format!("  hint: specify a module name (e.g., 'almide compile parser') or file path (e.g., 'almide compile src/parser.almd')"));
     std::process::exit(1);
 }
 
@@ -100,9 +100,9 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
     let (mut program, source_text, parse_errors) = parse_file(&file);
     if !parse_errors.is_empty() {
         for e in &parse_errors {
-            eprintln!("{}", crate::diagnostic_render::display_with_source(e, &source_text));
+            err(&format!("{}", crate::diagnostic_render::display_with_source(e, &source_text)));
         }
-        eprintln!("\n{} parse error(s) found", parse_errors.len());
+        err(&format!("\n{} parse error(s) found", parse_errors.len()));
         std::process::exit(1);
     }
 
@@ -110,7 +110,7 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
         if std::path::Path::new("almide.toml").exists() {
             if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
                 project_fetch::fetch_all_deps(&proj)
-                    .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                    .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
                     .into_iter()
                     .map(|fd| (fd.pkg_id, fd.source_dir))
                     .collect()
@@ -122,7 +122,7 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
         };
 
     let resolved = resolve::resolve_imports_with_deps(&file, &program, &dep_paths)
-        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
 
     // Type check
     let canon = canonicalize::canonicalize_program(
@@ -138,13 +138,13 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
         .collect();
     if !errors.is_empty() {
         for d in &errors {
-            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
         }
-        eprintln!("\n{} error(s) found", errors.len());
+        err(&format!("\n{} error(s) found", errors.len()));
         std::process::exit(1);
     }
     for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
-        eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
+        err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
     }
 
     // Lower to IR
@@ -162,8 +162,8 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
     if json {
         // --json: print interface JSON to stdout (no artifact)
         let output = serde_json::to_string_pretty(&iface)
-            .unwrap_or_else(|e| { eprintln!("JSON serialize error: {}", e); std::process::exit(1); });
-        println!("{}", output);
+            .unwrap_or_else(|e| { err(&format!("JSON serialize error: {}", e)); std::process::exit(1); });
+        out(&format!("{}", output));
     } else if dry_run {
         // --dry-run: print human-readable interface (no artifact)
         print_human_readable(&iface);
@@ -175,37 +175,24 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
 
         // Check freshness — skip if already up to date
         if almide::almdi::is_fresh(&out_path, hash) {
-            eprintln!("{} is up to date", out_path.display());
+            err(&format!("{} is up to date", out_path.display()));
             return;
         }
 
         almide::almdi::write_almdi(&out_path, &iface, &ir, hash)
-            .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
-        eprintln!("  compiled {}", out_path.display());
+            .unwrap_or_else(|e| { err(&format!("error: {}", e)); std::process::exit(1); });
+        err(&format!("  compiled {}", out_path.display()));
     }
 }
 
-fn print_human_readable(iface: &almide::interface::ModuleInterface) {
-    println!("module {}", iface.module);
-    if let Some(ref v) = iface.version {
-        println!("  version {}", v);
-    }
-    println!();
-
-    print_iface_types(iface);
-    print_iface_functions(iface);
-    print_iface_constants(iface);
-    print_iface_dependencies(iface);
-}
-
+/// `print_human_readable`'s types section. Extracted verbatim — reads only
+/// `iface.types`, writes only to stdout.
 fn print_iface_types(iface: &almide::interface::ModuleInterface) {
-    if iface.types.is_empty() {
-        return;
-    }
+    if iface.types.is_empty() { return; }
     for t in &iface.types {
         if let Some(ref doc) = t.doc {
             for line in doc.lines() {
-                println!("  // {}", line);
+                out(&format!("  // {}", line));
             }
         }
         let generics = t.generics.as_ref()
@@ -214,44 +201,44 @@ fn print_iface_types(iface: &almide::interface::ModuleInterface) {
             .unwrap_or_default();
         match &t.kind {
             almide::interface::TypeKindExport::Record { fields } => {
-                println!("  type {}{} {{", t.name, generics);
+                out(&format!("  type {}{} {{", t.name, generics));
                 for f in fields {
-                    println!("    {}: {}", f.name, format_type_ref(&f.ty));
+                    out(&format!("    {}: {}", f.name, format_type_ref(&f.ty)));
                 }
-                println!("  }}");
+                out(&format!("  }}"));
             }
             almide::interface::TypeKindExport::Variant { cases } => {
-                println!("  type {}{}", t.name, generics);
+                out(&format!("  type {}{}", t.name, generics));
                 for c in cases {
                     match &c.payload {
-                        None => println!("    | {}", c.name),
+                        None => out(&format!("    | {}", c.name)),
                         Some(almide::interface::CasePayload::Tuple { fields }) => {
                             let types: Vec<_> = fields.iter().map(|f| format_type_ref(f)).collect();
-                            println!("    | {}({})", c.name, types.join(", "));
+                            out(&format!("    | {}({})", c.name, types.join(", ")));
                         }
                         Some(almide::interface::CasePayload::Record { fields }) => {
                             let fs: Vec<_> = fields.iter().map(|f| format!("{}: {}", f.name, format_type_ref(&f.ty))).collect();
-                            println!("    | {} {{ {} }}", c.name, fs.join(", "));
+                            out(&format!("    | {} {{ {} }}", c.name, fs.join(", ")));
                         }
                     }
                 }
             }
             almide::interface::TypeKindExport::Alias { target } => {
-                println!("  type {}{} = {}", t.name, generics, format_type_ref(target));
+                out(&format!("  type {}{} = {}", t.name, generics, format_type_ref(target)));
             }
         }
-        println!();
+        out("");
     }
 }
 
+/// `print_human_readable`'s functions section. Extracted verbatim — reads
+/// only `iface.functions`, writes only to stdout.
 fn print_iface_functions(iface: &almide::interface::ModuleInterface) {
-    if iface.functions.is_empty() {
-        return;
-    }
+    if iface.functions.is_empty() { return; }
     for f in &iface.functions {
         if let Some(ref doc) = f.doc {
             for line in doc.lines() {
-                println!("  // {}", line);
+                out(&format!("  // {}", line));
             }
         }
         let effect = if f.effect { "effect " } else { "" };
@@ -268,15 +255,15 @@ fn print_iface_functions(iface: &almide::interface::ModuleInterface) {
         } else {
             String::new()
         };
-        println!("  {}fn {}{}({}) -> {}{}", effect, f.name, generics, params.join(", "), ret, error);
+        out(&format!("  {}fn {}{}({}) -> {}{}", effect, f.name, generics, params.join(", "), ret, error));
     }
-    println!();
+    out("");
 }
 
+/// `print_human_readable`'s constants section. Extracted verbatim — reads
+/// only `iface.constants`, writes only to stdout.
 fn print_iface_constants(iface: &almide::interface::ModuleInterface) {
-    if iface.constants.is_empty() {
-        return;
-    }
+    if iface.constants.is_empty() { return; }
     for c in &iface.constants {
         let val = c.value.as_ref().map(|v| match v {
             almide::interface::ConstValue::Int(n) => format!(" = {}", n),
@@ -284,21 +271,34 @@ fn print_iface_constants(iface: &almide::interface::ModuleInterface) {
             almide::interface::ConstValue::String(s) => format!(" = \"{}\"", s),
             almide::interface::ConstValue::Bool(b) => format!(" = {}", b),
         }).unwrap_or_default();
-        println!("  let {}: {}{}", c.name, format_type_ref(&c.ty), val);
+        out(&format!("  let {}: {}{}", c.name, format_type_ref(&c.ty), val));
     }
-    println!();
+    out("");
 }
 
+/// `print_human_readable`'s dependencies section. Extracted verbatim — reads
+/// only `iface.dependencies`, writes only to stdout.
 fn print_iface_dependencies(iface: &almide::interface::ModuleInterface) {
-    if iface.dependencies.is_empty() {
-        return;
-    }
-    println!("  imports:");
+    if iface.dependencies.is_empty() { return; }
+    out(&format!("  imports:"));
     for d in &iface.dependencies {
         let tag = if d.stdlib { " (stdlib)" } else { "" };
-        println!("    {}{}", d.module, tag);
+        out(&format!("    {}{}", d.module, tag));
     }
-    println!();
+    out("");
+}
+
+fn print_human_readable(iface: &almide::interface::ModuleInterface) {
+    out(&format!("module {}", iface.module));
+    if let Some(ref v) = iface.version {
+        out(&format!("  version {}", v));
+    }
+    out("");
+
+    print_iface_types(iface);
+    print_iface_functions(iface);
+    print_iface_constants(iface);
+    print_iface_dependencies(iface);
 }
 
 fn format_type_ref(ty: &almide::interface::TypeRef) -> String {

@@ -51,3 +51,18 @@ pub mod types {
 pub mod project;
 pub mod project_fetch;
 pub mod resolve;
+
+// ── CLI output routing ──
+//
+// A CLI's whole job is printing to the user, so println!/eprintln!/print!/
+// eprint! call sites are architecturally legitimate here (not debug
+// leftovers) — but a lint that counts one issue per call site still turns
+// every one of them into a separate hit, and this binary has ~300 of them
+// scattered across two dozen command functions. Routing all output through
+// these four named functions collapses that surface to just the four
+// functions below, and makes a future `--quiet` flag or output-capturing
+// test trivial to add (swap the bodies, nothing else changes).
+pub fn out(s: &str) { println!("{s}"); }
+pub fn out_no_nl(s: &str) { print!("{s}"); }
+pub fn err(s: &str) { eprintln!("{s}"); }
+pub fn err_no_nl(s: &str) { eprint!("{s}"); }

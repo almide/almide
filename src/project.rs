@@ -88,16 +88,59 @@ pub struct NativeDep {
 }
 
 /// Parse almide.toml (simple line-based, no toml crate)
+/// `parse_toml`'s running accumulator — one field group per TOML section, so
+/// the per-section line handlers below can each take just the fields they
+/// touch by `&mut` reference (write-only from each handler's own
+/// perspective; no handler reads a field another handler writes).
+#[derive(Default)]
+struct TomlAccum {
+    name: String,
+    version: String,
+    almide_min: Option<String>,
+    deps: Vec<Dependency>,
+    permissions: Vec<String>,
+    native_deps: Vec<NativeDep>,
+}
+
+/// `parse_toml`'s `[package]` section line handler. Extracted verbatim.
+fn apply_package_line(line: &str, acc: &mut TomlAccum) {
+    if let Some((key, val)) = parse_kv(line) {
+        match key {
+            "name" => acc.name = val,
+            "version" => acc.version = val,
+            "almide" => acc.almide_min = Some(val),
+            _ => {}
+        }
+    }
+}
+
+/// `parse_toml`'s `[permissions]` section line handler. Extracted verbatim.
+fn apply_permissions_line(line: &str, acc: &mut TomlAccum) {
+    if let Some(("allow", val)) = parse_kv(line) {
+        acc.permissions.extend(
+            val.trim_matches(|c| c == '[' || c == ']')
+                .split(',')
+                .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                .filter(|s| !s.is_empty())
+        );
+    }
+}
+
+/// `parse_toml`'s `[native-deps]` section line handler. Extracted verbatim.
+fn apply_native_deps_line(line: &str, acc: &mut TomlAccum) {
+    if let Some((dep_name, spec)) = parse_kv(line) {
+        acc.native_deps.push(NativeDep {
+            name: dep_name.to_string(),
+            spec,
+        });
+    }
+}
+
 pub fn parse_toml(path: &Path) -> Result<Project, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
 
-    let mut name = String::new();
-    let mut version = "0.1.0".to_string();
-    let mut almide_min: Option<String> = None;
-    let mut deps: Vec<Dependency> = Vec::new();
-    let mut permissions: Vec<String> = Vec::new();
-    let mut native_deps: Vec<NativeDep> = Vec::new();
+    let mut acc = TomlAccum { version: "0.1.0".to_string(), ..TomlAccum::default() };
     let mut section = "";
 
     for line in content.lines() {
@@ -120,51 +163,26 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
             continue;
         }
         match section {
-            "package" => {
-                if let Some((key, val)) = parse_kv(line) {
-                    match key {
-                        "name" => name = val,
-                        "version" => version = val,
-                        "almide" => almide_min = Some(val),
-                        _ => {}
-                    }
-                }
-            }
+            "package" => apply_package_line(line, &mut acc),
             "dependencies" => {
                 if let Some(dep) = parse_dep_line(line) {
-                    deps.push(dep);
+                    acc.deps.push(dep);
                 }
             }
-            "permissions" => {
-                if let Some(("allow", val)) = parse_kv(line) {
-                    permissions.extend(
-                        val.trim_matches(|c| c == '[' || c == ']')
-                            .split(',')
-                            .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
-                            .filter(|s| !s.is_empty())
-                    );
-                }
-            }
-            "native-deps" => {
-                if let Some((dep_name, spec)) = parse_kv(line) {
-                    native_deps.push(NativeDep {
-                        name: dep_name.to_string(),
-                        spec,
-                    });
-                }
-            }
+            "permissions" => apply_permissions_line(line, &mut acc),
+            "native-deps" => apply_native_deps_line(line, &mut acc),
             _ => {}
         }
     }
 
     // Validate package name: must be a valid Almide identifier (no hyphens).
     // Like Go, the package name IS the import name. No implicit conversion.
-    if name.contains('-') {
+    if acc.name.contains('-') {
         return Err(format!(
             "package name '{}' contains hyphens — use underscores instead\n  \
              hint: rename to '{}' in [package] name. The package name is the import name.",
-            name,
-            name.replace('-', "_"),
+            acc.name,
+            acc.name.replace('-', "_"),
         ));
     }
 
@@ -173,10 +191,10 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
         _ => PathBuf::from("."),
     };
     Ok(Project {
-        package: Package { name, version, almide_min },
-        dependencies: deps,
-        permissions,
-        native_deps,
+        package: Package { name: acc.name, version: acc.version, almide_min: acc.almide_min },
+        dependencies: acc.deps,
+        permissions: acc.permissions,
+        native_deps: acc.native_deps,
         root,
     })
 }

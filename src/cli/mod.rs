@@ -15,7 +15,7 @@ mod fix;
 mod docs_gen;
 
 pub use run::{cmd_run, cmd_run_inner};
-pub use build::cmd_build;
+pub use build::{cmd_build, BuildArgs};
 pub use compile::cmd_compile;
 pub use emit::cmd_emit;
 pub use check::{cmd_check, cmd_check_json, cmd_check_effects};
@@ -27,6 +27,7 @@ pub use fix::cmd_fix;
 pub use docs_gen::cmd_docs_gen;
 
 use std::hash::{Hash, Hasher};
+use crate::err;
 
 /// Check that all effects used in the program are allowed by [permissions].allow in almide.toml.
 /// Returns Ok(()) if no violations, or Err with a description of violations.
@@ -55,15 +56,15 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
             .filter(|e| !allowed.contains(e))
             .collect();
         if !forbidden.is_empty() {
-            eprintln!("error: capability violation in `{}`", name);
+            err(&format!("error: capability violation in `{}`", name));
             for e in &forbidden {
-                eprintln!("  {} is not in [permissions].allow", e);
+                err(&format!("  {} is not in [permissions].allow", e));
             }
             violations += 1;
         }
     }
     if violations > 0 {
-        eprintln!("\n{} capability violation(s)", violations);
+        err(&format!("\n{} capability violation(s)", violations));
         return Err(format!("{} capability violation(s)", violations));
     }
     Ok(())
@@ -370,6 +371,57 @@ pub(crate) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path
 }
 
 /// Build generated Rust code with optional native Rust dependencies and source files.
+/// `cargo_build_generated_with_native`'s dependency-free rlib fast path:
+/// link the precompiled runtime instead of recompiling its ~2000 lines per
+/// build. The runtime is compiled at the same opt-level as the binary (3 for
+/// `--release`, 1 for debug/`almide run`), so it is fully optimized; only
+/// its compilation is amortized. Net: shipping builds drop from ~27-33s to
+/// ~1-2s (~20x).
+///
+/// Tradeoff: because the runtime is a separate crate (no LTO), non-generic
+/// non-#[inline] runtime fns (e.g. string.trim/split) aren't inlined across
+/// the crate boundary, costing up to ~10% runtime on string/list-heavy hot
+/// loops (typically 2-5%). ThinLTO would recover it but erases the build win
+/// (it re-optimizes the runtime at link time). The planned fix is #[inline]
+/// on the hot runtime fns — see docs/roadmap. `ALMIDE_NO_RTLIB=1` forces the
+/// monolithic cargo build (full cross-crate inlining) when a shipped binary
+/// must squeeze out that last few percent (checked by the caller, before
+/// this is even invoked).
+///
+/// Returns `None` on ANY failure (a `?`-propagated missing rlib/slim-main,
+/// a write failure, or a nonzero rustc exit) — the caller falls through to
+/// the cargo-based slow path unconditionally, so correctness never
+/// regresses, only the speedup is forfeited. Extracted verbatim (the
+/// original's `if let (Ok(_), Some(_))` tuple-match + nested `if`s become
+/// this function's `?` chain — same "either piece missing → skip" semantics).
+fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<std::path::PathBuf> {
+    let opt_level = if release { "3" } else { "1" };
+    let rlib = ensure_runtime_rlib(opt_level).ok()?;
+    let mut slim = crate::codegen::slim_main_with_external_runtime(rs_code)?;
+    if !slim.contains("fn main(") && !slim.contains("fn almide_main(") {
+        slim.push_str("\nfn main() {}\n");
+    }
+    let rlib_dir = rlib.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let rs_path = project_dir.join("almide_gen_main.rs");
+    let bin_path = project_dir.join(if cfg!(windows) { "almide-out.exe" } else { "almide-out" });
+    std::fs::write(&rs_path, &slim).ok()?;
+    let mut cmd = std::process::Command::new(crate::find_rustc());
+    cmd.arg(&rs_path)
+        .arg("-o").arg(&bin_path)
+        .arg("--edition").arg("2021")
+        .arg("-C").arg(format!("opt-level={opt_level}"))
+        .arg("--extern").arg(format!("almide_rt={}", rlib.display()))
+        .arg("-L").arg(rlib_dir)
+        .arg("-A").arg("warnings");
+    let output = cmd.output().ok()?;
+    if output.status.success() {
+        Some(bin_path)
+    } else {
+        // else: fall through to the self-contained cargo build
+        None
+    }
+}
+
 fn cargo_build_generated_with_native(
     rs_code: &str,
     project_dir: &std::path::Path,
@@ -381,52 +433,12 @@ fn cargo_build_generated_with_native(
     let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
     let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
 
-    // rlib fast path (dep-free): link the precompiled runtime instead of
-    // recompiling its ~2000 lines per build. The runtime is compiled at the same
-    // opt-level as the binary (3 for `--release`, 1 for debug/`almide run`), so
-    // it is fully optimized; only its compilation is amortized. Net: shipping
-    // builds drop from ~27-33s to ~1-2s (~20x).
-    //
-    // Tradeoff: because the runtime is a separate crate (no LTO), non-generic
-    // non-#[inline] runtime fns (e.g. string.trim/split) aren't inlined across
-    // the crate boundary, costing up to ~10% runtime on string/list-heavy hot
-    // loops (typically 2-5%). ThinLTO would recover it but erases the build win
-    // (it re-optimizes the runtime at link time). The planned fix is #[inline] on
-    // the hot runtime fns — see docs/roadmap. ALMIDE_NO_RTLIB=1 forces the
-    // monolithic cargo build (full cross-crate inlining) when a shipped binary
-    // must squeeze out that last few percent. Any rustc failure also falls
-    // through to the cargo path below, so correctness never regresses.
     if std::env::var_os("ALMIDE_NO_RTLIB").is_none()
         && !uses_matrix && !uses_http && !uses_zlib
         && native_deps.is_empty() && source_root.is_none()
     {
-        let opt_level = if release { "3" } else { "1" };
-        if let (Ok(rlib), Some(mut slim)) = (
-            ensure_runtime_rlib(opt_level),
-            crate::codegen::slim_main_with_external_runtime(rs_code),
-        ) {
-            if !slim.contains("fn main(") && !slim.contains("fn almide_main(") {
-                slim.push_str("\nfn main() {}\n");
-            }
-            let rlib_dir = rlib.parent().unwrap_or_else(|| std::path::Path::new("."));
-            let rs_path = project_dir.join("almide_gen_main.rs");
-            let bin_path = project_dir.join(if cfg!(windows) { "almide-out.exe" } else { "almide-out" });
-            if std::fs::write(&rs_path, &slim).is_ok() {
-                let mut cmd = std::process::Command::new(crate::find_rustc());
-                cmd.arg(&rs_path)
-                    .arg("-o").arg(&bin_path)
-                    .arg("--edition").arg("2021")
-                    .arg("-C").arg(format!("opt-level={opt_level}"))
-                    .arg("--extern").arg(format!("almide_rt={}", rlib.display()))
-                    .arg("-L").arg(rlib_dir)
-                    .arg("-A").arg("warnings");
-                if let Ok(output) = cmd.output() {
-                    if output.status.success() {
-                        return Ok(bin_path);
-                    }
-                    // else: fall through to the self-contained cargo build
-                }
-            }
+        if let Some(bin_path) = try_rlib_fast_build(rs_code, project_dir, release) {
+            return Ok(bin_path);
         }
     }
 
@@ -588,82 +600,11 @@ fn build_runtime_rlib(opt_level: &str) -> Result<std::path::PathBuf, String> {
     Ok(rlib)
 }
 
-fn cargo_build_test_with_native(
-    rs_code: &str,
-    project_dir: &std::path::Path,
-    native_deps: &[crate::project::NativeDep],
-    source_root: Option<&std::path::Path>,
-) -> Result<std::path::PathBuf, String> {
-    let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
-    let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
-    let base_toml = if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
-    let mut all_deps = native_deps.to_vec();
-    if uses_zlib {
-        all_deps.push(crate::project::NativeDep { name: "flate2".into(), spec: "1".into() });
-    }
-
-    // Fast path: the generated test crate is dependency-free (the runtime is
-    // inlined as source). `cargo test --no-run` serializes concurrent builds on
-    // cargo's global `~/.cargo/.package-cache` lock — even across separate
-    // project dirs — so a parallel test run is effectively sequential. A bare
-    // `rustc --test` has no such lock, so per-file builds run truly in parallel.
-    if !uses_http && !uses_zlib && native_deps.is_empty() && source_root.is_none() {
-        return cargo_build_test_fast_path(rs_code, project_dir);
-    }
-
-    let cargo_toml = build_cargo_toml(base_toml, &all_deps);
-    let src_dir = project_dir.join("src");
-    std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
-    std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
-        .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
-
-    let mut final_code = rs_code.to_string();
-    inject_native_modules(&mut final_code, source_root, &src_dir)?;
-    inject_dep_natives(&mut final_code, source_root, &src_dir, project_dir)?;
-
-    // Library modules may not define main — auto-generate an empty one for test builds
-    if !final_code.contains("fn main(") && !final_code.contains("fn almide_main(") {
-        final_code.push_str("\nfn main() {}\n");
-    }
-
-    std::fs::write(src_dir.join("main.rs"), &final_code)
-        .map_err(|e| format!("failed to write main.rs: {}", e))?;
-
-    // Use `cargo test --no-run` to build the test binary without running it
-    let mut cmd = std::process::Command::new("cargo");
-    inject_almide_par_if_rayon(&mut cmd, project_dir);
-    cmd.arg("test").arg("--no-run").arg("--quiet").arg("--message-format=json")
-        .current_dir(project_dir);
-
-    let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
-    if !output.status.success() {
-        // --quiet suppresses cargo's own error display, but rustc messages
-        // come through stdout as JSON (--message-format=json). Extract the
-        // "rendered" field from each compiler-message so the user sees the
-        // real error spans, not just "1 previous error; N warnings emitted".
-        return Err(render_cargo_test_build_error(&output));
-    }
-
-    // Parse the JSON output to find the test binary path
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
-            if json.get("reason").and_then(|r| r.as_str()) == Some("compiler-artifact") {
-                if let Some(exe) = json.get("executable").and_then(|e| e.as_str()) {
-                    return Ok(std::path::PathBuf::from(exe));
-                }
-            }
-        }
-    }
-
-    Err("could not determine test binary path from cargo output".to_string())
-}
-
-/// `cargo_build_test_with_native`'s fast path: the generated test crate is
-/// dependency-free, so it can be built with a bare `rustc --test` instead of
-/// going through `cargo test --no-run` (which serializes on cargo's global
-/// package-cache lock). Extracted verbatim from the `if` block that always
-/// terminates with a `return`.
+/// `cargo_build_test_with_native`'s dependency-free fast path: an rlib-linked
+/// build first (falls through to the fully self-contained inline build on
+/// any failure). Extracted verbatim — once entered, the original code
+/// always returned before reaching the slow (cargo-based) path below, so
+/// this is a genuine alternative branch, not a mid-body early exit.
 fn cargo_build_test_fast_path(rs_code: &str, project_dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
     let bin_path = project_dir.join("almide_test_bin");
 
@@ -732,14 +673,14 @@ fn cargo_build_test_fast_path(rs_code: &str, project_dir: &std::path::Path) -> R
     Ok(bin_path)
 }
 
-/// Render a failed `cargo test --no-run --message-format=json` invocation's
-/// compiler diagnostics as a single human-readable string.
-fn render_cargo_test_build_error(output: &std::process::Output) -> String {
+/// `cargo_build_test_with_native`'s compiler-message renderer for the slow
+/// (cargo-based) path: `--quiet` suppresses cargo's own error display, so
+/// rustc messages must be read back out of the `--message-format=json`
+/// stdout stream. Extracted verbatim — a pure formatting step over its
+/// parameters.
+fn render_cargo_json_errors(stdout: &str, stderr: &str, verbose: bool) -> String {
     let mut rendered: Vec<String> = Vec::new();
-    let verbose = std::env::var("ALMIDE_TEST_VERBOSE")
-        .map(|v| v == "1" || v == "true")
-        .unwrap_or(false);
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
+    for line in stdout.lines() {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
             if json.get("reason").and_then(|r| r.as_str()) == Some("compiler-message") {
                 let level = json.get("message")
@@ -757,13 +698,90 @@ fn render_cargo_test_build_error(output: &std::process::Output) -> String {
             }
         }
     }
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let combined = if rendered.is_empty() {
-        stderr
+    if rendered.is_empty() {
+        stderr.to_string()
     } else {
         format!("{}\n{}", rendered.join("\n"), stderr)
-    };
-    wrap_codegen_leak(combined)
+    }
+}
+
+fn cargo_build_test_with_native(
+    rs_code: &str,
+    project_dir: &std::path::Path,
+    native_deps: &[crate::project::NativeDep],
+    source_root: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, String> {
+    let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
+    let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
+    let base_toml = if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
+    let mut all_deps = native_deps.to_vec();
+    if uses_zlib {
+        all_deps.push(crate::project::NativeDep { name: "flate2".into(), spec: "1".into() });
+    }
+
+    // Fast path: the generated test crate is dependency-free (the runtime is
+    // inlined as source). `cargo test --no-run` serializes concurrent builds on
+    // cargo's global `~/.cargo/.package-cache` lock — even across separate
+    // project dirs — so a parallel test run is effectively sequential. A bare
+    // `rustc --test` has no such lock, so per-file builds run truly in parallel.
+    if !uses_http && !uses_zlib && native_deps.is_empty() && source_root.is_none() {
+        return cargo_build_test_fast_path(rs_code, project_dir);
+    }
+
+    let cargo_toml = build_cargo_toml(base_toml, &all_deps);
+    let src_dir = project_dir.join("src");
+    std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
+    std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
+        .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
+
+    let mut final_code = rs_code.to_string();
+    inject_native_modules(&mut final_code, source_root, &src_dir)?;
+    inject_dep_natives(&mut final_code, source_root, &src_dir, project_dir)?;
+
+    // Library modules may not define main — auto-generate an empty one for test builds
+    if !final_code.contains("fn main(") && !final_code.contains("fn almide_main(") {
+        final_code.push_str("\nfn main() {}\n");
+    }
+
+    std::fs::write(src_dir.join("main.rs"), &final_code)
+        .map_err(|e| format!("failed to write main.rs: {}", e))?;
+
+    // Use `cargo test --no-run` to build the test binary without running it
+    let mut cmd = std::process::Command::new("cargo");
+    inject_almide_par_if_rayon(&mut cmd, project_dir);
+    cmd.arg("test").arg("--no-run").arg("--quiet").arg("--message-format=json")
+        .current_dir(project_dir);
+
+    let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
+    if !output.status.success() {
+        // --quiet suppresses cargo's own error display, but rustc messages
+        // come through stdout as JSON (--message-format=json). Extract the
+        // "rendered" field from each compiler-message so the user sees the
+        // real error spans, not just "1 previous error; N warnings emitted".
+        let verbose = std::env::var("ALMIDE_TEST_VERBOSE")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
+        let combined = render_cargo_json_errors(
+            &String::from_utf8_lossy(&output.stdout),
+            &String::from_utf8_lossy(&output.stderr),
+            verbose,
+        );
+        return Err(wrap_codegen_leak(combined));
+    }
+
+    // Parse the JSON output to find the test binary path
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+            if json.get("reason").and_then(|r| r.as_str()) == Some("compiler-artifact") {
+                if let Some(exe) = json.get("executable").and_then(|e| e.as_str()) {
+                    return Ok(std::path::PathBuf::from(exe));
+                }
+            }
+        }
+    }
+
+    Err("could not determine test binary path from cargo output".to_string())
 }
 
 /// Recursively collect .almd files that contain `test` blocks.
