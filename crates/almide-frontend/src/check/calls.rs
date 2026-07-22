@@ -226,9 +226,43 @@ impl Checker {
         let obj_ty = self.infer_expr(object);
         let obj_concrete = resolve_ty(&obj_ty, &self.uf);
         let field = field.clone();
-        // Record field call: h.run("hello") where run is a Fn-typed field
-        // Must check before UFCS so field-access + call takes priority
-        let field_ty = self.resolve_field_type(&obj_concrete, &field);
+
+        if let Some(ty) = self.check_call_target_record_field(&obj_concrete, &field, arg_tys) {
+            return ty;
+        }
+        // Built-in generic types -> stdlib module UFCS
+        let builtin_module = builtin_module_for_type(&obj_concrete);
+        if let Some(ty) = self.check_call_target_builtin_ufcs(builtin_module, &field, &obj_ty, arg_tys) {
+            return ty;
+        }
+        if let Some(ty) = self.check_call_target_convention(&obj_concrete, &field, &obj_ty, arg_tys) {
+            return ty;
+        }
+        if let Some(ty) = self.check_call_target_typevar_protocol(&obj_concrete, &field) {
+            return ty;
+        }
+        // UFCS: user-defined function obj.func(args) -> func(obj, args)
+        if self.env.functions.contains_key(&sym(&field)) {
+            let mut all_args = vec![obj_ty];
+            all_args.extend(arg_tys.iter().cloned());
+            return self.check_named_call(&field, &all_args);
+        }
+        if let Some(ty) = self.check_call_target_cross_module_ufcs(&obj_concrete, &field, &obj_ty, arg_tys) {
+            return ty;
+        }
+        if let Some(ty) = self.check_call_target_e002_hint(builtin_module, &field, object) {
+            return ty;
+        }
+        let ret = self.fresh_var();
+        self.constrain(obj_ty, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
+        ret
+    }
+
+    /// Record field call: `h.run("hello")` where `run` is a Fn-typed field.
+    /// Must be checked before UFCS so field-access + call takes priority.
+    /// Verbatim text move out of [`Self::check_call_target_member`].
+    fn check_call_target_record_field(&mut self, obj_concrete: &Ty, field: &Sym, arg_tys: &[Ty]) -> Option<Ty> {
+        let field_ty = self.resolve_field_type(obj_concrete, field);
         if let Ty::Fn { params, ret } = &field_ty {
             // Validate argument count
             if arg_tys.len() != params.len() {
@@ -240,53 +274,65 @@ impl Checker {
             for (aty, pty) in arg_tys.iter().zip(params.iter()) {
                 self.constrain(pty.clone(), aty.clone(), format!("call to .{}()", field));
             }
-            return ret.as_ref().clone();
+            return Some(ret.as_ref().clone());
         }
-        // Built-in generic types -> stdlib module UFCS
-        let builtin_module = builtin_module_for_type(&obj_concrete);
-        if let Some(module) = builtin_module {
-            let key = format!("{}.{}", module, field);
-            if self.env.functions.contains_key(&sym(&key))
-                || crate::stdlib::resolve_ufcs_candidates(&field).contains(&module)
-            {
-                let mut all_args = vec![obj_ty];
-                all_args.extend(arg_tys.iter().cloned());
-                return self.check_named_call(&key, &all_args);
-            }
+        None
+    }
+
+    /// Built-in generic types -> stdlib module UFCS (`xs.len()` -> `list.len(xs)`).
+    /// Verbatim text move out of [`Self::check_call_target_member`].
+    fn check_call_target_builtin_ufcs(&mut self, builtin_module: Option<&str>, field: &Sym, obj_ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
+        let module = builtin_module?;
+        let key = format!("{}.{}", module, field);
+        if self.env.functions.contains_key(&sym(&key))
+            || crate::stdlib::resolve_ufcs_candidates(field).contains(&module)
+        {
+            let mut all_args = vec![obj_ty.clone()];
+            all_args.extend(arg_tys.iter().cloned());
+            return Some(self.check_named_call(&key, &all_args));
         }
-        // Convention method: dog.repr() -> Dog.repr(dog)
-        let type_name_opt = self.resolve_type_name(&obj_concrete);
+        None
+    }
+
+    /// Convention method: `dog.repr()` -> `Dog.repr(dog)`. Verbatim text
+    /// move out of [`Self::check_call_target_member`].
+    fn check_call_target_convention(&mut self, obj_concrete: &Ty, field: &Sym, obj_ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
+        let type_name_opt = self.resolve_type_name(obj_concrete);
         if let Some(type_name) = type_name_opt {
             let convention_key = format!("{}.{}", type_name, field);
             if self.env.functions.contains_key(&sym(&convention_key)) {
-                let mut all_args = vec![obj_ty];
+                let mut all_args = vec![obj_ty.clone()];
                 all_args.extend(arg_tys.iter().cloned());
-                return self.check_named_call(&convention_key, &all_args);
+                return Some(self.check_named_call(&convention_key, &all_args));
             }
         }
-        // Protocol method on TypeVar: item.show() where item: T, T: Showable
-        if let Ty::TypeVar(tv) = &obj_concrete {
+        None
+    }
+
+    /// Protocol method on TypeVar: `item.show()` where `item: T, T: Showable`.
+    /// Verbatim text move out of [`Self::check_call_target_member`].
+    fn check_call_target_typevar_protocol(&mut self, obj_concrete: &Ty, field: &Sym) -> Option<Ty> {
+        if let Ty::TypeVar(tv) = obj_concrete {
             if let Some(proto_names) = self.env.generic_protocol_bounds.get(tv).cloned() {
                 for proto_name in &proto_names {
                     if let Some(proto_def) = self.env.protocols.get(proto_name).cloned() {
-                        if let Some(method_sig) = proto_def.methods.iter().find(|m| m.name == field) {
+                        if let Some(method_sig) = proto_def.methods.iter().find(|m| m.name == *field) {
                             // Resolve method return type: substitute Self -> T (the TypeVar)
-                            let ret = self.substitute_self_in_ty(&method_sig.ret, &obj_concrete);
-                            return ret;
+                            let ret = self.substitute_self_in_ty(&method_sig.ret, obj_concrete);
+                            return Some(ret);
                         }
                     }
                 }
             }
         }
-        // UFCS: user-defined function obj.func(args) -> func(obj, args)
-        if self.env.functions.contains_key(&sym(&field)) {
-            let mut all_args = vec![obj_ty];
-            all_args.extend(arg_tys.iter().cloned());
-            return self.check_named_call(&field, &all_args);
-        }
-        // Cross-module UFCS: find the module that defines the object's type,
-        // then check if module.method exists.
-        let cross_type_name = match &obj_concrete {
+        None
+    }
+
+    /// Cross-module UFCS: find the module that defines the object's type,
+    /// then check if `module.method` exists. Verbatim text move out of
+    /// [`Self::check_call_target_member`].
+    fn check_call_target_cross_module_ufcs(&mut self, obj_concrete: &Ty, field: &Sym, obj_ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
+        let cross_type_name = match obj_concrete {
             Ty::Named(n, _) => Some(n.to_string()),
             _ => None,
         };
@@ -310,69 +356,70 @@ impl Checker {
             if let Some(module) = defining_module {
                 let key = format!("{}.{}", module, field);
                 if self.env.functions.contains_key(&sym(&key)) {
-                    let mut all_args = vec![obj_ty];
+                    let mut all_args = vec![obj_ty.clone()];
                     all_args.extend(arg_tys.iter().cloned());
-                    return self.check_named_call(&key, &all_args);
+                    return Some(self.check_named_call(&key, &all_args));
                 }
             }
         }
-        // Almide-specific hint: method-call syntax isn't supported.
-        // If obj_ty maps to a stdlib module, suggest the module-call
-        // form (plus the closest existing name if there's a typo).
-        if let Some(module) = builtin_module {
-            // Use the *full* surface (TOML + bundled `.almd`) so fns
-            // migrated through the Stdlib Unification arc still power
-            // the E002 suggestion. `module_functions` only sees TOML,
-            // so after `stdlib/string.almd` replaced the TOML the
-            // method-call try-snippet silently disappeared.
-            let module_funcs = crate::stdlib::module_functions_all(module);
-            let suggestion = almide_base::diagnostic::suggest(&field, module_funcs.iter().copied());
-            let hint = if let Some(close) = &suggestion {
-                format!(
-                    "Almide doesn't use method-call syntax. Write `{m}.{close}(x)` (or `x |> {m}.{close}`). Method syntax `x.{field}()` is not supported.",
-                    m = module, close = close, field = field
-                )
+        None
+    }
+
+    /// Almide-specific hint: method-call syntax isn't supported. If
+    /// `obj_ty` maps to a stdlib module, suggest the module-call form
+    /// (plus the closest existing name if there's a typo). Verbatim text
+    /// move out of [`Self::check_call_target_member`].
+    fn check_call_target_e002_hint(&mut self, builtin_module: Option<&str>, field: &Sym, object: &ast::Expr) -> Option<Ty> {
+        let module = builtin_module?;
+        // Use the *full* surface (TOML + bundled `.almd`) so fns
+        // migrated through the Stdlib Unification arc still power
+        // the E002 suggestion. `module_functions` only sees TOML,
+        // so after `stdlib/string.almd` replaced the TOML the
+        // method-call try-snippet silently disappeared.
+        let module_funcs = crate::stdlib::module_functions_all(module);
+        let suggestion = almide_base::diagnostic::suggest(field, module_funcs.iter().copied());
+        let hint = if let Some(close) = &suggestion {
+            format!(
+                "Almide doesn't use method-call syntax. Write `{m}.{close}(x)` (or `x |> {m}.{close}`). Method syntax `x.{field}()` is not supported.",
+                m = module, close = close, field = field
+            )
+        } else {
+            format!(
+                "Almide doesn't use method-call syntax. Write `{m}.<fn>(x)` (or `x |> {m}.<fn>`) — there is no method `{field}` on `{m}`. Run `almide explain E002` for examples.",
+                m = module, field = field
+            )
+        };
+        let mut diag = super::err(
+            format!("undefined method '{}' on {}", field, module),
+            hint,
+            format!("method call .{}()", field)
+        ).with_code("E002");
+        if let Some(close) = suggestion {
+            // Mechanical rewrite path: if we have the object's
+            // source text AND the full call span, substitute
+            // `x.field()` → `module.close(x)` in place. Falls
+            // back to the comment-headed display form when
+            // the source isn't reachable (IDE / playground).
+            let rewrite = object.span
+                .and_then(|s| self.source_slice(s))
+                .and_then(|obj_src| {
+                    let call_span = self.call_span_hint?;
+                    Some((call_span, format!("{}.{}({})", module, close, obj_src)))
+                });
+            if let Some((call_span, snippet)) = rewrite {
+                diag = diag.with_try_replace(
+                    call_span.line, call_span.col, call_span.end_col,
+                    snippet,
+                );
             } else {
-                format!(
-                    "Almide doesn't use method-call syntax. Write `{m}.<fn>(x)` (or `x |> {m}.<fn>`) — there is no method `{field}` on `{m}`. Run `almide explain E002` for examples.",
-                    m = module, field = field
-                )
-            };
-            let mut diag = super::err(
-                format!("undefined method '{}' on {}", field, module),
-                hint,
-                format!("method call .{}()", field)
-            ).with_code("E002");
-            if let Some(close) = suggestion {
-                // Mechanical rewrite path: if we have the object's
-                // source text AND the full call span, substitute
-                // `x.field()` → `module.close(x)` in place. Falls
-                // back to the comment-headed display form when
-                // the source isn't reachable (IDE / playground).
-                let rewrite = object.span
-                    .and_then(|s| self.source_slice(s))
-                    .and_then(|obj_src| {
-                        let call_span = self.call_span_hint?;
-                        Some((call_span, format!("{}.{}({})", module, close, obj_src)))
-                    });
-                if let Some((call_span, snippet)) = rewrite {
-                    diag = diag.with_try_replace(
-                        call_span.line, call_span.col, call_span.end_col,
-                        snippet,
-                    );
-                } else {
-                    diag = diag.with_try(format!(
-                        "// x.{field}()  →  {m}.{close}(x)\n{m}.{close}(x)",
-                        m = module, close = close, field = field
-                    ));
-                }
+                diag = diag.with_try(format!(
+                    "// x.{field}()  →  {m}.{close}(x)\n{m}.{close}(x)",
+                    m = module, close = close, field = field
+                ));
             }
-            self.emit(diag);
-            return Ty::Unknown;
         }
-        let ret = self.fresh_var();
-        self.constrain(obj_ty, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
-        ret
+        self.emit(diag);
+        Some(Ty::Unknown)
     }
 
     /// The `TypeName(..)` callee arm of [`Self::check_call_with_type_args`] —
