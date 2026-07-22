@@ -338,6 +338,45 @@ fn lower_fn(
     // Set up protocol bounds and const params for this function's generics
     let saved_pb = std::mem::take(&mut ctx.protocol_bounds);
     let saved_cp = std::mem::take(&mut ctx.const_param_vars);
+    register_generic_protocol_bounds(ctx, generics);
+
+    let mut ir_params = lower_const_param_ir_params(ctx, generics, span);
+    ir_params.extend(lower_fn_value_params(ctx, name, params, module_prefix, span));
+
+    let ret_ty = resolve_fn_ret_ty(ctx, name, module_prefix, body);
+
+    let ir_body = lower_expr(ctx, body);
+    ctx.protocol_bounds = saved_pb;
+    ctx.const_param_vars = saved_cp;
+    ctx.pop_scope();
+
+    let is_effect = effect.unwrap_or(false);
+    let is_async = r#async.unwrap_or(false);
+    let vis = match visibility {
+        ast::Visibility::Public => IrVisibility::Public,
+        ast::Visibility::Mod => IrVisibility::Mod,
+        ast::Visibility::Local => IrVisibility::Private,
+    };
+
+    let stripped_generics = strip_const_param_generics(generics);
+    let mutated_params = resolve_mutated_params(params, attrs);
+
+    IrFunction {
+        name: sym(name), params: ir_params, ret_ty, body: ir_body,
+        is_effect, is_async, is_test: false,
+        generics: stripped_generics, extern_attrs: extern_attrs.to_vec(),
+        export_attrs: export_attrs.to_vec(),
+        attrs: attrs.to_vec(),
+        visibility: vis,
+        doc: None, blank_lines_before: 0,
+        def_id: ctx.def_map.get(&sym(name)).copied(),
+        mutated_params, module_origin: None,
+    }
+}
+
+// Set up protocol bounds for this function's generics (non-const-param
+// bounds only — const params are handled separately below).
+fn register_generic_protocol_bounds(ctx: &mut LowerCtx, generics: &Option<Vec<ast::GenericParam>>) {
     if let Some(gs) = generics {
         for g in gs {
             if let Some(bounds) = &g.bounds {
@@ -352,10 +391,12 @@ fn lower_fn(
             }
         }
     }
+}
 
+// Const generic params (a single scalar-type bound, e.g. `[N: Int]`) become
+// implicit leading IrParams instead of type parameters.
+fn lower_const_param_ir_params(ctx: &mut LowerCtx, generics: &Option<Vec<ast::GenericParam>>, span: &Option<ast::Span>) -> Vec<IrParam> {
     let mut ir_params = Vec::new();
-
-    // Add const params as implicit leading parameters
     if let Some(gs) = generics {
         for g in gs {
             if let Some(bounds) = &g.bounds {
@@ -374,13 +415,17 @@ fn lower_fn(
             }
         }
     }
+    ir_params
+}
 
-    // A bare `self` first param is sugar for `self: Self` (see registration.rs
-    // and check/mod.rs's matching fixes). `Self` only stays an unresolved
-    // placeholder inside a `protocol { ... }` declaration; on a real
-    // convention method it must lower to the enclosing type, or codegen
-    // emits the literal (nonexistent) Rust type `Self`.
+// A bare `self` first param is sugar for `self: Self` (see registration.rs
+// and check/mod.rs's matching fixes). `Self` only stays an unresolved
+// placeholder inside a `protocol { ... }` declaration; on a real
+// convention method it must lower to the enclosing type, or codegen
+// emits the literal (nonexistent) Rust type `Self`.
+fn lower_fn_value_params(ctx: &mut LowerCtx, name: &str, params: &[ast::Param], module_prefix: Option<&str>, span: &Option<ast::Span>) -> Vec<IrParam> {
     let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
+    let mut ir_params = Vec::new();
     for (i, p) in params.iter().enumerate() {
         let ty = if i == 0 && p.name.as_str() == "self"
             && matches!(&p.ty, ast::TypeExpr::Simple { name: tn } if tn.as_str() == "Self")
@@ -398,46 +443,39 @@ fn lower_fn(
             attrs: p.attrs.clone(),
         });
     }
+    ir_params
+}
 
-    let ret_ty = {
-        // For module functions, look up the module-prefixed name first (e.g., "option.unwrap_or")
-        // to avoid picking up a user function with the same bare name.
-        let prefixed = module_prefix.map(|p| format!("{}.{}", p, name));
-        let sig = prefixed.as_ref()
-            .and_then(|pn| ctx.env.functions.get(&sym(pn)))
-            .or_else(|| ctx.env.functions.get(&sym(name)));
-        if let Some(sig) = sig {
-            sig.ret.clone()
-        } else {
-            ctx.expr_ty(body)
-        }
-    };
+// For module functions, look up the module-prefixed name first (e.g.,
+// "option.unwrap_or") to avoid picking up a user function with the same
+// bare name.
+fn resolve_fn_ret_ty(ctx: &LowerCtx, name: &str, module_prefix: Option<&str>, body: &ast::Expr) -> Ty {
+    let prefixed = module_prefix.map(|p| format!("{}.{}", p, name));
+    let sig = prefixed.as_ref()
+        .and_then(|pn| ctx.env.functions.get(&sym(pn)))
+        .or_else(|| ctx.env.functions.get(&sym(name)));
+    if let Some(sig) = sig {
+        sig.ret.clone()
+    } else {
+        ctx.expr_ty(body)
+    }
+}
 
-    let ir_body = lower_expr(ctx, body);
-    ctx.protocol_bounds = saved_pb;
-    ctx.const_param_vars = saved_cp;
-    ctx.pop_scope();
-
-    let is_effect = effect.unwrap_or(false);
-    let is_async = r#async.unwrap_or(false);
-    let vis = match visibility {
-        ast::Visibility::Public => IrVisibility::Public,
-        ast::Visibility::Mod => IrVisibility::Mod,
-        ast::Visibility::Local => IrVisibility::Private,
-    };
-
-    // Strip const params from generics (they became runtime params above).
-    // If only const params remain, generics becomes None (non-generic function).
-    let stripped_generics = generics.as_ref().map(|gs| {
+// Strip const params from generics (they became runtime params above).
+// If only const params remain, generics becomes None (non-generic function).
+fn strip_const_param_generics(generics: &Option<Vec<ast::GenericParam>>) -> Option<Vec<ast::GenericParam>> {
+    generics.as_ref().map(|gs| {
         let remaining: Vec<_> = gs.iter().filter(|g| {
             !g.bounds.as_ref().map_or(false, |bs| {
                 bs.len() == 1 && crate::canonicalize::registration::SCALAR_TYPE_NAMES.contains(&bs[0].as_str())
             })
         }).cloned().collect();
         if remaining.is_empty() { None } else { Some(remaining) }
-    }).flatten();
+    }).flatten()
+}
 
-    // Resolve mut params: from `mut` keyword and @mutating(param_name) annotation
+// Resolve mut params: from `mut` keyword and @mutating(param_name) annotation
+fn resolve_mutated_params(params: &[ast::Param], attrs: &[ast::Attribute]) -> Vec<usize> {
     let mut mutated_params: Vec<usize> = params.iter().enumerate()
         .filter(|(_, p)| p.is_mut)
         .map(|(i, _)| i)
@@ -454,16 +492,5 @@ fn lower_fn(
             }
         }
     }
-
-    IrFunction {
-        name: sym(name), params: ir_params, ret_ty, body: ir_body,
-        is_effect, is_async, is_test: false,
-        generics: stripped_generics, extern_attrs: extern_attrs.to_vec(),
-        export_attrs: export_attrs.to_vec(),
-        attrs: attrs.to_vec(),
-        visibility: vis,
-        doc: None, blank_lines_before: 0,
-        def_id: ctx.def_map.get(&sym(name)).copied(),
-        mutated_params, module_origin: None,
-    }
+    mutated_params
 }
