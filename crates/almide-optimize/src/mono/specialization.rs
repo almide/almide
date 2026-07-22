@@ -190,6 +190,22 @@ fn collect_varids_in_for_in(expr: &IrExpr, out: &mut Vec<VarId>) {
 /// IndexAccess/MapAccess/StringInterp/RustMacro: collect from each child expression.
 fn collect_varids_in_containers(expr: &IrExpr, out: &mut Vec<VarId>) {
     match &expr.kind {
+        IrExprKind::List { .. } | IrExprKind::Tuple { .. } | IrExprKind::Fan { .. }
+        | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. } | IrExprKind::MapLiteral { .. } => {
+            collect_varids_in_containers_literals(expr, out)
+        }
+        IrExprKind::Range { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::StringInterp { .. } | IrExprKind::RustMacro { .. } => {
+            collect_varids_in_containers_access(expr, out)
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// List/Tuple/Fan/Record/SpreadRecord/MapLiteral: collect from each element/entry.
+fn collect_varids_in_containers_literals(expr: &IrExpr, out: &mut Vec<VarId>) {
+    match &expr.kind {
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
             for e in elements { collect_varids_in_expr(e, out); }
         }
@@ -199,6 +215,14 @@ fn collect_varids_in_containers(expr: &IrExpr, out: &mut Vec<VarId>) {
             for (_, e) in fields { collect_varids_in_expr(e, out); }
         }
         IrExprKind::MapLiteral { entries } => { for (k, v) in entries { collect_varids_in_expr(k, out); collect_varids_in_expr(v, out); } }
+        _ => unreachable!(),
+    }
+}
+
+/// Range/Member/TupleIndex/OptionalChain/IndexAccess/MapAccess/StringInterp/RustMacro:
+/// collect from each accessed sub-expression.
+fn collect_varids_in_containers_access(expr: &IrExpr, out: &mut Vec<VarId>) {
+    match &expr.kind {
         IrExprKind::Range { start, end, .. } => { collect_varids_in_expr(start, out); collect_varids_in_expr(end, out); }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
         | IrExprKind::OptionalChain { expr: object, .. } => collect_varids_in_expr(object, out),
@@ -297,6 +321,47 @@ fn remap_id(id: VarId, remap: &HashMap<VarId, VarId>) -> VarId {
 fn remap_expr_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
     match &mut expr.kind {
         IrExprKind::Var { id } => *id = remap_id(*id, remap),
+        IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. } | IrExprKind::If { .. }
+        | IrExprKind::While { .. } => remap_control_varids(expr, remap),
+        IrExprKind::Match { .. } => remap_match_varids(expr, remap),
+        IrExprKind::Block { stmts, expr } => {
+            for s in stmts { remap_stmt_varids(s, remap); }
+            if let Some(e) = expr { remap_expr_varids(e, remap); }
+        }
+        IrExprKind::Call { .. } => remap_call_varids(expr, remap),
+        IrExprKind::ForIn { .. } => remap_for_in_varids(expr, remap),
+        IrExprKind::List { .. } | IrExprKind::Tuple { .. } | IrExprKind::Fan { .. }
+        | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. } | IrExprKind::MapLiteral { .. } => {
+            remap_container_literal_varids(expr, remap)
+        }
+        IrExprKind::Range { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::StringInterp { .. } | IrExprKind::RustMacro { .. } => {
+            remap_container_access_varids(expr, remap)
+        }
+        IrExprKind::Lambda { params, body, .. } => {
+            for (id, _) in params { *id = remap_id(*id, remap); }
+            remap_expr_varids(body, remap);
+        }
+        IrExprKind::ClosureCreate { captures, .. } => {
+            for (id, _) in captures { *id = remap_id(*id, remap); }
+        }
+        IrExprKind::EnvLoad { env_var, .. } => *env_var = remap_id(*env_var, remap),
+        IrExprKind::IterChain { .. } => remap_iter_chain_varids(expr, remap),
+        IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::Try { .. }
+        | IrExprKind::Await { .. } | IrExprKind::Clone { .. }
+        | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::Unwrap { .. }
+        | IrExprKind::ToOption { .. } | IrExprKind::UnwrapOr { .. } => remap_wrap_varids(expr, remap),
+        _ => {} // literals, unit, break, continue, etc.
+    }
+}
+
+/// BinOp/UnOp/If/While: remap operands, condition, and bodies.
+fn remap_control_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
+    match &mut expr.kind {
         IrExprKind::BinOp { left, right, .. } => { remap_expr_varids(left, remap); remap_expr_varids(right, remap); }
         IrExprKind::UnOp { operand, .. } => remap_expr_varids(operand, remap),
         IrExprKind::If { cond, then, else_ } => {
@@ -304,28 +369,36 @@ fn remap_expr_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
             remap_expr_varids(then, remap);
             remap_expr_varids(else_, remap);
         }
-        IrExprKind::Match { .. } => remap_match_varids(expr, remap),
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { remap_stmt_varids(s, remap); }
-            if let Some(e) = expr { remap_expr_varids(e, remap); }
-        }
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => remap_expr_varids(object, remap),
-                _ => {}
-            }
-            for a in args { remap_expr_varids(a, remap); }
-        }
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-            *var = remap_id(*var, remap);
-            if let Some(tvs) = var_tuple { for tv in tvs { *tv = remap_id(*tv, remap); } }
-            remap_expr_varids(iterable, remap);
-            for s in body { remap_stmt_varids(s, remap); }
-        }
         IrExprKind::While { cond, body } => {
             remap_expr_varids(cond, remap);
             for s in body { remap_stmt_varids(s, remap); }
         }
+        _ => unreachable!(),
+    }
+}
+
+/// Call: remap the receiver (if any) and arguments.
+fn remap_call_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
+    let IrExprKind::Call { target, args, .. } = &mut expr.kind else { unreachable!() };
+    match target {
+        CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => remap_expr_varids(object, remap),
+        _ => {}
+    }
+    for a in args { remap_expr_varids(a, remap); }
+}
+
+/// ForIn: remap the loop var(s), the iterable, and the body.
+fn remap_for_in_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
+    let IrExprKind::ForIn { var, var_tuple, iterable, body } = &mut expr.kind else { unreachable!() };
+    *var = remap_id(*var, remap);
+    if let Some(tvs) = var_tuple { for tv in tvs { *tv = remap_id(*tv, remap); } }
+    remap_expr_varids(iterable, remap);
+    for s in body { remap_stmt_varids(s, remap); }
+}
+
+/// List/Tuple/Fan/Record/SpreadRecord/MapLiteral: remap each element/entry.
+fn remap_container_literal_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
+    match &mut expr.kind {
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
             for e in elements { remap_expr_varids(e, remap); }
         }
@@ -335,23 +408,31 @@ fn remap_expr_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
             for (_, e) in fields { remap_expr_varids(e, remap); }
         }
         IrExprKind::MapLiteral { entries } => { for (k, v) in entries { remap_expr_varids(k, remap); remap_expr_varids(v, remap); } }
+        _ => unreachable!(),
+    }
+}
+
+/// Range/Member/TupleIndex/OptionalChain/IndexAccess/MapAccess/StringInterp/RustMacro:
+/// remap each accessed sub-expression.
+fn remap_container_access_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
+    match &mut expr.kind {
         IrExprKind::Range { start, end, .. } => { remap_expr_varids(start, remap); remap_expr_varids(end, remap); }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
         | IrExprKind::OptionalChain { expr: object, .. } => remap_expr_varids(object, remap),
         IrExprKind::IndexAccess { object, index } => { remap_expr_varids(object, remap); remap_expr_varids(index, remap); }
         IrExprKind::MapAccess { object, key } => { remap_expr_varids(object, remap); remap_expr_varids(key, remap); }
-        IrExprKind::Lambda { params, body, .. } => {
-            for (id, _) in params { *id = remap_id(*id, remap); }
-            remap_expr_varids(body, remap);
-        }
         IrExprKind::StringInterp { parts } => {
             for p in parts { if let IrStringPart::Expr { expr } = p { remap_expr_varids(expr, remap); } }
         }
-        IrExprKind::ClosureCreate { captures, .. } => {
-            for (id, _) in captures { *id = remap_id(*id, remap); }
-        }
-        IrExprKind::EnvLoad { env_var, .. } => *env_var = remap_id(*env_var, remap),
-        IrExprKind::IterChain { .. } => remap_iter_chain_varids(expr, remap),
+        IrExprKind::RustMacro { args, .. } => { for a in args { remap_expr_varids(a, remap); } }
+        _ => unreachable!(),
+    }
+}
+
+/// ResultOk/ResultErr/OptionSome/Try/Await/Clone/Deref/Borrow/BoxNew/RcWrap/ToVec/Unwrap/ToOption/UnwrapOr:
+/// remap the wrapped expression(s).
+fn remap_wrap_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
+    match &mut expr.kind {
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
         | IrExprKind::Await { expr } | IrExprKind::Clone { expr }
@@ -363,8 +444,7 @@ fn remap_expr_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
             remap_expr_varids(expr, remap);
             remap_expr_varids(fallback, remap);
         }
-        IrExprKind::RustMacro { args, .. } => { for a in args { remap_expr_varids(a, remap); } }
-        _ => {} // literals, unit, break, continue, etc.
+        _ => unreachable!(),
     }
 }
 
