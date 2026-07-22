@@ -976,7 +976,7 @@ fn dispatch(cli: Cli) {
             cli::cmd_self_update(version.as_deref());
         }
         Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c } => {
-            cli::cmd_emit(&file, &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c);
+            cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c });
         }
     }
 }

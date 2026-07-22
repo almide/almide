@@ -17,7 +17,7 @@ mod docs_gen;
 pub use run::{cmd_run, cmd_run_inner};
 pub use build::{cmd_build, BuildArgs};
 pub use compile::cmd_compile;
-pub use emit::cmd_emit;
+pub use emit::{cmd_emit, EmitArgs};
 pub use check::{cmd_check, cmd_check_json, cmd_check_effects};
 pub use commands::{cmd_init, cmd_test, cmd_test_fast, cmd_test_json, cmd_test_wasm, cmd_fmt, cmd_clean};
 pub use install::cmd_install;
