@@ -11,7 +11,7 @@
 //! needed" until the deterministic rewrite infrastructure grows to
 //! cover them too.
 
-use crate::{parse_file, project, project_fetch};
+use crate::{parse_file, project, project_fetch, out, err};
 use almide::ast::{self, Expr, ExprKind};
 use almide::fmt::{auto_imports, format_program};
 use almide_base::intern::sym;
@@ -79,7 +79,7 @@ fn report_fix_result(
             changed: any_change,
             dry_run,
         };
-        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+        out(&format!("{}", serde_json::to_string_pretty(&report).unwrap()));
         return;
     }
 
@@ -89,43 +89,43 @@ fn report_fix_result(
     );
     if dry_run {
         if !any_change {
-            println!("no auto-applicable fixes");
+            out(&format!("no auto-applicable fixes"));
         } else {
-            println!("--- would apply ---");
-            for m in import_messages { println!("  {}", m); }
-            if operator_count > 0 { println!("  {}", op_msg(operator_count)); }
+            out(&format!("--- would apply ---"));
+            for m in import_messages { out(&format!("  {}", m)); }
+            if operator_count > 0 { out(&format!("  {}", op_msg(operator_count))); }
             if letin_count > 0 {
-                println!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count);
+                out(&format!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count));
             }
             if return_count > 0 {
-                println!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", return_count);
+                out(&format!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", return_count));
             }
-            println!("\n--- new file contents ---");
-            println!("{}", working);
+            out(&format!("\n--- new file contents ---"));
+            out(&format!("{}", working));
         }
     } else if any_change {
-        eprintln!("{}:", file);
-        for m in import_messages { eprintln!("  {}", m); }
-        if operator_count > 0 { eprintln!("  {}", op_msg(operator_count)); }
+        err(&format!("{}:", file));
+        for m in import_messages { err(&format!("  {}", m)); }
+        if operator_count > 0 { err(&format!("  {}", op_msg(operator_count))); }
         if letin_count > 0 {
-            eprintln!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count);
+            err(&format!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count));
         }
         if return_count > 0 {
-            eprintln!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", return_count);
+            err(&format!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", return_count));
         }
     }
 
     if !manual.is_empty() {
-        eprintln!("\n{} diagnostic(s) have `try:` snippets that need manual application:", manual.len());
+        err(&format!("\n{} diagnostic(s) have `try:` snippets that need manual application:", manual.len()));
         for d in &manual {
             let loc = match (d.line, d.col) {
                 (Some(l), Some(c)) => format!("{}:{}", l, c),
                 (Some(l), None) => format!("{}", l),
                 _ => "?".into(),
             };
-            eprintln!("  [{code}] {file}:{loc}  {}", d.message, code = d.code);
+            err(&format!("  [{code}] {file}:{loc}  {}", d.message, code = d.code));
         }
-        eprintln!("\nRun `almide check {}` for the full text of each `try:` snippet.", file);
+        err(&format!("\nRun `almide check {}` for the full text of each `try:` snippet.", file));
     }
 
     // Exit code contract for harness integration:
@@ -199,7 +199,7 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
 
     if !dry_run && any_change {
         if let Err(e) = std::fs::write(file, &working) {
-            eprintln!("error: failed to write {}: {}", file, e);
+            err(&format!("error: failed to write {}: {}", file, e));
             std::process::exit(1);
         }
     }
