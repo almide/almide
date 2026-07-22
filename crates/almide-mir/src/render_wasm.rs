@@ -1466,6 +1466,174 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
     m
 }
 
+/// The per-`Op` classification arm of [`classify_f64_locals`]'s scan loop —
+/// verbatim move. `hard`/`poison`/`edges` are the loop's accumulators,
+/// write-only from every arm (a genuine fold): threading them as `&mut`
+/// out-params called once per op preserves the exact original mutation
+/// order, so this is safe despite the match having 20+ arms.
+fn classify_f64_op(
+    op: &Op,
+    hard: &mut BTreeSet<ValueId>,
+    poison: &mut BTreeSet<ValueId>,
+    edges: &mut Vec<(ValueId, ValueId)>,
+) {
+    let arg_vals = |args: &[CallArg], poison: &mut BTreeSet<ValueId>| {
+        for a in args {
+            match a {
+                CallArg::Handle(v) | CallArg::Scalar(v) => {
+                    poison.insert(*v);
+                }
+                CallArg::Imm(_) | CallArg::Label(_) => {}
+            }
+        }
+    };
+    match op {
+        Op::Prim { kind: PrimKind::FloatUn(_) | PrimKind::FloatBin(_), dst, args } => {
+            for a in args {
+                hard.insert(*a);
+            }
+            if let Some(d) = dst {
+                hard.insert(*d);
+            }
+        }
+        Op::Prim { kind: PrimKind::FloatCmp(_), dst, args } => {
+            for a in args {
+                hard.insert(*a);
+            }
+            if let Some(d) = dst {
+                poison.insert(*d);
+            }
+        }
+        Op::Prim { kind: PrimKind::F64FromInt | PrimKind::IntToFloat, dst, args } => {
+            for a in args {
+                poison.insert(*a);
+            }
+            if let Some(d) = dst {
+                hard.insert(*d);
+            }
+        }
+        Op::Prim { kind: PrimKind::FloatToInt, dst, args } => {
+            for a in args {
+                hard.insert(*a);
+            }
+            if let Some(d) = dst {
+                poison.insert(*d);
+            }
+        }
+        // FloatBits / the f32 family are BIT-level (identity pass-throughs, low-32
+        // patterns) — they need the i64-uniform slot. Every other prim borrows
+        // addresses/handles or produces non-float scalars.
+        Op::Prim { dst, args, .. } => {
+            for a in args {
+                poison.insert(*a);
+            }
+            if let Some(d) = dst {
+                poison.insert(*d);
+            }
+        }
+        Op::ConstInt { .. } | Op::Const { .. } => {}
+        Op::SetLocal { local, src } => edges.push((*local, *src)),
+        Op::ListGetScalar { dst: _, list, idx } => {
+            poison.insert(*list);
+            poison.insert(*idx);
+        }
+        Op::ListSetScalar { list, idx, val: _ } => {
+            poison.insert(*list);
+            poison.insert(*idx);
+        }
+        Op::ListLit { dst, elems: _ } => {
+            poison.insert(*dst);
+        }
+        Op::IntBinOp { dst, a, b, .. } => {
+            poison.insert(*dst);
+            poison.insert(*a);
+            poison.insert(*b);
+        }
+        Op::IfThen { cond, dst } => {
+            poison.insert(*cond);
+            if let Some(d) = dst {
+                poison.insert(*d);
+            }
+        }
+        Op::Else { val } | Op::EndIf { val } => {
+            if let Some(v) = val {
+                poison.insert(*v);
+            }
+        }
+        Op::LoopBreakUnless { cond } => {
+            poison.insert(*cond);
+        }
+        Op::LoopStart | Op::LoopEnd => {}
+        Op::Alloc { dst, init, .. } => {
+            poison.insert(*dst);
+            match init {
+                Init::DynStr { len }
+                | Init::DynList { len }
+                | Init::DynListStr { len } => {
+                    poison.insert(*len);
+                }
+                Init::OptSome { payload } => {
+                    poison.insert(*payload);
+                }
+                Init::Opaque
+                | Init::OptNone
+                | Init::IntList(_)
+                | Init::Bytes(_)
+                | Init::Str(_) => {}
+            }
+        }
+        Op::Dup { dst, src } => {
+            poison.insert(*dst);
+            poison.insert(*src);
+        }
+        Op::Drop { v }
+        | Op::DropListStr { v }
+        | Op::DropValue { v }
+        | Op::DropListValue { v }
+        | Op::DropListStrValue { v }
+        | Op::DropListStrStr { v }
+        | Op::DropListIntStr { v }
+        | Op::DropListStrInt { v }
+        | Op::DropResultListValue { v }
+        | Op::DropResultValue { v }
+        | Op::DropResultStrInt { v }
+        | Op::DropResultValueInt { v }
+        | Op::DropResultListValueInt { v }
+        | Op::DropResultListStrInt { v }
+        | Op::DropResultListStr { v }
+        | Op::DropListListStr { v }
+        | Op::DropVariant { v, .. }
+        | Op::DropWrapperRec { v, .. }
+        | Op::Consume { v }
+        | Op::Borrow { v }
+        | Op::MakeUnique { v } => {
+            poison.insert(*v);
+        }
+        Op::Pure { dst, uses } => {
+            poison.insert(*dst);
+            for u in uses {
+                poison.insert(*u);
+            }
+        }
+        Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } | Op::CallImport { dst, args, .. } => {
+            if let Some(d) = dst {
+                poison.insert(*d);
+            }
+            arg_vals(args, &mut *poison);
+        }
+        Op::CallIndirect { dst, table_idx, args, .. } => {
+            if let Some(d) = dst {
+                poison.insert(*d);
+            }
+            poison.insert(*table_idx);
+            arg_vals(args, &mut *poison);
+        }
+        Op::FuncRef { dst, .. } => {
+            poison.insert(*dst);
+        }
+    }
+}
+
 /// #806 step 3a: the set of locals this function can declare as REAL `f64`
 /// wasm locals instead of i64-uniform bit slots. The uniform model pays 2-3
 /// `reinterpret`s (GPR↔XMM moves Cranelift does not eliminate through locals)
@@ -1490,162 +1658,8 @@ pub(crate) fn classify_f64_locals(func: &MirFunction) -> BTreeSet<ValueId> {
         poison.insert(r);
     }
     let mut edges: Vec<(ValueId, ValueId)> = Vec::new();
-    let arg_vals = |args: &[CallArg], poison: &mut BTreeSet<ValueId>| {
-        for a in args {
-            match a {
-                CallArg::Handle(v) | CallArg::Scalar(v) => {
-                    poison.insert(*v);
-                }
-                CallArg::Imm(_) | CallArg::Label(_) => {}
-            }
-        }
-    };
     for op in &func.ops {
-        match op {
-            Op::Prim { kind: PrimKind::FloatUn(_) | PrimKind::FloatBin(_), dst, args } => {
-                for a in args {
-                    hard.insert(*a);
-                }
-                if let Some(d) = dst {
-                    hard.insert(*d);
-                }
-            }
-            Op::Prim { kind: PrimKind::FloatCmp(_), dst, args } => {
-                for a in args {
-                    hard.insert(*a);
-                }
-                if let Some(d) = dst {
-                    poison.insert(*d);
-                }
-            }
-            Op::Prim { kind: PrimKind::F64FromInt | PrimKind::IntToFloat, dst, args } => {
-                for a in args {
-                    poison.insert(*a);
-                }
-                if let Some(d) = dst {
-                    hard.insert(*d);
-                }
-            }
-            Op::Prim { kind: PrimKind::FloatToInt, dst, args } => {
-                for a in args {
-                    hard.insert(*a);
-                }
-                if let Some(d) = dst {
-                    poison.insert(*d);
-                }
-            }
-            // FloatBits / the f32 family are BIT-level (identity pass-throughs, low-32
-            // patterns) — they need the i64-uniform slot. Every other prim borrows
-            // addresses/handles or produces non-float scalars.
-            Op::Prim { dst, args, .. } => {
-                for a in args {
-                    poison.insert(*a);
-                }
-                if let Some(d) = dst {
-                    poison.insert(*d);
-                }
-            }
-            Op::ConstInt { .. } | Op::Const { .. } => {}
-            Op::SetLocal { local, src } => edges.push((*local, *src)),
-            Op::ListGetScalar { dst: _, list, idx } => {
-                poison.insert(*list);
-                poison.insert(*idx);
-            }
-            Op::ListSetScalar { list, idx, val: _ } => {
-                poison.insert(*list);
-                poison.insert(*idx);
-            }
-            Op::ListLit { dst, elems: _ } => {
-                poison.insert(*dst);
-            }
-            Op::IntBinOp { dst, a, b, .. } => {
-                poison.insert(*dst);
-                poison.insert(*a);
-                poison.insert(*b);
-            }
-            Op::IfThen { cond, dst } => {
-                poison.insert(*cond);
-                if let Some(d) = dst {
-                    poison.insert(*d);
-                }
-            }
-            Op::Else { val } | Op::EndIf { val } => {
-                if let Some(v) = val {
-                    poison.insert(*v);
-                }
-            }
-            Op::LoopBreakUnless { cond } => {
-                poison.insert(*cond);
-            }
-            Op::LoopStart | Op::LoopEnd => {}
-            Op::Alloc { dst, init, .. } => {
-                poison.insert(*dst);
-                match init {
-                    Init::DynStr { len }
-                    | Init::DynList { len }
-                    | Init::DynListStr { len } => {
-                        poison.insert(*len);
-                    }
-                    Init::OptSome { payload } => {
-                        poison.insert(*payload);
-                    }
-                    Init::Opaque
-                    | Init::OptNone
-                    | Init::IntList(_)
-                    | Init::Bytes(_)
-                    | Init::Str(_) => {}
-                }
-            }
-            Op::Dup { dst, src } => {
-                poison.insert(*dst);
-                poison.insert(*src);
-            }
-            Op::Drop { v }
-            | Op::DropListStr { v }
-            | Op::DropValue { v }
-            | Op::DropListValue { v }
-            | Op::DropListStrValue { v }
-            | Op::DropListStrStr { v }
-            | Op::DropListIntStr { v }
-            | Op::DropListStrInt { v }
-            | Op::DropResultListValue { v }
-            | Op::DropResultValue { v }
-            | Op::DropResultStrInt { v }
-            | Op::DropResultValueInt { v }
-            | Op::DropResultListValueInt { v }
-            | Op::DropResultListStrInt { v }
-            | Op::DropResultListStr { v }
-            | Op::DropListListStr { v }
-            | Op::DropVariant { v, .. }
-            | Op::DropWrapperRec { v, .. }
-            | Op::Consume { v }
-            | Op::Borrow { v }
-            | Op::MakeUnique { v } => {
-                poison.insert(*v);
-            }
-            Op::Pure { dst, uses } => {
-                poison.insert(*dst);
-                for u in uses {
-                    poison.insert(*u);
-                }
-            }
-            Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } | Op::CallImport { dst, args, .. } => {
-                if let Some(d) = dst {
-                    poison.insert(*d);
-                }
-                arg_vals(args, &mut poison);
-            }
-            Op::CallIndirect { dst, table_idx, args, .. } => {
-                if let Some(d) = dst {
-                    poison.insert(*d);
-                }
-                poison.insert(*table_idx);
-                arg_vals(args, &mut poison);
-            }
-            Op::FuncRef { dst, .. } => {
-                poison.insert(*dst);
-            }
-        }
+        classify_f64_op(op, &mut hard, &mut poison, &mut edges);
     }
     // Propagate both properties across copy components to a fixpoint: a
     // component with any poisoned member stays i64 throughout; one with a
