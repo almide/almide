@@ -149,31 +149,43 @@ fn concretize_top_lets(program: &mut IrProgram, prog_vt: &mut VarTable, symbols:
 
 /// Phase 1b: Propagate top_let types by name into VarTable entries
 /// that are cross-module synthetic references (different VarId, same name).
-fn propagate_top_let_types_by_name(program: &IrProgram, prog_vt: &mut VarTable) {
+/// Insert `name` → `ty` under both its source spelling and its
+/// SCREAMING_CASE const spelling. The use-site synthetic Var carries the
+/// SCREAMING_CASE spelling (`lower/expressions.rs` `field.to_uppercase()`)
+/// while the definition keeps the source name — bridge BOTH spellings, or
+/// a lowercase module top-let never propagates (#502 fix C). Extracted
+/// from `propagate_top_let_types_by_name` (cog>25 decomposition): was a
+/// local closure, promoted to a named function.
+fn insert_top_let_ty_both_spellings(name: String, ty: &Ty, map: &mut std::collections::HashMap<String, Ty>) {
+    let upper = name.to_uppercase();
+    if upper != name { map.entry(upper).or_insert_with(|| ty.clone()); }
+    map.insert(name, ty.clone());
+}
+
+/// Collect every resolved top-let's type (top-level and per-module), keyed
+/// by name (both spellings — see [`insert_top_let_ty_both_spellings`]).
+/// Extracted from `propagate_top_let_types_by_name` (cog>25 decomposition).
+fn collect_top_let_types(program: &IrProgram, prog_vt: &VarTable) -> std::collections::HashMap<String, Ty> {
     let mut top_let_types: std::collections::HashMap<String, Ty> = std::collections::HashMap::new();
-    // The use-site synthetic Var carries the SCREAMING_CASE const
-    // spelling (lower/expressions.rs `field.to_uppercase()`) while the
-    // definition keeps the source name — bridge BOTH spellings, or a
-    // lowercase module top-let never propagates (#502 fix C).
-    let mut insert_both = |name: String, ty: &Ty, map: &mut std::collections::HashMap<String, Ty>| {
-        let upper = name.to_uppercase();
-        if upper != name { map.entry(upper).or_insert_with(|| ty.clone()); }
-        map.insert(name, ty.clone());
-    };
     for tl in &program.top_lets {
         if !tl.ty.has_unresolved_deep() {
             let name = prog_vt.get(tl.var).name.to_string();
-            insert_both(name, &tl.ty, &mut top_let_types);
+            insert_top_let_ty_both_spellings(name, &tl.ty, &mut top_let_types);
         }
     }
     for module in &program.modules {
         for tl in &module.top_lets {
             if !tl.ty.has_unresolved_deep() {
                 let name = prog_vt.get(tl.var).name.to_string();
-                insert_both(name, &tl.ty, &mut top_let_types);
+                insert_top_let_ty_both_spellings(name, &tl.ty, &mut top_let_types);
             }
         }
     }
+    top_let_types
+}
+
+fn propagate_top_let_types_by_name(program: &IrProgram, prog_vt: &mut VarTable) {
+    let top_let_types = collect_top_let_types(program, prog_vt);
     if !top_let_types.is_empty() {
         for entry in &mut prog_vt.entries {
             if entry.ty.has_unresolved_deep() {
@@ -239,170 +251,10 @@ impl SymbolTable {
 /// - `Constructor { name: "Alias", args: [Bind(v)] }` → `Bind(v)` (identity unwrap)
 /// This is the Rust `#[repr(transparent)]` / Haskell `newtype` approach.
 fn erase_type_aliases(program: &mut IrProgram, aliases: &HashMap<String, Ty>) {
-    use almide_ir::{IrExprKind, IrStmtKind, IrPattern};
-    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
-
-    fn erase_ty(ty: &mut Ty, aliases: &HashMap<String, Ty>) {
-        if let Ty::Named(name, _) = ty {
-            if let Some(target) = aliases.get(name.as_str()) {
-                *ty = target.clone();
-            }
-        }
-    }
-
-    fn erase_expr(expr: &mut almide_ir::IrExpr, aliases: &HashMap<String, Ty>) {
-        erase_ty(&mut expr.ty, aliases);
-        match &mut expr.kind {
-            // Constructor call: Alias(arg) → arg
-            IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, args, .. } => {
-                if aliases.contains_key(name.as_str()) && args.len() == 1 {
-                    let arg = args.remove(0);
-                    *expr = arg;
-                    erase_expr(expr, aliases);
-                    return;
-                }
-                for a in args.iter_mut() { erase_expr(a, aliases); }
-            }
-            IrExprKind::Block { stmts, expr: tail } => {
-                for s in stmts.iter_mut() { erase_stmt(s, aliases); }
-                if let Some(t) = tail { erase_expr(t, aliases); }
-            }
-            IrExprKind::If { cond, then, else_ } => {
-                erase_expr(cond, aliases);
-                erase_expr(then, aliases);
-                erase_expr(else_, aliases);
-            }
-            IrExprKind::Match { subject, arms } => {
-                erase_expr(subject, aliases);
-                for arm in arms.iter_mut() {
-                    erase_pattern(&mut arm.pattern, aliases);
-                    if let Some(g) = &mut arm.guard { erase_expr(g, aliases); }
-                    erase_expr(&mut arm.body, aliases);
-                }
-            }
-            IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. } => {
-                for a in args.iter_mut() { erase_expr(a, aliases); }
-            }
-            IrExprKind::RuntimeCall { args, .. } => {
-                for a in args.iter_mut() { erase_expr(a, aliases); }
-            }
-            IrExprKind::Lambda { body, params, .. } => {
-                for (_, t) in params.iter_mut() { erase_ty(t, aliases); }
-                erase_expr(body, aliases);
-            }
-            IrExprKind::BinOp { left, right, .. } => {
-                erase_expr(left, aliases);
-                erase_expr(right, aliases);
-            }
-            IrExprKind::UnOp { operand, .. } => erase_expr(operand, aliases),
-            IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-                for e in elements.iter_mut() { erase_expr(e, aliases); }
-            }
-            IrExprKind::Record { fields, .. } => {
-                for (_, e) in fields.iter_mut() { erase_expr(e, aliases); }
-            }
-            IrExprKind::Member { object, .. } => erase_expr(object, aliases),
-            IrExprKind::IndexAccess { object, index } => {
-                erase_expr(object, aliases);
-                erase_expr(index, aliases);
-            }
-            IrExprKind::ForIn { iterable, body, .. } => {
-                erase_expr(iterable, aliases);
-                for s in body.iter_mut() { erase_stmt(s, aliases); }
-            }
-            IrExprKind::While { cond, body } => {
-                erase_expr(cond, aliases);
-                for s in body.iter_mut() { erase_stmt(s, aliases); }
-            }
-            IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
-            | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-            | IrExprKind::Unwrap { expr: e } | IrExprKind::Clone { expr: e } => erase_expr(e, aliases),
-            // Explicit-preserve (total-by-construction). The head of this
-            // fn already ran `erase_ty(&mut expr.ty, ..)` for this node;
-            // these variants intentionally do not descend further (exactly
-            // the old `_ => {}` behaviour). Listing every remaining kind
-            // makes a future IrExprKind variant a compile error here so a
-            // new node carrying an aliasable subtree cannot be silently
-            // skipped.
-            IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-            | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
-            | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
-            | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
-            | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
-            | IrExprKind::SpreadRecord { .. } | IrExprKind::Range { .. }
-            | IrExprKind::TupleIndex { .. } | IrExprKind::MapAccess { .. }
-            | IrExprKind::StringInterp { .. } | IrExprKind::OptionNone
-            | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
-            | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
-            | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
-            | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
-            | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
-            | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
-            | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
-            | IrExprKind::IterChain { .. } | IrExprKind::Hole
-            | IrExprKind::Todo { .. } => {}
-        }
-    }
-
-    fn erase_stmt(stmt: &mut almide_ir::IrStmt, aliases: &HashMap<String, Ty>) {
-        match &mut stmt.kind {
-            IrStmtKind::Bind { value, ty, .. } => {
-                erase_ty(ty, aliases);
-                erase_expr(value, aliases);
-            }
-            IrStmtKind::Assign { value, .. } => erase_expr(value, aliases),
-            IrStmtKind::Expr { expr } => erase_expr(expr, aliases),
-            IrStmtKind::BindDestructure { value, pattern, .. } => {
-                erase_expr(value, aliases);
-                erase_pattern(pattern, aliases);
-            }
-            // Explicit-preserve (total-by-construction). These statement
-            // kinds carry no `Ty::Named` slot or aliasable subtree that
-            // alias-erasure needs to touch (the assignable expressions
-            // inside IndexAssign/MapInsert/FieldAssign/Guard contain only
-            // values whose own types are erased when their enclosing
-            // expression is visited). Zero behaviour change vs the old
-            // `_ => {}`; listing every kind makes a new IrStmtKind a
-            // compile error here.
-            IrStmtKind::IndexAssign { .. } | IrStmtKind::MapInsert { .. }
-            | IrStmtKind::FieldAssign { .. } | IrStmtKind::Guard { .. }
-            | IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. }
-            | IrStmtKind::RcDec { .. } | IrStmtKind::ListSwap { .. }
-            | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
-            | IrStmtKind::ListCopySlice { .. } => {}
-        }
-    }
-
-    fn erase_pattern(pat: &mut IrPattern, aliases: &HashMap<String, Ty>) {
-        match pat {
-            // Constructor("Alias", [Bind(v)]) → Bind(v)
-            IrPattern::Constructor { name, args } => {
-                if aliases.contains_key(name.as_str()) && args.len() == 1 {
-                    *pat = args.remove(0);
-                    return;
-                }
-            }
-            IrPattern::Tuple { elements } => {
-                for e in elements.iter_mut() { erase_pattern(e, aliases); }
-            }
-            IrPattern::Some { inner } => erase_pattern(inner, aliases),
-            IrPattern::Ok { inner } | IrPattern::Err { inner } => erase_pattern(inner, aliases),
-            _ => {}
-        }
-    }
-
-    for func in &mut program.functions {
-        erase_ty(&mut func.ret_ty, aliases);
-        for p in &mut func.params { erase_ty(&mut p.ty, aliases); }
-        erase_expr(&mut func.body, aliases);
-    }
+    for func in &mut program.functions { erase_fn_types(func, aliases); }
     for tl in &mut program.top_lets { erase_expr(&mut tl.value, aliases); }
     for module in &mut program.modules {
-        for func in &mut module.functions {
-            erase_ty(&mut func.ret_ty, aliases);
-            for p in &mut func.params { erase_ty(&mut p.ty, aliases); }
-            erase_expr(&mut func.body, aliases);
-        }
+        for func in &mut module.functions { erase_fn_types(func, aliases); }
     }
     // Also erase in VarTable
     for entry in &mut program.var_table.entries {
@@ -410,8 +262,199 @@ fn erase_type_aliases(program: &mut IrProgram, aliases: &HashMap<String, Ty>) {
     }
 }
 
-fn build_symbol_table(program: &IrProgram) -> SymbolTable {
-    let mut sigs = std::collections::HashMap::new();
+// ── `erase_type_aliases` helpers (Ty::Named alias substitution) ──────────
+
+/// Erase aliases in a function's return type, param types, and body — the
+/// identical per-function step `erase_type_aliases` runs both for top-level
+/// and module functions.
+fn erase_fn_types(func: &mut IrFunction, aliases: &HashMap<String, Ty>) {
+    erase_ty(&mut func.ret_ty, aliases);
+    for p in &mut func.params { erase_ty(&mut p.ty, aliases); }
+    erase_expr(&mut func.body, aliases);
+}
+
+fn erase_ty(ty: &mut Ty, aliases: &HashMap<String, Ty>) {
+    if let Ty::Named(name, _) = ty {
+        if let Some(target) = aliases.get(name.as_str()) {
+            *ty = target.clone();
+        }
+    }
+}
+
+// `Call { target: Named { name }, args, .. }` arm of `erase_expr`: a
+// constructor call for an alias, `Alias(arg)`, unwraps to `arg`
+// (recursively erased); otherwise erase each arg in place.
+fn erase_expr_alias_call(expr: &mut IrExpr, aliases: &HashMap<String, Ty>) {
+    let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &mut expr.kind else { unreachable!() };
+    if aliases.contains_key(name.as_str()) && args.len() == 1 {
+        let arg = args.remove(0);
+        *expr = arg;
+        erase_expr(expr, aliases);
+        return;
+    }
+    for a in args.iter_mut() { erase_expr(a, aliases); }
+}
+
+// `Block { stmts, expr: tail }` arm of `erase_expr`.
+fn erase_expr_block(stmts: &mut [IrStmt], tail: &mut Option<Box<IrExpr>>, aliases: &HashMap<String, Ty>) {
+    for s in stmts.iter_mut() { erase_stmt(s, aliases); }
+    if let Some(t) = tail { erase_expr(t, aliases); }
+}
+
+// `If { cond, then, else_ }` arm of `erase_expr`.
+fn erase_expr_if(cond: &mut IrExpr, then: &mut IrExpr, else_: &mut IrExpr, aliases: &HashMap<String, Ty>) {
+    erase_expr(cond, aliases);
+    erase_expr(then, aliases);
+    erase_expr(else_, aliases);
+}
+
+// `Match { subject, arms }` arm of `erase_expr`.
+fn erase_expr_match(subject: &mut IrExpr, arms: &mut [IrMatchArm], aliases: &HashMap<String, Ty>) {
+    erase_expr(subject, aliases);
+    for arm in arms.iter_mut() {
+        erase_pattern(&mut arm.pattern, aliases);
+        if let Some(g) = &mut arm.guard { erase_expr(g, aliases); }
+        erase_expr(&mut arm.body, aliases);
+    }
+}
+
+// `ForIn { iterable, body, .. }` arm of `erase_expr`.
+fn erase_expr_for_in(iterable: &mut IrExpr, body: &mut [IrStmt], aliases: &HashMap<String, Ty>) {
+    erase_expr(iterable, aliases);
+    for s in body.iter_mut() { erase_stmt(s, aliases); }
+}
+
+// `While { cond, body }` arm of `erase_expr`.
+fn erase_expr_while(cond: &mut IrExpr, body: &mut [IrStmt], aliases: &HashMap<String, Ty>) {
+    erase_expr(cond, aliases);
+    for s in body.iter_mut() { erase_stmt(s, aliases); }
+}
+
+// `Call { args, .. } | TailCall { args, .. }`, `RuntimeCall { args, .. }`,
+// and `List { elements } | Tuple { elements }` arms of `erase_expr` — all
+// erase a flat `Vec<IrExpr>` in place.
+fn erase_expr_args(args: &mut [IrExpr], aliases: &HashMap<String, Ty>) {
+    for a in args.iter_mut() { erase_expr(a, aliases); }
+}
+
+// `Lambda { body, params, .. }` arm of `erase_expr`.
+fn erase_expr_lambda(body: &mut IrExpr, params: &mut [(VarId, Ty)], aliases: &HashMap<String, Ty>) {
+    for (_, t) in params.iter_mut() { erase_ty(t, aliases); }
+    erase_expr(body, aliases);
+}
+
+// `Record { fields, .. }` arm of `erase_expr`.
+fn erase_expr_field_values(fields: &mut [(almide_base::intern::Sym, IrExpr)], aliases: &HashMap<String, Ty>) {
+    for (_, e) in fields.iter_mut() { erase_expr(e, aliases); }
+}
+
+fn erase_expr(expr: &mut IrExpr, aliases: &HashMap<String, Ty>) {
+    erase_ty(&mut expr.ty, aliases);
+    match &mut expr.kind {
+        // Constructor call: Alias(arg) → arg
+        IrExprKind::Call { target: CallTarget::Named { .. }, .. } => erase_expr_alias_call(expr, aliases),
+        IrExprKind::Block { stmts, expr: tail } => erase_expr_block(stmts, tail, aliases),
+        IrExprKind::If { cond, then, else_ } => erase_expr_if(cond, then, else_, aliases),
+        IrExprKind::Match { subject, arms } => erase_expr_match(subject, arms, aliases),
+        IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. } => erase_expr_args(args, aliases),
+        IrExprKind::RuntimeCall { args, .. } => erase_expr_args(args, aliases),
+        IrExprKind::Lambda { body, params, .. } => erase_expr_lambda(body, params, aliases),
+        IrExprKind::BinOp { left, right, .. } => {
+            erase_expr(left, aliases);
+            erase_expr(right, aliases);
+        }
+        IrExprKind::UnOp { operand, .. } => erase_expr(operand, aliases),
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => erase_expr_args(elements, aliases),
+        IrExprKind::Record { fields, .. } => erase_expr_field_values(fields, aliases),
+        IrExprKind::Member { object, .. } => erase_expr(object, aliases),
+        IrExprKind::IndexAccess { object, index } => {
+            erase_expr(object, aliases);
+            erase_expr(index, aliases);
+        }
+        IrExprKind::ForIn { iterable, body, .. } => erase_expr_for_in(iterable, body, aliases),
+        IrExprKind::While { cond, body } => erase_expr_while(cond, body, aliases),
+        IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::Clone { expr: e } => erase_expr(e, aliases),
+        // Explicit-preserve (total-by-construction). The head of this
+        // fn already ran `erase_ty(&mut expr.ty, ..)` for this node;
+        // these variants intentionally do not descend further (exactly
+        // the old `_ => {}` behaviour). Listing every remaining kind
+        // makes a future IrExprKind variant a compile error here so a
+        // new node carrying an aliasable subtree cannot be silently
+        // skipped.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Range { .. }
+        | IrExprKind::TupleIndex { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::StringInterp { .. } | IrExprKind::OptionNone
+        | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
+        | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
+        | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::IterChain { .. } | IrExprKind::Hole
+        | IrExprKind::Todo { .. } => {}
+    }
+}
+
+fn erase_stmt(stmt: &mut IrStmt, aliases: &HashMap<String, Ty>) {
+    match &mut stmt.kind {
+        IrStmtKind::Bind { value, ty, .. } => {
+            erase_ty(ty, aliases);
+            erase_expr(value, aliases);
+        }
+        IrStmtKind::Assign { value, .. } => erase_expr(value, aliases),
+        IrStmtKind::Expr { expr } => erase_expr(expr, aliases),
+        IrStmtKind::BindDestructure { value, pattern, .. } => {
+            erase_expr(value, aliases);
+            erase_pattern(pattern, aliases);
+        }
+        // Explicit-preserve (total-by-construction). These statement
+        // kinds carry no `Ty::Named` slot or aliasable subtree that
+        // alias-erasure needs to touch (the assignable expressions
+        // inside IndexAssign/MapInsert/FieldAssign/Guard contain only
+        // values whose own types are erased when their enclosing
+        // expression is visited). Zero behaviour change vs the old
+        // `_ => {}`; listing every kind makes a new IrStmtKind a
+        // compile error here.
+        IrStmtKind::IndexAssign { .. } | IrStmtKind::MapInsert { .. }
+        | IrStmtKind::FieldAssign { .. } | IrStmtKind::Guard { .. }
+        | IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. }
+        | IrStmtKind::RcDec { .. } | IrStmtKind::ListSwap { .. }
+        | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
+        | IrStmtKind::ListCopySlice { .. } => {}
+    }
+}
+
+fn erase_pattern(pat: &mut IrPattern, aliases: &HashMap<String, Ty>) {
+    match pat {
+        // Constructor("Alias", [Bind(v)]) → Bind(v)
+        IrPattern::Constructor { name, args } => {
+            if aliases.contains_key(name.as_str()) && args.len() == 1 {
+                *pat = args.remove(0);
+                return;
+            }
+        }
+        IrPattern::Tuple { elements } => {
+            for e in elements.iter_mut() { erase_pattern(e, aliases); }
+        }
+        IrPattern::Some { inner } => erase_pattern(inner, aliases),
+        IrPattern::Ok { inner } | IrPattern::Err { inner } => erase_pattern(inner, aliases),
+        _ => {}
+    }
+}
+
+/// Register top-level and module function return-type signatures (keyed by
+/// `(module_name_or_empty, fn_name)`) into `sigs`. Extracted from
+/// `build_symbol_table` (cog>25 decomposition): a write-only accumulator
+/// loop, never read back within this function.
+fn register_named_fn_sigs(program: &IrProgram, sigs: &mut std::collections::HashMap<(String, String), Ty>) {
     // Top-level functions (Named call targets)
     for func in &program.functions {
         if !func.ret_ty.has_unresolved_deep() {
@@ -428,34 +471,47 @@ fn build_symbol_table(program: &IrProgram) -> SymbolTable {
             }
         }
     }
-    let mut record_fields = std::collections::HashMap::new();
-    let mut register_type_decl = |decl: &almide_ir::IrTypeDecl| {
-        match &decl.kind {
-            almide_ir::IrTypeDeclKind::Record { fields } => {
-                let fs: Vec<_> = fields.iter()
-                    .map(|f| (f.name, f.ty.clone()))
-                    .collect();
-                record_fields.insert(decl.name.to_string(), fs);
-            }
-            almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
-                for case in cases {
-                    if let almide_ir::IrVariantKind::Record { fields } = &case.kind {
-                        let v: Vec<_> = fields.iter()
-                            .map(|f| (f.name, f.ty.clone()))
-                            .collect();
-                        record_fields.insert(case.name.to_string(), v);
-                    }
+}
+
+/// Register a single type declaration's record field list(s) into
+/// `record_fields` — a plain record's own fields, or every Record-shaped
+/// variant case's fields. Extracted from `build_symbol_table` (cog>25
+/// decomposition): was a local closure, promoted to a named function so
+/// its own complexity is independently measured (never wrap in a closure
+/// to dodge measurement).
+fn register_type_decl_fields(decl: &almide_ir::IrTypeDecl, record_fields: &mut std::collections::HashMap<String, Vec<(almide_base::intern::Sym, Ty)>>) {
+    match &decl.kind {
+        almide_ir::IrTypeDeclKind::Record { fields } => {
+            let fs: Vec<_> = fields.iter()
+                .map(|f| (f.name, f.ty.clone()))
+                .collect();
+            record_fields.insert(decl.name.to_string(), fs);
+        }
+        almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
+            for case in cases {
+                if let almide_ir::IrVariantKind::Record { fields } = &case.kind {
+                    let v: Vec<_> = fields.iter()
+                        .map(|f| (f.name, f.ty.clone()))
+                        .collect();
+                    record_fields.insert(case.name.to_string(), v);
                 }
             }
-            _ => {}
         }
-    };
+        _ => {}
+    }
+}
+
+fn build_symbol_table(program: &IrProgram) -> SymbolTable {
+    let mut sigs = std::collections::HashMap::new();
+    register_named_fn_sigs(program, &mut sigs);
+
+    let mut record_fields = std::collections::HashMap::new();
     for decl in &program.type_decls {
-        register_type_decl(decl);
+        register_type_decl_fields(decl, &mut record_fields);
     }
     for module in &program.modules {
         for decl in &module.type_decls {
-            register_type_decl(decl);
+            register_type_decl_fields(decl, &mut record_fields);
         }
     }
     SymbolTable { sigs, record_fields }
@@ -564,6 +620,25 @@ fn merge_more_concrete(a: &Ty, b: &Ty) -> Option<Ty> {
     }
 }
 
+/// `(List { elements }, Applied(List, [elem_ty]))` arm of [`propagate_ty_down`].
+fn propagate_ty_down_list(elements: &mut [IrExpr], elem_ty: &Ty) {
+    for e in elements.iter_mut() { propagate_ty_down(e, elem_ty); }
+}
+
+/// `(Tuple { elements }, Tuple(ts))` arm of [`propagate_ty_down`].
+fn propagate_ty_down_tuple(elements: &mut [IrExpr], ts: &[Ty]) {
+    for (e, t) in elements.iter_mut().zip(ts.iter()) {
+        propagate_ty_down(e, t);
+    }
+}
+
+/// `(Match { arms, .. }, _)` arm of [`propagate_ty_down`].
+fn propagate_ty_down_match_arms(arms: &mut [IrMatchArm], expected: &Ty) {
+    for arm in arms.iter_mut() {
+        propagate_ty_down(&mut arm.body, expected);
+    }
+}
+
 /// Push `expected` down into `expr`, recursing into wrappers (OptionSome,
 /// Result*, List, Tuple). Updates expr.ty and any matching sub-expressions
 /// whose own types have unresolved slots compatible with `expected`.
@@ -591,12 +666,10 @@ fn propagate_ty_down(expr: &mut IrExpr, expected: &Ty) {
         (IrExprKind::List { elements }, Ty::Applied(TCI::List, args))
             if args.len() == 1 =>
         {
-            for e in elements.iter_mut() { propagate_ty_down(e, &args[0]); }
+            propagate_ty_down_list(elements, &args[0]);
         }
         (IrExprKind::Tuple { elements }, Ty::Tuple(ts)) if elements.len() == ts.len() => {
-            for (e, t) in elements.iter_mut().zip(ts.iter()) {
-                propagate_ty_down(e, t);
-            }
+            propagate_ty_down_tuple(elements, ts);
         }
         (IrExprKind::If { then, else_, .. }, _) => {
             propagate_ty_down(then, expected);
@@ -605,11 +678,7 @@ fn propagate_ty_down(expr: &mut IrExpr, expected: &Ty) {
         (IrExprKind::Block { expr: Some(tail), .. }, _) => {
             propagate_ty_down(tail, expected);
         }
-        (IrExprKind::Match { arms, .. }, _) => {
-            for arm in arms.iter_mut() {
-                propagate_ty_down(&mut arm.body, expected);
-            }
-        }
+        (IrExprKind::Match { arms, .. }, _) => propagate_ty_down_match_arms(arms, expected),
         // Explicit-preserve (total-by-construction). The guarded arms above
         // handle the wrapper/branch shapes whose `expr.kind` and `expected`
         // line up; every other (kind, expected) pairing — including a
@@ -697,48 +766,28 @@ fn is_fold_like_call(expr: &IrExpr) -> bool {
     }
 }
 
-/// For `list.fold(xs, init, f)` where `f: (acc, t) -> acc`: the accumulator
-/// type `A` has two sources — `init.ty` and `f.body.ty` — which must agree.
-/// Pick the most concrete form available, then push it back into the init
-/// sub-expression, the lambda's acc parameter (IR annotation + VarTable),
-/// the Ty::Fn wrapper, and the Call's own ty. Returns true when changes
-/// were made.
-fn back_propagate_fold_acc(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
-    let args = match &mut expr.kind {
-        IrExprKind::Call { args, .. } => args,
-        _ => return false,
-    };
-    if args.len() < 3 { return false; }
-
-    let body_ty = match &args[2].kind {
-        IrExprKind::Lambda { body, .. } => body.ty.clone(),
-        _ => return false,
-    };
-    let init_ty = args[1].ty.clone();
-
-    // Accumulator type: merge init and body, picking the most concrete
-    // shape when both are known and compatible. Fall back to whichever is
-    // concrete when only one side has a type.
-    let acc_ty = if !init_ty.has_unresolved_deep() && !body_ty.has_unresolved_deep() {
-        merge_more_concrete(&init_ty, &body_ty)
+/// Accumulator type for `list.fold(xs, init, f)`: merge `init_ty` and
+/// `body_ty`, picking the most concrete shape when both are known and
+/// compatible, falling back to whichever side is concrete when only one
+/// is. Extracted from `back_propagate_fold_acc` (cog>25 decomposition).
+fn compute_fold_acc_ty(init_ty: &Ty, body_ty: &Ty) -> Option<Ty> {
+    if !init_ty.has_unresolved_deep() && !body_ty.has_unresolved_deep() {
+        merge_more_concrete(init_ty, body_ty)
     } else if !init_ty.has_unresolved_deep() {
         Some(init_ty.clone())
     } else if !body_ty.has_unresolved_deep() {
         Some(body_ty.clone())
     } else {
         None
-    };
-    let Some(acc_ty) = acc_ty else { return false; };
-
-    let mut changed = false;
-
-    // Push acc_ty into the init sub-expression when init has weaker shape
-    if init_ty != acc_ty {
-        propagate_ty_down(&mut args[1], &acc_ty);
-        changed = true;
     }
+}
 
-    // Update lambda's acc param (IR + VarTable) and the Ty::Fn wrapper
+/// Update the fold lambda's acc param (IR annotation + VarTable) and its
+/// `Ty::Fn` wrapper to `acc_ty`, wherever still unresolved. `args[2]` is
+/// the fold lambda arg. Extracted from `back_propagate_fold_acc` (cog>25
+/// decomposition). Returns true when a change was made.
+fn update_fold_lambda_acc(args: &mut [IrExpr], acc_ty: &Ty, vt: &mut VarTable) -> bool {
+    let mut changed = false;
     if let IrExprKind::Lambda { params, .. } = &mut args[2].kind {
         if let Some((vid, pty)) = params.get_mut(0) {
             if pty.has_unresolved_deep() {
@@ -762,6 +811,39 @@ fn back_propagate_fold_acc(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
             changed = true;
         }
     }
+    changed
+}
+
+/// For `list.fold(xs, init, f)` where `f: (acc, t) -> acc`: the accumulator
+/// type `A` has two sources — `init.ty` and `f.body.ty` — which must agree.
+/// Pick the most concrete form available, then push it back into the init
+/// sub-expression, the lambda's acc parameter (IR annotation + VarTable),
+/// the Ty::Fn wrapper, and the Call's own ty. Returns true when changes
+/// were made.
+fn back_propagate_fold_acc(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
+    let args = match &mut expr.kind {
+        IrExprKind::Call { args, .. } => args,
+        _ => return false,
+    };
+    if args.len() < 3 { return false; }
+
+    let body_ty = match &args[2].kind {
+        IrExprKind::Lambda { body, .. } => body.ty.clone(),
+        _ => return false,
+    };
+    let init_ty = args[1].ty.clone();
+
+    let Some(acc_ty) = compute_fold_acc_ty(&init_ty, &body_ty) else { return false; };
+
+    let mut changed = false;
+
+    // Push acc_ty into the init sub-expression when init has weaker shape
+    if init_ty != acc_ty {
+        propagate_ty_down(&mut args[1], &acc_ty);
+        changed = true;
+    }
+
+    if update_fold_lambda_acc(args, &acc_ty, vt) { changed = true; }
 
     // Update Call's own ty if it's still unresolved
     if expr.ty.has_unresolved_deep() {

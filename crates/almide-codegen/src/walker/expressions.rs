@@ -2,6 +2,7 @@
 
 use almide_ir::*;
 use almide_ir::annotations::VarStorage;
+use almide_base::Sym;
 use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
 use super::types::render_type;
@@ -169,17 +170,285 @@ fn render_expr_match(ctx: &RenderContext, expr: &IrExpr) -> String {
         .unwrap_or(fallback)
 }
 
+/// `LitStr { value }` case of `render_expr`.
+fn render_expr_lit_str(ctx: &RenderContext, value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"")
+        .replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r");
+    ctx.templates.render_with("string_literal", None, &[], &[("value", escaped.as_str())])
+        .unwrap_or_else(|| format!("\"{}\"", value))
+}
+
+/// `UnOp { op, operand }` case of `render_expr`.
+fn render_expr_unop(ctx: &RenderContext, op: UnOp, operand: &IrExpr) -> String {
+    let inner = render_expr(ctx, operand);
+    match op {
+        UnOp::NegInt | UnOp::NegFloat => format!("(-{})", inner),
+        UnOp::Not => format!("(!{})", inner),
+    }
+}
+
+/// `While { cond, body }` case of `render_expr`.
+fn render_expr_while(ctx: &RenderContext, cond: &IrExpr, body: &[IrStmt]) -> String {
+    let cond_str = render_expr(ctx, cond);
+    let body_raw = render_stmts(ctx, body).join("\n");
+    let body_str = indent_lines(&body_raw, 4);
+    ctx.templates.render_with("while_loop", None, &[], &[("cond", cond_str.as_str()), ("body", body_str.as_str())])
+        .unwrap_or_else(|| "while _ { }".to_string())
+}
+
+/// `Member { object, field }` case of `render_expr`.
+fn render_expr_member(ctx: &RenderContext, object: &IrExpr, field: &Sym) -> String {
+    let expr_s = render_expr(ctx, object);
+    ctx.templates.render_with("field_access", None, &[], &[("expr", expr_s.as_str()), ("field", field.as_str())])
+        .unwrap_or_else(|| format!("{}.{}", render_expr(ctx, object), field))
+}
+
+/// `OptionSome { expr: inner }` case of `render_expr`.
+fn render_expr_option_some(ctx: &RenderContext, inner: &IrExpr) -> String {
+    let inner_s = render_expr_owned(ctx, inner);
+    ctx.templates.render_with("some_expr", None, &[], &[("inner", inner_s.as_str())])
+        .unwrap_or_else(|| format!("Some({})", inner_s))
+}
+
+/// `OptionNone` case of `render_expr`. Typed None: pass inner type via
+/// bindings + attribute for template guard.
+fn render_expr_option_none(ctx: &RenderContext, ty: &Ty) -> String {
+    if let Ty::Applied(TypeConstructorId::Option, args) = ty {
+        if args.len() == 1 && !args[0].is_unresolved() {
+            let type_hint_s = render_type(ctx, &args[0]);
+            return ctx.templates.render_with("none_expr", None, &["none_type_hint"], &[("type_hint", type_hint_s.as_str())])
+                .unwrap_or_else(|| "None".into());
+        }
+    }
+    template_or(ctx, "none_expr", &[], "None")
+}
+
+/// `ResultOk { expr: inner }` case of `render_expr`.
+fn render_expr_result_ok(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> String {
+    let inner_s = render_expr_owned(ctx, inner);
+    // A bare `Ok(x)` is `Result<TyOf(x), _>` — the error type stays open
+    // for rustc to infer from context. That fails (E0282) when the
+    // surrounding call leaves E unconstrained, e.g.
+    // `result.unwrap_or(ok(10), -1)`: `unwrap_or<T, E>` names E only in its
+    // `Result<T, E>` parameter, so nothing pins it. The checker already
+    // resolved the full Result type (`expr.ty`), so emit a turbofish that
+    // carries it — defaulting a still-unconstrained error to String
+    // (Almide's conventional error type; mirrors the render_type fix).
+    if let Some((ok_s, err_s)) = result_turbofish_args(ctx, ty) {
+        format!("Ok::<{}, {}>({})", ok_s, err_s, inner_s)
+    } else {
+        ctx.templates.render_with("ok_expr", None, &[], &[("inner", inner_s.as_str())])
+            .unwrap_or_else(|| format!("Ok({})", inner_s))
+    }
+}
+
+/// `ResultErr { expr: inner }` case of `render_expr`.
+fn render_expr_result_err(ctx: &RenderContext, inner: &IrExpr) -> String {
+    let inner_str = render_expr(ctx, inner);
+    let construct = if matches!(&inner.ty, Ty::String) { "err_inner_string" } else { "err_inner_other" };
+    ctx.templates.render_with(construct, None, &[], &[("inner", inner_str.as_str())])
+        .or_else(|| ctx.templates.render_with("err_expr", None, &[], &[("inner", inner_str.as_str())]))
+        .unwrap_or_else(|| format!("Err({})", render_expr(ctx, inner)))
+}
+
+/// `Range { start, end, inclusive }` case of `render_expr`.
+fn render_expr_range(ctx: &RenderContext, start: &IrExpr, end: &IrExpr, inclusive: bool) -> String {
+    let s = render_expr(ctx, start);
+    let e = render_expr(ctx, end);
+    let construct = if inclusive { "range_inclusive" } else { "range_expr" };
+    ctx.templates.render_with(construct, None, &[], &[("start", s.as_str()), ("end", e.as_str())])
+        .unwrap_or_else(|| "range(...)".into())
+}
+
+/// `Tuple { elements }` case of `render_expr`.
+fn render_expr_tuple(ctx: &RenderContext, elements: &[IrExpr]) -> String {
+    let parts = elements.iter().map(|e| render_expr_owned(ctx, e)).collect::<Vec<_>>().join(", ");
+    ctx.templates.render_with("tuple_literal", None, &[], &[("elements", parts.as_str())])
+        .unwrap_or_else(|| "tuple(...)".into())
+}
+
+/// `TupleIndex { object, index }` case of `render_expr`.
+fn render_expr_tuple_index(ctx: &RenderContext, object: &IrExpr, index: usize) -> String {
+    let object_s = render_expr(ctx, object);
+    let index_s = format!("{}", index);
+    ctx.templates.render_with("tuple_index", None, &[], &[("object", object_s.as_str()), ("index", index_s.as_str())])
+        .unwrap_or_else(|| format!("{}.{}", render_expr(ctx, object), index))
+}
+
+/// `IndexAccess { object, index }` case of `render_expr`.
+fn render_expr_index_access(ctx: &RenderContext, object: &IrExpr, index: &IrExpr) -> String {
+    let obj_str = render_expr(ctx, object);
+    let idx = render_expr(ctx, index);
+    let base = ctx.templates.render_with("index_access", None, &[], &[("object", obj_str.as_str()), ("index", idx.as_str())])
+        .unwrap_or_else(|| "idx[...]".into());
+    if matches!(object.ty, Ty::Bytes) {
+        format!("{} as i64", base)
+    } else {
+        base
+    }
+}
+
+/// `MapAccess { object, key }` case of `render_expr`.
+fn render_expr_map_access(ctx: &RenderContext, object: &IrExpr, key: &IrExpr) -> String {
+    let obj_str = render_expr(ctx, object);
+    let key_str = render_expr(ctx, key);
+    ctx.templates.render_with("map_get", None, &[], &[("object", obj_str.as_str()), ("key", key_str.as_str())])
+        .unwrap_or_else(|| "map_get(...)".into())
+}
+
+/// `MapLiteral { entries }` case of `render_expr`.
+fn render_expr_map_literal(ctx: &RenderContext, entries: &[(IrExpr, IrExpr)]) -> String {
+    let entry_template = ctx.templates.render_with("map_entry", None, &[], &[])
+        .unwrap_or_else(|| "({key}, {value})".into());
+    let parts: Vec<String> = entries.iter()
+        .map(|(k, v)| {
+            entry_template.replace("{key}", &render_expr(ctx, k))
+                .replace("{value}", &render_expr(ctx, v))
+        })
+        .collect();
+    let entries_s = parts.join(", ");
+    ctx.templates.render_with("map_literal", None, &[], &[("entries", entries_s.as_str())])
+        .unwrap_or_else(|| format!("map([{}])", parts.join(", ")))
+}
+
+/// `EmptyMap` case of `render_expr`. Renders `AlmideMap::<K, V>::new()` with
+/// the key/value types from the literal's resolved type, so an annotated
+/// empty map (`[:]: Map[K,V]`) routed through `almide_repr` infers (native
+/// E0282 otherwise). When the types are unknown they erase to `_`
+/// (inference fills them from the surrounding context, as before this
+/// turbofish).
+fn render_expr_empty_map(ctx: &RenderContext, ty: &Ty) -> String {
+    let (key_ty, value_ty) = match ty {
+        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
+            (render_map_type_arg(ctx, &args[0]), render_map_type_arg(ctx, &args[1]))
+        }
+        _ => ("_".to_string(), "_".to_string()),
+    };
+    ctx.templates.render_with("empty_map", None, &[], &[("key_type", key_ty.as_str()), ("value_type", value_ty.as_str())])
+        .unwrap_or_else(|| format!("AlmideMap::<{}, {}>::new()", key_ty, value_ty))
+}
+
+/// `Try { expr: inner }` case of `render_expr`.
+fn render_expr_try(ctx: &RenderContext, inner: &IrExpr) -> String {
+    let s = render_expr(ctx, inner);
+    ctx.templates.render_with("try_expr", None, &[], &[("inner", s.as_str())])
+        .unwrap_or_else(|| "try(...)".into())
+}
+
+/// `UnwrapOr { expr: inner, fallback }` case of `render_expr`.
+fn render_expr_unwrap_or(ctx: &RenderContext, inner: &IrExpr, fallback: &IrExpr) -> String {
+    let s = render_expr(ctx, inner);
+    let f = render_expr(ctx, fallback);
+    // Rc wrapping for List[Fn] fallback is now handled by RustLoweringPass
+    // which inserts RcWrap nodes into the IR.
+    let when_type = if inner.ty.is_option() { Some("Option") } else { None };
+    // When inner.ty is Unknown, defaults to Result template.
+    // This is correct if type inference produced Unknown due to a bug;
+    // the Rust compiler will catch any mismatch.
+    ctx.templates.render_with("unwrap_or_expr", when_type, &[], &[("inner", s.as_str()), ("fallback", f.as_str())])
+        .unwrap_or_else(|| format!("{}.unwrap_or({})", s, f))
+}
+
+/// `ToOption { expr: inner }` case of `render_expr`.
+fn render_expr_to_option(ctx: &RenderContext, inner: &IrExpr) -> String {
+    if inner.ty.is_option() {
+        render_expr(ctx, inner)
+    } else {
+        let s = render_expr(ctx, inner);
+        ctx.templates.render_with("to_option_expr", None, &[], &[("inner", s.as_str())])
+            .unwrap_or_else(|| format!("({}).ok()", s))
+    }
+}
+
+/// `OptionalChain { expr: inner, field }` case of `render_expr`.
+fn render_expr_optional_chain(ctx: &RenderContext, inner: &IrExpr, field: &Sym) -> String {
+    let s = render_expr(ctx, inner);
+    ctx.templates.render_with("optional_chain_expr", None, &[], &[("inner", s.as_str()), ("field", field)])
+        .unwrap_or_else(|| format!("{}.as_ref().map(|__v| __v.{}.clone())", s, field))
+}
+
+/// `Await { expr: inner }` case of `render_expr`.
+fn render_expr_await(ctx: &RenderContext, inner: &IrExpr) -> String {
+    let s = render_expr(ctx, inner);
+    ctx.templates.render_with("await_expr", None, &[], &[("inner", s.as_str())])
+        .unwrap_or_else(|| "await(...)".into())
+}
+
+/// `Deref { expr: inner }` case of `render_expr`.
+fn render_expr_deref(ctx: &RenderContext, inner: &IrExpr) -> String {
+    let name_s = render_expr(ctx, inner);
+    ctx.templates.render_with("deref_var", None, &[], &[("name", name_s.as_str())])
+        .unwrap_or_else(|| format!("(*{})", name_s))
+}
+
+/// `RcWrap { expr: inner, cast_ty, wrap }` case of `render_expr`. A BOXED
+/// closure literal needs annotated params (the `as` cast does not
+/// back-infer them). Wrap in parens so a boxed-then-CALLED closure
+/// `(Rc::new(..) as T)(args)` parses (a cast can't be followed by `(`).
+fn render_expr_rc_wrap(ctx: &RenderContext, inner: &IrExpr, cast_ty: &Option<Box<Ty>>, wrap: almide_ir::FnBox) -> String {
+    let s = if let IrExprKind::Lambda { params, body, .. } = &inner.kind {
+        render_lambda(ctx, params, body, true)
+    } else {
+        render_expr(ctx, inner)
+    };
+    match wrap {
+        // fan.race/any/settle thunk: `Box<dyn Fn + Send + Sync>` is itself
+        // `Fn + Send + Sync`, so heterogeneous capturing thunks unify in the
+        // runtime's `Vec<impl Fn() -> _ + Send + Sync>` (fixes E0308).
+        almide_ir::FnBox::BoxSendSync => {
+            let ty = cast_ty.as_deref().expect("fan thunk RcWrap always carries a Fn cast_ty");
+            let box_type = super::helpers::render_type_box_fn(ctx, ty, "Send + Sync");
+            format!("(std::boxed::Box::new({}) as {})", s, box_type)
+        }
+        almide_ir::FnBox::Rc => {
+            if let Some(ty) = cast_ty {
+                let rc_type = super::helpers::render_type_rc_fn(ctx, ty);
+                format!("(std::rc::Rc::new({}) as {})", s, rc_type)
+            } else {
+                format!("std::rc::Rc::new({})", s)
+            }
+        }
+    }
+}
+
+/// `RustMacro { name, args }` case of `render_expr`. Renders macro args —
+/// `LitStr` rendered as bare `&str` (no `.to_string()`). Control chars must
+/// be escaped here too, otherwise they land as real source newlines and the
+/// Rust source formatter's continuation indent leaks into the string
+/// literal at runtime (same failure mode as StringInterp's Lit parts).
+fn render_expr_rust_macro(ctx: &RenderContext, name: &Sym, args: &[IrExpr]) -> String {
+    let args_str = args.iter().map(|a| {
+        match &a.kind {
+            IrExprKind::LitStr { value } => {
+                let escaped = value
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+                    .replace('\t', "\\t")
+                    .replace('\r', "\\r");
+                format!("\"{}\"", escaped)
+            }
+            _ => render_expr(ctx, a),
+        }
+    }).collect::<Vec<_>>().join(", ");
+    format!("{}!({})", name, args_str)
+}
+
+/// `ToVec { expr: inner }` case of `render_expr`.
+fn render_expr_to_vec(ctx: &RenderContext, inner: &IrExpr) -> String {
+    if matches!(&inner.kind, IrExprKind::Range { .. }) {
+        format!("({}).collect::<Vec<_>>()", render_expr(ctx, inner))
+    } else {
+        format!("({}).to_vec()", render_expr(ctx, inner))
+    }
+}
+
 pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
     match &expr.kind {
         // ── Literals ──
         IrExprKind::LitInt { value } => render_expr_lit_int(ctx, expr, *value),
         IrExprKind::LitFloat { value } => render_expr_lit_float(ctx, expr, *value),
-        IrExprKind::LitStr { value } => {
-            let escaped = value.replace('\\', "\\\\").replace('"', "\\\"")
-                .replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r");
-            ctx.templates.render_with("string_literal", None, &[], &[("value", escaped.as_str())])
-                .unwrap_or_else(|| format!("\"{}\"", value))
-        }
+        IrExprKind::LitStr { value } => render_expr_lit_str(ctx, value),
         IrExprKind::LitBool { value } => {
             let key = if *value { "bool_literal_true" } else { "bool_literal_false" };
             template_or(ctx, key, &[], &value.to_string())
@@ -194,13 +463,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::BinOp { op, left, right } => {
             render_binop(ctx, *op, left, right, &expr.ty)
         }
-        IrExprKind::UnOp { op, operand } => {
-            let inner = render_expr(ctx, operand);
-            match op {
-                UnOp::NegInt | UnOp::NegFloat => format!("(-{})", inner),
-                UnOp::Not => format!("(!{})", inner),
-            }
-        }
+        IrExprKind::UnOp { op, operand } => render_expr_unop(ctx, *op, operand),
 
         // ── Control flow ──
         IrExprKind::If { .. } => render_expr_if(ctx, expr),
@@ -212,13 +475,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Loops ──
         IrExprKind::ForIn { .. } => render_expr_for_in(ctx, expr),
 
-        IrExprKind::While { cond, body } => {
-            let cond_str = render_expr(ctx, cond);
-            let body_raw = render_stmts(ctx, body).join("\n");
-            let body_str = indent_lines(&body_raw, 4);
-            ctx.templates.render_with("while_loop", None, &[], &[("cond", cond_str.as_str()), ("body", body_str.as_str())])
-                .unwrap_or_else(|| format!("while _ {{ }}"))
-        }
+        IrExprKind::While { cond, body } => render_expr_while(ctx, cond, body),
 
         IrExprKind::Break => template_or(ctx, "break_stmt", &[], "break"),
         IrExprKind::Continue => template_or(ctx, "continue_stmt", &[], "continue"),
@@ -255,53 +512,13 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Record { .. } => render_expr_record(ctx, expr),
 
         // ── Access ──
-        IrExprKind::Member { object, field } => {
-            let expr_s = render_expr(ctx, object);
-            ctx.templates.render_with("field_access", None, &[], &[("expr", expr_s.as_str()), ("field", field.as_str())])
-                .unwrap_or_else(|| format!("{}.{}", render_expr(ctx, object), field))
-        }
+        IrExprKind::Member { object, field } => render_expr_member(ctx, object, field),
 
         // ── Option / Result ──
-        IrExprKind::OptionSome { expr: inner } => {
-            let inner_s = render_expr_owned(ctx, inner);
-            ctx.templates.render_with("some_expr", None, &[], &[("inner", inner_s.as_str())])
-                .unwrap_or_else(|| format!("Some({})", inner_s))
-        }
-        IrExprKind::OptionNone => {
-            // Typed None: pass inner type via bindings + attribute for template guard
-            if let Ty::Applied(TypeConstructorId::Option, args) = &expr.ty {
-                if args.len() == 1 && !args[0].is_unresolved() {
-                    let type_hint_s = render_type(ctx, &args[0]);
-                    return ctx.templates.render_with("none_expr", None, &["none_type_hint"], &[("type_hint", type_hint_s.as_str())])
-                        .unwrap_or_else(|| "None".into());
-                }
-            }
-            template_or(ctx, "none_expr", &[], "None")
-        }
-        IrExprKind::ResultOk { expr: inner } => {
-            let inner_s = render_expr_owned(ctx, inner);
-            // A bare `Ok(x)` is `Result<TyOf(x), _>` — the error type stays open
-            // for rustc to infer from context. That fails (E0282) when the
-            // surrounding call leaves E unconstrained, e.g.
-            // `result.unwrap_or(ok(10), -1)`: `unwrap_or<T, E>` names E only in its
-            // `Result<T, E>` parameter, so nothing pins it. The checker already
-            // resolved the full Result type (`expr.ty`), so emit a turbofish that
-            // carries it — defaulting a still-unconstrained error to String
-            // (Almide's conventional error type; mirrors the render_type fix).
-            if let Some((ok_s, err_s)) = result_turbofish_args(ctx, &expr.ty) {
-                format!("Ok::<{}, {}>({})", ok_s, err_s, inner_s)
-            } else {
-                ctx.templates.render_with("ok_expr", None, &[], &[("inner", inner_s.as_str())])
-                    .unwrap_or_else(|| format!("Ok({})", inner_s))
-            }
-        }
-        IrExprKind::ResultErr { expr: inner } => {
-            let inner_str = render_expr(ctx, inner);
-            let construct = if matches!(&inner.ty, Ty::String) { "err_inner_string" } else { "err_inner_other" };
-            ctx.templates.render_with(construct, None, &[], &[("inner", inner_str.as_str())])
-                .or_else(|| ctx.templates.render_with("err_expr", None, &[], &[("inner", inner_str.as_str())]))
-                .unwrap_or_else(|| format!("Err({})", render_expr(ctx, inner)))
-        }
+        IrExprKind::OptionSome { expr: inner } => render_expr_option_some(ctx, inner),
+        IrExprKind::OptionNone => render_expr_option_none(ctx, &expr.ty),
+        IrExprKind::ResultOk { expr: inner } => render_expr_result_ok(ctx, inner, &expr.ty),
+        IrExprKind::ResultErr { expr: inner } => render_expr_result_err(ctx, inner),
 
         // ── Lambda ──
         // A bare (combinator-consumed) lambda leaves its params UNANNOTATED — a
@@ -312,184 +529,39 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::StringInterp { parts } => render_string_interp(ctx, parts),
 
         // ── Range ──
-        IrExprKind::Range { start, end, inclusive } => {
-            let s = render_expr(ctx, start);
-            let e = render_expr(ctx, end);
-            let construct = if *inclusive { "range_inclusive" } else { "range_expr" };
-            ctx.templates.render_with(construct, None, &[], &[("start", s.as_str()), ("end", e.as_str())])
-                .unwrap_or_else(|| "range(...)".into())
-        }
+        IrExprKind::Range { start, end, inclusive } => render_expr_range(ctx, start, end, *inclusive),
 
         // ── Tuple ──
-        IrExprKind::Tuple { elements } => {
-            let parts = elements.iter().map(|e| render_expr_owned(ctx, e)).collect::<Vec<_>>().join(", ");
-            ctx.templates.render_with("tuple_literal", None, &[], &[("elements", parts.as_str())])
-                .unwrap_or_else(|| "tuple(...)".into())
-        }
-        IrExprKind::TupleIndex { object, index } => {
-            let object_s = render_expr(ctx, object);
-            let index_s = format!("{}", index);
-            ctx.templates.render_with("tuple_index", None, &[], &[("object", object_s.as_str()), ("index", index_s.as_str())])
-                .unwrap_or_else(|| format!("{}.{}", render_expr(ctx, object), index))
-        }
-        IrExprKind::IndexAccess { object, index } => {
-            let obj_str = render_expr(ctx, object);
-            let idx = render_expr(ctx, index);
-            let base = ctx.templates.render_with("index_access", None, &[], &[("object", obj_str.as_str()), ("index", idx.as_str())])
-                .unwrap_or_else(|| "idx[...]".into());
-            if matches!(object.ty, Ty::Bytes) {
-                format!("{} as i64", base)
-            } else {
-                base
-            }
-        }
-        IrExprKind::MapAccess { object, key } => {
-            let obj_str = render_expr(ctx, object);
-            let key_str = render_expr(ctx, key);
-            ctx.templates.render_with("map_get", None, &[], &[("object", obj_str.as_str()), ("key", key_str.as_str())])
-                .unwrap_or_else(|| "map_get(...)".into())
-        }
+        IrExprKind::Tuple { elements } => render_expr_tuple(ctx, elements),
+        IrExprKind::TupleIndex { object, index } => render_expr_tuple_index(ctx, object, *index),
+        IrExprKind::IndexAccess { object, index } => render_expr_index_access(ctx, object, index),
+        IrExprKind::MapAccess { object, key } => render_expr_map_access(ctx, object, key),
 
         // ── Map ──
-        IrExprKind::MapLiteral { entries } => {
-            let entry_template = ctx.templates.render_with("map_entry", None, &[], &[])
-                .unwrap_or_else(|| "({key}, {value})".into());
-            let parts: Vec<String> = entries.iter()
-                .map(|(k, v)| {
-                    entry_template.replace("{key}", &render_expr(ctx, k))
-                        .replace("{value}", &render_expr(ctx, v))
-                })
-                .collect();
-            let entries_s = parts.join(", ");
-            ctx.templates.render_with("map_literal", None, &[], &[("entries", entries_s.as_str())])
-                .unwrap_or_else(|| format!("map([{}])", parts.join(", ")))
-        }
-        IrExprKind::EmptyMap => {
-            // Render `AlmideMap::<K, V>::new()` with the key/value types from the
-            // literal's resolved type, so an annotated empty map (`[:]: Map[K,V]`)
-            // routed through `almide_repr` infers (native E0282 otherwise). When
-            // the types are unknown they erase to `_` (inference fills them from
-            // the surrounding context, as before this turbofish).
-            let (key_ty, value_ty) = match &expr.ty {
-                Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
-                    (render_map_type_arg(ctx, &args[0]), render_map_type_arg(ctx, &args[1]))
-                }
-                _ => ("_".to_string(), "_".to_string()),
-            };
-            ctx.templates.render_with("empty_map", None, &[], &[("key_type", key_ty.as_str()), ("value_type", value_ty.as_str())])
-                .unwrap_or_else(|| format!("AlmideMap::<{}, {}>::new()", key_ty, value_ty))
-        }
+        IrExprKind::MapLiteral { entries } => render_expr_map_literal(ctx, entries),
+        IrExprKind::EmptyMap => render_expr_empty_map(ctx, &expr.ty),
 
         // ── SpreadRecord ──
         IrExprKind::SpreadRecord { .. } => render_expr_spread_record(ctx, expr),
 
         // ── Try / Await / Unwrap / ToOption ──
-        IrExprKind::Try { expr: inner } => {
-            let s = render_expr(ctx, inner);
-            ctx.templates.render_with("try_expr", None, &[], &[("inner", s.as_str())])
-                .unwrap_or_else(|| "try(...)".into())
-        }
+        IrExprKind::Try { expr: inner } => render_expr_try(ctx, inner),
         IrExprKind::Unwrap { .. } => render_expr_unwrap(ctx, expr),
-        IrExprKind::UnwrapOr { expr: inner, fallback } => {
-            let s = render_expr(ctx, inner);
-            let f = render_expr(ctx, fallback);
-            // Rc wrapping for List[Fn] fallback is now handled by RustLoweringPass
-            // which inserts RcWrap nodes into the IR.
-            let when_type = if inner.ty.is_option() { Some("Option") } else { None };
-            // When inner.ty is Unknown, defaults to Result template.
-            // This is correct if type inference produced Unknown due to a bug;
-            // the Rust compiler will catch any mismatch.
-            ctx.templates.render_with("unwrap_or_expr", when_type, &[], &[("inner", s.as_str()), ("fallback", f.as_str())])
-                .unwrap_or_else(|| format!("{}.unwrap_or({})", s, f))
-        }
-        IrExprKind::ToOption { expr: inner } => {
-            if inner.ty.is_option() {
-                render_expr(ctx, inner)
-            } else {
-                let s = render_expr(ctx, inner);
-                ctx.templates.render_with("to_option_expr", None, &[], &[("inner", s.as_str())])
-                    .unwrap_or_else(|| format!("({}).ok()", s))
-            }
-        }
-        IrExprKind::OptionalChain { expr: inner, field } => {
-            let s = render_expr(ctx, inner);
-            ctx.templates.render_with("optional_chain_expr", None, &[], &[("inner", s.as_str()), ("field", field)])
-                .unwrap_or_else(|| format!("{}.as_ref().map(|__v| __v.{}.clone())", s, field))
-        }
-        IrExprKind::Await { expr: inner } => {
-            let s = render_expr(ctx, inner);
-            ctx.templates.render_with("await_expr", None, &[], &[("inner", s.as_str())])
-                .unwrap_or_else(|| "await(...)".into())
-        }
+        IrExprKind::UnwrapOr { expr: inner, fallback } => render_expr_unwrap_or(ctx, inner, fallback),
+        IrExprKind::ToOption { expr: inner } => render_expr_to_option(ctx, inner),
+        IrExprKind::OptionalChain { expr: inner, field } => render_expr_optional_chain(ctx, inner, field),
+        IrExprKind::Await { expr: inner } => render_expr_await(ctx, inner),
 
         // ── Codegen nodes (inserted by passes — walker just renders) ──
         IrExprKind::Clone { .. } => render_expr_clone(ctx, expr),
-        IrExprKind::Deref { expr: inner } => {
-            let name_s = render_expr(ctx, inner);
-            ctx.templates.render_with("deref_var", None, &[], &[("name", name_s.as_str())])
-                .unwrap_or_else(|| format!("(*{})", name_s))
-        }
+        IrExprKind::Deref { expr: inner } => render_expr_deref(ctx, inner),
         IrExprKind::Borrow { .. } => render_expr_borrow(ctx, expr),
         IrExprKind::BoxNew { expr: inner } => {
             format!("std::boxed::Box::new({})", render_expr(ctx, inner))
         }
-        IrExprKind::RcWrap { expr: inner, cast_ty, wrap } => {
-            // A BOXED closure literal needs annotated params (the `as` cast does
-            // not back-infer them). Wrap in parens so a boxed-then-CALLED closure
-            // `(Rc::new(..) as T)(args)` parses (a cast can't be followed by `(`).
-            let s = if let IrExprKind::Lambda { params, body, .. } = &inner.kind {
-                render_lambda(ctx, params, body, true)
-            } else {
-                render_expr(ctx, inner)
-            };
-            match wrap {
-                // fan.race/any/settle thunk: `Box<dyn Fn + Send + Sync>` is itself
-                // `Fn + Send + Sync`, so heterogeneous capturing thunks unify in the
-                // runtime's `Vec<impl Fn() -> _ + Send + Sync>` (fixes E0308).
-                almide_ir::FnBox::BoxSendSync => {
-                    let ty = cast_ty.as_deref().expect("fan thunk RcWrap always carries a Fn cast_ty");
-                    let box_type = super::helpers::render_type_box_fn(ctx, ty, "Send + Sync");
-                    format!("(std::boxed::Box::new({}) as {})", s, box_type)
-                }
-                almide_ir::FnBox::Rc => {
-                    if let Some(ty) = cast_ty {
-                        let rc_type = super::helpers::render_type_rc_fn(ctx, ty);
-                        format!("(std::rc::Rc::new({}) as {})", s, rc_type)
-                    } else {
-                        format!("std::rc::Rc::new({})", s)
-                    }
-                }
-            }
-        }
-        IrExprKind::RustMacro { name, args } => {
-            // Render macro args — LitStr rendered as bare &str (no .to_string()).
-            // Control chars must be escaped here too, otherwise they land as
-            // real source newlines and the Rust source formatter's continuation
-            // indent leaks into the string literal at runtime (same failure
-            // mode as StringInterp's Lit parts).
-            let args_str = args.iter().map(|a| {
-                match &a.kind {
-                    IrExprKind::LitStr { value } => {
-                        let escaped = value
-                            .replace('\\', "\\\\")
-                            .replace('"', "\\\"")
-                            .replace('\n', "\\n")
-                            .replace('\t', "\\t")
-                            .replace('\r', "\\r");
-                        format!("\"{}\"", escaped)
-                    }
-                    _ => render_expr(ctx, a),
-                }
-            }).collect::<Vec<_>>().join(", ");
-            format!("{}!({})", name, args_str)
-        }
-        IrExprKind::ToVec { expr: inner } => {
-            if matches!(&inner.kind, IrExprKind::Range { .. }) {
-                format!("({}).collect::<Vec<_>>()", render_expr(ctx, inner))
-            } else {
-                format!("({}).to_vec()", render_expr(ctx, inner))
-            }
-        }
+        IrExprKind::RcWrap { expr: inner, cast_ty, wrap } => render_expr_rc_wrap(ctx, inner, cast_ty, *wrap),
+        IrExprKind::RustMacro { name, args } => render_expr_rust_macro(ctx, name, args),
+        IrExprKind::ToVec { expr: inner } => render_expr_to_vec(ctx, inner),
 
         // ── Hole / Todo ──
         IrExprKind::Hole => template_or(ctx, "hole", &[], "todo!()"),

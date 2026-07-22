@@ -1,3 +1,18 @@
+/// Bundles the five values threaded unchanged through every recursive call
+/// in `extract_invariants_from_stmt` / `try_hoist_expr` and their arm
+/// helpers, so each fn stays at or under the `max-params` limit (2 params:
+/// the node being visited, plus `&mut HoistCtx`). `loop_defined` is
+/// per-scope — a `ForIn`/`While` arm rebuilds a fresh `HoistCtx` with an
+/// extended set (reborrowing `vt`/`hoisted`/`pure_fns`/`mm`) before
+/// descending into the loop body.
+struct HoistCtx<'a> {
+    loop_defined: &'a HashSet<VarId>,
+    vt: &'a mut VarTable,
+    hoisted: &'a mut Vec<IrStmt>,
+    pure_fns: &'a HashSet<Sym>,
+    mm: &'a MutationMap,
+}
+
 /// Try to extract invariant sub-expressions from a statement's value.
 /// If the value of a Bind or Expr statement is loop-invariant, hoist it.
 fn extract_invariants_from_stmt(
@@ -8,12 +23,13 @@ fn extract_invariants_from_stmt(
     pure_fns: &HashSet<Sym>,
     mm: &MutationMap,
 ) {
+    let mut ctx = HoistCtx { loop_defined, vt, hoisted, pure_fns, mm };
     match &mut stmt.kind {
         IrStmtKind::Bind { value, .. } => {
-            try_hoist_expr(value, loop_defined, vt, hoisted, pure_fns, mm);
+            try_hoist_expr(value, &mut ctx);
         }
         IrStmtKind::Expr { expr } => {
-            try_hoist_expr(expr, loop_defined, vt, hoisted, pure_fns, mm);
+            try_hoist_expr(expr, &mut ctx);
         }
         // Don't hoist the whole RHS of assignments — the assignment itself
         // is a side effect (mutates a var). Only recurse into sub-expressions
@@ -21,10 +37,10 @@ fn extract_invariants_from_stmt(
         IrStmtKind::Assign { value, .. } => {
             // The assignment itself stays in the loop, but sub-expressions of
             // the RHS may be hoistable (e.g., total = total + square(n) → hoist square(n)).
-            try_hoist_expr(value, loop_defined, vt, hoisted, pure_fns, mm);
+            try_hoist_expr(value, &mut ctx);
         }
         IrStmtKind::Guard { cond, .. } => {
-            try_hoist_expr(cond, loop_defined, vt, hoisted, pure_fns, mm);
+            try_hoist_expr(cond, &mut ctx);
             // Do NOT hoist guard else — it's a control flow value (break/return),
             // not a computed expression. Hoisting ok(()) out of a guard makes
             // the hoisted binding's type (Result<(),_>) incompatible with
@@ -46,30 +62,23 @@ fn extract_invariants_from_stmt(
 /// If `expr` is loop-invariant and non-trivial, replace it with a Var reference
 /// and push the original expression as a hoisted `let` binding.
 /// Also recurses into sub-expressions to find hoistable parts.
-fn try_hoist_expr(
-    expr: &mut IrExpr,
-    loop_defined: &HashSet<VarId>,
-    vt: &mut VarTable,
-    hoisted: &mut Vec<IrStmt>,
-    pure_fns: &HashSet<Sym>,
-    mm: &MutationMap,
-) {
+fn try_hoist_expr(expr: &mut IrExpr, ctx: &mut HoistCtx) {
     // Check if the whole expression is hoistable
-    if is_hoistable(expr, loop_defined, pure_fns) {
+    if is_hoistable(expr, ctx.loop_defined, ctx.pure_fns) {
         let ty = expr.ty.clone();
         // Suffix each __licm with the next VarId so multiple hoists from the
         // same loop (especially nested loops that emit several bindings at
         // the same scope) don't shadow each other. Rust shadowing with
         // differing types silently breaks later uses — tracked down while
         // fixing the extract_q1_0_tensor inner loop regression.
-        let var_name = almide_base::intern::sym(&format!("__licm_{}", vt.len()));
-        let var = vt.alloc(var_name, ty.clone(), Mutability::Let, None);
+        let var_name = almide_base::intern::sym(&format!("__licm_{}", ctx.vt.len()));
+        let var = ctx.vt.alloc(var_name, ty.clone(), Mutability::Let, None);
         let original = std::mem::replace(expr, IrExpr {
             kind: IrExprKind::Var { id: var },
             ty: ty.clone(),
             span: expr.span, def_id: None,
         });
-        hoisted.push(IrStmt {
+        ctx.hoisted.push(IrStmt {
             kind: IrStmtKind::Bind {
                 var,
                 mutability: Mutability::Let,
@@ -83,65 +92,50 @@ fn try_hoist_expr(
 
     // Otherwise, recurse into sub-expressions to find hoistable parts
     match &mut expr.kind {
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, .. } => try_hoist_expr(object, loop_defined, vt, hoisted, pure_fns, mm),
-                CallTarget::Computed { callee } => try_hoist_expr(callee, loop_defined, vt, hoisted, pure_fns, mm),
-                other @ (CallTarget::Named { .. } | CallTarget::Module { .. }) => { let _ = other; }
-            }
-            for arg in args {
-                try_hoist_expr(arg, loop_defined, vt, hoisted, pure_fns, mm);
-            }
-        }
+        IrExprKind::Call { target, args, .. } => try_hoist_call(target, args, ctx),
         IrExprKind::RuntimeCall { args, .. } => {
             for arg in args {
-                try_hoist_expr(arg, loop_defined, vt, hoisted, pure_fns, mm);
+                try_hoist_expr(arg, ctx);
             }
         }
         IrExprKind::BinOp { left, right, .. } => {
-            try_hoist_expr(left, loop_defined, vt, hoisted, pure_fns, mm);
-            try_hoist_expr(right, loop_defined, vt, hoisted, pure_fns, mm);
+            try_hoist_expr(left, ctx);
+            try_hoist_expr(right, ctx);
         }
         IrExprKind::UnOp { operand, .. } => {
-            try_hoist_expr(operand, loop_defined, vt, hoisted, pure_fns, mm);
+            try_hoist_expr(operand, ctx);
         }
         IrExprKind::If { cond, then, else_ } => {
-            try_hoist_expr(cond, loop_defined, vt, hoisted, pure_fns, mm);
-            try_hoist_expr(then, loop_defined, vt, hoisted, pure_fns, mm);
-            try_hoist_expr(else_, loop_defined, vt, hoisted, pure_fns, mm);
+            try_hoist_expr(cond, ctx);
+            try_hoist_expr(then, ctx);
+            try_hoist_expr(else_, ctx);
         }
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
             for e in elements {
-                try_hoist_expr(e, loop_defined, vt, hoisted, pure_fns, mm);
+                try_hoist_expr(e, ctx);
             }
         }
         IrExprKind::Record { fields, .. } => {
             for (_, v) in fields {
-                try_hoist_expr(v, loop_defined, vt, hoisted, pure_fns, mm);
+                try_hoist_expr(v, ctx);
             }
         }
         IrExprKind::Member { object, .. }
         | IrExprKind::OptionalChain { expr: object, .. } => {
-            try_hoist_expr(object, loop_defined, vt, hoisted, pure_fns, mm);
+            try_hoist_expr(object, ctx);
         }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            try_hoist_expr(object, loop_defined, vt, hoisted, pure_fns, mm);
-            try_hoist_expr(index, loop_defined, vt, hoisted, pure_fns, mm);
+            try_hoist_expr(object, ctx);
+            try_hoist_expr(index, ctx);
         }
-        IrExprKind::StringInterp { parts } => {
-            for part in parts {
-                if let IrStringPart::Expr { expr: e } = part {
-                    try_hoist_expr(e, loop_defined, vt, hoisted, pure_fns, mm);
-                }
-            }
-        }
+        IrExprKind::StringInterp { parts } => try_hoist_string_interp(parts, ctx),
         IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
         | IrExprKind::ResultErr { expr: e } => {
-            try_hoist_expr(e, loop_defined, vt, hoisted, pure_fns, mm);
+            try_hoist_expr(e, ctx);
         }
         IrExprKind::Range { start, end, .. } => {
-            try_hoist_expr(start, loop_defined, vt, hoisted, pure_fns, mm);
-            try_hoist_expr(end, loop_defined, vt, hoisted, pure_fns, mm);
+            try_hoist_expr(start, ctx);
+            try_hoist_expr(end, ctx);
         }
         // Nested loops: descend into the body so an expression that is
         // invariant w.r.t. BOTH the outer and inner loops (e.g. a struct
@@ -153,26 +147,9 @@ fn try_hoist_expr(
         // `loop_defined` is extended with the nested loop's variables so
         // we never hoist an expression that genuinely depends on the
         // inner loop (e.g. `byte_idx = bits_start + i / 8`).
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-            try_hoist_expr(iterable, loop_defined, vt, hoisted, pure_fns, mm);
-            let mut nested_defined = loop_defined.clone();
-            nested_defined.insert(*var);
-            if let Some(vars) = var_tuple {
-                for v in vars { nested_defined.insert(*v); }
-            }
-            collect_defined_vars_stmts(body, &mut nested_defined, mm);
-            for stmt in body.iter_mut() {
-                extract_invariants_from_stmt(stmt, &nested_defined, vt, hoisted, pure_fns, mm);
-            }
-        }
-        IrExprKind::While { cond, body } => {
-            try_hoist_expr(cond, loop_defined, vt, hoisted, pure_fns, mm);
-            let mut nested_defined = loop_defined.clone();
-            collect_defined_vars_stmts(body, &mut nested_defined, mm);
-            for stmt in body.iter_mut() {
-                extract_invariants_from_stmt(stmt, &nested_defined, vt, hoisted, pure_fns, mm);
-            }
-        }
+        IrExprKind::ForIn { var, var_tuple, iterable, body } =>
+            try_hoist_for_in(*var, var_tuple, iterable, body, ctx),
+        IrExprKind::While { cond, body } => try_hoist_while(cond, body, ctx),
         // Explicit-preserve: the whole-expression hoist check above already
         // decided these nodes are not worth recursing into for sub-part
         // hoisting (they are leaves, control flow with their own scoping, or
@@ -197,6 +174,57 @@ fn try_hoist_expr(
         | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
         | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
         | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+    }
+}
+
+/// `Call { target, args, .. }` arm of [`try_hoist_expr`].
+fn try_hoist_call(target: &mut CallTarget, args: &mut [IrExpr], ctx: &mut HoistCtx) {
+    match target {
+        CallTarget::Method { object, .. } => try_hoist_expr(object, ctx),
+        CallTarget::Computed { callee } => try_hoist_expr(callee, ctx),
+        other @ (CallTarget::Named { .. } | CallTarget::Module { .. }) => { let _ = other; }
+    }
+    for arg in args {
+        try_hoist_expr(arg, ctx);
+    }
+}
+
+/// `StringInterp { parts }` arm of [`try_hoist_expr`].
+fn try_hoist_string_interp(parts: &mut [IrStringPart], ctx: &mut HoistCtx) {
+    for part in parts {
+        if let IrStringPart::Expr { expr: e } = part {
+            try_hoist_expr(e, ctx);
+        }
+    }
+}
+
+/// `ForIn { var, var_tuple, iterable, body }` arm of [`try_hoist_expr`].
+/// Descends into the body so an expression that is invariant w.r.t. BOTH
+/// the outer and inner loops (e.g. a struct field read from a function
+/// parameter) can be hoisted all the way out to the outer pre-loop region.
+/// `loop_defined` is extended with the nested loop's variables so we never
+/// hoist an expression that genuinely depends on the inner loop.
+fn try_hoist_for_in(var: VarId, var_tuple: &mut Option<Vec<VarId>>, iterable: &mut IrExpr, body: &mut [IrStmt], ctx: &mut HoistCtx) {
+    try_hoist_expr(iterable, ctx);
+    let mut nested_defined = ctx.loop_defined.clone();
+    nested_defined.insert(var);
+    if let Some(vars) = var_tuple {
+        for v in vars { nested_defined.insert(*v); }
+    }
+    collect_defined_vars_stmts(body, &mut nested_defined, ctx.mm);
+    for stmt in body.iter_mut() {
+        extract_invariants_from_stmt(stmt, &nested_defined, ctx.vt, ctx.hoisted, ctx.pure_fns, ctx.mm);
+    }
+}
+
+/// `While { cond, body }` arm of [`try_hoist_expr`]. See [`try_hoist_for_in`]
+/// for why the loop body is descended into with an extended `loop_defined`.
+fn try_hoist_while(cond: &mut IrExpr, body: &mut [IrStmt], ctx: &mut HoistCtx) {
+    try_hoist_expr(cond, ctx);
+    let mut nested_defined = ctx.loop_defined.clone();
+    collect_defined_vars_stmts(body, &mut nested_defined, ctx.mm);
+    for stmt in body.iter_mut() {
+        extract_invariants_from_stmt(stmt, &nested_defined, ctx.vt, ctx.hoisted, ctx.pure_fns, ctx.mm);
     }
 }
 

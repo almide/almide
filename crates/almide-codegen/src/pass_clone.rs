@@ -7,7 +7,7 @@
 
 use std::collections::{HashSet, HashMap};
 use almide_ir::*;
-use almide_base::Span;
+use almide_base::{Span, Sym};
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
 
@@ -37,11 +37,11 @@ impl NanoPass for CloneInsertionPass {
         for func in &mut program.functions {
             // Reset remaining for each function (vars are function-scoped)
             reset_remaining(&mut remaining, &eligible, &syntactic);
-            func.body = insert_clones_live(std::mem::take(&mut func.body), &always, &eligible, &mut remaining, false);
+            func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: &always, eligible: &eligible, remaining: &mut remaining, in_loop: false });
         }
         for tl in &mut program.top_lets {
             reset_remaining(&mut remaining, &eligible, &syntactic);
-            tl.value = insert_clones_live(std::mem::take(&mut tl.value), &always, &eligible, &mut remaining, false);
+            tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &always, eligible: &eligible, remaining: &mut remaining, in_loop: false });
         }
 
         let IrProgram { modules, var_table, .. } = &mut program;
@@ -53,11 +53,11 @@ impl NanoPass for CloneInsertionPass {
 
             for func in module.functions.iter_mut() {
                 reset_remaining(&mut m_remaining, &m_eligible, &module_syntactic);
-                func.body = insert_clones_live(std::mem::take(&mut func.body), &m_always, &m_eligible, &mut m_remaining, false);
+                func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: &m_always, eligible: &m_eligible, remaining: &mut m_remaining, in_loop: false });
             }
             for tl in module.top_lets.iter_mut() {
                 reset_remaining(&mut m_remaining, &m_eligible, &module_syntactic);
-                tl.value = insert_clones_live(std::mem::take(&mut tl.value), &m_always, &m_eligible, &mut m_remaining, false);
+                tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &m_always, eligible: &m_eligible, remaining: &mut m_remaining, in_loop: false });
             }
         }
         PassResult { program, changed: true }
@@ -193,6 +193,18 @@ fn reset_remaining(remaining: &mut HashMap<VarId, u32>, eligible: &HashSet<VarId
 
 // ── Clone insertion with last-use tracking ─────────────────────────
 
+/// Bundles the four values threaded unchanged through every recursive call
+/// in `insert_clones_live` / `insert_clone_stmts_live` (and their arm
+/// helpers), so each fn stays at or under the `max-params` limit. `in_loop`
+/// flips to `true` for a nested loop body/cond — built as a fresh `CloneCtx`
+/// reborrowing `remaining` (same shape as `HoistCtx` in pass_licm_p2.rs).
+struct CloneCtx<'a> {
+    always: &'a HashSet<VarId>,
+    eligible: &'a HashSet<VarId>,
+    remaining: &'a mut HashMap<VarId, u32>,
+    in_loop: bool,
+}
+
 fn make_clone(id: VarId, ty: Ty, span: Option<Span>) -> IrExpr {
     IrExpr {
         kind: IrExprKind::Clone {
@@ -202,245 +214,268 @@ fn make_clone(id: VarId, ty: Ty, span: Option<Span>) -> IrExpr {
     }
 }
 
-fn insert_clones_live(
-    expr: IrExpr,
-    always: &HashSet<VarId>,
-    eligible: &HashSet<VarId>,
-    remaining: &mut HashMap<VarId, u32>,
-    in_loop: bool,
-) -> IrExpr {
+/// `Var { id }` arm of [`insert_clones_live`] — the core decision point for
+/// clone-vs-move on a variable reference. Merges the two former match-guard
+/// arms (`always`/`eligible`); an id tracked by neither falls through
+/// unchanged, same as the exhaustive `other` catch-all's no-op on a
+/// childless node.
+fn insert_clones_var(id: VarId, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
+    if ctx.always.contains(&id) {
+        return make_clone(id, ty, span);
+    }
+    if ctx.eligible.contains(&id) {
+        if let Some(r) = ctx.remaining.get_mut(&id) {
+            *r = r.saturating_sub(1);
+            if *r == 0 && !ctx.in_loop {
+                // Last use outside a loop → move (no clone)
+                return IrExpr { kind: IrExprKind::Var { id }, ty, span, def_id: None };
+            }
+        }
+        return make_clone(id, ty, span);
+    }
+    IrExpr { kind: IrExprKind::Var { id }, ty, span, def_id: None }
+}
+
+/// `If { cond, then, else_ }` arm of [`insert_clones_live`]: save/restore/min
+/// for branches (the branch that consumed more `remaining` wins — conservative).
+fn insert_clones_if(cond: IrExpr, then: IrExpr, else_: IrExpr, ctx: &mut CloneCtx) -> IrExprKind {
+    let new_cond = insert_clones_live(cond, ctx);
+    let saved = ctx.remaining.clone();
+    let new_then = insert_clones_live(then, ctx);
+    let then_remaining = std::mem::replace(ctx.remaining, saved);
+    let new_else = insert_clones_live(else_, ctx);
+    for &id in ctx.eligible.iter() {
+        let t = then_remaining.get(&id).copied().unwrap_or(0);
+        let e = ctx.remaining.get(&id).copied().unwrap_or(0);
+        ctx.remaining.insert(id, t.min(e));
+    }
+    IrExprKind::If {
+        cond: Box::new(new_cond),
+        then: Box::new(new_then),
+        else_: Box::new(new_else),
+    }
+}
+
+/// `Match { subject, arms }` arm of [`insert_clones_live`]: same save/min
+/// strategy as [`insert_clones_if`], generalized to N arms.
+fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCtx) -> IrExprKind {
+    let new_subject = insert_clones_live(subject, ctx);
+    let saved = ctx.remaining.clone();
+    let mut min_remaining = HashMap::new();
+    let mut new_arms = Vec::with_capacity(arms.len());
+
+    for (i, arm) in arms.into_iter().enumerate() {
+        *ctx.remaining = saved.clone();
+        let new_guard = arm.guard.map(|g| insert_clones_live(g, ctx));
+        let new_body = insert_clones_live(arm.body, ctx);
+        new_arms.push(IrMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body });
+
+        if i == 0 {
+            min_remaining = ctx.remaining.clone();
+        } else {
+            for &id in ctx.eligible.iter() {
+                let cur = ctx.remaining.get(&id).copied().unwrap_or(0);
+                let prev = min_remaining.get(&id).copied().unwrap_or(0);
+                min_remaining.insert(id, cur.min(prev));
+            }
+        }
+    }
+    *ctx.remaining = min_remaining;
+    IrExprKind::Match { subject: Box::new(new_subject), arms: new_arms }
+}
+
+/// `ForIn { var, var_tuple, iterable, body }` arm of [`insert_clones_live`]:
+/// the iterable is NOT in the loop, the body IS.
+fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, iterable: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> IrExprKind {
+    let new_iterable = insert_clones_live(iterable, ctx);
+    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true };
+    let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
+    IrExprKind::ForIn { var, var_tuple, iterable: Box::new(new_iterable), body: new_body }
+}
+
+/// `While { cond, body }` arm of [`insert_clones_live`]: cond and body are
+/// both in the loop.
+fn insert_clones_while(cond: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> IrExprKind {
+    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true };
+    let new_cond = insert_clones_live(cond, &mut loop_ctx);
+    let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
+    IrExprKind::While { cond: Box::new(new_cond), body: new_body }
+}
+
+/// `Call { target, args, type_args }` arm of [`insert_clones_live`].
+fn insert_clones_call(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<Ty>, ctx: &mut CloneCtx) -> IrExprKind {
+    let args = args.into_iter().map(|a| insert_clones_live(a, ctx)).collect();
+    let target = match target {
+        CallTarget::Method { object, method } => CallTarget::Method {
+            object: Box::new(insert_clones_live(*object, ctx)), method,
+        },
+        CallTarget::Computed { callee } => CallTarget::Computed {
+            callee: Box::new(insert_clones_live(*callee, ctx)),
+        },
+        other => other,
+    };
+    IrExprKind::Call { target, args, type_args }
+}
+
+/// `IndexAccess { object, index }` arm of [`insert_clones_live`]: borrow the
+/// container, clone the element.
+fn insert_clones_index_access(object: IrExpr, index: IrExpr, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
+    let mut processed_object = insert_clones_live(object, ctx);
+    // Strip top-level Clone from container (indexing borrows)
+    if let IrExprKind::Clone { expr } = processed_object.kind {
+        processed_object = *expr;
+    }
+    let processed_index = insert_clones_live(index, ctx);
+    let access = IrExpr {
+        kind: IrExprKind::IndexAccess {
+            object: Box::new(processed_object),
+            index: Box::new(processed_index),
+        },
+        ty: ty.clone(), span, def_id: None,
+    };
+    if needs_clone(&ty) {
+        return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
+    }
+    access
+}
+
+/// `MapAccess { object, key }` arm of [`insert_clones_live`]: borrow the
+/// container, clone the element.
+fn insert_clones_map_access(object: IrExpr, key: IrExpr, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
+    let mut processed_object = insert_clones_live(object, ctx);
+    if let IrExprKind::Clone { expr } = processed_object.kind {
+        processed_object = *expr;
+    }
+    let processed_key = insert_clones_live(key, ctx);
+    let access = IrExpr {
+        kind: IrExprKind::MapAccess {
+            object: Box::new(processed_object),
+            key: Box::new(processed_key),
+        },
+        ty: ty.clone(), span, def_id: None,
+    };
+    if needs_clone(&ty) {
+        return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
+    }
+    access
+}
+
+/// `Member { object, field }` arm of [`insert_clones_live`]. Mirrors
+/// IndexAccess/MapAccess: the container is borrowed (Record may be a `&T`
+/// after BorrowInference), and a heap-typed field can't be moved out
+/// through the reference. Wrap the access in Clone when the field itself
+/// needs cloning.
+fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
+    let mut processed_object = insert_clones_live(object, ctx);
+    if let IrExprKind::Clone { expr } = processed_object.kind {
+        processed_object = *expr;
+    }
+    let access = IrExpr {
+        kind: IrExprKind::Member {
+            object: Box::new(processed_object),
+            field,
+        },
+        ty: ty.clone(), span, def_id: None,
+    };
+    if needs_clone(&ty) {
+        return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
+    }
+    access
+}
+
+fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
 
     let kind = match expr.kind {
-        // ── Var: the core decision point ───────────────────────────
-        IrExprKind::Var { id } if always.contains(&id) => {
-            return make_clone(id, ty, span);
-        }
-        IrExprKind::Var { id } if eligible.contains(&id) => {
-            if let Some(r) = remaining.get_mut(&id) {
-                *r = r.saturating_sub(1);
-                if *r == 0 && !in_loop {
-                    // Last use outside a loop → move (no clone)
-                    return IrExpr { kind: IrExprKind::Var { id }, ty, span, def_id: None };
-                }
-            }
-            return make_clone(id, ty, span);
-        }
+        IrExprKind::Var { id } => return insert_clones_var(id, ty, span, ctx),
 
         // ── Block: sequential statements ───────────────────────────
         IrExprKind::Block { stmts, expr } => IrExprKind::Block {
-            stmts: insert_clone_stmts_live(stmts, always, eligible, remaining, in_loop),
-            expr: expr.map(|e| Box::new(insert_clones_live(*e, always, eligible, remaining, in_loop))),
+            stmts: insert_clone_stmts_live(stmts, ctx),
+            expr: expr.map(|e| Box::new(insert_clones_live(*e, ctx))),
         },
 
-        // ── If: save/restore/min for branches ──────────────────────
-        IrExprKind::If { cond, then, else_ } => {
-            let new_cond = insert_clones_live(*cond, always, eligible, remaining, in_loop);
-            let saved = remaining.clone();
-            let new_then = insert_clones_live(*then, always, eligible, remaining, in_loop);
-            let then_remaining = std::mem::replace(remaining, saved);
-            let new_else = insert_clones_live(*else_, always, eligible, remaining, in_loop);
-            // Merge: take min (conservative — the branch that consumed more wins)
-            for &id in eligible.iter() {
-                let t = then_remaining.get(&id).copied().unwrap_or(0);
-                let e = remaining.get(&id).copied().unwrap_or(0);
-                remaining.insert(id, t.min(e));
-            }
-            IrExprKind::If {
-                cond: Box::new(new_cond),
-                then: Box::new(new_then),
-                else_: Box::new(new_else),
-            }
-        }
-
-        // ── Match: same strategy as If but N arms ──────────────────
-        IrExprKind::Match { subject, arms } => {
-            let new_subject = insert_clones_live(*subject, always, eligible, remaining, in_loop);
-            let saved = remaining.clone();
-            let mut min_remaining = HashMap::new();
-            let mut new_arms = Vec::with_capacity(arms.len());
-
-            for (i, arm) in arms.into_iter().enumerate() {
-                *remaining = saved.clone();
-                let new_guard = arm.guard.map(|g| insert_clones_live(g, always, eligible, remaining, in_loop));
-                let new_body = insert_clones_live(arm.body, always, eligible, remaining, in_loop);
-                new_arms.push(IrMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body });
-
-                if i == 0 {
-                    min_remaining = remaining.clone();
-                } else {
-                    for &id in eligible.iter() {
-                        let cur = remaining.get(&id).copied().unwrap_or(0);
-                        let prev = min_remaining.get(&id).copied().unwrap_or(0);
-                        min_remaining.insert(id, cur.min(prev));
-                    }
-                }
-            }
-            *remaining = min_remaining;
-            IrExprKind::Match { subject: Box::new(new_subject), arms: new_arms }
-        }
-
-        // ── ForIn: iterable is NOT in loop, body IS ────────────────
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-            let new_iterable = insert_clones_live(*iterable, always, eligible, remaining, in_loop);
-            let new_body = insert_clone_stmts_live(body, always, eligible, remaining, true);
-            IrExprKind::ForIn { var, var_tuple, iterable: Box::new(new_iterable), body: new_body }
-        }
-
-        // ── While: cond and body are in loop ───────────────────────
-        IrExprKind::While { cond, body } => {
-            let new_cond = insert_clones_live(*cond, always, eligible, remaining, true);
-            let new_body = insert_clone_stmts_live(body, always, eligible, remaining, true);
-            IrExprKind::While { cond: Box::new(new_cond), body: new_body }
-        }
+        IrExprKind::If { cond, then, else_ } => insert_clones_if(*cond, *then, *else_, ctx),
+        IrExprKind::Match { subject, arms } => insert_clones_match(*subject, arms, ctx),
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => insert_clones_for_in(var, var_tuple, *iterable, body, ctx),
+        IrExprKind::While { cond, body } => insert_clones_while(*cond, body, ctx),
 
         // ── Lambda: body recurses normally ─────────────────────────
         IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
-            params, body: Box::new(insert_clones_live(*body, always, eligible, remaining, in_loop)), lambda_id,
+            params, body: Box::new(insert_clones_live(*body, ctx)), lambda_id,
         },
 
-        // ── Call ───────────────────────────────────────────────────
-        IrExprKind::Call { target, args, type_args } => {
-            let args = args.into_iter().map(|a| insert_clones_live(a, always, eligible, remaining, in_loop)).collect();
-            let target = match target {
-                CallTarget::Method { object, method } => CallTarget::Method {
-                    object: Box::new(insert_clones_live(*object, always, eligible, remaining, in_loop)), method,
-                },
-                CallTarget::Computed { callee } => CallTarget::Computed {
-                    callee: Box::new(insert_clones_live(*callee, always, eligible, remaining, in_loop)),
-                },
-                other => other,
-            };
-            IrExprKind::Call { target, args, type_args }
-        }
+        IrExprKind::Call { target, args, type_args } => insert_clones_call(target, args, type_args, ctx),
         IrExprKind::RuntimeCall { symbol, args } => {
-            let args = args.into_iter().map(|a| insert_clones_live(a, always, eligible, remaining, in_loop)).collect();
+            let args = args.into_iter().map(|a| insert_clones_live(a, ctx)).collect();
             IrExprKind::RuntimeCall { symbol, args }
         }
 
-        // ── IndexAccess: borrow container, clone element ───────────
-        IrExprKind::IndexAccess { object, index } => {
-            let mut processed_object = insert_clones_live(*object, always, eligible, remaining, in_loop);
-            // Strip top-level Clone from container (indexing borrows)
-            if let IrExprKind::Clone { expr } = processed_object.kind {
-                processed_object = *expr;
-            }
-            let processed_index = insert_clones_live(*index, always, eligible, remaining, in_loop);
-            let access = IrExpr {
-                kind: IrExprKind::IndexAccess {
-                    object: Box::new(processed_object),
-                    index: Box::new(processed_index),
-                },
-                ty: ty.clone(), span, def_id: None,
-            };
-            if needs_clone(&ty) {
-                return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
-            }
-            return access;
-        }
-
-        // ── MapAccess: borrow container, clone element ─────────────
-        IrExprKind::MapAccess { object, key } => {
-            let mut processed_object = insert_clones_live(*object, always, eligible, remaining, in_loop);
-            if let IrExprKind::Clone { expr } = processed_object.kind {
-                processed_object = *expr;
-            }
-            let processed_key = insert_clones_live(*key, always, eligible, remaining, in_loop);
-            let access = IrExpr {
-                kind: IrExprKind::MapAccess {
-                    object: Box::new(processed_object),
-                    key: Box::new(processed_key),
-                },
-                ty: ty.clone(), span, def_id: None,
-            };
-            if needs_clone(&ty) {
-                return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
-            }
-            return access;
-        }
+        IrExprKind::IndexAccess { object, index } => return insert_clones_index_access(*object, *index, ty, span, ctx),
+        IrExprKind::MapAccess { object, key } => return insert_clones_map_access(*object, *key, ty, span, ctx),
 
         // ── Simple recursion cases ─────────────────────────────────
         IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
             op,
-            left: Box::new(insert_clones_live(*left, always, eligible, remaining, in_loop)),
-            right: Box::new(insert_clones_live(*right, always, eligible, remaining, in_loop)),
+            left: Box::new(insert_clones_live(*left, ctx)),
+            right: Box::new(insert_clones_live(*right, ctx)),
         },
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op, operand: Box::new(insert_clones_live(*operand, always, eligible, remaining, in_loop)),
+            op, operand: Box::new(insert_clones_live(*operand, ctx)),
         },
         IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter().map(|e| insert_clones_live(e, always, eligible, remaining, in_loop)).collect(),
+            elements: elements.into_iter().map(|e| insert_clones_live(e, ctx)).collect(),
         },
         IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name, fields: fields.into_iter().map(|(k, v)| (k, insert_clones_live(v, always, eligible, remaining, in_loop))).collect(),
+            name, fields: fields.into_iter().map(|(k, v)| (k, insert_clones_live(v, ctx))).collect(),
         },
-        // Member access mirrors IndexAccess/MapAccess: the container is
-        // borrowed (Record may be a `&T` after BorrowInference), and a
-        // heap-typed field can't be moved out through the reference.
-        // Wrap the access in Clone when the field itself needs cloning.
-        IrExprKind::Member { object, field } => {
-            let mut processed_object = insert_clones_live(*object, always, eligible, remaining, in_loop);
-            if let IrExprKind::Clone { expr } = processed_object.kind {
-                processed_object = *expr;
-            }
-            let access = IrExpr {
-                kind: IrExprKind::Member {
-                    object: Box::new(processed_object),
-                    field,
-                },
-                ty: ty.clone(), span, def_id: None,
-            };
-            if needs_clone(&ty) {
-                return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
-            }
-            return access;
-        }
+        IrExprKind::Member { object, field } => return insert_clones_member(*object, field, ty, span, ctx),
         IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
-            expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)), field,
+            expr: Box::new(insert_clones_live(*expr, ctx)), field,
         },
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: insert_clones_live(expr, always, eligible, remaining, in_loop) },
+                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: insert_clones_live(expr, ctx) },
                 other => other,
             }).collect(),
         },
-        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)) },
-        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)) },
-        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)) },
-        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)) },
-        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)) },
-        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)) },
+        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(insert_clones_live(*expr, ctx)) },
+        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(insert_clones_live(*expr, ctx)) },
+        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(insert_clones_live(*expr, ctx)) },
+        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(insert_clones_live(*expr, ctx)) },
+        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(insert_clones_live(*expr, ctx)) },
+        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(insert_clones_live(*expr, ctx)) },
         IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
-            expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)),
-            fallback: Box::new(insert_clones_live(*fallback, always, eligible, remaining, in_loop)),
+            expr: Box::new(insert_clones_live(*expr, ctx)),
+            fallback: Box::new(insert_clones_live(*fallback, ctx)),
         },
-        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)) },
+        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(insert_clones_live(*expr, ctx)) },
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(|e| insert_clones_live(e, always, eligible, remaining, in_loop)).collect(),
+            exprs: exprs.into_iter().map(|e| insert_clones_live(e, ctx)).collect(),
         },
         IrExprKind::SpreadRecord { base, fields } => {
             // Fields are evaluated before the spread base in Rust struct literals
-            let new_fields: Vec<_> = fields.into_iter().map(|(k, v)| (k, insert_clones_live(v, always, eligible, remaining, in_loop))).collect();
-            let new_base = insert_clones_live(*base, always, eligible, remaining, in_loop);
+            let new_fields: Vec<_> = fields.into_iter().map(|(k, v)| (k, insert_clones_live(v, ctx))).collect();
+            let new_base = insert_clones_live(*base, ctx);
             IrExprKind::SpreadRecord { base: Box::new(new_base), fields: new_fields }
         },
         IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
-            start: Box::new(insert_clones_live(*start, always, eligible, remaining, in_loop)),
-            end: Box::new(insert_clones_live(*end, always, eligible, remaining, in_loop)),
+            start: Box::new(insert_clones_live(*start, ctx)),
+            end: Box::new(insert_clones_live(*end, ctx)),
             inclusive,
         },
         IrExprKind::Tuple { elements } => IrExprKind::Tuple {
-            elements: elements.into_iter().map(|e| insert_clones_live(e, always, eligible, remaining, in_loop)).collect(),
+            elements: elements.into_iter().map(|e| insert_clones_live(e, ctx)).collect(),
         },
         IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
-            entries: entries.into_iter().map(|(k, v)| (insert_clones_live(k, always, eligible, remaining, in_loop), insert_clones_live(v, always, eligible, remaining, in_loop))).collect(),
+            entries: entries.into_iter().map(|(k, v)| (insert_clones_live(k, ctx), insert_clones_live(v, ctx))).collect(),
         },
         IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
-            object: Box::new(insert_clones_live(*object, always, eligible, remaining, in_loop)), index,
+            object: Box::new(insert_clones_live(*object, ctx)), index,
         },
         IrExprKind::Borrow { expr, as_str, mutable } => {
-            let mut inner = insert_clones_live(*expr, always, eligible, remaining, in_loop);
+            let mut inner = insert_clones_live(*expr, ctx);
             // Strip clone inside borrow: &x.clone() → &x (borrow doesn't consume ownership)
             if let IrExprKind::Clone { expr: unwrapped } = inner.kind {
                 inner = *unwrapped;
@@ -448,16 +483,16 @@ fn insert_clones_live(
             IrExprKind::Borrow { expr: Box::new(inner), as_str, mutable }
         },
         IrExprKind::BoxNew { expr } => IrExprKind::BoxNew {
-            expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)),
+            expr: Box::new(insert_clones_live(*expr, ctx)),
         },
         IrExprKind::ToVec { expr } => IrExprKind::ToVec {
-            expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)),
+            expr: Box::new(insert_clones_live(*expr, ctx)),
         },
         IrExprKind::Await { expr } => IrExprKind::Await {
-            expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)),
+            expr: Box::new(insert_clones_live(*expr, ctx)),
         },
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
-            name, args: args.into_iter().map(|a| insert_clones_live(a, always, eligible, remaining, in_loop)).collect(),
+            name, args: args.into_iter().map(|a| insert_clones_live(a, ctx)).collect(),
         },
         // Default: recurse into every child through the exhaustive `map_children`
         // chokepoint, so no un-listed node kind (`IterChain`/`RcWrap`/`TailCall`/
@@ -466,7 +501,7 @@ fn insert_clones_live(
         // no children and pass through unchanged.
         other => {
             let e = IrExpr { kind: other, ty: ty.clone(), span, def_id: None };
-            return e.map_children(&mut |child| insert_clones_live(child, always, eligible, remaining, in_loop));
+            return e.map_children(&mut |child| insert_clones_live(child, ctx));
         }
     };
 
@@ -484,25 +519,19 @@ fn count_target_use(target: VarId, eligible: &HashSet<VarId>, remaining: &mut Ha
     }
 }
 
-fn insert_clone_stmts_live(
-    stmts: Vec<IrStmt>,
-    always: &HashSet<VarId>,
-    eligible: &HashSet<VarId>,
-    remaining: &mut HashMap<VarId, u32>,
-    in_loop: bool,
-) -> Vec<IrStmt> {
+fn insert_clone_stmts_live(stmts: Vec<IrStmt>, ctx: &mut CloneCtx) -> Vec<IrStmt> {
     stmts.into_iter().map(|s| {
         let kind = match s.kind {
             IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
-                var, mutability, ty, value: insert_clones_live(value, always, eligible, remaining, in_loop),
+                var, mutability, ty, value: insert_clones_live(value, ctx),
             },
-            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: insert_clones_live(value, always, eligible, remaining, in_loop) },
-            IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: insert_clones_live(expr, always, eligible, remaining, in_loop) },
+            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: insert_clones_live(value, ctx) },
+            IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: insert_clones_live(expr, ctx) },
             IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
-                cond: insert_clones_live(cond, always, eligible, remaining, in_loop), else_: insert_clones_live(else_, always, eligible, remaining, in_loop),
+                cond: insert_clones_live(cond, ctx), else_: insert_clones_live(else_, ctx),
             },
             IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
-                pattern, value: insert_clones_live(value, always, eligible, remaining, in_loop),
+                pattern, value: insert_clones_live(value, ctx),
             },
             // In-place mutations: process the sub-exprs first (they may consume
             // vars), THEN account the target as a use of `target` itself —
@@ -512,27 +541,27 @@ fn insert_clone_stmts_live(
             // cloned/moved (the statement writes through it in place); this is a
             // pure counter decrement.
             IrStmtKind::IndexAssign { target, index, value } => {
-                let index = insert_clones_live(index, always, eligible, remaining, in_loop);
-                let value = insert_clones_live(value, always, eligible, remaining, in_loop);
-                count_target_use(target, eligible, remaining);
+                let index = insert_clones_live(index, ctx);
+                let value = insert_clones_live(value, ctx);
+                count_target_use(target, ctx.eligible, ctx.remaining);
                 IrStmtKind::IndexAssign { target, index, value }
             }
             IrStmtKind::FieldAssign { target, field, value } => {
-                let value = insert_clones_live(value, always, eligible, remaining, in_loop);
-                count_target_use(target, eligible, remaining);
+                let value = insert_clones_live(value, ctx);
+                count_target_use(target, ctx.eligible, ctx.remaining);
                 IrStmtKind::FieldAssign { target, field, value }
             }
             IrStmtKind::MapInsert { target, key, value } => {
-                let key = insert_clones_live(key, always, eligible, remaining, in_loop);
-                let value = insert_clones_live(value, always, eligible, remaining, in_loop);
-                count_target_use(target, eligible, remaining);
+                let key = insert_clones_live(key, ctx);
+                let value = insert_clones_live(value, ctx);
+                count_target_use(target, ctx.eligible, ctx.remaining);
                 IrStmtKind::MapInsert { target, key, value }
             }
             // Default: recurse every expr child via the exhaustive `map_exprs`
             // chokepoint so no un-listed stmt kind (`ListSwap`/`ListReverse`/… —
             // which `count_syntactic` already counts) drops its expr subtree.
             other => IrStmt { kind: other, span: s.span }
-                .map_exprs(&mut |e| insert_clones_live(e, always, eligible, remaining, in_loop))
+                .map_exprs(&mut |e| insert_clones_live(e, ctx))
                 .kind,
         };
         IrStmt { kind, span: s.span }

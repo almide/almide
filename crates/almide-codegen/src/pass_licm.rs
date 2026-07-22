@@ -209,28 +209,36 @@ fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable, pure_fns: &HashSet<Sym
     }
 }
 
-fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm: &MutationMap) -> Vec<IrStmt> {
+/// `ForIn { var, var_tuple, body, .. }` arm of [`try_hoist_from_loop`].
+fn try_hoist_from_for_in(var: VarId, var_tuple: &mut Option<Vec<VarId>>, body: &mut [IrStmt], vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm: &MutationMap) -> Vec<IrStmt> {
     let mut hoisted = Vec::new();
+    let mut loop_defined = HashSet::new();
+    loop_defined.insert(var);
+    if let Some(vars) = var_tuple {
+        for v in vars { loop_defined.insert(*v); }
+    }
+    collect_defined_vars_stmts(body, &mut loop_defined, mm);
+    for stmt in body.iter_mut() {
+        extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted, pure_fns, mm);
+    }
+    hoisted
+}
 
+/// `While { body, .. }` arm of [`try_hoist_from_loop`].
+fn try_hoist_from_while(body: &mut [IrStmt], vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm: &MutationMap) -> Vec<IrStmt> {
+    let mut hoisted = Vec::new();
+    let mut loop_defined = HashSet::new();
+    collect_defined_vars_stmts(body, &mut loop_defined, mm);
+    for stmt in body.iter_mut() {
+        extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted, pure_fns, mm);
+    }
+    hoisted
+}
+
+fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm: &MutationMap) -> Vec<IrStmt> {
     match &mut expr.kind {
-        IrExprKind::ForIn { var, var_tuple, body, .. } => {
-            let mut loop_defined = HashSet::new();
-            loop_defined.insert(*var);
-            if let Some(vars) = var_tuple {
-                for v in vars { loop_defined.insert(*v); }
-            }
-            collect_defined_vars_stmts(body, &mut loop_defined, mm);
-            for stmt in body.iter_mut() {
-                extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted, pure_fns, mm);
-            }
-        }
-        IrExprKind::While { cond: _, body } => {
-            let mut loop_defined = HashSet::new();
-            collect_defined_vars_stmts(body, &mut loop_defined, mm);
-            for stmt in body.iter_mut() {
-                extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted, pure_fns, mm);
-            }
-        }
+        IrExprKind::ForIn { var, var_tuple, body, .. } => try_hoist_from_for_in(*var, var_tuple, body, vt, pure_fns, mm),
+        IrExprKind::While { cond: _, body } => try_hoist_from_while(body, vt, pure_fns, mm),
         // Explicit-preserve: only loop heads (ForIn/While) drive hoisting
         // here; every other node kind yields no hoisted bindings. Listing
         // each variant turns a new IrExprKind into a compile error.
@@ -260,10 +268,8 @@ fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<
         | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
         | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
         | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
-        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => Vec::new(),
     }
-
-    hoisted
 }
 
 /// Collect all VarIds that are bound OR assigned within a list of statements.

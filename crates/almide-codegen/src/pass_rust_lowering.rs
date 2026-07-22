@@ -31,38 +31,53 @@ impl NanoPass for RustLoweringPass {
         // arg-0 and RE-TAG the matching bind's list elements to BoxSendSync —
         // the var-indirection twin of the inline-list boxing.
         if rebox_var_thunk_lists(&mut program) { changed = true; }
-        // Vars whose Assign must STAY an Assign — their lvalue is not a direct
-        // Rust place, so the `xs = xs + [v]` → `xs.push(v)` rewrite would push
-        // onto a DISCARDED CLONE and silently lose the write:
-        //   - shared cells (`SharedMut`): `xs.get().push(v)` (Closure v2 P6);
-        //   - mutable TOP-LETS (`ModuleRc`): the Method renderer falls through
-        //     to the module-var READ accessor `UPPER.with(|c| (**c.borrow())
-        //     .clone()).push(v)` (#501). Left as an Assign, the walker emits
-        //     the ModuleRc WRITE template, which is also alias-safe: the RHS
-        //     (including reads of the same var) evaluates BEFORE borrow_mut.
-        let mut shared: HashSet<VarId> = program.codegen_annotations.shared_mut_vars.clone();
-        for tl in &program.top_lets {
-            if tl.mutable { shared.insert(tl.var); }
-        }
-        for m in &program.modules {
-            for tl in &m.top_lets {
-                if tl.mutable { shared.insert(tl.var); }
-            }
-        }
-        let IrProgram { functions, top_lets, modules, var_table, .. } = &mut program;
-        for func in functions.iter_mut() {
-            if rewrite_stmts_in_expr(&mut func.body, var_table, &shared) { changed = true; }
-        }
-        for tl in top_lets.iter_mut() {
-            if rewrite_stmts_in_expr(&mut tl.value, var_table, &shared) { changed = true; }
-        }
-        for module in modules.iter_mut() {
-            for func in module.functions.iter_mut() {
-                if rewrite_stmts_in_expr(&mut func.body, var_table, &shared) { changed = true; }
-            }
-        }
+        let shared = collect_assign_exempt_vars(&program);
+        if apply_rewrite_stmts_program(&mut program, &shared) { changed = true; }
         PassResult { program, changed }
     }
+}
+
+/// Vars whose `Assign` must STAY an `Assign` — their lvalue is not a direct
+/// Rust place, so the `xs = xs + [v]` → `xs.push(v)` rewrite would push onto
+/// a DISCARDED CLONE and silently lose the write:
+///   - shared cells (`SharedMut`): `xs.get().push(v)` (Closure v2 P6);
+///   - mutable TOP-LETS (`ModuleRc`): the Method renderer falls through
+///     to the module-var READ accessor `UPPER.with(|c| (**c.borrow())
+///     .clone()).push(v)` (#501). Left as an Assign, the walker emits
+///     the ModuleRc WRITE template, which is also alias-safe: the RHS
+///     (including reads of the same var) evaluates BEFORE borrow_mut.
+/// Extracted from `RustLoweringPass::run` (cog>25 decomposition).
+fn collect_assign_exempt_vars(program: &IrProgram) -> HashSet<VarId> {
+    let mut shared: HashSet<VarId> = program.codegen_annotations.shared_mut_vars.clone();
+    for tl in &program.top_lets {
+        if tl.mutable { shared.insert(tl.var); }
+    }
+    for m in &program.modules {
+        for tl in &m.top_lets {
+            if tl.mutable { shared.insert(tl.var); }
+        }
+    }
+    shared
+}
+
+/// Run [`rewrite_stmts_in_expr`] over every function body and top-let value,
+/// top-level and per-module. Extracted from `RustLoweringPass::run`
+/// (cog>25 decomposition).
+fn apply_rewrite_stmts_program(program: &mut IrProgram, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    let IrProgram { functions, top_lets, modules, var_table, .. } = program;
+    for func in functions.iter_mut() {
+        if rewrite_stmts_in_expr(&mut func.body, var_table, shared) { changed = true; }
+    }
+    for tl in top_lets.iter_mut() {
+        if rewrite_stmts_in_expr(&mut tl.value, var_table, shared) { changed = true; }
+    }
+    for module in modules.iter_mut() {
+        for func in module.functions.iter_mut() {
+            if rewrite_stmts_in_expr(&mut func.body, var_table, shared) { changed = true; }
+        }
+    }
+    changed
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -481,47 +496,14 @@ fn map_value_ty(ty: &almide_lang::types::Ty) -> Option<&almide_lang::types::Ty> 
 
 /// Walk all stmts in expressions recursively (Rust push/index peepholes).
 fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
-    let mut changed = false;
     match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts.iter_mut() {
-                if rewrite_stmt(s, vt, shared) { changed = true; }
-                rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
-            }
-            if let Some(e) = tail { if rewrite_stmts_in_expr(e, vt, shared) { changed = true; } }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
-            if rewrite_stmts_in_expr(then, vt, shared) { changed = true; }
-            if rewrite_stmts_in_expr(else_, vt, shared) { changed = true; }
-        }
-        IrExprKind::Match { subject, arms } => {
-            if rewrite_stmts_in_expr(subject, vt, shared) { changed = true; }
-            for arm in arms {
-                if let Some(g) = &mut arm.guard { rewrite_stmts_in_expr(g, vt, shared); }
-                if rewrite_stmts_in_expr(&mut arm.body, vt, shared) { changed = true; }
-            }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            if rewrite_stmts_in_expr(iterable, vt, shared) { changed = true; }
-            for s in body.iter_mut() {
-                if rewrite_stmt(s, vt, shared) { changed = true; }
-                rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
-            }
-        }
-        IrExprKind::While { cond, body } => {
-            if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
-            for s in body.iter_mut() {
-                if rewrite_stmt(s, vt, shared) { changed = true; }
-                rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
-            }
-        }
-        IrExprKind::Lambda { body, .. } => {
-            if rewrite_stmts_in_expr(body, vt, shared) { changed = true; }
-        }
-        IrExprKind::RuntimeCall { args, .. } => {
-            for a in args.iter_mut() { if rewrite_stmts_in_expr(a, vt, shared) { changed = true; } }
-        }
+        IrExprKind::Block { stmts, expr: tail } => rewrite_stmts_in_block(stmts, tail, vt, shared),
+        IrExprKind::If { cond, then, else_ } => rewrite_stmts_in_if(cond, then, else_, vt, shared),
+        IrExprKind::Match { subject, arms } => rewrite_stmts_in_match(subject, arms, vt, shared),
+        IrExprKind::ForIn { iterable, body, .. } => rewrite_stmts_in_for_in(iterable, body, vt, shared),
+        IrExprKind::While { cond, body } => rewrite_stmts_in_while(cond, body, vt, shared),
+        IrExprKind::Lambda { body, .. } => rewrite_stmts_in_expr(body, vt, shared),
+        IrExprKind::RuntimeCall { args, .. } => rewrite_stmts_in_runtime_call_args(args, vt, shared),
         // No nested statements to rewrite — listed explicitly so a new
         // statement-bearing IrExprKind is a compile error, not a silent miss.
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
@@ -540,9 +522,93 @@ fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<
         | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
         | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
-        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => false,
+    }
+}
+
+/// `Block { stmts, expr: tail }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_block(stmts: &mut [IrStmt], tail: &mut Option<Box<IrExpr>>, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    for s in stmts.iter_mut() {
+        if rewrite_stmt(s, vt, shared) { changed = true; }
+        rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
+    }
+    if let Some(e) = tail { if rewrite_stmts_in_expr(e, vt, shared) { changed = true; } }
+    changed
+}
+
+/// `If { cond, then, else_ }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_if(cond: &mut IrExpr, then: &mut IrExpr, else_: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
+    if rewrite_stmts_in_expr(then, vt, shared) { changed = true; }
+    if rewrite_stmts_in_expr(else_, vt, shared) { changed = true; }
+    changed
+}
+
+/// `Match { subject, arms }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_match(subject: &mut IrExpr, arms: &mut [IrMatchArm], vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    if rewrite_stmts_in_expr(subject, vt, shared) { changed = true; }
+    for arm in arms {
+        if let Some(g) = &mut arm.guard { rewrite_stmts_in_expr(g, vt, shared); }
+        if rewrite_stmts_in_expr(&mut arm.body, vt, shared) { changed = true; }
     }
     changed
+}
+
+/// `ForIn { iterable, body, .. }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_for_in(iterable: &mut IrExpr, body: &mut [IrStmt], vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    if rewrite_stmts_in_expr(iterable, vt, shared) { changed = true; }
+    for s in body.iter_mut() {
+        if rewrite_stmt(s, vt, shared) { changed = true; }
+        rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
+    }
+    changed
+}
+
+/// `While { cond, body }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_while(cond: &mut IrExpr, body: &mut [IrStmt], vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
+    for s in body.iter_mut() {
+        if rewrite_stmt(s, vt, shared) { changed = true; }
+        rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
+    }
+    changed
+}
+
+/// `RuntimeCall { args, .. }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_runtime_call_args(args: &mut [IrExpr], vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    for a in args.iter_mut() { if rewrite_stmts_in_expr(a, vt, shared) { changed = true; } }
+    changed
+}
+
+/// `IndexAssign { index, value, target }` arm of [`rewrite_stmts_in_stmt`]:
+/// `xs[i] = closure` into a `List[Fn]` boxes the stored closure (the
+/// expr-level boxing pass can't reach a statement value).
+fn rewrite_stmts_in_index_assign(index: &mut IrExpr, value: &mut IrExpr, target: VarId, vt: &mut VarTable, shared: &HashSet<VarId>, changed: &mut bool) {
+    if rewrite_stmts_in_expr(index, vt, shared) { *changed = true; }
+    if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
+    let ety = list_elem_ty(&vt.get(target).ty).cloned();
+    if let Some(et) = ety {
+        if matches!(&et, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &et) { *changed = true; }
+    }
+}
+
+/// `MapInsert { key, value, target }` arm of [`rewrite_stmts_in_stmt`]:
+/// `m[k] = closure` / `m = map.set(m,k,closure)` (lowered to MapInsert)
+/// into a closure-valued map boxes the stored closure, same reasoning as
+/// [`rewrite_stmts_in_index_assign`].
+fn rewrite_stmts_in_map_insert(key: &mut IrExpr, value: &mut IrExpr, target: VarId, vt: &mut VarTable, shared: &HashSet<VarId>, changed: &mut bool) {
+    if rewrite_stmts_in_expr(key, vt, shared) { *changed = true; }
+    if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
+    let vty = map_value_ty(&vt.get(target).ty).cloned();
+    if let Some(vt_) = vty {
+        if matches!(&vt_, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &vt_) { *changed = true; }
+    }
 }
 
 fn rewrite_stmts_in_stmt(stmt: &mut IrStmt, vt: &mut VarTable, shared: &HashSet<VarId>, changed: &mut bool) {
@@ -551,26 +617,8 @@ fn rewrite_stmts_in_stmt(stmt: &mut IrStmt, vt: &mut VarTable, shared: &HashSet<
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
             if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
         }
-        IrStmtKind::IndexAssign { index, value, target } => {
-            if rewrite_stmts_in_expr(index, vt, shared) { *changed = true; }
-            if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
-            // `xs[i] = closure` into a `List[Fn]` — box the stored closure.
-            let ety = list_elem_ty(&vt.get(*target).ty).cloned();
-            if let Some(et) = ety {
-                if matches!(&et, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &et) { *changed = true; }
-            }
-        }
-        IrStmtKind::MapInsert { key, value, target } => {
-            if rewrite_stmts_in_expr(key, vt, shared) { *changed = true; }
-            if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
-            // `m[k] = closure` / `m = map.set(m,k,closure)` (lowered to MapInsert)
-            // into a closure-valued map — box the stored closure. The expr-level
-            // boxing pass can't reach a statement value.
-            let vty = map_value_ty(&vt.get(*target).ty).cloned();
-            if let Some(vt_) = vty {
-                if matches!(&vt_, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &vt_) { *changed = true; }
-            }
-        }
+        IrStmtKind::IndexAssign { index, value, target } => rewrite_stmts_in_index_assign(index, value, *target, vt, shared, changed),
+        IrStmtKind::MapInsert { key, value, target } => rewrite_stmts_in_map_insert(key, value, *target, vt, shared, changed),
         IrStmtKind::Guard { cond, else_ } => {
             if rewrite_stmts_in_expr(cond, vt, shared) { *changed = true; }
             if rewrite_stmts_in_expr(else_, vt, shared) { *changed = true; }

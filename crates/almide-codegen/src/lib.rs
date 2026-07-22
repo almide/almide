@@ -556,48 +556,68 @@ fn append_runtime_module_lines(
     let lines: Vec<&str> = stripped.lines().collect();
     let mut i = 0;
     while i < lines.len() {
-        let line = lines[i];
-        let trimmed = line.trim();
-        // Top-level use: not indented and starts with "use "
-        if !line.starts_with(' ') && !line.starts_with('\t')
-            && trimmed.starts_with("use ") && trimmed.ends_with(';')
-        {
-            if use_set.insert(trimmed.to_string()) {
-                use_lines.push(trimmed.to_string());
-            }
-            i += 1;
+        if let Some(next) = try_consume_use_line(&lines, i, use_set, use_lines) {
+            i = next;
             continue;
         }
-        // Detect struct definitions: #[derive(...)] followed by pub struct Name
-        // Skip the block if user_code already contains that struct (walker emitted it).
-        if trimmed.starts_with("#[derive(") {
-            if let Some(next) = lines.get(i + 1) {
-                if let Some(struct_name) = next.trim().strip_prefix("pub struct ")
-                    .and_then(|s| s.split_whitespace().next())
-                    .map(|s| s.trim_end_matches('{').trim())
-                {
-                    let needle = format!("struct {}", struct_name);
-                    if user_code.contains(&needle) {
-                        // Skip derive + struct + fields + closing brace
-                        i += 1; // skip #[derive]
-                        let mut depth = 0u32;
-                        while i < lines.len() {
-                            if lines[i].contains('{') { depth += 1; }
-                            if lines[i].contains('}') {
-                                depth = depth.saturating_sub(1);
-                                if depth == 0 { i += 1; break; }
-                            }
-                            i += 1;
-                        }
-                        continue;
-                    }
-                }
-            }
+        if let Some(next) = try_skip_emitted_struct_block(&lines, i, user_code) {
+            i = next;
+            continue;
         }
-        body_lines.push(line.to_string());
+        body_lines.push(lines[i].to_string());
         i += 1;
     }
     body_lines.push(String::new());
+}
+
+/// Try to consume a top-level `use a::b::X;` line at `lines[i]` (not
+/// indented). On match, records it in `use_set`/`use_lines` (deduped) and
+/// returns the next line index. Extracted from `append_runtime_module_lines`.
+fn try_consume_use_line(
+    lines: &[&str],
+    i: usize,
+    use_set: &mut std::collections::HashSet<String>,
+    use_lines: &mut Vec<String>,
+) -> Option<usize> {
+    let line = lines[i];
+    let trimmed = line.trim();
+    if !line.starts_with(' ') && !line.starts_with('\t')
+        && trimmed.starts_with("use ") && trimmed.ends_with(';')
+    {
+        if use_set.insert(trimmed.to_string()) {
+            use_lines.push(trimmed.to_string());
+        }
+        Some(i + 1)
+    } else {
+        None
+    }
+}
+
+/// Try to consume a `#[derive(...)] pub struct Name { ... }` block starting
+/// at `lines[i]` whose struct `user_code` already contains (the walker
+/// already emitted it). Returns the index right after the closing brace when
+/// the block is skipped. Extracted from `append_runtime_module_lines`.
+fn try_skip_emitted_struct_block(lines: &[&str], i: usize, user_code: &str) -> Option<usize> {
+    let trimmed = lines[i].trim();
+    if !trimmed.starts_with("#[derive(") { return None; }
+    let next = lines.get(i + 1)?;
+    let struct_name = next.trim().strip_prefix("pub struct ")
+        .and_then(|s| s.split_whitespace().next())
+        .map(|s| s.trim_end_matches('{').trim())?;
+    let needle = format!("struct {}", struct_name);
+    if !user_code.contains(&needle) { return None; }
+    // Skip derive + struct + fields + closing brace
+    let mut j = i + 1; // skip #[derive]
+    let mut depth = 0u32;
+    while j < lines.len() {
+        if lines[j].contains('{') { depth += 1; }
+        if lines[j].contains('}') {
+            depth = depth.saturating_sub(1);
+            if depth == 0 { j += 1; break; }
+        }
+        j += 1;
+    }
+    Some(j)
 }
 
 /// Remove single-item `use a::b::X;` lines when a group `use

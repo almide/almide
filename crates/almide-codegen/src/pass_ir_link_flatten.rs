@@ -243,36 +243,76 @@ fn rename_ty(ty: &Ty, map: &HashMap<String, Sym>) -> Ty {
 /// plus the type-bearing fields `map_children` does NOT reach: a `Bind`
 /// statement's declared type, and a struct `Record { … }` literal's ctor name
 /// (re-pinned from the expr's now-mangled struct type).
+/// Rename the declared type of every `Bind` statement in `stmts`. Shared by
+/// the `Block` / `While` / `ForIn` arms of [`rename_expr`] — loop bodies hold
+/// `Vec<IrStmt>` directly (not a Block child), so each needs this same
+/// `let`-binding type-annotation pass. Without it, a `let p = mod.f()` inside
+/// a `while`/`for` keeps the unmangled type name and the walker emits
+/// `let p: P` against the flat struct `almide_rt_mod_P` → E0425
+/// (cross-module record bound in a loop).
+fn rename_bind_tys_in_stmts(stmts: &mut [IrStmt], map: &HashMap<String, Sym>) {
+    for s in stmts.iter_mut() {
+        if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
+            *ty = rename_ty(ty, map);
+        }
+    }
+}
+
+// Lambda params, closure captures, call type-args, and boxing casts carry
+// Tys OUTSIDE expr.ty — the walker renders them verbatim into Rust closure
+// signatures and `as Rc<dyn Fn>` casts, so a missed rename here surfaces as
+// E0425 on the unmangled name (#681: a linked module's record flowing
+// through a fold lambda's `(acc, l)` params). Each of the next three
+// helpers renames one such carrier, for the matching `rename_expr` arm.
+
+fn rename_lambda_param_tys(params: &mut [(VarId, Ty)], map: &HashMap<String, Sym>) {
+    for (_, ty) in params.iter_mut() {
+        *ty = rename_ty(ty, map);
+    }
+}
+
+fn rename_closure_capture_tys(captures: &mut [(VarId, Ty)], map: &HashMap<String, Sym>) {
+    for (_, ty) in captures.iter_mut() {
+        *ty = rename_ty(ty, map);
+    }
+}
+
+fn rename_call_type_args(type_args: &mut [Ty], map: &HashMap<String, Sym>) {
+    for ty in type_args.iter_mut() {
+        *ty = rename_ty(ty, map);
+    }
+}
+
+/// `InlineRust { template, .. }` arm of [`rename_expr`]: a user package's
+/// `@inline_rust` template is raw Rust text that can reference the
+/// package's OWN structs. StdlibLowering requalified those tokens to the
+/// canonical dotted name (`aes.Cfb8State`); mangle them to the flat struct
+/// name here, exactly like every Ty reference. A dotted token cannot occur
+/// in valid Rust, so plain textual replacement is unambiguous — longest
+/// keys first so `m.Cfg` never clips `m.CfgSet`.
+fn rename_inline_rust_template(template: &mut String, map: &HashMap<String, Sym>) {
+    if template.contains('.') {
+        let mut keys: Vec<&String> = map.keys()
+            .filter(|k| template.contains(k.as_str()))
+            .collect();
+        keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
+        for k in keys {
+            *template = template.replace(k.as_str(), map[k].as_str());
+        }
+    }
+}
+
+/// Recursively rewrite every `expr.ty` (and child exprs) through `rename_ty`,
+/// plus the type-bearing fields `map_children` does NOT reach: a `Bind`
+/// statement's declared type, and a struct `Record { … }` literal's ctor name
+/// (re-pinned from the expr's now-mangled struct type).
 fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
     let mut e = e.map_children(&mut |c| rename_expr(c, map));
     e.ty = rename_ty(&e.ty, map);
     match &mut e.kind {
-        IrExprKind::Block { stmts, .. } => {
-            for s in stmts.iter_mut() {
-                if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
-                    *ty = rename_ty(ty, map);
-                }
-            }
-        }
-        // Loop bodies hold `Vec<IrStmt>` directly (not a Block child), so the
-        // Block arm above misses their `let`-binding type annotations. Without
-        // this, a `let p = mod.f()` inside a `while`/`for` keeps the unmangled
-        // type name and the walker emits `let p: P` against the flat struct
-        // `almide_rt_mod_P` → E0425 (cross-module record bound in a loop).
-        IrExprKind::While { body, .. } => {
-            for s in body.iter_mut() {
-                if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
-                    *ty = rename_ty(ty, map);
-                }
-            }
-        }
-        IrExprKind::ForIn { body, .. } => {
-            for s in body.iter_mut() {
-                if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
-                    *ty = rename_ty(ty, map);
-                }
-            }
-        }
+        IrExprKind::Block { stmts, .. } => rename_bind_tys_in_stmts(stmts, map),
+        IrExprKind::While { body, .. } => rename_bind_tys_in_stmts(body, map),
+        IrExprKind::ForIn { body, .. } => rename_bind_tys_in_stmts(body, map),
         IrExprKind::Record { name: Some(n), .. } => {
             // A struct literal carries its (now-qualified) type name as the ctor
             // (`mod.Type`, pinned by lowering); mangle it to the flat struct name.
@@ -280,46 +320,13 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
                 *n = *nn;
             }
         }
-        // Lambda params, closure captures, call type-args, and boxing casts
-        // carry Tys OUTSIDE expr.ty — the walker renders them verbatim into
-        // Rust closure signatures and `as Rc<dyn Fn>` casts, so a missed rename
-        // here surfaces as E0425 on the unmangled name (#681: a linked module's
-        // record flowing through a fold lambda's `(acc, l)` params).
-        IrExprKind::Lambda { params, .. } => {
-            for (_, ty) in params.iter_mut() {
-                *ty = rename_ty(ty, map);
-            }
-        }
-        IrExprKind::ClosureCreate { captures, .. } => {
-            for (_, ty) in captures.iter_mut() {
-                *ty = rename_ty(ty, map);
-            }
-        }
-        IrExprKind::Call { type_args, .. } => {
-            for ty in type_args.iter_mut() {
-                *ty = rename_ty(ty, map);
-            }
-        }
+        IrExprKind::Lambda { params, .. } => rename_lambda_param_tys(params, map),
+        IrExprKind::ClosureCreate { captures, .. } => rename_closure_capture_tys(captures, map),
+        IrExprKind::Call { type_args, .. } => rename_call_type_args(type_args, map),
         IrExprKind::RcWrap { cast_ty: Some(ty), .. } => {
             **ty = rename_ty(ty, map);
         }
-        // A user package's `@inline_rust` template is raw Rust text that can
-        // reference the package's OWN structs. StdlibLowering requalified those
-        // tokens to the canonical dotted name (`aes.Cfb8State`); mangle them to
-        // the flat struct name here, exactly like every Ty reference. A dotted
-        // token cannot occur in valid Rust, so plain textual replacement is
-        // unambiguous — longest keys first so `m.Cfg` never clips `m.CfgSet`.
-        IrExprKind::InlineRust { template, .. } => {
-            if template.contains('.') {
-                let mut keys: Vec<&String> = map.keys()
-                    .filter(|k| template.contains(k.as_str()))
-                    .collect();
-                keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
-                for k in keys {
-                    *template = template.replace(k.as_str(), map[k].as_str());
-                }
-            }
-        }
+        IrExprKind::InlineRust { template, .. } => rename_inline_rust_template(template, map),
         _ => {}
     }
     e

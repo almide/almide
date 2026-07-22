@@ -334,6 +334,65 @@ fn emit_expr(expr: &IrExpr, vt: &VarTable, indent: usize) -> String {
 }
 
 /// Emit an expression as an inline value (no semicolons/returns).
+/// WGSL infix operator spelling for `op`. `BinOp { op, left, right }` arm
+/// of [`emit_expr_inline`].
+fn binop_wgsl_str(op: BinOp) -> &'static str {
+    match op {
+        BinOp::AddInt | BinOp::AddFloat => "+",
+        BinOp::SubInt | BinOp::SubFloat => "-",
+        BinOp::MulInt | BinOp::MulFloat => "*",
+        BinOp::DivInt | BinOp::DivFloat => "/",
+        BinOp::ModInt | BinOp::ModFloat => "%",
+        BinOp::Eq => "==",
+        BinOp::Neq => "!=",
+        BinOp::Lt => "<",
+        BinOp::Lte => "<=",
+        BinOp::Gt => ">",
+        BinOp::Gte => ">=",
+        BinOp::And => "&&",
+        BinOp::Or => "||",
+        _ => "/* unsupported op */",
+    }
+}
+
+/// `Call { target, args, .. }` arm of [`emit_expr_inline`].
+fn emit_expr_inline_call(target: &CallTarget, args: &[IrExpr], vt: &VarTable) -> String {
+    match target {
+        CallTarget::Named { name } => {
+            let arg_strs: Vec<String> = args.iter().map(|a| emit_expr_inline(a, vt)).collect();
+            // Map GPU type constructors to WGSL builtins
+            let wgsl_name = match name.as_str() {
+                "Vec2" => "vec2<f32>",
+                "Vec3" => "vec3<f32>",
+                "Vec4" => "vec4<f32>",
+                "Mat3" => "mat3x3<f32>",
+                "Mat4" => "mat4x4<f32>",
+                other => other,
+            };
+            format!("{}({})", wgsl_name, arg_strs.join(", "))
+        }
+        CallTarget::Module { module, func, .. } => {
+            let m = module.as_str();
+            let f = func.as_str();
+            let arg_strs: Vec<String> = args.iter().map(|a| emit_expr_inline(a, vt)).collect();
+            // Map lumen module calls to WGSL builtins
+            match (m, f) {
+                (_, "new") if m.contains("v2") || m.contains("vec2") => {
+                    format!("vec2<f32>({})", arg_strs.join(", "))
+                }
+                (_, "new") if m.contains("v3") || m.contains("vec3") => {
+                    format!("vec3<f32>({})", arg_strs.join(", "))
+                }
+                (_, "new") if m.contains("v4") || m.contains("vec4") => {
+                    format!("vec4<f32>({})", arg_strs.join(", "))
+                }
+                _ => format!("{}({})", f, arg_strs.join(", ")),
+            }
+        }
+        _ => "/* unknown call */".to_string(),
+    }
+}
+
 fn emit_expr_inline(expr: &IrExpr, vt: &VarTable) -> String {
     match &expr.kind {
         IrExprKind::LitInt { value } => format!("{}", value),
@@ -347,23 +406,7 @@ fn emit_expr_inline(expr: &IrExpr, vt: &VarTable) -> String {
         IrExprKind::BinOp { op, left, right } => {
             let l = emit_expr_inline(left, vt);
             let r = emit_expr_inline(right, vt);
-            let op_str = match op {
-                BinOp::AddInt | BinOp::AddFloat => "+",
-                BinOp::SubInt | BinOp::SubFloat => "-",
-                BinOp::MulInt | BinOp::MulFloat => "*",
-                BinOp::DivInt | BinOp::DivFloat => "/",
-                BinOp::ModInt | BinOp::ModFloat => "%",
-                BinOp::Eq => "==",
-                BinOp::Neq => "!=",
-                BinOp::Lt => "<",
-                BinOp::Lte => "<=",
-                BinOp::Gt => ">",
-                BinOp::Gte => ">=",
-                BinOp::And => "&&",
-                BinOp::Or => "||",
-                _ => "/* unsupported op */",
-            };
-            format!("({} {} {})", l, op_str, r)
+            format!("({} {} {})", l, binop_wgsl_str(*op), r)
         }
 
         IrExprKind::UnOp { op, operand } => {
@@ -406,42 +449,7 @@ fn emit_expr_inline(expr: &IrExpr, vt: &VarTable) -> String {
             )
         }
 
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Named { name } => {
-                    let arg_strs: Vec<String> = args.iter().map(|a| emit_expr_inline(a, vt)).collect();
-                    // Map GPU type constructors to WGSL builtins
-                    let wgsl_name = match name.as_str() {
-                        "Vec2" => "vec2<f32>",
-                        "Vec3" => "vec3<f32>",
-                        "Vec4" => "vec4<f32>",
-                        "Mat3" => "mat3x3<f32>",
-                        "Mat4" => "mat4x4<f32>",
-                        other => other,
-                    };
-                    format!("{}({})", wgsl_name, arg_strs.join(", "))
-                }
-                CallTarget::Module { module, func, .. } => {
-                    let m = module.as_str();
-                    let f = func.as_str();
-                    let arg_strs: Vec<String> = args.iter().map(|a| emit_expr_inline(a, vt)).collect();
-                    // Map lumen module calls to WGSL builtins
-                    match (m, f) {
-                        (_, "new") if m.contains("v2") || m.contains("vec2") => {
-                            format!("vec2<f32>({})", arg_strs.join(", "))
-                        }
-                        (_, "new") if m.contains("v3") || m.contains("vec3") => {
-                            format!("vec3<f32>({})", arg_strs.join(", "))
-                        }
-                        (_, "new") if m.contains("v4") || m.contains("vec4") => {
-                            format!("vec4<f32>({})", arg_strs.join(", "))
-                        }
-                        _ => format!("{}({})", f, arg_strs.join(", ")),
-                    }
-                }
-                _ => "/* unknown call */".to_string(),
-            }
-        }
+        IrExprKind::Call { target, args, .. } => emit_expr_inline_call(target, args, vt),
 
         IrExprKind::If { cond, then, else_ } => {
             format!(

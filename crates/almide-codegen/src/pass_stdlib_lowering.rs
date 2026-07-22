@@ -416,209 +416,224 @@ fn prefix_intra_module_named_calls(program: &mut IrProgram) {
     }
 }
 
+/// `Call { target: Module { module, func, .. }, args, type_args }` arm of
+/// [`rewrite_expr`]. Always returns early — every branch either lowers the
+/// call to a different node or leaves it as a `Module` call — so it never
+/// falls through to the generic `kind = ...` tail.
+fn rewrite_expr_call_module(module: Sym, func: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty: Ty, span: Option<almide_base::Span>) -> IrExpr {
+    // Stage 3c: list operations migrate to bundled `@inline_rust`
+    // like every other module, BUT the Rust target needs the
+    // fused-iterator lowering (`IterChain`) for isolated closure
+    // ops (`list.map(xs, f)` outside a pipe) to stay zero-copy.
+    // `StreamFusionPass` (runs earlier, pipeline-level) already
+    // handles pipe chains; `try_lower_to_iter_chain` is the
+    // fallback for single-call shape. Putting it BEFORE the
+    // `inline_rust_spec` intercept keeps the perf win — if it
+    // declines (non-closure ops like `len`, `push`), we fall
+    // through to the declarative bundled dispatch below.
+    if module.as_ref() == "list" {
+        let args_for_fusion: Vec<IrExpr> = args.iter().cloned()
+            .map(|a| rewrite_expr(a))
+            .collect();
+        if let Some(iter_expr) = try_lower_to_iter_chain(
+            &func, args_for_fusion, &ty, span,
+        ) {
+            return iter_expr;
+        }
+    }
+    // Stdlib Unification Stage 1: if a bundled stdlib fn
+    // declares `@inline_rust("template")`, produce an
+    // InlineRust IR node with the template + param-keyed args.
+    // Bundled wins over the legacy TOML/arg_transforms path.
+    if let Some(spec) = inline_rust_spec(module, func) {
+        let mut rewritten_args: Vec<IrExpr> = args.into_iter()
+            .map(|a| rewrite_expr(a))
+            .collect();
+        // Fill trailing positional args from declared defaults.
+        // Bundled fns like `string.slice(s, start, end = <sentinel>)`
+        // let the caller omit `end`; without this the template
+        // would render with an unreplaced `{end}` placeholder.
+        // The IR-population path carries full `IrExpr` defaults
+        // from the lowered bundled module; the source-parse
+        // fallback only supports simple literals — anything
+        // else is `None` and leaves the arg unfilled (the same
+        // failure mode as before this carve-out).
+        if rewritten_args.len() < spec.param_names.len() {
+            for default in spec.defaults.iter().skip(rewritten_args.len()) {
+                if let Some(d) = default {
+                    rewritten_args.push(d.clone());
+                } else {
+                    break;
+                }
+            }
+        }
+        // Pair each rewritten arg with the matching param name.
+        // Strip pre-inserted Clone / Borrow / ToVec / BoxNew /
+        // RcWrap wrappers ONLY when the template references
+        // the parameter with an explicit borrow sigil
+        // (`&{b}`, `&mut {b}`, `&*{b}`). In that case the
+        // template owns reference semantics and the wrapper
+        // would produce `&mut b.clone()` — mutation on a
+        // temp, silently dropped. Elsewhere (by-value params
+        // like `value.field(v, key)` that take `Value` owned
+        // and reuse `v` across several `?`-propagating calls
+        // after the codec derive), keep the wrappers so the
+        // clone-insertion pass's ownership plumbing works.
+        let paired: Vec<(Sym, IrExpr)> = spec.param_names.iter()
+            .zip(rewritten_args.into_iter())
+            .map(|(n, a)| {
+                let a = if template_wants_reference(&spec.template, n.as_str()) {
+                    strip_arg_decorations(a)
+                } else {
+                    a
+                };
+                // Stage 3: a literal Lambda arg to a bundled
+                // stdlib fn needs the same clone-binding
+                // treatment as the TOML path's `ArgTransform::
+                // LambdaClone` — otherwise a captured var used
+                // twice inside the lambda body produces a
+                // move-after-move in the generated closure.
+                // `prepare_lambda` is a no-op on non-Lambda
+                // args, so this is safe for non-closure params.
+                let a = prepare_lambda(a);
+                (*n, a)
+            })
+            .collect();
+        return IrExpr {
+            kind: IrExprKind::InlineRust { template: spec.template, args: paired },
+            ty,
+            span, def_id: None,
+        };
+    }
+
+    // Modules without @inline_rust (user packages without native,
+    // bundled-only stdlib fns): leave as Module calls, rendered by
+    // walker directly.
+    let is_stdlib = almide_lang::stdlib_info::is_stdlib_module(&module);
+    let has_inline = inline_rust_spec(module, func).is_some();
+    if (!is_stdlib && !has_inline) || is_bundled_only(module, func) {
+        let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
+        return IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Module { module, func, def_id: None },
+                args,
+                type_args,
+            },
+            ty,
+            span, def_id: None,
+        };
+    }
+
+    // Recurse into args first (fan auto-try is handled by FanLoweringPass)
+    let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
+
+    // Try to lower list operations to iterator chains (Rust-only optimization)
+    if module.as_ref() == "list" {
+        if let Some(iter_expr) = try_lower_to_iter_chain(&func, args.clone(), &ty, span) {
+            return iter_expr;
+        }
+    }
+
+    // Inline math/float/int intrinsics as native Rust expressions
+    if let Some(inlined) = try_inline_intrinsic(&module, &func, &args, &ty, span) {
+        return inlined;
+    }
+
+    // Post Stdlib Declarative Unification every stdlib module
+    // flows through the `@inline_rust` dispatch above. Any
+    // Module call that reaches here is either a user module
+    // (already returned at the `is_bundled_only` branch) or a
+    // stale alias that should remain visible to the walker.
+    IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module { module, func, def_id: None },
+            args,
+            type_args,
+        },
+        ty,
+        span, def_id: None,
+    }
+}
+
+/// `Call { target, args, type_args }` arm of [`rewrite_expr`] (any target
+/// other than `Module`). Builds and returns the full [`IrExpr`] itself
+/// (rather than yielding an `IrExprKind` for the caller to wrap) because the
+/// UFCS branches need to bypass the generic wrap and return an already
+/// fully-rewritten node.
+fn rewrite_expr_call_other(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<Ty>, ty: Ty, span: Option<almide_base::Span>) -> IrExpr {
+    let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
+    let target = match target {
+        CallTarget::Method { object, method } => {
+            let object = Box::new(rewrite_expr(*object));
+            // Fallback: bare method (no dot) on known type → convert to Module call
+            if !method.contains('.') {
+                if let Some(module) = resolve_module_from_ty(&object.ty, &method) {
+                    let mut call_args = vec![*object];
+                    call_args.extend(args);
+                    let module_call = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module { module: module.to_string().into(), func: method, def_id: None },
+                            args: call_args, type_args,
+                        },
+                        ty: ty.clone(), span, def_id: None,
+                    };
+                    return rewrite_expr(module_call);
+                }
+            }
+            // UFCS: "module.func" method → convert to Module call and process
+            // Accept stdlib fns from two sources:
+            //   1. TOML-backed `arg_transforms` table (legacy path)
+            //   2. Bundled `@inline_rust` stdlib fns (Stdlib Declarative
+            //      Unification Stage 2+) — the INLINE_RUST registry built
+            //      at the top of `run`. Without this branch, deleting a
+            //      fn's TOML entry after migrating it to bundled would
+            //      drop UFCS dispatch (`42.to_string()`) back into the
+            //      BuiltinLoweringPass Method fallback.
+            if method.contains('.') && !method.ends_with(".encode") && !method.ends_with(".decode") {
+                let dot_pos = method.find('.').unwrap();
+                let (mod_name, func_name) = (&method[..dot_pos], &method[dot_pos+1..]);
+                let mod_sym = almide_base::intern::sym(mod_name);
+                let func_sym = almide_base::intern::sym(func_name);
+                let is_bundled_inline_rust = INLINE_RUST.with(|s| s.borrow().contains_key(&(mod_sym, func_sym)));
+                if !is_bundled_inline_rust {
+                        // Not a stdlib function — leave as Method call for BuiltinLoweringPass
+                        return IrExpr { kind: IrExprKind::Call {
+                            target: CallTarget::Method { object, method },
+                            args, type_args,
+                        }, ty, span, def_id: None };
+                    }
+                let mut call_args = vec![*object];
+                call_args.extend(args);
+                let module_call = IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Module { module: mod_name.into(), func: func_name.into(), def_id: None },
+                        args: call_args, type_args,
+                    },
+                    ty: ty.clone(), span, def_id: None,
+                };
+                return rewrite_expr(module_call);
+            }
+            CallTarget::Method { object, method }
+        }
+        CallTarget::Computed { callee } => CallTarget::Computed {
+            callee: Box::new(rewrite_expr(*callee)),
+        },
+        other => other,
+    };
+    IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty, span, def_id: None }
+}
+
 fn rewrite_expr(expr: IrExpr) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
 
     let kind = match expr.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, type_args } => {
-            // Stage 3c: list operations migrate to bundled `@inline_rust`
-            // like every other module, BUT the Rust target needs the
-            // fused-iterator lowering (`IterChain`) for isolated closure
-            // ops (`list.map(xs, f)` outside a pipe) to stay zero-copy.
-            // `StreamFusionPass` (runs earlier, pipeline-level) already
-            // handles pipe chains; `try_lower_to_iter_chain` is the
-            // fallback for single-call shape. Putting it BEFORE the
-            // `inline_rust_spec` intercept keeps the perf win — if it
-            // declines (non-closure ops like `len`, `push`), we fall
-            // through to the declarative bundled dispatch below.
-            if module.as_ref() == "list" {
-                let args_for_fusion: Vec<IrExpr> = args.iter().cloned()
-                    .map(|a| rewrite_expr(a))
-                    .collect();
-                if let Some(iter_expr) = try_lower_to_iter_chain(
-                    &func, args_for_fusion, &ty, span,
-                ) {
-                    return iter_expr;
-                }
-            }
-            // Stdlib Unification Stage 1: if a bundled stdlib fn
-            // declares `@inline_rust("template")`, produce an
-            // InlineRust IR node with the template + param-keyed args.
-            // Bundled wins over the legacy TOML/arg_transforms path.
-            if let Some(spec) = inline_rust_spec(module, func) {
-                let mut rewritten_args: Vec<IrExpr> = args.into_iter()
-                    .map(|a| rewrite_expr(a))
-                    .collect();
-                // Fill trailing positional args from declared defaults.
-                // Bundled fns like `string.slice(s, start, end = <sentinel>)`
-                // let the caller omit `end`; without this the template
-                // would render with an unreplaced `{end}` placeholder.
-                // The IR-population path carries full `IrExpr` defaults
-                // from the lowered bundled module; the source-parse
-                // fallback only supports simple literals — anything
-                // else is `None` and leaves the arg unfilled (the same
-                // failure mode as before this carve-out).
-                if rewritten_args.len() < spec.param_names.len() {
-                    for default in spec.defaults.iter().skip(rewritten_args.len()) {
-                        if let Some(d) = default {
-                            rewritten_args.push(d.clone());
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                // Pair each rewritten arg with the matching param name.
-                // Strip pre-inserted Clone / Borrow / ToVec / BoxNew /
-                // RcWrap wrappers ONLY when the template references
-                // the parameter with an explicit borrow sigil
-                // (`&{b}`, `&mut {b}`, `&*{b}`). In that case the
-                // template owns reference semantics and the wrapper
-                // would produce `&mut b.clone()` — mutation on a
-                // temp, silently dropped. Elsewhere (by-value params
-                // like `value.field(v, key)` that take `Value` owned
-                // and reuse `v` across several `?`-propagating calls
-                // after the codec derive), keep the wrappers so the
-                // clone-insertion pass's ownership plumbing works.
-                let paired: Vec<(Sym, IrExpr)> = spec.param_names.iter()
-                    .zip(rewritten_args.into_iter())
-                    .map(|(n, a)| {
-                        let a = if template_wants_reference(&spec.template, n.as_str()) {
-                            strip_arg_decorations(a)
-                        } else {
-                            a
-                        };
-                        // Stage 3: a literal Lambda arg to a bundled
-                        // stdlib fn needs the same clone-binding
-                        // treatment as the TOML path's `ArgTransform::
-                        // LambdaClone` — otherwise a captured var used
-                        // twice inside the lambda body produces a
-                        // move-after-move in the generated closure.
-                        // `prepare_lambda` is a no-op on non-Lambda
-                        // args, so this is safe for non-closure params.
-                        let a = prepare_lambda(a);
-                        (*n, a)
-                    })
-                    .collect();
-                return IrExpr {
-                    kind: IrExprKind::InlineRust { template: spec.template, args: paired },
-                    ty,
-                    span, def_id: None,
-                };
-            }
-
-            // Modules without @inline_rust (user packages without native,
-            // bundled-only stdlib fns): leave as Module calls, rendered by
-            // walker directly.
-            let is_stdlib = almide_lang::stdlib_info::is_stdlib_module(&module);
-            let has_inline = inline_rust_spec(module, func).is_some();
-            if (!is_stdlib && !has_inline) || is_bundled_only(module, func) {
-                let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
-                return IrExpr {
-                    kind: IrExprKind::Call {
-                        target: CallTarget::Module { module, func, def_id: None },
-                        args,
-                        type_args,
-                    },
-                    ty,
-                    span, def_id: None,
-                };
-            }
-
-            // Recurse into args first (fan auto-try is handled by FanLoweringPass)
-            let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
-
-            // Try to lower list operations to iterator chains (Rust-only optimization)
-            if module.as_ref() == "list" {
-                if let Some(iter_expr) = try_lower_to_iter_chain(&func, args.clone(), &ty, span) {
-                    return iter_expr;
-                }
-            }
-
-            // Inline math/float/int intrinsics as native Rust expressions
-            if let Some(inlined) = try_inline_intrinsic(&module, &func, &args, &ty, span) {
-                return inlined;
-            }
-
-            // Post Stdlib Declarative Unification every stdlib module
-            // flows through the `@inline_rust` dispatch above. Any
-            // Module call that reaches here is either a user module
-            // (already returned at the `is_bundled_only` branch) or a
-            // stale alias that should remain visible to the walker.
-            return IrExpr {
-                kind: IrExprKind::Call {
-                    target: CallTarget::Module { module, func, def_id: None },
-                    args,
-                    type_args,
-                },
-                ty,
-                span, def_id: None,
-            };
-        }
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, type_args } =>
+            return rewrite_expr_call_module(module, func, args, type_args, ty, span),
 
         // Recurse into all sub-expressions (same as before)
-        IrExprKind::Call { target, args, type_args } => {
-            let args = args.into_iter().map(|a| rewrite_expr(a)).collect();
-            let target = match target {
-                CallTarget::Method { object, method } => {
-                    let object = Box::new(rewrite_expr(*object));
-                    // Fallback: bare method (no dot) on known type → convert to Module call
-                    if !method.contains('.') {
-                        if let Some(module) = resolve_module_from_ty(&object.ty, &method) {
-                            let mut call_args = vec![*object];
-                            call_args.extend(args);
-                            let module_call = IrExpr {
-                                kind: IrExprKind::Call {
-                                    target: CallTarget::Module { module: module.to_string().into(), func: method, def_id: None },
-                                    args: call_args, type_args,
-                                },
-                                ty: ty.clone(), span, def_id: None,
-                            };
-                            return rewrite_expr(module_call);
-                        }
-                    }
-                    // UFCS: "module.func" method → convert to Module call and process
-                    // Accept stdlib fns from two sources:
-                    //   1. TOML-backed `arg_transforms` table (legacy path)
-                    //   2. Bundled `@inline_rust` stdlib fns (Stdlib Declarative
-                    //      Unification Stage 2+) — the INLINE_RUST registry built
-                    //      at the top of `run`. Without this branch, deleting a
-                    //      fn's TOML entry after migrating it to bundled would
-                    //      drop UFCS dispatch (`42.to_string()`) back into the
-                    //      BuiltinLoweringPass Method fallback.
-                    if method.contains('.') && !method.ends_with(".encode") && !method.ends_with(".decode") {
-                        let dot_pos = method.find('.').unwrap();
-                        let (mod_name, func_name) = (&method[..dot_pos], &method[dot_pos+1..]);
-                        let mod_sym = almide_base::intern::sym(mod_name);
-                        let func_sym = almide_base::intern::sym(func_name);
-                        let is_bundled_inline_rust = INLINE_RUST.with(|s| s.borrow().contains_key(&(mod_sym, func_sym)));
-                        if !is_bundled_inline_rust {
-                                // Not a stdlib function — leave as Method call for BuiltinLoweringPass
-                                return IrExpr { kind: IrExprKind::Call {
-                                    target: CallTarget::Method { object, method },
-                                    args, type_args,
-                                }, ty, span, def_id: None };
-                            }
-                        let mut call_args = vec![*object];
-                        call_args.extend(args);
-                        let module_call = IrExpr {
-                            kind: IrExprKind::Call {
-                                target: CallTarget::Module { module: mod_name.into(), func: func_name.into(), def_id: None },
-                                args: call_args, type_args,
-                            },
-                            ty: ty.clone(), span, def_id: None,
-                        };
-                        return rewrite_expr(module_call);
-                    }
-                    CallTarget::Method { object, method }
-                }
-                CallTarget::Computed { callee } => CallTarget::Computed {
-                    callee: Box::new(rewrite_expr(*callee)),
-                },
-                other => other,
-            };
-            IrExprKind::Call { target, args, type_args }
-        }
+        IrExprKind::Call { target, args, type_args } =>
+            return rewrite_expr_call_other(target, args, type_args, ty, span),
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: Box::new(rewrite_expr(*cond)),
             then: Box::new(rewrite_expr(*then)),

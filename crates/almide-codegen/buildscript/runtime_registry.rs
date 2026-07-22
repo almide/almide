@@ -108,64 +108,78 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) {
     }
     rust_out.push_str("];\n");
 
-    // ── Embed the almide-kernel crate as an inlinable `mod almide_kernel` ──
-    // runtime/rs/src/matrix.rs calls `almide_kernel::…` for the SIMD hot paths, but
-    // the `almide test`/`almide build` fast paths compile the runtime as a single
-    // crate (rlib or inlined) with no `almide_kernel` extern — so matrix specs failed
-    // to resolve the crate. Embed the kernel source so emit_runtime_crate / emit_source
-    // can drop it in as a crate-local module wherever `matrix` is used; no extern, no
-    // rlib plumbing, and the cargo path gets it for free too.
-    //
-    // Kernel modules reference siblings via `crate::silu` etc.; wrapped one level deep
-    // under `mod almide_kernel`, that sibling path is `super::silu`, so rewrite
-    // `crate::` → `super::`. Test blocks are stripped — the runtime is built with
-    // `--test`, so the kernel's own `#[cfg(test)]` would otherwise run inside every spec.
-    let kernel_dir = workspace_root.join("crates/almide-kernel/src");
-    let kernel_inline = if kernel_dir.exists() {
-        let lib = fs::read_to_string(kernel_dir.join("lib.rs")).unwrap_or_default();
-        let mut mods: Vec<String> = lib
-            .lines()
-            .filter_map(|l| l.trim().strip_prefix("pub mod ").and_then(|s| s.strip_suffix(';')))
-            .map(|s| s.trim().to_string())
-            .collect();
-        mods.sort();
-        let mut inline = String::new();
-        inline.push_str("#[allow(dead_code, unused_imports, unused_variables, unused_parens, unused_mut, non_snake_case, clippy::all)]\nmod almide_kernel {\n");
-        for m in &mods {
-            // `bridge` is the kernel's STANDALONE bench/ABI-glue module, written against
-            // the pre-0.28 nested `Vec<Vec<f64>>` matrix; nothing in the runtime calls
-            // `bridge::` (matrix.rs calls the kernels directly on the flat struct).
-            // Embedding it shipped a second, stale `AlmideMatrix` into every generated
-            // matrix crate — and its alias line was the exact marker the old burn
-            // splicer keyed on, so the splicer fired INSIDE the bridge and produced
-            // invalid Rust (#739). Kernel compute modules only.
-            if m == "bridge" {
-                continue;
-            }
-            if let Ok(src) = fs::read_to_string(kernel_dir.join(format!("{m}.rs"))) {
-                let body = strip_test_blocks(&src).replace("crate::", "super::");
-                inline.push_str(&format!("pub mod {m} {{\n{body}\n}}\n"));
-            }
-        }
-        inline.push_str("}\n");
-        println!("cargo:rerun-if-changed={}", kernel_dir.display());
-        inline
-    } else {
-        String::new()
-    };
     rust_out.push_str("\n/// almide-kernel embedded as an inlinable `mod almide_kernel`, dropped into the\n");
     rust_out.push_str("/// runtime source wherever the `matrix` module is used (see emit_runtime_crate).\n");
+    let kernel_inline = build_kernel_inline(workspace_root);
     rust_out.push_str(&format!("pub const ALMIDE_KERNEL_INLINE: &str = {kernel_inline:?};\n"));
 
     fs::write(out_dir.join("rust_runtime.rs"), &rust_out).unwrap();
 
-    // Auto-extract the runtime helpers whose LAST positional parameter is a generic
-    // `F: Fn(...)` element fn (the value codec combinators — encode/decode list,
-    // option, …). Their fn argument must stay a raw `impl Fn`, NOT the uniform
-    // `Rc<dyn Fn>` closure value. Derived from the signatures themselves (no
-    // hand-maintained allow-list) so a new codec combinator needs no codegen edit.
+    write_runtime_fn_modes(&rust_entries, out_dir);
+
+    println!("cargo:rerun-if-changed={}", rust_dir.display());
+}
+
+/// Embed the almide-kernel crate as an inlinable `mod almide_kernel`.
+/// `runtime/rs/src/matrix.rs` calls `almide_kernel::…` for the SIMD hot
+/// paths, but the `almide test`/`almide build` fast paths compile the
+/// runtime as a single crate (rlib or inlined) with no `almide_kernel`
+/// extern — so matrix specs failed to resolve the crate. Embed the kernel
+/// source so emit_runtime_crate / emit_source can drop it in as a
+/// crate-local module wherever `matrix` is used; no extern, no rlib
+/// plumbing, and the cargo path gets it for free too.
+///
+/// Kernel modules reference siblings via `crate::silu` etc.; wrapped one
+/// level deep under `mod almide_kernel`, that sibling path is
+/// `super::silu`, so rewrite `crate::` → `super::`. Test blocks are
+/// stripped — the runtime is built with `--test`, so the kernel's own
+/// `#[cfg(test)]` would otherwise run inside every spec. Extracted from
+/// `generate` (cog>25 decomposition).
+fn build_kernel_inline(workspace_root: &Path) -> String {
+    let kernel_dir = workspace_root.join("crates/almide-kernel/src");
+    if !kernel_dir.exists() {
+        return String::new();
+    }
+    let lib = fs::read_to_string(kernel_dir.join("lib.rs")).unwrap_or_default();
+    let mut mods: Vec<String> = lib
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("pub mod ").and_then(|s| s.strip_suffix(';')))
+        .map(|s| s.trim().to_string())
+        .collect();
+    mods.sort();
+    let mut inline = String::new();
+    inline.push_str("#[allow(dead_code, unused_imports, unused_variables, unused_parens, unused_mut, non_snake_case, clippy::all)]\nmod almide_kernel {\n");
+    for m in &mods {
+        // `bridge` is the kernel's STANDALONE bench/ABI-glue module, written against
+        // the pre-0.28 nested `Vec<Vec<f64>>` matrix; nothing in the runtime calls
+        // `bridge::` (matrix.rs calls the kernels directly on the flat struct).
+        // Embedding it shipped a second, stale `AlmideMatrix` into every generated
+        // matrix crate — and its alias line was the exact marker the old burn
+        // splicer keyed on, so the splicer fired INSIDE the bridge and produced
+        // invalid Rust (#739). Kernel compute modules only.
+        if m == "bridge" {
+            continue;
+        }
+        if let Ok(src) = fs::read_to_string(kernel_dir.join(format!("{m}.rs"))) {
+            let body = strip_test_blocks(&src).replace("crate::", "super::");
+            inline.push_str(&format!("pub mod {m} {{\n{body}\n}}\n"));
+        }
+    }
+    inline.push_str("}\n");
+    println!("cargo:rerun-if-changed={}", kernel_dir.display());
+    inline
+}
+
+/// Auto-extract the runtime helpers whose LAST positional parameter is a
+/// generic `F: Fn(...)` element fn (the value codec combinators —
+/// encode/decode list, option, …), and write `runtime_fn_modes.rs`. Their
+/// fn argument must stay a raw `impl Fn`, NOT the uniform `Rc<dyn Fn>`
+/// closure value. Derived from the signatures themselves (no
+/// hand-maintained allow-list) so a new codec combinator needs no codegen
+/// edit. Extracted from `generate` (cog>25 decomposition).
+fn write_runtime_fn_modes(rust_entries: &[fs::DirEntry], out_dir: &Path) {
     let mut raw_fn_helpers: Vec<String> = Vec::new();
-    for entry in &rust_entries {
+    for entry in rust_entries {
         let content = read_with_includes(&entry.path());
         raw_fn_helpers.extend(extract_raw_fn_last_arg_helpers(&content));
     }
@@ -189,8 +203,6 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) {
     }
     modes_out.push_str("}\n");
     fs::write(out_dir.join("runtime_fn_modes.rs"), &modes_out).unwrap();
-
-    println!("cargo:rerun-if-changed={}", rust_dir.display());
 }
 
 /// Names of `pub fn`s whose declared generics include a `<G>: Fn(...)` bound and
