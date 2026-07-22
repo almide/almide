@@ -143,106 +143,7 @@ pub fn build_import_table(
     let mut canonical_to_alias: HashMap<String, String> = HashMap::new();
 
     for imp in &prog.imports {
-        let (path, alias, names, span) = match imp {
-            ast::Decl::Import { path, alias, names, span } => (path, alias, names, span),
-            _ => continue,
-        };
-
-        // 1. Build canonical name
-        let mut canonical = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-        let is_self = path.first().map(|s| s.as_str()) == Some("self");
-
-        // 2. Resolve self → module name as registered by resolve
-        //
-        // Resolver registration is asymmetric:
-        //   - Project's own self-loaded modules → leaf names ("openai")
-        //   - Dependency packages' submodules  → FQN ("almai.providers.openai")
-        //
-        // Prefer FQN when registered (dep context), fall back to leaf
-        // for the project's own self-loaded modules. This keeps both
-        // working without requiring callers to know which context applies.
-        if is_self {
-            if path.len() == 1 {
-                // import self → package root name
-                if let Some(mod_name) = module_name {
-                    canonical = mod_name.to_string();
-                }
-            } else {
-                // import self.a.b → prefer "<module>.a.b" if registered, else "b"
-                let leaf = path.last().unwrap().to_string();
-                let fqn = if let Some(mod_name) = module_name {
-                    let suffix = path[1..].iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-                    format!("{}.{}", mod_name, suffix)
-                } else {
-                    leaf.clone()
-                };
-                canonical = if user_modules.contains(&sym(&fqn)) {
-                    fqn
-                } else {
-                    leaf
-                };
-            }
-        }
-
-        // 3. Determine used name (what the programmer writes to call functions)
-        let used_name = if let Some(a) = alias {
-            a.to_string()
-        } else if path.len() > 1 {
-            // Go-style: last segment is the namespace
-            path.last().unwrap().to_string()
-        } else if is_self {
-            // import self → use the resolved package name
-            canonical.split('.').last().unwrap_or(&canonical).to_string()
-        } else {
-            path.last().unwrap().to_string()
-        };
-
-        // 4. Collision detection: same used_name for different canonicals → error
-        if let Some(existing) = alias_to_canonical.get(&used_name) {
-            if existing != &canonical {
-                diagnostics.push(Diagnostic::error(
-                    format!("ambiguous import: '{}' could refer to '{}' or '{}'", used_name, existing, canonical),
-                    format!("Use `import {} as <alias>` to disambiguate", canonical),
-                    format!("import at line {}", span.as_ref().map(|s| s.line).unwrap_or(0)),
-                ));
-                continue;
-            }
-        }
-
-        // 5. Duplicate detection: same canonical imported twice → warning
-        if let Some(existing_alias) = canonical_to_alias.get(&canonical) {
-            if existing_alias != &used_name {
-                diagnostics.push(Diagnostic::warning(
-                    format!("module '{}' is already imported as '{}'", canonical, existing_alias),
-                    "Remove the duplicate import".to_string(),
-                    format!("import at line {}", span.as_ref().map(|s| s.line).unwrap_or(0)),
-                ));
-            }
-        }
-
-        // 6. Register
-        alias_to_canonical.insert(used_name.clone(), canonical.clone());
-        canonical_to_alias.entry(canonical.clone()).or_insert_with(|| used_name.clone());
-        table.aliases.insert(sym(&used_name), sym(&canonical));
-        table.accessible.insert(sym(&canonical));
-
-        // 7. Stdlib detection
-        if crate::stdlib::is_any_stdlib(&used_name) {
-            table.stdlib.insert(sym(&used_name));
-        }
-        // Also check canonical for multi-segment stdlib (unlikely but safe)
-        let first_segment = path.first().map(|s| s.as_str()).unwrap_or("");
-        if crate::stdlib::is_any_stdlib(first_segment) && !is_self {
-            table.stdlib.insert(sym(first_segment));
-        }
-
-        // 8. Selective import: register each name → canonical module mapping.
-        // Lets bare calls `from_string(x)` resolve to `json.from_string(x)`.
-        if let Some(name_list) = names {
-            for n in name_list {
-                table.direct.insert(*n, sym(&canonical));
-            }
-        }
+        build_import_table_process_import(imp, module_name, user_modules, &mut table, &mut diagnostics, &mut alias_to_canonical, &mut canonical_to_alias);
     }
 
     // Also register Tier 1 auto-imports from bundled modules
@@ -251,4 +152,122 @@ pub fn build_import_table(
     }
 
     (table, diagnostics)
+}
+
+/// Process one `import` declaration into `table`/`diagnostics`: canonical-name
+/// resolution (with `import self` special-casing), used-name derivation,
+/// ambiguous/duplicate-import diagnostics, and stdlib/selective-import
+/// registration. Verbatim text move of the loop body out of
+/// [`build_import_table`]; a `continue` in the original loop becomes an
+/// early `return` here (both simply skip the rest of this import and move
+/// on to the next one).
+fn build_import_table_process_import(
+    imp: &ast::Decl,
+    module_name: Option<&str>,
+    user_modules: &HashSet<Sym>,
+    table: &mut ImportTable,
+    diagnostics: &mut Vec<Diagnostic>,
+    alias_to_canonical: &mut HashMap<String, String>,
+    canonical_to_alias: &mut HashMap<String, String>,
+) {
+    let (path, alias, names, span) = match imp {
+        ast::Decl::Import { path, alias, names, span } => (path, alias, names, span),
+        _ => return,
+    };
+
+    // 1. Build canonical name
+    let mut canonical = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+    let is_self = path.first().map(|s| s.as_str()) == Some("self");
+
+    // 2. Resolve self → module name as registered by resolve
+    //
+    // Resolver registration is asymmetric:
+    //   - Project's own self-loaded modules → leaf names ("openai")
+    //   - Dependency packages' submodules  → FQN ("almai.providers.openai")
+    //
+    // Prefer FQN when registered (dep context), fall back to leaf
+    // for the project's own self-loaded modules. This keeps both
+    // working without requiring callers to know which context applies.
+    if is_self {
+        if path.len() == 1 {
+            // import self → package root name
+            if let Some(mod_name) = module_name {
+                canonical = mod_name.to_string();
+            }
+        } else {
+            // import self.a.b → prefer "<module>.a.b" if registered, else "b"
+            let leaf = path.last().unwrap().to_string();
+            let fqn = if let Some(mod_name) = module_name {
+                let suffix = path[1..].iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+                format!("{}.{}", mod_name, suffix)
+            } else {
+                leaf.clone()
+            };
+            canonical = if user_modules.contains(&sym(&fqn)) {
+                fqn
+            } else {
+                leaf
+            };
+        }
+    }
+
+    // 3. Determine used name (what the programmer writes to call functions)
+    let used_name = if let Some(a) = alias {
+        a.to_string()
+    } else if path.len() > 1 {
+        // Go-style: last segment is the namespace
+        path.last().unwrap().to_string()
+    } else if is_self {
+        // import self → use the resolved package name
+        canonical.split('.').last().unwrap_or(&canonical).to_string()
+    } else {
+        path.last().unwrap().to_string()
+    };
+
+    // 4. Collision detection: same used_name for different canonicals → error
+    if let Some(existing) = alias_to_canonical.get(&used_name) {
+        if existing != &canonical {
+            diagnostics.push(Diagnostic::error(
+                format!("ambiguous import: '{}' could refer to '{}' or '{}'", used_name, existing, canonical),
+                format!("Use `import {} as <alias>` to disambiguate", canonical),
+                format!("import at line {}", span.as_ref().map(|s| s.line).unwrap_or(0)),
+            ));
+            return;
+        }
+    }
+
+    // 5. Duplicate detection: same canonical imported twice → warning
+    if let Some(existing_alias) = canonical_to_alias.get(&canonical) {
+        if existing_alias != &used_name {
+            diagnostics.push(Diagnostic::warning(
+                format!("module '{}' is already imported as '{}'", canonical, existing_alias),
+                "Remove the duplicate import".to_string(),
+                format!("import at line {}", span.as_ref().map(|s| s.line).unwrap_or(0)),
+            ));
+        }
+    }
+
+    // 6. Register
+    alias_to_canonical.insert(used_name.clone(), canonical.clone());
+    canonical_to_alias.entry(canonical.clone()).or_insert_with(|| used_name.clone());
+    table.aliases.insert(sym(&used_name), sym(&canonical));
+    table.accessible.insert(sym(&canonical));
+
+    // 7. Stdlib detection
+    if crate::stdlib::is_any_stdlib(&used_name) {
+        table.stdlib.insert(sym(&used_name));
+    }
+    // Also check canonical for multi-segment stdlib (unlikely but safe)
+    let first_segment = path.first().map(|s| s.as_str()).unwrap_or("");
+    if crate::stdlib::is_any_stdlib(first_segment) && !is_self {
+        table.stdlib.insert(sym(first_segment));
+    }
+
+    // 8. Selective import: register each name → canonical module mapping.
+    // Lets bare calls `from_string(x)` resolve to `json.from_string(x)`.
+    if let Some(name_list) = names {
+        for n in name_list {
+            table.direct.insert(*n, sym(&canonical));
+        }
+    }
 }
