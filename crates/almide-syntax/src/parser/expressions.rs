@@ -203,97 +203,7 @@ impl Parser {
         let mut expr = self.parse_primary()?;
         loop {
             if self.check(TokenType::Dot) {
-                let dot_span = self.current_span();
-                self.advance();
-                if self.check(TokenType::Int) {
-                    let idx_str = self.current().value.clone();
-                    self.advance();
-                    let index = idx_str.parse::<usize>().map_err(|_| {
-                        format!("invalid tuple index '{}' at line {:?}", idx_str, dot_span)
-                    })?;
-                    expr = Expr::new(self.next_id(), Some(dot_span), ExprKind::TupleIndex {
-                        object: Box::new(expr), index,
-                    });
-                } else {
-                    // Capture the field's token span BEFORE `expect_any_name`
-                    // advances past it. The Member's span then covers the
-                    // full `object.field` — from the object's starting
-                    // column to the field token's end column (same-line
-                    // assumption: Almide's lexer never emits a Dot across
-                    // lines, since `.` before a newline is a syntax error).
-                    // This precise span powers E002's `try_replace` for
-                    // rename suggestions like `string.length` → `string.len`.
-                    let field_span = self.current_span();
-                    let field = self.expect_any_name()?;
-                    let full_span = match expr.span {
-                        Some(obj_span) if obj_span.line == field_span.line => Span {
-                            line: field_span.line,
-                            col: obj_span.col,
-                            end_col: field_span.end_col,
-                        },
-                        _ => field_span,
-                    };
-                    // Module-qualified record literal: module.TypeName { field: value }
-                    // Detected when: the object is an Ident, the field starts with
-                    // uppercase, and the next token is { followed by ident: (record pattern)
-                    let is_qualified_record = field.as_str().starts_with(char::is_uppercase)
-                        && matches!(&expr.kind, ExprKind::Ident { .. })
-                        && self.peek_named_record();
-                    if is_qualified_record {
-                        // Compose the qualified name: "module.TypeName"
-                        let module_name = match &expr.kind {
-                            ExprKind::Ident { name } => name.as_str().to_string(),
-                            _ => String::new(),
-                        };
-                        let qualified = sym(&format!("{}.{}", module_name, field));
-                        let open_rec = self.current().clone();
-                        self.advance(); // skip {
-                        self.skip_newlines();
-                        if self.check(TokenType::DotDotDot) {
-                            self.advance();
-                            let base = self.parse_expr()?;
-                            let mut fields = Vec::new();
-                            while self.check(TokenType::Comma) {
-                                self.advance(); self.skip_newlines();
-                                if self.check(TokenType::RBrace) { break; }
-                                let fname = self.expect_any_name()?;
-                                self.expect(TokenType::Colon)?;
-                                self.skip_newlines();
-                                let fval = self.parse_expr()?;
-                                fields.push(FieldInit { name: fname, value: fval });
-                            }
-                            self.skip_newlines();
-                            self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "spread record")?;
-                            expr = Expr::new(self.next_id(), Some(full_span), ExprKind::SpreadRecord {
-                                base: Box::new(base), fields,
-                            });
-                        } else {
-                            let mut fields = Vec::new();
-                            while !self.check(TokenType::RBrace) {
-                                self.skip_newlines();
-                                let fname = self.expect_any_name()?;
-                                if self.check(TokenType::Colon) {
-                                    self.advance(); self.skip_newlines();
-                                    let fval = self.parse_expr()?;
-                                    fields.push(FieldInit { name: fname, value: fval });
-                                } else {
-                                    fields.push(FieldInit {
-                                        name: fname.clone(),
-                                        value: Expr::new(self.next_id(), None, ExprKind::Ident { name: fname }),
-                                    });
-                                }
-                                self.skip_newlines();
-                                if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
-                            }
-                            self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "record construction")?;
-                            expr = Expr::new(self.next_id(), Some(full_span), ExprKind::Record { name: Some(qualified), fields });
-                        }
-                    } else {
-                        expr = Expr::new(self.next_id(), Some(full_span), ExprKind::Member {
-                            object: Box::new(expr), field,
-                        });
-                    }
-                }
+                expr = self.parse_postfix_dot(expr)?;
             } else if self.check(TokenType::LBracket) && self.peek_type_args_call() {
                 let span = Some(self.current_span());
                 let ta = self.parse_type_args()?;
@@ -313,27 +223,7 @@ impl Parser {
                     object: Box::new(expr), index: Box::new(index),
                 });
             } else if self.check(TokenType::LParen) && !self.newline_before_current() {
-                let open = self.current().clone();
-                let open_span = self.current_span();
-                self.advance();
-                let (args, named_args) = self.parse_call_args()?;
-                // Capture the closing `)` span BEFORE `expect_closing`
-                // so we can compute the full call range (callee-start ..
-                // `)`-end) even on single-line calls. Multi-line calls
-                // fall back to the `(`-span since `Span` is single-line.
-                let close_span = self.current_span();
-                self.expect_closing(TokenType::RParen, open.line, open.col, "function call")?;
-                let full_span = match (expr.span, close_span.line == open_span.line) {
-                    (Some(callee_span), true) if callee_span.line == open_span.line => Some(Span {
-                        line: callee_span.line,
-                        col: callee_span.col,
-                        end_col: close_span.end_col,
-                    }),
-                    _ => Some(open_span),
-                };
-                expr = Expr::new(self.next_id(), full_span, ExprKind::Call {
-                    callee: Box::new(expr), args, named_args, type_args: None,
-                });
+                expr = self.parse_postfix_call(expr)?;
             } else if self.check(TokenType::Bang) && !self.newline_before_current() {
                 // expr! — unwrap with error propagation
                 let span = Some(self.current_span());
@@ -370,6 +260,137 @@ impl Parser {
             }
         }
         Ok(expr)
+    }
+
+    /// Handles the `.` postfix branch: tuple index (`expr.0`), field member
+    /// access (`expr.field`), and module-qualified record literals
+    /// (`module.TypeName { .. }`). Takes/returns the loop-carried postfix
+    /// accumulator so the caller's loop shape stays intact.
+    fn parse_postfix_dot(&mut self, expr: Expr) -> Result<Expr, String> {
+        let dot_span = self.current_span();
+        self.advance();
+        if self.check(TokenType::Int) {
+            let idx_str = self.current().value.clone();
+            self.advance();
+            let index = idx_str.parse::<usize>().map_err(|_| {
+                format!("invalid tuple index '{}' at line {:?}", idx_str, dot_span)
+            })?;
+            return Ok(Expr::new(self.next_id(), Some(dot_span), ExprKind::TupleIndex {
+                object: Box::new(expr), index,
+            }));
+        }
+        // Capture the field's token span BEFORE `expect_any_name`
+        // advances past it. The Member's span then covers the
+        // full `object.field` — from the object's starting
+        // column to the field token's end column (same-line
+        // assumption: Almide's lexer never emits a Dot across
+        // lines, since `.` before a newline is a syntax error).
+        // This precise span powers E002's `try_replace` for
+        // rename suggestions like `string.length` → `string.len`.
+        let field_span = self.current_span();
+        let field = self.expect_any_name()?;
+        let full_span = match expr.span {
+            Some(obj_span) if obj_span.line == field_span.line => Span {
+                line: field_span.line,
+                col: obj_span.col,
+                end_col: field_span.end_col,
+            },
+            _ => field_span,
+        };
+        // Module-qualified record literal: module.TypeName { field: value }
+        // Detected when: the object is an Ident, the field starts with
+        // uppercase, and the next token is { followed by ident: (record pattern)
+        let is_qualified_record = field.as_str().starts_with(char::is_uppercase)
+            && matches!(&expr.kind, ExprKind::Ident { .. })
+            && self.peek_named_record();
+        if is_qualified_record {
+            return self.parse_postfix_qualified_record(expr, field, full_span);
+        }
+        Ok(Expr::new(self.next_id(), Some(full_span), ExprKind::Member {
+            object: Box::new(expr), field,
+        }))
+    }
+
+    /// Parses the `{ .. }` body of a module-qualified record literal
+    /// (`module.TypeName { .. }` or `module.TypeName { ...base, .. }`),
+    /// reached from `parse_postfix_dot` once the qualified-record shape is
+    /// confirmed. `expr` is the already-consumed `module` ident, used only
+    /// to derive the qualified name.
+    fn parse_postfix_qualified_record(&mut self, expr: Expr, field: Sym, full_span: Span) -> Result<Expr, String> {
+        // Compose the qualified name: "module.TypeName"
+        let module_name = match &expr.kind {
+            ExprKind::Ident { name } => name.as_str().to_string(),
+            _ => String::new(),
+        };
+        let qualified = sym(&format!("{}.{}", module_name, field));
+        let open_rec = self.current().clone();
+        self.advance(); // skip {
+        self.skip_newlines();
+        if self.check(TokenType::DotDotDot) {
+            self.advance();
+            let base = self.parse_expr()?;
+            let mut fields = Vec::new();
+            while self.check(TokenType::Comma) {
+                self.advance(); self.skip_newlines();
+                if self.check(TokenType::RBrace) { break; }
+                let fname = self.expect_any_name()?;
+                self.expect(TokenType::Colon)?;
+                self.skip_newlines();
+                let fval = self.parse_expr()?;
+                fields.push(FieldInit { name: fname, value: fval });
+            }
+            self.skip_newlines();
+            self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "spread record")?;
+            Ok(Expr::new(self.next_id(), Some(full_span), ExprKind::SpreadRecord {
+                base: Box::new(base), fields,
+            }))
+        } else {
+            let mut fields = Vec::new();
+            while !self.check(TokenType::RBrace) {
+                self.skip_newlines();
+                let fname = self.expect_any_name()?;
+                if self.check(TokenType::Colon) {
+                    self.advance(); self.skip_newlines();
+                    let fval = self.parse_expr()?;
+                    fields.push(FieldInit { name: fname, value: fval });
+                } else {
+                    fields.push(FieldInit {
+                        name: fname.clone(),
+                        value: Expr::new(self.next_id(), None, ExprKind::Ident { name: fname }),
+                    });
+                }
+                self.skip_newlines();
+                if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
+            }
+            self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "record construction")?;
+            Ok(Expr::new(self.next_id(), Some(full_span), ExprKind::Record { name: Some(qualified), fields }))
+        }
+    }
+
+    /// Handles the `(` postfix branch: a call on the current postfix
+    /// accumulator. Takes/returns `expr` like `parse_postfix_dot`.
+    fn parse_postfix_call(&mut self, expr: Expr) -> Result<Expr, String> {
+        let open = self.current().clone();
+        let open_span = self.current_span();
+        self.advance();
+        let (args, named_args) = self.parse_call_args()?;
+        // Capture the closing `)` span BEFORE `expect_closing`
+        // so we can compute the full call range (callee-start ..
+        // `)`-end) even on single-line calls. Multi-line calls
+        // fall back to the `(`-span since `Span` is single-line.
+        let close_span = self.current_span();
+        self.expect_closing(TokenType::RParen, open.line, open.col, "function call")?;
+        let full_span = match (expr.span, close_span.line == open_span.line) {
+            (Some(callee_span), true) if callee_span.line == open_span.line => Some(Span {
+                line: callee_span.line,
+                col: callee_span.col,
+                end_col: close_span.end_col,
+            }),
+            _ => Some(open_span),
+        };
+        Ok(Expr::new(self.next_id(), full_span, ExprKind::Call {
+            callee: Box::new(expr), args, named_args, type_args: None,
+        }))
     }
 
     pub(crate) fn parse_call_args(&mut self) -> Result<(Vec<Expr>, Vec<(Sym, Expr)>), String> {
