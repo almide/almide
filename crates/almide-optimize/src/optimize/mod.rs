@@ -69,11 +69,43 @@ fn constant_fold(program: &mut IrProgram) {
 fn fold_expr(expr: &mut IrExpr) {
     // Recurse first (bottom-up)
     match &mut expr.kind {
+        IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. } => fold_expr_binop(expr),
+        IrExprKind::Block { .. } | IrExprKind::If { .. }
+        | IrExprKind::ForIn { .. } | IrExprKind::While { .. } => fold_expr_control(expr),
+        IrExprKind::Match { .. } => fold_expr_match(expr),
+        IrExprKind::Call { .. } => fold_expr_call(expr),
+        IrExprKind::List { .. } | IrExprKind::Tuple { .. } | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Range { .. } | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::MapLiteral { .. } | IrExprKind::StringInterp { .. } => fold_expr_containers(expr),
+        IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } | IrExprKind::OptionSome { .. }
+        | IrExprKind::Try { .. } | IrExprKind::Await { .. } => fold_expr_wrap(expr),
+        IrExprKind::Lambda { body, .. } => fold_expr(body),
+        _ => {}
+    }
+
+    // Now try to fold this node
+    let replacement = try_fold(expr);
+    if let Some(new_expr) = replacement {
+        *expr = new_expr;
+    }
+}
+
+/// BinOp / UnOp: recurse into operands.
+fn fold_expr_binop(expr: &mut IrExpr) {
+    match &mut expr.kind {
         IrExprKind::BinOp { left, right, .. } => {
             fold_expr(left);
             fold_expr(right);
         }
         IrExprKind::UnOp { operand, .. } => fold_expr(operand),
+        _ => unreachable!(),
+    }
+}
+
+/// Block / If / ForIn / While: recurse into control-flow subexpressions and bodies.
+fn fold_expr_control(expr: &mut IrExpr) {
+    match &mut expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts { fold_stmt(s); }
             if let Some(t) = tail { fold_expr(t); }
@@ -83,26 +115,44 @@ fn fold_expr(expr: &mut IrExpr) {
             fold_expr(then);
             fold_expr(else_);
         }
-        IrExprKind::Call { target, args, .. } => {
-            if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
-                fold_expr(object);
-            }
-            for a in args { fold_expr(a); }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            fold_expr(iterable);
+            for s in body { fold_stmt(s); }
         }
+        IrExprKind::While { cond, body } => {
+            fold_expr(cond);
+            for s in body { fold_stmt(s); }
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Match: recurse into subject, guards, and arm bodies.
+fn fold_expr_match(expr: &mut IrExpr) {
+    let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+    fold_expr(subject);
+    for a in arms {
+        if let Some(g) = &mut a.guard { fold_expr(g); }
+        fold_expr(&mut a.body);
+    }
+}
+
+/// Call: recurse into the receiver (if any) and arguments.
+fn fold_expr_call(expr: &mut IrExpr) {
+    let IrExprKind::Call { target, args, .. } = &mut expr.kind else { unreachable!() };
+    if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
+        fold_expr(object);
+    }
+    for a in args { fold_expr(a); }
+}
+
+/// List/Tuple/Record/SpreadRecord/Range/IndexAccess/MapAccess/Member/TupleIndex/MapLiteral/StringInterp:
+/// recurse into each child expression.
+fn fold_expr_containers(expr: &mut IrExpr) {
+    match &mut expr.kind {
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
             for e in elements { fold_expr(e); }
         }
-        IrExprKind::Lambda { body, .. } => fold_expr(body),
-        IrExprKind::Match { subject, arms } => {
-            fold_expr(subject);
-            for a in arms {
-                if let Some(g) = &mut a.guard { fold_expr(g); }
-                fold_expr(&mut a.body);
-            }
-        }
-        IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
-        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Await { expr: e } => fold_expr(e),
         IrExprKind::Record { fields, .. } => {
             for (_, v) in fields { fold_expr(v); }
         }
@@ -133,22 +183,16 @@ fn fold_expr(expr: &mut IrExpr) {
                 if let IrStringPart::Expr { expr: e } = p { fold_expr(e); }
             }
         }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            fold_expr(iterable);
-            for s in body { fold_stmt(s); }
-        }
-        IrExprKind::While { cond, body } => {
-            fold_expr(cond);
-            for s in body { fold_stmt(s); }
-        }
-        _ => {}
+        _ => unreachable!(),
     }
+}
 
-    // Now try to fold this node
-    let replacement = try_fold(expr);
-    if let Some(new_expr) = replacement {
-        *expr = new_expr;
-    }
+/// ResultOk/ResultErr/OptionSome/Try/Await: recurse into the wrapped expression.
+fn fold_expr_wrap(expr: &mut IrExpr) {
+    let (IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Await { expr: e }) = &mut expr.kind else { unreachable!() };
+    fold_expr(e);
 }
 
 /// Try to reduce an expression to a simpler form.
