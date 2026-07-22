@@ -1,4 +1,4 @@
-use crate::{parse_file, canonicalize, check as check_mod, diagnostic, resolve, project, project_fetch};
+use crate::{parse_file, canonicalize, check as check_mod, diagnostic, resolve, project, project_fetch, out, err};
 
 pub fn cmd_check(file: &str, deny_warnings: bool) {
     let (mut program, source_text, parse_errors) = parse_file(file);
@@ -6,7 +6,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
             project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
                 .into_iter()
                 .map(|fd| (fd.pkg_id, fd.source_dir))
                 .collect()
@@ -18,7 +18,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     };
 
     let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
-        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
 
     let canon = canonicalize::canonicalize_program(
         &program,
@@ -49,7 +49,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
         warnings.push(d);
     }
     for d in &warnings {
-        eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
+        err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
     }
 
     // Combine parse errors + checker errors
@@ -61,17 +61,17 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     if deny_warnings && !warnings.is_empty() {
         // Treat warnings as errors
         for d in &all_errors {
-            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
         }
         let total = all_errors.len() + warnings.len();
-        eprintln!("\n{} error(s) found (--deny-warnings: {} warning(s) treated as errors)", total, warnings.len());
+        err(&format!("\n{} error(s) found (--deny-warnings: {} warning(s) treated as errors)", total, warnings.len()));
         std::process::exit(1);
     }
     if !all_errors.is_empty() {
         for d in &all_errors {
-            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
         }
-        eprintln!("\n{} error(s) found", all_errors.len());
+        err(&format!("\n{} error(s) found", all_errors.len()));
         std::process::exit(1);
     }
 
@@ -87,7 +87,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
         }
     }
 
-    eprintln!("No errors found");
+    err(&format!("No errors found"));
 }
 
 pub fn cmd_check_json(file: &str) {
@@ -96,7 +96,7 @@ pub fn cmd_check_json(file: &str) {
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
             project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
                 .into_iter()
                 .map(|fd| (fd.pkg_id, fd.source_dir))
                 .collect()
@@ -108,7 +108,7 @@ pub fn cmd_check_json(file: &str) {
     };
 
     let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
-        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
 
     let canon = canonicalize::canonicalize_program(
         &program,
@@ -125,10 +125,10 @@ pub fn cmd_check_json(file: &str) {
 
     // Output each diagnostic as JSON (one per line)
     for d in &parse_errors {
-        println!("{}", crate::diagnostic_render::to_json(d));
+        out(&format!("{}", crate::diagnostic_render::to_json(d)));
     }
     for d in &diagnostics {
-        println!("{}", crate::diagnostic_render::to_json(d));
+        out(&format!("{}", crate::diagnostic_render::to_json(d)));
     }
 
     // Lower to IR for unused variable warnings (skip if type errors)
@@ -137,7 +137,7 @@ pub fn cmd_check_json(file: &str) {
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
         let unused = almide::ir::collect_unused_var_warnings(&ir, file);
         for d in &unused {
-            println!("{}", crate::diagnostic_render::to_json(d));
+            out(&format!("{}", crate::diagnostic_render::to_json(d)));
         }
     }
 }
@@ -168,25 +168,25 @@ fn enforce_effect_permissions(
             .filter(|e| !allowed.contains(e))
             .collect();
         if !forbidden.is_empty() {
-            eprintln!(
+            err(&format!(
                 "\nerror: capability violation in `{}`",
                 name
-            );
+            ));
             for e in &forbidden {
-                eprintln!("  {} is not in [permissions].allow", e);
+                err(&format!("  {} is not in [permissions].allow", e));
             }
-            eprintln!(
+            err(&format!(
                 "  hint: add {} to [permissions].allow in almide.toml",
                 forbidden.iter().map(|e| format!("\"{}\"", e)).collect::<Vec<_>>().join(", ")
-            );
+            ));
             violations += 1;
         }
     }
     if violations > 0 {
-        eprintln!("\n{} capability violation(s) found", violations);
+        err(&format!("\n{} capability violation(s) found", violations));
         std::process::exit(1);
     }
-    eprintln!("\nPermissions OK: all effects within [permissions].allow = {:?}", proj.permissions);
+    err(&format!("\nPermissions OK: all effects within [permissions].allow = {:?}", proj.permissions));
 }
 
 pub fn cmd_check_effects(file: &str) {
@@ -194,16 +194,16 @@ pub fn cmd_check_effects(file: &str) {
 
     if !parse_errors.is_empty() {
         for d in &parse_errors {
-            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
         }
-        eprintln!("\n{} parse error(s)", parse_errors.len());
+        err(&format!("\n{} parse error(s)", parse_errors.len()));
         std::process::exit(1);
     }
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
             project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
                 .into_iter()
                 .map(|fd| (fd.pkg_id, fd.source_dir))
                 .collect()
@@ -215,7 +215,7 @@ pub fn cmd_check_effects(file: &str) {
     };
 
     let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
-        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
 
     let canon = canonicalize::canonicalize_program(
         &program,
@@ -235,9 +235,9 @@ pub fn cmd_check_effects(file: &str) {
         .collect();
     if !errors.is_empty() {
         for d in &errors {
-            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
         }
-        eprintln!("\n{} error(s) found", errors.len());
+        err(&format!("\n{} error(s) found", errors.len()));
         std::process::exit(1);
     }
 
@@ -251,19 +251,19 @@ pub fn cmd_check_effects(file: &str) {
     let ir = result.program;
 
     // Display results
-    eprintln!("{}:\n", file);
+    err(&format!("{}:\n", file));
     let mut entries: Vec<_> = ir.effect_map.functions.iter().collect();
     entries.sort_by_key(|(name, _)| (*name).clone());
 
     for (name, fe) in &entries {
         let effects = EffectMap::format_effects(&fe.transitive);
         let marker = if fe.is_effect { " (effect fn)" } else { "" };
-        eprintln!("  {}  → {}{}", name, effects, marker);
+        err(&format!("  {}  → {}{}", name, effects, marker));
     }
 
     let pure_count = entries.iter().filter(|(_, fe)| fe.transitive.is_empty()).count();
     let effect_count = entries.len() - pure_count;
-    eprintln!("\n{} functions: {} pure, {} with effects", entries.len(), pure_count, effect_count);
+    err(&format!("\n{} functions: {} pure, {} with effects", entries.len(), pure_count, effect_count));
 
     // Check permissions from almide.toml
     if std::path::Path::new("almide.toml").exists() {
