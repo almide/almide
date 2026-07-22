@@ -53,87 +53,99 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         IrStmtKind::MapInsert { .. } => render_stmt_map_insert(ctx, stmt),
         IrStmtKind::FieldAssign { .. } => render_stmt_field_assign(ctx, stmt),
         IrStmtKind::BindDestructure { .. } => render_stmt_bind_destructure(ctx, stmt),
-        IrStmtKind::ListSwap { target, a, b } => {
-            let t = ctx.var_name(*target).to_string();
-            let upper = ctx.global_static_name(*target);
-            let a_s = render_expr(ctx, a);
-            let b_s = render_expr(ctx, b);
-            if let Some(info) = ctx.ann.global(*target) {
-                use almide_ir::top_let_storage::TopLetStorage as Tls;
-                return match info.storage {
-                    Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).swap({} as usize, {} as usize));", info.static_name, a_s, b_s),
-                    other => unreachable!("[COMPILER BUG] list-swap on {:?} global `{}`", other, info.static_name),
-                };
-            }
-            match ctx.ann.get_var_storage(target) {
-                VarStorage::RcCow => format!("{}.make_mut().swap({} as usize, {} as usize);", t, a_s, b_s),
-                _ => ctx.templates.render_with("peep_swap", None, &[], &[("target", &t), ("a", &a_s), ("b", &b_s)])
-                    .unwrap_or_else(|| format!("{}.swap({}, {});", t, a_s, b_s)),
-            }
-        }
-        IrStmtKind::ListReverse { target, end } => {
-            let t = ctx.var_name(*target).to_string();
-            let upper = ctx.global_static_name(*target);
-            let e = render_expr(ctx, end);
-            if let Some(info) = ctx.ann.global(*target) {
-                use almide_ir::top_let_storage::TopLetStorage as Tls;
-                return match info.storage {
-                    Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].reverse());", info.static_name, e),
-                    other => unreachable!("[COMPILER BUG] list-reverse on {:?} global `{}`", other, info.static_name),
-                };
-            }
-            match ctx.ann.get_var_storage(target) {
-                VarStorage::RcCow => format!("{}.make_mut()[..={} as usize].reverse();", t, e),
-                _ => ctx.templates.render_with("peep_reverse", None, &[], &[("target", &t), ("end", &e)])
-                    .unwrap_or_else(|| format!("{}[..={} as usize].reverse();", t, e)),
-            }
-        }
-        IrStmtKind::ListRotateLeft { target, end } => {
-            let t = ctx.var_name(*target).to_string();
-            let upper = ctx.global_static_name(*target);
-            let e = render_expr(ctx, end);
-            if let Some(info) = ctx.ann.global(*target) {
-                use almide_ir::top_let_storage::TopLetStorage as Tls;
-                return match info.storage {
-                    Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].rotate_left(1));", info.static_name, e),
-                    other => unreachable!("[COMPILER BUG] list-rotate on {:?} global `{}`", other, info.static_name),
-                };
-            }
-            match ctx.ann.get_var_storage(target) {
-                VarStorage::RcCow => format!("{}.make_mut()[..={} as usize].rotate_left(1);", t, e),
-                _ => ctx.templates.render_with("peep_rotate_left", None, &[], &[("target", &t), ("end", &e)])
-                    .unwrap_or_else(|| format!("{}[..={} as usize].rotate_left(1);", t, e)),
-            }
-        }
-        IrStmtKind::ListCopySlice { dst, src, len } => {
-            let d = ctx.var_name(*dst).to_string();
-            let s = ctx.var_name(*src).to_string();
-            let upper_d = ctx.global_static_name(*dst);
-            let n = render_expr(ctx, len);
-            // §4 Stage 2: both the dst write AND the src re-read dispatch on
-            // the attribute (the src probe was the 9th hand-rolled copy of
-            // the ModuleRc protocol).
-            let src_read = match ctx.ann.global(*src) {
-                Some(si) if matches!(si.storage, almide_ir::top_let_storage::TopLetStorage::RcRefCell) =>
-                    format!("{}.with(|c| c.borrow().clone())", si.static_name),
-                _ => s.clone(),
-            };
-            if let Some(info) = ctx.ann.global(*dst) {
-                use almide_ir::top_let_storage::TopLetStorage as Tls;
-                return match info.storage {
-                    Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..{n} as usize].copy_from_slice(&{src_read}[..{n} as usize]));", info.static_name, n=n, src_read=src_read),
-                    other => unreachable!("[COMPILER BUG] copy-slice into {:?} global `{}`", other, info.static_name),
-                };
-            }
-            match ctx.ann.get_var_storage(dst) {
-                VarStorage::RcCow => format!("{}.make_mut()[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, src_read, n),
-                _ => ctx.templates.render_with("peep_copy_slice", None, &[], &[("dst", &d), ("src", &src_read), ("n", &n)])
-                    .unwrap_or_else(|| format!("{}[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, src_read, n)),
-            }
-        }
+        IrStmtKind::ListSwap { target, a, b } => render_stmt_list_swap(ctx, *target, a, b),
+        IrStmtKind::ListReverse { target, end } => render_stmt_list_reverse(ctx, *target, end),
+        IrStmtKind::ListRotateLeft { target, end } => render_stmt_list_rotate_left(ctx, *target, end),
+        IrStmtKind::ListCopySlice { dst, src, len } => render_stmt_list_copy_slice(ctx, *dst, *src, len),
         IrStmtKind::Comment { text } => format!("// {}", text),
         // Perceus RC ops are WASM-only; Rust handles ownership natively.
         IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => String::new(),
+    }
+}
+
+/// `ListSwap { target, a, b }` arm of [`render_stmt`].
+fn render_stmt_list_swap(ctx: &RenderContext, target: VarId, a: &IrExpr, b: &IrExpr) -> String {
+    let t = ctx.var_name(target).to_string();
+    let upper = ctx.global_static_name(target);
+    let a_s = render_expr(ctx, a);
+    let b_s = render_expr(ctx, b);
+    if let Some(info) = ctx.ann.global(target) {
+        use almide_ir::top_let_storage::TopLetStorage as Tls;
+        return match info.storage {
+            Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).swap({} as usize, {} as usize));", info.static_name, a_s, b_s),
+            other => unreachable!("[COMPILER BUG] list-swap on {:?} global `{}`", other, info.static_name),
+        };
+    }
+    match ctx.ann.get_var_storage(&target) {
+        VarStorage::RcCow => format!("{}.make_mut().swap({} as usize, {} as usize);", t, a_s, b_s),
+        _ => ctx.templates.render_with("peep_swap", None, &[], &[("target", &t), ("a", &a_s), ("b", &b_s)])
+            .unwrap_or_else(|| format!("{}.swap({}, {});", t, a_s, b_s)),
+    }
+}
+
+/// `ListReverse { target, end }` arm of [`render_stmt`].
+fn render_stmt_list_reverse(ctx: &RenderContext, target: VarId, end: &IrExpr) -> String {
+    let t = ctx.var_name(target).to_string();
+    let upper = ctx.global_static_name(target);
+    let e = render_expr(ctx, end);
+    if let Some(info) = ctx.ann.global(target) {
+        use almide_ir::top_let_storage::TopLetStorage as Tls;
+        return match info.storage {
+            Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].reverse());", info.static_name, e),
+            other => unreachable!("[COMPILER BUG] list-reverse on {:?} global `{}`", other, info.static_name),
+        };
+    }
+    match ctx.ann.get_var_storage(&target) {
+        VarStorage::RcCow => format!("{}.make_mut()[..={} as usize].reverse();", t, e),
+        _ => ctx.templates.render_with("peep_reverse", None, &[], &[("target", &t), ("end", &e)])
+            .unwrap_or_else(|| format!("{}[..={} as usize].reverse();", t, e)),
+    }
+}
+
+/// `ListRotateLeft { target, end }` arm of [`render_stmt`].
+fn render_stmt_list_rotate_left(ctx: &RenderContext, target: VarId, end: &IrExpr) -> String {
+    let t = ctx.var_name(target).to_string();
+    let upper = ctx.global_static_name(target);
+    let e = render_expr(ctx, end);
+    if let Some(info) = ctx.ann.global(target) {
+        use almide_ir::top_let_storage::TopLetStorage as Tls;
+        return match info.storage {
+            Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].rotate_left(1));", info.static_name, e),
+            other => unreachable!("[COMPILER BUG] list-rotate on {:?} global `{}`", other, info.static_name),
+        };
+    }
+    match ctx.ann.get_var_storage(&target) {
+        VarStorage::RcCow => format!("{}.make_mut()[..={} as usize].rotate_left(1);", t, e),
+        _ => ctx.templates.render_with("peep_rotate_left", None, &[], &[("target", &t), ("end", &e)])
+            .unwrap_or_else(|| format!("{}[..={} as usize].rotate_left(1);", t, e)),
+    }
+}
+
+/// `ListCopySlice { dst, src, len }` arm of [`render_stmt`].
+fn render_stmt_list_copy_slice(ctx: &RenderContext, dst: VarId, src: VarId, len: &IrExpr) -> String {
+    let d = ctx.var_name(dst).to_string();
+    let s = ctx.var_name(src).to_string();
+    let upper_d = ctx.global_static_name(dst);
+    let n = render_expr(ctx, len);
+    // §4 Stage 2: both the dst write AND the src re-read dispatch on
+    // the attribute (the src probe was the 9th hand-rolled copy of
+    // the ModuleRc protocol).
+    let src_read = match ctx.ann.global(src) {
+        Some(si) if matches!(si.storage, almide_ir::top_let_storage::TopLetStorage::RcRefCell) =>
+            format!("{}.with(|c| c.borrow().clone())", si.static_name),
+        _ => s.clone(),
+    };
+    if let Some(info) = ctx.ann.global(dst) {
+        use almide_ir::top_let_storage::TopLetStorage as Tls;
+        return match info.storage {
+            Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..{n} as usize].copy_from_slice(&{src_read}[..{n} as usize]));", info.static_name, n=n, src_read=src_read),
+            other => unreachable!("[COMPILER BUG] copy-slice into {:?} global `{}`", other, info.static_name),
+        };
+    }
+    match ctx.ann.get_var_storage(&dst) {
+        VarStorage::RcCow => format!("{}.make_mut()[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, src_read, n),
+        _ => ctx.templates.render_with("peep_copy_slice", None, &[], &[("dst", &d), ("src", &src_read), ("n", &n)])
+            .unwrap_or_else(|| format!("{}[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, src_read, n)),
     }
 }
 
