@@ -1,16 +1,17 @@
 use std::io::{self, Write, BufRead};
 use std::path::PathBuf;
+use crate::{out, out_no_nl, err};
 
 pub fn run_repl() {
-    println!("Almide REPL v{} — type expressions to evaluate, :q to quit",
-             env!("CARGO_PKG_VERSION"));
-    println!();
+    out(&format!("Almide REPL v{} — type expressions to evaluate, :q to quit",
+             env!("CARGO_PKG_VERSION")));
+    out("");
 
     let mut session = Session::new();
     let stdin = io::stdin();
 
     loop {
-        print!(">>> ");
+        out_no_nl(&format!(">>> "));
         io::stdout().flush().ok();
 
         let mut line = String::new();
@@ -26,7 +27,7 @@ pub fn run_repl() {
                 ":h" | ":help" => print_help(),
                 ":history" => session.print_history(),
                 ":clear" => session.clear(),
-                _ => println!("Unknown command: {}. Type :h for help.", input),
+                _ => out(&format!("Unknown command: {}. Type :h for help.", input)),
             }
             continue;
         }
@@ -113,10 +114,10 @@ impl Session {
     fn eval_expr(&mut self, input: &str) {
         let source = build_program(&self.top, &self.body, Some(input));
         match self.compile_and_run(&source) {
-            Ok(out) => {
-                let out = out.trim();
-                if !out.is_empty() {
-                    println!("{}", out);
+            Ok(result) => {
+                let result = result.trim();
+                if !result.is_empty() {
+                    out(&format!("{}", result));
                 }
             }
             Err(_) => {} // errors already printed by compiler / cargo
@@ -150,7 +151,7 @@ impl Session {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if !stderr.is_empty() {
-                eprintln!("{}", stderr.trim());
+                err(&format!("{}", stderr.trim()));
             }
             return Err("runtime error".into());
         }
@@ -163,14 +164,14 @@ impl Session {
 
     fn print_history(&self) {
         for (i, h) in self.history.iter().enumerate() {
-            println!("{:>3}  {}", i + 1, h);
+            out(&format!("{:>3}  {}", i + 1, h));
         }
     }
 
     fn clear(&mut self) {
         self.top.clear();
         self.body.clear();
-        println!("Session cleared.");
+        out(&format!("Session cleared."));
     }
 }
 
@@ -199,16 +200,16 @@ fn build_program(top: &[String], body: &[String], expr: Option<&str>) -> String 
 }
 
 fn print_help() {
-    println!("Commands:");
-    println!("  :q, :quit    Exit");
-    println!("  :h, :help    Show this help");
-    println!("  :history     Show evaluation history");
-    println!("  :clear       Clear session state");
-    println!();
-    println!("Examples:");
-    println!("  >>> 1 + 2");
-    println!("  3");
-    println!("  >>> let name = \"world\"");
-    println!("  >>> \"Hello, \" + name");
-    println!("  Hello, world");
+    out(&format!("Commands:"));
+    out(&format!("  :q, :quit    Exit"));
+    out(&format!("  :h, :help    Show this help"));
+    out(&format!("  :history     Show evaluation history"));
+    out(&format!("  :clear       Clear session state"));
+    out("");
+    out(&format!("Examples:"));
+    out(&format!("  >>> 1 + 2"));
+    out(&format!("  3"));
+    out(&format!("  >>> let name = \"world\""));
+    out(&format!("  >>> \"Hello, \" + name"));
+    out(&format!("  Hello, world"));
 }
