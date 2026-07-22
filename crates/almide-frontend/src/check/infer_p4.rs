@@ -106,22 +106,30 @@ impl Checker {
     fn check_stmt_assign(&mut self, stmt: &mut ast::Stmt) {
         let ast::Stmt::Assign { name, value, .. } = stmt else { unreachable!() };
         let val_ty = self.infer_expr(value);
-        // A mut-receiver stdlib mutator (`list.push`, `map.insert`,
-        // `string.push`, …) returns Unit and mutates in place. Writing
-        // `b = list.push(b, x)` therefore assigns Unit to a non-Unit
-        // binding. Native catches this at rustc (E0308 "expected Vec,
-        // found ()"); WASM erases Unit and silently RUNS the program —
-        // a cross-target asymmetry (compiles on one target, not the
-        // other). Reject it in the checker so BOTH targets agree, with
-        // the fix spelled out: drop the assignment (the call already
-        // mutates) or rebuild a fresh value.
+        self.check_stmt_assign_unify(name, &val_ty);
+        self.check_stmt_assign_immutable(name);
+        self.check_stmt_assign_escape(name);
+    }
+
+    /// A mut-receiver stdlib mutator (`list.push`, `map.insert`,
+    /// `string.push`, …) returns Unit and mutates in place. Writing
+    /// `b = list.push(b, x)` therefore assigns Unit to a non-Unit
+    /// binding. Native catches this at rustc (E0308 "expected Vec,
+    /// found ()"); WASM erases Unit and silently RUNS the program —
+    /// a cross-target asymmetry (compiles on one target, not the
+    /// other). Reject it in the checker so BOTH targets agree (E001), with
+    /// the fix spelled out: drop the assignment (the call already
+    /// mutates) or rebuild a fresh value. Otherwise, unify the assigned
+    /// value's type with the variable's declared type. Verbatim text move
+    /// out of [`Self::check_stmt_assign`].
+    fn check_stmt_assign_unify(&mut self, name: &Sym, val_ty: &Ty) {
         // A local binding (`lookup_var`) OR a module-level `var`
         // (`top_lets`) — both are valid assignment targets and both carry
         // a concrete declared type to flow into the value.
         let var_ty = self.env.lookup_var(name).cloned()
             .or_else(|| self.env.top_lets.get(&sym(name)).cloned());
         if let Some(var_ty) = &var_ty {
-            let val_resolved = resolve_ty(&val_ty, &self.uf);
+            let val_resolved = resolve_ty(val_ty, &self.uf);
             let var_resolved = self.env.resolve_named(var_ty);
             if matches!(val_resolved, Ty::Unit) && !matches!(var_resolved, Ty::Unit | Ty::Unknown) {
                 // Rebuild form is type-directed: a List concatenates a
@@ -181,6 +189,11 @@ impl Checker {
                 self.constrain(var_ty.clone(), constrain_val, format!("assign {}", name));
             }
         }
+    }
+
+    /// E009: reassigning an immutable `let` binding (or a function
+    /// parameter). Verbatim text move out of [`Self::check_stmt_assign`].
+    fn check_stmt_assign_immutable(&mut self, name: &Sym) {
         if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(&sym(name)) {
             let is_param = self.env.param_vars.contains(&sym(name));
             let hint = if is_param {
@@ -201,7 +214,11 @@ impl Checker {
             }
             self.emit(diag);
         }
-        // Escape analysis: block var mutation inside closures in pure fns
+    }
+
+    /// E011: escape analysis — block `var` mutation inside a closure in a
+    /// pure fn. Verbatim text move out of [`Self::check_stmt_assign`].
+    fn check_stmt_assign_escape(&mut self, name: &Sym) {
         if self.env.mutable_vars.contains(&sym(name)) && !self.env.can_call_effect {
             if let Some(&decl_depth) = self.env.var_lambda_depth.get(&sym(name)) {
                 if self.env.lambda_depth > decl_depth {
@@ -448,19 +465,39 @@ impl Checker {
 
     /// Infer the result type of the + operator (numeric add or string/list concat).
     fn infer_plus_op(&mut self, lc: &Ty, rc: &Ty, lt: Ty) -> Ty {
+        if let Some(t) = self.infer_plus_op_concat(lc, rc, &lt) {
+            return t;
+        }
+        // Matrix addition
+        if *lc == Ty::Matrix || *rc == Ty::Matrix {
+            return Ty::Matrix;
+        }
+        self.infer_plus_op_numeric_check(lc, rc);
+        if let Some(t) = self.infer_plus_op_sized(lc, rc) {
+            return t;
+        }
+        if *lc == Ty::Float || *rc == Ty::Float { Ty::Float } else { lt }
+    }
+
+    /// String/List concatenation guard of [`Self::infer_plus_op`]: unify a
+    /// TypeVar/Unknown side with the other side's String/List type, and pin
+    /// List element types when concatenating two Lists. `Some` means this
+    /// rule applied and the caller should return that type immediately.
+    /// Verbatim text move.
+    fn infer_plus_op_concat(&mut self, lc: &Ty, rc: &Ty, lt: &Ty) -> Option<Ty> {
         let is_concat_ty = |t: &Ty| matches!(t, Ty::String | Ty::Applied(TypeConstructorId::List, _));
         let is_unknown_ty = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_));
         // When one side is List and the other is TypeVar, unify the TypeVar with the List type
         if is_unknown_ty(lc) && is_concat_ty(rc) {
-            self.unify_infer(&lt, rc);
-            let resolved_lt = resolve_ty(&lt, &self.uf);
+            self.unify_infer(lt, rc);
+            let resolved_lt = resolve_ty(lt, &self.uf);
             // Now unify element types if both resolved to List
             if let (Ty::Applied(TypeConstructorId::List, la), Ty::Applied(TypeConstructorId::List, ra)) = (&resolved_lt, rc) {
                 if let (Some(le), Some(re)) = (la.first(), ra.first()) {
                     self.unify_infer(le, re);
                 }
             }
-            return resolve_ty(&lt, &self.uf);
+            return Some(resolve_ty(lt, &self.uf));
         }
         if (is_concat_ty(lc) && (is_concat_ty(rc) || is_unknown_ty(rc)))
             || (is_concat_ty(rc) && is_unknown_ty(lc)) {
@@ -470,12 +507,15 @@ impl Checker {
                     self.unify_infer(le, re);
                 }
             }
-            return resolve_ty(&lt, &self.uf);
+            return Some(resolve_ty(lt, &self.uf));
         }
-        // Matrix addition
-        if *lc == Ty::Matrix || *rc == Ty::Matrix {
-            return Ty::Matrix;
-        }
+        None
+    }
+
+    /// Numeric-operand diagnostic guard of [`Self::infer_plus_op`] — emits
+    /// E-diagnostic only; the caller falls through regardless. Verbatim
+    /// text move.
+    fn infer_plus_op_numeric_check(&mut self, lc: &Ty, rc: &Ty) {
         // Sized Numeric Types (Stage 1c): arithmetic accepts canonical
         // `Int` / `Float` plus every sized variant. Same-type pairing is
         // enforced below; mixing widths is an explicit conversion.
@@ -492,6 +532,13 @@ impl Checker {
                 format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
                 "Use + with numeric types, String, or List", format!("operator +")));
         }
+    }
+
+    /// Sized-numeric-type guard of [`Self::infer_plus_op`]: reject mixed
+    /// widths (E-diagnostic + return the left type), or return the common
+    /// sized type when both sides are sized and compatible. Verbatim text
+    /// move.
+    fn infer_plus_op_sized(&mut self, lc: &Ty, rc: &Ty) -> Option<Ty> {
         // Result type resolution:
         //   - Same sized type on both sides → that sized type.
         //   - Canonical Float promotes Int mixes to Float (legacy rule).
@@ -519,11 +566,11 @@ impl Checker {
                     lc.display().to_lowercase()),
                 "Convert one side with `.to_intN()` / `.to_floatN()` before the op",
                 format!("operator +")));
-            return lc.clone();
+            return Some(lc.clone());
         }
         if lc.compatible(rc) && is_sized_scalar(lc) {
-            return lc.clone();
+            return Some(lc.clone());
         }
-        if *lc == Ty::Float || *rc == Ty::Float { Ty::Float } else { lt }
+        None
     }
 }
