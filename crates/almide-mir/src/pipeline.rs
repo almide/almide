@@ -826,30 +826,31 @@ fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
     }
 }
 
-fn try_render_wasm_source_impl_rest(
-    ir: &mut almide_ir::IrProgram,
-    verbose: bool,
-) -> Result<String, LowerError> {
-    let PipelineLayouts {
-        globals,
-        global_inits,
-        main_globals,
-        main_global_inits,
-        mutable_toplet_aliases,
-        record_layouts,
-        variant_layouts,
-    } = collect_pipeline_layouts(ir);
+/// The [`inline_and_classify_cross_module_fns`] outputs: the mangled linked-module
+/// sibling fns, MAIN's tail-inlined fns, and the union of both (the whole-program set
+/// the ABI-registry classification needs).
+struct CrossModuleFns {
+    module_fn_sibs: Vec<almide_ir::IrFunction>,
+    inlined_fns: Vec<almide_ir::IrFunction>,
+    all_fns: Vec<almide_ir::IrFunction>,
+}
 
-    // PROGRAM pre-pass: inline mutual-recursive tail siblings (semantics-preserving TCO exposure).
-    // The input is the WHOLE program — main's functions PLUS every linked user-module sibling
-    // under its MANGLED `almide_rt_<m>_<f>` name (bodies already reference siblings by that
-    // name, post-`resolve_user_module_calls`). Without the siblings, the never-err/auto-wrap
-    // ABI registries were populated from MAIN's functions only: a cross-module effect callee
-    // (`m.estep`) was UNCLASSIFIED, so the caller kept its auto-`?` Try (expecting a heap
-    // Result handle) while the separately-lowered callee returned its raw scalar — the
-    // crossmod_shape_matrix i64/i32 invalid-wasm class. One combined classification makes
-    // caller and callee agree by construction; the returned rewritten bodies are then split
-    // back into the main / module lowering regions (each keeps its own globals union).
+/// Phase 3: PROGRAM pre-pass — inline mutual-recursive tail siblings (semantics-preserving
+/// TCO exposure). The input is the WHOLE program — main's functions PLUS every linked
+/// user-module sibling under its MANGLED `almide_rt_<m>_<f>` name (bodies already
+/// reference siblings by that name, post-`resolve_user_module_calls`). Without the
+/// siblings, the never-err/auto-wrap ABI registries were populated from MAIN's functions
+/// only: a cross-module effect callee (`m.estep`) was UNCLASSIFIED, so the caller kept
+/// its auto-`?` Try (expecting a heap Result handle) while the separately-lowered callee
+/// returned its raw scalar — the crossmod_shape_matrix i64/i32 invalid-wasm class. One
+/// combined classification makes caller and callee agree by construction; the returned
+/// rewritten bodies are then split back into the main / module lowering regions (each
+/// keeps its own globals union) — iterated to a FIXPOINT (the #485 effect_assign shape).
+fn inline_and_classify_cross_module_fns(
+    ir: &almide_ir::IrProgram,
+    main_globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    record_layouts: &crate::lower::RecordLayouts,
+) -> CrossModuleFns {
     let mut module_fn_sibs: Vec<almide_ir::IrFunction> = ir
         .modules
         .iter()
@@ -903,14 +904,14 @@ fn try_render_wasm_source_impl_rest(
     // wasm stack — wasm_same_name_crossmod_test), and the registries alone are what the
     // module-side lowering consults by MANGLED name.
     let mut inlined_fns =
-        crate::lower::inline_mutual_tail_recursion(&ir.functions, &main_globals, &record_layouts);
+        crate::lower::inline_mutual_tail_recursion(&ir.functions, main_globals, record_layouts);
     // WIDEN the ABI registries over the whole program AFTER the main pre-pass (whose own
     // population is main-only, the pre-batch behavior its rewrites were verified under):
     // every LOWERING-time keyed lookup (never-err strip exclusions, AUTO_WRAP body.ty
     // override, `ret_is_result_abi`) then sees module callees by their mangled names —
     // the crossmod caller/callee ABI agreement — without the pre-pass rewrites ever
     // touching module bodies.
-    crate::lower::populate_abi_registries(&all_fns, &record_layouts);
+    crate::lower::populate_abi_registries(&all_fns, record_layouts);
     // The registries above are program-wide, but the never-err REWRITES ran with MAIN-ONLY
     // sets (inside the pre-pass) and never touched module bodies at all. So a MAIN caller of
     // a cross-module never-err callee kept its lifted `Try`/Result-typed call, and a MODULE
@@ -934,7 +935,7 @@ fn try_render_wasm_source_impl_rest(
     for _ in 0..8 {
         let mut all_rewritten: Vec<almide_ir::IrFunction> = inlined_fns.clone();
         all_rewritten.extend(module_fn_sibs.iter().cloned());
-        crate::lower::populate_abi_registries(&all_rewritten, &record_layouts);
+        crate::lower::populate_abi_registries(&all_rewritten, record_layouts);
         let cur = crate::lower::auto_wrap_abi_snapshot();
         if prev_auto_wrap.as_ref() == Some(&cur) {
             break;
@@ -956,10 +957,30 @@ fn try_render_wasm_source_impl_rest(
                 &mut f.body,
                 &wide_can_err,
                 &wide_lifted,
-                &record_layouts,
+                record_layouts,
             );
         }
     }
+    CrossModuleFns { module_fn_sibs, inlined_fns, all_fns }
+}
+
+fn try_render_wasm_source_impl_rest(
+    ir: &mut almide_ir::IrProgram,
+    verbose: bool,
+) -> Result<String, LowerError> {
+    let PipelineLayouts {
+        globals,
+        global_inits,
+        main_globals,
+        main_global_inits,
+        mutable_toplet_aliases,
+        record_layouts,
+        variant_layouts,
+    } = collect_pipeline_layouts(ir);
+
+    let CrossModuleFns { mut module_fn_sibs, mut inlined_fns, all_fns } =
+        inline_and_classify_cross_module_fns(ir, &main_globals, &record_layouts);
+
     // Cross-module DERIVED-METHOD name bridge (#790 codec row, piece 2 of the pinned
     // design): a MAIN-region `T.encode` / `T.decode` reference whose type `T` is
     // declared by exactly ONE linked module (and not by main) resolves to that
