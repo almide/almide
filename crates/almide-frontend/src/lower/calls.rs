@@ -9,43 +9,9 @@ use super::expressions::lower_expr;
 use super::types::resolve_type_expr;
 
 pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Expr], named_args: &[(almide_base::intern::Sym, ast::Expr)], type_args: Option<&Vec<ast::TypeExpr>>, ty: Ty, span: Option<ast::Span>) -> IrExpr {
-    // Convenience: json.encode(expr) → json.stringify(T.encode(expr)) when expr is Codec type
-    if let ast::ExprKind::Member { object, field, .. } = &callee.kind {
-        if let ast::ExprKind::Ident { name: module, .. } = &object.kind {
-            if field == "encode" && args.len() == 1 {
-                let arg_ty = ctx.expr_ty(&args[0]);
-                if let Some(encode_fn) = ctx.find_convention_fn(&arg_ty, "encode") {
-                    let ir_arg = lower_expr(ctx, &args[0]);
-                    let encoded = ctx.mk(IrExprKind::Call {
-                        target: CallTarget::Named { name: encode_fn },
-                        args: vec![ir_arg], type_args: vec![],
-                    }, Ty::Named("Value".into(), vec![]), span);
-                    return ctx.mk(IrExprKind::Call {
-                        target: CallTarget::Module { module: sym(module), func: sym("stringify"), def_id: ctx.def_map.get(&sym(&format!("{}.stringify", module))).copied() },
-                        args: vec![encoded], type_args: vec![],
-                    }, Ty::String, span);
-                }
-            }
-            if field == "decode" && args.len() == 1
-                && let Some(type_args) = type_args
-                && let Some(ast::TypeExpr::Simple { name: type_name }) = type_args.first()
-            {
-                let ir_arg = lower_expr(ctx, &args[0]);
-                // json.decode[T](text) → T.decode(json.parse(text)?)
-                let parsed = ctx.mk(IrExprKind::Try { expr: Box::new(ctx.mk(IrExprKind::Call {
-                    target: CallTarget::Module { module: sym(module), func: sym("parse"), def_id: ctx.def_map.get(&sym(&format!("{}.parse", module))).copied() },
-                    args: vec![ir_arg], type_args: vec![],
-                }, Ty::result(Ty::Named("Value".into(), vec![]), Ty::String), span)) },
-                Ty::Named("Value".into(), vec![]), span);
-                let decode_fn = sym(&format!("{}.decode", type_name));
-                return ctx.mk(IrExprKind::Call {
-                    target: CallTarget::Named { name: decode_fn },
-                    args: vec![parsed], type_args: vec![],
-                }, ty, span);
-            }
-        }
+    if let Some(converted) = lower_call_json_convenience(ctx, callee, args, type_args, ty.clone(), span) {
+        return converted;
     }
-
 
     let mut ir_args: Vec<IrExpr> = Vec::new();
     let ta_raw: Vec<Ty> = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
@@ -98,38 +64,8 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
     }
 
     // Default args: fill in remaining defaults (for calls without named args).
-    // A default value that references an EARLIER parameter (`fn rect(w, h: Int =
-    // w)`) must be filled with that parameter's actual argument — the callee-local
-    // name does not exist at the call site (rustc E0425) (#664). Build a
-    // param→value map from the provided args and each already-filled default, then
-    // substitute before lowering. Guarded on a 1:1 arg/param alignment so prepended
-    // const-type-args / UFCS objects don't desync the mapping.
-    if let (true, CallTarget::Named { name }) = (named_args.is_empty(), &target) {
-        if let Some(defaults) = ctx.fn_defaults.get(name).cloned() {
-            let param_names: Vec<Sym> = ctx.env.functions.get(name)
-                .map(|sig| sig.params.iter().map(|(n, _)| almide_base::intern::sym(&n.to_string())).collect())
-                .unwrap_or_default();
-            let n_provided = ir_args.len();
-            let aligned = n_provided == args.len() && !param_names.is_empty();
-            let mut param_values: std::collections::HashMap<Sym, ast::Expr> = std::collections::HashMap::new();
-            if aligned {
-                for (j, arg) in args.iter().enumerate() {
-                    if let Some(pn) = param_names.get(j) { param_values.insert(*pn, arg.clone()); }
-                }
-            }
-            for j in n_provided..defaults.len() {
-                if let Some(default_expr) = defaults.get(j).and_then(|d| d.as_ref()) {
-                    if aligned {
-                        let mut d = default_expr.clone();
-                        substitute_call_params(&mut d, &param_values);
-                        if let Some(pn) = param_names.get(j) { param_values.insert(*pn, d.clone()); }
-                        ir_args.push(lower_expr(ctx, &d));
-                    } else {
-                        ir_args.push(lower_expr(ctx, default_expr));
-                    }
-                }
-            }
-        }
+    if named_args.is_empty() {
+        lower_call_fill_defaults(ctx, &mut ir_args, args, &target);
     }
 
     // #558: UFCS default-arg fill. A bare `x.foo()` lowers to a `Method`
@@ -152,11 +88,137 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
     }
 
     // Stage 1b: retype Int/Float literal args that flow into sized
-    // numeric params (`Int32`, `UInt8`, `Float32`, ...). Mirrors the
-    // let-binding coercion in `statements.rs::override_record_literal_ty`
-    // so `f(42)` where `f(x: UInt32)` emits `f(42u32)` instead of an
-    // `i64` / `u32` codegen mismatch.
-    if let CallTarget::Named { name } = &target {
+    // numeric params (`Int32`, `UInt8`, `Float32`, ...).
+    lower_call_coerce_args(ctx, &mut ir_args, &target);
+
+    // ALS-T18: the assert family OUTSIDE a test block desugars ONCE into
+    // the normalized abort form, so every consumer (the native walker, the v0
+    // wasm emit, the v1 MIR leg, the interp oracle) inherits identical
+    // observables: ONE stderr line + exit 1 — never a raw Rust panic (exit
+    // 101) or a bare wasm trap (exit 134). Fuzz seed-20260718 index 10:
+    // `assert_eq` in main leaked the native panic banner with exit 101 while
+    // wasm printed a value-less line with exit 1. Test blocks keep the harness
+    // assertion forms (cargo / the wasm test runner report those).
+    if !ctx.in_test {
+        if let CallTarget::Named { name } = &target {
+            let n = name.as_str();
+            if (matches!(n, "assert_eq" | "assert_ne") && ir_args.len() == 2)
+                || (n == "assert" && !ir_args.is_empty())
+            {
+                return desugar_assert_abort(ctx, n, ir_args, span);
+            }
+        }
+    }
+
+    // A call to a closure VALUE (Computed target) has, by definition, the
+    // callee's RETURN type — even when the inferred `ty` came back as the whole
+    // `Fn` type (which happens for a HOF lambda parameter whose concrete type is
+    // only fixed by the enclosing call's unification, after the body was checked).
+    // Leaving the node typed `fn(..) -> T` makes a later `acc + f(x)` trip the IR
+    // verifier (AddInt on a function value).
+    let ty = match &target {
+        CallTarget::Computed { callee } => match &callee.ty {
+            Ty::Fn { ret, .. } if !ret.has_unresolved_deep() => (**ret).clone(),
+            _ => ty,
+        },
+        _ => ty,
+    };
+    ctx.mk(IrExprKind::Call { target, args: ir_args, type_args: ta }, ty, span)
+}
+
+/// The json Codec convenience prefix of [`lower_call`]: `json.encode(expr)` →
+/// `json.stringify(T.encode(expr))` and `json.decode[T](text)` →
+/// `T.decode(json.parse(text)?)`, when `expr`/`T` has a Codec-derived
+/// convention fn. Verbatim text move — an independent guard chain that reads
+/// only its own params and returns `Some(IrExpr)` on match, `None` (fall
+/// through to the ordinary call-lowering path) otherwise.
+fn lower_call_json_convenience(
+    ctx: &mut LowerCtx,
+    callee: &ast::Expr,
+    args: &[ast::Expr],
+    type_args: Option<&Vec<ast::TypeExpr>>,
+    ty: Ty,
+    span: Option<ast::Span>,
+) -> Option<IrExpr> {
+    let ast::ExprKind::Member { object, field, .. } = &callee.kind else { return None };
+    let ast::ExprKind::Ident { name: module, .. } = &object.kind else { return None };
+    if field == "encode" && args.len() == 1 {
+        let arg_ty = ctx.expr_ty(&args[0]);
+        if let Some(encode_fn) = ctx.find_convention_fn(&arg_ty, "encode") {
+            let ir_arg = lower_expr(ctx, &args[0]);
+            let encoded = ctx.mk(IrExprKind::Call {
+                target: CallTarget::Named { name: encode_fn },
+                args: vec![ir_arg], type_args: vec![],
+            }, Ty::Named("Value".into(), vec![]), span);
+            return Some(ctx.mk(IrExprKind::Call {
+                target: CallTarget::Module { module: sym(module), func: sym("stringify"), def_id: ctx.def_map.get(&sym(&format!("{}.stringify", module))).copied() },
+                args: vec![encoded], type_args: vec![],
+            }, Ty::String, span));
+        }
+    }
+    if field == "decode" && args.len() == 1
+        && let Some(type_args) = type_args
+        && let Some(ast::TypeExpr::Simple { name: type_name }) = type_args.first()
+    {
+        let ir_arg = lower_expr(ctx, &args[0]);
+        // json.decode[T](text) → T.decode(json.parse(text)?)
+        let parsed = ctx.mk(IrExprKind::Try { expr: Box::new(ctx.mk(IrExprKind::Call {
+            target: CallTarget::Module { module: sym(module), func: sym("parse"), def_id: ctx.def_map.get(&sym(&format!("{}.parse", module))).copied() },
+            args: vec![ir_arg], type_args: vec![],
+        }, Ty::result(Ty::Named("Value".into(), vec![]), Ty::String), span)) },
+        Ty::Named("Value".into(), vec![]), span);
+        let decode_fn = sym(&format!("{}.decode", type_name));
+        return Some(ctx.mk(IrExprKind::Call {
+            target: CallTarget::Named { name: decode_fn },
+            args: vec![parsed], type_args: vec![],
+        }, ty, span));
+    }
+    None
+}
+
+/// The default-args fill stage of [`lower_call`], for calls WITHOUT named
+/// args to a `Named` target. A default value that references an EARLIER
+/// parameter (`fn rect(w, h: Int = w)`) must be filled with that parameter's
+/// actual argument — the callee-local name does not exist at the call site
+/// (rustc E0425) (#664). Build a param→value map from the provided args and
+/// each already-filled default, then substitute before lowering. Guarded on
+/// a 1:1 arg/param alignment so prepended const-type-args / UFCS objects
+/// don't desync the mapping. Verbatim text move; mutates `ir_args` in place.
+fn lower_call_fill_defaults(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, args: &[ast::Expr], target: &CallTarget) {
+    let CallTarget::Named { name } = target else { return };
+    let Some(defaults) = ctx.fn_defaults.get(name).cloned() else { return };
+    let param_names: Vec<Sym> = ctx.env.functions.get(name)
+        .map(|sig| sig.params.iter().map(|(n, _)| almide_base::intern::sym(&n.to_string())).collect())
+        .unwrap_or_default();
+    let n_provided = ir_args.len();
+    let aligned = n_provided == args.len() && !param_names.is_empty();
+    let mut param_values: std::collections::HashMap<Sym, ast::Expr> = std::collections::HashMap::new();
+    if aligned {
+        for (j, arg) in args.iter().enumerate() {
+            if let Some(pn) = param_names.get(j) { param_values.insert(*pn, arg.clone()); }
+        }
+    }
+    for j in n_provided..defaults.len() {
+        if let Some(default_expr) = defaults.get(j).and_then(|d| d.as_ref()) {
+            if aligned {
+                let mut d = default_expr.clone();
+                substitute_call_params(&mut d, &param_values);
+                if let Some(pn) = param_names.get(j) { param_values.insert(*pn, d.clone()); }
+                ir_args.push(lower_expr(ctx, &d));
+            } else {
+                ir_args.push(lower_expr(ctx, default_expr));
+            }
+        }
+    }
+}
+
+/// Stage 1b of [`lower_call`]: retype Int/Float literal args that flow into
+/// sized numeric params (`Int32`, `UInt8`, `Float32`, ...). Mirrors the
+/// let-binding coercion in `statements.rs::override_record_literal_ty` so
+/// `f(42)` where `f(x: UInt32)` emits `f(42u32)` instead of an `i64` / `u32`
+/// codegen mismatch. Verbatim text move; mutates `ir_args` in place.
+fn lower_call_coerce_args(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, target: &CallTarget) {
+    if let CallTarget::Named { name } = target {
         // Builtin comparison macros (assert_eq / assert_ne) aren't
         // registered in env.functions, but their semantics demand
         // width-matched operands on both targets. Coerce literal-side
@@ -197,7 +259,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
                 }
             }
         }
-    } else if let CallTarget::Module { module, func, .. } = &target {
+    } else if let CallTarget::Module { module, func, .. } = target {
         if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
             for (i, (_, param_ty)) in sig.params.iter().enumerate() {
                 if let Some(arg) = ir_args.get_mut(i) {
@@ -206,40 +268,6 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
             }
         }
     }
-
-    // ALS-T18: the assert family OUTSIDE a test block desugars ONCE here into
-    // the normalized abort form, so every consumer (the native walker, the v0
-    // wasm emit, the v1 MIR leg, the interp oracle) inherits identical
-    // observables: ONE stderr line + exit 1 — never a raw Rust panic (exit
-    // 101) or a bare wasm trap (exit 134). Fuzz seed-20260718 index 10:
-    // `assert_eq` in main leaked the native panic banner with exit 101 while
-    // wasm printed a value-less line with exit 1. Test blocks keep the harness
-    // assertion forms (cargo / the wasm test runner report those).
-    if !ctx.in_test {
-        if let CallTarget::Named { name } = &target {
-            let n = name.as_str();
-            if (matches!(n, "assert_eq" | "assert_ne") && ir_args.len() == 2)
-                || (n == "assert" && !ir_args.is_empty())
-            {
-                return desugar_assert_abort(ctx, n, ir_args, span);
-            }
-        }
-    }
-
-    // A call to a closure VALUE (Computed target) has, by definition, the
-    // callee's RETURN type — even when the inferred `ty` came back as the whole
-    // `Fn` type (which happens for a HOF lambda parameter whose concrete type is
-    // only fixed by the enclosing call's unification, after the body was checked).
-    // Leaving the node typed `fn(..) -> T` makes a later `acc + f(x)` trip the IR
-    // verifier (AddInt on a function value).
-    let ty = match &target {
-        CallTarget::Computed { callee } => match &callee.ty {
-            Ty::Fn { ret, .. } if !ret.has_unresolved_deep() => (**ret).clone(),
-            _ => ty,
-        },
-        _ => ty,
-    };
-    ctx.mk(IrExprKind::Call { target, args: ir_args, type_args: ta }, ty, span)
 }
 
 /// Unwrap `Result[T, _]` → `T`; any other type is returned unchanged.
