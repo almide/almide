@@ -84,6 +84,13 @@ pub fn is_any_stdlib(name: &str) -> bool {
 /// type checker queries and the templates codegen emits cannot drift
 /// out of step as bundled `.almd` modules evolve.
 pub fn bundled_source(name: &str) -> Option<&'static str> {
+    bundled_source_core(name)
+        .or_else(|| bundled_source_collections(name))
+        .or_else(|| bundled_source_io(name))
+        .or_else(|| bundled_source_sized_numeric(name))
+}
+
+fn bundled_source_core(name: &str) -> Option<&'static str> {
     match name {
         "args" => Some(include_str!("../../../stdlib/args.almd")),
         "path" => Some(include_str!("../../../stdlib/path.almd")),
@@ -95,6 +102,12 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "bytes" => Some(include_str!("../../../stdlib/bytes.almd")),
         "error" => Some(include_str!("../../../stdlib/error.almd")),
         "value" => Some(include_str!("../../../stdlib/value.almd")),
+        _ => None,
+    }
+}
+
+fn bundled_source_collections(name: &str) -> Option<&'static str> {
+    match name {
         "option" => Some(include_str!("../../../stdlib/option.almd")),
         "result" => Some(include_str!("../../../stdlib/result.almd")),
         "map" => Some(include_str!("../../../stdlib/map.almd")),
@@ -105,6 +118,12 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "random" => Some(include_str!("../../../stdlib/random.almd")),
         "regex" => Some(include_str!("../../../stdlib/regex.almd")),
         "testing" => Some(include_str!("../../../stdlib/testing.almd")),
+        _ => None,
+    }
+}
+
+fn bundled_source_io(name: &str) -> Option<&'static str> {
+    match name {
         "process" => Some(include_str!("../../../stdlib/process.almd")),
         "fs" => Some(include_str!("../../../stdlib/fs.almd")),
         "http" => Some(include_str!("../../../stdlib/http.almd")),
@@ -113,6 +132,12 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "mem" => Some(include_str!("../../../stdlib/mem.almd")),
         "math" => Some(include_str!("../../../stdlib/math.almd")),
         "datetime" => Some(include_str!("../../../stdlib/datetime.almd")),
+        _ => None,
+    }
+}
+
+fn bundled_source_sized_numeric(name: &str) -> Option<&'static str> {
+    match name {
         "int8" => Some(include_str!("../../../stdlib/int8.almd")),
         "int16" => Some(include_str!("../../../stdlib/int16.almd")),
         "int32" => Some(include_str!("../../../stdlib/int32.almd")),
