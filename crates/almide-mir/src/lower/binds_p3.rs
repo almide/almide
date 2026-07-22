@@ -1,3 +1,29 @@
+/// The element's drop kind for `try_lower_record_list_literal_as`'s list-literal builder: a
+/// recursive-drop record (`$__drop_list_<R>`), a `(String,String)` tuple (`Op::DropListStrStr` —
+/// the map.entries / `[(k,v), …]` literal shape), OR an Option/Result CTOR element (`[some(1),
+/// none]`, `[ok(1), err("x")]` — the collect-test shapes): a Flat class (scalar payload — the
+/// per-element `rc_dec` of `DropListStr` is exact) or a LenLoop class (owned handle slots — the
+/// generated `$__drop_list_lenlist`). Moved to module scope (was function-local) so
+/// `LowerCtx::classify_list_elem_drop` can return it — pure text move, no behavior change.
+enum ListElemDrop {
+    Record(String),
+    StrStr,
+    StrInt,
+    IntStr,
+    StrVariant(String),
+    StrMapStr,
+    StrListOpt,
+    RecordInt(String),
+    MapMlo,
+    ListStr,
+    MapHval,
+    ScalarAggregate,
+    CtorFlat,
+    CtorLenLoop,
+    Closure,
+    StrClosure,
+}
+
 impl LowerCtx {
     /// Construct a SCALAR-field tuple `(a, b, …)`: alloc an n-slot block (Init::DynList) and store
     /// each field's computed scalar value at its slot via `Prim::Store`. Returns `None` (caller
@@ -353,10 +379,14 @@ impl LowerCtx {
                     self.lower_owned_heap_field(arg)?
                 };
                 field_vals.push((v, true));
-            } else if matches!(arg.ty, Ty::String) {
+                continue;
+            }
+            if matches!(arg.ty, Ty::String) {
                 let obj = self.lower_owned_heap_field(arg)?;
                 field_vals.push((obj, true));
-            } else if self.ctor_list_field_drop_freeable(&arg.ty) {
+                continue;
+            }
+            if self.ctor_list_field_drop_freeable(&arg.ty) {
                 // A `List[scalar]` / `List[<rich variant>]` ctor field (ADT brick 5:
                 // `ValArray(items)` — the gguf read_array accumulator): admitted EXACTLY when
                 // the generated `$__drop_<T>` body frees it (flat `rc_dec` / `__drop_list_<E>`
@@ -366,7 +396,9 @@ impl LowerCtx {
                 // (the generator emits no free for those — admitting one would leak).
                 let obj = self.lower_owned_heap_field(arg)?;
                 field_vals.push((obj, true));
-            } else if matches!(&arg.ty, Ty::Named(..) | Ty::Record { .. })
+                continue;
+            }
+            if matches!(&arg.ty, Ty::Named(..) | Ty::Record { .. })
                 && self.aggregate_field_tys(&arg.ty).is_some()
             {
                 // A RECORD-type ctor field (`Wrap(Color)`, `Box(Inner)`): materialize the record (a
@@ -382,7 +414,9 @@ impl LowerCtx {
                     _ => self.lower_owned_heap_field(arg)?,
                 };
                 field_vals.push((obj, true));
-            } else if matches!(&arg.ty,
+                continue;
+            }
+            if matches!(&arg.ty,
                 Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a)
                     if a.len() == 1 && !is_heap_ty(&a[0]))
             {
@@ -397,7 +431,9 @@ impl LowerCtx {
                     .try_lower_option_ctor(arg, &arg.ty)
                     .or_else(|| self.lower_owned_heap_field(arg))?;
                 field_vals.push((obj, true));
-            } else if matches!(&arg.ty, Ty::Fn { .. }) {
+                continue;
+            }
+            if matches!(&arg.ty, Ty::Fn { .. }) {
                 // A CLOSURE ctor field (`Run(() => …)` / `Thunk((x) => x * x)` — the
                 // variant-stored closure class): a Lambda arg LIFTS to its closure
                 // block, a Var arg Dups the tracked block (both via
@@ -407,12 +443,13 @@ impl LowerCtx {
                 // the same change — construction and drop agree).
                 let obj = self.lower_owned_heap_field(arg)?;
                 field_vals.push((obj, true));
-            } else if is_heap_ty(&arg.ty) {
-                return None; // List[String] / Map / other heap ctor field — a later brick
-            } else {
-                let v = self.lower_scalar_value(arg)?;
-                field_vals.push((v, false));
+                continue;
             }
+            if is_heap_ty(&arg.ty) {
+                return None; // List[String] / Map / other heap ctor field — a later brick
+            }
+            let v = self.lower_scalar_value(arg)?;
+            field_vals.push((v, false));
         }
         // Rung-5 variants slab: an ALL-SCALAR ctor block is a plain slot list
         // (tag@slot0, fields@1+, zero-filled to the type's uniform width), so
@@ -648,6 +685,223 @@ impl LowerCtx {
         self.try_lower_record_list_literal_as(value, None)
     }
 
+    /// The element-type → drop-shape classification for `try_lower_record_list_literal_as`'s
+    /// list-literal builder — see [`ListElemDrop`]. Read-only over `self` (only `&self`
+    /// lookups). A `return None` inside an arm below (the `StrVariant`/`RecordInt` cases)
+    /// returns `None` from THIS helper, not from the caller directly; the call site's
+    /// `let Some(kind) = self.classify_list_elem_drop(…) else { return None }` re-propagates
+    /// it, so the caller's observable behavior is byte-for-byte unchanged from the former
+    /// inline if-else-if chain. Verbatim extraction (guard-clause flattening), no behavior
+    /// change — see docs/roadmap/active/code-health-codopsy.md.
+    fn classify_list_elem_drop(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
+        // A STRUCTURAL record element (`[{key: "x", val: "2"}]` in argument position —
+        // the checker leaves the literal structural, so `record_drop_type_name` alone
+        // declined it, calls_p2's List-arg wall): the synthesized anon-record drop
+        // (`__drop_anonrec_<hash>`) covers it with the SAME field order the literal
+        // materializes in — no declared-vs-structural order mismatch (the soundness
+        // crux the named path guards).
+        if let Some(rname) = self.record_or_anon_drop_type_name(elem_ty) {
+            return Some(ListElemDrop::Record(rname));
+        }
+        if matches!(elem_ty,
+            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+                && (matches!(tys[1], Ty::String)
+                    || matches!(&tys[1],
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
+                            if b.len() == 1 && !is_heap_ty(&b[0]))))
+        {
+            // Widened to (String, <flat block>): DropListStrStr's per-tuple BOTH-slot
+            // rc_dec is a full free for a String OR List[scalar] second slot — the hval
+            // map literal's `("xs", [1, 2, 3])` pairs (the OWNED-builder route the PCC
+            // ownership gate accepts, unlike the raw-handle view widening it rejected).
+            return Some(ListElemDrop::StrStr);
+        }
+        if matches!(elem_ty, Ty::Tuple(tys)
+            if tys.len() == 2
+                && is_heap_ty(&tys[0])
+                && is_heap_ty(&tys[1])
+                && self.is_flat_heap_tuple_slot(&tys[0])
+                && self.is_flat_heap_tuple_slot(&tys[1]))
+        {
+            // A `(<flat record/variant>, String)` TUPLE element (`[Color{r,g,b}: "red"]` —
+            // the `[key: value]` map-literal desugar over a user Hash-key type,
+            // hash_protocol_test's Color/Direction shapes): `Op::DropListStrStr`'s render
+            // (`__ssdrop_list` in value_core.almd) is PURELY handle-based — `rc_dec` of the
+            // raw handle at slot0 (@12) and slot1 (@20), reading NEITHER slot's internal
+            // bytes — so it is exact for ANY pair of ONE-LEVEL-EXACT heap values, not just
+            // two Strings (confirmed by reading its body: no `__str_eq`-style length/byte
+            // interpretation, the exact class of bug this session's `_str`-dispatch fix
+            // caught elsewhere). A FLAT record (`record_or_anon_drop_type_name` already
+            // returned `None` above — only a RECURSIVE-drop record reaches that arm; an
+            // all-scalar record like `Color` falls through to here) or a flat variant
+            // (`Direction`, all-nullary) is exactly one-level-exact: a single `rc_dec`
+            // frees the whole block, since it owns no further heap.
+            return Some(ListElemDrop::StrStr);
+        }
+        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && self.is_flat_heap_tuple_slot(&tys[0]) && is_heap_ty(&tys[0]) && !is_heap_ty(&tys[1]))
+        {
+            // A `(<flat heap>, <scalar>)` TUPLE element (`[("k0", 1), ("k1", 2)]` — the
+            // `[key: value]` map-literal desugar's pairs list, map_fold_heap_acc's initial
+            // accumulator, `[("k0", true), …]` — option_unwrap_or_else_heap's Map[String,
+            // Bool]; `[East: 90, …]` — hash_protocol_test's `Map[Direction, Int]`): the
+            // MIRROR of the IntStr arm below. Recursive drop via the EXISTING
+            // `Op::DropListStrInt` (rc_dec slot0 @12 only — the render NEVER reads slot1's
+            // contents, so it is scalar-type-agnostic: Int/Bool/Float all free identically;
+            // and slot0-type-agnostic too, since it just rc_decs the raw handle — a flat
+            // record/variant frees exactly like a String there) — the same Op
+            // calls_p2.rs's concat-operator path already routes to for the (String,scalar)
+            // instance, just not previously wired to the list-LITERAL classifier nor
+            // widened past String. Was Int-only (B34), then any-scalar-value (B37); now
+            // any-flat-heap-key too.
+            return Some(ListElemDrop::StrInt);
+        }
+        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && !is_heap_ty(&tys[0]) && self.is_flat_heap_tuple_slot(&tys[1]) && is_heap_ty(&tys[1]))
+        {
+            // A `(<scalar>, <flat heap>)` TUPLE element (`[(0, "a"), (1, "b")]` —
+            // `list.enumerate` shaped literals): recursive drop via the existing
+            // `Op::DropListIntStr` (rc_dec slot1 @20 only — likewise type-agnostic).
+            return Some(ListElemDrop::IntStr);
+        }
+        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+            && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
+                if b.len() == 2 && matches!(b[0], Ty::String) && matches!(b[1], Ty::String)))
+        {
+            // A `(String, Map[String, String])` TUPLE element (the map_fold_heap_acc
+            // nested-map literal's pairs list, `["k0": ["k0": "x"]]` desugared to
+            // `map.from_list_msv([("k0", <inner map>)])`): slot1 is a MAP owning its own
+            // String slots — the static `$__drop_list_str_mss` (map_msv.almd) frees
+            // slot0 flat and sweeps the last-ref inner map (a flat rc_dec would leak
+            // every inner key/value String). Checked BEFORE the generic StrVariant arm
+            // (a Map is not a custom variant, so that arm's name lookup would decline).
+            return Some(ListElemDrop::StrMapStr);
+        }
+        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+            && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
+                if b.len() == 1
+                    && matches!(&b[0], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, o)
+                        if o.len() == 1 && matches!(o[0], Ty::Int))))
+        {
+            // A `(String, List[Option[Int]])` TUPLE element (compound_repr_interp's `deep`
+            // pairs list, `["k": [some(1), none]]` desugared to `map.from_list_mlo([("k",
+            // <lenlist>)])`): slot1 is a LIST owning its Option-block slots — the static
+            // `$__drop_list_str_mlo` (map_mlo.almd) frees slot0 flat and sweeps the
+            // last-ref inner list (a flat rc_dec would leak every Option block). Same
+            // placement rationale as StrMapStr above.
+            return Some(ListElemDrop::StrListOpt);
+        }
+        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+            && matches!(tys[1], Ty::Fn { .. }))
+        {
+            // A `(String, <Fn>)` TUPLE element (`map.from_list([("a", () => …)])` — the
+            // closure-valued map's pairs list): slot1 is a CLOSURE BLOCK whose captured
+            // env a flat rc_dec would leak — the static `$__drop_list_str_clo` frees
+            // slot0 flat (String rc_dec) and routes slot1 through `__drop_closure`.
+            // Checked BEFORE the generic `(String, <non-flat heap>)` StrVariant arm
+            // below, whose variant-name lookup would DECLINE a Fn slot (killing the
+            // whole builder).
+            return Some(ListElemDrop::StrClosure);
+        }
+        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+            && is_heap_ty(&tys[1]) && !self.is_flat_heap_tuple_slot(&tys[1]))
+        {
+            // A `(String, <RICH variant>)` TUPLE element (`[("x", ValInt(64)), ("y",
+            // ValStr("s"))]` — generic_chain_unwrap_or's `List[(String, V)]` metadata
+            // pairs, `type V = ValInt(Int) | ValStr(String)`): the MIRROR of `StrInt`,
+            // but slot1 is NOT scalar — it is a variant needing its OWN recursive drop
+            // (a `ValStr` payload owns a String). `DropListStrInt`'s render only ever
+            // rc_decs slot0 and leaves slot1 UNTOUCHED (sound only when slot1 is truly
+            // scalar) — reusing it here would silently LEAK every `ValStr` element's
+            // String, so this is a genuinely new drop shape: a generated
+            // `$__drop_list_str_<V>` (drop_sources.rs) frees slot0 (String, flat
+            // rc_dec) AND recurses into slot1 via the variant's own already-generated
+            // `$__drop_<V>` (V is a real, non-generic type — no shadow-type machinery
+            // needed, unlike B117's generic-instantiation case).
+            let Ty::Tuple(tys) = elem_ty else { unreachable!() };
+            let Some(vname) = self.custom_variant_type_name(&tys[1]) else { return None };
+            return Some(ListElemDrop::StrVariant(vname));
+        }
+        if matches!(elem_ty, Ty::Tuple(tys) if tys.len() == 2
+            && !is_heap_ty(&tys[1])
+            && self.record_or_anon_drop_type_name(&tys[0]).is_some())
+        {
+            // A `(<RECURSIVE-DROP record>, <scalar>)` TUPLE element (`[({name: "alice", age:
+            // 30}, 1), …]` — compound_eq's `Map[P, Int]` from_list pairs): the RECORD mirror
+            // of `StrVariant`. `DropListStrInt` only rc_decs slot0 one level — P owns a String
+            // field, so a flat rc_dec LEAKS it; slot0 must recurse via `$__drop_<R>`. The
+            // element's record slot is FORCED to this declared/classified type at construction
+            // (below), so classification name, construction layout, and the generated
+            // `$__drop_list_<R>_int` teardown all key on ONE name — the mismatch that produced
+            // the earlier attempt's dangling `$__drop_list_anonrec_<hash>_int`.
+            let Ty::Tuple(tys) = elem_ty else { unreachable!() };
+            let Some(rname) = self.record_or_anon_drop_type_name(&tys[0]) else { return None };
+            return Some(ListElemDrop::RecordInt(rname));
+        }
+        if matches!(elem_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
+                if i.len() == 1 && matches!(i[0], Ty::String))
+        {
+            // A `List[List[String]]` literal (`[["b","2"], ["a","1"]]` — the sort_by
+            // string-key shape): each inner list is a fresh owned DynListStr; the outer
+            // drop is the recursive list-of-list-str free (`list_list_str_lists`).
+            return Some(ListElemDrop::ListStr);
+        }
+        if matches!(elem_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, kv)
+                if kv.len() == 2 && matches!(kv[0], Ty::String)
+                    && matches!(&kv[1],
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
+                            if b.len() == 1 && matches!(b[0], Ty::Int)))
+        {
+            // A `List[Map[String, List[Int]]]` literal (`[["a": [1, 2]], ["b": [3]]]` —
+            // the nested repr shape): each element is an hval map block (a from_list_hval
+            // call result, moved in); the list frees per-element via the self-hosted
+            // `$__drop_list_map_hval` (each element through `__drop_map_hval`).
+            return Some(ListElemDrop::MapHval);
+        }
+        if crate::lower::is_map_mlo_ty(elem_ty) {
+            // A `List[Map[String, List[Option[Int]]]]` literal (compound_repr_interp's
+            // `deep` outer list): each element is an mlo map block (a from_list_mlo call
+            // result, moved in); the list frees per-element via the self-hosted
+            // `$__drop_list_map_mlo` (each element through `__drop_map_mlo`).
+            return Some(ListElemDrop::MapMlo);
+        }
+        if matches!(elem_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
+                if b.len() == 1 && !is_heap_ty(&b[0]))
+        {
+            // A `List[List[<scalar>]]` literal ARG (`[[1, 2], [3, 4]]` — compound_eq's
+            // lnl): each inner list is a fresh FLAT block (inline scalars), so the
+            // per-element rc_dec of the masked DropListStr is its full free — the same
+            // ScalarAggregate physics with a list-literal element materializer.
+            return Some(ListElemDrop::ScalarAggregate);
+        }
+        if matches!(elem_ty, Ty::Tuple(tys) if !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t)))
+        {
+            // An ALL-SCALAR tuple element (`[(1, 2), (3, 4)]` — the compound_eq
+            // List[(Int, Int)] argument): each element is a fresh flat block (inline
+            // scalars only), so the per-element rc_dec of the masked DropListStr IS its
+            // full free. The OWNED route (build + Consume) — the raw-handle view trap
+            // (B24) double-frees this shape.
+            return Some(ListElemDrop::ScalarAggregate);
+        }
+        if let Some(class) = crate::lower::lenlist_elem_class(elem_ty) {
+            return Some(match class {
+                crate::lower::CtorElemClass::Flat => ListElemDrop::CtorFlat,
+                crate::lower::CtorElemClass::LenLoop => ListElemDrop::CtorLenLoop,
+            });
+        }
+        if matches!(elem_ty, Ty::Fn { .. }) {
+            // A `List[<Fn>]` LITERAL element (`[(x: Int) => x + 1, (x: Int) => x * 2]` —
+            // #623's closure-parameter shape): each element is a fresh closure BLOCK (lifted
+            // via `lift_lambda`, the SAME mechanism a call-argument lambda already uses),
+            // freed per-element via the generated `$__drop_list_closure` (recurses into the
+            // uniform `$__drop_closure` — required even for a non-capturing lambda, since the
+            // LIST's TYPE alone (`List[(Int)->Int]`) does not preclude a capturing element).
+            return Some(ListElemDrop::Closure);
+        }
+        None
+    }
+
     /// As [`Self::try_lower_record_list_literal`], but with an AUTHORITATIVE element type override.
     /// A `[{...}]` record LITERAL infers its element type STRUCTURALLY (`Ty::Record{fields}`) — never
     /// the NAMED record (the type checker leaves a record literal structural). So `record_drop_type_name`
@@ -677,219 +931,14 @@ impl LowerCtx {
                 _ => return None,
             },
         };
-        // The element's drop kind: a recursive-drop record (`$__drop_list_<R>`), a `(String,String)`
-        // tuple (`Op::DropListStrStr` — the map.entries / `[(k,v), …]` literal shape), OR an
-        // Option/Result CTOR element (`[some(1), none]`, `[ok(1), err("x")]` — the collect-test
-        // shapes): a Flat class (scalar payload — the per-element `rc_dec` of `DropListStr` is
-        // exact) or a LenLoop class (owned handle slots — the generated `$__drop_list_lenlist`).
-        // Anything else → `None` (the caller keeps the scalar / wall path).
-        enum ListElemDrop {
-            Record(String),
-            StrStr,
-            StrInt,
-            IntStr,
-            StrVariant(String),
-            StrMapStr,
-            StrListOpt,
-            RecordInt(String),
-            MapMlo,
-            ListStr,
-            MapHval,
-            ScalarAggregate,
-            CtorFlat,
-            CtorLenLoop,
-            Closure,
-            StrClosure,
-        }
-        // A STRUCTURAL record element (`[{key: "x", val: "2"}]` in argument position —
-        // the checker leaves the literal structural, so `record_drop_type_name` alone
-        // declined it, calls_p2's List-arg wall): the synthesized anon-record drop
-        // (`__drop_anonrec_<hash>`) covers it with the SAME field order the literal
-        // materializes in — no declared-vs-structural order mismatch (the soundness
-        // crux the named path guards).
-        let kind = if let Some(rname) = self.record_or_anon_drop_type_name(&elem_ty) {
-            ListElemDrop::Record(rname)
-        } else if matches!(&elem_ty,
-            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
-                && (matches!(tys[1], Ty::String)
-                    || matches!(&tys[1],
-                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
-                            if b.len() == 1 && !is_heap_ty(&b[0]))))
-        {
-            // Widened to (String, <flat block>): DropListStrStr's per-tuple BOTH-slot
-            // rc_dec is a full free for a String OR List[scalar] second slot — the hval
-            // map literal's `("xs", [1, 2, 3])` pairs (the OWNED-builder route the PCC
-            // ownership gate accepts, unlike the raw-handle view widening it rejected).
-            ListElemDrop::StrStr
-        } else if matches!(&elem_ty, Ty::Tuple(tys)
-            if tys.len() == 2
-                && is_heap_ty(&tys[0])
-                && is_heap_ty(&tys[1])
-                && self.is_flat_heap_tuple_slot(&tys[0])
-                && self.is_flat_heap_tuple_slot(&tys[1]))
-        {
-            // A `(<flat record/variant>, String)` TUPLE element (`[Color{r,g,b}: "red"]` —
-            // the `[key: value]` map-literal desugar over a user Hash-key type,
-            // hash_protocol_test's Color/Direction shapes): `Op::DropListStrStr`'s render
-            // (`__ssdrop_list` in value_core.almd) is PURELY handle-based — `rc_dec` of the
-            // raw handle at slot0 (@12) and slot1 (@20), reading NEITHER slot's internal
-            // bytes — so it is exact for ANY pair of ONE-LEVEL-EXACT heap values, not just
-            // two Strings (confirmed by reading its body: no `__str_eq`-style length/byte
-            // interpretation, the exact class of bug this session's `_str`-dispatch fix
-            // caught elsewhere). A FLAT record (`record_or_anon_drop_type_name` already
-            // returned `None` above — only a RECURSIVE-drop record reaches that arm; an
-            // all-scalar record like `Color` falls through to here) or a flat variant
-            // (`Direction`, all-nullary) is exactly one-level-exact: a single `rc_dec`
-            // frees the whole block, since it owns no further heap.
-            ListElemDrop::StrStr
-        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && self.is_flat_heap_tuple_slot(&tys[0]) && is_heap_ty(&tys[0]) && !is_heap_ty(&tys[1]))
-        {
-            // A `(<flat heap>, <scalar>)` TUPLE element (`[("k0", 1), ("k1", 2)]` — the
-            // `[key: value]` map-literal desugar's pairs list, map_fold_heap_acc's initial
-            // accumulator, `[("k0", true), …]` — option_unwrap_or_else_heap's Map[String,
-            // Bool]; `[East: 90, …]` — hash_protocol_test's `Map[Direction, Int]`): the
-            // MIRROR of the IntStr arm below. Recursive drop via the EXISTING
-            // `Op::DropListStrInt` (rc_dec slot0 @12 only — the render NEVER reads slot1's
-            // contents, so it is scalar-type-agnostic: Int/Bool/Float all free identically;
-            // and slot0-type-agnostic too, since it just rc_decs the raw handle — a flat
-            // record/variant frees exactly like a String there) — the same Op
-            // calls_p2.rs's concat-operator path already routes to for the (String,scalar)
-            // instance, just not previously wired to the list-LITERAL classifier nor
-            // widened past String. Was Int-only (B34), then any-scalar-value (B37); now
-            // any-flat-heap-key too.
-            ListElemDrop::StrInt
-        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && !is_heap_ty(&tys[0]) && self.is_flat_heap_tuple_slot(&tys[1]) && is_heap_ty(&tys[1]))
-        {
-            // A `(<scalar>, <flat heap>)` TUPLE element (`[(0, "a"), (1, "b")]` —
-            // `list.enumerate` shaped literals): recursive drop via the existing
-            // `Op::DropListIntStr` (rc_dec slot1 @20 only — likewise type-agnostic).
-            ListElemDrop::IntStr
-        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
-            && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, b)
-                if b.len() == 2 && matches!(b[0], Ty::String) && matches!(b[1], Ty::String)))
-        {
-            // A `(String, Map[String, String])` TUPLE element (the map_fold_heap_acc
-            // nested-map literal's pairs list, `["k0": ["k0": "x"]]` desugared to
-            // `map.from_list_msv([("k0", <inner map>)])`): slot1 is a MAP owning its own
-            // String slots — the static `$__drop_list_str_mss` (map_msv.almd) frees
-            // slot0 flat and sweeps the last-ref inner map (a flat rc_dec would leak
-            // every inner key/value String). Checked BEFORE the generic StrVariant arm
-            // (a Map is not a custom variant, so that arm's name lookup would decline).
-            ListElemDrop::StrMapStr
-        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
-            && matches!(&tys[1], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
-                if b.len() == 1
-                    && matches!(&b[0], Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, o)
-                        if o.len() == 1 && matches!(o[0], Ty::Int))))
-        {
-            // A `(String, List[Option[Int]])` TUPLE element (compound_repr_interp's `deep`
-            // pairs list, `["k": [some(1), none]]` desugared to `map.from_list_mlo([("k",
-            // <lenlist>)])`): slot1 is a LIST owning its Option-block slots — the static
-            // `$__drop_list_str_mlo` (map_mlo.almd) frees slot0 flat and sweeps the
-            // last-ref inner list (a flat rc_dec would leak every Option block). Same
-            // placement rationale as StrMapStr above.
-            ListElemDrop::StrListOpt
-        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
-            && matches!(tys[1], Ty::Fn { .. }))
-        {
-            // A `(String, <Fn>)` TUPLE element (`map.from_list([("a", () => …)])` — the
-            // closure-valued map's pairs list): slot1 is a CLOSURE BLOCK whose captured
-            // env a flat rc_dec would leak — the static `$__drop_list_str_clo` frees
-            // slot0 flat (String rc_dec) and routes slot1 through `__drop_closure`.
-            // Checked BEFORE the generic `(String, <non-flat heap>)` StrVariant arm
-            // below, whose variant-name lookup would DECLINE a Fn slot (killing the
-            // whole builder).
-            ListElemDrop::StrClosure
-        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
-            && is_heap_ty(&tys[1]) && !self.is_flat_heap_tuple_slot(&tys[1]))
-        {
-            // A `(String, <RICH variant>)` TUPLE element (`[("x", ValInt(64)), ("y",
-            // ValStr("s"))]` — generic_chain_unwrap_or's `List[(String, V)]` metadata
-            // pairs, `type V = ValInt(Int) | ValStr(String)`): the MIRROR of `StrInt`,
-            // but slot1 is NOT scalar — it is a variant needing its OWN recursive drop
-            // (a `ValStr` payload owns a String). `DropListStrInt`'s render only ever
-            // rc_decs slot0 and leaves slot1 UNTOUCHED (sound only when slot1 is truly
-            // scalar) — reusing it here would silently LEAK every `ValStr` element's
-            // String, so this is a genuinely new drop shape: a generated
-            // `$__drop_list_str_<V>` (drop_sources.rs) frees slot0 (String, flat
-            // rc_dec) AND recurses into slot1 via the variant's own already-generated
-            // `$__drop_<V>` (V is a real, non-generic type — no shadow-type machinery
-            // needed, unlike B117's generic-instantiation case).
-            let Ty::Tuple(tys) = &elem_ty else { unreachable!() };
-            let Some(vname) = self.custom_variant_type_name(&tys[1]) else { return None };
-            ListElemDrop::StrVariant(vname)
-        } else if matches!(&elem_ty, Ty::Tuple(tys) if tys.len() == 2
-            && !is_heap_ty(&tys[1])
-            && self.record_or_anon_drop_type_name(&tys[0]).is_some())
-        {
-            // A `(<RECURSIVE-DROP record>, <scalar>)` TUPLE element (`[({name: "alice", age:
-            // 30}, 1), …]` — compound_eq's `Map[P, Int]` from_list pairs): the RECORD mirror
-            // of `StrVariant`. `DropListStrInt` only rc_decs slot0 one level — P owns a String
-            // field, so a flat rc_dec LEAKS it; slot0 must recurse via `$__drop_<R>`. The
-            // element's record slot is FORCED to this declared/classified type at construction
-            // (below), so classification name, construction layout, and the generated
-            // `$__drop_list_<R>_int` teardown all key on ONE name — the mismatch that produced
-            // the earlier attempt's dangling `$__drop_list_anonrec_<hash>_int`.
-            let Ty::Tuple(tys) = &elem_ty else { unreachable!() };
-            let Some(rname) = self.record_or_anon_drop_type_name(&tys[0]) else { return None };
-            ListElemDrop::RecordInt(rname)
-        } else if matches!(&elem_ty,
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
-                if i.len() == 1 && matches!(i[0], Ty::String))
-        {
-            // A `List[List[String]]` literal (`[["b","2"], ["a","1"]]` — the sort_by
-            // string-key shape): each inner list is a fresh owned DynListStr; the outer
-            // drop is the recursive list-of-list-str free (`list_list_str_lists`).
-            ListElemDrop::ListStr
-        } else if matches!(&elem_ty,
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, kv)
-                if kv.len() == 2 && matches!(kv[0], Ty::String)
-                    && matches!(&kv[1],
-                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
-                            if b.len() == 1 && matches!(b[0], Ty::Int)))
-        {
-            // A `List[Map[String, List[Int]]]` literal (`[["a": [1, 2]], ["b": [3]]]` —
-            // the nested repr shape): each element is an hval map block (a from_list_hval
-            // call result, moved in); the list frees per-element via the self-hosted
-            // `$__drop_list_map_hval` (each element through `__drop_map_hval`).
-            ListElemDrop::MapHval
-        } else if crate::lower::is_map_mlo_ty(&elem_ty) {
-            // A `List[Map[String, List[Option[Int]]]]` literal (compound_repr_interp's
-            // `deep` outer list): each element is an mlo map block (a from_list_mlo call
-            // result, moved in); the list frees per-element via the self-hosted
-            // `$__drop_list_map_mlo` (each element through `__drop_map_mlo`).
-            ListElemDrop::MapMlo
-        } else if matches!(&elem_ty,
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b)
-                if b.len() == 1 && !is_heap_ty(&b[0]))
-        {
-            // A `List[List[<scalar>]]` literal ARG (`[[1, 2], [3, 4]]` — compound_eq's
-            // lnl): each inner list is a fresh FLAT block (inline scalars), so the
-            // per-element rc_dec of the masked DropListStr is its full free — the same
-            // ScalarAggregate physics with a list-literal element materializer.
-            ListElemDrop::ScalarAggregate
-        } else if matches!(&elem_ty, Ty::Tuple(tys) if !tys.is_empty() && tys.iter().all(|t| !is_heap_ty(t)))
-        {
-            // An ALL-SCALAR tuple element (`[(1, 2), (3, 4)]` — the compound_eq
-            // List[(Int, Int)] argument): each element is a fresh flat block (inline
-            // scalars only), so the per-element rc_dec of the masked DropListStr IS its
-            // full free. The OWNED route (build + Consume) — the raw-handle view trap
-            // (B24) double-frees this shape.
-            ListElemDrop::ScalarAggregate
-        } else if let Some(class) = crate::lower::lenlist_elem_class(&elem_ty) {
-            match class {
-                crate::lower::CtorElemClass::Flat => ListElemDrop::CtorFlat,
-                crate::lower::CtorElemClass::LenLoop => ListElemDrop::CtorLenLoop,
-            }
-        } else if matches!(&elem_ty, Ty::Fn { .. }) {
-            // A `List[<Fn>]` LITERAL element (`[(x: Int) => x + 1, (x: Int) => x * 2]` —
-            // #623's closure-parameter shape): each element is a fresh closure BLOCK (lifted
-            // via `lift_lambda`, the SAME mechanism a call-argument lambda already uses),
-            // freed per-element via the generated `$__drop_list_closure` (recurses into the
-            // uniform `$__drop_closure` — required even for a non-capturing lambda, since the
-            // LIST's TYPE alone (`List[(Int)->Int]`) does not preclude a capturing element).
-            ListElemDrop::Closure
-        } else {
+        // The element's drop kind (`classify_list_elem_drop`): a recursive-drop record
+        // (`$__drop_list_<R>`), a `(String,String)` tuple (`Op::DropListStrStr` — the
+        // map.entries / `[(k,v), …]` literal shape), OR an Option/Result CTOR element
+        // (`[some(1), none]`, `[ok(1), err("x")]` — the collect-test shapes): a Flat class
+        // (scalar payload — the per-element `rc_dec` of `DropListStr` is exact) or a LenLoop
+        // class (owned handle slots — the generated `$__drop_list_lenlist`). Anything else →
+        // `None` (the caller keeps the scalar / wall path).
+        let Some(kind) = self.classify_list_elem_drop(&elem_ty) else {
             return None;
         };
         // Lower each element to an OWNED handle BEFORE the alloc (a field expr that allocates
