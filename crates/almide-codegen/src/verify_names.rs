@@ -190,6 +190,19 @@ fn expr_kind_tag(k: &IrExprKind) -> &'static str {
     }
 }
 
+/// `IrVariantKind` case of `collect_unresolvable_names`'s `check_decl_tys`
+/// closure, extracted to a real top-level fn (cog>30 decomposition) — NOT
+/// an anonymous-closure measurement dodge, since `check_decl_tys` itself
+/// stays a named, identifier-bound closure that codopsy already measures
+/// as its own unit.
+fn check_variant_case_tys(chk: &mut TyChecker, kind: &IrVariantKind) {
+    match kind {
+        IrVariantKind::Tuple { fields } => for t in fields { chk.check_ty(t); },
+        IrVariantKind::Record { fields } => for f in fields { chk.check_ty(&f.ty); },
+        IrVariantKind::Unit => {}
+    }
+}
+
 /// Pure detector: every Ty position in the program (type decls, signatures,
 /// var tables, top-lets, expression types) is scanned for bare names whose
 /// only declaration is qualified.
@@ -204,13 +217,7 @@ pub fn collect_unresolvable_names(program: &IrProgram) -> Vec<UnresolvableName> 
                 for f in fields { chk.check_ty(&f.ty); }
             }
             IrTypeDeclKind::Variant { cases, .. } => {
-                for c in cases {
-                    match &c.kind {
-                        IrVariantKind::Tuple { fields } => for t in fields { chk.check_ty(t); },
-                        IrVariantKind::Record { fields } => for f in fields { chk.check_ty(&f.ty); },
-                        IrVariantKind::Unit => {}
-                    }
-                }
+                for c in cases { check_variant_case_tys(chk, &c.kind); }
             }
             IrTypeDeclKind::Alias { target } => chk.check_ty(target),
         }
