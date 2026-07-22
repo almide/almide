@@ -46,50 +46,82 @@ impl<'a> Interpreter<'a> {
             evaled.push(val!(self.eval_expr(a, scope)));
         }
 
-        match (m, f) {
-            // ── list HOFs ──
-            ("list", "map") => self.hof_map(&evaled),
-            ("list", "filter") => self.hof_filter(&evaled, true),
-            ("list", "find") => self.hof_find(&evaled),
-            ("list", "find_index") => self.hof_find_index(&evaled),
-            ("list", "any") => self.hof_any_all(&evaled, true),
-            ("list", "all") => self.hof_any_all(&evaled, false),
-            ("list", "count") => self.hof_count(&evaled),
-            ("list", "flat_map") => self.hof_flat_map(&evaled),
-            ("list", "filter_map") => self.hof_filter_map(&evaled),
-            ("list", "fold") => self.hof_fold(&evaled),
-            ("list", "reduce") => self.hof_reduce(&evaled),
-            ("list", "take_while") => self.hof_take_drop_while(&evaled, true),
-            ("list", "drop_while") => self.hof_take_drop_while(&evaled, false),
-            ("list", "partition") => self.hof_partition(&evaled),
-            ("list", "sort_by") => self.hof_sort_by(&evaled),
-            ("list", "each") => self.hof_each(&evaled),
-            ("list", "zip_with") => self.hof_zip_with(&evaled),
-            ("list", "unique_by") => self.hof_unique_by(&evaled),
-            ("list", "scan") => self.hof_scan(&evaled),
-
-            // ── option HOFs ──
-            ("option", "map") => self.hof_option_map(&evaled),
-            ("option", "flat_map") => self.hof_option_flat_map(&evaled),
-            ("option", "filter") => self.hof_option_filter(&evaled),
-            ("option", "unwrap_or_else") => self.hof_option_unwrap_or_else(&evaled),
-            ("option", "or_else") => self.hof_option_or_else(&evaled),
-
-            // ── result HOFs ──
-            ("result", "map") => self.hof_result_map(&evaled, false),
-            ("result", "map_err") => self.hof_result_map(&evaled, true),
-            ("result", "flat_map") => self.hof_result_flat_map(&evaled),
-            ("result", "unwrap_or_else") => self.hof_result_unwrap_or_else(&evaled),
-            ("result", "or_else") => self.hof_result_or_else(&evaled),
-
-            // ── set HOFs (operate on the ordered backing vec) ──
-            ("set", "map") => self.hof_set_map(&evaled),
-            ("set", "filter") => self.hof_set_filter(&evaled),
-            ("set", "any") => self.hof_any_all(&evaled, true),
-            ("set", "all") => self.hof_any_all(&evaled, false),
-            ("set", "fold") => self.hof_fold(&evaled),
-
+        // Per-module dispatch — same behavior-preserving regrouping as
+        // `eval_container_op`: every arm was already keyed by a unique
+        // `(m, f)` literal pair, so splitting on `m` first changes nothing
+        // observable, and keeps each group under the per-function
+        // complexity threshold instead of one 30-armed match.
+        match m {
+            "list" => self.eval_hof_list(f, &evaled),
+            "option" => self.eval_hof_option(f, &evaled),
+            "result" => self.eval_hof_result(f, &evaled),
+            "set" => self.eval_hof_set(f, &evaled),
             _ => Flow::Unsupported(format!("HOF {}.{}", m, f)),
+        }
+    }
+
+    fn eval_hof_list(&mut self, f: &str, evaled: &[Value]) -> Flow {
+        match f {
+            "map" => self.hof_map(evaled),
+            "filter" => self.hof_filter(evaled, true),
+            "find" => self.hof_find(evaled),
+            "find_index" => self.hof_find_index(evaled),
+            "any" => self.hof_any_all(evaled, true),
+            "all" => self.hof_any_all(evaled, false),
+            "count" => self.hof_count(evaled),
+            "flat_map" => self.hof_flat_map(evaled),
+            "filter_map" => self.hof_filter_map(evaled),
+            "fold" => self.hof_fold(evaled),
+            _ => self.eval_hof_list2(f, evaled),
+        }
+    }
+
+    fn eval_hof_list2(&mut self, f: &str, evaled: &[Value]) -> Flow {
+        match f {
+            "reduce" => self.hof_reduce(evaled),
+            "take_while" => self.hof_take_drop_while(evaled, true),
+            "drop_while" => self.hof_take_drop_while(evaled, false),
+            "partition" => self.hof_partition(evaled),
+            "sort_by" => self.hof_sort_by(evaled),
+            "each" => self.hof_each(evaled),
+            "zip_with" => self.hof_zip_with(evaled),
+            "unique_by" => self.hof_unique_by(evaled),
+            "scan" => self.hof_scan(evaled),
+            _ => Flow::Unsupported(format!("HOF list.{}", f)),
+        }
+    }
+
+    fn eval_hof_option(&mut self, f: &str, evaled: &[Value]) -> Flow {
+        match f {
+            "map" => self.hof_option_map(evaled),
+            "flat_map" => self.hof_option_flat_map(evaled),
+            "filter" => self.hof_option_filter(evaled),
+            "unwrap_or_else" => self.hof_option_unwrap_or_else(evaled),
+            "or_else" => self.hof_option_or_else(evaled),
+            _ => Flow::Unsupported(format!("HOF option.{}", f)),
+        }
+    }
+
+    fn eval_hof_result(&mut self, f: &str, evaled: &[Value]) -> Flow {
+        match f {
+            "map" => self.hof_result_map(evaled, false),
+            "map_err" => self.hof_result_map(evaled, true),
+            "flat_map" => self.hof_result_flat_map(evaled),
+            "unwrap_or_else" => self.hof_result_unwrap_or_else(evaled),
+            "or_else" => self.hof_result_or_else(evaled),
+            _ => Flow::Unsupported(format!("HOF result.{}", f)),
+        }
+    }
+
+    // set HOFs operate on the ordered backing vec.
+    fn eval_hof_set(&mut self, f: &str, evaled: &[Value]) -> Flow {
+        match f {
+            "map" => self.hof_set_map(evaled),
+            "filter" => self.hof_set_filter(evaled),
+            "any" => self.hof_any_all(evaled, true),
+            "all" => self.hof_any_all(evaled, false),
+            "fold" => self.hof_fold(evaled),
+            _ => Flow::Unsupported(format!("HOF set.{}", f)),
         }
     }
 
