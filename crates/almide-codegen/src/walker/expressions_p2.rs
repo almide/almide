@@ -27,6 +27,67 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
 
 // ── Binary operator rendering ──
 
+/// #617: the matrix operators return a RAW AlmideMatrix from the runtime —
+/// wrap into the RcCow value shape like every runtime-call result.
+/// Extracted from `render_binop`'s BinOp::{Mul,Add,Sub,Scale}Matrix arms
+/// (cog>30 decomposition, pattern 2, uniform-shaped arms grouped by a
+/// shared theme). Only ever called for those four ops.
+fn render_binop_matrix(ctx: &RenderContext, op: BinOp, left: &IrExpr, l: &str, r: &str) -> String {
+    match op {
+        BinOp::MulMatrix => rc_cow_result_glue(
+            ctx.templates.render_with("matrix_mul", None, &[], &[("left", l), ("right", r)])
+                .unwrap_or_else(|| format!("almide_rt_matrix_mul(&{}, &{})", l, r)),
+            &Ty::Matrix,
+        ),
+        BinOp::AddMatrix => rc_cow_result_glue(
+            ctx.templates.render_with("matrix_add", None, &[], &[("left", l), ("right", r)])
+                .unwrap_or_else(|| format!("almide_rt_matrix_add(&{}, &{})", l, r)),
+            &Ty::Matrix,
+        ),
+        BinOp::SubMatrix => rc_cow_result_glue(
+            ctx.templates.render_with("matrix_sub", None, &[], &[("left", l), ("right", r)])
+                .unwrap_or_else(|| format!("almide_rt_matrix_sub(&{}, &{})", l, r)),
+            &Ty::Matrix,
+        ),
+        BinOp::ScaleMatrix => {
+            // Ensure matrix is first arg, scalar is second
+            let (mat, scalar) = if matches!(&left.ty, Ty::Matrix) {
+                (l, r)
+            } else {
+                (r, l)
+            };
+            rc_cow_result_glue(
+                ctx.templates.render_with("matrix_scale", None, &[], &[("left", mat), ("right", scalar)])
+                    .unwrap_or_else(|| format!("almide_rt_matrix_scale(&{}, {})", mat, scalar)),
+                &Ty::Matrix,
+            )
+        }
+        _ => unreachable!("render_binop_matrix called for non-matrix BinOp"),
+    }
+}
+
+/// Bare infix operator string for ops that render via the generic
+/// `binary_op` template (not one with dedicated totality-macro/matrix
+/// handling above). Extracted from `render_binop`'s fallback arm.
+fn binop_symbol(op: BinOp) -> &'static str {
+    match op {
+        BinOp::AddInt | BinOp::AddFloat => "+",
+        BinOp::SubInt | BinOp::SubFloat => "-",
+        BinOp::MulInt | BinOp::MulFloat => "*",
+        // DivInt/ModInt are matched above (totality macros) and must never
+        // reach this bare-operator fallback — fall to "??" loudly if they do.
+        BinOp::DivFloat => "/",
+        BinOp::ModFloat => "%",
+        BinOp::Lt => "<",
+        BinOp::Gt => ">",
+        BinOp::Lte => "<=",
+        BinOp::Gte => ">=",
+        BinOp::And => "&&",
+        BinOp::Or => "||",
+        _ => "??",
+    }
+}
+
 fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _ty: &Ty) -> String {
     let l = render_expr(ctx, left);
     let r = render_expr(ctx, right);
@@ -41,36 +102,8 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             ctx.templates.render_with("concat_expr", Some(ty_tag), &[], &[("left", lo.as_str()), ("right", ro.as_str())])
                 .unwrap_or_else(|| format!("concat(_, _)"))
         }
-        // #617: the matrix operators return a RAW AlmideMatrix from the runtime —
-        // wrap into the RcCow value shape like every runtime-call result.
-        BinOp::MulMatrix => rc_cow_result_glue(
-            ctx.templates.render_with("matrix_mul", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
-                .unwrap_or_else(|| format!("almide_rt_matrix_mul(&{}, &{})", l, r)),
-            &Ty::Matrix,
-        ),
-        BinOp::AddMatrix => rc_cow_result_glue(
-            ctx.templates.render_with("matrix_add", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
-                .unwrap_or_else(|| format!("almide_rt_matrix_add(&{}, &{})", l, r)),
-            &Ty::Matrix,
-        ),
-        BinOp::SubMatrix => rc_cow_result_glue(
-            ctx.templates.render_with("matrix_sub", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
-                .unwrap_or_else(|| format!("almide_rt_matrix_sub(&{}, &{})", l, r)),
-            &Ty::Matrix,
-        ),
-        BinOp::ScaleMatrix => {
-            // Ensure matrix is first arg, scalar is second
-            let (mat, scalar) = if matches!(&left.ty, Ty::Matrix) {
-                (l.as_str(), r.as_str())
-            } else {
-                (r.as_str(), l.as_str())
-            };
-            rc_cow_result_glue(
-                ctx.templates.render_with("matrix_scale", None, &[], &[("left", mat), ("right", scalar)])
-                    .unwrap_or_else(|| format!("almide_rt_matrix_scale(&{}, {})", mat, scalar)),
-                &Ty::Matrix,
-            )
-        }
+        BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix =>
+            render_binop_matrix(ctx, op, left, l.as_str(), r.as_str()),
         BinOp::Eq => {
             ctx.templates.render_with("eq_expr", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("_ == _"))
@@ -102,22 +135,7 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
                 .unwrap_or_else(|| format!("pow(_, _)"))
         }
         _ => {
-            let op_str = match op {
-                BinOp::AddInt | BinOp::AddFloat => "+",
-                BinOp::SubInt | BinOp::SubFloat => "-",
-                BinOp::MulInt | BinOp::MulFloat => "*",
-                // DivInt/ModInt are matched above (totality macros) and must never
-                // reach this bare-operator fallback — fall to "??" loudly if they do.
-                BinOp::DivFloat => "/",
-                BinOp::ModFloat => "%",
-                BinOp::Lt => "<",
-                BinOp::Gt => ">",
-                BinOp::Lte => "<=",
-                BinOp::Gte => ">=",
-                BinOp::And => "&&",
-                BinOp::Or => "||",
-                _ => "??",
-            };
+            let op_str = binop_symbol(op);
             let op_s = op_str.to_string();
             ctx.templates.render_with("binary_op", None, &[], &[("left", l.as_str()), ("op", op_s.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("({} {} {})", "l", op_str, "r"))
