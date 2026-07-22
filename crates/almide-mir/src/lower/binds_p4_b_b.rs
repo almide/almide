@@ -1,4 +1,26 @@
+/// Both arm-2 and arm-4 guards below are multi-clause booleans (each `&&`/
+/// nested `matches!` is its own decision point to the complexity scorer);
+/// naming them as standalone predicates collapses each guard to a single
+/// call in the router without changing which arm fires for any input —
+/// pure "extract the boolean, keep the shape" refactor.
+fn is_scalar_result_err_target(expr_ty: &Ty, ty: &Ty) -> bool {
+    !is_heap_ty(expr_ty)
+        && matches!(ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                if a.len() == 2 && !is_heap_ty(&a[0]) && !is_heap_ty(&a[1]))
+}
+
 impl LowerCtx {
+    fn is_heap_err_variant_ctor_target(&self, value: &IrExpr, ty: &Ty) -> bool {
+        if let IrExprKind::ResultErr { expr } = &value.kind {
+            is_heap_ty(&expr.ty)
+                && !matches!(&expr.kind, IrExprKind::Var { .. })
+                && self.is_heap_ok_variant_err_result(ty)
+        } else {
+            false
+        }
+    }
+
     /// Name router — arm bodies (2 of the 4 arms have real bodies; the other
     /// 2 already delegate to a single named call) moved to helpers, same
     /// "uniform match arm" split as binds_p4_b.rs above.
@@ -7,22 +29,13 @@ impl LowerCtx {
             IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => {
                 self.try_lower_result_ok_scalar(expr, ty)
             }
-            IrExprKind::ResultErr { expr }
-                if !is_heap_ty(&expr.ty)
-                    && matches!(ty,
-                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
-                            if a.len() == 2 && !is_heap_ty(&a[0]) && !is_heap_ty(&a[1])) =>
-            {
+            IrExprKind::ResultErr { expr } if is_scalar_result_err_target(&expr.ty, ty) => {
                 self.try_lower_result_err_scalar(expr, ty)
             }
             IrExprKind::ResultErr { .. } if self.is_scalar_ok_variant_err_result(ty) => {
                 self.try_lower_result_err_variant_ctor(value, ty)
             }
-            IrExprKind::ResultErr { expr }
-                if is_heap_ty(&expr.ty)
-                    && !matches!(&expr.kind, IrExprKind::Var { .. })
-                    && self.is_heap_ok_variant_err_result(ty) =>
-            {
+            _ if self.is_heap_err_variant_ctor_target(value, ty) => {
                 self.try_lower_result_err_variant_ctor_heap_ok(value, ty)
             }
             _ => None,
@@ -66,123 +79,26 @@ impl LowerCtx {
 
     fn result_err_heap_ok_result_body(&mut self, expr: &IrExpr, ty: &Ty) -> Option<ValueId> {
         let repr = repr_of(ty).ok()?;
-        let piece = match &expr.kind {
-            IrExprKind::Var { id }
-                if self
-                    .value_for(*id)
-                    .map(|v| self.live_heap_handles.contains(&v))
-                    .unwrap_or(false) =>
-            {
-                // Dup, do NOT move: the ctor gets its OWN co-owned reference and
-                // the var keeps its handle + its scope-end drop. Moving consumed
-                // the var — a SECOND `ok(r0)` then found nothing and deferred to
-                // the zeroed Opaque, printing `ok("")` (fuzz seed-20260718 index
-                // 248); native value-semantics copies each time. The same
-                // borrow-then-Dup discipline as the param arm below.
-                let src = self.value_for(*id).ok()?;
-                let dup = self.fresh_value();
-                self.ops.push(Op::Dup { dst: dup, src });
-                dup
-            }
-            // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
-            // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
-            // (cert `a`) and move THAT in — the caller keeps its own reference (freed by
-            // its owner once), the wrapper owns the Dup. The borrow-then-Dup discipline
-            // the spread-record copy already proves.
-            IrExprKind::Var { id }
-                if self
-                    .value_for(*id)
-                    .map(|v| self.param_values.contains(&v))
-                    .unwrap_or(false) =>
-            {
-                let src = self.value_for(*id).ok()?;
-                let dup = self.fresh_value();
-                self.ops.push(Op::Dup { dst: dup, src });
-                dup
-            }
-            IrExprKind::LitStr { value } => {
-                let pr = repr_of(&expr.ty).ok()?;
-                let p = self.fresh_value();
-                self.ops.push(Op::Alloc {
-                    dst: p,
-                    repr: pr,
-                    init: Init::Str(value.clone()),
-                });
-                p
-            }
-            IrExprKind::Call {
-                target: CallTarget::Named { name },
-                args,
-                ..
-            } => {
-                let lowered = self.lower_call_args(args).ok()?;
-                let pr = repr_of(&expr.ty).ok()?;
-                let p = self.fresh_value();
-                self.ops.push(Op::CallFn {
-                    dst: Some(p),
-                    name: name.as_str().to_string(),
-                    args: lowered,
-                    result: Some(pr),
-                });
-                p
-            }
-            // `err("bad " + reason)` — a COMPUTED String Err payload (`ConcatStr`). Same
-            // fresh-owned `__str_concat` piece as an `ok(concat)`; operand temps drop here.
-            IrExprKind::BinOp {
-                op: almide_ir::BinOp::ConcatStr,
-                ..
-            } => {
-                let mark = self.live_heap_handles.len();
-                let obj = self.try_lower_concat_str(expr)?;
-                self.drop_arm_locals(mark);
-                obj
-            }
-            // An INTERPOLATED String payload (`err("bad ${id}")`, `ok("v=${x}")`) — the
-            // same fresh-owned `__str_concat` chain as the ConcatStr arm (the interp IS a
-            // concat fold); operand temps drop here so only the result survives the move.
-            IrExprKind::StringInterp { parts } if matches!(expr.ty, Ty::String) => {
-                let mark = self.live_heap_handles.len();
-                let obj = self.try_lower_string_interp(parts)?;
-                self.drop_arm_locals(mark);
-                obj
-            }
-            // `err(["a", "b"])` — a `List[String]` LITERAL payload (the result.collect
-            // Err side, `Result[List[Int], List[String]]`): the inner list builds
-            // fresh-owned; the Result block's flat DropListStr would free slot-0 as a
-            // STRING (leaking the inner list's elements), so RECLASSIFY the drop below
-            // to the recursive list-of-list-str free.
-            IrExprKind::List { .. }
-                if matches!(&expr.ty,
-                            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
-                                if i.len() == 1 && matches!(i[0], Ty::String)) =>
-            {
-                let obj = self.try_lower_str_list_literal(expr)?;
-                let dst = self.materialize_result_str(obj, repr, true, false);
-                self.heap_elem_lists.remove(&dst);
-                self.list_list_str_lists.insert(dst);
-                return Some(dst);
-            }
-            // `err(float.to_fixed(x, 4))` — a PURE Module call yielding a fresh owned
-            // STRING Err payload (fuzz C-class: fell to the deferred Opaque whose zeroed
-            // block even flipped the TAG — printed `ok("")` for an err). Same piece as the
-            // ok-side Module-call arm; the cap-as-tag Err slot owns the one String.
-            IrExprKind::Call {
-                target: CallTarget::Module { .. },
-                ..
-            } if matches!(expr.ty, Ty::String) => {
-                let p = self.lower_owned_heap_field(expr)?;
-                self.live_heap_handles.retain(|h| *h != p);
-                p
-            }
-            // `err((if c then a else b))` — a heap-result IF/MATCH String Err payload
-            // (the F-858 family): the one owned result moves into the Err slot.
-            IrExprKind::If { .. } | IrExprKind::Match { .. } if matches!(expr.ty, Ty::String) => {
-                let p = self.lower_owned_heap_field(expr)?;
-                self.live_heap_handles.retain(|h| *h != p);
-                p
-            }
-            _ => return None,
-        };
+        // `err(["a", "b"])` — a `List[String]` LITERAL payload (the result.collect
+        // Err side, `Result[List[Int], List[String]]`): the inner list builds
+        // fresh-owned; the Result block's flat DropListStr would free slot-0 as a
+        // STRING (leaking the inner list's elements), so RECLASSIFY the drop below
+        // to the recursive list-of-list-str free. The ONLY arm not shared with
+        // [`Self::result_err_heap_fallback_piece`] (checked first, same order as
+        // the original single match), so it stays a standalone early-return arm
+        // rather than folding into [`Self::lower_heap_err_common_piece`].
+        if matches!(&expr.kind, IrExprKind::List { .. })
+            && matches!(&expr.ty,
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
+                            if i.len() == 1 && matches!(i[0], Ty::String))
+        {
+            let obj = self.try_lower_str_list_literal(expr)?;
+            let dst = self.materialize_result_str(obj, repr, true, false);
+            self.heap_elem_lists.remove(&dst);
+            self.list_list_str_lists.insert(dst);
+            return Some(dst);
+        }
+        let piece = self.lower_heap_err_common_piece(expr)?;
         Some(self.materialize_result_str(piece, repr, true, false))
     }
 
@@ -214,9 +130,25 @@ impl LowerCtx {
     /// `Var` (one in `live_heap_handles` — a freshly-built/closure-returned String, NOT
     /// a BORROWED param). Consuming a borrow into the Err would move out a value the
     /// caller still owns (a double-free the checker rejects), so a borrowed `Var` falls
-    /// through to the sound deferred `Opaque`.
+    /// through to the sound deferred `Opaque`. Delegates entirely to
+    /// [`Self::lower_heap_err_common_piece`] — this Result's scalar-Ok Err payload
+    /// shapes are IDENTICAL to [`Self::result_err_heap_ok_result_body`]'s (both build a
+    /// fresh-owned or Dup'd heap piece from the same `expr.kind`); only the two callers'
+    /// surrounding materialize call differs, so the piece-construction match itself is
+    /// factored once rather than duplicated per caller.
     fn result_err_heap_fallback_piece(&mut self, expr: &IrExpr) -> Option<ValueId> {
-        let piece = match &expr.kind {
+        self.lower_heap_err_common_piece(expr)
+    }
+
+    /// Shared arm-for-arm with what used to be two separate matches (see
+    /// [`Self::result_err_heap_ok_result_body`] and
+    /// [`Self::result_err_heap_fallback_piece`]): a fresh-owned or Dup'd heap piece
+    /// from a heap-typed `ResultErr` payload expr, covering every shape EXCEPT the
+    /// `List[String]` literal (that one only occurs on the heap-Ok-Result side and
+    /// stays inline there, since it early-returns through its own `materialize_result_str`
+    /// + read-shape reclassification instead of flowing through this common piece).
+    fn lower_heap_err_common_piece(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        match &expr.kind {
             IrExprKind::Var { id }
                 if self
                     .value_for(*id)
@@ -232,7 +164,7 @@ impl LowerCtx {
                 let src = self.value_for(*id).ok()?;
                 let dup = self.fresh_value();
                 self.ops.push(Op::Dup { dst: dup, src });
-                dup
+                Some(dup)
             }
             // A BORROWED param payload (`effect fn fail(msg: String) = err(msg)` — the
             // fan-family tail ctors): Dup the param's handle into a fresh CO-OWNED ref
@@ -248,7 +180,7 @@ impl LowerCtx {
                 let src = self.value_for(*id).ok()?;
                 let dup = self.fresh_value();
                 self.ops.push(Op::Dup { dst: dup, src });
-                dup
+                Some(dup)
             }
             IrExprKind::LitStr { value } => {
                 let pr = repr_of(&expr.ty).ok()?;
@@ -258,7 +190,7 @@ impl LowerCtx {
                     repr: pr,
                     init: Init::Str(value.clone()),
                 });
-                p
+                Some(p)
             }
             IrExprKind::Call {
                 target: CallTarget::Named { name },
@@ -274,7 +206,7 @@ impl LowerCtx {
                     args: lowered,
                     result: Some(pr),
                 });
-                p
+                Some(p)
             }
             // A COMPUTED String Err payload (`ConcatStr`) — fresh-owned concat piece.
             IrExprKind::BinOp {
@@ -284,7 +216,7 @@ impl LowerCtx {
                 let mark = self.live_heap_handles.len();
                 let obj = self.try_lower_concat_str(expr)?;
                 self.drop_arm_locals(mark);
-                obj
+                Some(obj)
             }
             // An INTERPOLATED String payload (`err("bad ${id}")`, `ok("v=${x}")`) — the
             // same fresh-owned `__str_concat` chain as the ConcatStr arm (the interp IS a
@@ -293,29 +225,28 @@ impl LowerCtx {
                 let mark = self.live_heap_handles.len();
                 let obj = self.try_lower_string_interp(parts)?;
                 self.drop_arm_locals(mark);
-                obj
+                Some(obj)
             }
-            // `err(float.to_fixed(x, 4))` for a SCALAR-Ok Result — a PURE Module call
-            // yielding a fresh owned STRING Err payload (fuzz C-class, len-as-tag twin of
-            // the heap-Ok Module-call arms): the deferred Opaque zeroed the block. Same
-            // fresh-owned move-in as the Named-call piece above.
+            // `err(float.to_fixed(x, 4))` — a PURE Module call yielding a fresh owned
+            // STRING Err payload (fuzz C-class: fell to the deferred Opaque whose zeroed
+            // block even flipped the TAG — printed `ok("")` for an err). Same piece as the
+            // ok-side Module-call arm; the cap-as-tag Err slot owns the one String.
             IrExprKind::Call {
                 target: CallTarget::Module { .. },
                 ..
             } if matches!(expr.ty, Ty::String) => {
                 let p = self.lower_owned_heap_field(expr)?;
                 self.live_heap_handles.retain(|h| *h != p);
-                p
+                Some(p)
             }
-            // `err((if c then a else b))` for a SCALAR-Ok Result — the heap-result
-            // IF/MATCH String Err payload (the F-858 family, len-as-tag twin).
+            // `err((if c then a else b))` — a heap-result IF/MATCH String Err payload
+            // (the F-858 family): the one owned result moves into the Err slot.
             IrExprKind::If { .. } | IrExprKind::Match { .. } if matches!(expr.ty, Ty::String) => {
                 let p = self.lower_owned_heap_field(expr)?;
                 self.live_heap_handles.retain(|h| *h != p);
-                p
+                Some(p)
             }
-            _ => return None,
-        };
-        Some(piece)
+            _ => None,
+        }
     }
 }
