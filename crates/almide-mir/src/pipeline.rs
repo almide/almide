@@ -717,11 +717,24 @@ fn build_ir_with_drops(
 /// The rest of the pipeline after [`build_ir_with_drops`]: collect globals/layouts,
 /// lower every fn to MIR (main + linked module siblings), synthesize the global-init
 /// and self-host-runtime auto-link fns, then render the final wasm module.
-fn try_render_wasm_source_impl_rest(
-    ir: &mut almide_ir::IrProgram,
-    verbose: bool,
-) -> Result<String, LowerError> {
-    // Top-level `let` globals (VarId -> Ty) + their INITIALIZER exprs, union of program + modules.
+/// The four lookup tables [`collect_pipeline_layouts`] builds: globals (both the shared
+/// program+modules union and the MAIN-region-bridged view), and the record/variant
+/// layout registries — everything the fn-lowering calls below consult by reference.
+struct PipelineLayouts {
+    globals: HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    main_globals: HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    main_global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    mutable_toplet_aliases: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId>,
+    record_layouts: crate::lower::RecordLayouts,
+    variant_layouts: crate::lower::VariantLayouts,
+}
+
+/// Phase 2: collect top-level `let` globals (VarId -> Ty) + their INITIALIZER exprs
+/// (union of program + modules), bridge the MAIN-region view across cross-module
+/// references, and build the record/variant layout registries (aliasing each
+/// UNIQUELY-owned base name onto its qualified layout).
+fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
     let mut globals: HashMap<almide_ir::VarId, almide_lang::types::Ty> = HashMap::new();
     let mut global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr> = HashMap::new();
     // An UNANNOTATED option-ctor top-let (`let MAYBE = some(Cfg { .. })`) leaves
@@ -751,7 +764,7 @@ fn try_render_wasm_source_impl_rest(
     let mut main_global_inits = global_inits.clone();
     let mut mutable_toplet_aliases: std::collections::HashMap<almide_ir::VarId, almide_ir::VarId> =
         std::collections::HashMap::new();
-    crate::lower::bridge_cross_module_toplets(&ir, &mut main_globals, &mut main_global_inits, &mut mutable_toplet_aliases);
+    crate::lower::bridge_cross_module_toplets(ir, &mut main_globals, &mut main_global_inits, &mut mutable_toplet_aliases);
     for tl in &ir.top_lets {
         main_globals.insert(tl.var, toplet_ty(tl));
         main_global_inits.insert(tl.var, tl.value.clone());
@@ -801,6 +814,31 @@ fn try_render_wasm_source_impl_rest(
             }
         }
     }
+
+    PipelineLayouts {
+        globals,
+        global_inits,
+        main_globals,
+        main_global_inits,
+        mutable_toplet_aliases,
+        record_layouts,
+        variant_layouts,
+    }
+}
+
+fn try_render_wasm_source_impl_rest(
+    ir: &mut almide_ir::IrProgram,
+    verbose: bool,
+) -> Result<String, LowerError> {
+    let PipelineLayouts {
+        globals,
+        global_inits,
+        main_globals,
+        main_global_inits,
+        mutable_toplet_aliases,
+        record_layouts,
+        variant_layouts,
+    } = collect_pipeline_layouts(ir);
 
     // PROGRAM pre-pass: inline mutual-recursive tail siblings (semantics-preserving TCO exposure).
     // The input is the WHOLE program — main's functions PLUS every linked user-module sibling
