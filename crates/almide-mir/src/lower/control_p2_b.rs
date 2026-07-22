@@ -332,92 +332,110 @@ impl LowerCtx {
         arg_tys: &[Ty],
         result_ty: &Ty,
     ) -> Option<String> {
-        use almide_lang::types::constructor::TypeConstructorId;
-        let strrec = |t: &Ty| -> Option<String> {
-            let Ty::Named(n, _) = t else { return None };
-            if self.custom_variant_type_name(t).is_some() {
-                return None;
-            }
-            let (_, tys) = self.aggregate_field_tys(t)?;
-            (!tys.is_empty()
-                && tys.iter().all(|f| matches!(f, Ty::Int | Ty::Bool | Ty::String))
-                && tys.iter().any(|f| matches!(f, Ty::String)))
-            .then(|| n.as_str().to_string())
-        };
+        // Pattern-1 module-name router (codopsy8 complexity sweep): the 3 arms below are
+        // independent, self-contained (`&self`, read-only) classifications, called on the
+        // SAME `module` dispatch as the original `match module { .. }` — a pure text-move
+        // split, no logic change. The shared `strrec` closure is now the `krec_strrec`
+        // method (callable from every arm's own function, not just a closure capture).
         match module {
-            "map" => {
-                let probe = |t: &Ty| -> Option<(String, Ty)> {
-                    let Ty::Applied(TypeConstructorId::Map, a) = t else { return None };
-                    if a.len() != 2 {
-                        return None;
-                    }
-                    Some((strrec(&a[0])?, a[1].clone()))
-                };
-                let (rname, vty) =
-                    arg_tys.first().and_then(&probe).or_else(|| probe(result_ty))?;
-                let vclass = match vty {
-                    Ty::Int | Ty::Bool => "iv",
-                    Ty::String => "sv",
-                    _ => return None,
-                };
-                match func {
-                    "from_list" | "set" | "get" | "contains" => {
-                        Some(format!("__krec_map_{func}_{rname}_{vclass}"))
-                    }
-                    // len reads the BACKING flavor's header directly.
-                    "len" => Some(if vclass == "iv" {
-                        "map.len_skv".to_string()
-                    } else {
-                        "map.len_str".to_string()
-                    }),
-                    _ => None,
-                }
-            }
-            "set" => {
-                let probe = |t: &Ty| -> Option<String> {
-                    let Ty::Applied(TypeConstructorId::Set, a) = t else { return None };
-                    if a.len() != 1 {
-                        return None;
-                    }
-                    strrec(&a[0])
-                };
-                let rname = arg_tys.first().and_then(&probe).or_else(|| probe(result_ty))?;
-                match func {
-                    "from_list" | "contains" | "insert" => {
-                        Some(format!("__krec_set_{func}_{rname}"))
-                    }
-                    _ => None,
-                }
-            }
-            "list" if func == "unique" => {
-                let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() else {
-                    return None;
-                };
-                if a.len() != 1 {
-                    return None;
-                }
-                // An UNANNOTATED record literal keeps its STRUCTURAL type (the r5
-                // lesson) — its block lays fields in SOURCE order, so the norm is
-                // generated against the structural shape, keyed by the anon hash.
-                if let Ty::Record { fields } = &a[0] {
-                    if !fields.is_empty()
-                        && fields
-                            .iter()
-                            .all(|(_, t)| matches!(t, Ty::Int | Ty::Bool | Ty::String))
-                        && fields.iter().any(|(_, t)| matches!(t, Ty::String))
-                    {
-                        return Some(format!(
-                            "__krec_list_unique_{}",
-                            crate::lower::anon_record_drop_name(fields)
-                        ));
-                    }
-                    return None;
-                }
-                let rname = strrec(&a[0])?;
-                Some(format!("__krec_list_unique_{rname}"))
-            }
+            "map" => self.krec_call_name_map(func, arg_tys, result_ty),
+            "set" => self.krec_call_name_set(func, arg_tys, result_ty),
+            "list" if func == "unique" => self.krec_call_name_list_unique(arg_tys),
             _ => None,
         }
+    }
+
+    /// Shared by every arm of [`Self::krec_call_name`]: is `t` a declared record of
+    /// String + Int/Bool fields (≥1 String — the all-scalar case is the `_srec` family's)?
+    /// If so, its normalized `__krec_*` key is the type name. Extracted from
+    /// `krec_call_name`'s original `strrec` closure (codopsy8 complexity sweep). Verbatim.
+    fn krec_strrec(&self, t: &Ty) -> Option<String> {
+        let Ty::Named(n, _) = t else { return None };
+        if self.custom_variant_type_name(t).is_some() {
+            return None;
+        }
+        let (_, tys) = self.aggregate_field_tys(t)?;
+        (!tys.is_empty()
+            && tys.iter().all(|f| matches!(f, Ty::Int | Ty::Bool | Ty::String))
+            && tys.iter().any(|f| matches!(f, Ty::String)))
+        .then(|| n.as_str().to_string())
+    }
+
+    /// Extracted from `krec_call_name` (codopsy8 complexity sweep, the `"map"` arm):
+    /// `Map[P, <scalar|String>]` where P is a String-field record — routes to the
+    /// GENERATED `__krec_map_*` twins, keyed by the record name AND the value class
+    /// (`iv` scalar / `sv` String, since the backing container differs). `len` reads the
+    /// BACKING flavor's header directly rather than a `__krec_*` name. Verbatim.
+    fn krec_call_name_map(&self, func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let probe = |t: &Ty| -> Option<(String, Ty)> {
+            let Ty::Applied(TypeConstructorId::Map, a) = t else { return None };
+            if a.len() != 2 {
+                return None;
+            }
+            Some((self.krec_strrec(&a[0])?, a[1].clone()))
+        };
+        let (rname, vty) = arg_tys.first().and_then(&probe).or_else(|| probe(result_ty))?;
+        let vclass = match vty {
+            Ty::Int | Ty::Bool => "iv",
+            Ty::String => "sv",
+            _ => return None,
+        };
+        match func {
+            "from_list" | "set" | "get" | "contains" => {
+                Some(format!("__krec_map_{func}_{rname}_{vclass}"))
+            }
+            // len reads the BACKING flavor's header directly.
+            "len" => Some(if vclass == "iv" { "map.len_skv".to_string() } else { "map.len_str".to_string() }),
+            _ => None,
+        }
+    }
+
+    /// Extracted from `krec_call_name` (codopsy8 complexity sweep, the `"set"` arm):
+    /// `Set[P]` where P is a String-field record — routes to the GENERATED
+    /// `__krec_set_*` twins, keyed by the record name. Verbatim.
+    fn krec_call_name_set(&self, func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let probe = |t: &Ty| -> Option<String> {
+            let Ty::Applied(TypeConstructorId::Set, a) = t else { return None };
+            if a.len() != 1 {
+                return None;
+            }
+            self.krec_strrec(&a[0])
+        };
+        let rname = arg_tys.first().and_then(&probe).or_else(|| probe(result_ty))?;
+        match func {
+            "from_list" | "contains" | "insert" => Some(format!("__krec_set_{func}_{rname}")),
+            _ => None,
+        }
+    }
+
+    /// Extracted from `krec_call_name` (codopsy8 complexity sweep, the `"list" if func ==
+    /// "unique"` arm): `list.unique(List[P])` where P is a String-field record — routes to
+    /// the GENERATED `__krec_list_unique_*` twin. An UNANNOTATED record literal keeps its
+    /// STRUCTURAL type (the r5 lesson) — its block lays fields in SOURCE order, so the norm
+    /// is generated against the structural shape, keyed by the anon hash, rather than
+    /// through `krec_strrec` (which requires a declared `Named` record). Verbatim.
+    fn krec_call_name_list_unique(&self, arg_tys: &[Ty]) -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() else { return None };
+        if a.len() != 1 {
+            return None;
+        }
+        if let Ty::Record { fields } = &a[0] {
+            if !fields.is_empty()
+                && fields.iter().all(|(_, t)| matches!(t, Ty::Int | Ty::Bool | Ty::String))
+                && fields.iter().any(|(_, t)| matches!(t, Ty::String))
+            {
+                return Some(format!(
+                    "__krec_list_unique_{}",
+                    crate::lower::anon_record_drop_name(fields)
+                ));
+            }
+            return None;
+        }
+        let rname = self.krec_strrec(&a[0])?;
+        Some(format!("__krec_list_unique_{rname}"))
     }
 
     pub(crate) fn custom_variant_type_name(&self, ty: &Ty) -> Option<String> {
