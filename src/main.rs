@@ -331,17 +331,17 @@ fn find_rustc() -> String {
 
 fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::Diagnostic>) {
     let input = std::fs::read_to_string(file)
-        .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", file, e); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&format!("Error reading {}: {}", file, e)); std::process::exit(1); });
 
     if file.ends_with(".json") {
         let prog = serde_json::from_str(&input)
-            .unwrap_or_else(|e| { eprintln!("JSON parse error: {}", e); std::process::exit(1); });
+            .unwrap_or_else(|e| { err(&format!("JSON parse error: {}", e)); std::process::exit(1); });
         (prog, input, Vec::new())
     } else {
         let tokens = lexer::Lexer::tokenize(&input);
         let mut parser = parser::Parser::new(tokens).with_file(file);
         let prog = parser.parse()
-            .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+            .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
         let parse_errors = std::mem::take(&mut parser.errors);
         (prog, input, parse_errors)
     }
@@ -368,14 +368,14 @@ fn report_check_diagnostics(
     all_errors.extend(checker_errors);
     if !all_errors.is_empty() {
         for d in &all_errors {
-            eprintln!("{}", diagnostic_render::display_with_source(d, source_text));
+            err(&format!("{}", diagnostic_render::display_with_source(d, source_text)));
         }
-        eprintln!("\n{} error(s) found", all_errors.len());
+        err(&format!("\n{} error(s) found", all_errors.len()));
         return Err(format!("{} error(s) found", all_errors.len()));
     }
     if !warnings_suppressed() {
         for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
-            eprintln!("{}", diagnostic_render::display_with_source(d, source_text));
+            err(&format!("{}", diagnostic_render::display_with_source(d, source_text)));
         }
     }
     Ok(())
@@ -421,7 +421,7 @@ fn lower_root_program_if_ready(
     if !warnings_suppressed() {
         let unused_warnings = almide::ir::collect_unused_var_warnings(&ir, file);
         for d in &unused_warnings {
-            eprintln!("{}", diagnostic_render::display_with_source(d, source_text));
+            err(&format!("{}", diagnostic_render::display_with_source(d, source_text)));
         }
     }
     Some(ir)
@@ -489,7 +489,7 @@ fn verify_ir_or_err(ir_program: &Option<almide::ir::IrProgram>) -> Result<(), St
         let verify_errors = almide::ir::verify_program(ir);
         if !verify_errors.is_empty() {
             for e in &verify_errors {
-                eprintln!("internal compiler error: {}", e);
+                err(&format!("internal compiler error: {}", e));
             }
             return Err(format!("{} IR verification error(s)", verify_errors.len()));
         }
@@ -509,12 +509,12 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
 
     if let Some(ref proj) = parsed_project {
         project::check_compiler_version(proj)
-            .map_err(|e| { eprintln!("{}", e); e })?;
+            .map_err(|e| { err(&format!("{}", e)); e })?;
     }
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if let Some(ref proj) = parsed_project {
         project_fetch::fetch_all_deps(proj)
-            .map_err(|e| { eprintln!("{}", e); e.to_string() })?
+            .map_err(|e| { err(&format!("{}", e)); e.to_string() })?
             .into_iter()
             .map(|fd| (fd.pkg_id, fd.source_dir))
             .collect()
@@ -523,7 +523,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
     };
 
     let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
-        .map_err(|e| { eprintln!("{}", e); e.clone() })?;
+        .map_err(|e| { err(&format!("{}", e)); e.clone() })?;
 
     let mut ir_program: Option<almide::ir::IrProgram> = None;
     let mut module_irs = std::collections::HashMap::new();
@@ -620,12 +620,12 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
 /// differential tests), whose v0 invocations ARE the parity gate, not user escapes.
 fn warn_no_verified_deprecated(no_verified: bool) {
     if no_verified && std::env::var_os("ALMIDE_NO_VERIFIED_OK").is_none() {
-        eprintln!(
+        err(&format!(
             "error: --no-verified (the legacy v0 codegen path) has been removed; the \
              verified renderer is byte-identical where it lowers and falls back to v0 \
              automatically, so the flag should never be needed. If a program genuinely \
              needs it, file an issue: https://github.com/almide/almide/issues"
-        );
+        ));
         std::process::exit(1);
     }
 }
@@ -636,7 +636,7 @@ fn resolve_file(file: Option<String>) -> String {
             // Early-validate package name before looking for entry point
             match crate::project::parse_toml(std::path::Path::new("almide.toml")) {
                 Err(e) if e.contains("hyphens") => {
-                    eprintln!("error: {}", e);
+                    err(&format!("error: {}", e));
                     std::process::exit(1);
                 }
                 _ => {}
@@ -647,12 +647,12 @@ fn resolve_file(file: Option<String>) -> String {
                     return entry.to_string();
                 }
             }
-            eprintln!("almide.toml found but no entry point (src/mod.almd or src/main.almd).");
-            eprintln!("Create src/mod.almd (library) or src/main.almd (executable).");
+            err(&format!("almide.toml found but no entry point (src/mod.almd or src/main.almd)."));
+            err(&format!("Create src/mod.almd (library) or src/main.almd (executable)."));
             std::process::exit(1);
         } else {
-            eprintln!("No file specified and no almide.toml found.");
-            eprintln!("Run 'almide init' to create a project, or specify a file.");
+            err(&format!("No file specified and no almide.toml found."));
+            err(&format!("Run 'almide init' to create a project, or specify a file."));
             std::process::exit(1);
         }
     })
@@ -680,7 +680,7 @@ fn print_error_explanation(code: &str) {
     };
     for path in &candidates {
         if let Ok(content) = std::fs::read_to_string(path) {
-            println!("{}", content);
+            out(&format!("{}", content));
             return;
         }
     }
@@ -697,11 +697,11 @@ fn print_error_explanation(code: &str) {
         "E009" => "E009: Assignment to immutable variable\n\n  Cannot assign to a variable declared with `let` or a function parameter.\n\n  Example:\n    let x = 1\n    x = 2  // error\n\n  Fix: Use `var` instead of `let` if the variable needs to be mutable.",
         "E010" => "E010: Non-exhaustive match\n\n  The match expression does not cover all possible cases of the subject type.\n\n  Example:\n    type Color = | Red | Green | Blue\n    match c { Red => 1 }  // error: missing Green, Blue\n\n  Fix: Add the missing arms, or use `_` as a catch-all.",
         _ => {
-            eprintln!("Unknown error code: {}", code);
+            err(&format!("Unknown error code: {}", code));
             std::process::exit(1);
         }
     };
-    println!("{}", explanation);
+    out(&format!("{}", explanation));
 }
 
 /// The parse → check → lower → emit pipeline is deeply recursive: AST and IR
@@ -857,7 +857,7 @@ fn dispatch(cli: Cli) {
                     collect_almd_files(std::path::Path::new("src"), &mut found);
                 }
                 if found.is_empty() {
-                    eprintln!("No .almd files found in src/");
+                    err(&format!("No .almd files found in src/"));
                     std::process::exit(1);
                 }
                 found
@@ -877,7 +877,7 @@ fn dispatch(cli: Cli) {
                 project_fetch::resolve_package_spec(&pkg)
             };
             project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref())
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
             let dep = project::Dependency {
                 name: name.clone(),
                 git: git_url,
@@ -887,37 +887,37 @@ fn dispatch(cli: Cli) {
                 path: None,
             };
             project_fetch::fetch_dep(&dep)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
         }
         Commands::Deps => {
             if std::path::Path::new("almide.toml").exists() {
                 let proj = project::parse_toml(std::path::Path::new("almide.toml"))
-                    .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+                    .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
                 if proj.dependencies.is_empty() {
-                    println!("No dependencies");
+                    out(&format!("No dependencies"));
                 } else {
                     for dep in &proj.dependencies {
                         let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
-                        println!("{} = {} ({})", dep.name, dep.git, ref_name);
+                        out(&format!("{} = {} ({})", dep.name, dep.git, ref_name));
                     }
                 }
             } else {
-                eprintln!("No almide.toml found");
+                err(&format!("No almide.toml found"));
             }
         }
         Commands::DepPath { name } => {
             if !std::path::Path::new("almide.toml").exists() {
-                eprintln!("No almide.toml found");
+                err(&format!("No almide.toml found"));
                 std::process::exit(1);
             }
             let proj = project::parse_toml(std::path::Path::new("almide.toml"))
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
             let fetched = project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
             match fetched.iter().find(|fd| fd.pkg_id.name == name) {
-                Some(fd) => println!("{}", fd.source_dir.display()),
+                Some(fd) => out(&format!("{}", fd.source_dir.display())),
                 None => {
-                    eprintln!("Dependency '{}' not found in almide.toml", name);
+                    err(&format!("Dependency '{}' not found in almide.toml", name));
                     std::process::exit(1);
                 }
             }
