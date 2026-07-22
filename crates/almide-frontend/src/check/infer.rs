@@ -129,36 +129,27 @@ impl Checker {
         let ExprKind::Record { name, fields, .. } = &mut expr.kind else { unreachable!("infer_expr_record called on the wrong ExprKind") };
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 if let Some(n) = name {
+                    self.infer_expr_record_named(n, fields)
+                } else {
+                    let field_tys: Vec<(Sym, Ty)> = fields.iter().map(|f| {
+                        let ty = self.type_map.get(&f.value.id).map(|it| resolve_ty(it, &self.uf)).unwrap_or(Ty::Unknown);
+                        (sym(&f.name), ty)
+                    }).collect();
+                    Ty::Record { fields: field_tys }
+                }
+    }
+
+    // The `name: Some(n)` branch of `infer_expr_record` — resolving a named
+    // record literal (record-variant ctor or bare named-record type) to its
+    // result type, with field validation and per-field type constraints.
+    fn infer_expr_record_named(&mut self, n: &Sym, fields: &Vec<ast::FieldInit>) -> Ty {
                     // A qualified record-variant name (`mod.Ctor { … }`) keys the
                     // constructor table by its BARE name, so strip any module prefix
                     // before a ctor lookup — otherwise a cross-module record-variant
                     // is mis-typed as a standalone `mod.Ctor` type (#412).
                     let ctor_sym = n.rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or_else(|| sym(n));
-                    // Constructing `EnumType { field: ... }` via the ENUM type
-                    // name (not a case name) is a category error: an enum has no
-                    // fields of its own. Native rustc would leak E0574 and WASM
-                    // silently mis-constructs, so reject it here with a proper
-                    // diagnostic that lists the available record-variant cases.
-                    if !self.env.constructors.contains_key(&ctor_sym) {
-                        if let Some(Ty::Variant { cases, .. }) = self.env.types.get(&sym(n)) {
-                            let record_cases: Vec<&str> = cases.iter()
-                                .filter(|c| matches!(c.payload, VariantPayload::Record(_)))
-                                .map(|c| c.name.as_str())
-                                .collect();
-                            let hint = if record_cases.is_empty() {
-                                format!("`{}` is an enum type; none of its cases take named fields. Construct a case directly, e.g. `{}::SomeCase(...)`.", n, n)
-                            } else {
-                                format!("`{}` is an enum type, not a record. Construct a case instead: {}.",
-                                    n,
-                                    record_cases.iter().map(|c| format!("`{} {{ ... }}`", c)).collect::<Vec<_>>().join(" or "))
-                            };
-                            self.emit(super::err(
-                                format!("cannot construct enum type '{}' with record syntax", n),
-                                hint,
-                                format!("record literal {}", n),
-                            ).with_code("E017"));
-                            return Ty::Unknown;
-                        }
+                    if let Some(early) = self.check_record_enum_misuse(n, ctor_sym) {
+                        return early;
                     }
                     // Constrain each provided field value to its DECLARED field
                     // type (with the parent type's generics instantiated to fresh
@@ -175,131 +166,179 @@ impl Checker {
                     // and a bare NAMED RECORD type (`type WithList = { items:
                     // List[Int] }`, resolved from `env.types`). Both reduce to a
                     // `(field, declared_ty)` list with generics already substituted.
+                    // #631: module-aware lookup so a BARE record-variant ctor
+                    // used INSIDE its owning submodule (`Circle { radius: r }`)
+                    // pins `type_name` to the owner-qualified `mod.Shape`,
+                    // matching the tuple-ctor path. Without this the bare result
+                    // type tripped the #433 name-pinning guard at codegen.
+                    let ctor_lookup = self.env.lookup_ctor_in(&ctor_sym, self.current_module_prefix.as_deref());
                     let (result_ty, decl_fields, closed, defaults): (Ty, Vec<(Sym, Ty)>, bool, std::collections::HashSet<Sym>) =
-                        // #631: module-aware lookup so a BARE record-variant ctor
-                        // used INSIDE its owning submodule (`Circle { radius: r }`)
-                        // pins `type_name` to the owner-qualified `mod.Shape`,
-                        // matching the tuple-ctor path. Without this the bare result
-                        // type tripped the #433 name-pinning guard at codegen.
-                        if let Some((type_name, case)) = self.env.lookup_ctor_in(&ctor_sym, self.current_module_prefix.as_deref()) {
-                            // Brace construction of a NON-record case is a
-                            // category error (`Wrap { x: 1 }` on a tuple case):
-                            // reject here, or rustc/wasm explode downstream.
-                            if !matches!(case.payload, crate::types::VariantPayload::Record(_)) {
-                                self.emit(super::err(
-                                    format!("case '{}' does not take named fields", n),
-                                    format!("'{}' is a tuple or unit case — construct it positionally: `{}(...)`", n, n),
-                                    format!("record literal {}", n),
-                                ).with_code("E021"));
-                                return Ty::Unknown;
-                            }
-                            let generic_args = self.instantiate_type_generics(type_name.as_str());
-                            let subst: std::collections::HashMap<Sym, Ty> = if !generic_args.is_empty() {
-                                self.env.types.get(&type_name).cloned().map(|ty_def| {
-                                    let mut tv_names = Vec::new();
-                                    crate::types::TypeEnv::collect_typevars(&ty_def, &mut tv_names);
-                                    tv_names.iter().zip(generic_args.iter())
-                                        .map(|(tv, fresh)| (*tv, fresh.clone())).collect()
-                                }).unwrap_or_default()
-                            } else { std::collections::HashMap::new() };
-                            let decl = match &case.payload {
-                                crate::types::VariantPayload::Record(fs) =>
-                                    fs.iter().map(|(fname, fty)| (*fname, super::calls::subst_ty(fty, &subst))).collect(),
-                                _ => Vec::new(),
-                            };
-                            // #433: a qualified record-variant `mod.Ctor { … }` takes
-                            // the namespaced `mod.Type` so it mangles to the right enum.
-                            let result_named = match n.as_str().rsplit_once('.') {
-                                Some((m, _)) => {
-                                    let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
-                                    let q = format!("{}.{}", rm, type_name.as_str());
-                                    if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { type_name }
-                                }
-                                None => type_name,
-                            };
-                            let case_defaults = self.env.ctor_field_defaults.get(&ctor_sym).cloned().unwrap_or_default();
-                            (Ty::Named(result_named, generic_args), decl, true, case_defaults)
-                        } else {
-                            // Named record type: instantiate its generics with
-                            // fresh vars so the declared field types carry the
-                            // SAME vars as the result type (so e.g. `List[T]`
-                            // unifies across the field and the binding's ascription).
-                            //
-                            // #433: the constructed type's NAME must be the
-                            // canonical qualified `mod.Type`, like the variant
-                            // branch above and annotation resolution. This was
-                            // the one producer still leaking bare cross-module
-                            // names — a module's record top-let carried bare
-                            // `Cfg` into IrTopLet.ty, rendering an unmangled
-                            // static type on native (E0425) and missing the
-                            // qualified record_fields key on wasm (trap).
-                            let canon = match n.rsplit_once('.') {
-                                // `alias.Cfg { … }`: resolve the import alias to
-                                // the real module, keep qualified if registered.
-                                Some((m, base)) => {
-                                    let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
-                                    let q = format!("{}.{}", rm, base);
-                                    if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { sym(n) }
-                                }
-                                None => crate::canonicalize::resolve::canonical_user_type_sym(
-                                    n, &self.env.types, self.current_module_prefix.as_deref(),
-                                ).unwrap_or_else(|| sym(n)),
-                            };
-                            // E029: a record literal naming an UNDECLARED type
-                            // previously fell through with empty decl fields —
-                            // validation skipped, `Ty::Named(Inner)` flowed into
-                            // the IR, and codegen emitted a nonexistent Rust
-                            // struct (E0422 — check accepted, build failed; fuzz
-                            // seed-20260718 index 940's mutated-away decl).
-                            if !self.env.types.contains_key(&canon) && !self.env.types.contains_key(&sym(n)) {
-                                self.emit(super::err(
-                                    format!("unknown type '{}'", n),
-                                    format!("no `type {}` is declared (or imported) in this program — declare it, or check the spelling", n),
-                                    format!("record literal {}", n),
-                                ).with_code("E029"));
-                                return Ty::Unknown;
-                            }
-                            let generic_args = self.instantiate_type_generics(n);
-                            let named = Ty::Named(canon, generic_args);
-                            let (decl, closed) = match self.env.resolve_named(&named) {
-                                Ty::Record { fields } => (fields, true),
-                                Ty::OpenRecord { fields } => (fields, false),
-                                _ => (Vec::new(), false),
-                            };
-                            let defaults = self.env.record_field_defaults.get(&canon)
-                                .or_else(|| self.env.record_field_defaults.get(&sym(n)))
-                                .cloned().unwrap_or_default();
-                            (named, decl, closed, defaults)
+                        match ctor_lookup {
+                            Some((type_name, case)) => match self.infer_expr_record_variant_ctor(n, ctor_sym, type_name, &case) {
+                                Ok(v) => v,
+                                Err(early) => return early,
+                            },
+                            None => match self.infer_expr_record_bare_type(n) {
+                                Ok(v) => v,
+                                Err(early) => return early,
+                            },
                         };
-                    // #488: field-set validation — duplicates always; unknown
-                    // and missing-without-default for closed declarations.
-                    if closed || !decl_fields.is_empty() {
-                        let given = fields.clone();
-                        self.validate_record_fields(n.as_str(), &given, &decl_fields, closed, &defaults);
-                    }
-                    for f in fields.iter() {
-                        if let Some((_, ety)) = decl_fields.iter().find(|(fname, _)| fname.as_str() == f.name.as_str()) {
-                            // E024, record-field edition: pin a bare/negated int
-                            // literal to the DECLARED sized field type so the
-                            // post-solve range validator sees it — `Inner { x:
-                            // -4294967295 }` over `x: Int8` was check-accepted
-                            // while native rustc rejected the narrowed literal
-                            // (fuzz seed-20260718 index 940, the C-038 mutation).
-                            self.record_int_literal_context(&f.value, ety);
-                            if let Some(vty) = self.type_map.get(&f.value.id).cloned() {
-                                self.constrain(ety.clone(), vty, format!("field {}", f.name));
-                            }
-                        }
-                    }
+                    self.constrain_record_fields(n, fields, &decl_fields, closed, &defaults);
                     result_ty
+    }
+
+    // Constructing `EnumType { field: ... }` via the ENUM type name (not a
+    // case name) is a category error: an enum has no fields of its own.
+    // Native rustc would leak E0574 and WASM silently mis-constructs, so
+    // reject it here with a proper diagnostic that lists the available
+    // record-variant cases. Returns `Some(Ty::Unknown)` to signal an
+    // early-return to the caller, `None` to continue.
+    fn check_record_enum_misuse(&mut self, n: &Sym, ctor_sym: Sym) -> Option<Ty> {
+        if !self.env.constructors.contains_key(&ctor_sym) {
+            if let Some(Ty::Variant { cases, .. }) = self.env.types.get(&sym(n)) {
+                let record_cases: Vec<&str> = cases.iter()
+                    .filter(|c| matches!(c.payload, VariantPayload::Record(_)))
+                    .map(|c| c.name.as_str())
+                    .collect();
+                let hint = if record_cases.is_empty() {
+                    format!("`{}` is an enum type; none of its cases take named fields. Construct a case directly, e.g. `{}::SomeCase(...)`.", n, n)
+                } else {
+                    format!("`{}` is an enum type, not a record. Construct a case instead: {}.",
+                        n,
+                        record_cases.iter().map(|c| format!("`{} {{ ... }}`", c)).collect::<Vec<_>>().join(" or "))
+                };
+                self.emit(super::err(
+                    format!("cannot construct enum type '{}' with record syntax", n),
+                    hint,
+                    format!("record literal {}", n),
+                ).with_code("E017"));
+                return Some(Ty::Unknown);
+            }
+        }
+        None
+    }
+
+    // #488: field-set validation (duplicates always; unknown and
+    // missing-without-default for closed declarations), then E024 int-literal
+    // context pinning and per-field type constraints.
+    fn constrain_record_fields(&mut self, n: &Sym, fields: &Vec<ast::FieldInit>, decl_fields: &[(Sym, Ty)], closed: bool, defaults: &std::collections::HashSet<Sym>) {
+        if closed || !decl_fields.is_empty() {
+            let given = fields.clone();
+            self.validate_record_fields(n.as_str(), &given, decl_fields, closed, defaults);
+        }
+        for f in fields.iter() {
+            if let Some((_, ety)) = decl_fields.iter().find(|(fname, _)| fname.as_str() == f.name.as_str()) {
+                // E024, record-field edition: pin a bare/negated int
+                // literal to the DECLARED sized field type so the
+                // post-solve range validator sees it — `Inner { x:
+                // -4294967295 }` over `x: Int8` was check-accepted
+                // while native rustc rejected the narrowed literal
+                // (fuzz seed-20260718 index 940, the C-038 mutation).
+                self.record_int_literal_context(&f.value, ety);
+                if let Some(vty) = self.type_map.get(&f.value.id).cloned() {
+                    self.constrain(ety.clone(), vty, format!("field {}", f.name));
                 }
-                else {
-                    let field_tys: Vec<(Sym, Ty)> = fields.iter().map(|f| {
-                        let ty = self.type_map.get(&f.value.id).map(|it| resolve_ty(it, &self.uf)).unwrap_or(Ty::Unknown);
-                        (sym(&f.name), ty)
-                    }).collect();
-                    Ty::Record { fields: field_tys }
-                }
+            }
+        }
+    }
+
+    // Record-variant ctor path of `infer_expr_record_named`: `n` names a case
+    // with a Record payload (`| Group { items: List[Shape] }`). Returns
+    // `Err(Ty)` to signal an early-return diagnostic to the caller.
+    fn infer_expr_record_variant_ctor(&mut self, n: &Sym, ctor_sym: Sym, type_name: Sym, case: &crate::types::VariantCase) -> Result<(Ty, Vec<(Sym, Ty)>, bool, std::collections::HashSet<Sym>), Ty> {
+        // Brace construction of a NON-record case is a
+        // category error (`Wrap { x: 1 }` on a tuple case):
+        // reject here, or rustc/wasm explode downstream.
+        if !matches!(case.payload, crate::types::VariantPayload::Record(_)) {
+            self.emit(super::err(
+                format!("case '{}' does not take named fields", n),
+                format!("'{}' is a tuple or unit case — construct it positionally: `{}(...)`", n, n),
+                format!("record literal {}", n),
+            ).with_code("E021"));
+            return Err(Ty::Unknown);
+        }
+        let generic_args = self.instantiate_type_generics(type_name.as_str());
+        let subst: std::collections::HashMap<Sym, Ty> = if !generic_args.is_empty() {
+            self.env.types.get(&type_name).cloned().map(|ty_def| {
+                let mut tv_names = Vec::new();
+                crate::types::TypeEnv::collect_typevars(&ty_def, &mut tv_names);
+                tv_names.iter().zip(generic_args.iter())
+                    .map(|(tv, fresh)| (*tv, fresh.clone())).collect()
+            }).unwrap_or_default()
+        } else { std::collections::HashMap::new() };
+        let decl = match &case.payload {
+            crate::types::VariantPayload::Record(fs) =>
+                fs.iter().map(|(fname, fty)| (*fname, super::calls::subst_ty(fty, &subst))).collect(),
+            _ => Vec::new(),
+        };
+        // #433: a qualified record-variant `mod.Ctor { … }` takes
+        // the namespaced `mod.Type` so it mangles to the right enum.
+        let result_named = match n.as_str().rsplit_once('.') {
+            Some((m, _)) => {
+                let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
+                let q = format!("{}.{}", rm, type_name.as_str());
+                if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { type_name }
+            }
+            None => type_name,
+        };
+        let case_defaults = self.env.ctor_field_defaults.get(&ctor_sym).cloned().unwrap_or_default();
+        Ok((Ty::Named(result_named, generic_args), decl, true, case_defaults))
+    }
+
+    // Bare named-record-type path of `infer_expr_record_named`: `n` names a
+    // plain `type X = { ... }` declaration (not a record-variant ctor).
+    // Returns `Err(Ty)` to signal an early-return diagnostic to the caller.
+    fn infer_expr_record_bare_type(&mut self, n: &Sym) -> Result<(Ty, Vec<(Sym, Ty)>, bool, std::collections::HashSet<Sym>), Ty> {
+        // Named record type: instantiate its generics with
+        // fresh vars so the declared field types carry the
+        // SAME vars as the result type (so e.g. `List[T]`
+        // unifies across the field and the binding's ascription).
+        //
+        // #433: the constructed type's NAME must be the
+        // canonical qualified `mod.Type`, like the variant
+        // branch above and annotation resolution. This was
+        // the one producer still leaking bare cross-module
+        // names — a module's record top-let carried bare
+        // `Cfg` into IrTopLet.ty, rendering an unmangled
+        // static type on native (E0425) and missing the
+        // qualified record_fields key on wasm (trap).
+        let canon = match n.rsplit_once('.') {
+            // `alias.Cfg { … }`: resolve the import alias to
+            // the real module, keep qualified if registered.
+            Some((m, base)) => {
+                let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
+                let q = format!("{}.{}", rm, base);
+                if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { sym(n) }
+            }
+            None => crate::canonicalize::resolve::canonical_user_type_sym(
+                n, &self.env.types, self.current_module_prefix.as_deref(),
+            ).unwrap_or_else(|| sym(n)),
+        };
+        // E029: a record literal naming an UNDECLARED type
+        // previously fell through with empty decl fields —
+        // validation skipped, `Ty::Named(Inner)` flowed into
+        // the IR, and codegen emitted a nonexistent Rust
+        // struct (E0422 — check accepted, build failed; fuzz
+        // seed-20260718 index 940's mutated-away decl).
+        if !self.env.types.contains_key(&canon) && !self.env.types.contains_key(&sym(n)) {
+            self.emit(super::err(
+                format!("unknown type '{}'", n),
+                format!("no `type {}` is declared (or imported) in this program — declare it, or check the spelling", n),
+                format!("record literal {}", n),
+            ).with_code("E029"));
+            return Err(Ty::Unknown);
+        }
+        let generic_args = self.instantiate_type_generics(n);
+        let named = Ty::Named(canon, generic_args);
+        let (decl, closed) = match self.env.resolve_named(&named) {
+            Ty::Record { fields } => (fields, true),
+            Ty::OpenRecord { fields } => (fields, false),
+            _ => (Vec::new(), false),
+        };
+        let defaults = self.env.record_field_defaults.get(&canon)
+            .or_else(|| self.env.record_field_defaults.get(&sym(n)))
+            .cloned().unwrap_or_default();
+        Ok((named, decl, closed, defaults))
     }
 
     fn infer_expr_member(&mut self, expr: &mut ast::Expr) -> Ty {

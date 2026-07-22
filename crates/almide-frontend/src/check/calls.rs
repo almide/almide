@@ -140,310 +140,6 @@ impl Checker {
             }
         }
     }
-    /// The `Member { object, field }` callee arm of [`Self::check_call_with_type_args`] — `object.field(...)`: static module/alias/TypeName/codec resolution, then the UFCS ladder (Fn-typed record field, builtin-module method, convention method, protocol method on a TypeVar, user-fn UFCS, cross-module UFCS), falling back to the E002 "no method syntax" diagnostic or a callable-object constraint. Verbatim text move: each step is an independent guard that either returns a resolved `Ty` or falls through to the next.
-    fn check_call_target_member(
-        &mut self,
-        object: &mut ast::Expr,
-        field: &Sym,
-        args: &[ast::Expr],
-        arg_tys: &[Ty],
-        callee_span_snapshot: Option<ast::Span>,
-    ) -> Ty {
-        self.arg_spans = args.iter().map(|a| a.span).collect();
-        // Try static resolution: module.func, alias.func, TypeName.method, codec.encode Thread the callee's span so `E002` can emit a mechanically-applicable `try_replace` when the stdlib alias map supplies a clean rename target.
-        let prev = self.callee_span_hint.take();
-        self.callee_span_hint = callee_span_snapshot;
-        let resolved = self.resolve_static_member(object, field, arg_tys);
-        self.callee_span_hint = prev;
-        if let Some(result) = resolved {
-            let arg_refs: Vec<&ast::Expr> = args.iter().collect();
-            self.validate_mut_args(&format!("{}.{}", if let ExprKind::Ident { name, .. } = &object.kind { name.as_str() } else { "?" }, field), &arg_refs);
-            return result;
-        }
-        // UFCS method: obj.method(args) -> module.method(obj, args)
-        let obj_ty = self.infer_expr(object);
-        let obj_concrete = resolve_ty(&obj_ty, &self.uf);
-        let field = field.clone();
-
-        if let Some(ty) = self.check_call_target_record_field(&obj_concrete, &field, arg_tys) {
-            return ty;
-        }
-        // Built-in generic types -> stdlib module UFCS
-        let builtin_module = builtin_module_for_type(&obj_concrete);
-        if let Some(ty) = self.check_call_target_builtin_ufcs(builtin_module, &field, &obj_ty, arg_tys) {
-            return ty;
-        }
-        if let Some(ty) = self.check_call_target_convention(&obj_concrete, &field, &obj_ty, arg_tys) {
-            return ty;
-        }
-        if let Some(ty) = self.check_call_target_typevar_protocol(&obj_concrete, &field) {
-            return ty;
-        }
-        // UFCS: user-defined function obj.func(args) -> func(obj, args)
-        if self.env.functions.contains_key(&sym(&field)) {
-            let mut all_args = vec![obj_ty];
-            all_args.extend(arg_tys.iter().cloned());
-            return self.check_named_call(&field, &all_args);
-        }
-        if let Some(ty) = self.check_call_target_cross_module_ufcs(&obj_concrete, &field, &obj_ty, arg_tys) {
-            return ty;
-        }
-        if let Some(ty) = self.check_call_target_e002_hint(builtin_module, &field, object) {
-            return ty;
-        }
-        let ret = self.fresh_var();
-        self.constrain(obj_ty, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
-        ret
-    }
-    /// Record field call: `h.run("hello")` where `run` is a Fn-typed field. Must be checked before UFCS so field-access + call takes priority. Verbatim text move out of [`Self::check_call_target_member`].
-    fn check_call_target_record_field(&mut self, obj_concrete: &Ty, field: &Sym, arg_tys: &[Ty]) -> Option<Ty> {
-        let field_ty = self.resolve_field_type(obj_concrete, field);
-        if let Ty::Fn { params, ret } = &field_ty {
-            // Validate argument count
-            if arg_tys.len() != params.len() {
-                self.emit(super::err(
-                    format!("field '{}' expects {} argument(s) but got {}", field, params.len(), arg_tys.len()),
-                    "Check the number of arguments", format!("call to .{}()", field)).with_code("E004"));
-            }
-            // Unify argument types with parameter types
-            for (aty, pty) in arg_tys.iter().zip(params.iter()) {
-                self.constrain(pty.clone(), aty.clone(), format!("call to .{}()", field));
-            }
-            return Some(ret.as_ref().clone());
-        }
-        None
-    }
-    /// Built-in generic types -> stdlib module UFCS (`xs.len()` -> `list.len(xs)`). Verbatim text move out of [`Self::check_call_target_member`].
-    fn check_call_target_builtin_ufcs(&mut self, builtin_module: Option<&str>, field: &Sym, obj_ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
-        let module = builtin_module?;
-        let key = format!("{}.{}", module, field);
-        if self.env.functions.contains_key(&sym(&key))
-            || crate::stdlib::resolve_ufcs_candidates(field).contains(&module)
-        {
-            let mut all_args = vec![obj_ty.clone()];
-            all_args.extend(arg_tys.iter().cloned());
-            return Some(self.check_named_call(&key, &all_args));
-        }
-        None
-    }
-    /// Convention method: `dog.repr()` -> `Dog.repr(dog)`. Verbatim text move out of [`Self::check_call_target_member`].
-    fn check_call_target_convention(&mut self, obj_concrete: &Ty, field: &Sym, obj_ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
-        let type_name_opt = self.resolve_type_name(obj_concrete);
-        if let Some(type_name) = type_name_opt {
-            let convention_key = format!("{}.{}", type_name, field);
-            if self.env.functions.contains_key(&sym(&convention_key)) {
-                let mut all_args = vec![obj_ty.clone()];
-                all_args.extend(arg_tys.iter().cloned());
-                return Some(self.check_named_call(&convention_key, &all_args));
-            }
-        }
-        None
-    }
-    /// Protocol method on TypeVar: `item.show()` where `item: T, T: Showable`. Verbatim text move out of [`Self::check_call_target_member`].
-    fn check_call_target_typevar_protocol(&mut self, obj_concrete: &Ty, field: &Sym) -> Option<Ty> {
-        if let Ty::TypeVar(tv) = obj_concrete {
-            if let Some(proto_names) = self.env.generic_protocol_bounds.get(tv).cloned() {
-                for proto_name in &proto_names {
-                    if let Some(proto_def) = self.env.protocols.get(proto_name).cloned() {
-                        if let Some(method_sig) = proto_def.methods.iter().find(|m| m.name == *field) {
-                            // Resolve method return type: substitute Self -> T (the TypeVar)
-                            let ret = self.substitute_self_in_ty(&method_sig.ret, obj_concrete);
-                            return Some(ret);
-                        }
-                    }
-                }
-            }
-        }
-        None
-    }
-    /// Cross-module UFCS: find the module that defines the object's type, then check if `module.method` exists. Verbatim text move out of [`Self::check_call_target_member`].
-    fn check_call_target_cross_module_ufcs(&mut self, obj_concrete: &Ty, field: &Sym, obj_ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
-        let cross_type_name = match obj_concrete {
-            Ty::Named(n, _) => Some(n.to_string()),
-            _ => None,
-        };
-        if let Some(type_name) = cross_type_name {
-            // A pinned QUALIFIED type name (`box.Box` — the #433 canonical form every checked expr now carries) names its defining module directly. The suffix scan below only ever matched historical BARE names, so cross-module UFCS silently fell through to the callable-object fallback and E001'd (ceangal's `count.get()`).
-            let defining_module = match type_name.rsplit_once('.') {
-                Some((m, _)) => Some(m.to_string()),
-                None => self.env.types.keys()
-                    .find(|k| {
-                        let s = k.as_str();
-                        s.ends_with(&format!(".{}", type_name))
-                            && s.len() > type_name.len() + 1
-                    })
-                    .map(|k| k.as_str()[..k.as_str().len() - type_name.len() - 1].to_string()),
-            };
-            if let Some(module) = defining_module {
-                let key = format!("{}.{}", module, field);
-                if self.env.functions.contains_key(&sym(&key)) {
-                    let mut all_args = vec![obj_ty.clone()];
-                    all_args.extend(arg_tys.iter().cloned());
-                    return Some(self.check_named_call(&key, &all_args));
-                }
-            }
-        }
-        None
-    }
-    /// Almide-specific hint: method-call syntax isn't supported. If `obj_ty` maps to a stdlib module, suggest the module-call form (plus the closest existing name if there's a typo). Verbatim text move out of [`Self::check_call_target_member`].
-    fn check_call_target_e002_hint(&mut self, builtin_module: Option<&str>, field: &Sym, object: &ast::Expr) -> Option<Ty> {
-        let module = builtin_module?;
-        // Use the *full* surface (TOML + bundled `.almd`) so fns migrated through the Stdlib Unification arc still power the E002 suggestion. `module_functions` only sees TOML, so after `stdlib/string.almd` replaced the TOML the method-call try-snippet silently disappeared.
-        let module_funcs = crate::stdlib::module_functions_all(module);
-        let suggestion = almide_base::diagnostic::suggest(field, module_funcs.iter().copied());
-        let hint = if let Some(close) = &suggestion {
-            format!(
-                "Almide doesn't use method-call syntax. Write `{m}.{close}(x)` (or `x |> {m}.{close}`). Method syntax `x.{field}()` is not supported.",
-                m = module, close = close, field = field
-            )
-        } else {
-            format!(
-                "Almide doesn't use method-call syntax. Write `{m}.<fn>(x)` (or `x |> {m}.<fn>`) — there is no method `{field}` on `{m}`. Run `almide explain E002` for examples.",
-                m = module, field = field
-            )
-        };
-        let mut diag = super::err(
-            format!("undefined method '{}' on {}", field, module),
-            hint,
-            format!("method call .{}()", field)
-        ).with_code("E002");
-        if let Some(close) = suggestion {
-            // Mechanical rewrite path: if we have the object's source text AND the full call span, substitute `x.field()` → `module.close(x)` in place. Falls back to the comment-headed display form when the source isn't reachable (IDE / playground).
-            let rewrite = object.span
-                .and_then(|s| self.source_slice(s))
-                .and_then(|obj_src| {
-                    let call_span = self.call_span_hint?;
-                    Some((call_span, format!("{}.{}({})", module, close, obj_src)))
-                });
-            if let Some((call_span, snippet)) = rewrite {
-                diag = diag.with_try_replace(
-                    call_span.line, call_span.col, call_span.end_col,
-                    snippet,
-                );
-            } else {
-                diag = diag.with_try(format!(
-                    "// x.{field}()  →  {m}.{close}(x)\n{m}.{close}(x)",
-                    m = module, close = close, field = field
-                ));
-            }
-        }
-        self.emit(diag);
-        Some(Ty::Unknown)
-    }
-    /// The `TypeName(..)` callee arm of [`Self::check_call_with_type_args`] — record/variant constructor calls. Verbatim text move (#781).
-    fn check_type_name_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {
-        // #631: pin the constructed value's `.ty` to the OWNER-qualified type name (`mod.Type`) via the module-aware lookup, exactly as the bare-value ctor path (infer.rs) and `lookup_ctor_in` for record ctors already do. A bare `lookup_ctor` here left the call expression's type bare `Type` even when the only declaration is `mod.Type`, so a producer fn INSIDE its owning submodule that constructs the variant tripped the #433 name-pinning guard at codegen (both targets aborted after `check` said clean).
-        if let Some((type_name, case)) =
-            self.env.lookup_ctor_in(&sym(name), self.current_module_prefix.as_deref())
-        {
-            self.report_ambiguous_ctor(name);
-            self.check_constructor_args(name, &case, &arg_tys);
-            // Instantiate parent type's generics with fresh inference vars
-            let generic_args = self.instantiate_type_generics(type_name.as_str());
-            // Unify each constructor arg with its payload type. For a GENERIC variant this resolves the parent's vars (Leaf(1) → T=Int); for ANY variant it also propagates a CONCRETE payload type — e.g. a function payload `Tick((Unit) -> Int)` — into a lambda arg's otherwise-unconstrained params. Without it a closure payload's unused param stays unresolved and the WASM closure signature mismatched the call site (an indirect-call trap). Was gated on `!generic_args.is_empty()`, so non-generic variants were skipped.
-            let subst: std::collections::HashMap<almide_base::intern::Sym, Ty> = if !generic_args.is_empty() {
-                self.env.types.get(&sym(type_name.as_str())).cloned().map(|ty_def| {
-                    let mut type_var_names = Vec::new();
-                    crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
-                    type_var_names.iter().zip(generic_args.iter())
-                        .map(|(tv, fresh)| (*tv, fresh.clone()))
-                        .collect()
-                }).unwrap_or_default()
-            } else {
-                std::collections::HashMap::new()
-            };
-            if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
-                for (aty, ety) in arg_tys.iter().zip(expected.iter()) {
-                    let substituted = subst_ty(ety, &subst);
-                    self.unify_infer(aty, &substituted);
-                }
-            }
-            Ty::Named(type_name, generic_args)
-        } else if let Some(target_ty) = self.env.opaque_alias_targets.get(&sym(name)).cloned() {
-            // Opaque alias constructor: SafeHtml("hello")
-            let vis = self.env.opaque_alias_visibility.get(&sym(name)).copied()
-                .unwrap_or(ast::Visibility::Public);
-            if !matches!(vis, ast::Visibility::Public) {
-                // Check if we're in the defining module
-                let defining_module = self.env.opaque_alias_module.get(&sym(name))
-                    .cloned().flatten();
-                let current_module = self.env.self_module_name
-                    .or(self.current_module_prefix.as_ref().map(|p| sym(p)));
-                let allowed = match (&defining_module, &current_module) {
-                    (None, None) => true,       // defined in main, used in main
-                    (Some(def), Some(cur)) => def == cur, // same module
-                    _ => false,                 // cross-module
-                };
-                if !allowed {
-                    self.emit(super::err(
-                        format!("cannot construct opaque type '{}' outside its defining module", name),
-                        format!("Use the module's public API to create '{}' values", name),
-                        format!("constructor {}()", name),
-                    ).with_code("E008"));
-                }
-            }
-            if arg_tys.len() != 1 {
-                self.emit(super::err(
-                    format!("{}() takes exactly 1 argument but got {}", name, arg_tys.len()),
-                    "Opaque type constructor wraps a single value",
-                    format!("constructor {}()", name),
-                ).with_code("E004"));
-            } else {
-                self.constrain(target_ty, arg_tys[0].clone(), format!("constructor {}()", name));
-            }
-            Ty::Named(sym(name), vec![])
-        } else {
-            // #488: nothing claimed this TypeName call — not a variant ctor, not an opaque alias, and the record paths were intercepted before infer_call. Letting it through here is how unvalidated constructions reached rustc/wasm; make the unknown name a checker error instead.
-            self.emit(super::err(
-                format!("unknown type or constructor '{}' in call position", name),
-                format!("No type, variant constructor, or opaque alias named '{}' is in scope. Check the spelling or add the missing import.", name),
-                format!("call to {}()", name),
-            ).with_code("E003"));
-            Ty::Named(sym(name), vec![])
-        }
-    }
-    /// Resolve a concrete type to its declared type name.
-    fn resolve_type_name(&self, ty: &Ty) -> Option<String> {
-        match ty {
-            Ty::Named(name, _) => Some(name.to_string()),
-            Ty::Record { .. } | Ty::Variant { .. } => {
-                self.env.types.iter().find_map(|(name, def)| {
-                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| name.to_string())
-                })
-            }
-            _ => None,
-        }
-    }
-    /// Resolve a type to its name for protocol checking purposes. Handles Named types, Records/Variants (by looking up type definitions), and TypeVars (which are not concrete — returns None to skip checking).
-    fn resolve_type_name_for_protocol(&self, ty: &Ty) -> Option<Sym> {
-        match ty {
-            Ty::Named(name, _) => Some(*name),
-            Ty::Record { .. } | Ty::Variant { .. } => {
-                self.env.types.iter().find_map(|(name, def)| {
-                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| *name)
-                })
-            }
-            // Numeric primitive types — canonicalised so `T: Numeric` bounds can look them up in `env.type_protocols` (the `register_builtin_protocols` pass seeds this table with the primitive ↔ `Numeric` links).
-            Ty::Int => Some(sym("Int")),
-            Ty::Float => Some(sym("Float")),
-            Ty::Int8 => Some(sym("Int8")),
-            Ty::Int16 => Some(sym("Int16")),
-            Ty::Int32 => Some(sym("Int32")),
-            Ty::UInt8 => Some(sym("UInt8")),
-            Ty::UInt16 => Some(sym("UInt16")),
-            Ty::UInt32 => Some(sym("UInt32")),
-            Ty::UInt64 => Some(sym("UInt64")),
-            Ty::Float32 => Some(sym("Float32")),
-            Ty::String => Some(sym("String")),
-            Ty::Bool => Some(sym("Bool")),
-            Ty::Bytes => Some(sym("Bytes")),
-            Ty::Matrix => Some(sym("Matrix")),
-            Ty::Unit => Some(sym("Unit")),
-            // TypeVars and inference vars are not concrete — skip protocol checking
-            Ty::TypeVar(_) | Ty::Unknown => None,
-            _ => None,
-        }
-    }
     pub(crate) fn check_named_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {
         self.check_named_call_with_type_args(name, arg_tys, None)
     }
@@ -727,62 +423,70 @@ impl Checker {
     fn check_unresolved_named_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {
         self.last_mut_params = vec![];
         // No function signature found — try constructor, variable, or report error
+        if let Some(ty) = self.try_unresolved_call_ctor_or_var(name, arg_tys) {
+            return ty;
+        }
+        self.emit_unresolved_call_diagnostic(name)
+    }
+
+    // Try resolving `name(...)` as a variant constructor or a callable
+    // variable — the two success paths of `check_unresolved_named_call`.
+    // Returns `None` when neither claims the name, so the caller falls
+    // through to the undefined-function diagnostic.
+    fn try_unresolved_call_ctor_or_var(&mut self, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
         if let Some((type_name, case)) = self.env.lookup_ctor(&sym(name)) {
             self.check_constructor_args(name, &case, arg_tys);
             let generic_args = self.instantiate_type_generics(type_name.as_str());
-            return Ty::Named(type_name, generic_args);
+            return Some(Ty::Named(type_name, generic_args));
         }
-        if let Some(ty) = self.env.lookup_var(name).cloned() {
-            if let Ty::Fn { params, ret } = &ty {
-                arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
-                    self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
-                });
-                return ret.as_ref().clone();
-            }
-            // #558: `n(args)` where `n` is a NON-function local — the call position makes this an error. Previously this returned the var's own type unchecked, so the program passed `check` and then ICE'd in the wasm emitter (`call target not in func_map`) / leaked a raw rustc E0425 natively.
-            let rty = resolve_ty(&ty, &self.uf);
-            if !matches!(rty, Ty::Unknown | Ty::TypeVar(_)) {
-                self.emit(super::err(
-                    format!("`{}` is not a function — it has type {}", name, rty.display()),
-                    format!("`{}` is a value; only functions and closures can be called", name),
-                    format!("call to {}()", name)).with_code("E002"));
-                return Ty::Unknown;
-            }
-            // #623: `f` is an as-yet-unresolved inference var being CALLED — so it MUST be a function. Constrain it to `(arg_tys) -> ?ret` and return `?ret`, not `f`'s own type. Returning `ty` typed the call result as f's CLOSURE type (e.g. `(f) => f(10)` in a `list.map` lambda became `((Int)->Int) -> ((Int)->Int)` instead of `((Int)->Int) -> Int`), so codegen emitted a closure body that returns a closure where it returns the call result (invalid Rust / wrong wasm). `?ret` is resolved from context — e.g. the element type `(Int)->Int` flowing in from `list.map` pins `?ret = Int`.
-            let ret = self.fresh_var();
-            let fn_ty = Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) };
-            self.constrain(fn_ty, ty, format!("call to {}()", name));
-            return ret;
+        let ty = self.env.lookup_var(name).cloned()?;
+        if let Ty::Fn { params, ret } = &ty {
+            arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
+                self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
+            });
+            return Some(ret.as_ref().clone());
         }
-        // Triple: (hint, clean fn-name fix for simple try:, rich multi-line snippet). `rich_snippet` overrides `fix_name` when present — used for hallucinations that need a conversion wrapper or operator rewrite rather than a rename.
-        let (hint, fix_name, rich_snippet): (String, Option<String>, Option<&'static str>) = {
-            // For module-qualified calls (e.g. "string.uppercase"), narrow candidates to the same module and compare only the function part for better suggestions.
-            if let Some((module, func)) = name.split_once('.') {
-                // Use the *full* surface (TOML + bundled) so diagnostic suggestions see fns migrated to `stdlib/<m>.almd` even after their TOML entries have been deleted.
-                let module_funcs = crate::stdlib::module_functions_all(module);
-                if !module_funcs.is_empty() {
-                    // Check known alias map first (catches common hallucinations)
-                    if let Some(alias) = crate::stdlib::suggest_alias(module, func) {
-                        // Aliases can be free text like "xs + [x]"; only treat as a copy-pasteable fn name if it matches `module.func` form.
-                        let fix = is_clean_fn_name(alias).then(|| alias.to_string());
-                        let rich = crate::stdlib::try_snippet_for_alias(module, func);
-                        (format!("Did you mean `{}`?", alias), fix, rich)
-                    } else if let Some(suggestion) = almide_base::diagnostic::suggest(func, module_funcs.iter().copied()) {
-                        let full = format!("{}.{}", module, suggestion);
-                        (format!("Did you mean `{}`?", full), Some(full), None)
-                    } else {
-                        (format!("No function '{}' in module '{}'. See docs/CHEATSHEET.md for available functions", func, module), None, None)
-                    }
+        // #558: `n(args)` where `n` is a NON-function local — the call position makes this an error. Previously this returned the var's own type unchecked, so the program passed `check` and then ICE'd in the wasm emitter (`call target not in func_map`) / leaked a raw rustc E0425 natively.
+        let rty = resolve_ty(&ty, &self.uf);
+        if !matches!(rty, Ty::Unknown | Ty::TypeVar(_)) {
+            self.emit(super::err(
+                format!("`{}` is not a function — it has type {}", name, rty.display()),
+                format!("`{}` is a value; only functions and closures can be called", name),
+                format!("call to {}()", name)).with_code("E002"));
+            return Some(Ty::Unknown);
+        }
+        // #623: `f` is an as-yet-unresolved inference var being CALLED — so it MUST be a function. Constrain it to `(arg_tys) -> ?ret` and return `?ret`, not `f`'s own type. Returning `ty` typed the call result as f's CLOSURE type (e.g. `(f) => f(10)` in a `list.map` lambda became `((Int)->Int) -> ((Int)->Int)` instead of `((Int)->Int) -> Int`), so codegen emitted a closure body that returns a closure where it returns the call result (invalid Rust / wrong wasm). `?ret` is resolved from context — e.g. the element type `(Int)->Int` flowing in from `list.map` pins `?ret = Int`.
+        let ret = self.fresh_var();
+        let fn_ty = Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) };
+        self.constrain(fn_ty, ty, format!("call to {}()", name));
+        Some(ret)
+    }
+
+    // Rename/conversion hint for an undefined call `name(...)`: (hint text,
+    // clean fn-name fix for a simple `try:`, rich multi-line snippet).
+    // `rich_snippet` overrides `fix_name` when present — used for
+    // hallucinations that need a conversion wrapper or operator rewrite
+    // rather than a rename.
+    fn unresolved_call_hint(&self, name: &str) -> (String, Option<String>, Option<&'static str>) {
+        // For module-qualified calls (e.g. "string.uppercase"), narrow candidates to the same module and compare only the function part for better suggestions.
+        if let Some((module, func)) = name.split_once('.') {
+            // Use the *full* surface (TOML + bundled) so diagnostic suggestions see fns migrated to `stdlib/<m>.almd` even after their TOML entries have been deleted.
+            let module_funcs = crate::stdlib::module_functions_all(module);
+            if !module_funcs.is_empty() {
+                // Check known alias map first (catches common hallucinations)
+                if let Some(alias) = crate::stdlib::suggest_alias(module, func) {
+                    // Aliases can be free text like "xs + [x]"; only treat as a copy-pasteable fn name if it matches `module.func` form.
+                    let fix = is_clean_fn_name(alias).then(|| alias.to_string());
+                    let rich = crate::stdlib::try_snippet_for_alias(module, func);
+                    (format!("Did you mean `{}`?", alias), fix, rich)
+                } else if let Some(suggestion) = almide_base::diagnostic::suggest(func, module_funcs.iter().copied()) {
+                    let full = format!("{}.{}", module, suggestion);
+                    (format!("Did you mean `{}`?", full), Some(full), None)
                 } else {
-                    // Unknown module — suggest across all candidates
-                    let candidates = self.env.all_visible_names();
-                    if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
-                        (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()), None)
-                    } else {
-                        ("Check the function name".to_string(), None, None)
-                    }
+                    (format!("No function '{}' in module '{}'. See docs/CHEATSHEET.md for available functions", func, module), None, None)
                 }
             } else {
+                // Unknown module — suggest across all candidates
                 let candidates = self.env.all_visible_names();
                 if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
                     (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()), None)
@@ -790,7 +494,22 @@ impl Checker {
                     ("Check the function name".to_string(), None, None)
                 }
             }
-        };
+        } else {
+            let candidates = self.env.all_visible_names();
+            if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
+                (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()), None)
+            } else {
+                ("Check the function name".to_string(), None, None)
+            }
+        }
+    }
+
+    // Undefined-function diagnostic path of `check_unresolved_named_call`:
+    // computes a rename/conversion hint, then emits E002 (unless suppressed
+    // by cascade-failure detection).
+    fn emit_unresolved_call_diagnostic(&mut self, name: &str) -> Ty {
+        // Triple: (hint, clean fn-name fix for simple try:, rich multi-line snippet). `rich_snippet` overrides `fix_name` when present — used for hallucinations that need a conversion wrapper or operator rewrite rather than a rename.
+        let (hint, fix_name, rich_snippet) = self.unresolved_call_hint(name);
         // Cascade suppression: if `name` belongs to a fn whose body failed to parse, the real error is already on top. Skip emitting E002 so the LLM focuses on the parse error, not N identical cascades.
         if self.env.failed_fn_names.contains(name) {
             return Ty::Unknown;
@@ -912,80 +631,118 @@ impl Checker {
         bindings: &mut HashMap<Sym, Ty>,
     ) -> bool {
         if let Ty::TypeVar(tv) = param_ty {
-            if let Some(bound) = structural_bounds.get(tv) {
-                let resolved = self.env.resolve_named(arg_ty);
-                if bound.compatible(&resolved) || bound.compatible(arg_ty) {
-                    bindings.insert(*tv, arg_ty.clone());
-                    return false;
-                } else {
-                    self.emit(super::err(
-                        format!("argument '{}' does not satisfy bound {}: got {}", param_name, bound.display(), arg_ty.display()),
-                        "The argument must have the required fields",
-                        format!("call to {}()", fn_name)));
-                    return true;
-                }
+            self.unify_call_arg_typevar(fn_name, param_name, *tv, arg_ty, structural_bounds, bindings)
+        } else {
+            self.unify_call_arg_concrete(fn_name, param_name, param_ty, arg_ty, bindings)
+        }
+    }
+
+    // TypeVar-param path of `unify_call_arg`: bind to a structural bound
+    // (checked compatible) when one is declared, else fall through to plain
+    // unification.
+    fn unify_call_arg_typevar(
+        &mut self, fn_name: &str, param_name: &Sym, tv: Sym, arg_ty: &Ty,
+        structural_bounds: &HashMap<Sym, Ty>,
+        bindings: &mut HashMap<Sym, Ty>,
+    ) -> bool {
+        if let Some(bound) = structural_bounds.get(&tv) {
+            let resolved = self.env.resolve_named(arg_ty);
+            if bound.compatible(&resolved) || bound.compatible(arg_ty) {
+                bindings.insert(tv, arg_ty.clone());
+                false
             } else {
-                crate::types::unify(param_ty, arg_ty, bindings);
-                return false;
+                self.emit(super::err(
+                    format!("argument '{}' does not satisfy bound {}: got {}", param_name, bound.display(), arg_ty.display()),
+                    "The argument must have the required fields",
+                    format!("call to {}()", fn_name)));
+                true
             }
         } else {
-            crate::types::unify(param_ty, arg_ty, bindings);
-            let expected = if bindings.is_empty() { param_ty.clone() } else { crate::types::substitute(param_ty, bindings) };
-            let expected_resolved = self.env.resolve_named(&expected);
-            let arg_resolved = self.env.resolve_named(arg_ty);
-            if types_mismatch(&expected_resolved, &arg_resolved) {
-                // #740: an Int-only math builtin given a Float — point at the Float-preserving sibling, not the truncating `float.to_int`.
-                let float_sibling = if matches!(arg_resolved, Ty::Float)
-                    && matches!(expected_resolved, Ty::Int)
-                {
-                    Self::math_float_sibling(fn_name)
-                } else {
-                    None
-                };
-                let hint = if let Some(sib) = float_sibling {
-                    format!(
-                        "`{}` is Int-only. For Floats use `{}(x)`, which preserves the Float — \
-                         not `float.to_int`, which truncates",
-                        fn_name, sib
-                    )
-                } else if let Ty::Named(name, args) = &expected {
-                    let n = name.as_str();
-                    let is_likely_typevar = args.is_empty()
-                        && !n.is_empty()
-                        && n.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
-                        && !self.env.types.contains_key(name)
-                        && !self.env.constructors.contains_key(name);
-                    if is_likely_typevar {
-                        format!("'{}' is not a known type. To use it as a type parameter, declare it: fn {}[{}](...)", n, fn_name, n)
-                    } else {
-                        Self::hint_with_conversion("Fix the argument type", &expected, arg_ty)
-                    }
-                } else {
-                    Self::hint_with_conversion("Fix the argument type", &expected, arg_ty)
-                };
-                let mut diag = super::err(
-                    format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
-                    hint,
-                    format!("call to {}()", fn_name)).with_code("E005");
-                if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(fn_name)) {
-                    diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
-                }
-                // Show fix code: replace argument with conversion expression. Suppressed for the math-Float-sibling case (#740): the fix is to change the function, not to wrap the arg in a truncating cast.
-                if float_sibling.is_none() {
-                    if let Some(span) = self.current_span {
-                        if let Some((_, template)) = Self::conversion_template(&expected, arg_ty) {
-                            if let Some(src) = self.source_slice(span) {
-                                let fixed = template.replace("{}", &src);
-                                diag = diag.with_try(format!("// Try:\n{}", fixed));
-                            }
-                        }
-                    }
-                }
-                self.emit(diag);
-                return true;
-            }
+            crate::types::unify(&Ty::TypeVar(tv), arg_ty, bindings);
             false
         }
+    }
+
+    // Concrete (non-TypeVar) param path of `unify_call_arg`: unify, then
+    // report a type-mismatch diagnostic with a fix-it hint when the resolved
+    // types differ.
+    fn unify_call_arg_concrete(
+        &mut self, fn_name: &str, param_name: &Sym, param_ty: &Ty, arg_ty: &Ty,
+        bindings: &mut HashMap<Sym, Ty>,
+    ) -> bool {
+        crate::types::unify(param_ty, arg_ty, bindings);
+        let expected = if bindings.is_empty() { param_ty.clone() } else { crate::types::substitute(param_ty, bindings) };
+        let expected_resolved = self.env.resolve_named(&expected);
+        let arg_resolved = self.env.resolve_named(arg_ty);
+        if !types_mismatch(&expected_resolved, &arg_resolved) {
+            return false;
+        }
+        self.emit_call_arg_mismatch(fn_name, param_name, &expected, arg_ty, &expected_resolved, &arg_resolved);
+        true
+    }
+
+    // Fix-it hint for `emit_call_arg_mismatch`: Float-sibling hint when
+    // `float_sibling` is set (an Int-only math builtin given a Float, #740),
+    // else a likely-typevar hint (an undeclared capitalized bare name), else
+    // a generic conversion hint.
+    fn call_arg_mismatch_hint(&self, fn_name: &str, expected: &Ty, arg_ty: &Ty, float_sibling: Option<&'static str>) -> String {
+        if let Some(sib) = float_sibling {
+            return format!(
+                "`{}` is Int-only. For Floats use `{}(x)`, which preserves the Float — \
+                 not `float.to_int`, which truncates",
+                fn_name, sib
+            );
+        }
+        if let Ty::Named(name, args) = expected {
+            let n = name.as_str();
+            let is_likely_typevar = args.is_empty()
+                && !n.is_empty()
+                && n.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
+                && !self.env.types.contains_key(name)
+                && !self.env.constructors.contains_key(name);
+            if is_likely_typevar {
+                return format!("'{}' is not a known type. To use it as a type parameter, declare it: fn {}[{}](...)", n, fn_name, n);
+            }
+        }
+        Self::hint_with_conversion("Fix the argument type", expected, arg_ty)
+    }
+
+    // Emits the E005 argument-type-mismatch diagnostic for
+    // `unify_call_arg_concrete`: derives a fix-it hint (Float-sibling /
+    // likely-typevar / generic conversion hint) and, where possible, a
+    // `// Try:` fix code snippet.
+    fn emit_call_arg_mismatch(
+        &mut self, fn_name: &str, param_name: &Sym, expected: &Ty, arg_ty: &Ty,
+        expected_resolved: &Ty, arg_resolved: &Ty,
+    ) {
+        // #740: an Int-only math builtin given a Float — point at the Float-preserving sibling, not the truncating `float.to_int`.
+        let float_sibling = if matches!(arg_resolved, Ty::Float)
+            && matches!(expected_resolved, Ty::Int)
+        {
+            Self::math_float_sibling(fn_name)
+        } else {
+            None
+        };
+        let hint = self.call_arg_mismatch_hint(fn_name, expected, arg_ty, float_sibling);
+        let mut diag = super::err(
+            format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
+            hint,
+            format!("call to {}()", fn_name)).with_code("E005");
+        if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(fn_name)) {
+            diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
+        }
+        // Show fix code: replace argument with conversion expression. Suppressed for the math-Float-sibling case (#740): the fix is to change the function, not to wrap the arg in a truncating cast.
+        if float_sibling.is_none() {
+            if let Some(span) = self.current_span {
+                if let Some((_, template)) = Self::conversion_template(expected, arg_ty) {
+                    if let Some(src) = self.source_slice(span) {
+                        let fixed = template.replace("{}", &src);
+                        diag = diag.with_try(format!("// Try:\n{}", fixed));
+                    }
+                }
+            }
+        }
+        self.emit(diag);
     }
     /// Substitute Ty::TypeVar("Self") with a concrete type in a protocol method return type.
     fn substitute_self_in_ty(&self, ty: &Ty, replacement: &Ty) -> Ty {
@@ -1002,3 +759,5 @@ fn is_clean_fn_name(s: &str) -> bool {
         && !s.starts_with('.')
         && !s.ends_with('.')
 }
+
+include!("calls_p2.rs");

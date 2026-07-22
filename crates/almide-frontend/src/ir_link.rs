@@ -87,7 +87,20 @@ pub fn ir_link_flatten(program: &mut IrProgram) {
 }
 
 /// Scan an expression tree for stdlib module references.
+///
+/// Router: dispatches to a group helper by expr kind. Each helper handles an
+/// independent subset of `IrExprKind` and returns whether it matched — `used`
+/// is a write-only accumulator (no arm ever reads back what an earlier arm
+/// wrote), so grouping is behavior-preserving. Mirrors the split used for
+/// `scan_expr` in `lower/mod_p2.rs`.
 fn scan_expr_stdlib(expr: &IrExpr, used: &mut HashSet<String>) {
+    if scan_expr_stdlib_calls(expr, used) { return; }
+    if scan_expr_stdlib_control(expr, used) { return; }
+    scan_expr_stdlib_containers(expr, used);
+}
+
+// Call-like nodes: the only arms that can add a module name to `used`.
+fn scan_expr_stdlib_calls(expr: &IrExpr, used: &mut HashSet<String>) -> bool {
     match &expr.kind {
         IrExprKind::Call { target, args, .. } => {
             if let CallTarget::Module { module, .. } = target {
@@ -97,6 +110,7 @@ fn scan_expr_stdlib(expr: &IrExpr, used: &mut HashSet<String>) {
                 scan_expr_stdlib(object, used);
             }
             for a in args { scan_expr_stdlib(a, used); }
+            true
         }
         IrExprKind::RuntimeCall { symbol, args } => {
             if let Some(rest) = symbol.as_str().strip_prefix("almide_rt_") {
@@ -105,15 +119,31 @@ fn scan_expr_stdlib(expr: &IrExpr, used: &mut HashSet<String>) {
                 }
             }
             for a in args { scan_expr_stdlib(a, used); }
+            true
         }
+        _ => false,
+    }
+}
+
+// Control-flow nodes: recurse into sub-blocks/statements/arms.
+fn scan_expr_stdlib_control(expr: &IrExpr, used: &mut HashSet<String>) -> bool {
+    if scan_expr_stdlib_block_like(expr, used) { return true; }
+    scan_expr_stdlib_loop_like(expr, used)
+}
+
+// Block/If/Match: nodes that carry statement lists or arms.
+fn scan_expr_stdlib_block_like(expr: &IrExpr, used: &mut HashSet<String>) -> bool {
+    match &expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts { scan_stmt_stdlib(s, used); }
             if let Some(e) = tail { scan_expr_stdlib(e, used); }
+            true
         }
         IrExprKind::If { cond, then, else_ } => {
             scan_expr_stdlib(cond, used);
             scan_expr_stdlib(then, used);
             scan_expr_stdlib(else_, used);
+            true
         }
         IrExprKind::Match { subject, arms } => {
             scan_expr_stdlib(subject, used);
@@ -121,37 +151,91 @@ fn scan_expr_stdlib(expr: &IrExpr, used: &mut HashSet<String>) {
                 if let Some(g) = &arm.guard { scan_expr_stdlib(g, used); }
                 scan_expr_stdlib(&arm.body, used);
             }
+            true
         }
-        IrExprKind::Lambda { body, .. } => scan_expr_stdlib(body, used),
+        _ => false,
+    }
+}
+
+// Lambda/ForIn/While: nodes with a body and (for loops) an iterable/cond.
+fn scan_expr_stdlib_loop_like(expr: &IrExpr, used: &mut HashSet<String>) -> bool {
+    match &expr.kind {
+        IrExprKind::Lambda { body, .. } => { scan_expr_stdlib(body, used); true }
         IrExprKind::ForIn { iterable, body, .. } => {
             scan_expr_stdlib(iterable, used);
             for s in body { scan_stmt_stdlib(s, used); }
+            true
         }
         IrExprKind::While { cond, body } => {
             scan_expr_stdlib(cond, used);
             for s in body { scan_stmt_stdlib(s, used); }
+            true
         }
-        IrExprKind::BinOp { left, right, .. } => {
-            scan_expr_stdlib(left, used);
-            scan_expr_stdlib(right, used);
-        }
-        IrExprKind::UnOp { operand, .. } => scan_expr_stdlib(operand, used),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { scan_expr_stdlib(e, used); }
-        }
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields { scan_expr_stdlib(v, used); }
-        }
+        _ => false,
+    }
+}
+
+// Plain container/wrapper nodes: straight recursive descent, no module names
+// to record here.
+fn scan_expr_stdlib_containers(expr: &IrExpr, used: &mut HashSet<String>) {
+    if scan_expr_stdlib_wrappers(expr, used) { return; }
+    scan_expr_stdlib_collections(expr, used);
+}
+
+// Single/dual-child wrapper nodes: UnOp, unwrap-like variants, UnwrapOr,
+// IndexAccess/Range — each recurses directly into its 1-2 sub-expressions.
+fn scan_expr_stdlib_wrappers(expr: &IrExpr, used: &mut HashSet<String>) -> bool {
+    match &expr.kind {
+        IrExprKind::UnOp { operand, .. } => { scan_expr_stdlib(operand, used); true }
         IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
         | IrExprKind::OptionSome { expr: e } | IrExprKind::Unwrap { expr: e }
         | IrExprKind::Try { expr: e } | IrExprKind::ToOption { expr: e }
         | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
-        | IrExprKind::Member { object: e, .. } => scan_expr_stdlib(e, used),
+        | IrExprKind::Member { object: e, .. } => { scan_expr_stdlib(e, used); true }
         IrExprKind::UnwrapOr { expr: e, fallback } => {
             scan_expr_stdlib(e, used);
             scan_expr_stdlib(fallback, used);
+            true
         }
+        IrExprKind::IndexAccess { object, index } | IrExprKind::Range { start: object, end: index, .. } => {
+            scan_expr_stdlib(object, used);
+            scan_expr_stdlib(index, used);
+            true
+        }
+        _ => false,
+    }
+}
+
+// Collection-literal nodes: recurse over a list/map of sub-expressions.
+fn scan_expr_stdlib_collections(expr: &IrExpr, used: &mut HashSet<String>) {
+    if scan_expr_stdlib_seq_literals(expr, used) { return; }
+    scan_expr_stdlib_keyed_literals(expr, used);
+}
+
+// BinOp/List/Tuple/Fan/Record: sequence-shaped literals and BinOp.
+fn scan_expr_stdlib_seq_literals(expr: &IrExpr, used: &mut HashSet<String>) -> bool {
+    match &expr.kind {
+        IrExprKind::BinOp { left, right, .. } => {
+            scan_expr_stdlib(left, used);
+            scan_expr_stdlib(right, used);
+            true
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
+        | IrExprKind::Fan { exprs: elements } => {
+            for e in elements { scan_expr_stdlib(e, used); }
+            true
+        }
+        IrExprKind::Record { fields, .. } => {
+            for (_, v) in fields { scan_expr_stdlib(v, used); }
+            true
+        }
+        _ => false,
+    }
+}
+
+// StringInterp/SpreadRecord/MapLiteral: keyed/mixed literal forms.
+fn scan_expr_stdlib_keyed_literals(expr: &IrExpr, used: &mut HashSet<String>) {
+    match &expr.kind {
         IrExprKind::StringInterp { parts } => {
             for p in parts {
                 if let IrStringPart::Expr { expr } = p { scan_expr_stdlib(expr, used); }
@@ -160,10 +244,6 @@ fn scan_expr_stdlib(expr: &IrExpr, used: &mut HashSet<String>) {
         IrExprKind::SpreadRecord { base, fields } => {
             scan_expr_stdlib(base, used);
             for (_, v) in fields { scan_expr_stdlib(v, used); }
-        }
-        IrExprKind::IndexAccess { object, index } | IrExprKind::Range { start: object, end: index, .. } => {
-            scan_expr_stdlib(object, used);
-            scan_expr_stdlib(index, used);
         }
         IrExprKind::MapLiteral { entries } => {
             for (k, v) in entries { scan_expr_stdlib(k, used); scan_expr_stdlib(v, used); }

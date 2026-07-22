@@ -4,7 +4,18 @@
 fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<String> {
     let mut used = std::collections::HashSet::new();
 
+    // Router: dispatches to a group helper by expr kind. Each helper handles
+    // an independent subset of `IrExprKind` and returns whether it matched —
+    // `used` is a write-only accumulator (no arm ever reads back what an
+    // earlier arm wrote), so grouping is behavior-preserving.
     fn scan_expr(expr: &IrExpr, used: &mut std::collections::HashSet<String>) {
+        if scan_expr_calls(expr, used) { return; }
+        if scan_expr_control(expr, used) { return; }
+        scan_expr_containers(expr, used);
+    }
+
+    // Call-like nodes: the only arms that can add a module name to `used`.
+    fn scan_expr_calls(expr: &IrExpr, used: &mut std::collections::HashSet<String>) -> bool {
         match &expr.kind {
             IrExprKind::Call { target, args, .. } => {
                 if let CallTarget::Module { module, .. } = target {
@@ -14,6 +25,7 @@ fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<Stri
                     scan_expr(object, used);
                 }
                 for a in args { scan_expr(a, used); }
+                true
             }
             IrExprKind::RuntimeCall { symbol, args } => {
                 // Extract module from runtime symbol: almide_rt_{module}_{fn}
@@ -23,13 +35,29 @@ fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<Stri
                     }
                 }
                 for a in args { scan_expr(a, used); }
+                true
             }
+            _ => false,
+        }
+    }
+
+    // Control-flow nodes: recurse into sub-blocks/statements/arms.
+    fn scan_expr_control(expr: &IrExpr, used: &mut std::collections::HashSet<String>) -> bool {
+        if scan_expr_block_like(expr, used) { return true; }
+        scan_expr_loop_like(expr, used)
+    }
+
+    // Block/If/Match: nodes that carry statement lists or arms.
+    fn scan_expr_block_like(expr: &IrExpr, used: &mut std::collections::HashSet<String>) -> bool {
+        match &expr.kind {
             IrExprKind::Block { stmts, expr: tail } => {
                 for s in stmts { scan_stmt(s, used); }
                 if let Some(e) = tail { scan_expr(e, used); }
+                true
             }
             IrExprKind::If { cond, then, else_ } => {
                 scan_expr(cond, used); scan_expr(then, used); scan_expr(else_, used);
+                true
             }
             IrExprKind::Match { subject, arms } => {
                 scan_expr(subject, used);
@@ -37,28 +65,76 @@ fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<Stri
                     if let Some(g) = &arm.guard { scan_expr(g, used); }
                     scan_expr(&arm.body, used);
                 }
+                true
             }
-            IrExprKind::Lambda { body, .. } => scan_expr(body, used),
+            _ => false,
+        }
+    }
+
+    // Lambda/ForIn/While: nodes with a body and (for loops) an iterable/cond.
+    fn scan_expr_loop_like(expr: &IrExpr, used: &mut std::collections::HashSet<String>) -> bool {
+        match &expr.kind {
+            IrExprKind::Lambda { body, .. } => { scan_expr(body, used); true }
             IrExprKind::ForIn { iterable, body, .. } => {
                 scan_expr(iterable, used);
                 for s in body { scan_stmt(s, used); }
+                true
             }
             IrExprKind::While { cond, body } => {
                 scan_expr(cond, used);
                 for s in body { scan_stmt(s, used); }
+                true
             }
-            IrExprKind::BinOp { left, right, .. } => { scan_expr(left, used); scan_expr(right, used); }
-            IrExprKind::UnOp { operand, .. } => scan_expr(operand, used),
-            IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
-                for e in elements { scan_expr(e, used); }
-            }
-            IrExprKind::Record { fields, .. } => { for (_, v) in fields { scan_expr(v, used); } }
+            _ => false,
+        }
+    }
+
+    // Plain container/wrapper nodes: straight recursive descent, no module
+    // names to record here.
+    fn scan_expr_containers(expr: &IrExpr, used: &mut std::collections::HashSet<String>) {
+        if scan_expr_wrappers(expr, used) { return; }
+        scan_expr_collections(expr, used);
+    }
+
+    // Single/dual-child wrapper nodes: unwrap-like variants, UnOp, IndexAccess,
+    // Range, UnwrapOr — each recurses directly into its 1-2 sub-expressions.
+    fn scan_expr_wrappers(expr: &IrExpr, used: &mut std::collections::HashSet<String>) -> bool {
+        match &expr.kind {
+            IrExprKind::UnOp { operand, .. } => { scan_expr(operand, used); true }
             IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
             | IrExprKind::OptionSome { expr: e } | IrExprKind::Unwrap { expr: e }
             | IrExprKind::Try { expr: e } | IrExprKind::ToOption { expr: e }
             | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
-            | IrExprKind::Member { object: e, .. } => scan_expr(e, used),
-            IrExprKind::UnwrapOr { expr: e, fallback } => { scan_expr(e, used); scan_expr(fallback, used); }
+            | IrExprKind::Member { object: e, .. } => { scan_expr(e, used); true }
+            IrExprKind::UnwrapOr { expr: e, fallback } => { scan_expr(e, used); scan_expr(fallback, used); true }
+            IrExprKind::IndexAccess { object, index } => { scan_expr(object, used); scan_expr(index, used); true }
+            IrExprKind::Range { start, end, .. } => { scan_expr(start, used); scan_expr(end, used); true }
+            _ => false,
+        }
+    }
+
+    // Collection-literal nodes: recurse over a list/map of sub-expressions.
+    fn scan_expr_collections(expr: &IrExpr, used: &mut std::collections::HashSet<String>) {
+        if scan_expr_seq_literals(expr, used) { return; }
+        scan_expr_keyed_literals(expr, used);
+    }
+
+    // BinOp/List/Tuple/Fan/Record: sequence-shaped literals and BinOp.
+    fn scan_expr_seq_literals(expr: &IrExpr, used: &mut std::collections::HashSet<String>) -> bool {
+        match &expr.kind {
+            IrExprKind::BinOp { left, right, .. } => { scan_expr(left, used); scan_expr(right, used); true }
+            IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
+                for e in elements { scan_expr(e, used); }
+                true
+            }
+            IrExprKind::Record { fields, .. } => { for (_, v) in fields { scan_expr(v, used); } true }
+            _ => false,
+        }
+    }
+
+    // StringInterp/SpreadRecord/MapLiteral: keyed/mixed literal forms.
+    fn scan_expr_keyed_literals(expr: &IrExpr, used: &mut std::collections::HashSet<String>) {
+        match &expr.kind {
             IrExprKind::StringInterp { parts } => {
                 for p in parts { if let IrStringPart::Expr { expr } = p { scan_expr(expr, used); } }
             }
@@ -66,11 +142,9 @@ fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<Stri
                 scan_expr(base, used);
                 for (_, v) in fields { scan_expr(v, used); }
             }
-            IrExprKind::IndexAccess { object, index } => { scan_expr(object, used); scan_expr(index, used); }
             IrExprKind::MapLiteral { entries } => {
                 for (k, v) in entries { scan_expr(k, used); scan_expr(v, used); }
             }
-            IrExprKind::Range { start, end, .. } => { scan_expr(start, used); scan_expr(end, used); }
             _ => {}
         }
     }
@@ -123,29 +197,72 @@ fn resolve_inference_typevars(program: &mut IrProgram) {
             _ => {}
         }
     }
+    // Router: dispatches to a group helper by expr kind after resolving the
+    // node's own `.ty`. Each helper handles an independent subset of
+    // `IrExprKind` and returns whether it matched — every arm only WRITES
+    // through its `&mut` sub-expressions (no arm reads back what an earlier
+    // arm wrote), so grouping is behavior-preserving.
     fn resolve_expr(expr: &mut IrExpr) {
         resolve_ty(&mut expr.ty);
+        if resolve_expr_calls(expr) { return; }
+        if resolve_expr_control(expr) { return; }
+        resolve_expr_containers(expr);
+    }
+
+    // Call/Lambda/BinOp: call-like and operator nodes.
+    fn resolve_expr_calls(expr: &mut IrExpr) -> bool {
         match &mut expr.kind {
-            IrExprKind::Call { args, .. } => { for a in args { resolve_expr(a); } }
+            IrExprKind::Call { args, .. } => { for a in args { resolve_expr(a); } true }
             IrExprKind::Lambda { body, params, .. } => {
                 for (_, ty) in params { resolve_ty(ty); }
                 resolve_expr(body);
+                true
             }
-            IrExprKind::BinOp { left, right, .. } => { resolve_expr(left); resolve_expr(right); }
+            IrExprKind::BinOp { left, right, .. } => { resolve_expr(left); resolve_expr(right); true }
+            _ => false,
+        }
+    }
+
+    // Match/If/Block/ForIn/While: nodes that carry statement lists or arms.
+    fn resolve_expr_control(expr: &mut IrExpr) -> bool {
+        match &mut expr.kind {
             IrExprKind::Match { subject, arms, .. } => {
                 resolve_expr(subject);
                 for arm in arms { resolve_expr(&mut arm.body); }
+                true
             }
             IrExprKind::If { cond, then, else_, .. } => {
                 resolve_expr(cond); resolve_expr(then); resolve_expr(else_);
+                true
             }
             IrExprKind::Block { stmts, expr, .. } => {
                 for s in stmts { resolve_stmt(s); }
                 if let Some(e) = expr { resolve_expr(e); }
+                true
             }
-            IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
-                for e in elements { resolve_expr(e); }
+            IrExprKind::ForIn { iterable, body, .. } => {
+                resolve_expr(iterable);
+                for s in body { resolve_stmt(s); }
+                true
             }
+            IrExprKind::While { cond, body } => {
+                resolve_expr(cond);
+                for s in body { resolve_stmt(s); }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    // Plain container/wrapper nodes: straight recursive descent.
+    fn resolve_expr_containers(expr: &mut IrExpr) {
+        if resolve_expr_wrappers(expr) { return; }
+        resolve_expr_collections(expr);
+    }
+
+    // Single-child unwrap-like variants and Member/OptionalChain.
+    fn resolve_expr_wrappers(expr: &mut IrExpr) -> bool {
+        match &mut expr.kind {
             IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
             | IrExprKind::OptionSome { expr: e } | IrExprKind::Unwrap { expr: e }
             | IrExprKind::Try { expr: e } | IrExprKind::ToOption { expr: e }
@@ -153,18 +270,22 @@ fn resolve_inference_typevars(program: &mut IrProgram) {
             | IrExprKind::ToVec { expr: e } | IrExprKind::UnOp { operand: e, .. }
             | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e } => {
                 resolve_expr(e);
+                true
+            }
+            IrExprKind::Member { object, .. } | IrExprKind::OptionalChain { expr: object, .. } => { resolve_expr(object); true }
+            _ => false,
+        }
+    }
+
+    // List/Tuple/Fan/UnwrapOr/Record/IndexAccess/Range/StringInterp:
+    // multi-child collection-literal and dual-child nodes.
+    fn resolve_expr_collections(expr: &mut IrExpr) {
+        match &mut expr.kind {
+            IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
+                for e in elements { resolve_expr(e); }
             }
             IrExprKind::UnwrapOr { expr: e, fallback } => { resolve_expr(e); resolve_expr(fallback); }
             IrExprKind::Record { fields, .. } => { for (_, v) in fields { resolve_expr(v); } }
-            IrExprKind::ForIn { iterable, body, .. } => {
-                resolve_expr(iterable);
-                for s in body { resolve_stmt(s); }
-            }
-            IrExprKind::While { cond, body } => {
-                resolve_expr(cond);
-                for s in body { resolve_stmt(s); }
-            }
-            IrExprKind::Member { object, .. } | IrExprKind::OptionalChain { expr: object, .. } => resolve_expr(object),
             IrExprKind::IndexAccess { object, index } | IrExprKind::Range { start: object, end: index, .. } => {
                 resolve_expr(object); resolve_expr(index);
             }
@@ -264,6 +385,45 @@ fn lower_fn(
     // Set up protocol bounds and const params for this function's generics
     let saved_pb = std::mem::take(&mut ctx.protocol_bounds);
     let saved_cp = std::mem::take(&mut ctx.const_param_vars);
+    register_generic_protocol_bounds(ctx, generics);
+
+    let mut ir_params = lower_const_param_ir_params(ctx, generics, span);
+    ir_params.extend(lower_fn_value_params(ctx, name, params, module_prefix, span));
+
+    let ret_ty = resolve_fn_ret_ty(ctx, name, module_prefix, body);
+
+    let ir_body = lower_expr(ctx, body);
+    ctx.protocol_bounds = saved_pb;
+    ctx.const_param_vars = saved_cp;
+    ctx.pop_scope();
+
+    let is_effect = effect.unwrap_or(false);
+    let is_async = r#async.unwrap_or(false);
+    let vis = match visibility {
+        ast::Visibility::Public => IrVisibility::Public,
+        ast::Visibility::Mod => IrVisibility::Mod,
+        ast::Visibility::Local => IrVisibility::Private,
+    };
+
+    let stripped_generics = strip_const_param_generics(generics);
+    let mutated_params = resolve_mutated_params(params, attrs);
+
+    IrFunction {
+        name: sym(name), params: ir_params, ret_ty, body: ir_body,
+        is_effect, is_async, is_test: false,
+        generics: stripped_generics, extern_attrs: extern_attrs.to_vec(),
+        export_attrs: export_attrs.to_vec(),
+        attrs: attrs.to_vec(),
+        visibility: vis,
+        doc: None, blank_lines_before: 0,
+        def_id: ctx.def_map.get(&sym(name)).copied(),
+        mutated_params, module_origin: None,
+    }
+}
+
+// Set up protocol bounds for this function's generics (non-const-param
+// bounds only — const params are handled separately below).
+fn register_generic_protocol_bounds(ctx: &mut LowerCtx, generics: &Option<Vec<ast::GenericParam>>) {
     if let Some(gs) = generics {
         for g in gs {
             if let Some(bounds) = &g.bounds {
@@ -278,10 +438,12 @@ fn lower_fn(
             }
         }
     }
+}
 
+// Const generic params (a single scalar-type bound, e.g. `[N: Int]`) become
+// implicit leading IrParams instead of type parameters.
+fn lower_const_param_ir_params(ctx: &mut LowerCtx, generics: &Option<Vec<ast::GenericParam>>, span: &Option<ast::Span>) -> Vec<IrParam> {
     let mut ir_params = Vec::new();
-
-    // Add const params as implicit leading parameters
     if let Some(gs) = generics {
         for g in gs {
             if let Some(bounds) = &g.bounds {
@@ -300,13 +462,17 @@ fn lower_fn(
             }
         }
     }
+    ir_params
+}
 
-    // A bare `self` first param is sugar for `self: Self` (see registration.rs
-    // and check/mod.rs's matching fixes). `Self` only stays an unresolved
-    // placeholder inside a `protocol { ... }` declaration; on a real
-    // convention method it must lower to the enclosing type, or codegen
-    // emits the literal (nonexistent) Rust type `Self`.
+// A bare `self` first param is sugar for `self: Self` (see registration.rs
+// and check/mod.rs's matching fixes). `Self` only stays an unresolved
+// placeholder inside a `protocol { ... }` declaration; on a real
+// convention method it must lower to the enclosing type, or codegen
+// emits the literal (nonexistent) Rust type `Self`.
+fn lower_fn_value_params(ctx: &mut LowerCtx, name: &str, params: &[ast::Param], module_prefix: Option<&str>, span: &Option<ast::Span>) -> Vec<IrParam> {
     let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
+    let mut ir_params = Vec::new();
     for (i, p) in params.iter().enumerate() {
         let ty = if i == 0 && p.name.as_str() == "self"
             && matches!(&p.ty, ast::TypeExpr::Simple { name: tn } if tn.as_str() == "Self")
@@ -324,46 +490,39 @@ fn lower_fn(
             attrs: p.attrs.clone(),
         });
     }
+    ir_params
+}
 
-    let ret_ty = {
-        // For module functions, look up the module-prefixed name first (e.g., "option.unwrap_or")
-        // to avoid picking up a user function with the same bare name.
-        let prefixed = module_prefix.map(|p| format!("{}.{}", p, name));
-        let sig = prefixed.as_ref()
-            .and_then(|pn| ctx.env.functions.get(&sym(pn)))
-            .or_else(|| ctx.env.functions.get(&sym(name)));
-        if let Some(sig) = sig {
-            sig.ret.clone()
-        } else {
-            ctx.expr_ty(body)
-        }
-    };
+// For module functions, look up the module-prefixed name first (e.g.,
+// "option.unwrap_or") to avoid picking up a user function with the same
+// bare name.
+fn resolve_fn_ret_ty(ctx: &LowerCtx, name: &str, module_prefix: Option<&str>, body: &ast::Expr) -> Ty {
+    let prefixed = module_prefix.map(|p| format!("{}.{}", p, name));
+    let sig = prefixed.as_ref()
+        .and_then(|pn| ctx.env.functions.get(&sym(pn)))
+        .or_else(|| ctx.env.functions.get(&sym(name)));
+    if let Some(sig) = sig {
+        sig.ret.clone()
+    } else {
+        ctx.expr_ty(body)
+    }
+}
 
-    let ir_body = lower_expr(ctx, body);
-    ctx.protocol_bounds = saved_pb;
-    ctx.const_param_vars = saved_cp;
-    ctx.pop_scope();
-
-    let is_effect = effect.unwrap_or(false);
-    let is_async = r#async.unwrap_or(false);
-    let vis = match visibility {
-        ast::Visibility::Public => IrVisibility::Public,
-        ast::Visibility::Mod => IrVisibility::Mod,
-        ast::Visibility::Local => IrVisibility::Private,
-    };
-
-    // Strip const params from generics (they became runtime params above).
-    // If only const params remain, generics becomes None (non-generic function).
-    let stripped_generics = generics.as_ref().map(|gs| {
+// Strip const params from generics (they became runtime params above).
+// If only const params remain, generics becomes None (non-generic function).
+fn strip_const_param_generics(generics: &Option<Vec<ast::GenericParam>>) -> Option<Vec<ast::GenericParam>> {
+    generics.as_ref().map(|gs| {
         let remaining: Vec<_> = gs.iter().filter(|g| {
             !g.bounds.as_ref().map_or(false, |bs| {
                 bs.len() == 1 && crate::canonicalize::registration::SCALAR_TYPE_NAMES.contains(&bs[0].as_str())
             })
         }).cloned().collect();
         if remaining.is_empty() { None } else { Some(remaining) }
-    }).flatten();
+    }).flatten()
+}
 
-    // Resolve mut params: from `mut` keyword and @mutating(param_name) annotation
+// Resolve mut params: from `mut` keyword and @mutating(param_name) annotation
+fn resolve_mutated_params(params: &[ast::Param], attrs: &[ast::Attribute]) -> Vec<usize> {
     let mut mutated_params: Vec<usize> = params.iter().enumerate()
         .filter(|(_, p)| p.is_mut)
         .map(|(i, _)| i)
@@ -380,16 +539,5 @@ fn lower_fn(
             }
         }
     }
-
-    IrFunction {
-        name: sym(name), params: ir_params, ret_ty, body: ir_body,
-        is_effect, is_async, is_test: false,
-        generics: stripped_generics, extern_attrs: extern_attrs.to_vec(),
-        export_attrs: export_attrs.to_vec(),
-        attrs: attrs.to_vec(),
-        visibility: vis,
-        doc: None, blank_lines_before: 0,
-        def_id: ctx.def_map.get(&sym(name)).copied(),
-        mutated_params, module_origin: None,
-    }
+    mutated_params
 }
