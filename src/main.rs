@@ -439,45 +439,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
 
         // Lower user modules
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-            if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
-            // For dependency modules, temporarily set self_module_name to the package root
-            // so `import self` in sub-modules resolves to the dependency, not the main project
-            let saved_self = checker.env.self_module_name;
-            if let Some(pid) = pkg_id.as_ref() {
-                checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
-            }
-            checker.infer_module(mod_prog, name);
-            let versioned = pkg_id.as_ref().map(|pid| {
-                let base = pid.mod_name();
-                if let Some(suffix) = name.strip_prefix(&pid.name) {
-                    format!("{}{}", base, suffix)
-                } else {
-                    base
-                }
-            });
-            if let Some(ref v) = versioned {
-                checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
-            }
-            // Set module's import table for lowering, then restore
-            let self_name = checker.env.self_module_name.map(|s| s.to_string());
-            let import_table_name = self_name.as_deref().unwrap_or(name);
-            let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
-            let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
-            // Stdlib Declarative Unification arc complete: stdlib/defs/ is
-            // gone, every stdlib fn lives in `stdlib/<m>.almd`. Fns with
-            // `@inline_rust` / `@wasm_intrinsic` carry no real body (the
-            // Rust walker / WASM emitter skip them), but their attributes
-            // are consumed by `StdlibLoweringPass` to rewrite call sites
-            // into `IrExprKind::InlineRust`. Fns without those attrs
-            // (e.g. helpers like `split_at`) emit normally. No prune.
-            let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
-            checker.env.import_table = saved_table;
-            checker.env.self_module_name = saved_self;
-            module_irs.insert(name.clone(), mod_ir_program);
-            if let Some(ref mut ir) = ir_program {
-                ir.modules.push(mod_ir_module);
-            }
+            lower_one_user_module(&mut checker, name, mod_prog, pkg_id, &mut module_irs, &mut ir_program);
         }
     }
 
@@ -525,6 +487,59 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         codegen::CodegenOutput::Binary(_) => unreachable!(),
     };
     Ok((code, ir_program))
+}
+
+/// Type-check and lower a single user (non-stdlib) module discovered by
+/// import resolution, appending its IR onto `ir_program` and `module_irs`.
+/// Extracted from `try_compile_with_ir`'s per-module loop body — same
+/// checker/env mutation order, `continue` becomes an early `return`.
+fn lower_one_user_module(
+    checker: &mut check::Checker,
+    name: &mut String,
+    mod_prog: &mut ast::Program,
+    pkg_id: &mut Option<project::PkgId>,
+    module_irs: &mut std::collections::HashMap<String, almide::ir::IrProgram>,
+    ir_program: &mut Option<almide::ir::IrProgram>,
+) {
+    if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { return; }
+    // For dependency modules, temporarily set self_module_name to the package root
+    // so `import self` in sub-modules resolves to the dependency, not the main project
+    let saved_self = checker.env.self_module_name;
+    if let Some(pid) = pkg_id.as_ref() {
+        checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
+    }
+    checker.infer_module(mod_prog, name);
+    let versioned = pkg_id.as_ref().map(|pid| {
+        let base = pid.mod_name();
+        if let Some(suffix) = name.strip_prefix(&pid.name) {
+            format!("{}{}", base, suffix)
+        } else {
+            base
+        }
+    });
+    if let Some(ref v) = versioned {
+        checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
+    }
+    // Set module's import table for lowering, then restore
+    let self_name = checker.env.self_module_name.map(|s| s.to_string());
+    let import_table_name = self_name.as_deref().unwrap_or(name);
+    let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
+    let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
+    let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+    // Stdlib Declarative Unification arc complete: stdlib/defs/ is
+    // gone, every stdlib fn lives in `stdlib/<m>.almd`. Fns with
+    // `@inline_rust` / `@wasm_intrinsic` carry no real body (the
+    // Rust walker / WASM emitter skip them), but their attributes
+    // are consumed by `StdlibLoweringPass` to rewrite call sites
+    // into `IrExprKind::InlineRust`. Fns without those attrs
+    // (e.g. helpers like `split_at`) emit normally. No prune.
+    let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
+    checker.env.import_table = saved_table;
+    checker.env.self_module_name = saved_self;
+    module_irs.insert(name.clone(), mod_ir_program);
+    if let Some(ir) = ir_program {
+        ir.modules.push(mod_ir_module);
+    }
 }
 
 fn compile_with_ir(file: &str, no_check: bool) -> (String, Option<almide::ir::IrProgram>) {
