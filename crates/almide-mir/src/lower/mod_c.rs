@@ -661,6 +661,7 @@ include!("mod_p3_c.rs");
 include!("mod_p4.rs");
 include!("mod_p4_b.rs");
 include!("mod_p4_c.rs");
+include!("mod_p4_f.rs");
 include!("mod_p4_d.rs");
 include!("mod_p4_e.rs");
 include!("mod_p5.rs");
