@@ -5,6 +5,79 @@
 /// clean render wall, never a wrong-typed link (the random/fan `_x` discipline).
 /// The mapped-list ELEMENT (collect_map's `xs`) is unconstrained: its slot is
 /// forwarded to the closure untouched (borrowed, any repr).
+/// Extracted from `result_call_name` (codopsy7 complexity sweep, pattern-2 uniform-arm
+/// split): the VALUE combinators over a HEAP-Ok Result — same cap-as-tag misread as
+/// is_ok/is_err, but the scalar impls also REBUILT the wrong layout: every `ok(x)` took the
+/// Err path and the result printed as a swapped/zeroed value (the fuzz C-904 silent `ok("")`
+/// class; unwrap_or_else even emitted invalid wasm — an i64-result CallFn bound to an i32
+/// String local). The exact `Result[String, String]` instantiation routes to the `_h` twins
+/// (result_map.almd); any other heap-Ok instantiation routes to the UNLINKED `_x` — a
+/// deterministic render wall, never a wrong-typed link. `unwrap_or` needs no arm
+/// (unwrap_or_call_name already keys on the repr), and the display/eq families are chosen by
+/// type at the call site. Verbatim (only re-narrowed via `use .. as TC` already in scope).
+fn result_call_name_heap_ok_input(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    // `flatten`'s BASE impl already reads the heap-Ok OUTER (tag@16) and the
+    // len-as-tag scalar INNER — `Result[Result[scalar, String], String]` is
+    // its exact shape (option_result_symmetry); only other inners wall.
+    if func == "flatten" {
+        let base_ok = matches!(arg_tys.first(), Some(Ty::Applied(TC::Result, a))
+            if matches!(&a[0], Ty::Applied(TC::Result, i)
+                if i.len() == 2 && !is_heap_ty(&i[0]) && matches!(i[1], Ty::String))
+                && matches!(a[1], Ty::String));
+        return Some(if base_ok {
+            "result.flatten".to_string()
+        } else {
+            "result.flatten_x".to_string()
+        });
+    }
+    let ss_in = matches!(arg_tys.first(), Some(Ty::Applied(TC::Result, a))
+        if matches!(a[0], Ty::String) && matches!(a[1], Ty::String));
+    let ss_res = matches!(result_ty, Ty::Applied(TC::Result, a)
+        if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String));
+    let has_h = match func {
+        "map" | "map_err" | "flat_map" => ss_in && ss_res,
+        // The `_h` twin is payload-type-INDEPENDENT (one handle slot per side:
+        // the Ok returns with the share discipline, the Err borrows into f, the
+        // closure ABI is (i32) -> i32 for any heap in/out), so ANY heap-Ok /
+        // heap-Err instantiation admits — `Result[List[Float], List[String]]`
+        // (uoe_heap_ok_share via result.collect) rides the String routine. A
+        // SCALAR Err stays walled: its slot holds an i64 value, not a handle,
+        // and the twin's load_handle would misread it.
+        "unwrap_or_else" => {
+            matches!(arg_tys.first(), Some(Ty::Applied(TC::Result, a))
+                if a.len() == 2 && is_heap_ty(&a[1]))
+                && is_heap_ty(result_ty)
+        }
+        // `to_option`'s `_h` twin is payload-type-INDEPENDENT (Ok → the
+        // shared handle into some(), Err → none — no Err read at all), so
+        // ANY heap-Ok instantiation admits (`result.to_option(v3)` over
+        // `Result[Option[Float], String]` — C-149).
+        "to_option" => true,
+        "to_err_option" => ss_in,
+        _ => false,
+    };
+    Some(if has_h { format!("result.{func}_h") } else { format!("result.{func}_x") })
+}
+
+/// Extracted from `result_call_name` (codopsy7 complexity sweep, pattern-2 uniform-arm
+/// split): the same combinators with a SCALAR-Ok INPUT but a HEAP-Ok RESULT
+/// (`result.map(r, (v) => some(v))` — `Result[Int, String]` → `Result[Option[Int], String]`,
+/// fuzz seed-20260718 index 647): the scalar impl's i64-result closure table type mismatches
+/// the heap-result closure AND its len-as-tag rebuild is the wrong OUTPUT layout. `map`
+/// routes to the `_s2h` twin (C-151 — Value-erased heap payload, cap-as-tag build);
+/// map_err/flat_map keep the UNLINKED `_x`. (Reached only when the input arm above did not
+/// match.) Verbatim.
+fn result_call_name_scalar_in_heap_out(func: &str, result_ty: &Ty) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    let err_is_string = matches!(result_ty, Ty::Applied(TC::Result, a)
+        if a.len() == 2 && matches!(a[1], Ty::String));
+    if func == "map" && err_is_string {
+        return Some("result.map_s2h".to_string());
+    }
+    Some(format!("result.{func}_x"))
+}
+
 fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId as TC;
     match func {
@@ -31,47 +104,7 @@ fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
             if matches!(arg_tys.first(), Some(Ty::Applied(TC::Result, a))
                 if a.len() == 2 && is_heap_ty(&a[0])) =>
         {
-            // `flatten`'s BASE impl already reads the heap-Ok OUTER (tag@16) and the
-            // len-as-tag scalar INNER — `Result[Result[scalar, String], String]` is
-            // its exact shape (option_result_symmetry); only other inners wall.
-            if func == "flatten" {
-                let base_ok = matches!(arg_tys.first(), Some(Ty::Applied(TC::Result, a))
-                    if matches!(&a[0], Ty::Applied(TC::Result, i)
-                        if i.len() == 2 && !is_heap_ty(&i[0]) && matches!(i[1], Ty::String))
-                        && matches!(a[1], Ty::String));
-                return Some(if base_ok {
-                    "result.flatten".to_string()
-                } else {
-                    "result.flatten_x".to_string()
-                });
-            }
-            let ss_in = matches!(arg_tys.first(), Some(Ty::Applied(TC::Result, a))
-                if matches!(a[0], Ty::String) && matches!(a[1], Ty::String));
-            let ss_res = matches!(result_ty, Ty::Applied(TC::Result, a)
-                if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String));
-            let has_h = match func {
-                "map" | "map_err" | "flat_map" => ss_in && ss_res,
-                // The `_h` twin is payload-type-INDEPENDENT (one handle slot per side:
-                // the Ok returns with the share discipline, the Err borrows into f, the
-                // closure ABI is (i32) -> i32 for any heap in/out), so ANY heap-Ok /
-                // heap-Err instantiation admits — `Result[List[Float], List[String]]`
-                // (uoe_heap_ok_share via result.collect) rides the String routine. A
-                // SCALAR Err stays walled: its slot holds an i64 value, not a handle,
-                // and the twin's load_handle would misread it.
-                "unwrap_or_else" => {
-                    matches!(arg_tys.first(), Some(Ty::Applied(TC::Result, a))
-                        if a.len() == 2 && is_heap_ty(&a[1]))
-                        && is_heap_ty(result_ty)
-                }
-                // `to_option`'s `_h` twin is payload-type-INDEPENDENT (Ok → the
-                // shared handle into some(), Err → none — no Err read at all), so
-                // ANY heap-Ok instantiation admits (`result.to_option(v3)` over
-                // `Result[Option[Float], String]` — C-149).
-                "to_option" => true,
-                "to_err_option" => ss_in,
-                _ => false,
-            };
-            Some(if has_h { format!("result.{func}_h") } else { format!("result.{func}_x") })
+            result_call_name_heap_ok_input(func, arg_tys, result_ty)
         }
         // The same combinators with a SCALAR-Ok INPUT but a HEAP-Ok RESULT
         // (`result.map(r, (v) => some(v))` — `Result[Int, String]` →
@@ -85,12 +118,7 @@ fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
             if matches!(result_ty, Ty::Applied(TC::Result, a)
                 if a.len() == 2 && is_heap_ty(&a[0])) =>
         {
-            let err_is_string = matches!(result_ty, Ty::Applied(TC::Result, a)
-                if a.len() == 2 && matches!(a[1], Ty::String));
-            if func == "map" && err_is_string {
-                return Some("result.map_s2h".to_string());
-            }
-            Some(format!("result.{func}_x"))
+            result_call_name_scalar_in_heap_out(func, result_ty)
         }
         // partition: List[Result[scalar, String]] → (List[scalar], List[String])
         "partition" => {
@@ -250,104 +278,117 @@ fn heap_fold_call_name(module: &str, arg_tys: &[Ty], result_ty: &Ty) -> String {
 /// Repr-poly `result.unwrap_or` / `option.unwrap_or` routing (see the block
 /// comment). Caller guarantees `func == "unwrap_or"`.
 fn unwrap_or_call_name(module: &str, arg_tys: &[Ty]) -> Option<String> {
-    use almide_lang::types::constructor::TypeConstructorId;
-    // `option.unwrap_or(o, d)` over an `Option[String]` (the pipe/UFCS form
-    // `list.get(xs, i) |> option.unwrap_or("")`, NOT the `??` operator that
-    // `try_lower_option_unwrap_or` desugars) must route to `option.unwrap_or_str`: the
-    // generic `option.unwrap_or` takes its default as an i64 SCALAR (`Option[Int]`), so a
-    // String fallback (an i32 handle) and a String result repr-mismatch it — invalid wasm
-    // (`expected i64, found i32` in the call + the i64 result). `option.unwrap_or_str`
-    // (param i32 i32) (result i32) is the rc-correct String variant (deep-copies the kept
-    // payload so result + source can both drop). Keyed on the Option payload being String.
-    // The same repr-poly routing for `result.unwrap_or` (the pipe/direct form —
-    // `result.unwrap_or(json.parse(s), json.null())`, json_gltf_walk): the generic
-    // impl takes an i64 scalar default; a heap Ok/default needs the rc-correct
-    // self-hosts registered for the `??` desugar.
+    // Pattern-1 name-router (codopsy7 complexity sweep): the `result`/`option` branches are
+    // mutually exclusive (keyed on `module`) and independent — a pure text-move split, called
+    // in the SAME order via early return. No logic change.
     if module == "result" {
-        if let Some(Ty::Applied(TypeConstructorId::Result, a)) = arg_tys.first() {
-            if a.len() == 2 && is_value_ty(&a[0]) {
-                return Some("result.value_unwrap_or".to_string());
-            }
-            if a.len() == 2
-                && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
-                    if e.len() == 1 && is_value_ty(&e[0]))
-            {
-                return Some("result.list_value_unwrap_or".to_string());
-            }
-            if a.len() == 2 && matches!(a[0], Ty::String) {
-                return Some("result.str_unwrap_or".to_string());
-            }
-            // A FLAT scalar block payload — a scalar TUPLE (`result.zip`'s `(Int, Int)`),
-            // a List[<scalar>], Bytes, or an `Option[<scalar>]` (the C-149
-            // nested-share chain — len-as-tag + one scalar slot, flat rc_dec):
-            // the rc-correct flat variant over the cap-as-tag layout (tag @16).
-            if a.len() == 2
-                && (matches!(&a[0], Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|t| !is_heap_ty(t)))
-                    || matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
-                        if e.len() == 1 && !is_heap_ty(&e[0]))
-                    || matches!(&a[0], Ty::Applied(TypeConstructorId::Option, e)
-                        if e.len() == 1 && !is_heap_ty(&e[0]))
-                    || matches!(a[0], Ty::Bytes))
-            {
-                return Some("result.flat_unwrap_or".to_string());
-            }
-            // Any OTHER heap Ok payload has no registered rc-correct variant: the
-            // generic impl takes an i64 SCALAR default, so a handle payload/default
-            // repr-mismatches (invalid wasm). Route to an unregistered `_x` name —
-            // the caller WALLS honestly.
-            if a.len() == 2 && is_heap_ty(&a[0]) {
-                return Some("result.unwrap_or_hx".to_string());
-            }
-        }
+        return unwrap_or_call_name_result(arg_tys);
     }
     if module == "option" {
-        if let Some(Ty::Applied(TypeConstructorId::Option, a)) = arg_tys.first() {
-            if a.len() == 1 && matches!(a[0], Ty::String) {
-                return Some("option.unwrap_or_str".to_string());
-            }
-            // The remaining heap payloads route to their rc-correct self-hosts
-            // (already registered for the `??` desugar): Value / List[Value] /
-            // List[String]. The generic unwrap_or takes an i64 scalar default,
-            // so a handle default (`json.get_array(v,k) |> option.unwrap_or([])`,
-            // json_gltf_walk's count_floats) repr-mismatched — invalid wasm.
-            if a.len() == 1 && is_value_ty(&a[0]) {
-                return Some("option.value_unwrap_or".to_string());
-            }
-            if a.len() == 1
-                && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
-                    if e.len() == 1 && is_value_ty(&e[0]))
-            {
-                return Some("option.listvalue_unwrap_or".to_string());
-            }
-            if a.len() == 1
-                && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
-                    if e.len() == 1 && matches!(e[0], Ty::String))
-            {
-                return Some("option.liststr_unwrap_or".to_string());
-            }
-            // A FLAT scalar-element list payload (`map.get(groups, "0") ?? []` —
-            // Option[List[Int]], the group_by class): the rc-correct flat variant.
-            // A scalar TUPLE or Bytes payload is the SAME flat block shape (uniform
-            // slots / raw bytes @12, flat rc_dec drop) — bytes.chunks' element class.
-            if a.len() == 1
-                && (matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
-                        if e.len() == 1 && !is_heap_ty(&e[0]))
-                    || matches!(&a[0], Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|t| !is_heap_ty(t)))
-                    // A NESTED `Option[<scalar>]` payload (`option.unwrap_or(
-                    // result.to_option(v3), none)` — C-149) is the SAME flat block
-                    // (len-as-tag + one scalar slot, flat rc_dec).
-                    || matches!(&a[0], Ty::Applied(TypeConstructorId::Option, e)
-                        if e.len() == 1 && !is_heap_ty(&e[0]))
-                    || matches!(a[0], Ty::Bytes))
-            {
-                return Some("option.listint_unwrap_or".to_string());
-            }
-            // Any OTHER heap payload: no registered rc-correct variant — wall honestly
-            // (the generic impl's i64 scalar default repr-mismatches a handle).
-            if a.len() == 1 && is_heap_ty(&a[0]) {
-                return Some("option.unwrap_or_hx".to_string());
-            }
-        }
+        return unwrap_or_call_name_option(arg_tys);
+    }
+    None
+}
+
+/// Extracted from `unwrap_or_call_name` (codopsy7 complexity sweep): the same repr-poly
+/// routing for `result.unwrap_or` (the pipe/direct form — `result.unwrap_or(json.parse(s),
+/// json.null())`, json_gltf_walk): the generic impl takes an i64 scalar default; a heap
+/// Ok/default needs the rc-correct self-hosts registered for the `??` desugar. Verbatim.
+fn unwrap_or_call_name_result(arg_tys: &[Ty]) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let Some(Ty::Applied(TypeConstructorId::Result, a)) = arg_tys.first() else { return None };
+    if a.len() == 2 && is_value_ty(&a[0]) {
+        return Some("result.value_unwrap_or".to_string());
+    }
+    if a.len() == 2
+        && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+            if e.len() == 1 && is_value_ty(&e[0]))
+    {
+        return Some("result.list_value_unwrap_or".to_string());
+    }
+    if a.len() == 2 && matches!(a[0], Ty::String) {
+        return Some("result.str_unwrap_or".to_string());
+    }
+    // A FLAT scalar block payload — a scalar TUPLE (`result.zip`'s `(Int, Int)`),
+    // a List[<scalar>], Bytes, or an `Option[<scalar>]` (the C-149
+    // nested-share chain — len-as-tag + one scalar slot, flat rc_dec):
+    // the rc-correct flat variant over the cap-as-tag layout (tag @16).
+    if a.len() == 2
+        && (matches!(&a[0], Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|t| !is_heap_ty(t)))
+            || matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+                if e.len() == 1 && !is_heap_ty(&e[0]))
+            || matches!(&a[0], Ty::Applied(TypeConstructorId::Option, e)
+                if e.len() == 1 && !is_heap_ty(&e[0]))
+            || matches!(a[0], Ty::Bytes))
+    {
+        return Some("result.flat_unwrap_or".to_string());
+    }
+    // Any OTHER heap Ok payload has no registered rc-correct variant: the
+    // generic impl takes an i64 SCALAR default, so a handle payload/default
+    // repr-mismatches (invalid wasm). Route to an unregistered `_x` name —
+    // the caller WALLS honestly.
+    if a.len() == 2 && is_heap_ty(&a[0]) {
+        return Some("result.unwrap_or_hx".to_string());
+    }
+    None
+}
+
+/// Extracted from `unwrap_or_call_name` (codopsy7 complexity sweep): `option.unwrap_or(o, d)`
+/// over an `Option[String]` (the pipe/UFCS form `list.get(xs, i) |> option.unwrap_or("")`,
+/// NOT the `??` operator that `try_lower_option_unwrap_or` desugars) must route to
+/// `option.unwrap_or_str`: the generic `option.unwrap_or` takes its default as an i64 SCALAR
+/// (`Option[Int]`), so a String fallback (an i32 handle) and a String result repr-mismatch it
+/// — invalid wasm (`expected i64, found i32` in the call + the i64 result).
+/// `option.unwrap_or_str` (param i32 i32) (result i32) is the rc-correct String variant
+/// (deep-copies the kept payload so result + source can both drop). Keyed on the Option
+/// payload being String. Verbatim.
+fn unwrap_or_call_name_option(arg_tys: &[Ty]) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let Some(Ty::Applied(TypeConstructorId::Option, a)) = arg_tys.first() else { return None };
+    if a.len() == 1 && matches!(a[0], Ty::String) {
+        return Some("option.unwrap_or_str".to_string());
+    }
+    // The remaining heap payloads route to their rc-correct self-hosts
+    // (already registered for the `??` desugar): Value / List[Value] /
+    // List[String]. The generic unwrap_or takes an i64 scalar default,
+    // so a handle default (`json.get_array(v,k) |> option.unwrap_or([])`,
+    // json_gltf_walk's count_floats) repr-mismatched — invalid wasm.
+    if a.len() == 1 && is_value_ty(&a[0]) {
+        return Some("option.value_unwrap_or".to_string());
+    }
+    if a.len() == 1
+        && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+            if e.len() == 1 && is_value_ty(&e[0]))
+    {
+        return Some("option.listvalue_unwrap_or".to_string());
+    }
+    if a.len() == 1
+        && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+            if e.len() == 1 && matches!(e[0], Ty::String))
+    {
+        return Some("option.liststr_unwrap_or".to_string());
+    }
+    // A FLAT scalar-element list payload (`map.get(groups, "0") ?? []` —
+    // Option[List[Int]], the group_by class): the rc-correct flat variant.
+    // A scalar TUPLE or Bytes payload is the SAME flat block shape (uniform
+    // slots / raw bytes @12, flat rc_dec drop) — bytes.chunks' element class.
+    if a.len() == 1
+        && (matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+                if e.len() == 1 && !is_heap_ty(&e[0]))
+            || matches!(&a[0], Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|t| !is_heap_ty(t)))
+            // A NESTED `Option[<scalar>]` payload (`option.unwrap_or(
+            // result.to_option(v3), none)` — C-149) is the SAME flat block
+            // (len-as-tag + one scalar slot, flat rc_dec).
+            || matches!(&a[0], Ty::Applied(TypeConstructorId::Option, e)
+                if e.len() == 1 && !is_heap_ty(&e[0]))
+            || matches!(a[0], Ty::Bytes))
+    {
+        return Some("option.listint_unwrap_or".to_string());
+    }
+    // Any OTHER heap payload: no registered rc-correct variant — wall honestly
+    // (the generic impl's i64 scalar default repr-mismatches a handle).
+    if a.len() == 1 && is_heap_ty(&a[0]) {
+        return Some("option.unwrap_or_hx".to_string());
     }
     None
 }
