@@ -7,54 +7,65 @@ use super::RenderContext;
 use super::types::render_type;
 use super::helpers::{template_or, render_type_field_fn};
 
+/// `render_type_decl`'s generics-string computation, extracted verbatim
+/// (cog>25 decomposition). Builds e.g. `"<T>"` or `"<T, U>"`, or `""` when
+/// there are none (or #621 phantom-param dropping applies).
+fn render_type_decl_generics(ctx: &RenderContext, td: &IrTypeDecl) -> String {
+    if ctx.ann.phantom_param_structs.contains(td.name.as_str()) {
+        // All params phantom (#621): drop them so Rust doesn't reject E0392.
+        return String::new();
+    }
+    let Some(generics) = &td.generics else { return String::new() };
+    if generics.is_empty() {
+        return String::new();
+    }
+    let params = generics.iter().map(|g| {
+        ctx.templates.render_with("generic_bound", None, &[], &[("name", g.name.as_str())])
+            .unwrap_or_else(|| g.name.to_string())
+    }).collect::<Vec<_>>().join(", ");
+    format!("<{}>", params)
+}
+
+/// `IrTypeDeclKind::Alias` arm of `render_type_decl`, extracted verbatim
+/// (cog>25 decomposition). Returns `None` for the two "no declaration
+/// emitted" cases (Fn alias erasure, transparent-primitive alias); the
+/// caller's `return String::new()` mirrors those.
+fn render_type_decl_alias(ctx: &RenderContext, td: &IrTypeDecl, target: &Ty) -> Option<String> {
+    // Fn type aliases are erased — the type checker expands them at use sites
+    if matches!(target, Ty::Fn { .. }) {
+        return None;
+    }
+    // Opaque (mod/local) aliases → newtype struct
+    if matches!(td.visibility, IrVisibility::Mod | IrVisibility::Private) {
+        let type_s = render_type(ctx, target);
+        return Some(format!(
+            "#[derive(Clone, Debug, PartialEq)]\npub struct {}({});",
+            td.name, type_s
+        ));
+    }
+    // Transparent aliases to primitives are expanded at use sites
+    // by render_type via type_aliases. Don't emit a Rust `type`
+    // declaration — it would shadow runtime `use` imports
+    // (e.g. `type TcpStream = i64` shadows `std::net::TcpStream`).
+    if ctx.type_aliases.contains_key(&td.name) {
+        return None;
+    }
+    let type_s = render_type(ctx, target);
+    Some(ctx.templates.render_with("type_alias", None, &[], &[("name", td.name.as_str()), ("type", type_s.as_str())])
+        .unwrap_or_else(|| format!("type {} = {};", td.name, render_type(ctx, target))))
+}
+
 pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
     let decl_attrs: Vec<&str> = if ctx.repr_c { vec!["repr_c"] } else { vec![] };
-
-    // Build generics string e.g. "<T>" or "<T, U>"
-    let generics_str = if ctx.ann.phantom_param_structs.contains(td.name.as_str()) {
-        // All params phantom (#621): drop them so Rust doesn't reject E0392.
-        String::new()
-    } else if let Some(generics) = &td.generics {
-        if generics.is_empty() {
-            String::new()
-        } else {
-            let params = generics.iter().map(|g| {
-                ctx.templates.render_with("generic_bound", None, &[], &[("name", g.name.as_str())])
-                    .unwrap_or_else(|| g.name.to_string())
-            }).collect::<Vec<_>>().join(", ");
-            format!("<{}>", params)
-        }
-    } else {
-        String::new()
-    };
+    let generics_str = render_type_decl_generics(ctx, td);
 
     let decl = match &td.kind {
         IrTypeDeclKind::Record { .. } => render_type_decl_record(ctx, td, &generics_str, &decl_attrs),
         IrTypeDeclKind::Variant { .. } => render_type_decl_variant(ctx, td, &generics_str, &decl_attrs),
-        IrTypeDeclKind::Alias { target } => {
-            // Fn type aliases are erased — the type checker expands them at use sites
-            if matches!(target, Ty::Fn { .. }) {
-                return String::new();
-            }
-            // Opaque (mod/local) aliases → newtype struct
-            if matches!(td.visibility, IrVisibility::Mod | IrVisibility::Private) {
-                let type_s = render_type(ctx, target);
-                return format!(
-                    "#[derive(Clone, Debug, PartialEq)]\npub struct {}({});",
-                    td.name, type_s
-                );
-            }
-            // Transparent aliases to primitives are expanded at use sites
-            // by render_type via type_aliases. Don't emit a Rust `type`
-            // declaration — it would shadow runtime `use` imports
-            // (e.g. `type TcpStream = i64` shadows `std::net::TcpStream`).
-            if ctx.type_aliases.contains_key(&td.name) {
-                return String::new();
-            }
-            let type_s = render_type(ctx, target);
-            ctx.templates.render_with("type_alias", None, &[], &[("name", td.name.as_str()), ("type", type_s.as_str())])
-                .unwrap_or_else(|| format!("type {} = {};", td.name, render_type(ctx, target)))
-        }
+        IrTypeDeclKind::Alias { target } => match render_type_decl_alias(ctx, td, target) {
+            Some(s) => s,
+            None => return String::new(),
+        },
     };
 
     // Emit the `AlmideRepr` impl for records/variants so a record/variant value
@@ -429,8 +440,11 @@ fn collect_anon_from_variant_case(kind: &IrVariantKind, named: &HashSet<Vec<Stri
     }
 }
 
-fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
-    collect_anon_from_ty(&expr.ty, named, seen);
+/// `collect_anon_from_expr` group: control-flow-shaped nodes (Block, If,
+/// Match, Call, ForIn, While, Lambda). Not exhaustive — the caller runs this
+/// alongside `collect_anon_from_expr_data`, so a `_ => {}` here just means
+/// "not this group's variant" (cog>25 decomposition).
+fn collect_anon_from_expr_control(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
     match &expr.kind {
         IrExprKind::Block { .. } => collect_anon_from_block(expr, named, seen),
         IrExprKind::If { cond, then, else_ } => {
@@ -440,6 +454,18 @@ fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mu
         }
         IrExprKind::Match { .. } => collect_anon_from_match(expr, named, seen),
         IrExprKind::Call { .. } => collect_anon_from_call(expr, named, seen),
+        IrExprKind::ForIn { iterable, body, .. } => collect_anon_from_loop_body(iterable, body, named, seen),
+        IrExprKind::While { cond, body } => collect_anon_from_loop_body(cond, body, named, seen),
+        IrExprKind::Lambda { body, .. } => collect_anon_from_expr(body, named, seen),
+        _ => {}
+    }
+}
+
+/// `collect_anon_from_expr` group: operator/data/wrapper nodes (BinOp, UnOp,
+/// collection literals, access, Result/Option wrappers, StringInterp,
+/// codegen-specific wrappers). See `collect_anon_from_expr_control`.
+fn collect_anon_from_expr_data(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    match &expr.kind {
         IrExprKind::BinOp { left, right, .. } => {
             collect_anon_from_expr(left, named, seen);
             collect_anon_from_expr(right, named, seen);
@@ -449,15 +475,12 @@ fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mu
         | IrExprKind::RustMacro { args: elements, .. } => {
             for e in elements { collect_anon_from_expr(e, named, seen); }
         }
-        IrExprKind::Lambda { body, .. } => collect_anon_from_expr(body, named, seen),
         IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
             for (_, v) in fields { collect_anon_from_expr(v, named, seen); }
         }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
             collect_anon_from_expr(object, named, seen);
         }
-        IrExprKind::ForIn { iterable, body, .. } => collect_anon_from_loop_body(iterable, body, named, seen),
-        IrExprKind::While { cond, body } => collect_anon_from_loop_body(cond, body, named, seen),
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
         | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
@@ -481,6 +504,12 @@ fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mu
         }
         _ => {}
     }
+}
+
+fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    collect_anon_from_ty(&expr.ty, named, seen);
+    collect_anon_from_expr_control(expr, named, seen);
+    collect_anon_from_expr_data(expr, named, seen);
 }
 
 /// `IrExprKind::Block` case of `collect_anon_from_expr`, extracted verbatim
