@@ -161,45 +161,124 @@ fn resolve_expr_lambda(expr: &mut IrExpr, vt: &mut VarTable) {
     }
 }
 
-fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
-    match &mut expr.kind {
-        IrExprKind::Call { .. } => resolve_expr_call(expr, vt),
-        IrExprKind::RuntimeCall { symbol, args } => {
-            for a in args.iter_mut() {
-                resolve_expr(a, vt);
+/// `IrExprKind::RuntimeCall` case of `resolve_expr`, extracted verbatim
+/// (cog>30 decomposition, pattern 2: uniform match arms, mirrors the
+/// `lower_expr`/`infer_expr_inner` extraction shape).
+fn resolve_expr_runtime_call(expr: &mut IrExpr, vt: &mut VarTable) {
+    let IrExprKind::RuntimeCall { symbol, args } = &mut expr.kind else { unreachable!() };
+    for a in args.iter_mut() {
+        resolve_expr(a, vt);
+    }
+    if expr.ty.has_unresolved_deep() {
+        let synthetic = CallTarget::Named { name: *symbol };
+        if let Some(new_ty) = compute_stdlib_call_ret(&synthetic, args, vt) {
+            expr.ty = new_ty;
+        }
+    }
+}
+
+/// `IrExprKind::Block` case of `resolve_expr`, extracted verbatim.
+fn resolve_expr_block(expr: &mut IrExpr, vt: &mut VarTable) {
+    let IrExprKind::Block { stmts, expr: tail } = &mut expr.kind else { unreachable!() };
+    for s in stmts.iter_mut() { resolve_stmt(s, vt); }
+    if let Some(e) = tail { resolve_expr(e, vt); }
+}
+
+/// `IrExprKind::Match` case of `resolve_expr`, extracted verbatim.
+fn resolve_expr_match(expr: &mut IrExpr, vt: &mut VarTable) {
+    let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+    resolve_expr(subject, vt);
+    for arm in arms.iter_mut() {
+        if let Some(g) = &mut arm.guard { resolve_expr(g, vt); }
+        resolve_expr(&mut arm.body, vt);
+    }
+}
+
+/// `IrExprKind::ForIn` case of `resolve_expr`, extracted verbatim.
+fn resolve_expr_for_in(expr: &mut IrExpr, vt: &mut VarTable) {
+    let IrExprKind::ForIn { iterable, body, .. } = &mut expr.kind else { unreachable!() };
+    resolve_expr(iterable, vt);
+    for s in body.iter_mut() { resolve_stmt(s, vt); }
+}
+
+/// `IrExprKind::While` case of `resolve_expr`, extracted verbatim.
+fn resolve_expr_while(expr: &mut IrExpr, vt: &mut VarTable) {
+    let IrExprKind::While { cond, body } = &mut expr.kind else { unreachable!() };
+    resolve_expr(cond, vt);
+    for s in body.iter_mut() { resolve_stmt(s, vt); }
+}
+
+/// Resolve a `TupleIndex` node's result type from its object's (now
+/// bottom-up-resolved) Tuple type. Returns `Some(new_ty)` if resolved (the
+/// caller assigns it to `expr.ty` itself — this only reads `object` and
+/// `current_ty`, no `&mut IrExpr` needed). Extracted from
+/// `sync_resolved_expr_ty` (cog>30 decomposition, second round).
+fn resolve_tuple_index_result_ty(object: &IrExpr, index: usize, current_ty: &Ty, vt: &VarTable) -> Option<Ty> {
+    // Resolve from object's Tuple type (object.ty may have been updated above)
+    let obj_ty = if let Ty::Tuple(_) = &object.ty {
+        &object.ty
+    } else if let IrExprKind::Var { id } = &object.kind {
+        if (id.0 as usize) < vt.len() { &vt.get(*id).ty } else { &object.ty }
+    } else {
+        &object.ty
+    };
+    if let Ty::Tuple(elems) = obj_ty {
+        if let Some(elem_ty) = elems.get(index) {
+            if !elem_ty.is_unresolved_structural() && current_ty.is_unresolved_structural() {
+                return Some(elem_ty.clone());
             }
-            if expr.ty.has_unresolved_deep() {
-                let synthetic = CallTarget::Named { name: *symbol };
-                if let Some(new_ty) = compute_stdlib_call_ret(&synthetic, args, vt) {
-                    expr.ty = new_ty;
+        }
+    }
+    None
+}
+
+/// Post-visit: sync expr.ty from VarTable for Var nodes, and resolve
+/// TupleIndex result type from the object's Tuple type / propagate BinOp
+/// operand types. Extracted from `resolve_expr`'s trailing sync match
+/// (cog>30 decomposition).
+fn sync_resolved_expr_ty(expr: &mut IrExpr, vt: &VarTable) {
+    match &expr.kind {
+        IrExprKind::Var { id } => {
+            if expr.ty.is_unresolved_structural() && (id.0 as usize) < vt.len() {
+                let vt_ty = &vt.get(*id).ty;
+                if !vt_ty.is_unresolved_structural() {
+                    expr.ty = vt_ty.clone();
                 }
             }
         }
-        IrExprKind::Lambda { .. } => resolve_expr_lambda(expr, vt),
-        IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts.iter_mut() { resolve_stmt(s, vt); }
-            if let Some(e) = tail { resolve_expr(e, vt); }
+        IrExprKind::TupleIndex { object, index } => {
+            if let Some(new_ty) = resolve_tuple_index_result_ty(object, *index, &expr.ty, vt) {
+                expr.ty = new_ty;
+            }
         }
+        IrExprKind::BinOp { left, right, .. } => {
+            // If BinOp result is unresolved but operands are resolved, propagate
+            if expr.ty.is_unresolved_structural() {
+                if !left.ty.is_unresolved_structural() {
+                    expr.ty = left.ty.clone();
+                } else if !right.ty.is_unresolved_structural() {
+                    expr.ty = right.ty.clone();
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
+    match &mut expr.kind {
+        IrExprKind::Call { .. } => resolve_expr_call(expr, vt),
+        IrExprKind::RuntimeCall { .. } => resolve_expr_runtime_call(expr, vt),
+        IrExprKind::Lambda { .. } => resolve_expr_lambda(expr, vt),
+        IrExprKind::Block { .. } => resolve_expr_block(expr, vt),
         IrExprKind::If { cond, then, else_ } => {
             resolve_expr(cond, vt);
             resolve_expr(then, vt);
             resolve_expr(else_, vt);
         }
-        IrExprKind::Match { subject, arms } => {
-            resolve_expr(subject, vt);
-            for arm in arms.iter_mut() {
-                if let Some(g) = &mut arm.guard { resolve_expr(g, vt); }
-                resolve_expr(&mut arm.body, vt);
-            }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            resolve_expr(iterable, vt);
-            for s in body.iter_mut() { resolve_stmt(s, vt); }
-        }
-        IrExprKind::While { cond, body } => {
-            resolve_expr(cond, vt);
-            for s in body.iter_mut() { resolve_stmt(s, vt); }
-        }
+        IrExprKind::Match { .. } => resolve_expr_match(expr, vt),
+        IrExprKind::ForIn { .. } => resolve_expr_for_in(expr, vt),
+        IrExprKind::While { .. } => resolve_expr_while(expr, vt),
         IrExprKind::BinOp { left, right, .. } => {
             resolve_expr(left, vt); resolve_expr(right, vt);
         }
@@ -266,44 +345,7 @@ fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
 
     // Post-visit: sync expr.ty from VarTable for Var nodes,
     // and resolve TupleIndex result type from the object's Tuple type.
-    match &expr.kind {
-        IrExprKind::Var { id } => {
-            if expr.ty.is_unresolved_structural() && (id.0 as usize) < vt.len() {
-                let vt_ty = &vt.get(*id).ty;
-                if !vt_ty.is_unresolved_structural() {
-                    expr.ty = vt_ty.clone();
-                }
-            }
-        }
-        IrExprKind::TupleIndex { object, index } => {
-            // Resolve from object's Tuple type (object.ty may have been updated above)
-            let obj_ty = if let Ty::Tuple(_) = &object.ty {
-                &object.ty
-            } else if let IrExprKind::Var { id } = &object.kind {
-                if (id.0 as usize) < vt.len() { &vt.get(*id).ty } else { &object.ty }
-            } else {
-                &object.ty
-            };
-            if let Ty::Tuple(elems) = obj_ty {
-                if let Some(elem_ty) = elems.get(*index) {
-                    if !elem_ty.is_unresolved_structural() && expr.ty.is_unresolved_structural() {
-                        expr.ty = elem_ty.clone();
-                    }
-                }
-            }
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            // If BinOp result is unresolved but operands are resolved, propagate
-            if expr.ty.is_unresolved_structural() {
-                if !left.ty.is_unresolved_structural() {
-                    expr.ty = left.ty.clone();
-                } else if !right.ty.is_unresolved_structural() {
-                    expr.ty = right.ty.clone();
-                }
-            }
-        }
-        _ => {}
-    }
+    sync_resolved_expr_ty(expr, vt);
 }
 
 fn resolve_stmt(stmt: &mut IrStmt, vt: &mut VarTable) {
