@@ -211,9 +211,14 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 ///
 /// Scan IR Bind statements for `var` of non-Copy types, then check if
 /// any lambda in the same function captures that var.
-fn classify_local_var_storage(program: &IrProgram, ann: &mut CodegenAnnotations) {
-    use almide_ir::annotations::VarStorage;
-    let mut exclude: std::collections::HashSet<u32> = std::collections::HashSet::new();
+/// Var/params that must NEVER get RcCow storage: mutable top-lets (module
+/// globals, handled by the `ModuleRc`/`ModuleCell` path) and every fn
+/// param (borrow inference owns those). Extracted from
+/// `classify_local_var_storage` (cog>30 decomposition, pattern 2:
+/// sequential independent phases).
+/// Insert every mutable top-let's VarId into `exclude` (module globals,
+/// handled by the `ModuleRc`/`ModuleCell` path).
+fn exclude_mutable_top_lets(program: &IrProgram, exclude: &mut std::collections::HashSet<u32>) {
     for tl in &program.top_lets {
         if tl.mutable { exclude.insert(tl.var.0); }
     }
@@ -222,6 +227,10 @@ fn classify_local_var_storage(program: &IrProgram, ann: &mut CodegenAnnotations)
             if tl.mutable { exclude.insert(tl.var.0); }
         }
     }
+}
+
+/// Insert every fn param's VarId into `exclude` (borrow inference owns those).
+fn exclude_fn_params(program: &IrProgram, exclude: &mut std::collections::HashSet<u32>) {
     for func in &program.functions {
         for p in &func.params { exclude.insert(p.var.0); }
     }
@@ -230,8 +239,17 @@ fn classify_local_var_storage(program: &IrProgram, ann: &mut CodegenAnnotations)
             for p in &func.params { exclude.insert(p.var.0); }
         }
     }
+}
 
-    // Phase 1: Collect all non-Copy `var` bindings
+fn collect_var_storage_exclusions(program: &IrProgram) -> std::collections::HashSet<u32> {
+    let mut exclude: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    exclude_mutable_top_lets(program, &mut exclude);
+    exclude_fn_params(program, &mut exclude);
+    exclude
+}
+
+/// Phase 1: Collect all non-Copy `var` bindings.
+fn collect_non_copy_var_binds(program: &IrProgram) -> std::collections::HashSet<u32> {
     struct VarBindCollector { vars: std::collections::HashSet<u32> }
     impl almide_ir::visit::IrVisitor for VarBindCollector {
         fn visit_stmt(&mut self, stmt: &IrStmt) {
@@ -258,15 +276,18 @@ fn classify_local_var_storage(program: &IrProgram, ann: &mut CodegenAnnotations)
             collector.visit_expr(&func.body);
         }
     }
+    collector.vars
+}
 
-    // Phase 2: Find vars captured by any lambda — via the single shared
-    // free-variable analysis (`almide_ir::free_vars`), the same one the WASM
-    // closure path uses. A lambda's captures are the free vars of its body
-    // relative to its params; the union over every lambda is the full captured
-    // set. `free_vars` tracks all binders (block lets incl. destructure, match
-    // arms, for-in vars, nested lambdas), so this is strictly more accurate than
-    // the old hand-rolled lambda-depth walker. (Closure v2, P4: one capture
-    // analysis for both targets.)
+/// Phase 2: Find vars captured by any lambda — via the single shared
+/// free-variable analysis (`almide_ir::free_vars`), the same one the WASM
+/// closure path uses. A lambda's captures are the free vars of its body
+/// relative to its params; the union over every lambda is the full captured
+/// set. `free_vars` tracks all binders (block lets incl. destructure, match
+/// arms, for-in vars, nested lambdas), so this is strictly more accurate than
+/// the old hand-rolled lambda-depth walker. (Closure v2, P4: one capture
+/// analysis for both targets.)
+fn collect_lambda_captured_vars(program: &IrProgram) -> std::collections::HashSet<u32> {
     struct CaptureUnion { captured: std::collections::HashSet<u32> }
     impl almide_ir::visit::IrVisitor for CaptureUnion {
         fn visit_expr(&mut self, expr: &IrExpr) {
@@ -280,21 +301,30 @@ fn classify_local_var_storage(program: &IrProgram, ann: &mut CodegenAnnotations)
             almide_ir::visit::walk_expr(self, expr);
         }
     }
+    use almide_ir::visit::IrVisitor;
     let mut cap = CaptureUnion { captured: std::collections::HashSet::new() };
     for func in &program.functions { cap.visit_expr(&func.body); }
     for module in &program.modules {
         for func in &module.functions { cap.visit_expr(&func.body); }
     }
+    cap.captured
+}
+
+fn classify_local_var_storage(program: &IrProgram, ann: &mut CodegenAnnotations) {
+    use almide_ir::annotations::VarStorage;
+    let exclude = collect_var_storage_exclusions(program);
+    let non_copy_var_binds = collect_non_copy_var_binds(program);
+    let captured = collect_lambda_captured_vars(program);
 
     // Phase 3: Only vars captured by lambdas get RcCow; rest are LocalMut (let mut)
-    for var_id in collector.vars {
+    for var_id in non_copy_var_binds {
         if exclude.contains(&var_id) { continue; }
         // Captured mutable vars that became shared cells (`Rc<Cell>` for Copy via
         // P3, `SharedMut` for non-Copy via P6) are driven by the shared-mut path,
         // NOT RcCow — RcCow's copy-on-write would lose a mutation made through the
         // closure. (Closure v2 P6.)
         if ann.is_shared_mut(&VarId(var_id)) { continue; }
-        if cap.captured.contains(&var_id) {
+        if captured.contains(&var_id) {
             ann.var_storage.insert(VarId(var_id), VarStorage::RcCow);
         }
         // LocalMut: no entry in var_storage → walker emits plain `let mut T`
