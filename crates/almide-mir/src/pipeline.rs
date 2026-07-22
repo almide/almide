@@ -1125,19 +1125,16 @@ fn repair_and_substitute_globals(
     ir: &mut almide_ir::IrProgram,
     inlined_fns: &mut [almide_ir::IrFunction],
     module_fn_sibs: &mut [almide_ir::IrFunction],
-    globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
-    main_globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
-    main_global_inits: &HashMap<almide_ir::VarId, almide_ir::IrExpr>,
-    record_layouts: &crate::lower::RecordLayouts,
+    layouts: &PipelineLayouts,
     all_fns: &[almide_ir::IrFunction],
 ) {
     for f in inlined_fns.iter_mut() {
-        crate::lower::repair_unknown_global_ref_tys(f, main_globals);
-        crate::lower::repair_member_field_tys(f, record_layouts);
+        crate::lower::repair_unknown_global_ref_tys(f, &layouts.main_globals);
+        crate::lower::repair_member_field_tys(f, &layouts.record_layouts);
     }
     for f in module_fn_sibs.iter_mut() {
-        crate::lower::repair_unknown_global_ref_tys(f, globals);
-        crate::lower::repair_member_field_tys(f, record_layouts);
+        crate::lower::repair_unknown_global_ref_tys(f, &layouts.globals);
+        crate::lower::repair_member_field_tys(f, &layouts.record_layouts);
     }
 
     use almide_ir::visit::{walk_expr, IrVisitor};
@@ -1178,7 +1175,7 @@ fn repair_and_substitute_globals(
             continue;
         }
         let id = almide_ir::VarId(i as u32);
-        let Some(init) = main_global_inits.get(&id) else { continue };
+        let Some(init) = layouts.main_global_inits.get(&id) else { continue };
         // #782: with the v0 fallback retired, a HEAP toplet whose init is a
         // CTOR form (tuple/record/variant/some/ok — `let PAIR = ("a", 1)`,
         // `let MOOD = Happy`) must ALSO substitute: value_or_global's CONST
@@ -1303,16 +1300,10 @@ fn repair_and_substitute_globals(
 /// the main-region tail-inlining pass) or one that itself walls is silently skipped
 /// (the caller then fails the unlinked-call render wall if it truly needed it — stdlib
 /// modules stay out, self-host-linked below).
-#[allow(clippy::too_many_arguments)]
 fn lower_main_and_sibling_fns(
     inlined_fns: &[almide_ir::IrFunction],
     module_fn_sibs: &[almide_ir::IrFunction],
-    main_globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
-    main_global_inits: &HashMap<almide_ir::VarId, almide_ir::IrExpr>,
-    globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
-    global_inits: &HashMap<almide_ir::VarId, almide_ir::IrExpr>,
-    record_layouts: &crate::lower::RecordLayouts,
-    variant_layouts: &crate::lower::VariantLayouts,
+    layouts: &PipelineLayouts,
     total_ir_fn_count: usize,
     verbose: bool,
 ) -> Vec<crate::MirFunction> {
@@ -1326,10 +1317,10 @@ fn lower_main_and_sibling_fns(
         }
         match crate::lower::lower_function_all_with_globals(
             func,
-            main_globals,
-            main_global_inits,
-            record_layouts,
-            variant_layouts,
+            &layouts.main_globals,
+            &layouts.main_global_inits,
+            &layouts.record_layouts,
+            &layouts.variant_layouts,
         ) {
             Ok(mirs) => functions.extend(mirs),
             Err(e) => walled.push(format!("{}: {e:?}", func.name.as_str())),
@@ -1357,10 +1348,10 @@ fn lower_main_and_sibling_fns(
         }
         if let Ok(mirs) = crate::lower::lower_function_all_with_globals(
             func,
-            globals,
-            global_inits,
-            record_layouts,
-            variant_layouts,
+            &layouts.globals,
+            &layouts.global_inits,
+            &layouts.record_layouts,
+            &layouts.variant_layouts,
         ) {
             functions.extend(mirs);
         }
@@ -1383,11 +1374,7 @@ fn lower_main_and_sibling_fns(
 fn synthesize_and_link_runtime_fns(
     functions: &mut Vec<crate::MirFunction>,
     mutable_tls: &[almide_ir::IrTopLet],
-    main_globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
-    main_global_inits: &HashMap<almide_ir::VarId, almide_ir::IrExpr>,
-    globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
-    record_layouts: &crate::lower::RecordLayouts,
-    variant_layouts: &crate::lower::VariantLayouts,
+    layouts: &PipelineLayouts,
     verbose: bool,
 ) -> Result<(), LowerError> {
     if !mutable_tls.is_empty() {
@@ -1425,10 +1412,10 @@ fn synthesize_and_link_runtime_fns(
         };
         match crate::lower::lower_function_all_with_globals(
             &init_fn,
-            main_globals,
-            main_global_inits,
-            record_layouts,
-            variant_layouts,
+            &layouts.main_globals,
+            &layouts.main_global_inits,
+            &layouts.record_layouts,
+            &layouts.variant_layouts,
         ) {
             Ok(mirs) => functions.extend(mirs),
             Err(e) => {
@@ -1484,7 +1471,7 @@ fn synthesize_and_link_runtime_fns(
             if any_called && !any_defined {
                 let rt = source_to_ir(rt_source)?;
                 for f in &rt.functions {
-                    let lowered = crate::lower::lower_function(f, globals);
+                    let lowered = crate::lower::lower_function(f, &layouts.globals);
                     if let Err(e) = &lowered {
                         if verbose
                             && (entries.iter().any(|(impl_fn, _)| f.name.as_str() == *impl_fn)
@@ -1532,7 +1519,7 @@ fn synthesize_and_link_runtime_fns(
     if !functions.iter().any(|f| f.name == "print_str") {
         let rt = source_to_ir(include_str!("../../../stdlib/print_str.almd"))?;
         for f in &rt.functions {
-            if let Ok(mir) = crate::lower::lower_function(f, globals) {
+            if let Ok(mir) = crate::lower::lower_function(f, &layouts.globals) {
                 functions.push(mir);
             }
         }
@@ -1544,58 +1531,27 @@ fn try_render_wasm_source_impl_rest(
     ir: &mut almide_ir::IrProgram,
     verbose: bool,
 ) -> Result<String, LowerError> {
-    let PipelineLayouts {
-        globals,
-        global_inits,
-        main_globals,
-        main_global_inits,
-        mutable_toplet_aliases,
-        record_layouts,
-        variant_layouts,
-    } = collect_pipeline_layouts(ir);
+    let layouts = collect_pipeline_layouts(ir);
 
     let CrossModuleFns { mut module_fn_sibs, mut inlined_fns, all_fns } =
-        inline_and_classify_cross_module_fns(ir, &main_globals, &record_layouts);
+        inline_and_classify_cross_module_fns(ir, &layouts.main_globals, &layouts.record_layouts);
 
     bridge_cross_module_derived_methods(ir, &mut inlined_fns, &mut module_fn_sibs);
 
-    let mutable_tls = assign_mutable_global_slots(ir, &mutable_toplet_aliases)?;
+    let mutable_tls = assign_mutable_global_slots(ir, &layouts.mutable_toplet_aliases)?;
     let mutable_global_count = mutable_tls.len() as u32;
 
-    repair_and_substitute_globals(
-        ir,
-        &mut inlined_fns,
-        &mut module_fn_sibs,
-        &globals,
-        &main_globals,
-        &main_global_inits,
-        &record_layouts,
-        &all_fns,
-    );
+    repair_and_substitute_globals(ir, &mut inlined_fns, &mut module_fn_sibs, &layouts, &all_fns);
 
     let mut functions = lower_main_and_sibling_fns(
         &inlined_fns,
         &module_fn_sibs,
-        &main_globals,
-        &main_global_inits,
-        &globals,
-        &global_inits,
-        &record_layouts,
-        &variant_layouts,
+        &layouts,
         ir.functions.len(),
         verbose,
     );
 
-    synthesize_and_link_runtime_fns(
-        &mut functions,
-        &mutable_tls,
-        &main_globals,
-        &main_global_inits,
-        &globals,
-        &record_layouts,
-        &variant_layouts,
-        verbose,
-    )?;
+    synthesize_and_link_runtime_fns(&mut functions, &mutable_tls, &layouts, verbose)?;
 
     // EAGER GLOBAL-INIT semantics (C-007): v0 evaluates every ABORTABLE top-let initializer at
     // startup. Synthesize `__global_init` binding each CALL-FREE SCALAR initializer and have
@@ -1620,7 +1576,7 @@ fn try_render_wasm_source_impl_rest(
             c.0
         }
         let mut max_var = 0u32;
-        for (v, _) in &globals {
+        for (v, _) in &layouts.globals {
             max_var = max_var.max(v.0);
         }
         {
@@ -1697,7 +1653,7 @@ fn try_render_wasm_source_impl_rest(
                 module_origin: None,
                 mutated_params: vec![],
             };
-            if let Ok(mir) = crate::lower::lower_function(&init_fn, &globals) {
+            if let Ok(mir) = crate::lower::lower_function(&init_fn, &layouts.globals) {
                 functions.push(mir);
             }
         }
