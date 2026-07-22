@@ -107,6 +107,27 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> Strin
     }
 }
 
+/// Resolve `[dependencies]` search paths from `almide.toml` in the current
+/// directory (if present), exiting the process on a fetch failure. Shared
+/// by `cmd_emit`, `resolve_module_to_file` and `cmd_compile` (`compile.rs`)
+/// — all three had identical copies of this almide.toml lookup + exit-on-
+/// error handling.
+pub(crate) fn dep_paths_from_cwd_toml() -> Vec<(crate::project::PkgId, std::path::PathBuf)> {
+    if std::path::Path::new("almide.toml").exists() {
+        if let Ok(proj) = crate::project::parse_toml(std::path::Path::new("almide.toml")) {
+            crate::project_fetch::fetch_all_deps(&proj)
+                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
+                .into_iter()
+                .map(|fd| (fd.pkg_id, fd.source_dir))
+                .collect()
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    }
+}
+
 /// Load `[native-deps]` and dependency-presence info from `almide.toml`,
 /// searching first in `file`'s directory then CWD. `source_root` (the
 /// directory containing `almide.toml`, where `native/*.rs` lives) is

@@ -1,4 +1,4 @@
-use crate::{parse_file, canonicalize, codegen, check, diagnostic, resolve, project, project_fetch, out, out_no_nl, err};
+use crate::{parse_file, canonicalize, codegen, check, diagnostic, resolve, out, out_no_nl, err};
 
 /// Print parse errors (if any) and exit. Extracted verbatim from `cmd_emit`'s
 /// leading parse-error gate — a pure diagnostics-formatting step with no
@@ -70,25 +70,6 @@ pub struct EmitArgs<'a> {
     pub repr_c: bool,
 }
 
-/// Resolve `[dependencies]` search paths from `almide.toml` (if present),
-/// exiting the process on a fetch failure. Extracted verbatim from
-/// `cmd_emit`'s dependency-path setup.
-fn dep_paths_for_emit() -> Vec<(project::PkgId, std::path::PathBuf)> {
-    if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
-                .into_iter()
-                .map(|fd| (fd.pkg_id, fd.source_dir))
-                .collect()
-        } else {
-            vec![]
-        }
-    } else {
-        vec![]
-    }
-}
-
 /// `cmd_emit`'s `--dialect` output path. Extracted verbatim.
 fn emit_dialect_output(ir_program: &Option<almide::ir::IrProgram>, target: &str) {
     let ir = ir_program.as_ref().expect("checker must have run for emit_dialect");
@@ -143,7 +124,7 @@ pub fn cmd_emit(args: EmitArgs) {
     let (mut program, source_text, parse_errors) = parse_file(file);
     exit_on_parse_errors(&parse_errors, &source_text);
 
-    let dep_paths = dep_paths_for_emit();
+    let dep_paths = super::dep_paths_from_cwd_toml();
 
     let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
