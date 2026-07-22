@@ -51,6 +51,116 @@ pub fn refresh_module_toplets(
     }
 }
 
+/// `resolve_imports_with_deps`'s `import self` / `import self.xxx` branch.
+/// Extracted verbatim — mutates only the three accumulator params (same
+/// idempotent load-if-not-loaded-yet semantics as the sibling `load_*`
+/// helpers this delegates to), `?` propagation preserved.
+#[allow(clippy::too_many_arguments)]
+fn resolve_self_import(
+    path: &[crate::intern::Sym],
+    alias: Option<&str>,
+    project_root: Option<&PathBuf>,
+    base_dir: &Path,
+    dep_paths: &[(project::PkgId, PathBuf)],
+    loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
+    loaded_names: &mut HashSet<String>,
+    loading: &mut HashSet<String>,
+) -> Result<(), String> {
+    if path.len() == 1 {
+        // import self → load src/mod.almd (package entry point)
+        let root = project_root.ok_or_else(|| {
+            "cannot resolve 'import self': no almide.toml found in parent directories".to_string()
+        })?;
+        let mod_file = root.join("src").join("mod.almd");
+        if !mod_file.exists() {
+            return Err(format!(
+                "cannot resolve 'import self': no src/mod.almd in {}\n  hint: Create src/mod.almd as the package entry point",
+                root.display()
+            ));
+        }
+        // Determine module name: alias, or package name from almide.toml
+        let pkg_name = project::parse_toml(&root.join("almide.toml"))
+            .map(|p| p.package.name)
+            .unwrap_or_default();
+        let mod_name_owned: String;
+        let mod_name: &str = if let Some(a) = alias {
+            a
+        } else if !pkg_name.is_empty() {
+            mod_name_owned = pkg_name;
+            &mod_name_owned
+        } else {
+            "self"
+        };
+        if !loaded_names.contains(mod_name) {
+            let src_dir = root.join("src");
+            let mod_path = vec![crate::intern::sym("mod")];
+            load_self_module(mod_name, &mod_path, &src_dir, base_dir, dep_paths, loaded, loaded_names, loading, true)?;
+        }
+    } else {
+        // self.xxx → local module within the project
+        let mod_path = &path[1..]; // skip "self"
+        // Always use the canonical name (last path segment) — aliases are handled by import_aliases
+        let mod_name = mod_path.last().expect("guarded by path.len() >= 2").as_str();
+        let display_name = mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+
+        if loaded_names.contains(mod_name) {
+            return Ok(());
+        }
+
+        let root = project_root.ok_or_else(|| {
+            format!("cannot resolve 'import self.{}': no almide.toml found in parent directories", display_name)
+        })?;
+        let src_dir = root.join("src");
+        load_self_module(mod_name, mod_path, &src_dir, base_dir, dep_paths, loaded, loaded_names, loading, false)?;
+    }
+    Ok(())
+}
+
+/// `resolve_imports_with_deps`'s non-`self` import branch (`import X` /
+/// `import pkg.submodule`). Extracted verbatim.
+fn resolve_named_import(
+    path: &[crate::intern::Sym],
+    base_dir: &Path,
+    dep_paths: &[(project::PkgId, PathBuf)],
+    loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
+    loaded_names: &mut HashSet<String>,
+    loading: &mut HashSet<String>,
+) -> Result<(), String> {
+    if path.len() == 1 {
+        let name = &path[0];
+        // Bundled stdlib modules (written in Almide) need the source
+        // loaded so `pass_stdlib_lowering` can see their
+        // `@inline_rust` attributes. This check has to precede the
+        // legacy "stdlib → skip" fallback, otherwise explicitly
+        // imported bundled stdlib (e.g. `import base64`) gets
+        // short-circuited before their source reaches the checker.
+        if let Some(source) = stdlib::get_bundled_source(name) {
+            if !loaded_names.contains(name.as_str()) {
+                load_bundled_module(name, source, base_dir, dep_paths, loaded, loaded_names, loading)?;
+            }
+            return Ok(());
+        }
+        if stdlib::is_stdlib_module(name) {
+            return Ok(());
+        }
+        load_module(name, base_dir, dep_paths, loaded, loaded_names, loading)?;
+    } else {
+        // import pkg.submodule — load just the sub-module directly
+        let pkg_name = &path[0];
+        if stdlib::is_stdlib_module(pkg_name) {
+            return Ok(());
+        }
+        let sub_path = &path[1..];
+        // Internal name is always the dotted path (e.g. "nomod_lib.parser")
+        let dotted_name = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+        if loaded_names.contains(&dotted_name) {
+            return Ok(());
+        }
+        load_submodule(pkg_name, sub_path, &dotted_name, base_dir, dep_paths, loaded, loaded_names, loading)?;
+    }
+    Ok(())
+}
+
 pub fn resolve_imports_with_deps(
     source_file: &str,
     program: &ast::Program,
@@ -65,86 +175,10 @@ pub fn resolve_imports_with_deps(
     for import in &program.imports {
         if let ast::Decl::Import { path, alias, .. } = import {
             let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
-
             if is_self_import {
-                if path.len() == 1 {
-                    // import self → load src/mod.almd (package entry point)
-                    let root = project_root.as_ref().ok_or_else(|| {
-                        "cannot resolve 'import self': no almide.toml found in parent directories".to_string()
-                    })?;
-                    let mod_file = root.join("src").join("mod.almd");
-                    if !mod_file.exists() {
-                        return Err(format!(
-                            "cannot resolve 'import self': no src/mod.almd in {}\n  hint: Create src/mod.almd as the package entry point",
-                            root.display()
-                        ));
-                    }
-                    // Determine module name: alias, or package name from almide.toml
-                    let pkg_name = project::parse_toml(&root.join("almide.toml"))
-                        .map(|p| p.package.name)
-                        .unwrap_or_default();
-                    let mod_name_owned: String;
-                    let mod_name: &str = if let Some(a) = alias.as_deref() {
-                        a
-                    } else if !pkg_name.is_empty() {
-                        mod_name_owned = pkg_name;
-                        &mod_name_owned
-                    } else {
-                        "self"
-                    };
-                    if !loaded_names.contains(mod_name) {
-                        let src_dir = root.join("src");
-                        let mod_path = vec![crate::intern::sym("mod")];
-                        load_self_module(mod_name, &mod_path, &src_dir, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading, true)?;
-                    }
-                } else {
-                    // self.xxx → local module within the project
-                    let mod_path = &path[1..]; // skip "self"
-                    // Always use the canonical name (last path segment) — aliases are handled by import_aliases
-                    let mod_name = mod_path.last().expect("guarded by path.len() >= 2").as_str();
-                    let display_name = mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-
-                    if loaded_names.contains(mod_name) {
-                        continue;
-                    }
-
-                    let root = project_root.as_ref().ok_or_else(|| {
-                        format!("cannot resolve 'import self.{}': no almide.toml found in parent directories", display_name)
-                    })?;
-                    let src_dir = root.join("src");
-                    load_self_module(mod_name, mod_path, &src_dir, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading, false)?;
-                }
-            } else if path.len() == 1 {
-                let name = &path[0];
-                // Bundled stdlib modules (written in Almide) need the source
-                // loaded so `pass_stdlib_lowering` can see their
-                // `@inline_rust` attributes. This check has to precede the
-                // legacy "stdlib → skip" fallback, otherwise explicitly
-                // imported bundled stdlib (e.g. `import base64`) gets
-                // short-circuited before their source reaches the checker.
-                if let Some(source) = stdlib::get_bundled_source(name) {
-                    if !loaded_names.contains(name.as_str()) {
-                        load_bundled_module(name, source, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
-                    }
-                    continue;
-                }
-                if stdlib::is_stdlib_module(name) {
-                    continue;
-                }
-                load_module(name, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
+                resolve_self_import(path, alias.as_deref(), project_root.as_ref(), base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
             } else {
-                // import pkg.submodule — load just the sub-module directly
-                let pkg_name = &path[0];
-                if stdlib::is_stdlib_module(pkg_name) {
-                    continue;
-                }
-                let sub_path = &path[1..];
-                // Internal name is always the dotted path (e.g. "nomod_lib.parser")
-                let dotted_name = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-                if loaded_names.contains(&dotted_name) {
-                    continue;
-                }
-                load_submodule(pkg_name, sub_path, &dotted_name, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
+                resolve_named_import(path, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
             }
         }
     }
