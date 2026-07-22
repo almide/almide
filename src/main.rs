@@ -497,8 +497,12 @@ fn verify_ir_or_err(ir_program: &Option<almide::ir::IrProgram>) -> Result<(), St
     Ok(())
 }
 
-pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>), String> {
-    let (mut program, source_text, parse_errors) = parse_file(file);
+/// `try_compile_with_ir`'s parse + project/dep resolution phase. Extracted
+/// verbatim — each error arm prints via `err` before returning, exactly
+/// matching the original `.map_err(|e| { err(...); e })` chain.
+#[allow(clippy::type_complexity)]
+fn parse_and_resolve_for_compile(file: &str) -> Result<(ast::Program, String, Vec<diagnostic::Diagnostic>, bool, resolve::ResolvedModules, Option<project::Project>), String> {
+    let (program, source_text, parse_errors) = parse_file(file);
     let has_parse_errors = !parse_errors.is_empty();
 
     let parsed_project = if std::path::Path::new("almide.toml").exists() {
@@ -522,66 +526,106 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         vec![]
     };
 
-    let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .map_err(|e| { err(&format!("{}", e)); e.clone() })?;
 
-    let mut ir_program: Option<almide::ir::IrProgram> = None;
-    let mut module_irs = std::collections::HashMap::new();
-    if !no_check {
-        let canon = canonicalize::canonicalize_program(
-            &program,
-            resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
-        );
-        let mut checker = check::Checker::from_env(canon.env);
-        checker.set_source(file, &source_text);
-        checker.diagnostics = canon.diagnostics;
-        // #785: module top-let types must be fully inferred before the entry
-        // program reads them (drivers infer the entry FIRST; without this the
-        // readers see the registration seed — Unknown for non-literal inits).
-        almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
-        let diagnostics = checker.infer_program(&mut program);
-        report_check_diagnostics(&parse_errors, &diagnostics, &source_text)?;
-        // Pre-register versioned names BEFORE root lowering so cross-module
-        // top_let references (mc_bot.DEFAULT_CONFIG) get correct V0 prefix.
-        register_versioned_module_names(&mut checker, &resolved.modules);
+    Ok((program, source_text, parse_errors, has_parse_errors, resolved, parsed_project))
+}
 
-        // Lower root program (versioned names now available)
-        ir_program = lower_root_program_if_ready(has_parse_errors, &program, &checker, &source_text, file);
+/// `try_compile_with_ir`'s parse-phase output needed by the type-check
+/// phase — bundled into one struct (`typecheck_and_lower_for_compile` was
+/// at 7 positional params, a max-params violation on its own) so the
+/// signature stays under the params threshold. Field names mirror
+/// `parse_and_resolve_for_compile`'s return tuple 1:1.
+struct ParsedSource<'a> {
+    file: &'a str,
+    source_text: &'a str,
+    parse_errors: &'a [diagnostic::Diagnostic],
+    has_parse_errors: bool,
+}
 
-        // Lower user modules
-        for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-            lower_one_user_module(&mut checker, name, mod_prog, pkg_id, &mut module_irs, &mut ir_program);
-        }
+/// `try_compile_with_ir`'s type-check + root/module lowering phase — only
+/// run when `!no_check`. Extracted verbatim.
+fn typecheck_and_lower_for_compile(
+    parsed: ParsedSource,
+    program: &mut ast::Program,
+    resolved: &mut resolve::ResolvedModules,
+    module_irs: &mut std::collections::HashMap<String, almide::ir::IrProgram>,
+) -> Result<Option<almide::ir::IrProgram>, String> {
+    let canon = canonicalize::canonicalize_program(
+        program,
+        resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
+    );
+    let mut checker = check::Checker::from_env(canon.env);
+    checker.set_source(parsed.file, parsed.source_text);
+    checker.diagnostics = canon.diagnostics;
+    // #785: module top-let types must be fully inferred before the entry
+    // program reads them (drivers infer the entry FIRST; without this the
+    // readers see the registration seed — Unknown for non-literal inits).
+    almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
+    let diagnostics = checker.infer_program(program);
+    report_check_diagnostics(parsed.parse_errors, &diagnostics, parsed.source_text)?;
+    // Pre-register versioned names BEFORE root lowering so cross-module
+    // top_let references (mc_bot.DEFAULT_CONFIG) get correct V0 prefix.
+    register_versioned_module_names(&mut checker, &resolved.modules);
+
+    // Lower root program (versioned names now available)
+    let mut ir_program = lower_root_program_if_ready(parsed.has_parse_errors, program, &checker, parsed.source_text, parsed.file);
+
+    // Lower user modules
+    for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
+        lower_one_user_module(&mut checker, name, mod_prog, pkg_id, module_irs, &mut ir_program);
     }
+    Ok(ir_program)
+}
 
+/// `try_compile_with_ir`'s post-typecheck IR pipeline: optimize, verify
+/// integrity, check `[permissions]`, monomorphize, and link dependency
+/// modules into the root. Extracted verbatim.
+fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, parsed_project: &Option<project::Project>) -> Result<(), String> {
     // Optimize IR: constant folding + dead code elimination
-    if let Some(ref mut ir) = ir_program {
+    if let Some(ir) = ir_program.as_mut() {
         almide::optimize::optimize_program(ir);
         // Reclassify top-level lets after optimization (cross-reference const detection)
         almide::ir::reclassify_top_lets(ir);
     }
 
     // Verify IR integrity
-    verify_ir_or_err(&ir_program)?;
+    verify_ir_or_err(ir_program)?;
 
     // Security Layer 2: check permissions if defined in almide.toml
-    if let Some(ref proj) = parsed_project {
+    if let Some(proj) = parsed_project {
         if !proj.permissions.is_empty() {
-            if let Some(ref ir) = ir_program {
+            if let Some(ir) = ir_program.as_ref() {
                 cli::check_permissions(ir, &proj.permissions)?;
             }
         }
     }
 
     // Monomorphize row-polymorphic functions (Rust target only)
-    if let Some(ref mut ir) = ir_program {
+    if let Some(ir) = ir_program.as_mut() {
         almide::mono::monomorphize(ir);
     }
 
     // IR link: merge dependency modules into root program
-    if let Some(ref mut ir) = ir_program {
+    if let Some(ir) = ir_program.as_mut() {
         almide::ir_link::ir_link(ir);
     }
+
+    Ok(())
+}
+
+pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>), String> {
+    let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, parsed_project) = parse_and_resolve_for_compile(file)?;
+
+    let mut ir_program: Option<almide::ir::IrProgram> = None;
+    let mut module_irs = std::collections::HashMap::new();
+    if !no_check {
+        let parsed = ParsedSource { file, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
+        ir_program = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &mut module_irs)?;
+    }
+
+    optimize_verify_and_link(&mut ir_program, &parsed_project)?;
 
     // Codegen v3: three-layer pipeline (Nanopass + Templates)
     let ir = ir_program.as_mut().expect("IR required for codegen");
@@ -658,50 +702,68 @@ fn resolve_file(file: Option<String>) -> String {
     })
 }
 
+/// `print_error_explanation`'s candidate markdown paths: `ALMIDE_DIAGNOSTICS_DIR`
+/// (if set), each ancestor of the current exe joined with
+/// `docs/diagnostics/<CODE>.md` (handles `target/release/almide` and
+/// `~/.local/bin/almide` layouts), then a CWD-relative fallback. Extracted
+/// verbatim.
+fn diagnostics_md_candidates(code: &str) -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("ALMIDE_DIAGNOSTICS_DIR") {
+        paths.push(std::path::PathBuf::from(dir).join(format!("{}.md", code)));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        // Walk up parent dirs, looking for docs/diagnostics/CODE.md.
+        // Handles target/release/almide and ~/.local/bin/almide layouts.
+        let mut cur = exe.as_path();
+        for _ in 0..6 {
+            paths.push(cur.join("docs/diagnostics").join(format!("{}.md", code)));
+            if let Some(p) = cur.parent() { cur = p; } else { break; }
+        }
+    }
+    paths.push(std::path::PathBuf::from(format!("docs/diagnostics/{}.md", code)));
+    paths
+}
+
+/// `print_error_explanation`'s built-in fallback text (used when no
+/// `docs/diagnostics/<CODE>.md` is found on disk). Converted from a 10-arm
+/// `match` (cyclomatic complexity counts one branch per arm, regardless of
+/// how trivial) to a flat data table + linear scan — same code→text
+/// mapping, genuinely lower complexity since dispatch is now data, not
+/// branches (same technique as `lookup_keyword_info` in lsp_p2.rs).
+fn builtin_error_explanation(code: &str) -> Option<&'static str> {
+    const TABLE: &[(&str, &str)] = &[
+        ("E001", "E001: Type mismatch\n\n  The expression's type does not match what was expected.\n\n  Example:\n    fn f() -> Int = \"hello\"  // error: expected Int but got String\n\n  Fix: Change the expression to match the expected type, or use a\n  conversion function like int.to_string() or int.parse()."),
+        ("E002", "E002: Undefined function\n\n  The function name was not found in the current scope, stdlib, or imports.\n\n  Example:\n    fn f() -> Int = nonexistent()  // error: undefined function\n\n  Fix: Check the function name for typos, or import the module that defines it."),
+        ("E003", "E003: Undefined variable\n\n  The variable name was not found in the current scope.\n\n  Example:\n    fn f() -> Int = x + 1  // error: undefined variable 'x'\n\n  Fix: Check the variable name for typos, or declare it with `let` or `var`\n  before use. If it's a function parameter, ensure it's in the parameter list."),
+        ("E004", "E004: Wrong argument count\n\n  The function was called with the wrong number of arguments.\n\n  Example:\n    fn add(a: Int, b: Int) -> Int = a + b\n    let x = add(1)  // error: expects 2 arguments but got 1\n\n  Fix: Provide the correct number of arguments."),
+        ("E005", "E005: Argument type mismatch\n\n  A function argument's type does not match the parameter type.\n\n  Example:\n    fn greet(name: String) -> String = name\n    greet(42)  // error: expects String but got Int\n\n  Fix: Pass the correct type, or use a conversion function."),
+        ("E006", "E006: Effect isolation violation\n\n  A pure function (fn) is calling an effect function (effect fn).\n  This violates Almide's security model — pure functions cannot perform I/O.\n\n  Example:\n    fn f() -> String = fs.read_text(\"file.txt\")  // error\n\n  Fix: Mark the calling function as `effect fn`."),
+        ("E007", "E007: Fan block in pure function\n\n  A `fan` block can only be used inside an `effect fn`.\n  Fan expressions perform concurrent I/O, which requires effect context.\n\n  Example:\n    fn f() -> (Int, Int) = fan { a(); b() }  // error\n\n  Fix: Mark the enclosing function as `effect fn`."),
+        ("E008", "E008: Mutable variable capture in fan\n\n  A `fan` block cannot capture mutable variables (var) from the outer scope.\n  This prevents data races in concurrent execution.\n\n  Example:\n    var x = 0\n    fan { use(x); ... }  // error: cannot capture var x\n\n  Fix: Use a `let` binding instead of `var`."),
+        ("E009", "E009: Assignment to immutable variable\n\n  Cannot assign to a variable declared with `let` or a function parameter.\n\n  Example:\n    let x = 1\n    x = 2  // error\n\n  Fix: Use `var` instead of `let` if the variable needs to be mutable."),
+        ("E010", "E010: Non-exhaustive match\n\n  The match expression does not cover all possible cases of the subject type.\n\n  Example:\n    type Color = | Red | Green | Blue\n    match c { Red => 1 }  // error: missing Green, Blue\n\n  Fix: Add the missing arms, or use `_` as a catch-all."),
+    ];
+    TABLE.iter().find(|(k, _)| *k == code).map(|(_, v)| *v)
+}
+
 fn print_error_explanation(code: &str) {
     // Prefer richer markdown reference under docs/diagnostics/<CODE>.md when
     // running from a checkout (or when ALMIDE_DIAGNOSTICS_DIR is set).
-    let candidates: Vec<std::path::PathBuf> = {
-        let mut paths = Vec::new();
-        if let Ok(dir) = std::env::var("ALMIDE_DIAGNOSTICS_DIR") {
-            paths.push(std::path::PathBuf::from(dir).join(format!("{}.md", code)));
-        }
-        if let Ok(exe) = std::env::current_exe() {
-            // Walk up parent dirs, looking for docs/diagnostics/CODE.md.
-            // Handles target/release/almide and ~/.local/bin/almide layouts.
-            let mut cur = exe.as_path();
-            for _ in 0..6 {
-                paths.push(cur.join("docs/diagnostics").join(format!("{}.md", code)));
-                if let Some(p) = cur.parent() { cur = p; } else { break; }
-            }
-        }
-        paths.push(std::path::PathBuf::from(format!("docs/diagnostics/{}.md", code)));
-        paths
-    };
-    for path in &candidates {
+    for path in &diagnostics_md_candidates(code) {
         if let Ok(content) = std::fs::read_to_string(path) {
             out(&format!("{}", content));
             return;
         }
     }
 
-    let explanation = match code {
-        "E001" => "E001: Type mismatch\n\n  The expression's type does not match what was expected.\n\n  Example:\n    fn f() -> Int = \"hello\"  // error: expected Int but got String\n\n  Fix: Change the expression to match the expected type, or use a\n  conversion function like int.to_string() or int.parse().",
-        "E002" => "E002: Undefined function\n\n  The function name was not found in the current scope, stdlib, or imports.\n\n  Example:\n    fn f() -> Int = nonexistent()  // error: undefined function\n\n  Fix: Check the function name for typos, or import the module that defines it.",
-        "E003" => "E003: Undefined variable\n\n  The variable name was not found in the current scope.\n\n  Example:\n    fn f() -> Int = x + 1  // error: undefined variable 'x'\n\n  Fix: Check the variable name for typos, or declare it with `let` or `var`\n  before use. If it's a function parameter, ensure it's in the parameter list.",
-        "E004" => "E004: Wrong argument count\n\n  The function was called with the wrong number of arguments.\n\n  Example:\n    fn add(a: Int, b: Int) -> Int = a + b\n    let x = add(1)  // error: expects 2 arguments but got 1\n\n  Fix: Provide the correct number of arguments.",
-        "E005" => "E005: Argument type mismatch\n\n  A function argument's type does not match the parameter type.\n\n  Example:\n    fn greet(name: String) -> String = name\n    greet(42)  // error: expects String but got Int\n\n  Fix: Pass the correct type, or use a conversion function.",
-        "E006" => "E006: Effect isolation violation\n\n  A pure function (fn) is calling an effect function (effect fn).\n  This violates Almide's security model — pure functions cannot perform I/O.\n\n  Example:\n    fn f() -> String = fs.read_text(\"file.txt\")  // error\n\n  Fix: Mark the calling function as `effect fn`.",
-        "E007" => "E007: Fan block in pure function\n\n  A `fan` block can only be used inside an `effect fn`.\n  Fan expressions perform concurrent I/O, which requires effect context.\n\n  Example:\n    fn f() -> (Int, Int) = fan { a(); b() }  // error\n\n  Fix: Mark the enclosing function as `effect fn`.",
-        "E008" => "E008: Mutable variable capture in fan\n\n  A `fan` block cannot capture mutable variables (var) from the outer scope.\n  This prevents data races in concurrent execution.\n\n  Example:\n    var x = 0\n    fan { use(x); ... }  // error: cannot capture var x\n\n  Fix: Use a `let` binding instead of `var`.",
-        "E009" => "E009: Assignment to immutable variable\n\n  Cannot assign to a variable declared with `let` or a function parameter.\n\n  Example:\n    let x = 1\n    x = 2  // error\n\n  Fix: Use `var` instead of `let` if the variable needs to be mutable.",
-        "E010" => "E010: Non-exhaustive match\n\n  The match expression does not cover all possible cases of the subject type.\n\n  Example:\n    type Color = | Red | Green | Blue\n    match c { Red => 1 }  // error: missing Green, Blue\n\n  Fix: Add the missing arms, or use `_` as a catch-all.",
-        _ => {
+    match builtin_error_explanation(code) {
+        Some(explanation) => out(&format!("{}", explanation)),
+        None => {
             err(&format!("Unknown error code: {}", code));
             std::process::exit(1);
         }
-    };
-    out(&format!("{}", explanation));
+    }
 }
 
 /// The parse → check → lower → emit pipeline is deeply recursive: AST and IR
@@ -908,6 +970,57 @@ fn dispatch_dep_path(name: String) {
     }
 }
 
+/// `dispatch`'s second half: the "tooling" commands (LSP, diagnostics
+/// explain, IDE queries, fmt, compile, clean, package management, self
+/// update, emit). Split out of `dispatch`'s single flat match — cyclomatic
+/// complexity counts one branch per match arm regardless of how thin the
+/// arm body is, and `Commands` has ~19 variants, so the single match alone
+/// tripped the threshold. Extracted verbatim; the split point is arbitrary
+/// (arm count, not domain semantics) — `other` is exhaustive over exactly
+/// the variants `dispatch`'s own match doesn't handle.
+fn dispatch_rest(command: Commands) {
+    match command {
+        Commands::Lsp => {
+            cli::lsp::run_lsp();
+        }
+        Commands::Explain { code } => {
+            print_error_explanation(&code);
+        }
+        Commands::Ide { cmd } => dispatch_ide(cmd),
+        Commands::Fmt { files, check, dry_run } => dispatch_fmt(files, check, dry_run),
+        Commands::Compile { module, json, dry_run, output } => {
+            cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
+        }
+        Commands::Clean => cli::cmd_clean(),
+        Commands::Add { pkg, git, tag } => dispatch_add(pkg, git, tag),
+        Commands::Deps => dispatch_deps(),
+        Commands::DepPath { name } => dispatch_dep_path(name),
+        Commands::Install { spec, tag, branch, name, bin_dir, target } => {
+            cli::cmd_install(
+                &spec,
+                tag.as_deref(),
+                branch.as_deref(),
+                name.as_deref(),
+                bin_dir.as_deref(),
+                target.as_deref(),
+            );
+        }
+        Commands::SelfUpdate { version } => {
+            cli::cmd_self_update(version.as_deref());
+        }
+        Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c } => {
+            cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c });
+        }
+        // `command`'s static type is the full `Commands` enum — Rust can't
+        // narrow it to "one of the 12 variants `dispatch` doesn't handle"
+        // across the function boundary, so this match must stay exhaustive.
+        // `dispatch`'s own match already handles the other 7 variants
+        // before ever calling this function, so this arm is genuinely
+        // unreachable at runtime.
+        _ => unreachable!("dispatch's match should have handled this Commands variant"),
+    }
+}
+
 fn dispatch(cli: Cli) {
     let command = match cli.command {
         Some(cmd) => cmd,
@@ -947,36 +1060,6 @@ fn dispatch(cli: Cli) {
         Commands::DocsGen { check } => {
             cli::cmd_docs_gen(check);
         }
-        Commands::Lsp => {
-            cli::lsp::run_lsp();
-        }
-        Commands::Explain { code } => {
-            print_error_explanation(&code);
-        }
-        Commands::Ide { cmd } => dispatch_ide(cmd),
-        Commands::Fmt { files, check, dry_run } => dispatch_fmt(files, check, dry_run),
-        Commands::Compile { module, json, dry_run, output } => {
-            cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
-        }
-        Commands::Clean => cli::cmd_clean(),
-        Commands::Add { pkg, git, tag } => dispatch_add(pkg, git, tag),
-        Commands::Deps => dispatch_deps(),
-        Commands::DepPath { name } => dispatch_dep_path(name),
-        Commands::Install { spec, tag, branch, name, bin_dir, target } => {
-            cli::cmd_install(
-                &spec,
-                tag.as_deref(),
-                branch.as_deref(),
-                name.as_deref(),
-                bin_dir.as_deref(),
-                target.as_deref(),
-            );
-        }
-        Commands::SelfUpdate { version } => {
-            cli::cmd_self_update(version.as_deref());
-        }
-        Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c } => {
-            cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c });
-        }
+        other => dispatch_rest(other),
     }
 }
