@@ -197,29 +197,72 @@ fn resolve_inference_typevars(program: &mut IrProgram) {
             _ => {}
         }
     }
+    // Router: dispatches to a group helper by expr kind after resolving the
+    // node's own `.ty`. Each helper handles an independent subset of
+    // `IrExprKind` and returns whether it matched — every arm only WRITES
+    // through its `&mut` sub-expressions (no arm reads back what an earlier
+    // arm wrote), so grouping is behavior-preserving.
     fn resolve_expr(expr: &mut IrExpr) {
         resolve_ty(&mut expr.ty);
+        if resolve_expr_calls(expr) { return; }
+        if resolve_expr_control(expr) { return; }
+        resolve_expr_containers(expr);
+    }
+
+    // Call/Lambda/BinOp: call-like and operator nodes.
+    fn resolve_expr_calls(expr: &mut IrExpr) -> bool {
         match &mut expr.kind {
-            IrExprKind::Call { args, .. } => { for a in args { resolve_expr(a); } }
+            IrExprKind::Call { args, .. } => { for a in args { resolve_expr(a); } true }
             IrExprKind::Lambda { body, params, .. } => {
                 for (_, ty) in params { resolve_ty(ty); }
                 resolve_expr(body);
+                true
             }
-            IrExprKind::BinOp { left, right, .. } => { resolve_expr(left); resolve_expr(right); }
+            IrExprKind::BinOp { left, right, .. } => { resolve_expr(left); resolve_expr(right); true }
+            _ => false,
+        }
+    }
+
+    // Match/If/Block/ForIn/While: nodes that carry statement lists or arms.
+    fn resolve_expr_control(expr: &mut IrExpr) -> bool {
+        match &mut expr.kind {
             IrExprKind::Match { subject, arms, .. } => {
                 resolve_expr(subject);
                 for arm in arms { resolve_expr(&mut arm.body); }
+                true
             }
             IrExprKind::If { cond, then, else_, .. } => {
                 resolve_expr(cond); resolve_expr(then); resolve_expr(else_);
+                true
             }
             IrExprKind::Block { stmts, expr, .. } => {
                 for s in stmts { resolve_stmt(s); }
                 if let Some(e) = expr { resolve_expr(e); }
+                true
             }
-            IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
-                for e in elements { resolve_expr(e); }
+            IrExprKind::ForIn { iterable, body, .. } => {
+                resolve_expr(iterable);
+                for s in body { resolve_stmt(s); }
+                true
             }
+            IrExprKind::While { cond, body } => {
+                resolve_expr(cond);
+                for s in body { resolve_stmt(s); }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    // Plain container/wrapper nodes: straight recursive descent.
+    fn resolve_expr_containers(expr: &mut IrExpr) {
+        if resolve_expr_wrappers(expr) { return; }
+        resolve_expr_collections(expr);
+    }
+
+    // Single-child unwrap-like variants and Member/OptionalChain.
+    fn resolve_expr_wrappers(expr: &mut IrExpr) -> bool {
+        match &mut expr.kind {
             IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
             | IrExprKind::OptionSome { expr: e } | IrExprKind::Unwrap { expr: e }
             | IrExprKind::Try { expr: e } | IrExprKind::ToOption { expr: e }
@@ -227,18 +270,22 @@ fn resolve_inference_typevars(program: &mut IrProgram) {
             | IrExprKind::ToVec { expr: e } | IrExprKind::UnOp { operand: e, .. }
             | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e } => {
                 resolve_expr(e);
+                true
+            }
+            IrExprKind::Member { object, .. } | IrExprKind::OptionalChain { expr: object, .. } => { resolve_expr(object); true }
+            _ => false,
+        }
+    }
+
+    // List/Tuple/Fan/UnwrapOr/Record/IndexAccess/Range/StringInterp:
+    // multi-child collection-literal and dual-child nodes.
+    fn resolve_expr_collections(expr: &mut IrExpr) {
+        match &mut expr.kind {
+            IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
+                for e in elements { resolve_expr(e); }
             }
             IrExprKind::UnwrapOr { expr: e, fallback } => { resolve_expr(e); resolve_expr(fallback); }
             IrExprKind::Record { fields, .. } => { for (_, v) in fields { resolve_expr(v); } }
-            IrExprKind::ForIn { iterable, body, .. } => {
-                resolve_expr(iterable);
-                for s in body { resolve_stmt(s); }
-            }
-            IrExprKind::While { cond, body } => {
-                resolve_expr(cond);
-                for s in body { resolve_stmt(s); }
-            }
-            IrExprKind::Member { object, .. } | IrExprKind::OptionalChain { expr: object, .. } => resolve_expr(object),
             IrExprKind::IndexAccess { object, index } | IrExprKind::Range { start: object, end: index, .. } => {
                 resolve_expr(object); resolve_expr(index);
             }
