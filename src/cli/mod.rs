@@ -82,6 +82,64 @@ fn incremental_cache_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(".almide/cache")
 }
 
+/// The v1 MIR trust-spine render used by `--verified`/`--native-verified`:
+/// try `almide_mir::pipeline::try_render_rust_source`, falling back to the v0
+/// `rs_code` on any WALL — a v1-rendered program is never wrong, so a wall
+/// just means "build via v0 exactly as without the flag". Shared by
+/// `cmd_build`'s native path (`build.rs`) and `compile_to_binary_with`
+/// (`run.rs`), which had identical copies of this try/fallback logic gated
+/// behind their own (different) `native_verified` conditions.
+pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> String {
+    let source_text = std::fs::read_to_string(file).unwrap_or_default();
+    match almide_mir::pipeline::try_render_rust_source(&source_text) {
+        Ok(v1_code) => {
+            if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+                err(&format!("native: v1 trust-spine render"));
+            }
+            v1_code
+        }
+        Err(e) => {
+            if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+                err(&format!("native: v1 walled ({e:?}) — falling back to v0 codegen"));
+            }
+            rs_code
+        }
+    }
+}
+
+/// Load `[native-deps]` and dependency-presence info from `almide.toml`,
+/// searching first in `file`'s directory then CWD. `source_root` (the
+/// directory containing `almide.toml`, where `native/*.rs` lives) is
+/// `Some` whenever there's anything to inject — native deps or
+/// `[dependencies]` — `None` otherwise, matching the previous inline
+/// `!native_deps.is_empty() || has_deps` gate. Shared by `cmd_build`
+/// (`build.rs`) and `compile_to_binary_with` (`run.rs`), which had
+/// identical copies of this almide.toml lookup.
+pub(crate) fn load_native_build_config(file: &str) -> (Vec<crate::project::NativeDep>, Option<std::path::PathBuf>) {
+    let file_dir = std::path::Path::new(file).parent()
+        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let toml_path = {
+        let candidate = file_dir.join("almide.toml");
+        if candidate.exists() { candidate } else { std::path::PathBuf::from("almide.toml") }
+    };
+    let parsed = toml_path.exists().then(|| {
+        // A broken almide.toml must not be SILENT: dropping it here also drops
+        // [native-deps]/native/ injection, and the build then fails later as an
+        // opaque E0433 on the native module.
+        crate::project::parse_toml(&toml_path)
+            .map_err(|e| err(&format!("warning: {} ignored: {}", toml_path.display(), e)))
+            .ok()
+    }).flatten();
+    let native_deps = parsed.as_ref().map(|p| p.native_deps.clone()).unwrap_or_default();
+    let toml_dir = toml_path.parent()
+        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
+    let source_root = if !native_deps.is_empty() || has_deps { Some(toml_dir) } else { None };
+    (native_deps, source_root)
+}
+
 /// Cargo.toml template for generated Rust projects (without HTTP/TLS).
 const GENERATED_CARGO_TOML: &str = r#"[package]
 name = "almide-out"

@@ -68,53 +68,17 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
 pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>, native_verified: bool) -> Result<std::path::PathBuf, String> {
     let rs_code = try_compile(file, no_check).map_err(|_| "compile failed".to_string())?;
     let rs_code = if native_verified && !test_mode {
-        let source_text = std::fs::read_to_string(file).unwrap_or_default();
-        match almide_mir::pipeline::try_render_rust_source(&source_text) {
-            Ok(v1_code) => {
-                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-                    err(&format!("native: v1 trust-spine render"));
-                }
-                v1_code
-            }
-            Err(e) => {
-                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-                    err(&format!("native: v1 walled ({e:?}) — falling back to v0 codegen"));
-                }
-                rs_code
-            }
-        }
+        super::render_v1_native_or_fallback(file, rs_code)
     } else {
         rs_code
     };
 
     // Load native deps from almide.toml (search in input file's directory, then CWD).
     // source_root is the directory containing almide.toml (where native/ lives).
-    let file_dir = std::path::Path::new(file).parent()
-        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let toml_path = {
-        let candidate = file_dir.join("almide.toml");
-        if candidate.exists() { candidate } else { std::path::PathBuf::from("almide.toml") }
-    };
-    let parsed = toml_path.exists().then(|| {
-        // A broken almide.toml must not be SILENT: dropping it here also drops
-        // [native-deps]/native/ injection, and the build then fails later as an
-        // opaque E0433 on the native module (almide-sqlite: a hyphenated
-        // package name errored in parse_toml and rusqlite never reached the
-        // generated Cargo.toml).
-        crate::project::parse_toml(&toml_path)
-            .map_err(|e| err(&format!("warning: {} ignored: {}", toml_path.display(), e)))
-            .ok()
-    }).flatten();
-    let native_deps = parsed.as_ref().map(|p| p.native_deps.as_slice()).unwrap_or(&[]);
-    let toml_dir = toml_path.parent()
-        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
-    let source_root = if !native_deps.is_empty() || has_deps { Some(toml_dir.as_path()) } else { None };
+    let (native_deps, source_root) = super::load_native_build_config(file);
 
     let use_test_harness = test_mode || (!rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main("));
-    build_native_cached(&rs_code, use_test_harness, release, project_dir_override, native_deps, source_root)
+    build_native_cached(&rs_code, use_test_harness, release, project_dir_override, &native_deps, source_root.as_deref())
 }
 
 /// Build a native binary from GENERATED Rust source through a content-addressed

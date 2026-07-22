@@ -21,15 +21,10 @@ pub struct BuildArgs<'a> {
     pub native_verified: bool,
 }
 
-pub fn cmd_build(args: BuildArgs) {
-    // Destructured immediately so the function body below is untouched
-    // (verbatim) — this is purely a call-site params bundling.
-    let BuildArgs {
-        file, output, target, release, fast, unchecked_index: _unchecked_index,
-        no_check, repr_c, cdylib, emit_unverified, verified, native_verified,
-    } = args;
-    // The npm/JavaScript target was removed with the TS backend; reject it with a
-    // clear pointer instead of emitting a non-functional stub package.
+/// The npm/JavaScript target was removed with the TS backend; reject it with
+/// a clear pointer instead of emitting a non-functional stub package. Exits
+/// the process (never returns) when `target` names a removed target.
+fn reject_removed_target(target: Option<&str>) {
     if matches!(target, Some("npm" | "js" | "ts" | "javascript" | "typescript")) {
         let t = target.unwrap_or("npm");
         err(&format!(
@@ -40,15 +35,12 @@ pub fn cmd_build(args: BuildArgs) {
         ));
         std::process::exit(2);
     }
-    let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
-    let is_wasm_direct = matches!(target, Some("wasm"));
+}
 
-    // Direct WASM emit: .almd → IR → WASM binary (no rustc)
-    if is_wasm_direct {
-        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified);
-        return;
-    }
-
+/// Compute the build's output path: `file`/`almide.toml`-derived default
+/// unless `-o` was given, plus the Windows `.exe` auto-suffix for native
+/// builds. Extracted verbatim from `cmd_build`.
+fn compute_output_path(file: &str, output: Option<&str>, is_wasm: bool) -> String {
     let default_output = if is_wasm {
         format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"))
     } else if std::path::Path::new("almide.toml").exists() {
@@ -64,13 +56,87 @@ pub fn cmd_build(args: BuildArgs) {
     let output_raw = output.unwrap_or(&default_output);
 
     // On Windows, auto-append .exe for native builds
-    let output = if cfg!(target_os = "windows") && !is_wasm
+    if cfg!(target_os = "windows") && !is_wasm
         && !output_raw.ends_with(".exe") && !output_raw.ends_with(".wasm")
     {
         format!("{}.exe", output_raw)
     } else {
         output_raw.to_string()
-    };
+    }
+}
+
+/// `cmd_build`'s cdylib target: build a shared library (.dylib/.so).
+/// Extracted verbatim — exits the process on a compile error, otherwise
+/// prints the built path and returns.
+fn cmd_build_cdylib(rs_code: &str, output: &str, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>) {
+    let project_dir = std::env::temp_dir().join("almide-build-cdylib");
+    // Strip fn main() from the code — cdylib has no entry point
+    let lib_code = rs_code.replace("fn main()", "fn __almide_unused_main()");
+    // Serialize across processes: the shared scratch dir's src + target would
+    // otherwise be corrupted by a concurrent `almide build`.
+    let _ = std::fs::create_dir_all(&project_dir);
+    let _flock = super::run::BuildDirLock::acquire(&project_dir)
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    match super::cargo_build_cdylib(&lib_code, &project_dir, output, use_release, native_deps, source_root) {
+        Ok(lib_path) => {
+            err(&format!("Built {}", lib_path.display()));
+        }
+        Err(e) => {
+            err(&format!("Compile error:\n{}", e));
+            std::process::exit(1);
+        }
+    }
+}
+
+/// `cmd_build`'s native binary target: the content-cached build shared with
+/// `almide run` — the cache key is the generated code, so identical output
+/// from any caller (or any source path) reuses one binary and skips cargo
+/// entirely. Locking and atomic binary staging live inside
+/// `build_native_cached`; the copy-out below reads a content-named,
+/// atomically-renamed file, so it needs no lock. Extracted verbatim.
+fn cmd_build_native(rs_code: &str, output: &str, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>) {
+    match super::run::build_native_cached(rs_code, false, use_release, None, native_deps, source_root) {
+        Ok(bin_path) => {
+            // Copy the built binary to the desired output location. Create the
+            // output's parent directory first — `-o build/app` must not fail
+            // just because `build/` doesn't exist yet (it's the natural place
+            // to put a binary, and every caller otherwise needs a manual mkdir).
+            if let Some(parent) = std::path::Path::new(&output).parent() {
+                if !parent.as_os_str().is_empty() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+            }
+            if let Err(e) = std::fs::copy(&bin_path, output) {
+                err(&format!("Failed to copy binary to {}: {}", output, e));
+                std::process::exit(1);
+            }
+            err(&format!("Built {}", output));
+        }
+        Err(e) => {
+            err(&format!("Compile error:\n{}", e));
+            std::process::exit(1);
+        }
+    }
+}
+
+pub fn cmd_build(args: BuildArgs) {
+    // Destructured immediately so the function body below is untouched
+    // (verbatim) — this is purely a call-site params bundling.
+    let BuildArgs {
+        file, output, target, release, fast, unchecked_index: _unchecked_index,
+        no_check, repr_c, cdylib, emit_unverified, verified, native_verified,
+    } = args;
+    reject_removed_target(target);
+    let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
+    let is_wasm_direct = matches!(target, Some("wasm"));
+
+    // Direct WASM emit: .almd → IR → WASM binary (no rustc)
+    if is_wasm_direct {
+        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified);
+        return;
+    }
+
+    let output = compute_output_path(file, output, is_wasm);
 
     let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false };
     let (rs_code, _ir) = crate::try_compile_with_ir(file, no_check, &opts)
@@ -88,21 +154,7 @@ pub fn cmd_build(args: BuildArgs) {
     // falls back to the v0 source above — honest-wall discipline: a v1-rendered
     // program is never wrong.
     let rs_code = if native_verified && !repr_c && !cdylib {
-        let source_text = std::fs::read_to_string(file).unwrap_or_default();
-        match almide_mir::pipeline::try_render_rust_source(&source_text) {
-            Ok(v1_code) => {
-                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-                    err(&format!("native: v1 trust-spine render"));
-                }
-                v1_code
-            }
-            Err(e) => {
-                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
-                    err(&format!("native: v1 walled ({e:?}) — falling back to v0 codegen"));
-                }
-                rs_code
-            }
-        }
+        super::render_v1_native_or_fallback(file, rs_code)
     } else {
         rs_code
     };
@@ -113,78 +165,15 @@ pub fn cmd_build(args: BuildArgs) {
     // fails with E0433 / a missing dep (#719). source_root is the directory
     // containing almide.toml (where native/ lives).
     let use_release = release || fast;
-    let file_dir = std::path::Path::new(file).parent()
-        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let toml_path = {
-        let candidate = file_dir.join("almide.toml");
-        if candidate.exists() { candidate } else { std::path::PathBuf::from("almide.toml") }
-    };
-    let parsed = toml_path.exists()
-        .then(|| {
-            // Mirror run.rs: a broken almide.toml silently dropped
-            // [native-deps]/native/ injection → opaque E0433 downstream.
-            project::parse_toml(&toml_path)
-                .map_err(|e| err(&format!("warning: {} ignored: {}", toml_path.display(), e)))
-                .ok()
-        })
-        .flatten();
-    let native_deps = parsed.as_ref().map(|p| p.native_deps.as_slice()).unwrap_or(&[]);
-    let toml_dir = toml_path.parent()
-        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
-    let source_root = if !native_deps.is_empty() || has_deps { Some(toml_dir.as_path()) } else { None };
+    let (native_deps, source_root) = super::load_native_build_config(file);
 
     // cdylib target: build shared library (.dylib/.so)
     if cdylib {
-        let project_dir = std::env::temp_dir().join("almide-build-cdylib");
-        // Strip fn main() from the code — cdylib has no entry point
-        let lib_code = rs_code.replace("fn main()", "fn __almide_unused_main()");
-        // Serialize across processes: the shared scratch dir's src + target would
-        // otherwise be corrupted by a concurrent `almide build`.
-        let _ = std::fs::create_dir_all(&project_dir);
-        let _flock = super::run::BuildDirLock::acquire(&project_dir)
-            .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
-        match super::cargo_build_cdylib(&lib_code, &project_dir, &output, use_release, native_deps, source_root) {
-            Ok(lib_path) => {
-                err(&format!("Built {}", lib_path.display()));
-            }
-            Err(e) => {
-                err(&format!("Compile error:\n{}", e));
-                std::process::exit(1);
-            }
-        }
+        cmd_build_cdylib(&rs_code, &output, use_release, &native_deps, source_root.as_deref());
         return;
     }
 
-    // Native target: the content-cached build shared with `almide run` — the
-    // cache key is the generated code, so identical output from any caller (or
-    // any source path) reuses one binary and skips cargo entirely. Locking and
-    // atomic binary staging live inside build_native_cached; the copy-out below
-    // reads a content-named, atomically-renamed file, so it needs no lock.
-    match super::run::build_native_cached(&rs_code, false, use_release, None, native_deps, source_root) {
-        Ok(bin_path) => {
-            // Copy the built binary to the desired output location. Create the
-            // output's parent directory first — `-o build/app` must not fail
-            // just because `build/` doesn't exist yet (it's the natural place
-            // to put a binary, and every caller otherwise needs a manual mkdir).
-            if let Some(parent) = std::path::Path::new(&output).parent() {
-                if !parent.as_os_str().is_empty() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-            }
-            if let Err(e) = std::fs::copy(&bin_path, &output) {
-                err(&format!("Failed to copy binary to {}: {}", output, e));
-                std::process::exit(1);
-            }
-            err(&format!("Built {}", output));
-        }
-        Err(e) => {
-            err(&format!("Compile error:\n{}", e));
-            std::process::exit(1);
-        }
-    }
+    cmd_build_native(&rs_code, &output, use_release, &native_deps, source_root.as_deref());
 }
 
 /// Build for WASI target using bare rustc (no external crate deps).
@@ -317,8 +306,11 @@ fn lower_one_wasm_module(
     ir_program.modules.push(mod_ir_module);
 }
 
-pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool) -> Result<(Vec<u8>, bool), ()> {
-    let (mut program, source_text, parse_errors) = parse_file(file);
+/// `compile_to_wasm_bytes`'s parse + dependency-fetch + import-resolution
+/// phase. Extracted verbatim — prints diagnostics and returns `Err(())` on
+/// any parse/fetch/resolve failure, mirroring the original early returns.
+fn parse_and_resolve_wasm(file: &str) -> Result<(almide::ast::Program, String, resolve::ResolvedModules), ()> {
+    let (program, source_text, parse_errors) = parse_file(file);
 
     if !parse_errors.is_empty() {
         for e in &parse_errors {
@@ -341,38 +333,45 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         vec![]
     };
 
-    let mut resolved = match resolve::resolve_imports_with_deps(file, &program, &dep_paths) {
+    let resolved = match resolve::resolve_imports_with_deps(file, &program, &dep_paths) {
         Ok(r) => r,
         Err(e) => { err(&format!("{}", e)); return Err(()); }
     };
 
-    // v1 `--verified`: capture the FRESH (un-inferred) cross-module siblings now, before the loop
-    // below mutates them in place — the v1 pipeline re-runs its own canonicalize/infer/lower from
-    // raw programs (exactly the render_program example's `discover_self_modules` input).
-    // #782: always collected — the v1 renderer is the only wasm path.
-    let v1_self_modules: Vec<(String, almide_lang::ast::Program, bool)> =
-        resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect();
+    Ok((program, source_text, resolved))
+}
 
-    // Type check
+/// `compile_to_wasm_bytes`'s type-check phase: canonicalize, build the
+/// `Checker`, refresh module top-let types (#785), and infer the entry
+/// program. Extracted verbatim — prints diagnostics and returns `Err(())`
+/// on any type error.
+fn typecheck_wasm_program(file: &str, source_text: &str, program: &mut almide::ast::Program, resolved: &resolve::ResolvedModules) -> Result<check::Checker, ()> {
     let canon = canonicalize::canonicalize_program(
-        &program,
+        program,
         resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
     );
     let mut checker = check::Checker::from_env(canon.env);
-    checker.set_source(file, &source_text);
+    checker.set_source(file, source_text);
     checker.diagnostics = canon.diagnostics;
     // #785: module top-let types must be fully inferred before the entry
     // program reads them (drivers infer the entry FIRST; without this the
     // readers see the registration seed — Unknown for non-literal inits).
     almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
-    let diagnostics = checker.infer_program(&mut program);
+    let diagnostics = checker.infer_program(program);
     if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
         for d in &diagnostics {
-            err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, source_text)));
         }
         return Err(());
     }
+    Ok(checker)
+}
 
+/// `compile_to_wasm_bytes`'s IR construction phase: pre-register versioned
+/// module names, lower the entry program, lower each resolved user module
+/// (bundled stdlib included so `@inline_rust` fns reach the bundled-dispatch
+/// path), link, optimize, and monomorphize. Extracted verbatim.
+fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> almide::ir::IrProgram {
     // Pre-register versioned names before root lowering
     for (name, _, pkg_id, _) in &resolved.modules {
         if let Some(pid) = pkg_id.as_ref() {
@@ -381,13 +380,13 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
             checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&v));
         }
     }
-    let mut ir_program = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+    let mut ir_program = almide::lower::lower_program(program, &checker.env, &checker.type_map);
 
     // Lower user modules to IR. Bundled stdlib modules (stdlib/<m>.almd) are
     // included so their fns can be invoked through the bundled-dispatch path;
     // colliding TOML-runtime fns are pruned to avoid duplicate definitions.
     for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-        lower_one_wasm_module(&mut checker, name, mod_prog, pkg_id, &mut ir_program);
+        lower_one_wasm_module(checker, name, mod_prog, pkg_id, &mut ir_program);
     }
 
     // IR link: merge dependency modules into root
@@ -399,11 +398,16 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // Monomorphize
     almide::mono::monomorphize(&mut ir_program);
 
-    // Verify IR integrity — gate the WASM emit on the same check the native
-    // path (main.rs) enforces. Without this an invalid IR (e.g. an unresolved
-    // closure-call result type) is emitted as a structurally-broken module that
-    // `almide build` reports as success (rc 0) but wasmtime refuses to load.
-    let verify_errors = almide::ir::verify_program(&ir_program);
+    ir_program
+}
+
+/// `compile_to_wasm_bytes`'s IR-integrity gate — the same check the native
+/// path (main.rs) enforces. Without this an invalid IR (e.g. an unresolved
+/// closure-call result type) is emitted as a structurally-broken module that
+/// `almide build` reports as success (rc 0) but wasmtime refuses to load.
+/// Extracted verbatim.
+fn verify_wasm_ir(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
+    let verify_errors = almide::ir::verify_program(ir_program);
     if !verify_errors.is_empty() {
         for e in &verify_errors {
             err(&format!("internal compiler error: {}", e));
@@ -411,11 +415,16 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         err(&format!("{} IR verification error(s) — no WASM emitted", verify_errors.len()));
         return Err(());
     }
+    Ok(())
+}
 
-    // Native-only matrix ops (e.g. qwen3_block_q1_0_kv: a packed-GGUF block with
-    // no primitive decomposition) have no WASM lowering. Reject at build time with
-    // a clear message rather than letting the emitter ICE deep in codegen.
-    if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(&ir_program) {
+/// `compile_to_wasm_bytes`'s native-only-matrix-op guard: native-only matrix
+/// ops (e.g. qwen3_block_q1_0_kv: a packed-GGUF block with no primitive
+/// decomposition) have no WASM lowering. Reject at build time with a clear
+/// message rather than letting the emitter ICE deep in codegen. Extracted
+/// verbatim.
+fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
+    if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(ir_program) {
         err(&format!(
             "error: matrix.{op} is native-only (a packed-GGUF fast path with no WASM \
              lowering) — not available on the WASM target. Use --target rust, or compose \
@@ -423,21 +432,19 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         ));
         return Err(());
     }
+    Ok(())
+}
 
-    // v1 OPT-IN verified codegen: after every v0 gate above (type-check, IR-verify, native-matrix
-    // guard) has passed, TRY the PCC-verified trust-spine renderer. It is byte-
-    // identical to v0 where it lowers and WALLS (`Err`) otherwise — on a wall we fall through to
-    // v0 codegen below. Honest-wall: a v1 module is never wrong; a walled program builds via v0
-    // exactly as without `--verified`.
-    // #782: the v0 wasm emitter is RETIRED — the v1 PCC-verified trust-spine
-    // renderer is the ONLY wasm path. A v1 wall is an honest, diagnosed hard
-    // error, never a silent fallback into unverified codegen: a program that
-    // compiles is verified, a program the renderer cannot verify is refused
-    // with the wall reason (refusal over risk — the medical-grade bar).
-    let _ = (&mut ir_program, allow_unverified, verified);
+/// `compile_to_wasm_bytes`'s v1 PCC-verified trust-spine render — the ONLY
+/// wasm path (#782: the v0 wasm emitter is retired). A v1 wall is an
+/// honest, diagnosed hard error, never a silent fallback into unverified
+/// codegen: a program that compiles is verified, a program the renderer
+/// cannot verify is refused with the wall reason (refusal over risk — the
+/// medical-grade bar). Extracted verbatim.
+fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang::ast::Program, bool)]) -> Result<(Vec<u8>, bool), ()> {
     match almide_mir::pipeline::try_render_wasm_source(
-        &source_text,
-        &v1_self_modules,
+        source_text,
+        v1_self_modules,
         std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok(),
     ) {
         Ok(wat) => match wat::parse_str(&wat) {
@@ -467,6 +474,30 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
             Err(())
         }
     }
+}
+
+pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool) -> Result<(Vec<u8>, bool), ()> {
+    let (mut program, source_text, mut resolved) = parse_and_resolve_wasm(file)?;
+
+    // v1 `--verified`: capture the FRESH (un-inferred) cross-module siblings now, before the loop
+    // below mutates them in place — the v1 pipeline re-runs its own canonicalize/infer/lower from
+    // raw programs (exactly the render_program example's `discover_self_modules` input).
+    // #782: always collected — the v1 renderer is the only wasm path.
+    let v1_self_modules: Vec<(String, almide_lang::ast::Program, bool)> =
+        resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect();
+
+    let mut checker = typecheck_wasm_program(file, &source_text, &mut program, &resolved)?;
+    let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved);
+    verify_wasm_ir(&ir_program)?;
+    check_no_native_only_matrix(&ir_program)?;
+
+    // v1 OPT-IN verified codegen: after every v0 gate above (type-check, IR-verify, native-matrix
+    // guard) has passed, TRY the PCC-verified trust-spine renderer. It is byte-
+    // identical to v0 where it lowers and WALLS (`Err`) otherwise — on a wall we fall through to
+    // v0 codegen below. Honest-wall: a v1 module is never wrong; a walled program builds via v0
+    // exactly as without `--verified`.
+    let _ = (&mut ir_program, allow_unverified, verified);
+    render_wasm_module(&source_text, &v1_self_modules)
 }
 
 /// Run `wasm-opt -O3 --enable-simd` on the output file, in-place.
