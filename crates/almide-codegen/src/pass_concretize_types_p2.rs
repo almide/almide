@@ -378,85 +378,94 @@ pub fn infer_var_type_from_body(body: &IrExpr, var: VarId) -> Option<Ty> {
     }
 }
 
+/// `Some(ty.clone())` when `ty` carries no unresolved type variable,
+/// `None` otherwise. The single repeated "is this node's type already
+/// concrete" check that most [`resolve_node_ty`] arms perform.
+fn if_concrete(ty: &Ty) -> Option<Ty> {
+    if !ty.has_unresolved_deep() { Some(ty.clone()) } else { None }
+}
+
+/// `Member { object, field }` arm of [`resolve_node_ty`].
+fn resolve_member_ty(object: &IrExpr, field: &almide_base::intern::Sym, vt: &VarTable, symbols: &SymbolTable) -> Option<Ty> {
+    let obj_ty = effective_ty(object, vt);
+    match &obj_ty {
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            fields.iter()
+                .find(|(n, _)| n == field.as_str())
+                .map(|(_, t)| t.clone())
+                .filter(|t| !t.has_unresolved_deep())
+        }
+        Ty::Named(name, _) => {
+            symbols.lookup_field(name.as_str(), field.as_str())
+                .filter(|t| !t.has_unresolved_deep())
+                .cloned()
+        }
+        _ => None,
+    }
+}
+
+/// `Lambda { params, body, .. }` arm of [`resolve_node_ty`].
+fn resolve_lambda_ty(params: &[(VarId, Ty)], body: &IrExpr) -> Option<Ty> {
+    let fparams: Vec<Ty> = params.iter().map(|(_, t)| t.clone()).collect();
+    if fparams.iter().any(Ty::has_unresolved_deep) || (body.ty).has_unresolved_deep() {
+        return None;
+    }
+    Some(Ty::Fn {
+        params: fparams,
+        ret: Box::new(body.ty.clone()),
+    })
+}
+
+/// `IndexAccess { object, .. }` arm of [`resolve_node_ty`]: for `List[T]`,
+/// the result is `T`. Uses `effective_ty` to resolve through the VarTable.
+fn resolve_index_access_ty(object: &IrExpr, vt: &VarTable) -> Option<Ty> {
+    let obj_ty = effective_ty(object, vt);
+    if obj_ty.has_unresolved_deep() {
+    }
+    if let Ty::Applied(_, args) = &obj_ty {
+        args.first().cloned().filter(|t| !t.has_unresolved_deep())
+    } else { None }
+}
+
+/// `MapAccess { object, .. }` arm of [`resolve_node_ty`]: `Map[K,V]` → `Option[V]`.
+fn resolve_map_access_ty(object: &IrExpr, vt: &VarTable) -> Option<Ty> {
+    let obj_ty = effective_ty(object, vt);
+    if let Ty::Applied(_, args) = &obj_ty {
+        args.get(1).cloned()
+            .filter(|t| !t.has_unresolved_deep())
+            .map(|v| Ty::Applied(
+                almide_lang::types::constructor::TypeConstructorId::Option, vec![v],
+            ))
+    } else { None }
+}
+
 fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Option<Ty> {
     match &expr.kind {
-        IrExprKind::Var { id } => {
-            let vt_ty = &vt.get(*id).ty;
-            if !vt_ty.has_unresolved_deep() { Some(vt_ty.clone()) } else { None }
-        }
-        IrExprKind::EnvLoad { env_var, .. } => {
-            let vt_ty = &vt.get(*env_var).ty;
-            if !vt_ty.has_unresolved_deep() { Some(vt_ty.clone()) } else { None }
-        }
+        IrExprKind::Var { id } => if_concrete(&vt.get(*id).ty),
+        IrExprKind::EnvLoad { env_var, .. } => if_concrete(&vt.get(*env_var).ty),
         IrExprKind::TupleIndex { object, index } => {
             let obj_ty = effective_ty(object, vt);
             if let Ty::Tuple(elems) = &obj_ty {
                 elems.get(*index).cloned().filter(|t| !t.has_unresolved_deep())
             } else { None }
         }
-        IrExprKind::Member { object, field } => {
-            let obj_ty = effective_ty(object, vt);
-            match &obj_ty {
-                Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                    fields.iter()
-                        .find(|(n, _)| n == field.as_str())
-                        .map(|(_, t)| t.clone())
-                        .filter(|t| !t.has_unresolved_deep())
-                }
-                Ty::Named(name, _) => {
-                    symbols.lookup_field(name.as_str(), field.as_str())
-                        .filter(|t| !t.has_unresolved_deep())
-                        .cloned()
-                }
-                _ => None,
-            }
-        }
+        IrExprKind::Member { object, field } => resolve_member_ty(object, field, vt, symbols),
         IrExprKind::BinOp { op, left, right } => {
-            op.result_ty().or_else(|| {
-                if !(left.ty).has_unresolved_deep() { Some(left.ty.clone()) }
-                else if !(right.ty).has_unresolved_deep() { Some(right.ty.clone()) }
-                else { None }
-            })
+            op.result_ty().or_else(|| if_concrete(&left.ty).or_else(|| if_concrete(&right.ty)))
         }
-        IrExprKind::UnOp { operand, .. } => {
-            // Most UnOps (Neg, Not, Minus) preserve operand type
-            if !(operand.ty).has_unresolved_deep() { Some(operand.ty.clone()) } else { None }
-        }
-        IrExprKind::Block { expr: Some(tail), .. } => {
-            if !(tail.ty).has_unresolved_deep() { Some(tail.ty.clone()) } else { None }
-        }
-        IrExprKind::If { then, else_, .. } => {
-            if !(then.ty).has_unresolved_deep() { Some(then.ty.clone()) }
-            else if !(else_.ty).has_unresolved_deep() { Some(else_.ty.clone()) }
-            else { None }
-        }
+        // Most UnOps (Neg, Not, Minus) preserve operand type
+        IrExprKind::UnOp { operand, .. } => if_concrete(&operand.ty),
+        IrExprKind::Block { expr: Some(tail), .. } => if_concrete(&tail.ty),
+        IrExprKind::If { then, else_, .. } => if_concrete(&then.ty).or_else(|| if_concrete(&else_.ty)),
         IrExprKind::Match { arms, .. } => {
-            arms.iter()
-                .find_map(|arm| if !(arm.body.ty).has_unresolved_deep() { Some(arm.body.ty.clone()) } else { None })
+            arms.iter().find_map(|arm| if_concrete(&arm.body.ty))
         }
-        IrExprKind::Lambda { params, body, .. } => {
-            let fparams: Vec<Ty> = params.iter().map(|(_, t)| t.clone()).collect();
-            if fparams.iter().any(Ty::has_unresolved_deep) || (body.ty).has_unresolved_deep() {
-                return None;
-            }
-            Some(Ty::Fn {
-                params: fparams,
-                ret: Box::new(body.ty.clone()),
-            })
-        }
-        IrExprKind::IndexAccess { object, .. } => {
-            // For List[T], result is T. Use effective_ty to resolve through VarTable.
-            let obj_ty = effective_ty(object, vt);
-            if obj_ty.has_unresolved_deep() {
-            }
-            if let Ty::Applied(_, args) = &obj_ty {
-                args.first().cloned().filter(|t| !t.has_unresolved_deep())
-            } else { None }
-        }
+        IrExprKind::Lambda { params, body, .. } => resolve_lambda_ty(params, body),
+        IrExprKind::IndexAccess { object, .. } => resolve_index_access_ty(object, vt),
         IrExprKind::List { elements } => {
             // List[T] where T = first element's type
             elements.first()
-                .and_then(|e| if !(e.ty).has_unresolved_deep() { Some(e.ty.clone()) } else { None })
+                .and_then(|e| if_concrete(&e.ty))
                 .map(|t| Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![t]))
         }
         IrExprKind::Tuple { elements } => {
@@ -464,18 +473,11 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
             if elem_tys.iter().any(Ty::has_unresolved_deep) { None }
             else { Some(Ty::Tuple(elem_tys)) }
         }
-        IrExprKind::OptionSome { expr } => {
-            // `some(x)` has type `Option[x.ty]`; recover when the type
-            // checker left an `Option[Unknown]` placeholder (typical for
-            // payloads built from pattern-bound names).
-            if expr.ty.has_unresolved_deep() { None }
-            else {
-                Some(Ty::Applied(
-                    almide_lang::types::constructor::TypeConstructorId::Option,
-                    vec![expr.ty.clone()],
-                ))
-            }
-        }
+        // `some(x)` has type `Option[x.ty]`; recover when the type
+        // checker left an `Option[Unknown]` placeholder (typical for
+        // payloads built from pattern-bound names).
+        IrExprKind::OptionSome { expr } => if_concrete(&expr.ty)
+            .map(|t| Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, vec![t])),
         IrExprKind::LitInt { .. } => Some(Ty::Int),
         IrExprKind::LitFloat { .. } => Some(Ty::Float),
         IrExprKind::LitBool { .. } => Some(Ty::Bool),
@@ -484,9 +486,7 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
         // StringInterp always produces String
         IrExprKind::StringInterp { .. } => Some(Ty::String),
         // Clone preserves the inner type
-        IrExprKind::Clone { expr } => {
-            if !expr.ty.has_unresolved_deep() { Some(expr.ty.clone()) } else { None }
-        }
+        IrExprKind::Clone { expr } => if_concrete(&expr.ty),
         // Layout-transparent codegen wrappers: the node's value type is the
         // inner expression's type. `*box` (Deref), `Box::new(x)` (BoxNew),
         // `(x).to_vec()` (ToVec), `&x` / `&*x` (Borrow), and `await x` all
@@ -499,33 +499,16 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
         | IrExprKind::BoxNew { expr }
         | IrExprKind::ToVec { expr }
         | IrExprKind::Borrow { expr, .. }
-        | IrExprKind::Await { expr } => {
-            if !expr.ty.has_unresolved_deep() { Some(expr.ty.clone()) } else { None }
-        }
+        | IrExprKind::Await { expr } => if_concrete(&expr.ty),
         // Range produces List[Int]
         IrExprKind::Range { .. } => Some(Ty::Applied(
             almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Int],
         )),
         // MapAccess: Map[K,V] → Option[V]
-        IrExprKind::MapAccess { object, .. } => {
-            let obj_ty = effective_ty(object, vt);
-            if let Ty::Applied(_, args) = &obj_ty {
-                args.get(1).cloned()
-                    .filter(|t| !t.has_unresolved_deep())
-                    .map(|v| Ty::Applied(
-                        almide_lang::types::constructor::TypeConstructorId::Option, vec![v],
-                    ))
-            } else { None }
-        }
+        IrExprKind::MapAccess { object, .. } => resolve_map_access_ty(object, vt),
         // ResultOk wraps in Result[T, E]
-        IrExprKind::ResultOk { expr } => {
-            if !expr.ty.has_unresolved_deep() {
-                Some(Ty::Applied(
-                    almide_lang::types::constructor::TypeConstructorId::Result,
-                    vec![expr.ty.clone(), Ty::String],
-                ))
-            } else { None }
-        }
+        IrExprKind::ResultOk { expr } => if_concrete(&expr.ty)
+            .map(|t| Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, vec![t, Ty::String])),
         IrExprKind::Call { target, args, .. } => resolve_call_ret_ty(target, args, vt, symbols),
         IrExprKind::RuntimeCall { symbol, args } => {
             // Post-IntrinsicLowering, the `Call { target: Module }` node
