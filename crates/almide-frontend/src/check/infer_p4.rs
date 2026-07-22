@@ -5,234 +5,18 @@
 impl Checker {
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
         match stmt {
-            ast::Stmt::Let { name, ty, value, span } => {
-                let val_ty = self.infer_expr(value);
-                let final_ty = if let Some(te) = ty {
-                    let declared = self.resolve_type_expr(te);
-                    // E029: an undeclared Named in the annotation compiles to a
-                    // nonexistent Rust type after `check` accepted (fuzz index 940).
-                    self.deferred_unknown_type_checks.push((
-                        declared.clone(), *span, format!("let '{}'", name),
-                    ));
-                    self.record_int_literal_context(value, &declared);
-                    self.constrain(declared.clone(), val_ty, format!("let {}", name));
-                    declared
-                } else {
-                    let t = resolve_ty(&val_ty, &self.uf);
-                    // Auto-unwrap Result in effect fns (but not in test blocks),
-                    // unless this binding is later used as a `match x { ok(_) =>
-                    // ..., err(_) => ... }` subject — in which case the user
-                    // wants to inspect the Result directly.
-                    let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)));
-                    // #662: an un-annotated binding whose value type carries an
-                    // unconstrained phantom slot (only an un-exercised branch
-                    // could pin it) is undecidable — re-check post-solve.
-                    self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
-                        ty: unwrapped.clone(), name: Some(name.to_string()), span: value.span,
-                    });
-                    unwrapped
-                };
-                if let Some(s) = span {
-                    self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
-                }
-                self.check_collection_element_types(&final_ty);
-                self.env.define_var(name, final_ty);
-            }
-            ast::Stmt::Var { name, ty, value, span } => {
-                let val_ty = self.infer_expr(value);
-                let final_ty = if let Some(te) = ty {
-                    let declared = self.resolve_type_expr(te);
-                    // E029: same undeclared-Named annotation check as Let.
-                    self.deferred_unknown_type_checks.push((
-                        declared.clone(), *span, format!("var '{}'", name),
-                    ));
-                    self.record_int_literal_context(value, &declared);
-                    self.constrain(declared.clone(), val_ty, format!("let {}", name));
-                    declared
-                } else {
-                    let t = resolve_ty(&val_ty, &self.uf);
-                    // Same rule as Let, including the usage-skip: a `var r =
-                    // effectCall()` later matched on ok/err keeps the Result.
-                    let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)));
-                    // #662: same undecidable-phantom-slot re-check as Let.
-                    self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
-                        ty: unwrapped.clone(), name: Some(name.to_string()), span: value.span,
-                    });
-                    unwrapped
-                };
-                if let Some(s) = span {
-                    self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
-                }
-                self.check_collection_element_types(&final_ty);
-                self.env.define_var(name, final_ty);
-                self.env.mutable_vars.insert(sym(name));
-                self.env.var_lambda_depth.insert(sym(name), self.env.lambda_depth);
-            }
+            ast::Stmt::Let { .. } => self.check_stmt_let(stmt),
+            ast::Stmt::Var { .. } => self.check_stmt_var(stmt),
             ast::Stmt::LetDestructure { pattern, value, .. } => {
                 let val_ty = self.infer_expr(value);
                 let val_resolved = resolve_ty(&val_ty, &self.uf);
                 self.bind_pattern(pattern, &val_resolved);
             }
-            ast::Stmt::Assign { name, value, .. } => {
-                let val_ty = self.infer_expr(value);
-                // A mut-receiver stdlib mutator (`list.push`, `map.insert`,
-                // `string.push`, …) returns Unit and mutates in place. Writing
-                // `b = list.push(b, x)` therefore assigns Unit to a non-Unit
-                // binding. Native catches this at rustc (E0308 "expected Vec,
-                // found ()"); WASM erases Unit and silently RUNS the program —
-                // a cross-target asymmetry (compiles on one target, not the
-                // other). Reject it in the checker so BOTH targets agree, with
-                // the fix spelled out: drop the assignment (the call already
-                // mutates) or rebuild a fresh value.
-                // A local binding (`lookup_var`) OR a module-level `var`
-                // (`top_lets`) — both are valid assignment targets and both carry
-                // a concrete declared type to flow into the value.
-                let var_ty = self.env.lookup_var(name).cloned()
-                    .or_else(|| self.env.top_lets.get(&sym(name)).cloned());
-                if let Some(var_ty) = &var_ty {
-                    let val_resolved = resolve_ty(&val_ty, &self.uf);
-                    let var_resolved = self.env.resolve_named(var_ty);
-                    if matches!(val_resolved, Ty::Unit) && !matches!(var_resolved, Ty::Unit | Ty::Unknown) {
-                        // Rebuild form is type-directed: a List concatenates a
-                        // singleton, a String appends a suffix string. Other
-                        // collections (Map/Set/Bytes) have no `+` rebuild, so we
-                        // steer toward the statement form only.
-                        let rebuild = match &var_resolved {
-                            Ty::Applied(TypeConstructorId::List, _) => Some(format!("{0} = {0} + [<item>]", name)),
-                            Ty::String => Some(format!("{0} = {0} + \"<suffix>\"", name)),
-                            _ => None,
-                        };
-                        let snippet = match &rebuild {
-                            Some(rb) => format!(
-                                "// the mutator already updates '{n}' in place — drop the `{n} =` and call it as a statement:\n<mutator>({n}, ...)\n// or rebuild a fresh value:\n{rb}",
-                                n = name,
-                            ),
-                            None => format!(
-                                "// the mutator already updates '{n}' in place — drop the `{n} =` and call it as a statement:\n<mutator>({n}, ...)",
-                                n = name,
-                            ),
-                        };
-                        let hint = match &rebuild {
-                            Some(rb) => format!(
-                                "the right-hand side returns Unit (an in-place mutator). Call it as a \
-                                 statement instead of assigning its result, or rebuild '{}' with a \
-                                 value-returning expression like `{}`",
-                                name, rb
-                            ),
-                            None => format!(
-                                "the right-hand side returns Unit (an in-place mutator). Call it as a \
-                                 statement instead of assigning its result — '{}' is already mutated in place",
-                                name
-                            ),
-                        };
-                        self.emit(super::err(
-                            format!("cannot assign a Unit value to '{}'", name),
-                            hint,
-                            format!("{} = ...", name),
-                        ).with_code("E001").with_try(snippet));
-                    } else {
-                        // Unify the assigned value's type with the variable's
-                        // declared type. The variable already carries a concrete
-                        // type from its `var`/`let` declaration; flowing it into
-                        // the value pins an otherwise-unconstrained element — e.g.
-                        // `items = []` for `var items: List[Int]` resolves `[]`'s
-                        // element to `Int` (it is the source of truth, exactly as
-                        // a typed `let` binding is). Without this, an empty literal
-                        // assigned to a typed var stays undecidable (E018).
-                        //
-                        // #485: apply the same effect-fn auto-unwrap rule as
-                        // let/var first — `x = step(x)` with x: Int unwraps the
-                        // lifted Result[Int, E]; a Result-typed target keeps it.
-                        // Only substitute when the unwrap actually fires, so an
-                        // unresolved TypeVar RHS keeps flowing through inference.
-                        let unwrapped = self.effect_unwrap_rhs(val_resolved.clone(), var_resolved.is_result());
-                        let constrain_val = if unwrapped != val_resolved { unwrapped } else { val_ty.clone() };
-                        self.constrain(var_ty.clone(), constrain_val, format!("assign {}", name));
-                    }
-                }
-                if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(&sym(name)) {
-                    let is_param = self.env.param_vars.contains(&sym(name));
-                    let hint = if is_param {
-                        format!("'{}' is a function parameter (immutable). Use a local copy: var {0}_ = {0}", name)
-                    } else {
-                        format!("Use 'var {0} = ...' instead of 'let {0} = ...' to declare a mutable variable", name)
-                    };
-                    let snippet = if is_param {
-                        format!("// '{n}' is a parameter — make a mutable copy:\nvar {n}_ = {n}\n// ...then reassign {n}_ instead of {n}", n = name)
-                    } else {
-                        format!("// let {n} = ...  →  var {n} = ...\nvar {n} = <initial value>", n = name)
-                    };
-                    let mut diag = super::err(
-                        format!("cannot reassign immutable binding '{}'", name),
-                        hint, format!("{} = ...", name)).with_code("E009").with_try(snippet);
-                    if let Some(&(line, col)) = self.env.var_decl_locs.get(&sym(name)) {
-                        diag = diag.with_secondary(line, Some(col), format!("'{}' declared here", name));
-                    }
-                    self.emit(diag);
-                }
-                // Escape analysis: block var mutation inside closures in pure fns
-                if self.env.mutable_vars.contains(&sym(name)) && !self.env.can_call_effect {
-                    if let Some(&decl_depth) = self.env.var_lambda_depth.get(&sym(name)) {
-                        if self.env.lambda_depth > decl_depth {
-                            self.emit(super::err(
-                                format!("mutable variable '{}' is mutated inside a closure in a pure function — use effect fn instead", name),
-                                "Move the mutation out of the closure, or mark the enclosing function as `effect fn`",
-                                format!("{} = ...", name)).with_code("E011"));
-                        }
-                    }
-                }
-            }
-            ast::Stmt::IndexAssign { target, index, value, .. } => {
-                self.infer_expr(index);
-                self.infer_expr(value);
-                // A module-level `let g` is immutable just like a local `let` — its
-                // contents may not be index-assigned. `lookup_var` only sees locals,
-                // so without the `top_lets` arm a global `let g; g[2]=…` slipped past
-                // this check and only failed later as opaque rustc `E0425` (the
-                // ModuleRc lowering never kicks in for a non-mutable global). Catch it
-                // here with the same E009 locals get.
-                let is_known_binding = self.env.lookup_var(target.as_str()).is_some()
-                    || self.env.top_lets.contains_key(&sym(target.as_str()));
-                if is_known_binding && !self.env.mutable_vars.contains(target) {
-                    let mut diag = super::err(
-                        format!("cannot mutate immutable binding '{}'", target),
-                        format!("Use 'var {} = ...' to declare a mutable variable", target),
-                        format!("{}[...] = ...", target)).with_code("E009");
-                    if let Some(&(line, col)) = self.env.var_decl_locs.get(target) {
-                        diag = diag.with_secondary(line, Some(col), format!("'{}' declared here", target));
-                    }
-                    self.emit(diag);
-                }
-            }
+            ast::Stmt::Assign { .. } => self.check_stmt_assign(stmt),
+            ast::Stmt::IndexAssign { .. } => self.check_stmt_index_assign(stmt),
             ast::Stmt::FieldAssign { value, .. } => { self.infer_expr(value); }
             ast::Stmt::Guard { cond, else_, .. } => { self.infer_expr(cond); self.infer_expr(else_); }
-            ast::Stmt::GuardLet { name, scrutinee, else_, .. } => {
-                // Swift-style: bind `name` to the value inside the scrutinee's
-                // Option/Result for the REST of the block (define_var in the current
-                // block scope persists across the following stmts). The else branch
-                // diverges; lowering desugars the block tail into a Some/Ok match.
-                let scrut_ty = self.infer_expr(scrutinee);
-                let resolved = resolve_ty(&scrut_ty, &self.uf);
-                let bound_ty = match &resolved {
-                    Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
-                        args[0].clone()
-                    }
-                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
-                        args[0].clone()
-                    }
-                    Ty::Unknown => Ty::Unknown,
-                    other => {
-                        self.emit(super::err(
-                            format!("`guard let` requires an Option or Result, found `{}`", other.display()),
-                            "bind the inner value of an Option/Result: `guard let v = some_option else { return }`".to_string(),
-                            "guard let scrutinee".to_string(),
-                        ).with_code("E001"));
-                        Ty::Unknown
-                    }
-                };
-                self.infer_expr(else_);
-                self.env.define_var(name, bound_ty);
-            }
+            ast::Stmt::GuardLet { .. } => self.check_stmt_guard_let(stmt),
             ast::Stmt::Expr { expr, .. } => {
                 let t = self.infer_expr(expr);
                 // #662: a discarded expression statement whose type carries an
@@ -244,6 +28,247 @@ impl Checker {
             }
             ast::Stmt::Comment { .. } | ast::Stmt::Error { .. } => {}
         }
+    }
+
+    /// `ast::Stmt::Let` arm of [`Self::check_stmt`]. Verbatim text move.
+    fn check_stmt_let(&mut self, stmt: &mut ast::Stmt) {
+        let ast::Stmt::Let { name, ty, value, span } = stmt else { unreachable!() };
+        let val_ty = self.infer_expr(value);
+        let final_ty = if let Some(te) = ty {
+            let declared = self.resolve_type_expr(te);
+            // E029: an undeclared Named in the annotation compiles to a
+            // nonexistent Rust type after `check` accepted (fuzz index 940).
+            self.deferred_unknown_type_checks.push((
+                declared.clone(), *span, format!("let '{}'", name),
+            ));
+            self.record_int_literal_context(value, &declared);
+            self.constrain(declared.clone(), val_ty, format!("let {}", name));
+            declared
+        } else {
+            let t = resolve_ty(&val_ty, &self.uf);
+            // Auto-unwrap Result in effect fns (but not in test blocks),
+            // unless this binding is later used as a `match x { ok(_) =>
+            // ..., err(_) => ... }` subject — in which case the user
+            // wants to inspect the Result directly.
+            let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)));
+            // #662: an un-annotated binding whose value type carries an
+            // unconstrained phantom slot (only an un-exercised branch
+            // could pin it) is undecidable — re-check post-solve.
+            self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                ty: unwrapped.clone(), name: Some(name.to_string()), span: value.span,
+            });
+            unwrapped
+        };
+        if let Some(s) = span {
+            self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
+        }
+        self.check_collection_element_types(&final_ty);
+        self.env.define_var(name, final_ty);
+    }
+
+    /// `ast::Stmt::Var` arm of [`Self::check_stmt`]. Verbatim text move.
+    fn check_stmt_var(&mut self, stmt: &mut ast::Stmt) {
+        let ast::Stmt::Var { name, ty, value, span } = stmt else { unreachable!() };
+        let val_ty = self.infer_expr(value);
+        let final_ty = if let Some(te) = ty {
+            let declared = self.resolve_type_expr(te);
+            // E029: same undeclared-Named annotation check as Let.
+            self.deferred_unknown_type_checks.push((
+                declared.clone(), *span, format!("var '{}'", name),
+            ));
+            self.record_int_literal_context(value, &declared);
+            self.constrain(declared.clone(), val_ty, format!("let {}", name));
+            declared
+        } else {
+            let t = resolve_ty(&val_ty, &self.uf);
+            // Same rule as Let, including the usage-skip: a `var r =
+            // effectCall()` later matched on ok/err keeps the Result.
+            let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)));
+            // #662: same undecidable-phantom-slot re-check as Let.
+            self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                ty: unwrapped.clone(), name: Some(name.to_string()), span: value.span,
+            });
+            unwrapped
+        };
+        if let Some(s) = span {
+            self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
+        }
+        self.check_collection_element_types(&final_ty);
+        self.env.define_var(name, final_ty);
+        self.env.mutable_vars.insert(sym(name));
+        self.env.var_lambda_depth.insert(sym(name), self.env.lambda_depth);
+    }
+
+    /// `ast::Stmt::Assign` arm of [`Self::check_stmt`]: the Unit-mutator
+    /// misuse diagnostic (E001), value/target unification, the
+    /// immutable-binding reassignment diagnostic (E009), and the
+    /// pure-fn-closure escape-analysis diagnostic (E011). Verbatim text move.
+    fn check_stmt_assign(&mut self, stmt: &mut ast::Stmt) {
+        let ast::Stmt::Assign { name, value, .. } = stmt else { unreachable!() };
+        let val_ty = self.infer_expr(value);
+        // A mut-receiver stdlib mutator (`list.push`, `map.insert`,
+        // `string.push`, …) returns Unit and mutates in place. Writing
+        // `b = list.push(b, x)` therefore assigns Unit to a non-Unit
+        // binding. Native catches this at rustc (E0308 "expected Vec,
+        // found ()"); WASM erases Unit and silently RUNS the program —
+        // a cross-target asymmetry (compiles on one target, not the
+        // other). Reject it in the checker so BOTH targets agree, with
+        // the fix spelled out: drop the assignment (the call already
+        // mutates) or rebuild a fresh value.
+        // A local binding (`lookup_var`) OR a module-level `var`
+        // (`top_lets`) — both are valid assignment targets and both carry
+        // a concrete declared type to flow into the value.
+        let var_ty = self.env.lookup_var(name).cloned()
+            .or_else(|| self.env.top_lets.get(&sym(name)).cloned());
+        if let Some(var_ty) = &var_ty {
+            let val_resolved = resolve_ty(&val_ty, &self.uf);
+            let var_resolved = self.env.resolve_named(var_ty);
+            if matches!(val_resolved, Ty::Unit) && !matches!(var_resolved, Ty::Unit | Ty::Unknown) {
+                // Rebuild form is type-directed: a List concatenates a
+                // singleton, a String appends a suffix string. Other
+                // collections (Map/Set/Bytes) have no `+` rebuild, so we
+                // steer toward the statement form only.
+                let rebuild = match &var_resolved {
+                    Ty::Applied(TypeConstructorId::List, _) => Some(format!("{0} = {0} + [<item>]", name)),
+                    Ty::String => Some(format!("{0} = {0} + \"<suffix>\"", name)),
+                    _ => None,
+                };
+                let snippet = match &rebuild {
+                    Some(rb) => format!(
+                        "// the mutator already updates '{n}' in place — drop the `{n} =` and call it as a statement:\n<mutator>({n}, ...)\n// or rebuild a fresh value:\n{rb}",
+                        n = name,
+                    ),
+                    None => format!(
+                        "// the mutator already updates '{n}' in place — drop the `{n} =` and call it as a statement:\n<mutator>({n}, ...)",
+                        n = name,
+                    ),
+                };
+                let hint = match &rebuild {
+                    Some(rb) => format!(
+                        "the right-hand side returns Unit (an in-place mutator). Call it as a \
+                         statement instead of assigning its result, or rebuild '{}' with a \
+                         value-returning expression like `{}`",
+                        name, rb
+                    ),
+                    None => format!(
+                        "the right-hand side returns Unit (an in-place mutator). Call it as a \
+                         statement instead of assigning its result — '{}' is already mutated in place",
+                        name
+                    ),
+                };
+                self.emit(super::err(
+                    format!("cannot assign a Unit value to '{}'", name),
+                    hint,
+                    format!("{} = ...", name),
+                ).with_code("E001").with_try(snippet));
+            } else {
+                // Unify the assigned value's type with the variable's
+                // declared type. The variable already carries a concrete
+                // type from its `var`/`let` declaration; flowing it into
+                // the value pins an otherwise-unconstrained element — e.g.
+                // `items = []` for `var items: List[Int]` resolves `[]`'s
+                // element to `Int` (it is the source of truth, exactly as
+                // a typed `let` binding is). Without this, an empty literal
+                // assigned to a typed var stays undecidable (E018).
+                //
+                // #485: apply the same effect-fn auto-unwrap rule as
+                // let/var first — `x = step(x)` with x: Int unwraps the
+                // lifted Result[Int, E]; a Result-typed target keeps it.
+                // Only substitute when the unwrap actually fires, so an
+                // unresolved TypeVar RHS keeps flowing through inference.
+                let unwrapped = self.effect_unwrap_rhs(val_resolved.clone(), var_resolved.is_result());
+                let constrain_val = if unwrapped != val_resolved { unwrapped } else { val_ty.clone() };
+                self.constrain(var_ty.clone(), constrain_val, format!("assign {}", name));
+            }
+        }
+        if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(&sym(name)) {
+            let is_param = self.env.param_vars.contains(&sym(name));
+            let hint = if is_param {
+                format!("'{}' is a function parameter (immutable). Use a local copy: var {0}_ = {0}", name)
+            } else {
+                format!("Use 'var {0} = ...' instead of 'let {0} = ...' to declare a mutable variable", name)
+            };
+            let snippet = if is_param {
+                format!("// '{n}' is a parameter — make a mutable copy:\nvar {n}_ = {n}\n// ...then reassign {n}_ instead of {n}", n = name)
+            } else {
+                format!("// let {n} = ...  →  var {n} = ...\nvar {n} = <initial value>", n = name)
+            };
+            let mut diag = super::err(
+                format!("cannot reassign immutable binding '{}'", name),
+                hint, format!("{} = ...", name)).with_code("E009").with_try(snippet);
+            if let Some(&(line, col)) = self.env.var_decl_locs.get(&sym(name)) {
+                diag = diag.with_secondary(line, Some(col), format!("'{}' declared here", name));
+            }
+            self.emit(diag);
+        }
+        // Escape analysis: block var mutation inside closures in pure fns
+        if self.env.mutable_vars.contains(&sym(name)) && !self.env.can_call_effect {
+            if let Some(&decl_depth) = self.env.var_lambda_depth.get(&sym(name)) {
+                if self.env.lambda_depth > decl_depth {
+                    self.emit(super::err(
+                        format!("mutable variable '{}' is mutated inside a closure in a pure function — use effect fn instead", name),
+                        "Move the mutation out of the closure, or mark the enclosing function as `effect fn`",
+                        format!("{} = ...", name)).with_code("E011"));
+                }
+            }
+        }
+    }
+
+    /// `ast::Stmt::IndexAssign` arm of [`Self::check_stmt`]. Verbatim text move.
+    fn check_stmt_index_assign(&mut self, stmt: &mut ast::Stmt) {
+        let ast::Stmt::IndexAssign { target, index, value, .. } = stmt else { unreachable!() };
+        self.infer_expr(index);
+        self.infer_expr(value);
+        // A module-level `let g` is immutable just like a local `let` — its
+        // contents may not be index-assigned. `lookup_var` only sees locals,
+        // so without the `top_lets` arm a global `let g; g[2]=…` slipped past
+        // this check and only failed later as opaque rustc `E0425` (the
+        // ModuleRc lowering never kicks in for a non-mutable global). Catch it
+        // here with the same E009 locals get.
+        let is_known_binding = self.env.lookup_var(target.as_str()).is_some()
+            || self.env.top_lets.contains_key(&sym(target.as_str()));
+        if is_known_binding && !self.env.mutable_vars.contains(target) {
+            let mut diag = super::err(
+                format!("cannot mutate immutable binding '{}'", target),
+                format!("Use 'var {} = ...' to declare a mutable variable", target),
+                format!("{}[...] = ...", target)).with_code("E009");
+            if let Some(&(line, col)) = self.env.var_decl_locs.get(target) {
+                diag = diag.with_secondary(line, Some(col), format!("'{}' declared here", target));
+            }
+            self.emit(diag);
+        }
+    }
+
+    /// `ast::Stmt::GuardLet` arm of [`Self::check_stmt`]: Swift-style
+    /// `guard let` binding of the Option/Result payload for the rest of
+    /// the block. Verbatim text move.
+    fn check_stmt_guard_let(&mut self, stmt: &mut ast::Stmt) {
+        let ast::Stmt::GuardLet { name, scrutinee, else_, .. } = stmt else { unreachable!() };
+        // Swift-style: bind `name` to the value inside the scrutinee's
+        // Option/Result for the REST of the block (define_var in the current
+        // block scope persists across the following stmts). The else branch
+        // diverges; lowering desugars the block tail into a Some/Ok match.
+        let scrut_ty = self.infer_expr(scrutinee);
+        let resolved = resolve_ty(&scrut_ty, &self.uf);
+        let bound_ty = match &resolved {
+            Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
+                args[0].clone()
+            }
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
+                args[0].clone()
+            }
+            Ty::Unknown => Ty::Unknown,
+            other => {
+                self.emit(super::err(
+                    format!("`guard let` requires an Option or Result, found `{}`", other.display()),
+                    "bind the inner value of an Option/Result: `guard let v = some_option else { return }`".to_string(),
+                    "guard let scrutinee".to_string(),
+                ).with_code("E001"));
+                Ty::Unknown
+            }
+        };
+        self.infer_expr(else_);
+        self.env.define_var(name, bound_ty);
     }
 
     // ── Pattern binding ──
