@@ -481,47 +481,14 @@ fn map_value_ty(ty: &almide_lang::types::Ty) -> Option<&almide_lang::types::Ty> 
 
 /// Walk all stmts in expressions recursively (Rust push/index peepholes).
 fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
-    let mut changed = false;
     match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts.iter_mut() {
-                if rewrite_stmt(s, vt, shared) { changed = true; }
-                rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
-            }
-            if let Some(e) = tail { if rewrite_stmts_in_expr(e, vt, shared) { changed = true; } }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
-            if rewrite_stmts_in_expr(then, vt, shared) { changed = true; }
-            if rewrite_stmts_in_expr(else_, vt, shared) { changed = true; }
-        }
-        IrExprKind::Match { subject, arms } => {
-            if rewrite_stmts_in_expr(subject, vt, shared) { changed = true; }
-            for arm in arms {
-                if let Some(g) = &mut arm.guard { rewrite_stmts_in_expr(g, vt, shared); }
-                if rewrite_stmts_in_expr(&mut arm.body, vt, shared) { changed = true; }
-            }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            if rewrite_stmts_in_expr(iterable, vt, shared) { changed = true; }
-            for s in body.iter_mut() {
-                if rewrite_stmt(s, vt, shared) { changed = true; }
-                rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
-            }
-        }
-        IrExprKind::While { cond, body } => {
-            if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
-            for s in body.iter_mut() {
-                if rewrite_stmt(s, vt, shared) { changed = true; }
-                rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
-            }
-        }
-        IrExprKind::Lambda { body, .. } => {
-            if rewrite_stmts_in_expr(body, vt, shared) { changed = true; }
-        }
-        IrExprKind::RuntimeCall { args, .. } => {
-            for a in args.iter_mut() { if rewrite_stmts_in_expr(a, vt, shared) { changed = true; } }
-        }
+        IrExprKind::Block { stmts, expr: tail } => rewrite_stmts_in_block(stmts, tail, vt, shared),
+        IrExprKind::If { cond, then, else_ } => rewrite_stmts_in_if(cond, then, else_, vt, shared),
+        IrExprKind::Match { subject, arms } => rewrite_stmts_in_match(subject, arms, vt, shared),
+        IrExprKind::ForIn { iterable, body, .. } => rewrite_stmts_in_for_in(iterable, body, vt, shared),
+        IrExprKind::While { cond, body } => rewrite_stmts_in_while(cond, body, vt, shared),
+        IrExprKind::Lambda { body, .. } => rewrite_stmts_in_expr(body, vt, shared),
+        IrExprKind::RuntimeCall { args, .. } => rewrite_stmts_in_runtime_call_args(args, vt, shared),
         // No nested statements to rewrite — listed explicitly so a new
         // statement-bearing IrExprKind is a compile error, not a silent miss.
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
@@ -540,8 +507,67 @@ fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<
         | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
         | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
-        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => false,
     }
+}
+
+/// `Block { stmts, expr: tail }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_block(stmts: &mut [IrStmt], tail: &mut Option<Box<IrExpr>>, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    for s in stmts.iter_mut() {
+        if rewrite_stmt(s, vt, shared) { changed = true; }
+        rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
+    }
+    if let Some(e) = tail { if rewrite_stmts_in_expr(e, vt, shared) { changed = true; } }
+    changed
+}
+
+/// `If { cond, then, else_ }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_if(cond: &mut IrExpr, then: &mut IrExpr, else_: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
+    if rewrite_stmts_in_expr(then, vt, shared) { changed = true; }
+    if rewrite_stmts_in_expr(else_, vt, shared) { changed = true; }
+    changed
+}
+
+/// `Match { subject, arms }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_match(subject: &mut IrExpr, arms: &mut [IrMatchArm], vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    if rewrite_stmts_in_expr(subject, vt, shared) { changed = true; }
+    for arm in arms {
+        if let Some(g) = &mut arm.guard { rewrite_stmts_in_expr(g, vt, shared); }
+        if rewrite_stmts_in_expr(&mut arm.body, vt, shared) { changed = true; }
+    }
+    changed
+}
+
+/// `ForIn { iterable, body, .. }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_for_in(iterable: &mut IrExpr, body: &mut [IrStmt], vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    if rewrite_stmts_in_expr(iterable, vt, shared) { changed = true; }
+    for s in body.iter_mut() {
+        if rewrite_stmt(s, vt, shared) { changed = true; }
+        rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
+    }
+    changed
+}
+
+/// `While { cond, body }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_while(cond: &mut IrExpr, body: &mut [IrStmt], vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
+    for s in body.iter_mut() {
+        if rewrite_stmt(s, vt, shared) { changed = true; }
+        rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
+    }
+    changed
+}
+
+/// `RuntimeCall { args, .. }` arm of [`rewrite_stmts_in_expr`].
+fn rewrite_stmts_in_runtime_call_args(args: &mut [IrExpr], vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
+    for a in args.iter_mut() { if rewrite_stmts_in_expr(a, vt, shared) { changed = true; } }
     changed
 }
 
