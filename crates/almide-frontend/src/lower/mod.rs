@@ -231,8 +231,29 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     let mut ctx = LowerCtx::new(env, type_map);
     ctx.current_module = module_prefix.map(sym);
 
-    // Register cross-package top-level lets that weren't in register_decls
-    // (dependency packages populate env.top_lets during project fetch).
+    register_cross_package_top_lets(&mut ctx, env);
+    collect_type_conventions(&mut ctx, prog);
+    collect_explicit_convention_fns(&mut ctx, prog);
+    collect_fn_defaults(&mut ctx, prog);
+
+    let mut functions = Vec::new();
+    let mut top_lets = Vec::new();
+    let mut type_decls = Vec::new();
+
+    preregister_top_lets(&mut ctx, prog, module_prefix);
+    lower_decls(&mut ctx, prog, module_prefix, &mut functions, &mut top_lets, &mut type_decls);
+    append_auto_derives(&mut ctx, &type_decls, &mut functions);
+
+    let annotated_result_vars = std::mem::take(&mut ctx.annotated_result_vars);
+    let mut program = build_ir_program(ctx, functions, top_lets, type_decls, env);
+    finalize_ir_program(&mut program, env, &annotated_result_vars);
+
+    program
+}
+
+// Register cross-package top-level lets that weren't in register_decls
+// (dependency packages populate env.top_lets during project fetch).
+fn register_cross_package_top_lets(ctx: &mut LowerCtx, env: &TypeEnv) {
     for (qual_name, ty) in &env.top_lets {
         if ctx.def_map.contains_key(qual_name) { continue; }
         let qual = qual_name.as_str();
@@ -247,8 +268,10 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
             ctx.def_map.insert(*qual_name, def_id);
         }
     }
+}
 
-    // Collect type conventions (deriving Eq, Repr, etc.)
+// Collect type conventions (deriving Eq, Repr, etc.)
+fn collect_type_conventions(ctx: &mut LowerCtx, prog: &ast::Program) {
     for decl in &prog.decls {
         if let ast::Decl::Type { name, deriving: Some(derives), .. } = decl {
             for conv in derives {
@@ -256,12 +279,14 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
             }
         }
     }
+}
 
-    // Collect convention methods the user wrote EXPLICITLY (a dotted `fn X.repr`),
-    // as opposed to ones auto-derive will synthesize. The
-    // interpolation `repr` dispatch uses this so a `deriving Repr` record falls
-    // through to the codegen `AlmideRepr` impl (canonical literal form) while a
-    // hand-written `fn X.repr` still overrides it.
+// Collect convention methods the user wrote EXPLICITLY (a dotted `fn X.repr`),
+// as opposed to ones auto-derive will synthesize. The
+// interpolation `repr` dispatch uses this so a `deriving Repr` record falls
+// through to the codegen `AlmideRepr` impl (canonical literal form) while a
+// hand-written `fn X.repr` still overrides it.
+fn collect_explicit_convention_fns(ctx: &mut LowerCtx, prog: &ast::Program) {
     for decl in &prog.decls {
         match decl {
             ast::Decl::Fn { name, body: Some(_), .. } if name.as_str().contains('.') => {
@@ -270,8 +295,10 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
             _ => {}
         }
     }
+}
 
-    // Collect function default arguments for call-site expansion
+// Collect function default arguments for call-site expansion
+fn collect_fn_defaults(ctx: &mut LowerCtx, prog: &ast::Program) {
     for decl in &prog.decls {
         if let ast::Decl::Fn { name, params, .. } = decl {
             if params.iter().any(|p| p.default.is_some()) {
@@ -282,16 +309,14 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
             }
         }
     }
+}
 
-    let mut functions = Vec::new();
-    let mut top_lets = Vec::new();
-    let mut type_decls = Vec::new();
-
-    // Pre-pass: register every top-level `let` binding in the root scope so that
-    // forward references from earlier function bodies resolve to the correct
-    // VarId. Without this, the lookup misses, the resolver falls back to the
-    // error-recovery `VarId(0)`, and the reference silently aliases the first
-    // variable allocated globally (typically a local in the first lowered fn).
+// Pre-pass: register every top-level `let` binding in the root scope so that
+// forward references from earlier function bodies resolve to the correct
+// VarId. Without this, the lookup misses, the resolver falls back to the
+// error-recovery `VarId(0)`, and the reference silently aliases the first
+// variable allocated globally (typically a local in the first lowered fn).
+fn preregister_top_lets(ctx: &mut LowerCtx, prog: &ast::Program, module_prefix: Option<&str>) {
     for decl in &prog.decls {
         if let ast::Decl::TopLet { name, value, mutable, .. } = decl {
             let prefixed_key = module_prefix
@@ -304,7 +329,20 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
             ctx.define_var(name, val_ty, mutability, None);
         }
     }
+}
 
+// Main decl loop: lowers every top-level declaration into `functions` /
+// `top_lets` / `type_decls`. Each output Vec is only ever pushed to — no arm
+// reads back what an earlier arm or iteration wrote — so this is a safe
+// accumulator-output extraction.
+fn lower_decls(
+    ctx: &mut LowerCtx,
+    prog: &ast::Program,
+    module_prefix: Option<&str>,
+    functions: &mut Vec<IrFunction>,
+    top_lets: &mut Vec<IrTopLet>,
+    type_decls: &mut Vec<IrTypeDecl>,
+) {
     // Pre-pass: collect file-scoped test where clauses
     let file_test_wheres: Vec<ast::TestWhere> = prog.decls.iter().filter_map(|d| {
         if let ast::Decl::TestWhereDef { clauses, .. } = d { Some(clauses.clone()) } else { None }
@@ -316,7 +354,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
 
         match decl {
             ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, .. } => {
-                let mut f = lower_fn(&mut ctx, name, params, body, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, module_prefix);
+                let mut f = lower_fn(ctx, name, params, body, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, module_prefix);
                 f.doc = doc;
                 f.blank_lines_before = blank_lines;
                 functions.push(f);
@@ -333,13 +371,13 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                     || attrs.iter().any(|a| matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic")) =>
             {
                 let hole_body = ast::Expr::new(ast::ExprId(0), span.clone(), ast::ExprKind::Hole);
-                let mut f = lower_fn(&mut ctx, name, params, &hole_body, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, module_prefix);
+                let mut f = lower_fn(ctx, name, params, &hole_body, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, module_prefix);
                 f.doc = doc;
                 f.blank_lines_before = blank_lines;
                 functions.push(f);
             }
             ast::Decl::Type { name, ty, deriving, visibility, generics, .. } => {
-                let mut td = types::lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref(), module_prefix);
+                let mut td = types::lower_type_decl(ctx, name, ty, deriving, visibility, generics.as_ref(), module_prefix);
                 td.doc = doc;
                 td.blank_lines_before = blank_lines;
                 type_decls.push(td);
@@ -347,7 +385,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
             ast::Decl::TopLet { name, ty: _, value, mutable, .. } => {
                 let var = ctx.lookup_var(name).expect("top-level let pre-registered");
                 let val_ty = ctx.var_table.get(var).ty.clone();
-                let ir_value = lower_expr(&mut ctx, value);
+                let ir_value = lower_expr(ctx, value);
                 let kind = classify_top_let_kind(&ir_value);
                 let tl_def_id = ctx.def_map.get(&sym(name)).copied();
                 top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, mutable: *mutable, doc, blank_lines_before: blank_lines, def_id: tl_def_id });
@@ -362,14 +400,14 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                     .filter(|wc| !matches!(wc, ast::TestWhere::Case { .. }))
                     .cloned());
                 if cases.is_empty() {
-                    let test_fn = lower_test_with_where(&mut ctx, name, body, &top_binds);
+                    let test_fn = lower_test_with_where(ctx, name, body, &top_binds);
                     functions.push(test_fn);
                 } else {
                     for (case_name, case_binds) in &cases {
                         let full_name = format!("{} / {}", name, case_name);
                         let mut merged = top_binds.clone();
                         merged.extend(case_binds.iter().cloned());
-                        let test_fn = lower_test_with_where(&mut ctx, &full_name, body, &merged);
+                        let test_fn = lower_test_with_where(ctx, &full_name, body, &merged);
                         functions.push(test_fn);
                     }
                 }
@@ -377,9 +415,12 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
             _ => {}
         }
     }
+}
 
-    // Auto-derive: generate convention functions for types that declare deriving but lack custom impl
-    let mut auto_derived = generate_auto_derives(&mut ctx, &type_decls, &functions);
+// Auto-derive: generate convention functions for types that declare deriving
+// but lack a custom impl, then append them to `functions`.
+fn append_auto_derives(ctx: &mut LowerCtx, type_decls: &[IrTypeDecl], functions: &mut Vec<IrFunction>) {
+    let mut auto_derived = generate_auto_derives(ctx, type_decls, functions);
     // Stamp every generated convention fn with a synthetic `@derived` marker.
     // This is the authoritative signal that a function is compiler-generated:
     // downstream passes (e.g. borrow inference, #647) must not name-match
@@ -389,14 +430,19 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         f.attrs.push(ast::Attribute { name: sym("derived"), args: vec![], span: None });
     }
     functions.extend(auto_derived);
+}
 
+// Assemble the IrProgram from the lowered pieces and register user-defined
+// types in the type constructor registry (HKT foundation). Consumes `ctx` by
+// value — nothing after this point needs it, its var_table/def_table move
+// straight into the program.
+fn build_ir_program(ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec<IrTopLet>, type_decls: Vec<IrTypeDecl>, env: &TypeEnv) -> IrProgram {
     // Collect effect fn names from TypeEnv (user-defined + stdlib)
     let effect_fn_names: std::collections::HashSet<almide_base::intern::Sym> = env.functions.iter()
         .filter(|(_, sig)| sig.is_effect)
         .map(|(name, _)| *name)
         .collect();
 
-    let annotated_result_vars = std::mem::take(&mut ctx.annotated_result_vars);
     let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default() };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
@@ -405,11 +451,18 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         program.type_registry.register_user_type(&*td.name, arity);
     }
 
-    compute_use_counts(&mut program); // After auto-derive so derived functions get correct use_counts
-    demote_unused_mut(&mut program);
+    program
+}
+
+// Post-processing passes shared by both lower_program and module lowering:
+// use-count/mut demotion, TypeVar resolution, auto-`?` insertion, and stdlib
+// module collection.
+fn finalize_ir_program(program: &mut IrProgram, env: &TypeEnv, annotated_result_vars: &std::collections::HashSet<VarId>) {
+    compute_use_counts(program); // After auto-derive so derived functions get correct use_counts
+    demote_unused_mut(program);
 
     // Resolve any remaining inference TypeVars to Unknown (prevents codegen ICE)
-    resolve_inference_typevars(&mut program);
+    resolve_inference_typevars(program);
 
     // Auto-? insertion: wrap Result-typed calls in Try nodes.
     // This bridges the gap between checker (auto_unwrap strips Result
@@ -425,13 +478,11 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
             if first_is_opt_result { Some(*k) } else { None }
         })
         .collect();
-    auto_try::insert_auto_try(&mut program, &annotated_result_vars, &first_arg_unwraps);
+    auto_try::insert_auto_try(program, annotated_result_vars, &first_arg_unwraps);
 
     // Collect stdlib modules used in root functions/top_lets.
     // ir_link extends this with modules from dependencies.
-    program.used_stdlib_modules = collect_stdlib_modules(&program);
-
-    program
+    program.used_stdlib_modules = collect_stdlib_modules(program);
 }
 
 include!("mod_p2.rs");
