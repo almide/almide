@@ -397,56 +397,13 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
                     IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } => {
                         match target {
                             CallTarget::Module { module, func, .. } => {
-                                if !crate::purity::is_pure(module.as_str(), func.as_str()) {
-                                    // Not a known-pure STDLIB call — but a USER module's
-                                    // fn (`let gray_50 = v.rgb(…)` calling view.rgb, the
-                                    // ceangal theme class) is in the registry under its
-                                    // QUALIFIED name: recurse into its body exactly like
-                                    // a Named callee (the same cycle guard applies). An
-                                    // unknown qualified name stays impure (declines).
-                                    let q = format!("{}.{}", module.as_str(), func.as_str());
-                                    if self.effects.contains(&q) {
-                                        self.ok = false;
-                                    } else if self.visiting.insert(q.clone()) {
-                                        match self.fns.get(&q) {
-                                            Some(body) => {
-                                                let body = body.clone();
-                                                if !expr_is_pure(
-                                                    &body,
-                                                    self.fns,
-                                                    self.effects,
-                                                    self.visiting,
-                                                ) {
-                                                    self.ok = false;
-                                                }
-                                            }
-                                            None => self.ok = false,
-                                        }
-                                    }
-                                }
+                                self.mark_impure_if_module_call_impure(
+                                    module.as_str(),
+                                    func.as_str(),
+                                );
                             }
                             CallTarget::Named { name } => {
-                                let n = name.as_str().to_string();
-                                if self.effects.contains(&n) {
-                                    self.ok = false;
-                                } else if self.visiting.insert(n.clone()) {
-                                    match self.fns.get(&n) {
-                                        Some(body) => {
-                                            let body = body.clone();
-                                            if !expr_is_pure(
-                                                &body,
-                                                self.fns,
-                                                self.effects,
-                                                self.visiting,
-                                            ) {
-                                                self.ok = false;
-                                            }
-                                        }
-                                        // An unknown callee (a variant ctor is fine — no
-                                        // body, no effect; anything else unknown declines).
-                                        None => {}
-                                    }
-                                }
+                                self.mark_impure_if_named_call_impure(name.as_str());
                             }
                             // A Method/Computed callee is unanalyzable here — decline.
                             _ => self.ok = false,
@@ -455,6 +412,64 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
                     _ => {}
                 }
                 walk_expr(self, e);
+            }
+        }
+        impl V<'_> {
+            /// The `CallTarget::Module` callee-purity check for `V::visit_expr` — routes an
+            /// impure/unknown callee to `self.ok = false`. Verbatim extraction (guard-clause
+            /// flattening) of the former inline if-else-if / match nesting, no behavior
+            /// change — see docs/roadmap/active/code-health-codopsy.md.
+            fn mark_impure_if_module_call_impure(&mut self, module: &str, func: &str) {
+                if crate::purity::is_pure(module, func) {
+                    return;
+                }
+                // Not a known-pure STDLIB call — but a USER module's fn (`let gray_50 =
+                // v.rgb(…)` calling view.rgb, the ceangal theme class) is in the registry
+                // under its QUALIFIED name: recurse into its body exactly like a Named
+                // callee (the same cycle guard applies). An unknown qualified name stays
+                // impure (declines).
+                let q = format!("{module}.{func}");
+                if self.effects.contains(&q) {
+                    self.ok = false;
+                    return;
+                }
+                if !self.visiting.insert(q.clone()) {
+                    return;
+                }
+                match self.fns.get(&q) {
+                    Some(body) => {
+                        let body = body.clone();
+                        if !expr_is_pure(&body, self.fns, self.effects, self.visiting) {
+                            self.ok = false;
+                        }
+                    }
+                    None => self.ok = false,
+                }
+            }
+
+            /// The `CallTarget::Named` sibling of
+            /// [`Self::mark_impure_if_module_call_impure`]. Verbatim extraction, no behavior
+            /// change.
+            fn mark_impure_if_named_call_impure(&mut self, name: &str) {
+                let n = name.to_string();
+                if self.effects.contains(&n) {
+                    self.ok = false;
+                    return;
+                }
+                if !self.visiting.insert(n.clone()) {
+                    return;
+                }
+                match self.fns.get(&n) {
+                    Some(body) => {
+                        let body = body.clone();
+                        if !expr_is_pure(&body, self.fns, self.effects, self.visiting) {
+                            self.ok = false;
+                        }
+                    }
+                    // An unknown callee (a variant ctor is fine — no body, no effect;
+                    // anything else unknown declines).
+                    None => {}
+                }
             }
         }
         let mut v = V { ok: true, fns, effects, visiting };
