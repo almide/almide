@@ -130,7 +130,25 @@ fn resolve_expr_call(expr: &mut IrExpr, vt: &mut VarTable) {
 fn resolve_expr_lambda(expr: &mut IrExpr, vt: &mut VarTable) {
     let IrExprKind::Lambda { params, .. } = &mut expr.kind else { unreachable!() };
     // Sync param types: VarTable ↔ IR annotation (concrete wins)
-    // Use .has_unresolved_deep() to catch Applied(List, [TypeVar(A)])
+    sync_lambda_param_types(params, vt);
+    // Update Ty::Fn wrapper to match resolved params
+    refresh_lambda_fn_ty(expr, vt);
+    // Recurse into body (params are now resolved for inner lambdas to see)
+    if let IrExprKind::Lambda { body, .. } = &mut expr.kind {
+        resolve_expr(body, vt);
+    }
+    // Bottom-up: infer still-Unknown params from body usage
+    if let IrExprKind::Lambda { params, body, .. } = &mut expr.kind {
+        infer_lambda_params_from_body(params, body, vt);
+        refresh_lambda_fn_ty(expr, vt);
+    }
+}
+
+/// Param-sync phase of `resolve_expr_lambda`, extracted verbatim (cog>30
+/// decomposition, sequential-phase pattern). Syncs `VarTable` ↔ IR
+/// annotation (concrete wins) — uses `.has_unresolved_deep()` to catch
+/// `Applied(List, [TypeVar(A)])`.
+fn sync_lambda_param_types(params: &mut [(VarId, Ty)], vt: &mut VarTable) {
     for (vid, pty) in params.iter_mut() {
         if (vid.0 as usize) < vt.len() {
             let vt_ty = vt.get(*vid).ty.clone();
@@ -141,23 +159,19 @@ fn resolve_expr_lambda(expr: &mut IrExpr, vt: &mut VarTable) {
             }
         }
     }
-    // Update Ty::Fn wrapper to match resolved params
-    refresh_lambda_fn_ty(expr, vt);
-    // Recurse into body (params are now resolved for inner lambdas to see)
-    if let IrExprKind::Lambda { body, .. } = &mut expr.kind {
-        resolve_expr(body, vt);
-    }
-    // Bottom-up: infer still-Unknown params from body usage
-    if let IrExprKind::Lambda { params, body, .. } = &mut expr.kind {
-        for (vid, pty) in params.iter_mut() {
-            if pty.has_unresolved_deep() {
-                if let Some(inferred) = super::pass_concretize_types::infer_var_type_from_body(body, *vid) {
-                    *pty = inferred.clone();
-                    vt.entries[vid.0 as usize].ty = inferred;
-                }
+}
+
+/// Bottom-up param-inference phase of `resolve_expr_lambda`, extracted
+/// verbatim (cog>30 decomposition) — infer still-Unknown params from body
+/// usage.
+fn infer_lambda_params_from_body(params: &mut [(VarId, Ty)], body: &IrExpr, vt: &mut VarTable) {
+    for (vid, pty) in params.iter_mut() {
+        if pty.has_unresolved_deep() {
+            if let Some(inferred) = super::pass_concretize_types::infer_var_type_from_body(body, *vid) {
+                *pty = inferred.clone();
+                vt.entries[vid.0 as usize].ty = inferred;
             }
         }
-        refresh_lambda_fn_ty(expr, vt);
     }
 }
 
