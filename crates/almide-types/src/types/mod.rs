@@ -166,25 +166,10 @@ impl FnSig {
 
 impl Ty {
     pub fn display(&self) -> String {
+        if let Some(s) = self.display_leaf() {
+            return s.to_string();
+        }
         match self {
-            Ty::Int => "Int".into(),
-            Ty::Float => "Float".into(),
-            Ty::Int8 => "Int8".into(),
-            Ty::Int16 => "Int16".into(),
-            Ty::Int32 => "Int32".into(),
-            Ty::Int64 => "Int64".into(),
-            Ty::UInt8 => "UInt8".into(),
-            Ty::UInt16 => "UInt16".into(),
-            Ty::UInt32 => "UInt32".into(),
-            Ty::UInt64 => "UInt64".into(),
-            Ty::Float32 => "Float32".into(),
-            Ty::Float64 => "Float64".into(),
-            Ty::String => "String".into(),
-            Ty::Bool => "Bool".into(),
-            Ty::Unit => "Unit".into(),
-            Ty::Bytes => "Bytes".into(),
-            Ty::Matrix => "Matrix".into(),
-            Ty::RawPtr => "RawPtr".into(),
             Ty::Applied(id, args) => Self::display_applied(id, args),
             Ty::Record { fields } => {
                 let fs: Vec<_> = fields.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect();
@@ -218,9 +203,39 @@ impl Ty {
             Ty::TypeVar(n) => n.to_string(),
             Ty::ConstParam { name, ty } => format!("const {} : {}", name, ty.display()),
             Ty::ConstValue { ty, value } => format!("{} (= {})", ty.display(), value),
-            Ty::Never => "Never".into(),
-            Ty::Unknown => "Unknown".into(),
+            // Never/Unknown and all unit-like scalars are handled by display_leaf above.
+            _ => unreachable!("display_leaf handles all unit-like scalar variants"),
         }
+    }
+
+    /// `display()` case for unit-like scalar variants (no payload to render):
+    /// the numeric/String/Bool/Unit/Bytes/Matrix/RawPtr family plus
+    /// Never/Unknown. Returns `None` for every variant that carries data and
+    /// needs the full match in `display()`.
+    fn display_leaf(&self) -> Option<&'static str> {
+        Some(match self {
+            Ty::Int => "Int",
+            Ty::Float => "Float",
+            Ty::Int8 => "Int8",
+            Ty::Int16 => "Int16",
+            Ty::Int32 => "Int32",
+            Ty::Int64 => "Int64",
+            Ty::UInt8 => "UInt8",
+            Ty::UInt16 => "UInt16",
+            Ty::UInt32 => "UInt32",
+            Ty::UInt64 => "UInt64",
+            Ty::Float32 => "Float32",
+            Ty::Float64 => "Float64",
+            Ty::String => "String",
+            Ty::Bool => "Bool",
+            Ty::Unit => "Unit",
+            Ty::Bytes => "Bytes",
+            Ty::Matrix => "Matrix",
+            Ty::RawPtr => "RawPtr",
+            Ty::Never => "Never",
+            Ty::Unknown => "Unknown",
+            _ => return None,
+        })
     }
 
     /// `display()` case for `Ty::Applied(id, args)`: resolve the constructor's
