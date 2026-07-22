@@ -356,26 +356,24 @@ impl OwnershipScan {
     }
 }
 
-pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
-    // Handle ≠ object. Each known heap HANDLE (ValueId) maps to its OBJECT (the
-    // `Alloc`'d representative ValueId); the refcount is per OBJECT. A handle is
-    // also tracked LIVE/dead, so a use of a handle after its own drop/consume is
-    // caught even when the object lives on through a sibling handle.
-    let mut object_of: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-    let mut rc: BTreeMap<ValueId, i64> = BTreeMap::new(); // keyed by object — OUR (callee's) owned refs
-    let mut dead: BTreeMap<ValueId, bool> = BTreeMap::new(); // keyed by handle
-    let mut violations: Vec<Violation> = Vec::new();
-
-    // Heap params are BORROWED by default (the v1 calling convention): the CALLER
-    // owns the reference and releases it at its own scope end; the callee gets a
-    // LIVE handle but holds NO owned reference of its own (its rc starts at 0).
-    // This is the exact dual of the certificate omitting the param's `i` event —
-    // an owned-param `+1` would be SYNTHETIC (no `Alloc`/`rc_inc` backs it), the
-    // gate-blind use-after-free class. A body that wants to consume or return a
-    // param must first `Dup` it (acquire its own ref); a release with rc 0 (the
-    // `borrowed` object, never `Dup`'d) fails — exactly the cert's `d`/`m` at
-    // rc 0, which the proven checker faults.
-    let mut borrowed: BTreeSet<ValueId> = BTreeSet::new();
+// Heap params are BORROWED by default (the v1 calling convention): the CALLER owns
+// the reference and releases it at its own scope end; the callee gets a LIVE
+// handle but holds NO owned reference of its own (its rc starts at 0). This is the
+// exact dual of the certificate omitting the param's `i` event — an owned-param
+// `+1` would be SYNTHETIC (no `Alloc`/`rc_inc` backs it), the gate-blind
+// use-after-free class. A body that wants to consume or return a param must first
+// `Dup` it (acquire its own ref); a release with rc 0 (the `borrowed` object, never
+// `Dup`'d) fails — exactly the cert's `d`/`m` at rc 0, which the proven checker
+// faults. Split out of `verify_ownership` (codopsy cc) as phase 1 of a sequential
+// setup → scan → return-check → leak-check pipeline — each phase touches disjoint
+// state (this one only populates, never reads a later phase's writes), the same
+// fold-independent-writes shape used elsewhere in this crate.
+fn init_borrowed_params(
+    func: &MirFunction,
+    object_of: &mut BTreeMap<ValueId, ValueId>,
+    dead: &mut BTreeMap<ValueId, bool>,
+    borrowed: &mut BTreeSet<ValueId>,
+) {
     for p in &func.params {
         if p.repr.is_heap() {
             object_of.insert(p.value, p.value);
@@ -383,6 +381,51 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             borrowed.insert(p.value);
         }
     }
+}
+
+// A heap return value is MOVED OUT to the caller. It must be a reference WE own
+// (an `Alloc`/call-result, or a `Dup` we acquired): releasing it transfers our
+// reference out. Returning a BORROWED param we never acquired (rc 0) would give
+// the caller a SECOND owner of the caller's own reference — a double-free.
+// `release` fails there (rc 0) and we record it, the dual of the cert's `m` at rc
+// 0 which the proven checker faults. Phase 3 of `verify_ownership`'s pipeline.
+fn check_return_release(
+    func: &MirFunction,
+    object_of: &BTreeMap<ValueId, ValueId>,
+    rc: &mut BTreeMap<ValueId, i64>,
+    dead: &mut BTreeMap<ValueId, bool>,
+    borrowed: &BTreeSet<ValueId>,
+    violations: &mut Vec<Violation>,
+) {
+    if let Some(r) = func.ret {
+        if object_of.contains_key(&r) && release(object_of, rc, dead, borrowed, r).is_err() {
+            violations.push(violation(func.ops.len(), r, ViolationKind::UseAfterMove));
+        }
+    }
+}
+
+// Leak check: every object's references must have left (dropped or moved). Phase
+// 4 (final) of `verify_ownership`'s pipeline.
+fn check_leaks(func: &MirFunction, rc: &BTreeMap<ValueId, i64>, violations: &mut Vec<Violation>) {
+    for (o, c) in rc {
+        if *c > 0 {
+            violations.push(violation(func.ops.len(), *o, ViolationKind::Leak));
+        }
+    }
+}
+
+pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
+    // Handle ≠ object. Each known heap HANDLE (ValueId) maps to its OBJECT (the
+    // `Alloc`'d representative ValueId); the refcount is per OBJECT. A handle is
+    // also tracked LIVE/dead, so a use of a handle after its own drop/consume is
+    // caught even when the object lives on through a sibling handle.
+    let mut object_of: BTreeMap<ValueId, ValueId> = BTreeMap::new();
+    let rc: BTreeMap<ValueId, i64> = BTreeMap::new(); // keyed by object — OUR (callee's) owned refs
+    let mut dead: BTreeMap<ValueId, bool> = BTreeMap::new(); // keyed by handle
+    let violations: Vec<Violation> = Vec::new();
+
+    let mut borrowed: BTreeSet<ValueId> = BTreeSet::new();
+    init_borrowed_params(func, &mut object_of, &mut dead, &mut borrowed);
 
     // BRANCH JOIN (mirrors the proven checker's `CBranch` rule): each arm of an
     // `IfThen`/`Else`/`EndIf` runs from the SAME entry state, and the arms must
@@ -407,26 +450,8 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
     }
     let OwnershipScan { object_of, mut rc, mut dead, borrowed, mut violations, .. } = scan;
 
-    // A heap return value is MOVED OUT to the caller. It must be a reference WE
-    // own (an `Alloc`/call-result, or a `Dup` we acquired): releasing it transfers
-    // our reference out. Returning a BORROWED param we never acquired (rc 0) would
-    // give the caller a SECOND owner of the caller's own reference — a double-free.
-    // `release` fails there (rc 0) and we record it, the dual of the cert's `m` at
-    // rc 0 which the proven checker faults.
-    if let Some(r) = func.ret {
-        if object_of.contains_key(&r)
-            && release(&object_of, &mut rc, &mut dead, &borrowed, r).is_err()
-        {
-            violations.push(violation(func.ops.len(), r, ViolationKind::UseAfterMove));
-        }
-    }
-
-    // Leak check: every object's references must have left (dropped or moved).
-    for (o, c) in &rc {
-        if *c > 0 {
-            violations.push(violation(func.ops.len(), *o, ViolationKind::Leak));
-        }
-    }
+    check_return_release(func, &object_of, &mut rc, &mut dead, &borrowed, &mut violations);
+    check_leaks(func, &rc, &mut violations);
 
     if violations.is_empty() {
         Ok(())
