@@ -246,38 +246,46 @@ fn try_fold(expr: &IrExpr) -> Option<IrExpr> {
 /// Fold a `BinOp` whose operands are both literals of the same kind, per-operator.
 fn try_fold_binop(op: BinOp, left: &IrExprKind, right: &IrExprKind) -> Option<IrExprKind> {
     match (left, right) {
-        (IrExprKind::LitInt { value: a }, IrExprKind::LitInt { value: b }) => {
-            match op {
-                BinOp::AddInt => Some(IrExprKind::LitInt { value: a.wrapping_add(*b) }),
-                BinOp::SubInt => Some(IrExprKind::LitInt { value: a.wrapping_sub(*b) }),
-                BinOp::MulInt => Some(IrExprKind::LitInt { value: a.wrapping_mul(*b) }),
-                BinOp::DivInt if *b != 0 => Some(IrExprKind::LitInt { value: a / b }),
-                BinOp::ModInt if *b != 0 => Some(IrExprKind::LitInt { value: a % b }),
-                _ => None,
-            }
-        }
-        (IrExprKind::LitFloat { value: a }, IrExprKind::LitFloat { value: b }) => {
-            match op {
-                BinOp::AddFloat => Some(IrExprKind::LitFloat { value: a + b }),
-                BinOp::SubFloat => Some(IrExprKind::LitFloat { value: a - b }),
-                BinOp::MulFloat => Some(IrExprKind::LitFloat { value: a * b }),
-                BinOp::DivFloat if *b != 0.0 => Some(IrExprKind::LitFloat { value: a / b }),
-                _ => None,
-            }
-        }
-        (IrExprKind::LitStr { value: a }, IrExprKind::LitStr { value: b }) => {
-            match op {
-                BinOp::ConcatStr => Some(IrExprKind::LitStr { value: format!("{}{}", a, b) }),
-                _ => None,
-            }
-        }
-        (IrExprKind::LitBool { value: a }, IrExprKind::LitBool { value: b }) => {
-            match op {
-                BinOp::And => Some(IrExprKind::LitBool { value: *a && *b }),
-                BinOp::Or  => Some(IrExprKind::LitBool { value: *a || *b }),
-                _ => None,
-            }
-        }
+        (IrExprKind::LitInt { value: a }, IrExprKind::LitInt { value: b }) => try_fold_binop_int(op, *a, *b),
+        (IrExprKind::LitFloat { value: a }, IrExprKind::LitFloat { value: b }) => try_fold_binop_float(op, *a, *b),
+        (IrExprKind::LitStr { value: a }, IrExprKind::LitStr { value: b }) => try_fold_binop_str(op, a, b),
+        (IrExprKind::LitBool { value: a }, IrExprKind::LitBool { value: b }) => try_fold_binop_bool(op, *a, *b),
+        _ => None,
+    }
+}
+
+fn try_fold_binop_int(op: BinOp, a: i64, b: i64) -> Option<IrExprKind> {
+    match op {
+        BinOp::AddInt => Some(IrExprKind::LitInt { value: a.wrapping_add(b) }),
+        BinOp::SubInt => Some(IrExprKind::LitInt { value: a.wrapping_sub(b) }),
+        BinOp::MulInt => Some(IrExprKind::LitInt { value: a.wrapping_mul(b) }),
+        BinOp::DivInt if b != 0 => Some(IrExprKind::LitInt { value: a / b }),
+        BinOp::ModInt if b != 0 => Some(IrExprKind::LitInt { value: a % b }),
+        _ => None,
+    }
+}
+
+fn try_fold_binop_float(op: BinOp, a: f64, b: f64) -> Option<IrExprKind> {
+    match op {
+        BinOp::AddFloat => Some(IrExprKind::LitFloat { value: a + b }),
+        BinOp::SubFloat => Some(IrExprKind::LitFloat { value: a - b }),
+        BinOp::MulFloat => Some(IrExprKind::LitFloat { value: a * b }),
+        BinOp::DivFloat if b != 0.0 => Some(IrExprKind::LitFloat { value: a / b }),
+        _ => None,
+    }
+}
+
+fn try_fold_binop_str(op: BinOp, a: &str, b: &str) -> Option<IrExprKind> {
+    match op {
+        BinOp::ConcatStr => Some(IrExprKind::LitStr { value: format!("{}{}", a, b) }),
+        _ => None,
+    }
+}
+
+fn try_fold_binop_bool(op: BinOp, a: bool, b: bool) -> Option<IrExprKind> {
+    match op {
+        BinOp::And => Some(IrExprKind::LitBool { value: a && b }),
+        BinOp::Or  => Some(IrExprKind::LitBool { value: a || b }),
         _ => None,
     }
 }

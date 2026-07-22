@@ -147,18 +147,14 @@ impl<'a> RewriteVisitor<'a> {
     }
 
     fn infer_from_return_type(&self, fn_name: &str, expr_ty: &Ty, bindings: &mut HashMap<String, Ty>) {
-        if bindings.is_empty() || bindings.values().any(|v| matches!(v, Ty::Unknown)) {
-            if let Some(gnames) = self.fn_generics.get(fn_name) {
-                if let Some(ret_ty) = self.fn_ret_types.get(fn_name) {
-                    for gname in gnames {
-                        if !bindings.contains_key(gname) || matches!(bindings.get(gname), Some(Ty::Unknown)) {
-                            let extracted = extract_typevar_binding(ret_ty, expr_ty, gname);
-                            if !matches!(extracted, Ty::Unknown) {
-                                bindings.insert(gname.clone(), extracted);
-                            }
-                        }
-                    }
-                }
+        if !bindings.is_empty() && !bindings.values().any(|v| matches!(v, Ty::Unknown)) { return; }
+        let Some(gnames) = self.fn_generics.get(fn_name) else { return };
+        let Some(ret_ty) = self.fn_ret_types.get(fn_name) else { return };
+        for gname in gnames {
+            if bindings.contains_key(gname) && !matches!(bindings.get(gname), Some(Ty::Unknown)) { continue; }
+            let extracted = extract_typevar_binding(ret_ty, expr_ty, gname);
+            if !matches!(extracted, Ty::Unknown) {
+                bindings.insert(gname.clone(), extracted);
             }
         }
     }
