@@ -19,26 +19,27 @@ fn bridged_ref_ty_agrees(bridged: &Ty, reference: &Ty) -> bool {
 /// (or the checker's partial `Option[Unknown]`) while the ctor's PAYLOAD expr
 /// carries its real inferred type — `Option[payload.ty]` is the structural
 /// truth, never a guess. Any other shape returns `None` (untouched).
-pub fn refine_option_toplet_ty(ty: &Ty, init: &almide_ir::IrExpr) -> Option<Ty> {
+// Named (codopsy cc) — a pure classification, no logic change.
+fn is_unknown_option_payload_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
-    let unknown_payload = match ty {
+    match ty {
         Ty::Unknown => true,
-        Ty::Applied(TypeConstructorId::Option, a)
-            if a.len() == 1 && matches!(a[0], Ty::Unknown) =>
-        {
+        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && matches!(a[0], Ty::Unknown) => {
             true
         }
         _ => false,
-    };
-    if !unknown_payload {
+    }
+}
+
+pub fn refine_option_toplet_ty(ty: &Ty, init: &almide_ir::IrExpr) -> Option<Ty> {
+    if !is_unknown_option_payload_ty(ty) {
         return None;
     }
-    if let almide_ir::IrExprKind::OptionSome { expr } = &init.kind {
-        if !matches!(expr.ty, Ty::Unknown) {
-            return Some(Ty::option(expr.ty.clone()));
-        }
+    let almide_ir::IrExprKind::OptionSome { expr } = &init.kind else { return None };
+    if matches!(expr.ty, Ty::Unknown) {
+        return None;
     }
-    None
+    Some(Ty::option(expr.ty.clone()))
 }
 
 /// Repair UNKNOWN expression types the frontend leaves on CROSS-MODULE global
@@ -52,30 +53,42 @@ pub fn repair_unknown_global_ref_tys(
     globals: &std::collections::HashMap<almide_ir::VarId, Ty>,
 ) {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
+    // The Member arm's field lookup, named (codopsy cc) — a pure function of the
+    // object's type and the field name, no visitor state.
+    fn repair_unknown_member_ty(object_ty: &Ty, field: almide_lang::intern::Sym) -> Option<Ty> {
+        let Ty::Record { fields } = object_ty else { return None };
+        fields
+            .iter()
+            .find(|(n, _)| n.as_str() == field.as_str())
+            .map(|(_, ft)| ft.clone())
+    }
+
     struct R<'a> {
         globals: &'a std::collections::HashMap<almide_ir::VarId, Ty>,
     }
     impl IrMutVisitor for R<'_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e); // children first — the object types before the member
-            match &mut e.kind {
-                IrExprKind::Var { id } if matches!(e.ty, Ty::Unknown) => {
+            // All 3 arms below share the SAME `e.ty == Unknown` guard (per-arm in the
+            // original) — hoisted to one check up front (codopsy cc), semantically
+            // identical since a non-Unknown `e.ty` always fell through to `_ => {}`.
+            if !matches!(e.ty, Ty::Unknown) {
+                return;
+            }
+            match &e.kind {
+                IrExprKind::Var { id } => {
                     if let Some(t) = self.globals.get(id) {
                         e.ty = t.clone();
                     }
                 }
-                IrExprKind::Member { object, field } if matches!(e.ty, Ty::Unknown) => {
-                    if let Ty::Record { fields } = &object.ty {
-                        if let Some((_, ft)) =
-                            fields.iter().find(|(n, _)| n.as_str() == field.as_str())
-                        {
-                            e.ty = ft.clone();
-                        }
+                IrExprKind::Member { object, field } => {
+                    if let Some(t) = repair_unknown_member_ty(&object.ty, *field) {
+                        e.ty = t;
                     }
                 }
                 // The PARENT of a repaired member read stays Unknown too — a BinOp is
                 // TYPE-DISPATCHED (AddFloat vs AddInt), so its result type is intrinsic.
-                IrExprKind::BinOp { op, .. } if matches!(e.ty, Ty::Unknown) => {
+                IrExprKind::BinOp { op, .. } => {
                     if let Some(t) = op.result_ty() {
                         e.ty = t;
                     }
@@ -205,64 +218,92 @@ fn variant_field_name(ty: &Ty, variant_names: &std::collections::HashSet<String>
 /// heap children. A String-only-field variant uses the masked `DropListStr` (ADT brick 5a/5c)
 /// instead — no recursive fn. Used by both the generator and `try_lower_variant_ctor` (to choose
 /// `DropVariant` tracking), so the two never disagree.
+// A ctor field the generated `$__drop_<V>` can free: a nested variant (recurse), a String
+// (rc_dec), a List[scalar] (flat rc_dec), an Option[scalar] (flat rc_dec — the 0-or-1 block
+// owns no children), a List[<variant>] (per-element), a List[String] (per-element via the
+// generic `__drop_list_str` — each element is an OWNED String handle a flat rc_dec of just
+// the list block would leak), or a RECORD (recurse via `$__drop_<R>` / a scalar-only record's
+// flat rc_dec — see the drop generator's field loop). Named (codopsy cc), pure — no logic
+// change from the closure `variant_needs_recursive_drop` used to carry.
+fn variant_drop_supported_heap_field(
+    t: &Ty,
+    variant_names: &std::collections::HashSet<String>,
+    record_names: &std::collections::HashSet<String>,
+) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    variant_field_name(t, variant_names).is_some()
+        || matches!(t, Ty::Named(n, _) if record_names.contains(n.as_str()))
+        || matches!(t, Ty::String)
+        // A CLOSURE field: the generator's Fn arm frees the self-describing
+        // closure block via `__drop_closure`.
+        || matches!(t, Ty::Fn { .. })
+        || matches!(t, Ty::Applied(TypeConstructorId::List, a)
+            if a.len() == 1
+                && (!is_heap_ty(&a[0])
+                    || matches!(a[0], Ty::String)
+                    || variant_field_name(&a[0], variant_names).is_some()))
+        || matches!(t, Ty::Applied(TypeConstructorId::Option, a)
+            if a.len() == 1 && !is_heap_ty(&a[0]))
+}
+
+fn variant_case_field_tys(kind: &almide_ir::IrVariantKind) -> Vec<&Ty> {
+    use almide_ir::IrVariantKind;
+    match kind {
+        IrVariantKind::Unit => vec![],
+        IrVariantKind::Tuple { fields } => fields.iter().collect(),
+        IrVariantKind::Record { fields } => fields.iter().map(|f| &f.ty).collect(),
+    }
+}
+
+/// Accumulator for [`variant_needs_recursive_drop`]'s per-case fold — each case's fields only
+/// SET these flags (never read one back to decide behavior for a LATER case), so the fold-body
+/// is independent per case and safe to factor into [`scan_variant_case_for_drop`] below.
+#[derive(Default)]
+struct VariantDropScan {
+    any_heap: bool,
+    all_supported: bool,
+    has_variant_field: bool,
+}
+
+fn scan_variant_case_for_drop(
+    tys: &[&Ty],
+    variant_names: &std::collections::HashSet<String>,
+    record_names: &std::collections::HashSet<String>,
+    scan: &mut VariantDropScan,
+) {
+    for t in tys {
+        if variant_field_name(t, variant_names).is_some() {
+            scan.has_variant_field = true;
+        }
+        if is_heap_ty(t) {
+            scan.any_heap = true;
+            if !variant_drop_supported_heap_field(t, variant_names, record_names) {
+                scan.all_supported = false;
+            }
+        }
+    }
+}
+
 pub fn variant_needs_recursive_drop(
     decl: &almide_ir::IrTypeDecl,
     variant_names: &std::collections::HashSet<String>,
     record_names: &std::collections::HashSet<String>,
 ) -> bool {
-    use almide_ir::{IrTypeDeclKind, IrVariantKind};
+    use almide_ir::IrTypeDeclKind;
     let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else {
         return false;
     };
-    // A ctor field the generated `$__drop_<V>` can free: a nested variant (recurse), a String
-    // (rc_dec), a List[scalar] (flat rc_dec), an Option[scalar] (flat rc_dec — the 0-or-1 block
-    // owns no children), a List[<variant>] (per-element), a List[String] (per-element via the
-    // generic `__drop_list_str` — each element is an OWNED String handle a flat rc_dec of just
-    // the list block would leak), or a RECORD (recurse via `$__drop_<R>` / a scalar-only record's
-    // flat rc_dec — see the drop generator's field loop).
-    let supported_heap = |t: &Ty| -> bool {
-        use almide_lang::types::constructor::TypeConstructorId;
-        variant_field_name(t, variant_names).is_some()
-            || matches!(t, Ty::Named(n, _) if record_names.contains(n.as_str()))
-            || matches!(t, Ty::String)
-            // A CLOSURE field: the generator's Fn arm frees the self-describing
-            // closure block via `__drop_closure`.
-            || matches!(t, Ty::Fn { .. })
-            || matches!(t, Ty::Applied(TypeConstructorId::List, a)
-                if a.len() == 1
-                    && (!is_heap_ty(&a[0])
-                        || matches!(a[0], Ty::String)
-                        || variant_field_name(&a[0], variant_names).is_some()))
-            || matches!(t, Ty::Applied(TypeConstructorId::Option, a)
-                if a.len() == 1 && !is_heap_ty(&a[0]))
-    };
-    let mut any_heap = false;
-    let mut all_supported = true;
-    let mut has_variant_field = false;
+    let mut scan = VariantDropScan { all_supported: true, ..Default::default() };
     for c in cases {
-        let tys: Vec<&Ty> = match &c.kind {
-            IrVariantKind::Unit => vec![],
-            IrVariantKind::Tuple { fields } => fields.iter().collect(),
-            IrVariantKind::Record { fields } => fields.iter().map(|f| &f.ty).collect(),
-        };
-        for t in tys {
-            if variant_field_name(t, variant_names).is_some() {
-                has_variant_field = true;
-            }
-            if is_heap_ty(t) {
-                any_heap = true;
-                if !supported_heap(t) {
-                    all_supported = false;
-                }
-            }
-        }
+        let tys = variant_case_field_tys(&c.kind);
+        scan_variant_case_for_drop(&tys, variant_names, record_names, &mut scan);
     }
     // The ORIGINAL rule (a nested-variant field) OR the widened one: some heap field,
     // ALL of them freeable by the generator (String / List[scalar] / List[variant]) —
     // the GGUFValue shape (ValString + ValArray(List[GGUFValue])). A type with an
     // unsupported heap field (e.g. a Map) keeps needing=false → its list stays WALLED
     // (never a silent leak).
-    has_variant_field || (any_heap && all_supported)
+    scan.has_variant_field || (scan.any_heap && scan.all_supported)
 }
 
 /// The set of FLAT variant type names — every constructor scalar-only, so the block owns NO inner
