@@ -693,22 +693,30 @@ pub(crate) fn desugar_hof_chain_anf(body: &IrExpr) -> Option<IrExpr> {
         }
         S { from, to }.visit_expr_mut(e);
     }
+    // Pure guard, no recursion — named so the recursive `tail_unwrap_payload`
+    // match arm below reads as one condition instead of three inlined clauses.
+    fn is_unwrap_or_call(module: almide_lang::intern::Sym, func: almide_lang::intern::Sym, arg_count: usize) -> bool {
+        func.as_str() == "unwrap_or" && matches!(module.as_str(), "option" | "result") && arg_count == 2
+    }
+    // Pure extraction, no recursion — the Option/Result payload ty an `unwrap_or`'s
+    // first arg carries, or None outside those two shapes.
+    fn unwrap_or_payload_ty(arg_ty: &Ty) -> Option<Ty> {
+        use almide_lang::types::constructor::TypeConstructorId as TCI;
+        match arg_ty {
+            Ty::Applied(TCI::Option, a) if a.len() == 1 => Some(a[0].clone()),
+            Ty::Applied(TCI::Result, a) if a.len() == 2 => Some(a[0].clone()),
+            _ => None,
+        }
+    }
     // Find the (unresolved payload, authoritative default) pair at the Block tail.
     fn tail_unwrap_payload(e: &IrExpr) -> Option<(Ty, Ty)> {
         match &e.kind {
             IrExprKind::Block { expr: Some(t), .. } => tail_unwrap_payload(t),
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-                if func.as_str() == "unwrap_or"
-                    && matches!(module.as_str(), "option" | "result")
-                    && args.len() == 2 =>
+                if is_unwrap_or_call(*module, *func, args.len()) =>
             {
-                use almide_lang::types::constructor::TypeConstructorId as TCI;
                 let d_ty = args[1].ty.clone();
-                let payload = match &args[0].ty {
-                    Ty::Applied(TCI::Option, a) if a.len() == 1 => Some(a[0].clone()),
-                    Ty::Applied(TCI::Result, a) if a.len() == 2 => Some(a[0].clone()),
-                    _ => None,
-                }?;
+                let payload = unwrap_or_payload_ty(&args[0].ty)?;
                 (payload != d_ty).then_some((payload, d_ty))
             }
             _ => None,
