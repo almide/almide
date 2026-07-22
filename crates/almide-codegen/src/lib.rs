@@ -537,62 +537,74 @@ fn resolve_runtime_deps(needed: &mut std::collections::HashSet<&str>) {
 /// Collect the runtime module bodies for the `needed` set: hoist top-level `use`
 /// to the front, deduplicate, and skip struct definitions the walker already
 /// emitted (present in `user_code`) to avoid E0428. Returns the assembled block.
-fn rust_runtime_modules(needed: &std::collections::HashSet<&str>, user_code: &str) -> String {
-    let mut use_set = std::collections::HashSet::new();
-    let mut use_lines = Vec::new();
-    let mut body_lines = Vec::new();
-    for (name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
-        if needed.contains(name) {
-            let stripped = strip_test_blocks(source);
-            let lines: Vec<&str> = stripped.lines().collect();
-            let mut i = 0;
-            while i < lines.len() {
-                let line = lines[i];
-                let trimmed = line.trim();
-                // Top-level use: not indented and starts with "use "
-                if !line.starts_with(' ') && !line.starts_with('\t')
-                    && trimmed.starts_with("use ") && trimmed.ends_with(';')
-                {
-                    if use_set.insert(trimmed.to_string()) {
-                        use_lines.push(trimmed.to_string());
-                    }
-                    i += 1;
-                    continue;
-                }
-                // Detect struct definitions: #[derive(...)] followed by pub struct Name
-                // Skip the block if user_code already contains that struct (walker emitted it).
-                if trimmed.starts_with("#[derive(") {
-                    if let Some(next) = lines.get(i + 1) {
-                        if let Some(struct_name) = next.trim().strip_prefix("pub struct ")
-                            .and_then(|s| s.split_whitespace().next())
-                            .map(|s| s.trim_end_matches('{').trim())
-                        {
-                            let needle = format!("struct {}", struct_name);
-                            if user_code.contains(&needle) {
-                                // Skip derive + struct + fields + closing brace
-                                i += 1; // skip #[derive]
-                                let mut depth = 0u32;
-                                while i < lines.len() {
-                                    if lines[i].contains('{') { depth += 1; }
-                                    if lines[i].contains('}') {
-                                        depth = depth.saturating_sub(1);
-                                        if depth == 0 { i += 1; break; }
-                                    }
-                                    i += 1;
-                                }
-                                continue;
-                            }
-                        }
-                    }
-                }
-                body_lines.push(line.to_string());
-                i += 1;
+/// Process one runtime module's (already-test-block-stripped) source lines,
+/// appending top-level `use` lines into `use_set`/`use_lines` (deduped) and
+/// everything else into `body_lines` — skipping a `#[derive(...)] pub
+/// struct Name { ... }` block whose struct the walker already emitted into
+/// `user_code`. Extracted from `rust_runtime_modules` (cog>30
+/// decomposition, second round): a write-only accumulator over
+/// `use_set`/`use_lines`/`body_lines`, never read back to change its own
+/// branching within this call.
+fn append_runtime_module_lines(
+    source: &str,
+    user_code: &str,
+    use_set: &mut std::collections::HashSet<String>,
+    use_lines: &mut Vec<String>,
+    body_lines: &mut Vec<String>,
+) {
+    let stripped = strip_test_blocks(source);
+    let lines: Vec<&str> = stripped.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+        // Top-level use: not indented and starts with "use "
+        if !line.starts_with(' ') && !line.starts_with('\t')
+            && trimmed.starts_with("use ") && trimmed.ends_with(';')
+        {
+            if use_set.insert(trimmed.to_string()) {
+                use_lines.push(trimmed.to_string());
             }
-            body_lines.push(String::new());
+            i += 1;
+            continue;
         }
+        // Detect struct definitions: #[derive(...)] followed by pub struct Name
+        // Skip the block if user_code already contains that struct (walker emitted it).
+        if trimmed.starts_with("#[derive(") {
+            if let Some(next) = lines.get(i + 1) {
+                if let Some(struct_name) = next.trim().strip_prefix("pub struct ")
+                    .and_then(|s| s.split_whitespace().next())
+                    .map(|s| s.trim_end_matches('{').trim())
+                {
+                    let needle = format!("struct {}", struct_name);
+                    if user_code.contains(&needle) {
+                        // Skip derive + struct + fields + closing brace
+                        i += 1; // skip #[derive]
+                        let mut depth = 0u32;
+                        while i < lines.len() {
+                            if lines[i].contains('{') { depth += 1; }
+                            if lines[i].contains('}') {
+                                depth = depth.saturating_sub(1);
+                                if depth == 0 { i += 1; break; }
+                            }
+                            i += 1;
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+        body_lines.push(line.to_string());
+        i += 1;
     }
-    // Remove single-item `use a::b::X;` when a group `use a::b::{..., X, ...};` exists
-    let use_lines: Vec<String> = use_lines.into_iter().filter(|line| {
+    body_lines.push(String::new());
+}
+
+/// Remove single-item `use a::b::X;` lines when a group `use
+/// a::b::{..., X, ...};` already covers them. Extracted from
+/// `rust_runtime_modules`.
+fn dedup_use_lines(use_lines: Vec<String>, use_set: &std::collections::HashSet<String>) -> Vec<String> {
+    use_lines.into_iter().filter(|line| {
         // Parse: use path::Item;
         if let Some(rest) = line.strip_prefix("use ").and_then(|s| s.strip_suffix(';')) {
             if !rest.contains('{') {
@@ -617,7 +629,19 @@ fn rust_runtime_modules(needed: &std::collections::HashSet<&str>, user_code: &st
             }
         }
         true
-    }).collect();
+    }).collect()
+}
+
+fn rust_runtime_modules(needed: &std::collections::HashSet<&str>, user_code: &str) -> String {
+    let mut use_set = std::collections::HashSet::new();
+    let mut use_lines = Vec::new();
+    let mut body_lines = Vec::new();
+    for (name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
+        if needed.contains(name) {
+            append_runtime_module_lines(source, user_code, &mut use_set, &mut use_lines, &mut body_lines);
+        }
+    }
+    let use_lines = dedup_use_lines(use_lines, &use_set);
     let mut out = String::new();
     for u in &use_lines { out.push_str(u); out.push('\n'); }
     for line in &body_lines { out.push_str(line); out.push('\n'); }
