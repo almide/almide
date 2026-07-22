@@ -1166,6 +1166,7 @@ include!("scalar_for.rs");
 // The defunc HOF family (formerly one 3.5k-line control_p5.rs), split by concern:
 include!("defunc_hof.rs");
 include!("defunc_fold.rs");
+include!("defunc_fold_b.rs");
 include!("defunc_str_acc.rs");
 include!("defunc_find.rs");
 include!("defunc_tuple_fold.rs");
