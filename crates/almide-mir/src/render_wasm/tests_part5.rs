@@ -320,6 +320,16 @@ fn heap_field_record_byte_matches_v0() {
     // `DropListStr` = one `d`) — no new op, no leak, no double-free. (A heap-field READ is a
     // borrowed `LoadHandle` Handle-arg, accounted by the cert as a no-op call-arg — the same
     // established borrow shape `prim.load_str` + `println(payload)` uses.)
+    assert_ownership_cert_balanced(&prog);
+    if let Some(out) = build_and_run("heap_field_record", &render_wasm_program(&prog)) {
+        assert_eq!(out, "7\nhi");
+    }
+}
+
+/// Shared cert-balance walk both heap-field-record tests below run: every line of every
+/// non-`__drop_*` function's ownership certificate never decs below 0 and ends at 0 — the
+/// same corpus-wall check, factored once instead of duplicated per test.
+fn assert_ownership_cert_balanced(prog: &MirProgram) {
     for f in &prog.functions {
         // The GENERATED recursive drops (`__drop_R`, `__drop_list_R`) are the trusted
         // free routines — the real pipeline verifies them by the coown whitelist
@@ -344,9 +354,6 @@ fn heap_field_record_byte_matches_v0() {
             }
             assert_eq!(rc, 0, "leak in {} cert line {:?}", f.name, line);
         }
-    }
-    if let Some(out) = build_and_run("heap_field_record", &render_wasm_program(&prog)) {
-        assert_eq!(out, "7\nhi");
     }
 }
 
@@ -388,31 +395,7 @@ fn spread_heap_field_record_materializes_soundly() {
         println(int.to_string(r2.n)) }\n";
     let prog = lower_source(src);
     // The cert stays balanced (the spread copy's `Dup` is matched by the masked drop's free).
-    for f in &prog.functions {
-        // The GENERATED recursive drops (`__drop_R`, `__drop_list_R`) are the trusted
-        // free routines — the real pipeline verifies them by the coown whitelist
-        // (proofs/CoownLoop.v), NOT by per-line parity: their whole job is dec-ing
-        // refs they do not own on the line (the owner is the caller). Skip them here
-        // exactly as the corpus-wall checker does.
-        if f.name.starts_with("__drop_") {
-            continue;
-        }
-        let cert = crate::certificate::ownership_certificate(f);
-        for line in cert.lines() {
-            let mut rc: i64 = 0;
-            for c in line.chars() {
-                match c {
-                    'i' | 'a' => rc += 1,
-                    'd' | 'm' => {
-                        assert!(rc > 0, "double-free in {} cert {:?}", f.name, line);
-                        rc -= 1;
-                    }
-                    _ => {}
-                }
-            }
-            assert_eq!(rc, 0, "leak in {} cert {:?}", f.name, line);
-        }
-    }
+    assert_ownership_cert_balanced(&prog);
     if let Some(out) = build_and_run("spread_heap_field_record", &render_wasm_program(&prog)) {
         // r2.n reads the override (9); r2.name copied "a"; r untouched — no double-free.
         assert_eq!(out, "9");
