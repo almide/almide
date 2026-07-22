@@ -362,6 +362,55 @@ fn check_needs_ownership_stmt(stmt: &IrStmt, var: VarId, needs: &mut bool) {
 /// `var` into a callee slot that expects `RefMut`. Used to promote a
 /// bundled body's own param from `Ref` to `RefMut` so the forwarded
 /// `&mut {arg}` wraps a `&mut Vec<u8>` instead of a `&Vec<u8>`.
+/// `IrExprKind::RuntimeCall` case of `check_needs_refmut`, extracted
+/// verbatim (cog>30 decomposition, pattern 2: mirrors the
+/// `check_needs_ownership` arm-extraction shape and its safety
+/// reasoning). Lowered `@intrinsic` with a mangled symbol — consult
+/// SIGS_SNAPSHOT (which carries the @intrinsic seed sigs, including
+/// implicit_mut promotions) to learn the callee slot kinds.
+fn check_needs_refmut_runtime_call(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    let IrExprKind::RuntimeCall { symbol, args } = &expr.kind else { unreachable!() };
+    if let Some(borrows) = SIGS_SNAPSHOT.with(|s| s.borrow().get(symbol.as_str()).cloned()) {
+        for (i, arg) in args.iter().enumerate() {
+            if matches!(borrows.get(i), Some(ParamBorrow::RefMut))
+                && is_var(arg, var)
+            {
+                *needs = true;
+                return;
+            }
+        }
+    }
+    for arg in args { check_needs_refmut(arg, var, needs); }
+}
+
+/// `IrExprKind::Call` case of `check_needs_refmut`, extracted verbatim.
+/// Named / Module call — look up user-defined borrow signatures.
+fn check_needs_refmut_call(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    let IrExprKind::Call { target, args, .. } = &expr.kind else { unreachable!() };
+    let callee_sig: Option<Vec<ParamBorrow>> = match target {
+        CallTarget::Named { name } => lookup_user_borrows(name.as_str()),
+        CallTarget::Module { module, func, .. } => {
+            let key = format!("{}::{}", module, func);
+            SIGS_SNAPSHOT.with(|s| s.borrow().get(&key).cloned())
+        }
+        _ => None,
+    };
+    if let Some(borrows) = callee_sig {
+        for (i, arg) in args.iter().enumerate() {
+            if matches!(borrows.get(i), Some(ParamBorrow::RefMut))
+                && is_var(arg, var)
+            {
+                *needs = true;
+                return;
+            }
+        }
+    }
+    if let CallTarget::Method { object, .. } = target {
+        check_needs_refmut(object, var, needs);
+    }
+    for arg in args { check_needs_refmut(arg, var, needs); }
+}
+
 fn check_needs_refmut(expr: &IrExpr, var: VarId, needs: &mut bool) {
     if *needs { return; }
     match &expr.kind {
@@ -386,44 +435,9 @@ fn check_needs_refmut(expr: &IrExpr, var: VarId, needs: &mut bool) {
         // Consult SIGS_SNAPSHOT (which carries the @intrinsic seed
         // sigs, including implicit_mut promotions) to learn the callee
         // slot kinds.
-        IrExprKind::RuntimeCall { symbol, args } => {
-            if let Some(borrows) = SIGS_SNAPSHOT.with(|s| s.borrow().get(symbol.as_str()).cloned()) {
-                for (i, arg) in args.iter().enumerate() {
-                    if matches!(borrows.get(i), Some(ParamBorrow::RefMut))
-                        && is_var(arg, var)
-                    {
-                        *needs = true;
-                        return;
-                    }
-                }
-            }
-            for arg in args { check_needs_refmut(arg, var, needs); }
-        }
+        IrExprKind::RuntimeCall { .. } => check_needs_refmut_runtime_call(expr, var, needs),
         // Named / Module call — look up user-defined borrow signatures.
-        IrExprKind::Call { target, args, .. } => {
-            let callee_sig: Option<Vec<ParamBorrow>> = match target {
-                CallTarget::Named { name } => lookup_user_borrows(name.as_str()),
-                CallTarget::Module { module, func, .. } => {
-                    let key = format!("{}::{}", module, func);
-                    SIGS_SNAPSHOT.with(|s| s.borrow().get(&key).cloned())
-                }
-                _ => None,
-            };
-            if let Some(borrows) = callee_sig {
-                for (i, arg) in args.iter().enumerate() {
-                    if matches!(borrows.get(i), Some(ParamBorrow::RefMut))
-                        && is_var(arg, var)
-                    {
-                        *needs = true;
-                        return;
-                    }
-                }
-            }
-            if let CallTarget::Method { object, .. } = target {
-                check_needs_refmut(object, var, needs);
-            }
-            for arg in args { check_needs_refmut(arg, var, needs); }
-        }
+        IrExprKind::Call { .. } => check_needs_refmut_call(expr, var, needs),
         IrExprKind::ForIn { iterable, body, .. } => {
             check_needs_refmut(iterable, var, needs);
             for s in body { check_needs_refmut_stmt(s, var, needs); }
