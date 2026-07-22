@@ -10,20 +10,8 @@ use super::*;
 /// (e.g. the optimizer's `optimize_program`) each module still owns
 /// its own table and we walk it into the module-local table.
 pub fn compute_use_counts(program: &mut IrProgram) {
-    // Reset all counts
-    for i in 0..program.var_table.len() {
-        program.var_table.entries[i].use_count = 0;
-    }
-
-    // Count uses in all function bodies
-    for func in &program.functions {
-        count_uses_in_expr(&func.body, &mut program.var_table);
-    }
-
-    // Count uses in top-level let values
-    for tl in &program.top_lets {
-        count_uses_in_expr(&tl.value, &mut program.var_table);
-    }
+    reset_use_counts(&mut program.var_table);
+    count_uses_in_decls(&program.functions, &program.top_lets, &mut program.var_table);
 
     // Modules: if the module still owns a populated VarTable (i.e.
     // unify hasn't run yet or the module happens to be empty), count
@@ -33,23 +21,28 @@ pub fn compute_use_counts(program: &mut IrProgram) {
     // `program.var_table`, so we walk there instead.
     for module in program.modules.iter_mut() {
         if module.var_table.entries.is_empty() {
-            for func in &module.functions {
-                count_uses_in_expr(&func.body, &mut program.var_table);
-            }
-            for tl in &module.top_lets {
-                count_uses_in_expr(&tl.value, &mut program.var_table);
-            }
+            count_uses_in_decls(&module.functions, &module.top_lets, &mut program.var_table);
         } else {
-            for i in 0..module.var_table.len() {
-                module.var_table.entries[i].use_count = 0;
-            }
-            for func in &module.functions {
-                count_uses_in_expr(&func.body, &mut module.var_table);
-            }
-            for tl in &module.top_lets {
-                count_uses_in_expr(&tl.value, &mut module.var_table);
-            }
+            reset_use_counts(&mut module.var_table);
+            count_uses_in_decls(&module.functions, &module.top_lets, &mut module.var_table);
         }
+    }
+}
+
+/// Zero out every use-count slot in `table`, in place.
+fn reset_use_counts(table: &mut VarTable) {
+    for i in 0..table.len() {
+        table.entries[i].use_count = 0;
+    }
+}
+
+/// Count uses in every function body and top-level let value, into `table`.
+fn count_uses_in_decls(functions: &[IrFunction], top_lets: &[IrTopLet], table: &mut VarTable) {
+    for func in functions {
+        count_uses_in_expr(&func.body, table);
+    }
+    for tl in top_lets {
+        count_uses_in_expr(&tl.value, table);
     }
 }
 
