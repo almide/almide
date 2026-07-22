@@ -54,8 +54,17 @@ impl LowerCtx {
     /// `LitStr`, `Var` (Result-Ok-context + generic), string/list concat, `StringInterp`,
     /// nested `If`, and the `List`/`Tuple`/`Record`/`SpreadRecord` literal constructors.
     /// Verbatim subset of the original single match — each arm owns its own `arm_mark`/
-    /// `drop_arm_locals` frame, no state crosses arm boundaries.
+    /// `drop_arm_locals` frame, no state crosses arm boundaries. Split further (codopsy
+    /// cc) into `_a` (pass-through + the two `Var` arms, which MUST stay together — the
+    /// guarded arm's failed guard falls through to the plain `Var` arm in the SAME match,
+    /// exactly as Rust's guard semantics require) and `_b` (concat/interp/nested-if/
+    /// aggregate-literal arms, a disjoint `IrExprKind` discriminant set from `_a`'s).
     fn lower_heap_result_arm_literal(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        self.lower_heap_result_arm_literal_a(arm, result_ty)
+            .or_else(|| self.lower_heap_result_arm_literal_b(arm, result_ty))
+    }
+
+    fn lower_heap_result_arm_literal_a(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         match &arm.kind {
             // An `e!` arm (`if c then parse_sequence(..)! else ..`) — effect-fn error
             // propagation: `e!` returns e's Result unchanged (Ok→Ok, Err→Err), so strip the
@@ -114,6 +123,22 @@ impl LowerCtx {
                 self.ops.push(Op::Consume { v: dst });
                 Some(dst)
             }
+            _ => None,
+        }
+    }
+
+    /// Concat/interp/nested-if/aggregate-literal arms — the rest of the original single
+    /// match, a discriminant set disjoint from `_a`'s (no `IrExprKind` variant appears in
+    /// both halves), so splitting the match at this boundary changes nothing observable.
+    /// Further split into `_b` (concat/interp/nested-if) and `_c` (the four aggregate
+    /// literal constructors) — same disjoint-discriminant reasoning.
+    fn lower_heap_result_arm_literal_b(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        self.lower_heap_result_arm_literal_b1(arm, result_ty)
+            .or_else(|| self.lower_heap_result_arm_literal_b2(arm, result_ty))
+    }
+
+    fn lower_heap_result_arm_literal_b1(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        match &arm.kind {
             // A string-concat arm (`match x { _ => a + b }`, `if c then a + b else …`) — the
             // __str_concat call's fresh owned String (cert `i`) + the arm's `Consume` (`m`) = the
             // same per-arm `"im"` balance as the call arms; any materialized arg temp is freed
@@ -156,6 +181,12 @@ impl LowerCtx {
             IrExprKind::If { cond, then, else_ } => {
                 self.lower_heap_result_if_inner(cond, then, else_, result_ty)
             }
+            _ => None,
+        }
+    }
+
+    fn lower_heap_result_arm_literal_b2(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        match &arm.kind {
             // A LIST-literal arm (`if string.is_empty(t) then [] else parse_rows_rec(...)` — the
             // parser entry's empty-or-recurse split): materialize the block + MOVE IT OUT
             // (`Consume` = `m`) — the same per-arm `"im"` as a literal arm. An EMPTY `[]` is a fresh
