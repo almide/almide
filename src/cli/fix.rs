@@ -48,6 +48,97 @@ struct ManualDiag {
     message: String,
 }
 
+/// `cmd_fix`'s reporting tail — JSON report / human dry-run preview / human
+/// diff summary / manual-fix listing / exit-code contract. Extracted
+/// verbatim as the function's true tail (nothing in `cmd_fix` runs after
+/// this call), so the early `return` inside the JSON branch is preserved
+/// exactly (it terminated `cmd_fix` before too — there was nothing after).
+#[allow(clippy::too_many_arguments)]
+fn report_fix_result(
+    file: &str,
+    dry_run: bool,
+    json: bool,
+    working: &str,
+    import_messages: &[String],
+    imports_added: Vec<String>,
+    operator_count: usize,
+    letin_count: usize,
+    return_count: usize,
+    manual: Vec<ManualDiag>,
+    any_change: bool,
+) {
+    if json {
+        let report = FixReport {
+            schema_version: FIX_REPORT_SCHEMA_VERSION,
+            file,
+            imports_added,
+            letin_removed: letin_count,
+            operator_rewrites: operator_count,
+            return_removed: return_count,
+            manual_pending: manual,
+            changed: any_change,
+            dry_run,
+        };
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+        return;
+    }
+
+    // Human output (default).
+    let op_msg = |n: usize| format!(
+        "Rewrote {} comparison function call(s) to operator form (int.gt/lt/eq/... → > < == ...)", n
+    );
+    if dry_run {
+        if !any_change {
+            println!("no auto-applicable fixes");
+        } else {
+            println!("--- would apply ---");
+            for m in import_messages { println!("  {}", m); }
+            if operator_count > 0 { println!("  {}", op_msg(operator_count)); }
+            if letin_count > 0 {
+                println!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count);
+            }
+            if return_count > 0 {
+                println!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", return_count);
+            }
+            println!("\n--- new file contents ---");
+            println!("{}", working);
+        }
+    } else if any_change {
+        eprintln!("{}:", file);
+        for m in import_messages { eprintln!("  {}", m); }
+        if operator_count > 0 { eprintln!("  {}", op_msg(operator_count)); }
+        if letin_count > 0 {
+            eprintln!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count);
+        }
+        if return_count > 0 {
+            eprintln!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", return_count);
+        }
+    }
+
+    if !manual.is_empty() {
+        eprintln!("\n{} diagnostic(s) have `try:` snippets that need manual application:", manual.len());
+        for d in &manual {
+            let loc = match (d.line, d.col) {
+                (Some(l), Some(c)) => format!("{}:{}", l, c),
+                (Some(l), None) => format!("{}", l),
+                _ => "?".into(),
+            };
+            eprintln!("  [{code}] {file}:{loc}  {}", d.message, code = d.code);
+        }
+        eprintln!("\nRun `almide check {}` for the full text of each `try:` snippet.", file);
+    }
+
+    // Exit code contract for harness integration:
+    //   0 — file is clean (or was made clean by auto-fixes; no manual work left)
+    //   1 — manual fixes still pending (harness should forward diagnostics to LLM retry)
+    // Write errors elsewhere already exit(1); here we only signal the
+    // "post-fix clean / dirty" bit. --dry-run never exits dirty so preview
+    // invocations don't surprise callers that pipe them.
+    if !dry_run && !manual.is_empty() {
+        std::process::exit(1);
+    }
+}
+
 pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
     // `parse_errors` is consumed inside the rule engine (per-rule
     // re-parse) so we discard it here.
@@ -113,76 +204,10 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
         }
     }
 
-    if json {
-        let report = FixReport {
-            schema_version: FIX_REPORT_SCHEMA_VERSION,
-            file,
-            imports_added,
-            letin_removed: letin_count,
-            operator_rewrites: operator_count,
-            return_removed: return_count,
-            manual_pending: manual,
-            changed: any_change,
-            dry_run,
-        };
-        println!("{}", serde_json::to_string_pretty(&report).unwrap());
-        return;
-    }
-
-    // Human output (default).
-    let op_msg = |n: usize| format!(
-        "Rewrote {} comparison function call(s) to operator form (int.gt/lt/eq/... → > < == ...)", n
+    report_fix_result(
+        file, dry_run, json, &working, &import_messages, imports_added,
+        operator_count, letin_count, return_count, manual, any_change,
     );
-    if dry_run {
-        if !any_change {
-            println!("no auto-applicable fixes");
-        } else {
-            println!("--- would apply ---");
-            for m in &import_messages { println!("  {}", m); }
-            if operator_count > 0 { println!("  {}", op_msg(operator_count)); }
-            if letin_count > 0 {
-                println!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count);
-            }
-            if return_count > 0 {
-                println!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", return_count);
-            }
-            println!("\n--- new file contents ---");
-            println!("{}", working);
-        }
-    } else if any_change {
-        eprintln!("{}:", file);
-        for m in &import_messages { eprintln!("  {}", m); }
-        if operator_count > 0 { eprintln!("  {}", op_msg(operator_count)); }
-        if letin_count > 0 {
-            eprintln!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count);
-        }
-        if return_count > 0 {
-            eprintln!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", return_count);
-        }
-    }
-
-    if !manual.is_empty() {
-        eprintln!("\n{} diagnostic(s) have `try:` snippets that need manual application:", manual.len());
-        for d in &manual {
-            let loc = match (d.line, d.col) {
-                (Some(l), Some(c)) => format!("{}:{}", l, c),
-                (Some(l), None) => format!("{}", l),
-                _ => "?".into(),
-            };
-            eprintln!("  [{code}] {file}:{loc}  {}", d.message, code = d.code);
-        }
-        eprintln!("\nRun `almide check {}` for the full text of each `try:` snippet.", file);
-    }
-
-    // Exit code contract for harness integration:
-    //   0 — file is clean (or was made clean by auto-fixes; no manual work left)
-    //   1 — manual fixes still pending (harness should forward diagnostics to LLM retry)
-    // Write errors elsewhere already exit(1); here we only signal the
-    // "post-fix clean / dirty" bit. --dry-run never exits dirty so preview
-    // invocations don't surprise callers that pipe them.
-    if !dry_run && !manual.is_empty() {
-        std::process::exit(1);
-    }
 }
 
 /// Delegate to the canonical comparison-operator table in
