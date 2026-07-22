@@ -1368,58 +1368,28 @@ fn lower_main_and_sibling_fns(
     functions
 }
 
-fn try_render_wasm_source_impl_rest(
-    ir: &mut almide_ir::IrProgram,
+/// Phase 8: synthesize `__mg_init` (assigns each mutable top-let its declared
+/// initializer, declaration order, through the SAME slot-routed Assign path user code
+/// uses — `_start` calls it before `__global_init`/`main`; a non-lowerable initializer
+/// WALLS the whole program, since shipping zeroed globals would be a silent
+/// miscompile), then auto-link the self-hosted stdlib runtime (int.to_string,
+/// string.concat, `print_str`, …): when a registry entry is called but not defined,
+/// its impl fn is lowered and renamed to the call name — iterated to a FIXPOINT since
+/// a linked impl may itself call ANOTHER registry entry. A self-hosted fn calling
+/// another registered impl by its IMPL name (pre-rename) is rewritten to the call name
+/// afterward, and `print_str` is force-linked last (`println` → `PrintStr` → `(call
+/// $print_str)`).
+#[allow(clippy::too_many_arguments)]
+fn synthesize_and_link_runtime_fns(
+    functions: &mut Vec<crate::MirFunction>,
+    mutable_tls: &[almide_ir::IrTopLet],
+    main_globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    main_global_inits: &HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    globals: &HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    record_layouts: &crate::lower::RecordLayouts,
+    variant_layouts: &crate::lower::VariantLayouts,
     verbose: bool,
-) -> Result<String, LowerError> {
-    let PipelineLayouts {
-        globals,
-        global_inits,
-        main_globals,
-        main_global_inits,
-        mutable_toplet_aliases,
-        record_layouts,
-        variant_layouts,
-    } = collect_pipeline_layouts(ir);
-
-    let CrossModuleFns { mut module_fn_sibs, mut inlined_fns, all_fns } =
-        inline_and_classify_cross_module_fns(ir, &main_globals, &record_layouts);
-
-    bridge_cross_module_derived_methods(ir, &mut inlined_fns, &mut module_fn_sibs);
-
-    let mutable_tls = assign_mutable_global_slots(ir, &mutable_toplet_aliases)?;
-    let mutable_global_count = mutable_tls.len() as u32;
-
-    repair_and_substitute_globals(
-        ir,
-        &mut inlined_fns,
-        &mut module_fn_sibs,
-        &globals,
-        &main_globals,
-        &main_global_inits,
-        &record_layouts,
-        &all_fns,
-    );
-
-    let mut functions = lower_main_and_sibling_fns(
-        &inlined_fns,
-        &module_fn_sibs,
-        &main_globals,
-        &main_global_inits,
-        &globals,
-        &global_inits,
-        &record_layouts,
-        &variant_layouts,
-        ir.functions.len(),
-        verbose,
-    );
-
-    // MUTABLE-GLOBAL INITIALIZATION: synthesize `__mg_init` assigning each mutable
-    // top-let its declared initializer (declaration order), lowered through the SAME
-    // slot-routed Assign path user code uses (minus the old-value take/drop — the slots
-    // start zeroed). `_start` calls it before `__global_init`/`main`. A non-lowerable
-    // initializer WALLS the whole program: shipping zeroed globals would be a silent
-    // miscompile, and the v0 fallback initializes them correctly.
+) -> Result<(), LowerError> {
     if !mutable_tls.is_empty() {
         let stmts: Vec<almide_ir::IrStmt> = mutable_tls
             .iter()
@@ -1455,10 +1425,10 @@ fn try_render_wasm_source_impl_rest(
         };
         match crate::lower::lower_function_all_with_globals(
             &init_fn,
-            &main_globals,
-            &main_global_inits,
-            &record_layouts,
-            &variant_layouts,
+            main_globals,
+            main_global_inits,
+            record_layouts,
+            variant_layouts,
         ) {
             Ok(mirs) => functions.extend(mirs),
             Err(e) => {
@@ -1468,7 +1438,6 @@ fn try_render_wasm_source_impl_rest(
             }
         }
     }
-
 
     // Auto-link the self-hosted stdlib runtime (int.to_string, string.concat, …) when an entry is
     // called but not defined, renaming its impl fn to the call name. A linked impl may call ANOTHER
@@ -1515,7 +1484,7 @@ fn try_render_wasm_source_impl_rest(
             if any_called && !any_defined {
                 let rt = source_to_ir(rt_source)?;
                 for f in &rt.functions {
-                    let lowered = crate::lower::lower_function(f, &globals);
+                    let lowered = crate::lower::lower_function(f, globals);
                     if let Err(e) = &lowered {
                         if verbose
                             && (entries.iter().any(|(impl_fn, _)| f.name.as_str() == *impl_fn)
@@ -1549,7 +1518,7 @@ fn try_render_wasm_source_impl_rest(
         .iter()
         .flat_map(|(_, es)| es.iter().map(|(i, c)| (*i, *c)))
         .collect();
-    for f in &mut functions {
+    for f in functions.iter_mut() {
         for op in &mut f.ops {
             if let crate::Op::CallFn { name, .. } = op {
                 if let Some(&c) = impl_to_call.get(name.as_str()) {
@@ -1563,11 +1532,70 @@ fn try_render_wasm_source_impl_rest(
     if !functions.iter().any(|f| f.name == "print_str") {
         let rt = source_to_ir(include_str!("../../../stdlib/print_str.almd"))?;
         for f in &rt.functions {
-            if let Ok(mir) = crate::lower::lower_function(f, &globals) {
+            if let Ok(mir) = crate::lower::lower_function(f, globals) {
                 functions.push(mir);
             }
         }
     }
+    Ok(())
+}
+
+fn try_render_wasm_source_impl_rest(
+    ir: &mut almide_ir::IrProgram,
+    verbose: bool,
+) -> Result<String, LowerError> {
+    let PipelineLayouts {
+        globals,
+        global_inits,
+        main_globals,
+        main_global_inits,
+        mutable_toplet_aliases,
+        record_layouts,
+        variant_layouts,
+    } = collect_pipeline_layouts(ir);
+
+    let CrossModuleFns { mut module_fn_sibs, mut inlined_fns, all_fns } =
+        inline_and_classify_cross_module_fns(ir, &main_globals, &record_layouts);
+
+    bridge_cross_module_derived_methods(ir, &mut inlined_fns, &mut module_fn_sibs);
+
+    let mutable_tls = assign_mutable_global_slots(ir, &mutable_toplet_aliases)?;
+    let mutable_global_count = mutable_tls.len() as u32;
+
+    repair_and_substitute_globals(
+        ir,
+        &mut inlined_fns,
+        &mut module_fn_sibs,
+        &globals,
+        &main_globals,
+        &main_global_inits,
+        &record_layouts,
+        &all_fns,
+    );
+
+    let mut functions = lower_main_and_sibling_fns(
+        &inlined_fns,
+        &module_fn_sibs,
+        &main_globals,
+        &main_global_inits,
+        &globals,
+        &global_inits,
+        &record_layouts,
+        &variant_layouts,
+        ir.functions.len(),
+        verbose,
+    );
+
+    synthesize_and_link_runtime_fns(
+        &mut functions,
+        &mutable_tls,
+        &main_globals,
+        &main_global_inits,
+        &globals,
+        &record_layouts,
+        &variant_layouts,
+        verbose,
+    )?;
 
     // EAGER GLOBAL-INIT semantics (C-007): v0 evaluates every ABORTABLE top-let initializer at
     // startup. Synthesize `__global_init` binding each CALL-FREE SCALAR initializer and have
