@@ -308,6 +308,13 @@ impl LowerCtx {
         layout: &VariantLayout,
         arms: &'a [IrMatchArm],
     ) -> Option<Vec<(VariantArmKind, &'a IrExpr)>> {
+        // Pattern-2 uniform-arm split (codopsy7 complexity sweep): the two heaviest match arms
+        // (Constructor / RecordPattern, each with their own inner loop) are pure text-moved
+        // into named helpers, called with `?` in the SAME position — a `None` from a helper
+        // still propagates as the enclosing `for`'s `return None` (this fn's decline-to-lower
+        // contract is unchanged). This is a `&mut self`-free fold: `plans` is a simple
+        // write-only accumulator, never read back mid-loop, so the extraction changes nothing
+        // about ordering or short-circuiting.
         let mut plans: Vec<(VariantArmKind, &IrExpr)> = Vec::with_capacity(arms.len());
         for arm in arms {
             if arm.guard.is_some() {
@@ -315,58 +322,10 @@ impl LowerCtx {
             }
             let kind = match &arm.pattern {
                 IrPattern::Constructor { name, args } => {
-                    let case = layout.case_by_ctor(name)?;
-                    if args.len() != case.fields.len() {
-                        return None;
-                    }
-                    let mut binds = Vec::new();
-                    for (i, fp) in args.iter().enumerate() {
-                        match fp {
-                            IrPattern::Wildcard => {}
-                            // slot 1+i (slot 0 is the tag). A SCALAR field binds by value copy.
-                            IrPattern::Bind { var, ty } if !is_heap_ty(ty) => {
-                                binds.push((1 + i, *var, false, ty.clone()))
-                            }
-                            // ANY heap field (`String`, a nested VARIANT, a `List[…]` —
-                            // `ArrV(xs) => for x in xs`, the gguf ValArray consumer — Bytes,
-                            // Matrix) binds as a BORROW of the slot handle: the subject owns
-                            // it, a move-out auto-Dups, a borrow-pass just reads. The bind is
-                            // type-agnostic (a slot-handle load); what the ARM does with it is
-                            // gated by the arm-body lowering as usual.
-                            IrPattern::Bind { var, ty } if is_heap_ty(ty) => {
-                                binds.push((1 + i, *var, true, ty.clone()))
-                            }
-                            // a nested ctor pattern — a later brick.
-                            _ => return None,
-                        }
-                    }
-                    VariantArmKind::Ctor { tag: case.tag as i64, binds }
+                    self.variant_arm_kind_from_constructor(layout, name, args)?
                 }
-                // A RECORD-ctor pattern (`Node { left, right, value }`, `Data { seq, .. }`,
-                // `Click { .. }`): resolve each named field to its declared slot (1 + index)
-                // and bind exactly like the positional ctor arm — scalar by value copy, heap
-                // as a borrow of the slot handle. `..`/unmentioned fields bind nothing; a
-                // NESTED field pattern stays a later brick.
                 IrPattern::RecordPattern { name, fields, rest: _ } => {
-                    let case = layout.case_by_ctor(name)?;
-                    let mut binds = Vec::new();
-                    for f in fields {
-                        let idx = case
-                            .fields
-                            .iter()
-                            .position(|(n, _)| n.as_str() == f.name)?;
-                        match &f.pattern {
-                            None | Some(IrPattern::Wildcard) => {}
-                            Some(IrPattern::Bind { var, ty }) if !is_heap_ty(ty) => {
-                                binds.push((1 + idx, *var, false, ty.clone()))
-                            }
-                            Some(IrPattern::Bind { var, ty }) if is_heap_ty(ty) => {
-                                binds.push((1 + idx, *var, true, ty.clone()))
-                            }
-                            _ => return None,
-                        }
-                    }
-                    VariantArmKind::Ctor { tag: case.tag as i64, binds }
+                    self.variant_arm_kind_from_record_pattern(layout, name, fields)?
                 }
                 IrPattern::Wildcard => VariantArmKind::Wildcard,
                 // A BINDER catch-all (`e => …`): binds the whole subject (borrow), any tag.
@@ -378,6 +337,70 @@ impl LowerCtx {
             plans.push((kind, &arm.body));
         }
         Some(plans)
+    }
+
+    /// Extracted from `Self::parse_variant_arms` (codopsy7 complexity sweep, pattern-2 group
+    /// 1 of 2): a positional-ctor arm (`Ctor(a, b)`) — slot 1+i (slot 0 is the tag). A SCALAR
+    /// field binds by value copy. ANY heap field (`String`, a nested VARIANT, a `List[…]` —
+    /// `ArrV(xs) => for x in xs`, the gguf ValArray consumer — Bytes, Matrix) binds as a
+    /// BORROW of the slot handle: the subject owns it, a move-out auto-Dups, a borrow-pass
+    /// just reads. The bind is type-agnostic (a slot-handle load); what the ARM does with it
+    /// is gated by the arm-body lowering as usual. A nested ctor pattern is a later brick.
+    /// Verbatim.
+    fn variant_arm_kind_from_constructor(
+        &self,
+        layout: &VariantLayout,
+        name: &str,
+        args: &[IrPattern],
+    ) -> Option<VariantArmKind> {
+        let case = layout.case_by_ctor(name)?;
+        if args.len() != case.fields.len() {
+            return None;
+        }
+        let mut binds = Vec::new();
+        for (i, fp) in args.iter().enumerate() {
+            match fp {
+                IrPattern::Wildcard => {}
+                IrPattern::Bind { var, ty } if !is_heap_ty(ty) => {
+                    binds.push((1 + i, *var, false, ty.clone()))
+                }
+                IrPattern::Bind { var, ty } if is_heap_ty(ty) => {
+                    binds.push((1 + i, *var, true, ty.clone()))
+                }
+                _ => return None,
+            }
+        }
+        Some(VariantArmKind::Ctor { tag: case.tag as i64, binds })
+    }
+
+    /// Extracted from `Self::parse_variant_arms` (codopsy7 complexity sweep, pattern-2 group
+    /// 2 of 2): a RECORD-ctor pattern (`Node { left, right, value }`, `Data { seq, .. }`,
+    /// `Click { .. }`): resolve each named field to its declared slot (1 + index) and bind
+    /// exactly like the positional ctor arm — scalar by value copy, heap as a borrow of the
+    /// slot handle. `..`/unmentioned fields bind nothing; a NESTED field pattern stays a later
+    /// brick. Verbatim.
+    fn variant_arm_kind_from_record_pattern(
+        &self,
+        layout: &VariantLayout,
+        name: &str,
+        fields: &[almide_ir::IrFieldPattern],
+    ) -> Option<VariantArmKind> {
+        let case = layout.case_by_ctor(name)?;
+        let mut binds = Vec::new();
+        for f in fields {
+            let idx = case.fields.iter().position(|(n, _)| n.as_str() == f.name)?;
+            match &f.pattern {
+                None | Some(IrPattern::Wildcard) => {}
+                Some(IrPattern::Bind { var, ty }) if !is_heap_ty(ty) => {
+                    binds.push((1 + idx, *var, false, ty.clone()))
+                }
+                Some(IrPattern::Bind { var, ty }) if is_heap_ty(ty) => {
+                    binds.push((1 + idx, *var, true, ty.clone()))
+                }
+                _ => return None,
+            }
+        }
+        Some(VariantArmKind::Ctor { tag: case.tag as i64, binds })
     }
 
     /// Bind a custom-variant arm's ctor fields from the block's slots (a `Wildcard` arm binds
