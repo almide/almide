@@ -68,7 +68,10 @@ pub fn cmd_self_update(version: Option<&str>) {
 
     // Extract
     let extract_dir = format!("{}/extracted", tmp);
-    std::fs::create_dir_all(&extract_dir).unwrap();
+    std::fs::create_dir_all(&extract_dir).unwrap_or_else(|e| {
+        err(&format!("error: failed to create extraction dir: {}", e));
+        std::process::exit(1);
+    });
 
     #[cfg(not(target_os = "windows"))]
     {
@@ -269,7 +272,10 @@ fn replace_binary(new_path: &str, current_exe: &std::path::Path) {
     {
         // Unix: copy new binary over the current one (inodes allow this)
         // Use a temp file + rename for atomicity
-        let dir = current_exe.parent().unwrap();
+        let dir = current_exe.parent().unwrap_or_else(|| {
+            err("error: could not determine directory of the running executable");
+            std::process::exit(1);
+        });
         let tmp_path = dir.join(".almide-update.tmp");
 
         std::fs::copy(new_path, &tmp_path).unwrap_or_else(|e| {

@@ -216,7 +216,9 @@ fn inject_native_modules(code: &mut String, source_root: Option<&std::path::Path
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().map_or(false, |e| e == "rs") {
-                let stem = path.file_stem().unwrap().to_string_lossy().to_string();
+                let stem = path.file_stem()
+                    .ok_or_else(|| format!("native module path has no file stem: {}", path.display()))?
+                    .to_string_lossy().to_string();
                 let content = std::fs::read_to_string(&path)
                     .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
                 std::fs::write(src_dir.join(entry.file_name()), &content)

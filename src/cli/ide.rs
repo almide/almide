@@ -106,7 +106,10 @@ pub fn cmd_ide_outline(target: &str, filter: Option<&str>, json: bool) {
     let filtered = apply_filter(outline, filter);
 
     if json {
-        let json_str = serde_json::to_string_pretty(&filtered).unwrap();
+        let json_str = serde_json::to_string_pretty(&filtered).unwrap_or_else(|e| {
+            err(&format!("{}", e));
+            std::process::exit(1);
+        });
         out(&format!("{}", json_str));
     } else {
         print_outline_text(&filtered);
