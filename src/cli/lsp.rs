@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::str::FromStr;
+use crate::err;
 use lsp_server::{Connection, Message, Request, Response, Notification};
 use lsp_types::*;
 
@@ -450,7 +451,7 @@ pub fn run_lsp() {
 
     let init_params = match connection.initialize(server_capabilities) {
         Ok(it) => it,
-        Err(e) => { eprintln!("LSP init failed: {}", e); return; }
+        Err(e) => { err(&format!("LSP init failed: {}", e)); return; }
     };
     let init: InitializeParams = serde_json::from_value(init_params).unwrap();
     let workspace_root = init.root_uri.as_ref()
