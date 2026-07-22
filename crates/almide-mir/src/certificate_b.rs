@@ -121,7 +121,20 @@ impl Streams {
 fn loop_carried_slots(
     func: &MirFunction,
 ) -> (BTreeMap<ValueId, ValueId>, BTreeSet<ValueId>, BTreeSet<ValueId>) {
-    // Heap object dsts: Alloc, and calls with a heap result.
+    // Sequential-phase split (codopsy8 complexity sweep): phase 1 computes the heap-object
+    // set (its own internal if/else/endif branch-stack state-threading, UNCHANGED — only the
+    // phase BOUNDARY is named, the risky stack algorithm inside is untouched); phase 2 reads
+    // that finished set (read-only) to find the loop-carried feeder slots. Pure text-move, no
+    // logic change.
+    let heap_objs = loop_carried_slots_heap_objs(func);
+    loop_carried_slots_feeder_slots(func, &heap_objs)
+}
+
+/// Extracted from `loop_carried_slots` (codopsy8 complexity sweep, phase 1 of 2): heap
+/// object dsts — Alloc/ListLit, calls with a heap result, Dup (always a heap handle), and a
+/// branch-MERGE dst whose arm value is heap. Verbatim (the `if_stack` branch-stack algorithm
+/// is UNCHANGED — this only names the phase boundary, not the algorithm itself).
+fn loop_carried_slots_heap_objs(func: &MirFunction) -> BTreeSet<ValueId> {
     let mut heap_objs: BTreeSet<ValueId> = BTreeSet::new();
     for p in &func.params {
         if p.repr.is_heap() {
@@ -192,14 +205,24 @@ fn loop_carried_slots(
             _ => {}
         }
     }
+    heap_objs
+}
+
+/// Extracted from `loop_carried_slots` (codopsy8 complexity sweep, phase 2 of 2): the
+/// feeder-to-slot map, keyed off the (already-finished, read-only) `heap_objs` set from
+/// phase 1. STRAIGHT-LINE (non-loop) heap slots: a `SetLocal { local, src }` with a heap
+/// `src` OUTSIDE any loop region (the unrolled identity-else shadow-rebind
+/// append-accumulator — porta serialize_opts). Each such reassign is folded into its OWN
+/// `(id)` CLoop body (`(` at the feeder's `i`, `)` at the SetLocal), so a body with k
+/// reassigns reads `i(id)…(id)m` — the SAME rc-preserving unit the loop slot proves,
+/// accepted by check_cert_lc. A SCALAR `src` (a loop counter `i+1`) is not a heap_obj, so it
+/// is never a slot here (no spurious fold). Verbatim.
+fn loop_carried_slots_feeder_slots(
+    func: &MirFunction,
+    heap_objs: &BTreeSet<ValueId>,
+) -> (BTreeMap<ValueId, ValueId>, BTreeSet<ValueId>, BTreeSet<ValueId>) {
     let mut feeder_to_slot: BTreeMap<ValueId, ValueId> = BTreeMap::new();
     let mut slots: BTreeSet<ValueId> = BTreeSet::new();
-    // STRAIGHT-LINE (non-loop) heap slots: a `SetLocal { local, src }` with a heap `src` OUTSIDE any
-    // loop region (the unrolled identity-else shadow-rebind append-accumulator — porta serialize_opts).
-    // Each such reassign is folded into its OWN `(id)` CLoop body (`(` at the feeder's `i`, `)` at the
-    // SetLocal), so a body with k reassigns reads `i(id)…(id)m` — the SAME rc-preserving unit the loop
-    // slot proves, accepted by check_cert_lc. A SCALAR `src` (a loop counter `i+1`) is not a heap_obj,
-    // so it is never a slot here (no spurious fold).
     let mut line_slots: BTreeSet<ValueId> = BTreeSet::new();
     let mut depth: u32 = 0;
     for op in &func.ops {
