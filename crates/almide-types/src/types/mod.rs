@@ -374,31 +374,40 @@ impl Ty {
             (Ty::Bool, Ty::Bool) => true,
             (Ty::Unit, Ty::Unit) => true,
             (Ty::Bytes, Ty::Bytes) => true,
-            (Ty::Matrix, Ty::Matrix) => true,
-            // Matrix ↔ Matrix[T] — asymmetric discrimination:
-            //   - `Matrix.compatible(Matrix[T])` = true for all T
-            //     (bare param accepts any typed value — pre-P4 stdlib
-            //     `matrix.shape(m: Matrix)` stays usable with
-            //     `matrix.zeros_f32` results).
-            //   - `Matrix[Ty::Float].compatible(Matrix)` = true only
-            //     for the `Float` dtype (`Matrix` is the alias for
-            //     `Matrix[Float]`; bare runtime repr is f64).
-            //   - `Matrix[Ty::Float32].compatible(Matrix)` etc = false,
-            //     enforced by falling through to the default arm: a
-            //     typed-arity fn like `mul_f32(a: Matrix[Float32])`
-            //     REJECTS a bare `Matrix` value, since the bare form
-            //     carries no f32 guarantee.
-            // `types_mismatch` is single-directional so this
-            // asymmetry reaches call-site diagnostics unaltered.
-            (Ty::Matrix, Ty::Applied(TypeConstructorId::Matrix, _)) => true,
-            (Ty::Applied(TypeConstructorId::Matrix, args), Ty::Matrix) => {
-                args.len() == 1 && matches!(args[0], Ty::Float | Ty::Float64)
-            }
             (Ty::RawPtr, Ty::RawPtr) => true,
+            (Ty::Matrix, Ty::Matrix) => true,
+            (Ty::Matrix, Ty::Applied(TypeConstructorId::Matrix, _))
+            | (Ty::Applied(TypeConstructorId::Matrix, _), Ty::Matrix) => {
+                Self::compatible_matrix_bridge(self, other)
+            }
             (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
                 args1.iter().zip(args2.iter()).all(|(a, b)| a.compatible(b))
             }
             _ => Self::compatible_structural(self, other),
+        }
+    }
+
+    /// `compatible()` case for bare `Matrix` vs `Matrix[T]` — asymmetric
+    /// discrimination:
+    ///   - `Matrix.compatible(Matrix[T])` = true for all T (bare param
+    ///     accepts any typed value — pre-P4 stdlib `matrix.shape(m: Matrix)`
+    ///     stays usable with `matrix.zeros_f32` results).
+    ///   - `Matrix[Ty::Float].compatible(Matrix)` = true only for the
+    ///     `Float` dtype (`Matrix` is the alias for `Matrix[Float]`; bare
+    ///     runtime repr is f64).
+    ///   - `Matrix[Ty::Float32].compatible(Matrix)` etc = false: a
+    ///     typed-arity fn like `mul_f32(a: Matrix[Float32])` REJECTS a bare
+    ///     `Matrix` value, since the bare form carries no f32 guarantee.
+    ///
+    /// `types_mismatch` is single-directional so this asymmetry reaches
+    /// call-site diagnostics unaltered.
+    fn compatible_matrix_bridge(a: &Ty, b: &Ty) -> bool {
+        match (a, b) {
+            (Ty::Matrix, Ty::Applied(TypeConstructorId::Matrix, _)) => true,
+            (Ty::Applied(TypeConstructorId::Matrix, args), Ty::Matrix) => {
+                args.len() == 1 && matches!(args[0], Ty::Float | Ty::Float64)
+            }
+            _ => false,
         }
     }
 
