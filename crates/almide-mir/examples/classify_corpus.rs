@@ -1068,6 +1068,289 @@ fn collect_almd(path: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// The read-only shared inputs [`classify_lower_one_fn`] threads through the
+/// Pass-1 per-function lowering loop of [`classify_file`] — bundled to avoid a
+/// 9-parameter helper signature (the max-params trap: see
+/// docs/roadmap/active/code-health-codopsy.md).
+struct FileCtx<'a> {
+    file: &'a std::path::Path,
+    globals: &'a std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty>,
+    global_inits: &'a std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr>,
+    record_layouts: &'a almide_mir::lower::RecordLayouts,
+    variant_layouts: &'a almide_mir::lower::VariantLayouts,
+    auto_linkable: &'a HashSet<String>,
+    file_fn_names: &'a HashSet<String>,
+    native_ffi_set: &'a HashSet<String>,
+}
+
+/// The Pass-1 per-(inlined-)function lowering-and-witness-emission body of
+/// [`classify_file`]'s main loop — verbatim move (`ctx.*` substituted for the
+/// free variables it used to close over as a nested loop body). `t`/`s` are
+/// accumulated into; `file_mirs`/`elided_call_fns` are appended/inserted into
+/// by every arm (never read back here), so no state threads BETWEEN calls
+/// beyond straightforward accumulation.
+fn classify_lower_one_fn(
+    ctx: &FileCtx,
+    func: &almide_ir::IrFunction,
+    t: &mut Tally,
+    s: &mut CertStreams,
+    file_mirs: &mut Vec<(String, MirFunction)>,
+    elided_call_fns: &mut HashSet<String>,
+) {
+    t.functions += 1;
+    let lowered = catch_unwind(AssertUnwindSafe(|| {
+        almide_mir::lower::lower_function_all_with_globals(
+            func,
+            ctx.globals,
+            ctx.global_inits,
+            ctx.record_layouts,
+            ctx.variant_layouts,
+        )
+    }));
+    match lowered {
+        Ok(Ok(mirs)) => {
+            // `mirs[0]` is the source function; `mirs[1..]` are lambda-lifted
+            // auxiliaries (the closures machinery lifts `let f = (x) => …` bodies
+            // into fresh functions). Every one is a real MIR function the proven
+            // checker re-verifies, so backing / ownership / names witnesses are
+            // emitted for ALL of them and the program assembler tables them by the
+            // same position. With no lifting wired the vector is just `[main]` and
+            // this is byte-identical to the prior single-function pass.
+            t.in_profile += mirs.len();
+            // The EFFECTIVE body the lowering actually saw: a let-bound heap-result
+            // `if`/`match` is tail-duplicated PURELY in the IR before lowering, so the
+            // caps `count_ir_calls` 1:1 gate and the interp-coverage count must read the
+            // SAME rewritten tree (the duplicated continuation's calls / interps appear
+            // once per arm in BOTH MIR and this counted IR — `mir == ir` by construction).
+            // desugar-before-both: the SAME ANF-lift (call-arg heap-if → let) then
+            // tail-duplication the lowering applies, so the duplicated calls are counted
+            // 1:1 (mir == ir) and the caps gate stays exact.
+            // desugar-before-both: read the SAME fully-desugared tree the lowering emits
+            // its MIR from (the full guard → beta → tuple-unwrap → effect-unwrap →
+            // heap-branches fixpoint), so a tail-duplicating rewrite duplicates a call in
+            // BOTH the MIR and this counted IR — `mir == ir` by construction. A subset
+            // (only guard + heap-branches) missed `desugar_tuple_unwrap_or`, so a
+            // `let r = opt.unwrap_or((tuple)); f(r.0)` mir>ir-breached.
+            let eff_body = almide_mir::lower::desugar_all(
+                &func.body,
+                func.name.as_str() == "main",
+                ctx.variant_layouts,
+                ctx.record_layouts,
+                &func.params,
+            );
+            // INTERP COVERAGE (a): this function LOWERED, so its FULLY-LINKABLE
+            // interps (Lit/String/Int/Bool parts) fold to a registered __str_concat /
+            // int.to_string / bool.to_string chain (proven byte-match v0 by the
+            // render_wasm detectors); a non-desugarable interp stays the sound Opaque
+            // fallback, and a desugarable-but-UNLINKED one (Float/compound) walls at
+            // render — both are (b) cleanly walled (no invalid wasm). The per-CallFn
+            // loop below ADDS the unlinked-occurrence count to (b); this counts the
+            // interp SITE once, as proven or walled, with no proven mis-bucket.
+            let (proven, walled) = count_interp_sites(&eff_body, &ctx.auto_linkable, ctx.record_layouts);
+            t.interp_lowered += proven;
+            t.interp_walled += walled;
+            // LINK COVERAGE: a LOWERED function emitting a dotted `Op::CallFn` whose
+            // name the v1 linker cannot resolve (not in the self-host registry) would,
+            // if rendered, emit a dangling `(call $name)` — invalid wasm. The render-
+            // side `try_render_wasm_program` now WALLS the WHOLE program in that case
+            // (a clean `LowerError::Unsupported`, never an `Ok` invalid module). So each
+            // such site is a bucket-(b) cleanly-walled, NOT a (c) forbidden hole. We
+            // MEASURE the distinct unlinkable callees (the visible self-host gap) and
+            // fold each occurrence into (b). The wall's COMPLETENESS — that no such site
+            // escapes to `Ok` — is what keeps (c) == 0 (asserted below).
+            for mir in &mirs {
+                for op in &mir.ops {
+                    if let Op::CallFn { name, .. } = op {
+                        // Unlinkable stdlib call ⟺ a DOTTED name that is neither in the
+                        // self-host registry NOR a function defined in this file (a dotted
+                        // user PROTOCOL METHOD resolves to itself/a sibling, so it is NOT a
+                        // dangling stdlib call). This is exactly the class the render wall
+                        // rejects; a user method / cross-file call is out of scope here.
+                        let unlinkable = name.contains('.')
+                            && !ctx.auto_linkable.contains(name)
+                            && !ctx.file_fn_names.contains(name);
+                        if unlinkable {
+                            *t.would_wall_callees.entry(name.clone()).or_insert(0) += 1;
+                            t.interp_walled += 1;
+                            // (c) completeness backstop: this site is genuinely unlinkable,
+                            // so the render wall MUST flag it. `unlinked_call_names` is the
+                            // wall's OWN predicate; if it does NOT contain the name, a site
+                            // escaped the wall → a real (c) breach. A single-fn probe is
+                            // sound here: the name is not file-defined, so adding sibling
+                            // functions could not make it resolve (only the registry could,
+                            // which `ctx.auto_linkable` already ruled out).
+                            let probe = MirProgram { functions: vec![mir.clone()], exports: vec![], mutable_global_count: 0 };
+                            if !almide_mir::render_wasm::unlinked_call_names(&probe)
+                                .contains(name)
+                            {
+                                t.forbidden_unwalled.push(format!(
+                                    "{}::{} -> {name} (escaped the render wall)",
+                                    ctx.file.display(),
+                                    mir.name
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            for mir in &mirs {
+                // The borrow-by-default soundness gate: every `+1` event must
+                // be backed by a real runtime op (no synthetic param `+1`).
+                if !plus_one_events_backed(mir) {
+                    t.cert_backing_breaches
+                        .push(format!("{}::{}", ctx.file.display(), mir.name));
+                }
+                // Ownership is one heap object per line; names are one line per
+                // function. Both are LOCAL properties — no transitivity.
+                let cert = ownership_certificate(mir);
+                // Parallel name index (ownership.names): one `<file>::<fn>` line per
+                // cert line, so a checker REJECT bisects straight to its function
+                // (the anonymous 20k-line cert made a reject a needle hunt).
+                for _ in cert.lines() {
+                    s.ownership_names
+                        .push_str(&format!("{}::{}\n", ctx.file.display(), mir.name));
+                }
+                s.ownership.push_str(&cert);
+                s.names.push_str(&name_witness_string(mir));
+                s.names.push('\n');
+            }
+            // CAPS SOUNDNESS: count the source's call nodes. A call ELIDED by
+            // Opaque lowering (a list element, ctor payload, BinOp operand, …) is
+            // absent from the MIR ops, so the transitive caps fold over CallFn /
+            // FuncRef edges cannot see its effects — if it reached Stdout the
+            // function would be falsely caps-verified. The IR call count covers the
+            // WHOLE source body (including any lambda later lifted out), so the MIR
+            // call count is summed across the main AND its lifted auxiliaries — a
+            // lifted lambda carries its body's calls, and a `CallIndirect` (a
+            // lowered closure invocation) is a genuine call counted here too. If the
+            // cluster has MORE IR calls than MIR call-ops some call was elided
+            // SOMEWHERE within it, so EVERY function of the cluster is conservatively
+            // TAINTED below (we cannot tell which member hid it).
+            let ir_calls = count_ir_calls(&eff_body, ctx.record_layouts, ctx.variant_layouts);
+            let mir_calls = mirs
+                .iter()
+                .flat_map(|m| m.ops.iter())
+                .filter(|o| {
+                    matches!(
+                        o,
+                        Op::Call { .. } | Op::CallFn { .. } | Op::CallIndirect { .. }
+                    )
+                })
+                // `$__mg_take` is a COMPILER-INJECTED slot accessor (a raw i32.load,
+                // Stdout-free — the trusted-prim class), not a lowering of any IR
+                // call node: a mutable-global heap assign injects one with no IR
+                // counterpart, so counting it would false-breach `mir <= ir`.
+                .filter(|o| !matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
+                .count();
+            if ir_calls > mir_calls {
+                for mir in &mirs {
+                    elided_call_fns.insert(mir.name.clone());
+                }
+            }
+            // SOUNDNESS BACKSTOP for the elided-call effect markers: a marker
+            // (`record_elided_calls`) may only surface a genuinely ELIDED
+            // call, so the MIR call count can rise at most TO the IR's. If it
+            // EXCEEDS, a marker double-counted a lowered call — which could
+            // mask another elision and falsely de-taint. A wall breach.
+            if mir_calls > ir_calls {
+                t.call_count_breaches.push(format!(
+                    "{}::{} (mir {mir_calls} > ir {ir_calls})",
+                    ctx.file.display(),
+                    func.name.as_str()
+                ));
+            }
+            for mir in mirs {
+                file_mirs.push((mir.name.clone(), mir));
+            }
+        }
+        Ok(Err(almide_mir::lower::LowerError::Unsupported(reason))) => {
+            // Categorize the wall: NATIVE-FFI (structural, excluded) iff this function is
+            // in the transitive native-FFI closure; else REAL (a lowering gap to close).
+            // A name absent from the node map (an inline_mutual_tail_recursion-synthesized
+            // aux) defaults REAL (conservative — never over-excludes a real gap).
+            let is_native = ctx.native_ffi_set.contains(func.name.as_str());
+            if is_native {
+                t.walled_native_ffi += 1;
+            } else {
+                t.walled_real += 1;
+            }
+            if std::env::var("WALL_NAMES").is_ok() {
+                let tag = if is_native { "NATIVE-FFI" } else { "REAL" };
+                eprintln!(
+                    "WALLED {tag} {} :: {} :: {}",
+                    ctx.file.display(),
+                    func.name.as_str(),
+                    reason
+                );
+            }
+            *t.unsupported.entry(reason_key(&reason)).or_insert(0) += 1;
+            // INTERP COVERAGE (b): every interp site inside a WALLED function is
+            // cleanly walled too (its function emits no wasm) — never a miscompile.
+            let (proven, walled) = count_interp_sites(&func.body, &ctx.auto_linkable, ctx.record_layouts);
+            t.interp_walled += proven + walled;
+        }
+        Err(_) => {
+            // THE wall breach: lowering must be total. Record file::func.
+            t.lower_panics
+                .push(format!("{}::{}", ctx.file.display(), func.name.as_str()));
+        }
+    }
+}
+
+/// The read-only shared inputs [`classify_fold_caps_one_fn`] threads through
+/// the Pass-2 per-function capability-soundness fold of [`classify_file`] —
+/// bundled to avoid a 9-parameter helper signature (the max-params trap: see
+/// docs/roadmap/active/code-health-codopsy.md).
+struct CapsFoldCtx<'a> {
+    in_profile_map: &'a BTreeMap<String, MirFunction>,
+    is_known_free: &'a dyn Fn(&str) -> bool,
+    is_elided: &'a dyn Fn(&str) -> bool,
+    cap_ids: &'a dyn Fn(&[Capability]) -> String,
+}
+
+/// The Pass-2 per-in-profile-function capability-soundness fold body of
+/// [`classify_file`]'s second loop — verbatim move. `file_graph_clean` is an
+/// output-only flag (every arm only ever clears it, never reads it back), so
+/// it is safe as a plain `&mut bool` out-param.
+fn classify_fold_caps_one_fn(
+    ctx: &CapsFoldCtx,
+    name: &str,
+    mir: &MirFunction,
+    t: &mut Tally,
+    s: &mut CertStreams,
+    file_graph_clean: &mut bool,
+) {
+    let mut visited = BTreeSet::new();
+    match reachable_caps_or_tainted(name, ctx.in_profile_map, ctx.is_known_free, ctx.is_elided, &mut visited)
+    {
+        // Unanalyzable (an unknown/cross-file or elided callee hides effects).
+        None => { t.caps_unverified += 1; *file_graph_clean = false; }
+        // Fully-known reachable set. Caps-VERIFIED iff it is within the
+        // DECLARED bound (`reachable ⊆ declared`): then emit the
+        // `<declared>|<reachable>` witness for the proven `check_caps_cert` to
+        // re-verify. A function reaching a capability it did NOT declare (e.g.
+        // a non-`effect fn` that prints — `is_effect` does not capture every
+        // Stdout reach) is conservatively caps-UNVERIFIED — it has an
+        // undeclared effect, honestly not claimed safe (emitting it would
+        // (correctly) fault the proven subset checker and fail the gate).
+        Some(reachable) => {
+            let declared: std::collections::BTreeSet<u32> =
+                mir.declared_caps.iter().map(|c| c.id()).collect();
+            if reachable.iter().all(|c| declared.contains(&c.id())) {
+                s.caps.push_str(&format!(
+                    "{}|{}\n",
+                    (ctx.cap_ids)(&mir.declared_caps),
+                    (ctx.cap_ids)(&reachable)
+                ));
+                t.caps_verified += 1;
+            } else {
+                t.caps_unverified += 1;
+                *file_graph_clean = false;
+            }
+        }
+    }
+}
+
 /// One corpus file's classification (the body of main's per-file loop —
 /// decomposed #781, cog 199; early `continue`s became early `return`s).
 fn classify_file(
@@ -1193,205 +1476,18 @@ fn classify_file(
     // the append-accumulator TCO). Guarded: only where it makes a walled fn lower (no regression).
     let inlined_fns =
         almide_mir::lower::inline_mutual_tail_recursion(&ir.functions, &globals, &record_layouts);
+    let ctx = FileCtx {
+        file,
+        globals: &globals,
+        global_inits: &global_inits,
+        record_layouts: &record_layouts,
+        variant_layouts: &variant_layouts,
+        auto_linkable,
+        file_fn_names: &file_fn_names,
+        native_ffi_set: &native_ffi_set,
+    };
     for func in &inlined_fns {
-        t.functions += 1;
-        let lowered = catch_unwind(AssertUnwindSafe(|| {
-            almide_mir::lower::lower_function_all_with_globals(
-                func,
-                &globals,
-                &global_inits,
-                &record_layouts,
-                &variant_layouts,
-            )
-        }));
-        match lowered {
-            Ok(Ok(mirs)) => {
-                // `mirs[0]` is the source function; `mirs[1..]` are lambda-lifted
-                // auxiliaries (the closures machinery lifts `let f = (x) => …` bodies
-                // into fresh functions). Every one is a real MIR function the proven
-                // checker re-verifies, so backing / ownership / names witnesses are
-                // emitted for ALL of them and the program assembler tables them by the
-                // same position. With no lifting wired the vector is just `[main]` and
-                // this is byte-identical to the prior single-function pass.
-                t.in_profile += mirs.len();
-                // The EFFECTIVE body the lowering actually saw: a let-bound heap-result
-                // `if`/`match` is tail-duplicated PURELY in the IR before lowering, so the
-                // caps `count_ir_calls` 1:1 gate and the interp-coverage count must read the
-                // SAME rewritten tree (the duplicated continuation's calls / interps appear
-                // once per arm in BOTH MIR and this counted IR — `mir == ir` by construction).
-                // desugar-before-both: the SAME ANF-lift (call-arg heap-if → let) then
-                // tail-duplication the lowering applies, so the duplicated calls are counted
-                // 1:1 (mir == ir) and the caps gate stays exact.
-                // desugar-before-both: read the SAME fully-desugared tree the lowering emits
-                // its MIR from (the full guard → beta → tuple-unwrap → effect-unwrap →
-                // heap-branches fixpoint), so a tail-duplicating rewrite duplicates a call in
-                // BOTH the MIR and this counted IR — `mir == ir` by construction. A subset
-                // (only guard + heap-branches) missed `desugar_tuple_unwrap_or`, so a
-                // `let r = opt.unwrap_or((tuple)); f(r.0)` mir>ir-breached.
-                let eff_body = almide_mir::lower::desugar_all(
-                    &func.body,
-                    func.name.as_str() == "main",
-                    &variant_layouts,
-                    &record_layouts,
-                    &func.params,
-                );
-                // INTERP COVERAGE (a): this function LOWERED, so its FULLY-LINKABLE
-                // interps (Lit/String/Int/Bool parts) fold to a registered __str_concat /
-                // int.to_string / bool.to_string chain (proven byte-match v0 by the
-                // render_wasm detectors); a non-desugarable interp stays the sound Opaque
-                // fallback, and a desugarable-but-UNLINKED one (Float/compound) walls at
-                // render — both are (b) cleanly walled (no invalid wasm). The per-CallFn
-                // loop below ADDS the unlinked-occurrence count to (b); this counts the
-                // interp SITE once, as proven or walled, with no proven mis-bucket.
-                let (proven, walled) = count_interp_sites(&eff_body, &auto_linkable, &record_layouts);
-                t.interp_lowered += proven;
-                t.interp_walled += walled;
-                // LINK COVERAGE: a LOWERED function emitting a dotted `Op::CallFn` whose
-                // name the v1 linker cannot resolve (not in the self-host registry) would,
-                // if rendered, emit a dangling `(call $name)` — invalid wasm. The render-
-                // side `try_render_wasm_program` now WALLS the WHOLE program in that case
-                // (a clean `LowerError::Unsupported`, never an `Ok` invalid module). So each
-                // such site is a bucket-(b) cleanly-walled, NOT a (c) forbidden hole. We
-                // MEASURE the distinct unlinkable callees (the visible self-host gap) and
-                // fold each occurrence into (b). The wall's COMPLETENESS — that no such site
-                // escapes to `Ok` — is what keeps (c) == 0 (asserted below).
-                for mir in &mirs {
-                    for op in &mir.ops {
-                        let Op::CallFn { name, .. } = op else {
-                            continue;
-                        };
-                        // Unlinkable stdlib call ⟺ a DOTTED name that is neither in the
-                        // self-host registry NOR a function defined in this file (a dotted
-                        // user PROTOCOL METHOD resolves to itself/a sibling, so it is NOT a
-                        // dangling stdlib call). This is exactly the class the render wall
-                        // rejects; a user method / cross-file call is out of scope here.
-                        let unlinkable = name.contains('.')
-                            && !auto_linkable.contains(name)
-                            && !file_fn_names.contains(name);
-                        if !unlinkable {
-                            continue;
-                        }
-                        *t.would_wall_callees.entry(name.clone()).or_insert(0) += 1;
-                        t.interp_walled += 1;
-                        // (c) completeness backstop: this site is genuinely unlinkable,
-                        // so the render wall MUST flag it. `unlinked_call_names` is the
-                        // wall's OWN predicate; if it does NOT contain the name, a site
-                        // escaped the wall → a real (c) breach. A single-fn probe is
-                        // sound here: the name is not file-defined, so adding sibling
-                        // functions could not make it resolve (only the registry could,
-                        // which `auto_linkable` already ruled out).
-                        let probe = MirProgram { functions: vec![mir.clone()], exports: vec![], mutable_global_count: 0 };
-                        if !almide_mir::render_wasm::unlinked_call_names(&probe).contains(name) {
-                            t.forbidden_unwalled.push(format!(
-                                "{}::{} -> {name} (escaped the render wall)",
-                                file.display(),
-                                mir.name
-                            ));
-                        }
-                    }
-                }
-                for mir in &mirs {
-                    // The borrow-by-default soundness gate: every `+1` event must
-                    // be backed by a real runtime op (no synthetic param `+1`).
-                    if !plus_one_events_backed(mir) {
-                        t.cert_backing_breaches
-                            .push(format!("{}::{}", file.display(), mir.name));
-                    }
-                    // Ownership is one heap object per line; names are one line per
-                    // function. Both are LOCAL properties — no transitivity.
-                    let cert = ownership_certificate(mir);
-                    // Parallel name index (ownership.names): one `<file>::<fn>` line per
-                    // cert line, so a checker REJECT bisects straight to its function
-                    // (the anonymous 20k-line cert made a reject a needle hunt).
-                    for _ in cert.lines() {
-                        s.ownership_names
-                            .push_str(&format!("{}::{}\n", file.display(), mir.name));
-                    }
-                    s.ownership.push_str(&cert);
-                    s.names.push_str(&name_witness_string(mir));
-                    s.names.push('\n');
-                }
-                // CAPS SOUNDNESS: count the source's call nodes. A call ELIDED by
-                // Opaque lowering (a list element, ctor payload, BinOp operand, …) is
-                // absent from the MIR ops, so the transitive caps fold over CallFn /
-                // FuncRef edges cannot see its effects — if it reached Stdout the
-                // function would be falsely caps-verified. The IR call count covers the
-                // WHOLE source body (including any lambda later lifted out), so the MIR
-                // call count is summed across the main AND its lifted auxiliaries — a
-                // lifted lambda carries its body's calls, and a `CallIndirect` (a
-                // lowered closure invocation) is a genuine call counted here too. If the
-                // cluster has MORE IR calls than MIR call-ops some call was elided
-                // SOMEWHERE within it, so EVERY function of the cluster is conservatively
-                // TAINTED below (we cannot tell which member hid it).
-                let ir_calls = count_ir_calls(&eff_body, &record_layouts, &variant_layouts);
-                let mir_calls = mirs
-                    .iter()
-                    .flat_map(|m| m.ops.iter())
-                    .filter(|o| {
-                        matches!(
-                            o,
-                            Op::Call { .. } | Op::CallFn { .. } | Op::CallIndirect { .. }
-                        )
-                    })
-                    // `$__mg_take` is a COMPILER-INJECTED slot accessor (a raw i32.load,
-                    // Stdout-free — the trusted-prim class), not a lowering of any IR
-                    // call node: a mutable-global heap assign injects one with no IR
-                    // counterpart, so counting it would false-breach `mir <= ir`.
-                    .filter(|o| !matches!(o, Op::CallFn { name, .. } if name == "__mg_take"))
-                    .count();
-                if ir_calls > mir_calls {
-                    for mir in &mirs {
-                        elided_call_fns.insert(mir.name.clone());
-                    }
-                }
-                // SOUNDNESS BACKSTOP for the elided-call effect markers: a marker
-                // (`record_elided_calls`) may only surface a genuinely ELIDED
-                // call, so the MIR call count can rise at most TO the IR's. If it
-                // EXCEEDS, a marker double-counted a lowered call — which could
-                // mask another elision and falsely de-taint. A wall breach.
-                if mir_calls > ir_calls {
-                    t.call_count_breaches.push(format!(
-                        "{}::{} (mir {mir_calls} > ir {ir_calls})",
-                        file.display(),
-                        func.name.as_str()
-                    ));
-                }
-                for mir in mirs {
-                    file_mirs.push((mir.name.clone(), mir));
-                }
-            }
-            Ok(Err(almide_mir::lower::LowerError::Unsupported(reason))) => {
-                // Categorize the wall: NATIVE-FFI (structural, excluded) iff this function is
-                // in the transitive native-FFI closure; else REAL (a lowering gap to close).
-                // A name absent from the node map (an inline_mutual_tail_recursion-synthesized
-                // aux) defaults REAL (conservative — never over-excludes a real gap).
-                let is_native = native_ffi_set.contains(func.name.as_str());
-                if is_native {
-                    t.walled_native_ffi += 1;
-                } else {
-                    t.walled_real += 1;
-                }
-                if std::env::var("WALL_NAMES").is_ok() {
-                    let tag = if is_native { "NATIVE-FFI" } else { "REAL" };
-                    eprintln!(
-                        "WALLED {tag} {} :: {} :: {}",
-                        file.display(),
-                        func.name.as_str(),
-                        reason
-                    );
-                }
-                *t.unsupported.entry(reason_key(&reason)).or_insert(0) += 1;
-                // INTERP COVERAGE (b): every interp site inside a WALLED function is
-                // cleanly walled too (its function emits no wasm) — never a miscompile.
-                let (proven, walled) = count_interp_sites(&func.body, &auto_linkable, &record_layouts);
-                t.interp_walled += proven + walled;
-            }
-            Err(_) => {
-                // THE wall breach: lowering must be total. Record file::func.
-                t.lower_panics
-                    .push(format!("{}::{}", file.display(), func.name.as_str()));
-            }
-        }
+        classify_lower_one_fn(&ctx, func, t, s, &mut file_mirs, &mut elided_call_fns);
     }
 
     // Pass 2 (capability SOUNDNESS): a function's empty capability witness is a
@@ -1414,36 +1510,14 @@ fn classify_file(
     // call-graph witness meaningful (any unanalyzable/over-bound function would route to
     // the UNIVERSE sentinel and reject — but unanalyzable is honest scope, not a failure).
     let mut file_graph_clean = !file_mirs.is_empty();
+    let caps_ctx = CapsFoldCtx {
+        in_profile_map: &in_profile_map,
+        is_known_free: &is_known_free,
+        is_elided: &is_elided,
+        cap_ids: &cap_ids,
+    };
     for (name, mir) in &file_mirs {
-        let mut visited = BTreeSet::new();
-        match reachable_caps_or_tainted(name, &in_profile_map, &is_known_free, &is_elided, &mut visited)
-        {
-            // Unanalyzable (an unknown/cross-file or elided callee hides effects).
-            None => { t.caps_unverified += 1; file_graph_clean = false; }
-            // Fully-known reachable set. Caps-VERIFIED iff it is within the
-            // DECLARED bound (`reachable ⊆ declared`): then emit the
-            // `<declared>|<reachable>` witness for the proven `check_caps_cert` to
-            // re-verify. A function reaching a capability it did NOT declare (e.g.
-            // a non-`effect fn` that prints — `is_effect` does not capture every
-            // Stdout reach) is conservatively caps-UNVERIFIED — it has an
-            // undeclared effect, honestly not claimed safe (emitting it would
-            // (correctly) fault the proven subset checker and fail the gate).
-            Some(reachable) => {
-                let declared: std::collections::BTreeSet<u32> =
-                    mir.declared_caps.iter().map(|c| c.id()).collect();
-                if reachable.iter().all(|c| declared.contains(&c.id())) {
-                    s.caps.push_str(&format!(
-                        "{}|{}\n",
-                        cap_ids(&mir.declared_caps),
-                        cap_ids(&reachable)
-                    ));
-                    t.caps_verified += 1;
-                } else {
-                    t.caps_unverified += 1;
-                    file_graph_clean = false;
-                }
-            }
-        }
+        classify_fold_caps_one_fn(&caps_ctx, name, mir, t, s, &mut file_graph_clean);
     }
     // The file is fully analyzable + within bound: emit its call-graph witness as ONE line
     // for the proven `check_prog_cert` (caps-transitive), which re-derives the transitive
