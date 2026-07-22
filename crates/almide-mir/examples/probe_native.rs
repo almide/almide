@@ -1,6 +1,7 @@
 //! Probe: render a source natively OR dump the MIR ops (--mir).
 fn main() {
-    let src = std::fs::read_to_string(std::env::args().nth(1).unwrap()).unwrap();
+    let path = std::env::args().nth(1).expect("usage: probe_native <file.almd> [--mir]");
+    let src = std::fs::read_to_string(&path).expect("failed to read the source file");
     if std::env::args().nth(2).as_deref() == Some("--mir") {
         match almide_mir::pipeline::debug_dump_mir(&src) {
             Ok(dump) => println!("{dump}"),
