@@ -392,130 +392,101 @@ pub fn desugar_all(
     record_layouts: &crate::lower::RecordLayouts,
     params: &[almide_ir::IrParam],
 ) -> IrExpr {
+    // Fixpoint-loop-to-or_else-chain split (codopsy8 complexity sweep): the original loop
+    // body was ALREADY a first-match-wins sequence of independent `if let Some(r) = pass(&cur)
+    // { cur = r; continue; }` checks (no shared state between checks beyond `cur` itself,
+    // re-read fresh by whichever check runs) — behaviorally IDENTICAL to an `.or_else()`
+    // chain that returns the first Some, called repeatedly until it returns None. Split
+    // into 2 named phase-groups (call/access rewrites, then match/branch rewrites) for the
+    // SAME `.or_else()` reason the `_call_name` routers throughout this crate use — a pure
+    // structural transform, EXACT same pass order preserved (each restart still re-tries
+    // from pass 1, matching the original `continue`'s "restart the loop" semantics).
     let mut cur = body.clone();
-    loop {
-        if let Some(r) = desugar_method_calls(&cur, record_layouts) {
-            cur = r;
-            continue;
-        }
+    while let Some(r) = desugar_all_try_one_pass(&cur, unit_main, layouts, record_layouts, params)
+    {
+        cur = r;
+    }
+    cur
+}
+
+/// Extracted from `desugar_all` (codopsy8 complexity sweep): one FULL pass over every
+/// desugar rule, first-match-wins, in the SAME order the original loop body tried them.
+/// Verbatim (pure text-move from `if let .. { continue }` chains to `.or_else()`).
+fn desugar_all_try_one_pass(
+    cur: &IrExpr,
+    unit_main: bool,
+    layouts: &crate::lower::VariantLayouts,
+    record_layouts: &crate::lower::RecordLayouts,
+    params: &[almide_ir::IrParam],
+) -> Option<IrExpr> {
+    desugar_all_try_call_access_passes(cur, unit_main, layouts, record_layouts, params)
+        .or_else(|| desugar_all_try_match_branch_passes(cur, unit_main, layouts))
+}
+
+/// Extracted from `desugar_all` (codopsy8 complexity sweep, group 1 of 2 — passes 1-12 of
+/// the original loop, in the SAME order): call/access-shape rewrites (method calls,
+/// assert, map/bytes indexing, matrix binops, slices, optional-chain, guard, beta-reduce,
+/// tuple-unwrap-or, effect-unwrap). Verbatim.
+fn desugar_all_try_call_access_passes(
+    cur: &IrExpr,
+    unit_main: bool,
+    layouts: &crate::lower::VariantLayouts,
+    record_layouts: &crate::lower::RecordLayouts,
+    params: &[almide_ir::IrParam],
+) -> Option<IrExpr> {
+    desugar_method_calls(cur, record_layouts)
         // assert/assert_eq/assert_ne → the controlled-halt `if`/die shape — the SAME
         // rewrite `lower_function_all_impl` applies before lowering. Without it here the
         // COUNTED tree kept the bare `assert_eq(a, b)` Call while the lowering emitted the
         // desugared eq's synthetic calls → a false `mir > ir` caps breach on every test fn
         // whose assert condition now lowers (desugar-before-both must mean BOTH).
-        if let Some(r) = desugar_assert_calls(&cur) {
-            cur = r;
-            continue;
-        }
+        .or_else(|| desugar_assert_calls(cur))
         // `m[k]` → `map.get(m, k)` — same desugar-before-both contract as the assert
         // rewrite above (the counted Call node matches the lowering's one CallFn).
-        if let Some(r) = desugar_map_access_calls(&cur) {
-            cur = r;
-            continue;
-        }
+        .or_else(|| desugar_map_access_calls(cur))
         // `buf[i]` over Bytes → `bytes.index(buf, i)` — same contract.
-        if let Some(r) = desugar_bytes_index_calls(&cur) {
-            cur = r;
-            continue;
-        }
+        .or_else(|| desugar_bytes_index_calls(cur))
         // Matrix BinOps → matrix.mul/add/sub — same contract.
-        if let Some(r) = desugar_matrix_binops(&cur) {
-            cur = r;
-            continue;
-        }
+        .or_else(|| desugar_matrix_binops(cur))
         // `buf[i] = v` over Bytes → `bytes.set_at(buf, i, v)` — same contract
         // (the rewrite adds ONE counted Module call matching the lowering's CallFn).
-        if let Some(r) = desugar_bytes_index_assign(&cur, params) {
-            cur = r;
-            continue;
-        }
+        .or_else(|| desugar_bytes_index_assign(cur, params))
         // `xs[a..b]` slice RuntimeCall → `list.slice(xs, a, b)` — same contract
         // (an elided RuntimeCall becomes ONE counted pure Module call, both sides).
-        if let Some(r) = desugar_list_slice_calls(&cur) {
-            cur = r;
-            continue;
-        }
+        .or_else(|| desugar_list_slice_calls(cur))
         // `p?.f` → the some/none match — same contract (adds no calls).
-        if let Some(r) = desugar_optional_chain(&cur) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_guard(&cur) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_beta_reduce(&cur) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_tuple_unwrap_or(&cur) {
-            cur = r;
-            continue;
-        }
+        .or_else(|| desugar_optional_chain(cur))
+        .or_else(|| desugar_guard(cur))
+        .or_else(|| desugar_beta_reduce(cur))
+        .or_else(|| desugar_tuple_unwrap_or(cur))
         // `ret_is_result=false`: this debug-dump-only path has no per-fn ABI fact available;
         // the bare-tail-Option-`!` rewrite it skips is call-count-invariant, so the dump stays
         // representative for the count-diff use this function serves.
-        if let Some(r) = desugar_effect_unwrap(&cur, unit_main, false, layouts) {
-            cur = r;
-            continue;
-        }
-        if unit_main {
-            if let Some(r) = desugar_unit_main_err_arms(&cur) {
-                cur = r;
-                continue;
-            }
-        }
-        if let Some(r) = desugar_sort_by_cached_keys(&cur) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_to_option_calls(&cur) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_offtype_testing_asserts(&cur) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_heap_branches(&cur, layouts) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_scalar_tuple_literal_match(&cur) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_scalar_guard_match(&cur) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_tuple_variant_match(&cur) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_tuple_variant_match_deep(&cur, layouts) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_tuple_empty_list_match(&cur) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_fan_block(&cur) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_record_destructure_match(&cur) {
-            cur = r;
-            continue;
-        }
-        if let Some(r) = desugar_list_pattern_match(&cur) {
-            cur = r;
-            continue;
-        }
-        break;
-    }
-    cur
+        .or_else(|| desugar_effect_unwrap(cur, unit_main, false, layouts))
+}
+
+/// Extracted from `desugar_all` (codopsy8 complexity sweep, group 2 of 2 — passes 13-25 of
+/// the original loop, in the SAME order): match/branch-shape rewrites (unit-main err arms,
+/// sort_by cached keys, to_option, off-type-testing asserts, heap branches, and the tuple/
+/// variant/list pattern-match family). Verbatim.
+fn desugar_all_try_match_branch_passes(
+    cur: &IrExpr,
+    unit_main: bool,
+    layouts: &crate::lower::VariantLayouts,
+) -> Option<IrExpr> {
+    (if unit_main { desugar_unit_main_err_arms(cur) } else { None })
+        .or_else(|| desugar_sort_by_cached_keys(cur))
+        .or_else(|| desugar_to_option_calls(cur))
+        .or_else(|| desugar_offtype_testing_asserts(cur))
+        .or_else(|| desugar_heap_branches(cur, layouts))
+        .or_else(|| desugar_scalar_tuple_literal_match(cur))
+        .or_else(|| desugar_scalar_guard_match(cur))
+        .or_else(|| desugar_tuple_variant_match(cur))
+        .or_else(|| desugar_tuple_variant_match_deep(cur, layouts))
+        .or_else(|| desugar_tuple_empty_list_match(cur))
+        .or_else(|| desugar_fan_block(cur))
+        .or_else(|| desugar_record_destructure_match(cur))
+        .or_else(|| desugar_list_pattern_match(cur))
 }
 
 /// Rewrite the FIRST `guard` in a loop-body statement list into an `if` statement:
