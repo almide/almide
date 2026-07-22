@@ -179,6 +179,39 @@ enum WasmTestOutcome {
 /// Compile one `.almd` file to WASM and run it under wasmtime. Pure per-file
 /// work (no shared mutable state) so it runs in parallel — the WASM path takes
 /// no rustc/cargo, so there's no global build lock to serialize on.
+/// `compile_and_run_wasm_test`'s independent pre-flight gates: `// wasm:skip`
+/// marker, parse errors (a real failure, not a skip — see the comment at the
+/// call site), and the main+test co-presence gap in the v1 test-mode runner.
+/// Extracted verbatim — each check only reads its parameters; whichever
+/// fires first determines the outcome, matching the original code's
+/// early-return order exactly.
+fn wasm_test_preflight_outcome(
+    test_file: &str,
+    program: &almide_lang::ast::Program,
+    source_text: &str,
+    parse_errors: &[crate::diagnostic::Diagnostic],
+) -> Option<WasmTestOutcome> {
+    if source_text.lines().take(3).any(|line| line.contains("// wasm:skip")) {
+        return Some(WasmTestOutcome::Skip { file: test_file.to_string(), reason: "wasm:skip".to_string() });
+    }
+    if parse_errors.iter().any(|d| d.level == crate::diagnostic::Level::Error) {
+        let mut detail = String::new();
+        for d in parse_errors.iter().filter(|d| d.level == crate::diagnostic::Level::Error).take(3) {
+            detail.push_str(&format!("  parse error: {}\n", d.message));
+        }
+        return Some(WasmTestOutcome::Fail { file: test_file.to_string(), detail });
+    }
+    let has_main = program
+        .decls
+        .iter()
+        .any(|d| matches!(d, almide_lang::ast::Decl::Fn { name, .. } if name.as_str() == "main"));
+    let has_test = program.decls.iter().any(|d| matches!(d, almide_lang::ast::Decl::Test { .. }));
+    if has_main && has_test {
+        return Some(WasmTestOutcome::Skip { file: test_file.to_string(), reason: "main + test blocks: wasm test-mode runs main only, not the tests".to_string() });
+    }
+    None
+}
+
 fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> WasmTestOutcome {
     use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
     let skip = |reason: String| WasmTestOutcome::Skip { file: test_file.to_string(), reason };
