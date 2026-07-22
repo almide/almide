@@ -481,6 +481,7 @@ include!("control_p3.rs");
 include!("control_p3_b.rs");
 include!("control_p3_c.rs");
 include!("heap_result_arm.rs");
+include!("heap_result_arm_b.rs");
 include!("result_materialize.rs");
 include!("result_ctors.rs");
 include!("scalar_for.rs");
