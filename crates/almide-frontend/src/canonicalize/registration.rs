@@ -816,114 +816,140 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
 
     for decl in decls {
         match decl {
-            ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, visibility, extern_attrs, .. } => {
-                // Skip duplicates that come from @extern re-export (name may appear twice by design).
-                if extern_attrs.is_empty() {
-                    let key = prefixed_key(prefix, name);
-                    if let Some(first_span) = seen_fn.get(&key) {
-                        let mut diag = err(
-                            format!("duplicate function '{}'", name),
-                            format!("Rename one of the definitions, or remove the earlier one. Almide requires each function name to be unique within a module."),
-                            format!("fn {}", name),
-                        ).with_code("E012");
-                        if let Some(s) = span {
-                            diag.line = Some(s.line);
-                            diag.col = Some(s.col);
-                        }
-                        if let Some(first) = first_span {
-                            diag.secondary.push(almide_base::diagnostic::SecondarySpan {
-                                line: first.line,
-                                col: Some(first.col),
-                                label: format!("first definition of '{}' here", name),
-                            });
-                        }
-                        diagnostics.push(diag);
-                        continue;
-                    }
-                    seen_fn.insert(key, span.clone());
-                }
-                register_fn_sig(env, name, params, return_type, effect, r#async, generics, prefix, span.as_ref(), *visibility);
-                // Register in DefTable
-                let fn_key = prefixed_key(prefix, name);
-                let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");
-                let mod_path = prefix.unwrap_or("");
-                let ret = env.functions.get(&sym(&fn_key)).map(|s| s.ret.clone()).unwrap_or(Ty::Unknown);
-                let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::Function, ret);
-                env.def_map.insert(sym(&fn_key), did);
-            }
-            ast::Decl::Test { name, span, .. } => {
-                let test_key = name.to_string();
-                if let Some(first_span) = seen_test.get(&test_key) {
-                    let mut diag = err(
-                        format!("duplicate test '{}'", name),
-                        format!("Rename one of the tests, or merge them. Each test name must be unique within a file."),
-                        format!("test \"{}\"", name),
-                    ).with_code("E012");
-                    if let Some(s) = span {
-                        diag.line = Some(s.line);
-                        diag.col = Some(s.col);
-                    }
-                    if let Some(first) = first_span {
-                        diag.secondary.push(almide_base::diagnostic::SecondarySpan {
-                            line: first.line,
-                            col: Some(first.col),
-                            label: format!("first test '{}' here", name),
-                        });
-                    }
-                    diagnostics.push(diag);
-                    continue;
-                }
-                seen_test.insert(test_key, span.clone());
-            }
-            ast::Decl::Type { name, ty, deriving, generics, visibility, .. } => {
-                register_type_decl(env, diagnostics, name, ty, deriving, generics, prefix, *visibility);
-                // Register in DefTable
-                let type_key = prefixed_key(prefix, name);
-                let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");
-                let mod_path = prefix.unwrap_or("");
-                let resolved_ty = env.types.get(&sym(&type_key)).cloned().unwrap_or(Ty::Unknown);
-                let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::Type, resolved_ty);
-                env.def_map.insert(sym(&type_key), did);
-                if let Some(derives) = deriving {
-                    for d in derives {
-                        env.type_protocols
-                            .entry(sym(name))
-                            .or_insert_with(std::collections::HashSet::new)
-                            .insert(sym(d));
-                    }
-                }
-            }
+            ast::Decl::Fn { .. } => register_decl_fn(env, diagnostics, &mut seen_fn, decl, prefix),
+            ast::Decl::Test { .. } => register_decl_test(diagnostics, &mut seen_test, decl),
+            ast::Decl::Type { .. } => register_decl_type(env, diagnostics, decl, prefix),
             ast::Decl::Protocol { name, generics, methods, .. } => {
                 register_protocol_decl(env, name, generics, methods);
             }
-            ast::Decl::TopLet { name, ty, value, .. } => {
-                let rt = ty.as_ref().map(|te| resolve(env, te))
-                    .unwrap_or_else(|| infer_top_let_seed(env, prefix, value));
-                let key = prefixed_key(prefix, name);
-                // A PREFIXED key names exactly one decl program-wide, and
-                // registration re-runs per driver leg over a persistent env —
-                // re-seeding must not downgrade a fully inferred entry (the
-                // post-solve flush's `Option[Cfg]`) back to the seed's partial
-                // `Option[Unknown]`. Unprefixed keys stay unconditional: they
-                // are scoped aliases (main program / intra-module temp) where
-                // an entry may legitimately describe a DIFFERENT decl.
-                let keep_existing = prefix.is_some()
-                    && (rt.contains_unknown() || rt.contains_typevar())
-                    && env.top_lets.get(&sym(&key)).is_some_and(|t| {
-                        !t.contains_unknown() && !t.contains_typevar()
-                    });
-                if !keep_existing {
-                    env.top_lets.insert(sym(&key), rt.clone());
-                }
-                // Register in DefTable
-                let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");
-                let mod_path = prefix.unwrap_or("");
-                let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::TopLet, rt);
-                env.def_map.insert(sym(&key), did);
-            }
+            ast::Decl::TopLet { .. } => register_decl_top_let(env, decl, prefix),
             _ => {}
         }
     }
     validate_protocol_impls(env, diagnostics);
     validate_derive_field_support(env, diagnostics);
+}
+
+/// `ast::Decl::Fn` arm of [`register_decls`] — E012 duplicate-function
+/// diagnostic (skipped for `@extern` re-exports), signature registration,
+/// and DefTable registration. Verbatim text move; `continue` in the
+/// original loop becomes an early `return` here (both simply skip the rest
+/// of this decl's registration and move on to the next `decl`).
+fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_fn: &mut HashMap<String, Option<ast::Span>>, decl: &ast::Decl, prefix: Option<&str>) {
+    let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, visibility, extern_attrs, .. } = decl else { unreachable!() };
+    // Skip duplicates that come from @extern re-export (name may appear twice by design).
+    if extern_attrs.is_empty() {
+        let key = prefixed_key(prefix, name);
+        if let Some(first_span) = seen_fn.get(&key) {
+            let mut diag = err(
+                format!("duplicate function '{}'", name),
+                format!("Rename one of the definitions, or remove the earlier one. Almide requires each function name to be unique within a module."),
+                format!("fn {}", name),
+            ).with_code("E012");
+            if let Some(s) = span {
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+            }
+            if let Some(first) = first_span {
+                diag.secondary.push(almide_base::diagnostic::SecondarySpan {
+                    line: first.line,
+                    col: Some(first.col),
+                    label: format!("first definition of '{}' here", name),
+                });
+            }
+            diagnostics.push(diag);
+            return;
+        }
+        seen_fn.insert(key, span.clone());
+    }
+    register_fn_sig(env, name, params, return_type, effect, r#async, generics, prefix, span.as_ref(), *visibility);
+    // Register in DefTable
+    let fn_key = prefixed_key(prefix, name);
+    let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");
+    let mod_path = prefix.unwrap_or("");
+    let ret = env.functions.get(&sym(&fn_key)).map(|s| s.ret.clone()).unwrap_or(Ty::Unknown);
+    let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::Function, ret);
+    env.def_map.insert(sym(&fn_key), did);
+}
+
+/// `ast::Decl::Test` arm of [`register_decls`] — E012 duplicate-test
+/// diagnostic. Verbatim text move; `continue` becomes an early `return`
+/// (see [`register_decl_fn`]).
+fn register_decl_test(diagnostics: &mut Vec<Diagnostic>, seen_test: &mut HashMap<String, Option<ast::Span>>, decl: &ast::Decl) {
+    let ast::Decl::Test { name, span, .. } = decl else { unreachable!() };
+    let test_key = name.to_string();
+    if let Some(first_span) = seen_test.get(&test_key) {
+        let mut diag = err(
+            format!("duplicate test '{}'", name),
+            format!("Rename one of the tests, or merge them. Each test name must be unique within a file."),
+            format!("test \"{}\"", name),
+        ).with_code("E012");
+        if let Some(s) = span {
+            diag.line = Some(s.line);
+            diag.col = Some(s.col);
+        }
+        if let Some(first) = first_span {
+            diag.secondary.push(almide_base::diagnostic::SecondarySpan {
+                line: first.line,
+                col: Some(first.col),
+                label: format!("first test '{}' here", name),
+            });
+        }
+        diagnostics.push(diag);
+        return;
+    }
+    seen_test.insert(test_key, span.clone());
+}
+
+/// `ast::Decl::Type` arm of [`register_decls`] — type registration plus
+/// DefTable and `type_protocols` bookkeeping. Verbatim text move out of
+/// [`register_decls`].
+fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl: &ast::Decl, prefix: Option<&str>) {
+    let ast::Decl::Type { name, ty, deriving, generics, visibility, .. } = decl else { unreachable!() };
+    register_type_decl(env, diagnostics, name, ty, deriving, generics, prefix, *visibility);
+    // Register in DefTable
+    let type_key = prefixed_key(prefix, name);
+    let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");
+    let mod_path = prefix.unwrap_or("");
+    let resolved_ty = env.types.get(&sym(&type_key)).cloned().unwrap_or(Ty::Unknown);
+    let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::Type, resolved_ty);
+    env.def_map.insert(sym(&type_key), did);
+    if let Some(derives) = deriving {
+        for d in derives {
+            env.type_protocols
+                .entry(sym(name))
+                .or_insert_with(std::collections::HashSet::new)
+                .insert(sym(d));
+        }
+    }
+}
+
+/// `ast::Decl::TopLet` arm of [`register_decls`] — top-level `let` type
+/// seeding (or reuse of a fully-inferred prior entry) and DefTable
+/// registration. Verbatim text move out of [`register_decls`].
+fn register_decl_top_let(env: &mut TypeEnv, decl: &ast::Decl, prefix: Option<&str>) {
+    let ast::Decl::TopLet { name, ty, value, .. } = decl else { unreachable!() };
+    let rt = ty.as_ref().map(|te| resolve(env, te))
+        .unwrap_or_else(|| infer_top_let_seed(env, prefix, value));
+    let key = prefixed_key(prefix, name);
+    // A PREFIXED key names exactly one decl program-wide, and
+    // registration re-runs per driver leg over a persistent env —
+    // re-seeding must not downgrade a fully inferred entry (the
+    // post-solve flush's `Option[Cfg]`) back to the seed's partial
+    // `Option[Unknown]`. Unprefixed keys stay unconditional: they
+    // are scoped aliases (main program / intra-module temp) where
+    // an entry may legitimately describe a DIFFERENT decl.
+    let keep_existing = prefix.is_some()
+        && (rt.contains_unknown() || rt.contains_typevar())
+        && env.top_lets.get(&sym(&key)).is_some_and(|t| {
+            !t.contains_unknown() && !t.contains_typevar()
+        });
+    if !keep_existing {
+        env.top_lets.insert(sym(&key), rt.clone());
+    }
+    // Register in DefTable
+    let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");
+    let mod_path = prefix.unwrap_or("");
+    let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::TopLet, rt);
+    env.def_map.insert(sym(&key), did);
 }
