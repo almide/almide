@@ -391,52 +391,6 @@ fn box_node_unbox_consumed(expr: &mut IrExpr) -> bool {
     }
 }
 
-/// Box every Fn-typed position reachable in `value` given its expected uniform
-/// element type `expected`. Descends through tuple/record element types so a
-/// closure nested in `[(k, closure)]` (map.from_list) is boxed.
-fn box_fn_in_value(value: &mut IrExpr, expected: &almide_lang::types::Ty) -> bool {
-    use almide_lang::types::Ty;
-    // A capture-clone-wrapped value (`{ let __cap = …; <tuple/record/closure> }`,
-    // produced for a HOF mapper body that captures) hides the structural value
-    // behind a Block — descend into the tail to reach the tuple/record beneath.
-    if let IrExprKind::Block { expr: Some(tail), .. } = &mut value.kind {
-        return box_fn_in_value(tail, expected);
-    }
-    match expected {
-        // UNIFORM-REPR SPIKE: a `Var` of `Ty::Fn` is ALREADY `Rc<dyn Fn>` (boxed
-        // at its binding / it is an `Rc<dyn Fn>` parameter), so storing it needs no
-        // re-box — wrapping it again would yield `Rc<Rc<dyn Fn>>` (the a6 over-box).
-        // Only fresh literals (Lambda, via control-flow joins) are boxed here.
-        Ty::Fn { .. } => box_closure_value(value, expected),
-        Ty::Tuple(comps) => {
-            if let IrExprKind::Tuple { elements } = &mut value.kind {
-                if elements.len() == comps.len() {
-                    let mut c = false;
-                    for (el, ct) in elements.iter_mut().zip(comps.iter()) {
-                        if ty_contains_fn(ct) { c |= box_fn_in_value(el, ct); }
-                    }
-                    return c;
-                }
-            }
-            false
-        }
-        Ty::Record { fields } => {
-            if let IrExprKind::Record { fields: vfields, .. } = &mut value.kind {
-                let mut c = false;
-                for (fname, fty) in fields.iter() {
-                    if !ty_contains_fn(fty) { continue; }
-                    if let Some((_, fv)) = vfields.iter_mut().find(|(n, _)| n == fname) {
-                        c |= box_fn_in_value(fv, fty);
-                    }
-                }
-                return c;
-            }
-            false
-        }
-        _ => false,
-    }
-}
-
 /// Wrap a single closure value in `RcWrap` as `Rc<dyn Fn>`. Only fresh closure
 /// LITERALS (`Lambda`) are boxed; values already read out of a container/field
 /// (`Var`, `Member`, …) are left untouched (already boxed there). `if`/`match`/
@@ -469,18 +423,6 @@ fn box_closure_value(slot: &mut IrExpr, fn_ty: &almide_lang::types::Ty) -> bool 
     true
 }
 
-/// True if `ty` mentions a function type at a position a uniform container would
-/// need to unify (directly, or inside a tuple/record element). Nested List/Map
-/// are their own containers — not descended here.
-fn ty_contains_fn(ty: &almide_lang::types::Ty) -> bool {
-    use almide_lang::types::Ty;
-    match ty {
-        Ty::Fn { .. } => true,
-        Ty::Tuple(ts) => ts.iter().any(ty_contains_fn),
-        Ty::Record { fields } => fields.iter().any(|(_, t)| ty_contains_fn(t)),
-        _ => false,
-    }
-}
 
 /// Element type of `List[E]`.
 fn list_elem_ty(ty: &almide_lang::types::Ty) -> Option<&almide_lang::types::Ty> {
