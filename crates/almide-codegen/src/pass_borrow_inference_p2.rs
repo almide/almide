@@ -431,6 +431,32 @@ fn check_needs_refmut_runtime_call(expr: &IrExpr, var: VarId, needs: &mut bool) 
     for arg in args { check_needs_refmut(arg, var, needs); }
 }
 
+/// `IrExprKind::Block` case of `check_needs_refmut`, extracted verbatim.
+fn check_needs_refmut_block(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    let IrExprKind::Block { stmts, expr: tail } = &expr.kind else { unreachable!() };
+    for s in stmts { check_needs_refmut_stmt(s, var, needs); }
+    if let Some(tail) = tail { check_needs_refmut(tail, var, needs); }
+}
+
+/// `IrExprKind::Match` case of `check_needs_refmut`, extracted verbatim.
+fn check_needs_refmut_match(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+    check_needs_refmut(subject, var, needs);
+    for arm in arms {
+        if let Some(g) = &arm.guard { check_needs_refmut(g, var, needs); }
+        check_needs_refmut(&arm.body, var, needs);
+    }
+}
+
+/// `IrExprKind::ForIn` / `IrExprKind::While` case of `check_needs_refmut`,
+/// extracted verbatim — both arms shared the identical
+/// "check head expr, then walk body stmts" shape (`iterable`/`cond` as the
+/// head), so they now share one helper instead of two copies.
+fn check_needs_refmut_expr_then_stmts(head: &IrExpr, body: &[IrStmt], var: VarId, needs: &mut bool) {
+    check_needs_refmut(head, var, needs);
+    for s in body { check_needs_refmut_stmt(s, var, needs); }
+}
+
 /// `IrExprKind::Call` case of `check_needs_refmut`, extracted verbatim.
 /// Named / Module call — look up user-defined borrow signatures.
 fn check_needs_refmut_call(expr: &IrExpr, var: VarId, needs: &mut bool) {
@@ -463,22 +489,13 @@ fn check_needs_refmut(expr: &IrExpr, var: VarId, needs: &mut bool) {
     if *needs { return; }
     match &expr.kind {
         IrExprKind::Var { .. } => {}
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { check_needs_refmut_stmt(s, var, needs); }
-            if let Some(tail) = expr { check_needs_refmut(tail, var, needs); }
-        }
+        IrExprKind::Block { .. } => check_needs_refmut_block(expr, var, needs),
         IrExprKind::If { cond, then, else_ } => {
             check_needs_refmut(cond, var, needs);
             check_needs_refmut(then, var, needs);
             check_needs_refmut(else_, var, needs);
         }
-        IrExprKind::Match { subject, arms } => {
-            check_needs_refmut(subject, var, needs);
-            for arm in arms {
-                if let Some(g) = &arm.guard { check_needs_refmut(g, var, needs); }
-                check_needs_refmut(&arm.body, var, needs);
-            }
-        }
+        IrExprKind::Match { .. } => check_needs_refmut_match(expr, var, needs),
         // `RuntimeCall` — lowered `@intrinsic` with a mangled symbol.
         // Consult SIGS_SNAPSHOT (which carries the @intrinsic seed
         // sigs, including implicit_mut promotions) to learn the callee
@@ -486,14 +503,8 @@ fn check_needs_refmut(expr: &IrExpr, var: VarId, needs: &mut bool) {
         IrExprKind::RuntimeCall { .. } => check_needs_refmut_runtime_call(expr, var, needs),
         // Named / Module call — look up user-defined borrow signatures.
         IrExprKind::Call { .. } => check_needs_refmut_call(expr, var, needs),
-        IrExprKind::ForIn { iterable, body, .. } => {
-            check_needs_refmut(iterable, var, needs);
-            for s in body { check_needs_refmut_stmt(s, var, needs); }
-        }
-        IrExprKind::While { cond, body } => {
-            check_needs_refmut(cond, var, needs);
-            for s in body { check_needs_refmut_stmt(s, var, needs); }
-        }
+        IrExprKind::ForIn { iterable, body, .. } => check_needs_refmut_expr_then_stmts(iterable, body, var, needs),
+        IrExprKind::While { cond, body } => check_needs_refmut_expr_then_stmts(cond, body, var, needs),
         IrExprKind::BinOp { left, right, .. } => {
             check_needs_refmut(left, var, needs);
             check_needs_refmut(right, var, needs);
