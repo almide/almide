@@ -365,10 +365,11 @@ fn render_fn_safe_name(
     format!("{}{}", safe_name, fn_generics)
 }
 
-pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
-    // Collect VarIds of fn params that will be emitted as references
-    // (`&T` / `&[T]` / `&str`). The Borrow walker uses this to skip
-    // outer `&` wrap on already-borrowed bindings.
+/// Collect VarIds of fn params that will be emitted as references (`&T` /
+/// `&[T]` / `&str`, and separately `&mut T`). The Borrow walker uses this
+/// to skip an outer `&` wrap on already-borrowed bindings. Extracted from
+/// `render_function` (cog>25 decomposition).
+fn collect_ref_params(func: &IrFunction) -> (std::collections::HashSet<VarId>, std::collections::HashSet<VarId>) {
     let mut ref_params: std::collections::HashSet<VarId> =
         std::collections::HashSet::new();
     let mut ref_mut_params: std::collections::HashSet<VarId> =
@@ -385,6 +386,34 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             _ => {}
         }
     }
+    (ref_params, ref_mut_params)
+}
+
+/// Wrap `effect fn main`: report an unhandled error via Display + exit 1.
+/// Both wrapper shapes first FORCE the abortable lazy top-lets in
+/// declaration order, so an aborting initializer (integer `/`/`%`) fires at
+/// startup — byte-identical to wasm's eager top-let evaluation in
+/// `_start`. Extracted from `render_function` (cog>25 decomposition).
+fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: bool, is_rust_plain_main_with_forces: bool) -> String {
+    let force_lines: String = ctx.ann.global_init_order.iter()
+        .filter_map(|v| ctx.ann.globals.get(v))
+        .filter(|i| matches!(i.storage, almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true }))
+        .map(|i| format!("    std::sync::LazyLock::force(&{});\n", i.static_name))
+        .collect();
+    if is_rust_effect_main {
+        format!("{}\n\nfn main() {{\n{}    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code, force_lines)
+    } else if is_rust_plain_main_with_forces {
+        format!("{}\n\nfn main() {{\n{}    __almide_main();\n}}", fn_code, force_lines)
+    } else {
+        fn_code
+    }
+}
+
+pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
+    // Collect VarIds of fn params that will be emitted as references
+    // (`&T` / `&[T]` / `&str`). The Borrow walker uses this to skip
+    // outer `&` wrap on already-borrowed bindings.
+    let (ref_params, ref_mut_params) = collect_ref_params(func);
 
     // Error type that the enclosing fn's `?`/auto-? propagates into. A fn
     // declared `Result[_, E]` propagates into `E`; an effect fn declared with
@@ -484,22 +513,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     let fn_code = fn_ctx.templates.render_with(construct, None, &[], &[("name", safe_name.as_str()), ("params", params_str.as_str()), ("return_type", ret_str.as_str()), ("body", body_str.as_str())])
         .unwrap_or_else(|| format!("fn {}() {{ }}", func.name));
 
-    // Wrap `effect fn main`: report an unhandled error via Display + exit 1.
-    // Both wrapper shapes first FORCE the abortable lazy top-lets in declaration
-    // order, so an aborting initializer (integer `/`/`%`) fires at startup —
-    // byte-identical to wasm's eager top-let evaluation in `_start`.
-    let force_lines: String = ctx.ann.global_init_order.iter()
-        .filter_map(|v| ctx.ann.globals.get(v))
-        .filter(|i| matches!(i.storage, almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true }))
-        .map(|i| format!("    std::sync::LazyLock::force(&{});\n", i.static_name))
-        .collect();
-    let fn_code = if is_rust_effect_main {
-        format!("{}\n\nfn main() {{\n{}    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code, force_lines)
-    } else if is_rust_plain_main_with_forces {
-        format!("{}\n\nfn main() {{\n{}    __almide_main();\n}}", fn_code, force_lines)
-    } else {
-        fn_code
-    };
+    let fn_code = wrap_main_fn_code(fn_code, ctx, is_rust_effect_main, is_rust_plain_main_with_forces);
 
     // Prepend doc comment if present
     if let Some(ref doc) = func.doc {
