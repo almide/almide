@@ -272,7 +272,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
 /// mutation order, `continue` becomes an early `return`. (Sibling of
 /// `crate::lower_one_user_module` in main.rs, which additionally tracks a
 /// per-module `module_irs` map the WASM path doesn't need.)
-fn lower_one_wasm_module(
+pub(super) fn lower_one_wasm_module(
     checker: &mut check::Checker,
     name: &mut String,
     mod_prog: &mut almide::ast::Program,
