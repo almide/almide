@@ -476,71 +476,80 @@ fn compute_abi(td: &IrTypeDecl) -> Option<AbiLayout> {
         return None;
     }
     match &td.kind {
-        IrTypeDeclKind::Record { fields } => {
-            let mut abi_fields = Vec::new();
-            let mut offset = 0usize;
-            let mut max_align = 1usize;
-            for f in fields {
-                let (size, align) = c_abi_size_align(&f.ty)?;
-                // Pad to alignment
-                let padding = (align - (offset % align)) % align;
-                offset += padding;
-                abi_fields.push(AbiField {
-                    name: f.name.to_string(),
-                    offset,
-                    size,
-                });
-                offset += size;
-                max_align = max_align.max(align);
-            }
-            // Pad struct size to alignment
-            let padding = (max_align - (offset % max_align)) % max_align;
-            offset += padding;
-            Some(AbiLayout { size: offset, align: max_align, fields: abi_fields })
-        }
-        IrTypeDeclKind::Variant { cases, .. } => {
-            // C repr enum: tag (i32 = 4 bytes) + max payload
-            let tag_size = 4usize;
-            let tag_align = 4usize;
-            let mut max_payload_size = 0usize;
-            let mut max_payload_align = 1usize;
-            for case in cases {
-                let (payload_size, payload_align) = match &case.kind {
-                    IrVariantKind::Unit => (0, 1),
-                    IrVariantKind::Tuple { fields } => {
-                        let mut size = 0usize;
-                        let mut align = 1usize;
-                        for f in fields {
-                            let (fs, fa) = c_abi_size_align(f)?;
-                            let padding = (fa - (size % fa)) % fa;
-                            size += padding + fs;
-                            align = align.max(fa);
-                        }
-                        (size, align)
-                    }
-                    IrVariantKind::Record { fields } => {
-                        let mut size = 0usize;
-                        let mut align = 1usize;
-                        for f in fields {
-                            let (fs, fa) = c_abi_size_align(&f.ty)?;
-                            let padding = (fa - (size % fa)) % fa;
-                            size += padding + fs;
-                            align = align.max(fa);
-                        }
-                        (size, align)
-                    }
-                };
-                max_payload_size = max_payload_size.max(payload_size);
-                max_payload_align = max_payload_align.max(payload_align);
-            }
-            let total_align = tag_align.max(max_payload_align);
-            // tag + padding + max_payload
-            let payload_offset = tag_size + (total_align - (tag_size % total_align)) % total_align;
-            let raw_size = if max_payload_size == 0 { tag_size } else { payload_offset + max_payload_size };
-            let total_size = raw_size + (total_align - (raw_size % total_align)) % total_align;
-            Some(AbiLayout { size: total_size, align: total_align, fields: vec![] })
-        }
+        IrTypeDeclKind::Record { fields } => compute_record_abi(fields),
+        IrTypeDeclKind::Variant { cases, .. } => compute_variant_abi(cases),
         IrTypeDeclKind::Alias { .. } => None,
+    }
+}
+
+fn compute_record_abi(fields: &[IrFieldDecl]) -> Option<AbiLayout> {
+    let mut abi_fields = Vec::new();
+    let mut offset = 0usize;
+    let mut max_align = 1usize;
+    for f in fields {
+        let (size, align) = c_abi_size_align(&f.ty)?;
+        // Pad to alignment
+        let padding = (align - (offset % align)) % align;
+        offset += padding;
+        abi_fields.push(AbiField {
+            name: f.name.to_string(),
+            offset,
+            size,
+        });
+        offset += size;
+        max_align = max_align.max(align);
+    }
+    // Pad struct size to alignment
+    let padding = (max_align - (offset % max_align)) % max_align;
+    offset += padding;
+    Some(AbiLayout { size: offset, align: max_align, fields: abi_fields })
+}
+
+fn compute_variant_abi(cases: &[IrVariantDecl]) -> Option<AbiLayout> {
+    // C repr enum: tag (i32 = 4 bytes) + max payload
+    let tag_size = 4usize;
+    let tag_align = 4usize;
+    let mut max_payload_size = 0usize;
+    let mut max_payload_align = 1usize;
+    for case in cases {
+        let (payload_size, payload_align) = c_abi_variant_case_size_align(&case.kind)?;
+        max_payload_size = max_payload_size.max(payload_size);
+        max_payload_align = max_payload_align.max(payload_align);
+    }
+    let total_align = tag_align.max(max_payload_align);
+    // tag + padding + max_payload
+    let payload_offset = tag_size + (total_align - (tag_size % total_align)) % total_align;
+    let raw_size = if max_payload_size == 0 { tag_size } else { payload_offset + max_payload_size };
+    let total_size = raw_size + (total_align - (raw_size % total_align)) % total_align;
+    Some(AbiLayout { size: total_size, align: total_align, fields: vec![] })
+}
+
+/// (size, align) of one variant case's payload under C ABI rules.
+fn c_abi_variant_case_size_align(kind: &IrVariantKind) -> Option<(usize, usize)> {
+    match kind {
+        IrVariantKind::Unit => Some((0, 1)),
+        IrVariantKind::Tuple { fields } => {
+            let mut size = 0usize;
+            let mut align = 1usize;
+            for f in fields {
+                let (fs, fa) = c_abi_size_align(f)?;
+                let padding = (fa - (size % fa)) % fa;
+                size += padding + fs;
+                align = align.max(fa);
+            }
+            Some((size, align))
+        }
+        IrVariantKind::Record { fields } => {
+            let mut size = 0usize;
+            let mut align = 1usize;
+            for f in fields {
+                let (fs, fa) = c_abi_size_align(&f.ty)?;
+                let padding = (fa - (size % fa)) % fa;
+                size += padding + fs;
+                align = align.max(fa);
+            }
+            Some((size, align))
+        }
     }
 }
 
