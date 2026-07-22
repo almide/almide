@@ -184,73 +184,13 @@ impl<'a> Interpreter<'a> {
                 Ok(())
             }
             IrStmtKind::IndexAssign { target, index, value } => {
-                let iv = match self.eval_expr(index, scope) {
-                    Flow::Value(v) => v,
-                    other => return Err(other),
-                };
-                let vv = match self.eval_expr(value, scope) {
-                    Flow::Value(v) => v,
-                    other => return Err(other),
-                };
-                let cur = scope.get(*target).ok_or_else(|| {
-                    Flow::Abort("internal: index-assign to unbound list".into())
-                })?;
-                match (cur, iv) {
-                    (Value::List(xs), Value::Int(i)) => {
-                        if i < 0 || (i as usize) >= xs.len() {
-                            return Err(Flow::Abort("index out of bounds".into()));
-                        }
-                        let mut new = (*xs).clone();
-                        new[i as usize] = vv;
-                        scope.assign(*target, Value::list(new));
-                        Ok(())
-                    }
-                    _ => Err(Flow::Abort("internal: malformed index-assign".into())),
-                }
+                self.exec_stmt_index_assign(*target, index, value, scope)
             }
             IrStmtKind::MapInsert { target, key, value } => {
-                let kv = match self.eval_expr(key, scope) {
-                    Flow::Value(v) => v,
-                    other => return Err(other),
-                };
-                let vv = match self.eval_expr(value, scope) {
-                    Flow::Value(v) => v,
-                    other => return Err(other),
-                };
-                let cur = scope.get(*target).ok_or_else(|| {
-                    Flow::Abort("internal: map-insert to unbound map".into())
-                })?;
-                match cur {
-                    Value::Map(entries) => {
-                        let mut new = (*entries).clone();
-                        map_insert(&mut new, kv, vv);
-                        scope.assign(*target, Value::Map(Rc::new(new)));
-                        Ok(())
-                    }
-                    _ => Err(Flow::Abort("internal: map-insert on non-Map".into())),
-                }
+                self.exec_stmt_map_insert(*target, key, value, scope)
             }
             IrStmtKind::FieldAssign { target, field, value } => {
-                let vv = match self.eval_expr(value, scope) {
-                    Flow::Value(v) => v,
-                    other => return Err(other),
-                };
-                let cur = scope.get(*target).ok_or_else(|| {
-                    Flow::Abort("internal: field-assign to unbound record".into())
-                })?;
-                match cur {
-                    Value::Record { name, fields } => {
-                        let mut new = (*fields).clone();
-                        if let Some(slot) = new.iter_mut().find(|(k, _)| k == field) {
-                            slot.1 = vv;
-                        } else {
-                            new.push((*field, vv));
-                        }
-                        scope.assign(*target, Value::Record { name, fields: Rc::new(new) });
-                        Ok(())
-                    }
-                    _ => Err(Flow::Abort("internal: field-assign on non-Record".into())),
-                }
+                self.exec_stmt_field_assign(*target, *field, value, scope)
             }
             IrStmtKind::Guard { cond, else_ } => {
                 let c = match self.eval_expr(cond, scope) {
@@ -291,6 +231,98 @@ impl<'a> Interpreter<'a> {
             | IrStmtKind::ListCopySlice { .. } => unreachable!(
                 "list peephole stmt is codegen-inserted (PeepholePass); interp runs pre-codegen"
             ),
+        }
+    }
+
+    // ── exec_stmt's assign-family arms ─────────────────────────
+
+    fn exec_stmt_index_assign(
+        &mut self,
+        target: VarId,
+        index: &IrExpr,
+        value: &IrExpr,
+        scope: &Scope,
+    ) -> Result<(), Flow> {
+        let iv = match self.eval_expr(index, scope) {
+            Flow::Value(v) => v,
+            other => return Err(other),
+        };
+        let vv = match self.eval_expr(value, scope) {
+            Flow::Value(v) => v,
+            other => return Err(other),
+        };
+        let cur = scope
+            .get(target)
+            .ok_or_else(|| Flow::Abort("internal: index-assign to unbound list".into()))?;
+        match (cur, iv) {
+            (Value::List(xs), Value::Int(i)) => {
+                if i < 0 || (i as usize) >= xs.len() {
+                    return Err(Flow::Abort("index out of bounds".into()));
+                }
+                let mut new = (*xs).clone();
+                new[i as usize] = vv;
+                scope.assign(target, Value::list(new));
+                Ok(())
+            }
+            _ => Err(Flow::Abort("internal: malformed index-assign".into())),
+        }
+    }
+
+    fn exec_stmt_map_insert(
+        &mut self,
+        target: VarId,
+        key: &IrExpr,
+        value: &IrExpr,
+        scope: &Scope,
+    ) -> Result<(), Flow> {
+        let kv = match self.eval_expr(key, scope) {
+            Flow::Value(v) => v,
+            other => return Err(other),
+        };
+        let vv = match self.eval_expr(value, scope) {
+            Flow::Value(v) => v,
+            other => return Err(other),
+        };
+        let cur = scope
+            .get(target)
+            .ok_or_else(|| Flow::Abort("internal: map-insert to unbound map".into()))?;
+        match cur {
+            Value::Map(entries) => {
+                let mut new = (*entries).clone();
+                map_insert(&mut new, kv, vv);
+                scope.assign(target, Value::Map(Rc::new(new)));
+                Ok(())
+            }
+            _ => Err(Flow::Abort("internal: map-insert on non-Map".into())),
+        }
+    }
+
+    fn exec_stmt_field_assign(
+        &mut self,
+        target: VarId,
+        field: Sym,
+        value: &IrExpr,
+        scope: &Scope,
+    ) -> Result<(), Flow> {
+        let vv = match self.eval_expr(value, scope) {
+            Flow::Value(v) => v,
+            other => return Err(other),
+        };
+        let cur = scope
+            .get(target)
+            .ok_or_else(|| Flow::Abort("internal: field-assign to unbound record".into()))?;
+        match cur {
+            Value::Record { name, fields } => {
+                let mut new = (*fields).clone();
+                if let Some(slot) = new.iter_mut().find(|(k, _)| *k == field) {
+                    slot.1 = vv;
+                } else {
+                    new.push((field, vv));
+                }
+                scope.assign(target, Value::Record { name, fields: Rc::new(new) });
+                Ok(())
+            }
+            _ => Err(Flow::Abort("internal: field-assign on non-Record".into())),
         }
     }
 }
