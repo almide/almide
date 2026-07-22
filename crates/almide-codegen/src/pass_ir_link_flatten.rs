@@ -39,18 +39,7 @@ impl NanoPass for IrLinkFlattenPass {
             // If both an alias and a non-alias exist for the same name,
             // keep the alias (so type_aliases expansion works).
             for td in module.type_decls {
-                let name = td.name.as_str().to_string();
-                if !emitted_types.contains(&name) {
-                    emitted_types.insert(name.clone());
-                    program.type_decls.push(td);
-                } else if matches!(&td.kind, IrTypeDeclKind::Alias { .. }) {
-                    // Replace non-alias with alias
-                    if let Some(pos) = program.type_decls.iter().position(|t| t.name.as_str() == name) {
-                        if !matches!(&program.type_decls[pos].kind, IrTypeDeclKind::Alias { .. }) {
-                            program.type_decls[pos] = td;
-                        }
-                    }
-                }
+                merge_module_type_decl(td, &mut emitted_types, &mut program.type_decls);
             }
 
             // Merge functions with module_origin (no renaming in IR)
@@ -74,6 +63,25 @@ impl NanoPass for IrLinkFlattenPass {
         mangle_qualified_type_names(&mut program);
 
         PassResult { program, changed: true }
+    }
+}
+
+/// Per-`td` body of `IrLinkFlattenPass::run`'s type-decl merge loop,
+/// extracted verbatim (cog>30 decomposition). Deduplicates by name,
+/// preferring an `Alias` over a non-alias when both exist for the same
+/// name (so `type_aliases` expansion works).
+fn merge_module_type_decl(td: IrTypeDecl, emitted_types: &mut HashSet<String>, type_decls: &mut Vec<IrTypeDecl>) {
+    let name = td.name.as_str().to_string();
+    if !emitted_types.contains(&name) {
+        emitted_types.insert(name.clone());
+        type_decls.push(td);
+    } else if matches!(&td.kind, IrTypeDeclKind::Alias { .. }) {
+        // Replace non-alias with alias
+        if let Some(pos) = type_decls.iter().position(|t| t.name.as_str() == name) {
+            if !matches!(&type_decls[pos].kind, IrTypeDeclKind::Alias { .. }) {
+                type_decls[pos] = td;
+            }
+        }
     }
 }
 
