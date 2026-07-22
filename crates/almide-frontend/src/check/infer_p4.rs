@@ -277,152 +277,173 @@ impl Checker {
         match pattern {
             ast::Pattern::Wildcard => {}
             ast::Pattern::Ident { name } => { self.env.define_var(name, ty.clone()); }
-            ast::Pattern::Constructor { name, args } => {
-                let resolved = self.env.resolve_named(ty);
-                // Normalize module-qualified names: "binary.Unreachable" → "Unreachable"
-                let bare_name = name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name);
-                let payload_tys: Vec<Ty> = match &resolved {
-                    Ty::Variant { cases, .. } => cases.iter()
-                        .find(|c| c.name == bare_name)
-                        .map(|c| match &c.payload {
-                            VariantPayload::Tuple(tys) => tys.clone(),
-                            // #488: a paren pattern on a RECORD-payload case
-                            // (`SetEmotion(_)`) bound nothing on native (rustc
-                            // E0164) while wasm accepted it — reject with the
-                            // brace spelling, both targets agree at check time.
-                            VariantPayload::Record(_) => {
-                                self.emit(super::err(
-                                    format!("case '{}' has named fields — use a record pattern", name),
-                                    format!("Match it as `{} {{ .. }}` (or bind fields: `{} {{ field }}`)", name, name),
-                                    format!("pattern {}(...)", name),
-                                ).with_code("E021"));
-                                vec![]
-                            }
-                            _ => vec![],
-                        })
-                        .unwrap_or_default(),
-                    // Opaque alias destructure: SafeHtml(s) → inner type
-                    Ty::Named(tname, _) => {
-                        if let Some(target) = self.env.opaque_alias_targets.get(tname).cloned() {
-                            vec![target]
-                        } else {
-                            vec![]
-                        }
-                    }
-                    _ => vec![],
-                };
-                for (i, arg) in args.iter().enumerate() {
-                    self.bind_pattern(arg, payload_tys.get(i).unwrap_or(&Ty::Unknown));
-                }
-            }
-            ast::Pattern::RecordPattern { name, fields, .. } => {
-                let resolved = self.env.resolve_named(ty);
-                // Normalize module-qualified names: "varlib.Circle" → "Circle" (mirrors
-                // the Constructor arm above, and `lower_pattern`'s already-fixed #412
-                // equivalent in `lower/statements.rs`). Without this a cross-module
-                // record-variant pattern's case lookup below always misses (`c.name` is
-                // the case's bare name), silently leaving every bound field `Ty::Unknown`
-                // — which then leaks through `bind_pattern` into the arm body's `Ident`
-                // inference and poisons the whole match expression's type (#412).
-                let bare_name = name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name);
-                let field_tys: Vec<(Sym, Ty)> = match &resolved {
-                    Ty::Record { fields } | Ty::OpenRecord { fields } => fields.clone(),
-                    Ty::Variant { cases, .. } => {
-                        // Find the specific case matching the pattern name
-                        cases.iter()
-                            .find(|c| c.name == bare_name)
-                            .and_then(|c| match &c.payload {
-                                VariantPayload::Record(fs) => Some(fs.iter().map(|(n, t)| (*n, t.clone())).collect()),
-                                _ => None,
-                            })
-                            .unwrap_or_default()
-                    }
-                    _ => vec![],
-                };
-                for f in fields {
-                    let ft = field_tys.iter().find(|(n, _)| *n == f.name).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown);
-                    if let Some(ref p) = f.pattern { self.bind_pattern(p, &ft); }
-                    else { self.env.define_var(&f.name, ft); }
-                }
-            }
-            ast::Pattern::Tuple { elements } => {
-                let resolved = resolve_ty(ty, &self.uf);
-                if let Ty::Tuple(tys) = &resolved {
-                    for (i, e) in elements.iter().enumerate() { self.bind_pattern(e, tys.get(i).unwrap_or(&Ty::Unknown)); }
-                } else if super::types::is_inference_var(&resolved).is_some() {
-                    // Type is an unresolved inference var (e.g., lambda parameter).
-                    // Create fresh vars for each element and constrain: ?N = (?a, ?b, ...).
-                    // When the outer call context later resolves ?N, the element vars
-                    // get their correct types through the constraint chain.
-                    let elem_vars: Vec<Ty> = elements.iter().map(|_| self.fresh_var()).collect();
-                    self.constrain(resolved, Ty::Tuple(elem_vars.clone()), "tuple destructure");
-                    for (e, ev) in elements.iter().zip(elem_vars.iter()) { self.bind_pattern(e, ev); }
-                } else {
-                    for e in elements { self.bind_pattern(e, &Ty::Unknown); }
-                }
-            }
-            ast::Pattern::List { elements } => {
-                let resolved = resolve_ty(ty, &self.uf);
-                let elem_ty = match &resolved {
-                    Ty::Applied(TypeConstructorId::List, args) if !args.is_empty() => args[0].clone(),
-                    // Subject is still an unresolved inference var (e.g. a
-                    // lambda param not yet linked to its call site). Matching
-                    // `[..]` asserts it is a List, so pin its structure to
-                    // List[?elem] — otherwise the element pattern var
-                    // dead-ends at Unknown and leaks to the IR.
-                    Ty::TypeVar(_) => {
-                        let elem_v = self.fresh_var();
-                        self.unify_infer(&resolved, &Ty::list(elem_v.clone()));
-                        elem_v
-                    }
-                    _ => Ty::Unknown,
-                };
-                for e in elements { self.bind_pattern(e, &elem_ty); }
-            }
-            ast::Pattern::Some { inner } => {
-                let resolved = resolve_ty(ty, &self.uf);
-                let it = match &resolved {
-                    Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
-                    // See List arm: pin an unresolved subject to Option[?inner].
-                    Ty::TypeVar(_) => {
-                        let inner_v = self.fresh_var();
-                        self.unify_infer(&resolved, &Ty::option(inner_v.clone()));
-                        inner_v
-                    }
-                    _ => Ty::Unknown,
-                };
-                self.bind_pattern(inner, &it);
-            }
-            ast::Pattern::Ok { inner } => {
-                let resolved = resolve_ty(ty, &self.uf);
-                let it = match &resolved {
-                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
-                    Ty::TypeVar(_) => {
-                        let ok_v = self.fresh_var();
-                        let err_v = self.fresh_var();
-                        self.unify_infer(&resolved, &Ty::result(ok_v.clone(), err_v));
-                        ok_v
-                    }
-                    _ => Ty::Unknown,
-                };
-                self.bind_pattern(inner, &it);
-            }
-            ast::Pattern::Err { inner } => {
-                let resolved = resolve_ty(ty, &self.uf);
-                let it = match &resolved {
-                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(),
-                    Ty::TypeVar(_) => {
-                        let ok_v = self.fresh_var();
-                        let err_v = self.fresh_var();
-                        self.unify_infer(&resolved, &Ty::result(ok_v, err_v.clone()));
-                        err_v
-                    }
-                    _ => Ty::Unknown,
-                };
-                self.bind_pattern(inner, &it);
-            }
+            ast::Pattern::Constructor { name, args } => self.bind_pattern_constructor(name, args, ty),
+            ast::Pattern::RecordPattern { name, fields, .. } => self.bind_pattern_record(name, fields, ty),
+            ast::Pattern::Tuple { elements } => self.bind_pattern_tuple(elements, ty),
+            ast::Pattern::List { elements } => self.bind_pattern_list(elements, ty),
+            ast::Pattern::Some { inner } => self.bind_pattern_some(inner, ty),
+            ast::Pattern::Ok { inner } => self.bind_pattern_ok(inner, ty),
+            ast::Pattern::Err { inner } => self.bind_pattern_err(inner, ty),
             ast::Pattern::None | ast::Pattern::Literal { .. } => {}
         }
+    }
+
+    /// `ast::Pattern::Constructor` arm of [`Self::bind_pattern`]. Verbatim text move.
+    fn bind_pattern_constructor(&mut self, name: &Sym, args: &[ast::Pattern], ty: &Ty) {
+        let resolved = self.env.resolve_named(ty);
+        // Normalize module-qualified names: "binary.Unreachable" → "Unreachable"
+        let bare_name = name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name);
+        let payload_tys: Vec<Ty> = match &resolved {
+            Ty::Variant { cases, .. } => cases.iter()
+                .find(|c| c.name == bare_name)
+                .map(|c| match &c.payload {
+                    VariantPayload::Tuple(tys) => tys.clone(),
+                    // #488: a paren pattern on a RECORD-payload case
+                    // (`SetEmotion(_)`) bound nothing on native (rustc
+                    // E0164) while wasm accepted it — reject with the
+                    // brace spelling, both targets agree at check time.
+                    VariantPayload::Record(_) => {
+                        self.emit(super::err(
+                            format!("case '{}' has named fields — use a record pattern", name),
+                            format!("Match it as `{} {{ .. }}` (or bind fields: `{} {{ field }}`)", name, name),
+                            format!("pattern {}(...)", name),
+                        ).with_code("E021"));
+                        vec![]
+                    }
+                    _ => vec![],
+                })
+                .unwrap_or_default(),
+            // Opaque alias destructure: SafeHtml(s) → inner type
+            Ty::Named(tname, _) => {
+                if let Some(target) = self.env.opaque_alias_targets.get(tname).cloned() {
+                    vec![target]
+                } else {
+                    vec![]
+                }
+            }
+            _ => vec![],
+        };
+        for (i, arg) in args.iter().enumerate() {
+            self.bind_pattern(arg, payload_tys.get(i).unwrap_or(&Ty::Unknown));
+        }
+    }
+
+    /// `ast::Pattern::RecordPattern` arm of [`Self::bind_pattern`]. Verbatim text move.
+    fn bind_pattern_record(&mut self, name: &Sym, fields: &[ast::FieldPattern], ty: &Ty) {
+        let resolved = self.env.resolve_named(ty);
+        // Normalize module-qualified names: "varlib.Circle" → "Circle" (mirrors
+        // the Constructor arm above, and `lower_pattern`'s already-fixed #412
+        // equivalent in `lower/statements.rs`). Without this a cross-module
+        // record-variant pattern's case lookup below always misses (`c.name` is
+        // the case's bare name), silently leaving every bound field `Ty::Unknown`
+        // — which then leaks through `bind_pattern` into the arm body's `Ident`
+        // inference and poisons the whole match expression's type (#412).
+        let bare_name = name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name);
+        let field_tys: Vec<(Sym, Ty)> = match &resolved {
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.clone(),
+            Ty::Variant { cases, .. } => {
+                // Find the specific case matching the pattern name
+                cases.iter()
+                    .find(|c| c.name == bare_name)
+                    .and_then(|c| match &c.payload {
+                        VariantPayload::Record(fs) => Some(fs.iter().map(|(n, t)| (*n, t.clone())).collect()),
+                        _ => None,
+                    })
+                    .unwrap_or_default()
+            }
+            _ => vec![],
+        };
+        for f in fields {
+            let ft = field_tys.iter().find(|(n, _)| *n == f.name).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown);
+            if let Some(ref p) = f.pattern { self.bind_pattern(p, &ft); }
+            else { self.env.define_var(&f.name, ft); }
+        }
+    }
+
+    /// `ast::Pattern::Tuple` arm of [`Self::bind_pattern`]. Verbatim text move.
+    fn bind_pattern_tuple(&mut self, elements: &[ast::Pattern], ty: &Ty) {
+        let resolved = resolve_ty(ty, &self.uf);
+        if let Ty::Tuple(tys) = &resolved {
+            for (i, e) in elements.iter().enumerate() { self.bind_pattern(e, tys.get(i).unwrap_or(&Ty::Unknown)); }
+        } else if super::types::is_inference_var(&resolved).is_some() {
+            // Type is an unresolved inference var (e.g., lambda parameter).
+            // Create fresh vars for each element and constrain: ?N = (?a, ?b, ...).
+            // When the outer call context later resolves ?N, the element vars
+            // get their correct types through the constraint chain.
+            let elem_vars: Vec<Ty> = elements.iter().map(|_| self.fresh_var()).collect();
+            self.constrain(resolved, Ty::Tuple(elem_vars.clone()), "tuple destructure");
+            for (e, ev) in elements.iter().zip(elem_vars.iter()) { self.bind_pattern(e, ev); }
+        } else {
+            for e in elements { self.bind_pattern(e, &Ty::Unknown); }
+        }
+    }
+
+    /// `ast::Pattern::List` arm of [`Self::bind_pattern`]. Verbatim text move.
+    fn bind_pattern_list(&mut self, elements: &[ast::Pattern], ty: &Ty) {
+        let resolved = resolve_ty(ty, &self.uf);
+        let elem_ty = match &resolved {
+            Ty::Applied(TypeConstructorId::List, args) if !args.is_empty() => args[0].clone(),
+            // Subject is still an unresolved inference var (e.g. a
+            // lambda param not yet linked to its call site). Matching
+            // `[..]` asserts it is a List, so pin its structure to
+            // List[?elem] — otherwise the element pattern var
+            // dead-ends at Unknown and leaks to the IR.
+            Ty::TypeVar(_) => {
+                let elem_v = self.fresh_var();
+                self.unify_infer(&resolved, &Ty::list(elem_v.clone()));
+                elem_v
+            }
+            _ => Ty::Unknown,
+        };
+        for e in elements { self.bind_pattern(e, &elem_ty); }
+    }
+
+    /// `ast::Pattern::Some` arm of [`Self::bind_pattern`]. Verbatim text move.
+    fn bind_pattern_some(&mut self, inner: &ast::Pattern, ty: &Ty) {
+        let resolved = resolve_ty(ty, &self.uf);
+        let it = match &resolved {
+            Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
+            // See List arm: pin an unresolved subject to Option[?inner].
+            Ty::TypeVar(_) => {
+                let inner_v = self.fresh_var();
+                self.unify_infer(&resolved, &Ty::option(inner_v.clone()));
+                inner_v
+            }
+            _ => Ty::Unknown,
+        };
+        self.bind_pattern(inner, &it);
+    }
+
+    /// `ast::Pattern::Ok` arm of [`Self::bind_pattern`]. Verbatim text move.
+    fn bind_pattern_ok(&mut self, inner: &ast::Pattern, ty: &Ty) {
+        let resolved = resolve_ty(ty, &self.uf);
+        let it = match &resolved {
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+            Ty::TypeVar(_) => {
+                let ok_v = self.fresh_var();
+                let err_v = self.fresh_var();
+                self.unify_infer(&resolved, &Ty::result(ok_v.clone(), err_v));
+                ok_v
+            }
+            _ => Ty::Unknown,
+        };
+        self.bind_pattern(inner, &it);
+    }
+
+    /// `ast::Pattern::Err` arm of [`Self::bind_pattern`]. Verbatim text move.
+    fn bind_pattern_err(&mut self, inner: &ast::Pattern, ty: &Ty) {
+        let resolved = resolve_ty(ty, &self.uf);
+        let it = match &resolved {
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(),
+            Ty::TypeVar(_) => {
+                let ok_v = self.fresh_var();
+                let err_v = self.fresh_var();
+                self.unify_infer(&resolved, &Ty::result(ok_v, err_v.clone()));
+                err_v
+            }
+            _ => Ty::Unknown,
+        };
+        self.bind_pattern(inner, &it);
     }
 
     /// Infer the result type of the + operator (numeric add or string/list concat).
