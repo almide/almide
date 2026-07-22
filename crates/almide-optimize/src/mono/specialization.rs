@@ -122,14 +122,7 @@ fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
             collect_varids_in_expr(then, out);
             collect_varids_in_expr(else_, out);
         }
-        IrExprKind::Match { subject, arms } => {
-            collect_varids_in_expr(subject, out);
-            for arm in arms {
-                collect_varids_in_pattern(&arm.pattern, out);
-                if let Some(g) = &arm.guard { collect_varids_in_expr(g, out); }
-                collect_varids_in_expr(&arm.body, out);
-            }
-        }
+        IrExprKind::Match { .. } => collect_varids_in_match(expr, out),
         IrExprKind::Block { stmts, expr } => {
             for s in stmts { collect_varids_in_stmt(s, out); }
             if let Some(e) = expr { collect_varids_in_expr(e, out); }
@@ -176,21 +169,7 @@ fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
             for (id, _) in captures { collect_var_id(*id, out); }
         }
         IrExprKind::EnvLoad { env_var, .. } => collect_var_id(*env_var, out),
-        IrExprKind::IterChain { source, steps, collector, .. } => {
-            collect_varids_in_expr(source, out);
-            for step in steps {
-                match step {
-                    IterStep::Map { lambda } | IterStep::Filter { lambda }
-                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => collect_varids_in_expr(lambda, out),
-                }
-            }
-            match collector {
-                IterCollector::Collect => {}
-                IterCollector::Fold { init, lambda } => { collect_varids_in_expr(init, out); collect_varids_in_expr(lambda, out); }
-                IterCollector::Any { lambda } | IterCollector::All { lambda }
-                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => collect_varids_in_expr(lambda, out),
-            }
-        }
+        IrExprKind::IterChain { .. } => collect_varids_in_iter_chain(expr, out),
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
         | IrExprKind::Await { expr } | IrExprKind::Clone { expr }
@@ -204,6 +183,33 @@ fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
         }
         IrExprKind::RustMacro { args, .. } => { for a in args { collect_varids_in_expr(a, out); } }
         _ => {} // literals, unit, break, continue, etc.
+    }
+}
+
+fn collect_varids_in_match(expr: &IrExpr, out: &mut Vec<VarId>) {
+    let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+    collect_varids_in_expr(subject, out);
+    for arm in arms {
+        collect_varids_in_pattern(&arm.pattern, out);
+        if let Some(g) = &arm.guard { collect_varids_in_expr(g, out); }
+        collect_varids_in_expr(&arm.body, out);
+    }
+}
+
+fn collect_varids_in_iter_chain(expr: &IrExpr, out: &mut Vec<VarId>) {
+    let IrExprKind::IterChain { source, steps, collector, .. } = &expr.kind else { unreachable!() };
+    collect_varids_in_expr(source, out);
+    for step in steps {
+        match step {
+            IterStep::Map { lambda } | IterStep::Filter { lambda }
+            | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => collect_varids_in_expr(lambda, out),
+        }
+    }
+    match collector {
+        IterCollector::Collect => {}
+        IterCollector::Fold { init, lambda } => { collect_varids_in_expr(init, out); collect_varids_in_expr(lambda, out); }
+        IterCollector::Any { lambda } | IterCollector::All { lambda }
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => collect_varids_in_expr(lambda, out),
     }
 }
 
@@ -253,14 +259,7 @@ fn remap_expr_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
             remap_expr_varids(then, remap);
             remap_expr_varids(else_, remap);
         }
-        IrExprKind::Match { subject, arms } => {
-            remap_expr_varids(subject, remap);
-            for arm in arms {
-                remap_pattern_varids(&mut arm.pattern, remap);
-                if let Some(g) = &mut arm.guard { remap_expr_varids(g, remap); }
-                remap_expr_varids(&mut arm.body, remap);
-            }
-        }
+        IrExprKind::Match { .. } => remap_match_varids(expr, remap),
         IrExprKind::Block { stmts, expr } => {
             for s in stmts { remap_stmt_varids(s, remap); }
             if let Some(e) = expr { remap_expr_varids(e, remap); }
@@ -307,21 +306,7 @@ fn remap_expr_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
             for (id, _) in captures { *id = remap_id(*id, remap); }
         }
         IrExprKind::EnvLoad { env_var, .. } => *env_var = remap_id(*env_var, remap),
-        IrExprKind::IterChain { source, steps, collector, .. } => {
-            remap_expr_varids(source, remap);
-            for step in steps {
-                match step {
-                    IterStep::Map { lambda } | IterStep::Filter { lambda }
-                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => remap_expr_varids(lambda, remap),
-                }
-            }
-            match collector {
-                IterCollector::Collect => {}
-                IterCollector::Fold { init, lambda } => { remap_expr_varids(init, remap); remap_expr_varids(lambda, remap); }
-                IterCollector::Any { lambda } | IterCollector::All { lambda }
-                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => remap_expr_varids(lambda, remap),
-            }
-        }
+        IrExprKind::IterChain { .. } => remap_iter_chain_varids(expr, remap),
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
         | IrExprKind::Await { expr } | IrExprKind::Clone { expr }
@@ -335,6 +320,33 @@ fn remap_expr_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
         }
         IrExprKind::RustMacro { args, .. } => { for a in args { remap_expr_varids(a, remap); } }
         _ => {} // literals, unit, break, continue, etc.
+    }
+}
+
+fn remap_match_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
+    let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+    remap_expr_varids(subject, remap);
+    for arm in arms {
+        remap_pattern_varids(&mut arm.pattern, remap);
+        if let Some(g) = &mut arm.guard { remap_expr_varids(g, remap); }
+        remap_expr_varids(&mut arm.body, remap);
+    }
+}
+
+fn remap_iter_chain_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
+    let IrExprKind::IterChain { source, steps, collector, .. } = &mut expr.kind else { unreachable!() };
+    remap_expr_varids(source, remap);
+    for step in steps {
+        match step {
+            IterStep::Map { lambda } | IterStep::Filter { lambda }
+            | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => remap_expr_varids(lambda, remap),
+        }
+    }
+    match collector {
+        IterCollector::Collect => {}
+        IterCollector::Fold { init, lambda } => { remap_expr_varids(init, remap); remap_expr_varids(lambda, remap); }
+        IterCollector::Any { lambda } | IterCollector::All { lambda }
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => remap_expr_varids(lambda, remap),
     }
 }
 
@@ -441,40 +453,12 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
             substitute_expr_types(then, bindings);
             substitute_expr_types(else_, bindings);
         }
-        IrExprKind::Match { subject, arms } => {
-            substitute_expr_types(subject, bindings);
-            for arm in arms {
-                substitute_pattern_types(&mut arm.pattern, bindings);
-                if let Some(g) = &mut arm.guard { substitute_expr_types(g, bindings); }
-                substitute_expr_types(&mut arm.body, bindings);
-            }
-        }
+        IrExprKind::Match { .. } => substitute_match_types(expr, bindings),
         IrExprKind::Block { stmts, expr } => {
             for s in stmts { substitute_stmt_types(s, bindings); }
             if let Some(e) = expr { substitute_expr_types(e, bindings); }
         }
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, method } => {
-                    substitute_expr_types(object, bindings);
-                    // Rewrite protocol method calls: T.show → Dog.show when T → Dog
-                    if let Some(dot_pos) = method.find('.') {
-                        let tv_name = &method[..dot_pos];
-                        if let Some(concrete_ty) = bindings.get(tv_name) {
-                            if let Some(concrete_name) = ty_to_name(concrete_ty) {
-                                let method_name = &method[dot_pos+1..];
-                                *method = format!("{}.{}", concrete_name, method_name).into();
-                            }
-                        }
-                    }
-                }
-                CallTarget::Computed { callee: object } => {
-                    substitute_expr_types(object, bindings);
-                }
-                _ => {}
-            }
-            for a in args { substitute_expr_types(a, bindings); }
-        }
+        IrExprKind::Call { .. } => substitute_call_types(expr, bindings),
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
             for e in elements { substitute_expr_types(e, bindings); }
         }
@@ -545,6 +529,40 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
         }
         _ => {}
     }
+}
+
+fn substitute_match_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
+    let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+    substitute_expr_types(subject, bindings);
+    for arm in arms {
+        substitute_pattern_types(&mut arm.pattern, bindings);
+        if let Some(g) = &mut arm.guard { substitute_expr_types(g, bindings); }
+        substitute_expr_types(&mut arm.body, bindings);
+    }
+}
+
+fn substitute_call_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
+    let IrExprKind::Call { target, args, .. } = &mut expr.kind else { unreachable!() };
+    match target {
+        CallTarget::Method { object, method } => {
+            substitute_expr_types(object, bindings);
+            // Rewrite protocol method calls: T.show → Dog.show when T → Dog
+            if let Some(dot_pos) = method.find('.') {
+                let tv_name = &method[..dot_pos];
+                if let Some(concrete_ty) = bindings.get(tv_name) {
+                    if let Some(concrete_name) = ty_to_name(concrete_ty) {
+                        let method_name = &method[dot_pos+1..];
+                        *method = format!("{}.{}", concrete_name, method_name).into();
+                    }
+                }
+            }
+        }
+        CallTarget::Computed { callee: object } => {
+            substitute_expr_types(object, bindings);
+        }
+        _ => {}
+    }
+    for a in args { substitute_expr_types(a, bindings); }
 }
 
 fn substitute_pattern_types(pattern: &mut IrPattern, bindings: &HashMap<String, Ty>) {

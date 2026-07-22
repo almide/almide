@@ -69,25 +69,7 @@ fn propagate_expr(expr: &mut IrExpr, vt: &mut VarTable) {
             propagate_expr(else_, vt);
             if has_typevar(&expr.ty) && !has_typevar(&then.ty) { expr.ty = then.ty.clone(); }
         }
-        IrExprKind::Match { subject, arms } => {
-            propagate_expr(subject, vt);
-            // Propagate concrete types into pattern bindings
-            let subj_ty = subject.ty.clone();
-            for arm in arms.iter_mut() {
-                propagate_pattern_types_mut(&mut arm.pattern, &subj_ty, vt);
-                if let Some(g) = &mut arm.guard { propagate_expr(g, vt); }
-                propagate_expr(&mut arm.body, vt);
-            }
-            // Match type = first concrete arm body type
-            if has_typevar(&expr.ty) {
-                for arm in arms.iter() {
-                    if !has_typevar(&arm.body.ty) {
-                        expr.ty = arm.body.ty.clone();
-                        break;
-                    }
-                }
-            }
-        }
+        IrExprKind::Match { .. } => propagate_expr_match(expr, vt),
         IrExprKind::Call { target, args, .. } => {
             match target {
                 CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => propagate_expr(object, vt),
@@ -118,24 +100,7 @@ fn propagate_expr(expr: &mut IrExpr, vt: &mut VarTable) {
         IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
             for (_, e) in fields.iter_mut() { propagate_expr(e, vt); }
         }
-        IrExprKind::Lambda { params, body, .. } => {
-            // Sync lambda param types between IR and VarTable — whichever
-            // has the concrete type wins. After mono, one or both may still
-            // have TypeVar; propagation from call sites resolves them.
-            for (vid, ty) in params.iter_mut() {
-                if (vid.0 as usize) < vt.len() {
-                    let vt_ty = &vt.get(*vid).ty;
-                    if has_typevar(ty) && !has_typevar(vt_ty) {
-                        // VarTable has concrete type → update IR param
-                        *ty = vt_ty.clone();
-                    } else if !has_typevar(ty) && has_typevar(vt_ty) {
-                        // IR has concrete type → update VarTable
-                        vt.entries[vid.0 as usize].ty = ty.clone();
-                    }
-                }
-            }
-            propagate_expr(body, vt);
-        }
+        IrExprKind::Lambda { .. } => propagate_expr_lambda(expr, vt),
         IrExprKind::OptionSome { expr: inner } | IrExprKind::ResultOk { expr: inner }
         | IrExprKind::ResultErr { expr: inner } | IrExprKind::Try { expr: inner }
         | IrExprKind::Await { expr: inner } | IrExprKind::Clone { expr: inner }
@@ -154,6 +119,47 @@ fn propagate_expr(expr: &mut IrExpr, vt: &mut VarTable) {
         IrExprKind::MapAccess { object, key } => { propagate_expr(object, vt); propagate_expr(key, vt); }
         _ => {}
     }
+}
+
+fn propagate_expr_match(expr: &mut IrExpr, vt: &mut VarTable) {
+    let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+    propagate_expr(subject, vt);
+    // Propagate concrete types into pattern bindings
+    let subj_ty = subject.ty.clone();
+    for arm in arms.iter_mut() {
+        propagate_pattern_types_mut(&mut arm.pattern, &subj_ty, vt);
+        if let Some(g) = &mut arm.guard { propagate_expr(g, vt); }
+        propagate_expr(&mut arm.body, vt);
+    }
+    // Match type = first concrete arm body type
+    if has_typevar(&expr.ty) {
+        for arm in arms.iter() {
+            if !has_typevar(&arm.body.ty) {
+                expr.ty = arm.body.ty.clone();
+                break;
+            }
+        }
+    }
+}
+
+fn propagate_expr_lambda(expr: &mut IrExpr, vt: &mut VarTable) {
+    let IrExprKind::Lambda { params, body, .. } = &mut expr.kind else { unreachable!() };
+    // Sync lambda param types between IR and VarTable — whichever
+    // has the concrete type wins. After mono, one or both may still
+    // have TypeVar; propagation from call sites resolves them.
+    for (vid, ty) in params.iter_mut() {
+        if (vid.0 as usize) < vt.len() {
+            let vt_ty = &vt.get(*vid).ty;
+            if has_typevar(ty) && !has_typevar(vt_ty) {
+                // VarTable has concrete type → update IR param
+                *ty = vt_ty.clone();
+            } else if !has_typevar(ty) && has_typevar(vt_ty) {
+                // IR has concrete type → update VarTable
+                vt.entries[vid.0 as usize].ty = ty.clone();
+            }
+        }
+    }
+    propagate_expr(body, vt);
 }
 
 fn propagate_pattern_types_mut(pattern: &mut IrPattern, subject_ty: &Ty, vt: &mut VarTable) {
