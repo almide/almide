@@ -156,64 +156,111 @@ fn shape_is_small(m: i64, k: i64, n: i64) -> bool {
         && m <= SMALL_LIMIT && k <= SMALL_LIMIT && n <= SMALL_LIMIT
 }
 
-fn rewrite_expr(expr: &mut IrExpr, shapes: &mut HashMap<VarId, Shape>) -> bool {
+/// `IrExprKind::Block` case of `rewrite_expr`, extracted verbatim (cog>30
+/// decomposition, pattern 2: uniform match arms, mirrors the
+/// `lower_expr`/`infer_expr_inner` extraction shape).
+fn rewrite_expr_block(expr: &mut IrExpr, shapes: &mut HashMap<VarId, Shape>) -> bool {
+    let IrExprKind::Block { stmts, expr: tail } = &mut expr.kind else { unreachable!() };
     let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        changed |= rewrite_stmt(stmt, shapes);
+    }
+    if let Some(e) = tail {
+        changed |= rewrite_expr(e, shapes);
+    }
+    changed
+}
+
+/// `IrExprKind::If` case of `rewrite_expr`, extracted verbatim.
+fn rewrite_expr_if(expr: &mut IrExpr, shapes: &mut HashMap<VarId, Shape>) -> bool {
+    let IrExprKind::If { cond, then, else_ } = &mut expr.kind else { unreachable!() };
+    let mut changed = rewrite_expr(cond, shapes);
+    // Branches: shape propagation through if/else is
+    // conservative — drop tracking inside arms.
+    let snap = shapes.clone();
+    changed |= rewrite_expr(then, shapes);
+    *shapes = snap.clone();
+    changed |= rewrite_expr(else_, shapes);
+    *shapes = snap;
+    changed
+}
+
+/// `IrExprKind::Match` case of `rewrite_expr`, extracted verbatim.
+fn rewrite_expr_match(expr: &mut IrExpr, shapes: &mut HashMap<VarId, Shape>) -> bool {
+    let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
+    let mut changed = rewrite_expr(subject, shapes);
+    let snap = shapes.clone();
+    for arm in arms {
+        *shapes = snap.clone();
+        if let Some(g) = &mut arm.guard {
+            changed |= rewrite_expr(g, shapes);
+        }
+        changed |= rewrite_expr(&mut arm.body, shapes);
+    }
+    *shapes = snap;
+    changed
+}
+
+/// `IrExprKind::Lambda` case of `rewrite_expr`, extracted verbatim.
+fn rewrite_expr_lambda(expr: &mut IrExpr, shapes: &mut HashMap<VarId, Shape>) -> bool {
+    let IrExprKind::Lambda { body, .. } = &mut expr.kind else { unreachable!() };
+    // Lambda captures: keep a shallow copy of outer shapes so
+    // inlineable constants flow in.
+    let snap = shapes.clone();
+    let changed = rewrite_expr(body, shapes);
+    *shapes = snap;
+    changed
+}
+
+/// After bottom-up rewriting, check if `expr` itself is a small matmul we
+/// can unroll into scalar ops. Extracted from `rewrite_expr`'s trailing
+/// self-check.
+fn try_unroll_small_matmul(expr: &mut IrExpr, shapes: &HashMap<VarId, Shape>) -> bool {
+    let Some((module, func, args)) = match_module_call(expr) else { return false; };
+    if module != "matrix" || args.len() != 2 { return false; }
+    let dtype = match func {
+        "mul" => Some(Dtype::F64),
+        "mul_f32" => Some(Dtype::F32),
+        _ => None,
+    };
+    let Some(dtype) = dtype else { return false; };
+    let sa = infer_shape(&args[0], shapes);
+    let sb = infer_shape(&args[1], shapes);
+    let (Some(sa), Some(sb)) = (sa, sb) else { return false; };
+    if sa.cols != sb.rows || !shape_is_small(sa.rows, sa.cols, sb.cols) {
+        return false;
+    }
+    // Safe to unroll.
+    let new_kind = make_unrolled_mul(
+        sa.rows, sa.cols, sb.cols, dtype, &args[0], &args[1], expr.ty.clone(), expr.span);
+    let new_expr = IrExpr { kind: new_kind, ty: expr.ty.clone(), span: expr.span, def_id: None };
+    *expr = new_expr;
+    true
+}
+
+fn rewrite_expr(expr: &mut IrExpr, shapes: &mut HashMap<VarId, Shape>) -> bool {
     // Recurse first so nested matmuls are handled inner-most first.
-    match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            for stmt in stmts.iter_mut() {
-                if rewrite_stmt(stmt, shapes) { changed = true; }
-            }
-            if let Some(e) = tail {
-                if rewrite_expr(e, shapes) { changed = true; }
-            }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            if rewrite_expr(cond, shapes) { changed = true; }
-            // Branches: shape propagation through if/else is
-            // conservative — drop tracking inside arms.
-            let snap = shapes.clone();
-            if rewrite_expr(then, shapes) { changed = true; }
-            *shapes = snap.clone();
-            if rewrite_expr(else_, shapes) { changed = true; }
-            *shapes = snap;
-        }
-        IrExprKind::Match { subject, arms } => {
-            if rewrite_expr(subject, shapes) { changed = true; }
-            let snap = shapes.clone();
-            for arm in arms {
-                *shapes = snap.clone();
-                if let Some(g) = &mut arm.guard {
-                    if rewrite_expr(g, shapes) { changed = true; }
-                }
-                if rewrite_expr(&mut arm.body, shapes) { changed = true; }
-            }
-            *shapes = snap;
-        }
-        IrExprKind::Lambda { body, .. } => {
-            // Lambda captures: keep a shallow copy of outer shapes so
-            // inlineable constants flow in.
-            let snap = shapes.clone();
-            if rewrite_expr(body, shapes) { changed = true; }
-            *shapes = snap;
-        }
+    let mut changed = match &mut expr.kind {
+        IrExprKind::Block { .. } => rewrite_expr_block(expr, shapes),
+        IrExprKind::If { .. } => rewrite_expr_if(expr, shapes),
+        IrExprKind::Match { .. } => rewrite_expr_match(expr, shapes),
+        IrExprKind::Lambda { .. } => rewrite_expr_lambda(expr, shapes),
         IrExprKind::Call { args, .. } => {
-            for arg in args.iter_mut() {
-                if rewrite_expr(arg, shapes) { changed = true; }
-            }
+            let mut c = false;
+            for arg in args.iter_mut() { c |= rewrite_expr(arg, shapes); }
+            c
         }
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            for e in elements { if rewrite_expr(e, shapes) { changed = true; } }
+            let mut c = false;
+            for e in elements { c |= rewrite_expr(e, shapes); }
+            c
         }
-        IrExprKind::BinOp { left, right, .. } => {
-            if rewrite_expr(left, shapes) { changed = true; }
-            if rewrite_expr(right, shapes) { changed = true; }
-        }
-        IrExprKind::UnOp { operand, .. } => {
-            if rewrite_expr(operand, shapes) { changed = true; }
-        }
+        IrExprKind::BinOp { left, right, .. } => rewrite_expr(left, shapes) | rewrite_expr(right, shapes),
+        IrExprKind::UnOp { operand, .. } => rewrite_expr(operand, shapes),
         IrExprKind::Record { fields, .. } => {
-            for (_, e) in fields { if rewrite_expr(e, shapes) { changed = true; } }
+            let mut c = false;
+            for (_, e) in fields { c |= rewrite_expr(e, shapes); }
+            c
         }
         // Explicit-preserve: every other node kind is left untouched by this
         // shape-specialization pass. Listing them all (instead of `_ => {}`)
@@ -266,33 +313,11 @@ fn rewrite_expr(expr: &mut IrExpr, shapes: &mut HashMap<VarId, Shape>) -> bool {
         | IrExprKind::EnvLoad { .. }
         | IrExprKind::IterChain { .. }
         | IrExprKind::Hole
-        | IrExprKind::Todo { .. } => {}
-    }
+        | IrExprKind::Todo { .. } => false,
+    };
 
     // Now look at self: is it a small matmul we can unroll?
-    if let Some((module, func, args)) = match_module_call(expr) {
-        if module == "matrix" && args.len() == 2 {
-            let dtype = match func {
-                "mul" => Some(Dtype::F64),
-                "mul_f32" => Some(Dtype::F32),
-                _ => None,
-            };
-            if let Some(dtype) = dtype {
-                let sa = infer_shape(&args[0], shapes);
-                let sb = infer_shape(&args[1], shapes);
-                if let (Some(sa), Some(sb)) = (sa, sb) {
-                    if sa.cols == sb.rows && shape_is_small(sa.rows, sa.cols, sb.cols) {
-                        // Safe to unroll.
-                        let new_kind = make_unrolled_mul(
-                            sa.rows, sa.cols, sb.cols, dtype, &args[0], &args[1], expr.ty.clone(), expr.span);
-                        let new_expr = IrExpr { kind: new_kind, ty: expr.ty.clone(), span: expr.span, def_id: None };
-                        *expr = new_expr;
-                        changed = true;
-                    }
-                }
-            }
-        }
-    }
+    changed |= try_unroll_small_matmul(expr, shapes);
 
     changed
 }
