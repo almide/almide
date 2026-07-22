@@ -251,6 +251,46 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
 /// Returns `(wasm_bytes, produced_by_v1)`. When the second field is `true`, the module IS the
 /// PCC-verified v1 trust-spine output — the caller MUST NOT post-process it (wasm-opt would replace
 /// the verified bytes with an unverified transform), so `--verified` ships exactly what was verified.
+/// Type-check and lower one user module for the WASM path, appending its IR
+/// directly onto `ir_program`. Extracted verbatim from
+/// `compile_to_wasm_bytes`'s per-module loop body — same checker/env
+/// mutation order, `continue` becomes an early `return`. (Sibling of
+/// `crate::lower_one_user_module` in main.rs, which additionally tracks a
+/// per-module `module_irs` map the WASM path doesn't need.)
+fn lower_one_wasm_module(
+    checker: &mut check::Checker,
+    name: &mut String,
+    mod_prog: &mut almide::ast::Program,
+    pkg_id: &mut Option<project::PkgId>,
+    ir_program: &mut almide::ir::IrProgram,
+) {
+    if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { return; }
+    let saved_self = checker.env.self_module_name;
+    if let Some(pid) = pkg_id.as_ref() {
+        checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
+    }
+    checker.infer_module(mod_prog, name);
+    let versioned = pkg_id.as_ref().map(|pid| {
+        let base = pid.mod_name();
+        if let Some(suffix) = name.strip_prefix(&pid.name) {
+            format!("{}{}", base, suffix)
+        } else {
+            base
+        }
+    });
+    if let Some(ref v) = versioned {
+        checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
+    }
+    let self_name = checker.env.self_module_name.map(|s| s.to_string());
+    let import_table_name = self_name.as_deref().unwrap_or(name);
+    let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
+    let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
+    let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+    checker.env.import_table = saved_table;
+    checker.env.self_module_name = saved_self;
+    ir_program.modules.push(mod_ir_module);
+}
+
 pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool) -> Result<(Vec<u8>, bool), ()> {
     let (mut program, source_text, parse_errors) = parse_file(file);
 
@@ -321,31 +361,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // included so their fns can be invoked through the bundled-dispatch path;
     // colliding TOML-runtime fns are pruned to avoid duplicate definitions.
     for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-        if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
-        let saved_self = checker.env.self_module_name;
-        if let Some(pid) = pkg_id.as_ref() {
-            checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
-        }
-        checker.infer_module(mod_prog, name);
-        let versioned = pkg_id.as_ref().map(|pid| {
-            let base = pid.mod_name();
-            if let Some(suffix) = name.strip_prefix(&pid.name) {
-                format!("{}{}", base, suffix)
-            } else {
-                base
-            }
-        });
-        if let Some(ref v) = versioned {
-            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
-        }
-        let self_name = checker.env.self_module_name.map(|s| s.to_string());
-        let import_table_name = self_name.as_deref().unwrap_or(name);
-        let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
-        let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-        let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
-        checker.env.import_table = saved_table;
-        checker.env.self_module_name = saved_self;
-        ir_program.modules.push(mod_ir_module);
+        lower_one_wasm_module(&mut checker, name, mod_prog, pkg_id, &mut ir_program);
     }
 
     // IR link: merge dependency modules into root
