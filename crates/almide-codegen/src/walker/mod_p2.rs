@@ -1,32 +1,37 @@
 // ── Full program rendering ──
 
-pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
-    // Build constructor → enum name map
-    // Build type alias map for transparent expansion
+/// Collect type aliases (public only — opaque local/mod aliases are
+/// newtypes, not expanded transparently) and generic type names, from
+/// ALL sources (top-level + modules) so `render_type` can expand them
+/// everywhere. Extracted from `render_program` (cog>30 decomposition,
+/// second round: further phase splitting on top of round 1's).
+fn collect_type_aliases_and_generics(program: &IrProgram) -> (
+    std::collections::HashMap<almide_base::intern::Sym, Ty>,
+    std::collections::HashSet<almide_base::intern::Sym>,
+) {
     let mut type_aliases = std::collections::HashMap::new();
     let mut generic_types = std::collections::HashSet::new();
-    // Collect type aliases and generic types from ALL sources
-    // (top-level + modules) so render_type can expand them everywhere.
     let all_type_decls = program.type_decls.iter()
         .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
     for td in all_type_decls {
-        match &td.kind {
-            IrTypeDeclKind::Alias { target } => {
-                // Opaque (mod/local) aliases are newtypes — don't expand transparently
-                if matches!(td.visibility, IrVisibility::Public) {
-                    type_aliases.insert(td.name, target.clone());
-                }
+        if let IrTypeDeclKind::Alias { target } = &td.kind {
+            // Opaque (mod/local) aliases are newtypes — don't expand transparently
+            if matches!(td.visibility, IrVisibility::Public) {
+                type_aliases.insert(td.name, target.clone());
             }
-            _ => {}
         }
         // Track types with generic parameters
         if td.generics.as_ref().map_or(false, |g| !g.is_empty()) {
             generic_types.insert(td.name);
         }
     }
-    // Record/variant types that get a generated `AlmideRepr` impl — a value of
-    // such a type interpolated in a string renders to its literal form. Gate
-    // mirrors `render_repr_impl` (closure-bearing types are excluded).
+    (type_aliases, generic_types)
+}
+
+/// Record/variant types that get a generated `AlmideRepr` impl — a value
+/// of such a type interpolated in a string renders to its literal form.
+/// Gate mirrors `render_repr_impl` (closure-bearing types are excluded).
+fn collect_repr_named_types(program: &IrProgram) -> std::collections::HashSet<almide_base::intern::Sym> {
     let mut repr_named_types = std::collections::HashSet::new();
     for td in program.type_decls.iter()
         .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
@@ -35,11 +40,17 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             repr_named_types.insert(td.name);
         }
     }
+    repr_named_types
+}
+
+/// Build the fully-populated `CodegenAnnotations` for this render pass,
+/// layered onto the caller's base `ctx.ann`: which user types cannot
+/// derive PartialEq (contain Matrix, Fn, or a field whose type itself
+/// blocks equality — considering type decls from every module, since user
+/// programs reference types defined in other modules), phantom-param
+/// structs, and function-local var storage classification.
+fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotations {
     let mut ann = ctx.ann.clone();
-    // Compute which user types cannot derive PartialEq (contain Matrix,
-    // Fn, or a field whose type itself blocks equality). Must consider
-    // type decls from every module, not just the top-level program,
-    // because user programs reference types defined in other modules.
     let all_type_decls: Vec<IrTypeDecl> = program.type_decls.iter()
         .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
         .cloned()
@@ -59,23 +70,12 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // Scan IR Bind statements for `var` of non-Copy types, then check if
     // any lambda in the same function captures that var.
     classify_local_var_storage(program, &mut ann);
-    let mut ctx = RenderContext {
-        templates: ctx.templates,
-        var_table: ctx.var_table,
-        indent: ctx.indent,
-        target: ctx.target,
-        auto_unwrap: ctx.auto_unwrap,
-        is_test: ctx.is_test,
-        ann,
-        type_aliases,
-        generic_types,
-        minimal_generic_bounds: false,
-        repr_c: ctx.repr_c,
-        ref_params: std::collections::HashSet::new(),
-        ref_mut_params: std::collections::HashSet::new(),
-        repr_named_types,
-        fn_err_ty: None,
-    };
+    ann
+}
+
+/// Register every variant constructor → enum name (top-level type decls,
+/// then imported-module type decls).
+fn register_ctor_to_enum(ctx: &mut RenderContext, program: &IrProgram) {
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
             for c in cases {
@@ -93,23 +93,15 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             }
         }
     }
+}
 
-    // Build anonymous record maps (populated by target-specific pipeline)
-    ctx.ann.named_records = collect_named_records(program);
-    ctx.ann.anon_records = collect_anon_records(program, &ctx.ann.named_records);
-    ctx.ann.anon_records_with_fn = declarations::take_anon_fn_keys();
-    ctx.ann.record_field_counts = collect_record_field_counts(program);
-
-    let mut parts = Vec::new();
-
-    // Anonymous record struct definitions (only if anon_records is populated).
-    render_anon_record_decls(&ctx, &mut parts);
-
-    // Type declarations — track emitted names to deduplicate across modules
+/// Render every top-level type decl (with doc comment if present) into `parts`.
+fn render_program_type_decls(ctx: &RenderContext, program: &IrProgram, parts: &mut Vec<String>) {
+    // Track emitted names to deduplicate across modules
     let mut emitted_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     for td in &program.type_decls {
         emitted_types.insert(td.name.as_str().to_string());
-        let mut rendered = render_type_decl(&ctx, td);
+        let mut rendered = render_type_decl(ctx, td);
         if let Some(ref doc) = td.doc {
             let doc_lines: String = doc.lines()
                 .map(|line| if line.is_empty() { "///".to_string() } else { format!("/// {}", line) })
@@ -119,17 +111,20 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         }
         parts.push(rendered);
     }
+}
 
-    // Top-level lets and vars — §4 Stage 2: the declaration consumes the
-    // SAME GlobalInfo every reference site dispatches on (storage class and
-    // static name decided once, in the attribute pass). The former
-    // `lazy_vars` mid-emission write is gone — no reader remains.
+/// Render top-level lets and vars into `parts`. §4 Stage 2: the
+/// declaration consumes the SAME GlobalInfo every reference site
+/// dispatches on (storage class and static name decided once, in the
+/// attribute pass). The former `lazy_vars` mid-emission write is gone —
+/// no reader remains.
+fn render_program_top_lets(ctx: &RenderContext, program: &IrProgram, parts: &mut Vec<String>) {
     for tl in &program.top_lets {
         // #617: a shared static stores the RAW Bytes/Matrix shape (Rc is not Sync;
         // fan threads read globals) — type and initializer un-wrap here, every
         // READ site re-wraps into the RcCow value shape.
-        let ty_str = expressions::rc_cow_raw_type(&render_type_fn(&ctx, &tl.ty));
-        let val_str = expressions::rc_cow_unglue(render_expr_fn(&ctx, &tl.value), &tl.ty);
+        let ty_str = expressions::rc_cow_raw_type(&render_type_fn(ctx, &tl.ty));
+        let val_str = expressions::rc_cow_unglue(render_expr_fn(ctx, &tl.value), &tl.ty);
         let info = ctx.ann.globals.get(&tl.var).unwrap_or_else(|| panic!(
             "[COMPILER BUG] top-let `{}` missing from the storage attribute",
             ctx.var_table.get(tl.var).name.as_str()
@@ -159,12 +154,15 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         }
         parts.push(rendered);
     }
+}
 
-    // Functions (non-test): separate extern fn imports from regular functions
+/// Render non-test functions into `parts`: extern fn imports as one group
+/// first, then regular functions.
+fn render_program_functions(ctx: &RenderContext, program: &IrProgram, parts: &mut Vec<String>) {
     let mut import_parts = Vec::new();
     let mut fn_parts = Vec::new();
     for func in program.functions.iter().filter(|f| !f.is_test) {
-        let rendered = render_function(&ctx, func);
+        let rendered = render_function(ctx, func);
         if !func.extern_attrs.is_empty() {
             import_parts.push(rendered);
         } else {
@@ -176,19 +174,63 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         parts.push(import_parts.join("\n"));
     }
     parts.extend(fn_parts);
+}
 
-    // Test functions
+/// Render test functions (wrapped in the `test_module` template) into `parts`.
+fn render_program_test_fns(ctx: &RenderContext, program: &IrProgram, parts: &mut Vec<String>) {
     let test_fns: Vec<&IrFunction> = program.functions.iter().filter(|f| f.is_test).collect();
-    if !test_fns.is_empty() {
-        let test_parts: Vec<String> = test_fns.iter()
-            .map(|f| render_function(&ctx, f))
-            .collect();
-        let tests_s = test_parts.join("\n\n");
-        let indented_tests = indent_lines(&tests_s, 4);
-        let wrapped = ctx.templates.render_with("test_module", None, &[], &[("tests", indented_tests.as_str())])
-            .unwrap_or_else(|| test_parts.join("\n\n"));
-        parts.push(wrapped);
+    if test_fns.is_empty() {
+        return;
     }
+    let test_parts: Vec<String> = test_fns.iter()
+        .map(|f| render_function(ctx, f))
+        .collect();
+    let tests_s = test_parts.join("\n\n");
+    let indented_tests = indent_lines(&tests_s, 4);
+    let wrapped = ctx.templates.render_with("test_module", None, &[], &[("tests", indented_tests.as_str())])
+        .unwrap_or_else(|| test_parts.join("\n\n"));
+    parts.push(wrapped);
+}
+
+pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
+    // Build constructor → enum name map
+    // Build type alias map for transparent expansion
+    let (type_aliases, generic_types) = collect_type_aliases_and_generics(program);
+    let repr_named_types = collect_repr_named_types(program);
+    let ann = build_program_ann(ctx, program);
+    let mut ctx = RenderContext {
+        templates: ctx.templates,
+        var_table: ctx.var_table,
+        indent: ctx.indent,
+        target: ctx.target,
+        auto_unwrap: ctx.auto_unwrap,
+        is_test: ctx.is_test,
+        ann,
+        type_aliases,
+        generic_types,
+        minimal_generic_bounds: false,
+        repr_c: ctx.repr_c,
+        ref_params: std::collections::HashSet::new(),
+        ref_mut_params: std::collections::HashSet::new(),
+        repr_named_types,
+        fn_err_ty: None,
+    };
+    register_ctor_to_enum(&mut ctx, program);
+
+    // Build anonymous record maps (populated by target-specific pipeline)
+    ctx.ann.named_records = collect_named_records(program);
+    ctx.ann.anon_records = collect_anon_records(program, &ctx.ann.named_records);
+    ctx.ann.anon_records_with_fn = declarations::take_anon_fn_keys();
+    ctx.ann.record_field_counts = collect_record_field_counts(program);
+
+    let mut parts = Vec::new();
+
+    // Anonymous record struct definitions (only if anon_records is populated).
+    render_anon_record_decls(&ctx, &mut parts);
+    render_program_type_decls(&ctx, program, &mut parts);
+    render_program_top_lets(&ctx, program, &mut parts);
+    render_program_functions(&ctx, program, &mut parts);
+    render_program_test_fns(&ctx, program, &mut parts);
 
     // Modules are flattened by ir_link_flatten into root functions/types/top_lets.
     // No per-module iteration needed.
