@@ -411,35 +411,51 @@ fn collect_defined_vars_runtime_call(expr: &IrExpr, defined: &mut HashSet<VarId>
     }
 }
 
+/// `IrExprKind::Block` case of `collect_defined_vars_expr`, extracted
+/// verbatim (cog>30 decomposition, pattern 1 — `defined` is a write-only
+/// accumulator).
+fn collect_defined_vars_block(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &MutationMap) {
+    let IrExprKind::Block { stmts, expr: tail } = &expr.kind else { unreachable!() };
+    collect_defined_vars_stmts(stmts, defined, mm);
+    if let Some(e) = tail { collect_defined_vars_expr(e, defined, mm); }
+}
+
+/// `IrExprKind::ForIn` case of `collect_defined_vars_expr`, extracted
+/// verbatim (cog>30 decomposition).
+fn collect_defined_vars_for_in(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &MutationMap) {
+    let IrExprKind::ForIn { var, var_tuple, body, iterable } = &expr.kind else { unreachable!() };
+    defined.insert(*var);
+    if let Some(vars) = var_tuple {
+        for v in vars { defined.insert(*v); }
+    }
+    collect_defined_vars_expr(iterable, defined, mm);
+    collect_defined_vars_stmts(body, defined, mm);
+}
+
+/// `IrExprKind::Match` case of `collect_defined_vars_expr`, extracted
+/// verbatim (cog>30 decomposition).
+fn collect_defined_vars_match(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &MutationMap) {
+    let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+    collect_defined_vars_expr(subject, defined, mm);
+    for arm in arms {
+        collect_defined_vars_expr(&arm.body, defined, mm);
+    }
+}
+
 fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &MutationMap) {
     match &expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            collect_defined_vars_stmts(stmts, defined, mm);
-            if let Some(e) = tail { collect_defined_vars_expr(e, defined, mm); }
-        }
+        IrExprKind::Block { .. } => collect_defined_vars_block(expr, defined, mm),
         IrExprKind::If { cond, then, else_ } => {
             collect_defined_vars_expr(cond, defined, mm);
             collect_defined_vars_expr(then, defined, mm);
             collect_defined_vars_expr(else_, defined, mm);
         }
-        IrExprKind::ForIn { var, var_tuple, body, iterable } => {
-            defined.insert(*var);
-            if let Some(vars) = var_tuple {
-                for v in vars { defined.insert(*v); }
-            }
-            collect_defined_vars_expr(iterable, defined, mm);
-            collect_defined_vars_stmts(body, defined, mm);
-        }
+        IrExprKind::ForIn { .. } => collect_defined_vars_for_in(expr, defined, mm),
         IrExprKind::While { cond, body } => {
             collect_defined_vars_expr(cond, defined, mm);
             collect_defined_vars_stmts(body, defined, mm);
         }
-        IrExprKind::Match { subject, arms } => {
-            collect_defined_vars_expr(subject, defined, mm);
-            for arm in arms {
-                collect_defined_vars_expr(&arm.body, defined, mm);
-            }
-        }
+        IrExprKind::Match { .. } => collect_defined_vars_match(expr, defined, mm),
         IrExprKind::Lambda { body, params, .. } => {
             for (v, _) in params { defined.insert(*v); }
             collect_defined_vars_expr(body, defined, mm);
