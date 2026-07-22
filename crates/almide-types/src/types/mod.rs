@@ -185,24 +185,7 @@ impl Ty {
             Ty::Bytes => "Bytes".into(),
             Ty::Matrix => "Matrix".into(),
             Ty::RawPtr => "RawPtr".into(),
-            Ty::Applied(id, args) => {
-                let name = match id {
-                    TypeConstructorId::List => "List",
-                    TypeConstructorId::Option => "Option",
-                    TypeConstructorId::Set => "Set",
-                    TypeConstructorId::Result => "Result",
-                    TypeConstructorId::Map => "Map",
-                    TypeConstructorId::Tuple => "Tuple",
-                    TypeConstructorId::UserDefined(n) => n.as_str(),
-                    _ => return id.to_string(),
-                };
-                if args.is_empty() {
-                    name.to_string()
-                } else {
-                    let ts: Vec<_> = args.iter().map(|t| t.display()).collect();
-                    format!("{}[{}]", name, ts.join(", "))
-                }
-            }
+            Ty::Applied(id, args) => Self::display_applied(id, args),
             Ty::Record { fields } => {
                 let fs: Vec<_> = fields.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect();
                 format!("{{ {} }}", fs.join(", "))
@@ -237,6 +220,27 @@ impl Ty {
             Ty::ConstValue { ty, value } => format!("{} (= {})", ty.display(), value),
             Ty::Never => "Never".into(),
             Ty::Unknown => "Unknown".into(),
+        }
+    }
+
+    /// `display()` case for `Ty::Applied(id, args)`: resolve the constructor's
+    /// display name, then append `[T, ...]` when it carries type args.
+    fn display_applied(id: &TypeConstructorId, args: &[Ty]) -> String {
+        let name = match id {
+            TypeConstructorId::List => "List",
+            TypeConstructorId::Option => "Option",
+            TypeConstructorId::Set => "Set",
+            TypeConstructorId::Result => "Result",
+            TypeConstructorId::Map => "Map",
+            TypeConstructorId::Tuple => "Tuple",
+            TypeConstructorId::UserDefined(n) => n.as_str(),
+            _ => return id.to_string(),
+        };
+        if args.is_empty() {
+            name.to_string()
+        } else {
+            let ts: Vec<_> = args.iter().map(|t| t.display()).collect();
+            format!("{}[{}]", name, ts.join(", "))
         }
     }
 
