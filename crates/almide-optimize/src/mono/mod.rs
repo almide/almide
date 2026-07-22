@@ -17,6 +17,7 @@
 mod utils;
 mod discovery;
 mod specialization;
+mod varid_remap;
 mod rewrite;
 mod propagation;
 
