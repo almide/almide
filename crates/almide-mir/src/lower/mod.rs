@@ -1991,12 +1991,17 @@ include!("desugar_guard.rs");
 include!("cells.rs");
 include!("inline_scalar_fns.rs");
 include!("mod_p2.rs");
+include!("mod_p2_b.rs");
+include!("mod_p2_c.rs");
 include!("mod_p3.rs");
+include!("mod_p3_b.rs");
+include!("mod_p3_c.rs");
 include!("mod_p4.rs");
 include!("mod_p4_b.rs");
 include!("mod_p4_c.rs");
 include!("mod_p4_d.rs");
 include!("mod_p5.rs");
+include!("mod_p5_b.rs");
 // The desugar family (formerly one 4.8k-line mod_p6.rs), split by concern:
 include!("desugar.rs");
 include!("desugar_unwrap.rs");
