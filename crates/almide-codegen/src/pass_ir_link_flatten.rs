@@ -183,19 +183,25 @@ fn rename_type_decl_kind(kind: &mut IrTypeDeclKind, map: &HashMap<String, Sym>) 
         }
         IrTypeDeclKind::Variant { cases, .. } => {
             for c in cases {
-                match &mut c.kind {
-                    IrVariantKind::Unit => {}
-                    IrVariantKind::Tuple { fields } => {
-                        for t in fields {
-                            *t = rename_ty(t, map);
-                        }
-                    }
-                    IrVariantKind::Record { fields } => {
-                        for f in fields {
-                            f.ty = rename_ty(&f.ty, map);
-                        }
-                    }
-                }
+                rename_variant_case_kind(&mut c.kind, map);
+            }
+        }
+    }
+}
+
+/// `IrVariantKind` case of `rename_type_decl_kind`'s `Variant` arm,
+/// extracted verbatim (cog>30 decomposition).
+fn rename_variant_case_kind(kind: &mut IrVariantKind, map: &HashMap<String, Sym>) {
+    match kind {
+        IrVariantKind::Unit => {}
+        IrVariantKind::Tuple { fields } => {
+            for t in fields {
+                *t = rename_ty(t, map);
+            }
+        }
+        IrVariantKind::Record { fields } => {
+            for f in fields {
+                f.ty = rename_ty(&f.ty, map);
             }
         }
     }
