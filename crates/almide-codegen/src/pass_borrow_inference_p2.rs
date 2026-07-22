@@ -34,73 +34,7 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         // For user-defined Named calls, consult the fixed-point SIGS snapshot
         // so a caller can transitively keep `data` borrowed when the callee
         // also borrows it.
-        IrExprKind::Call { target, args, .. } => {
-            // Bytes-only stdlib-aware: only skip ownership for Bytes args in
-            // stdlib Module calls. Lists/Strings keep the old conservative
-            // behaviour to avoid lambda-typing regressions in filter/map.
-            if let CallTarget::Module { module, func, .. } = target {
-                if almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
-                    for (i, arg) in args.iter().enumerate() {
-                        let borrowed = bundled_borrow_at(module.as_str(), func.as_str(), i)
-                            && matches!(arg.ty, Ty::Bytes);
-                        if !borrowed && is_var(arg, var) {
-                            *needs = true;
-                            return;
-                        }
-                    }
-                    for arg in args { check_needs_ownership(arg, var, needs); }
-                    return;
-                }
-            }
-            // Self-recursive Named call: treat optimistically. For tail-recursive
-            // parsers passing the same `data` through, we don't want the first-pass
-            // pessimism to lock the param to Own and prevent the fixed point from
-            // promoting it to Ref.
-            if let CallTarget::Named { name } = target {
-                let is_self = CURRENT_FN.with(|c| c.borrow().as_deref() == Some(name.as_str()));
-                if is_self {
-                    for arg in args { check_needs_ownership(arg, var, needs); }
-                    return;
-                }
-            }
-            // User-defined Named call: only skip ownership when the arg is Bytes
-            // AND the callee borrows that slot.
-            if let CallTarget::Named { name } = target {
-                if let Some(borrows) = lookup_user_borrows(name.as_str()) {
-                    for (i, arg) in args.iter().enumerate() {
-                        // The callee borrows slot `i` (Ref/RefSlice/RefStr)
-                        // → forwarding a heap-typed var into it does NOT
-                        // consume the var, so the outer param can stay
-                        // borrowed. Previously gated to `Ty::Bytes` only;
-                        // generalized to every heap type (records, lists,
-                        // strings) so the natural `vocab_id(t, ..)` /
-                        // `merge_rank(t, ..)` factoring no longer clones the
-                        // whole record per call (#647). Downstream rendering
-                        // is type-agnostic: walker/mod.rs:264 emits `&T`,
-                        // ref_params (walker/mod.rs:146) + the `&t`→`t`
-                        // collapse (walker/expressions.rs:847) already work.
-                        let borrowed = borrows.get(i).map_or(false, |b| !matches!(b, ParamBorrow::Own))
-                            && is_heap_type(&arg.ty);
-                        if !borrowed && is_var(arg, var) { *needs = true; return; }
-                    }
-                    for arg in args { check_needs_ownership(arg, var, needs); }
-                    return;
-                }
-            }
-            // Non-stdlib fallback: any arg use needs ownership.
-            for arg in args {
-                if is_var(arg, var) { *needs = true; return; }
-            }
-            if let CallTarget::Method { object, .. } = target {
-                if is_var(object, var) { *needs = true; return; }
-            }
-            match target {
-                CallTarget::Method { object, .. } => check_needs_ownership(object, var, needs),
-                CallTarget::Computed { callee } => check_needs_ownership(callee, var, needs),
-                _ => {}
-            }
-            for arg in args { check_needs_ownership(arg, var, needs); }
-        }
+        IrExprKind::Call { .. } => check_needs_ownership_call(expr, var, needs),
 
         // ── Collection construction consumes ──
         IrExprKind::Record { fields, .. } => {
@@ -151,29 +85,7 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         }
 
         // ── IterChain: source consumed if consume=true ──
-        IrExprKind::IterChain { source, consume, steps, collector } => {
-            if *consume && is_var(source, var) { *needs = true; return; }
-            check_needs_ownership(source, var, needs);
-            for step in steps {
-                match step {
-                    IterStep::Map { lambda } | IterStep::Filter { lambda }
-                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
-                        if uses_var(lambda, var) { *needs = true; return; }
-                    }
-                }
-            }
-            match collector {
-                IterCollector::Collect => {}
-                IterCollector::Fold { init, lambda } => {
-                    if is_var(init, var) { *needs = true; return; }
-                    if uses_var(lambda, var) { *needs = true; return; }
-                }
-                IterCollector::Any { lambda } | IterCollector::All { lambda }
-                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
-                    if uses_var(lambda, var) { *needs = true; return; }
-                }
-            }
-        }
+        IrExprKind::IterChain { .. } => check_needs_ownership_iter_chain(expr, var, needs),
 
         // ── Safe reads (no ownership needed) ──
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
@@ -197,17 +109,7 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             check_needs_ownership(then, var, needs);
             check_needs_ownership(else_, var, needs);
         }
-        IrExprKind::Match { subject, arms } => {
-            // Match subject: destructuring a borrowed value changes bind types
-            // → needs ownership to avoid &-pattern complications
-            if is_var(subject, var) { *needs = true; return; }
-            check_needs_ownership(subject, var, needs);
-            for arm in arms {
-                if let Some(g) = &arm.guard { check_needs_ownership(g, var, needs); }
-                if is_var(&arm.body, var) { *needs = true; return; }
-                check_needs_ownership(&arm.body, var, needs);
-            }
-        }
+        IrExprKind::Match { .. } => check_needs_ownership_match(expr, var, needs),
         IrExprKind::While { cond, body } => {
             check_needs_ownership(cond, var, needs);
             for s in body { check_needs_ownership_stmt(s, var, needs); }
@@ -247,19 +149,7 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         // Its borrow signature lives in SIGS_SNAPSHOT keyed by the mangled
         // symbol. If the arg slot is Own, the call consumes that arg and
         // the enclosing var must also be owned.
-        IrExprKind::RuntimeCall { symbol, args } => {
-            let borrows = SIGS_SNAPSHOT.with(|s| s.borrow().get(symbol.as_str()).cloned());
-            if let Some(borrows) = borrows {
-                for (i, arg) in args.iter().enumerate() {
-                    let is_own = matches!(borrows.get(i), Some(ParamBorrow::Own));
-                    if is_own && is_var(arg, var) { *needs = true; return; }
-                }
-            } else {
-                // No sig: be conservative — any var arg needs ownership.
-                for arg in args { if is_var(arg, var) { *needs = true; return; } }
-            }
-            for arg in args { check_needs_ownership(arg, var, needs); }
-        }
+        IrExprKind::RuntimeCall { .. } => check_needs_ownership_runtime_call(expr, var, needs),
         // Leaves and nodes that carry no borrowable child use of `var` in this
         // analysis. Explicit-preserve (not recurse-more): borrow inference is
         // sensitive to which refs are seen, so every un-handled variant is
@@ -278,6 +168,152 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
         | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
+}
+
+// ── `check_needs_ownership` arm extraction (cog>100 decomposition) ──
+//
+// Each of these is a 1:1 text-move of one of the router's largest match
+// arms (pattern 2: uniform match arms, mirrors the `lower_expr` /
+// `infer_expr_inner` extraction shape). The router's `if *needs { return; }`
+// entry guard stays exactly where it is (top of `check_needs_ownership`)
+// and is NOT duplicated here — every recursive `check_needs_ownership(child,
+// ..)` call, whether made from the router or from one of these helpers,
+// re-enters the router and passes through that SAME guard, so the
+// short-circuit-once-found semantics are identical to the inlined form.
+// Every `*needs = true; return;` inside an arm now returns from the
+// helper instead of from `check_needs_ownership` directly — since the
+// router's match is its last statement with no trailing code, returning
+// from the helper (which the router's arm then falls out of normally) is
+// externally indistinguishable from the original early return.
+
+/// `IrExprKind::Call` case of `check_needs_ownership`, extracted verbatim.
+fn check_needs_ownership_call(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    let IrExprKind::Call { target, args, .. } = &expr.kind else { unreachable!() };
+    // Bytes-only stdlib-aware: only skip ownership for Bytes args in
+    // stdlib Module calls. Lists/Strings keep the old conservative
+    // behaviour to avoid lambda-typing regressions in filter/map.
+    if let CallTarget::Module { module, func, .. } = target {
+        if almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
+            for (i, arg) in args.iter().enumerate() {
+                let borrowed = bundled_borrow_at(module.as_str(), func.as_str(), i)
+                    && matches!(arg.ty, Ty::Bytes);
+                if !borrowed && is_var(arg, var) {
+                    *needs = true;
+                    return;
+                }
+            }
+            for arg in args { check_needs_ownership(arg, var, needs); }
+            return;
+        }
+    }
+    // Self-recursive Named call: treat optimistically. For tail-recursive
+    // parsers passing the same `data` through, we don't want the first-pass
+    // pessimism to lock the param to Own and prevent the fixed point from
+    // promoting it to Ref.
+    if let CallTarget::Named { name } = target {
+        let is_self = CURRENT_FN.with(|c| c.borrow().as_deref() == Some(name.as_str()));
+        if is_self {
+            for arg in args { check_needs_ownership(arg, var, needs); }
+            return;
+        }
+    }
+    // User-defined Named call: only skip ownership when the arg is Bytes
+    // AND the callee borrows that slot.
+    if let CallTarget::Named { name } = target {
+        if let Some(borrows) = lookup_user_borrows(name.as_str()) {
+            for (i, arg) in args.iter().enumerate() {
+                // The callee borrows slot `i` (Ref/RefSlice/RefStr)
+                // → forwarding a heap-typed var into it does NOT
+                // consume the var, so the outer param can stay
+                // borrowed. Previously gated to `Ty::Bytes` only;
+                // generalized to every heap type (records, lists,
+                // strings) so the natural `vocab_id(t, ..)` /
+                // `merge_rank(t, ..)` factoring no longer clones the
+                // whole record per call (#647). Downstream rendering
+                // is type-agnostic: walker/mod.rs:264 emits `&T`,
+                // ref_params (walker/mod.rs:146) + the `&t`→`t`
+                // collapse (walker/expressions.rs:847) already work.
+                let borrowed = borrows.get(i).map_or(false, |b| !matches!(b, ParamBorrow::Own))
+                    && is_heap_type(&arg.ty);
+                if !borrowed && is_var(arg, var) { *needs = true; return; }
+            }
+            for arg in args { check_needs_ownership(arg, var, needs); }
+            return;
+        }
+    }
+    // Non-stdlib fallback: any arg use needs ownership.
+    for arg in args {
+        if is_var(arg, var) { *needs = true; return; }
+    }
+    if let CallTarget::Method { object, .. } = target {
+        if is_var(object, var) { *needs = true; return; }
+    }
+    match target {
+        CallTarget::Method { object, .. } => check_needs_ownership(object, var, needs),
+        CallTarget::Computed { callee } => check_needs_ownership(callee, var, needs),
+        _ => {}
+    }
+    for arg in args { check_needs_ownership(arg, var, needs); }
+}
+
+/// `IrExprKind::IterChain` case of `check_needs_ownership`, extracted verbatim.
+fn check_needs_ownership_iter_chain(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    let IrExprKind::IterChain { source, consume, steps, collector } = &expr.kind else { unreachable!() };
+    if *consume && is_var(source, var) { *needs = true; return; }
+    check_needs_ownership(source, var, needs);
+    for step in steps {
+        match step {
+            IterStep::Map { lambda } | IterStep::Filter { lambda }
+            | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                if uses_var(lambda, var) { *needs = true; return; }
+            }
+        }
+    }
+    match collector {
+        IterCollector::Collect => {}
+        IterCollector::Fold { init, lambda } => {
+            if is_var(init, var) { *needs = true; return; }
+            if uses_var(lambda, var) { *needs = true; return; }
+        }
+        IterCollector::Any { lambda } | IterCollector::All { lambda }
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+            if uses_var(lambda, var) { *needs = true; return; }
+        }
+    }
+}
+
+/// `IrExprKind::Match` case of `check_needs_ownership`, extracted verbatim.
+fn check_needs_ownership_match(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+    // Match subject: destructuring a borrowed value changes bind types
+    // → needs ownership to avoid &-pattern complications
+    if is_var(subject, var) { *needs = true; return; }
+    check_needs_ownership(subject, var, needs);
+    for arm in arms {
+        if let Some(g) = &arm.guard { check_needs_ownership(g, var, needs); }
+        if is_var(&arm.body, var) { *needs = true; return; }
+        check_needs_ownership(&arm.body, var, needs);
+    }
+}
+
+/// `IrExprKind::RuntimeCall` case of `check_needs_ownership`, extracted
+/// verbatim. Lowered form of `@intrinsic` / bundled Module call. Its
+/// borrow signature lives in SIGS_SNAPSHOT keyed by the mangled symbol.
+/// If the arg slot is Own, the call consumes that arg and the enclosing
+/// var must also be owned.
+fn check_needs_ownership_runtime_call(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    let IrExprKind::RuntimeCall { symbol, args } = &expr.kind else { unreachable!() };
+    let borrows = SIGS_SNAPSHOT.with(|s| s.borrow().get(symbol.as_str()).cloned());
+    if let Some(borrows) = borrows {
+        for (i, arg) in args.iter().enumerate() {
+            let is_own = matches!(borrows.get(i), Some(ParamBorrow::Own));
+            if is_own && is_var(arg, var) { *needs = true; return; }
+        }
+    } else {
+        // No sig: be conservative — any var arg needs ownership.
+        for arg in args { if is_var(arg, var) { *needs = true; return; } }
+    }
+    for arg in args { check_needs_ownership(arg, var, needs); }
 }
 
 fn check_needs_ownership_stmt(stmt: &IrStmt, var: VarId, needs: &mut bool) {
