@@ -13,6 +13,40 @@ use super::pass::PassResult;
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, Target};
 
+/// Effect-fn-names collection phase of `AutoParallelPass::run`, extracted
+/// verbatim (cog>30 decomposition, sequential-phase pattern — no state
+/// shared with the mutable-vars phase below).
+fn collect_effect_fn_names(program: &IrProgram) -> std::collections::HashSet<Sym> {
+    let mut effect_fns: std::collections::HashSet<Sym> = std::collections::HashSet::new();
+    for func in &program.functions {
+        if func.is_effect {
+            effect_fns.insert(func.name);
+        }
+    }
+    for module in &program.modules {
+        for func in &module.functions {
+            if func.is_effect {
+                effect_fns.insert(sym(&format!("{}.{}", module.name, func.name)));
+                effect_fns.insert(func.name);
+            }
+        }
+    }
+    effect_fns
+}
+
+/// Mutable-var-IDs collection phase of `AutoParallelPass::run`, extracted
+/// verbatim (cog>30 decomposition).
+fn collect_mutable_var_ids(program: &IrProgram) -> std::collections::HashSet<VarId> {
+    let mut mutable_vars = std::collections::HashSet::new();
+    for i in 0..program.var_table.len() {
+        let id = VarId(i as u32);
+        if program.var_table.get(id).mutability == Mutability::Var {
+            mutable_vars.insert(id);
+        }
+    }
+    mutable_vars
+}
+
 #[derive(Debug)]
 pub struct AutoParallelPass;
 
@@ -29,29 +63,9 @@ impl NanoPass for AutoParallelPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Collect effect function names for purity analysis
-        let mut effect_fns: std::collections::HashSet<Sym> = std::collections::HashSet::new();
-        for func in &program.functions {
-            if func.is_effect {
-                effect_fns.insert(func.name);
-            }
-        }
-        for module in &program.modules {
-            for func in &module.functions {
-                if func.is_effect {
-                    effect_fns.insert(sym(&format!("{}.{}", module.name, func.name)));
-                    effect_fns.insert(func.name);
-                }
-            }
-        }
-
+        let effect_fns = collect_effect_fn_names(&program);
         // Collect mutable variable IDs from var_table
-        let mut mutable_vars = std::collections::HashSet::new();
-        for i in 0..program.var_table.len() {
-            let id = VarId(i as u32);
-            if program.var_table.get(id).mutability == Mutability::Var {
-                mutable_vars.insert(id);
-            }
-        }
+        let mutable_vars = collect_mutable_var_ids(&program);
 
         for func in &mut program.functions {
             func.body = rewrite_expr(func.body.clone(), &effect_fns, &mutable_vars);
@@ -95,6 +109,96 @@ fn is_pure_lambda(
     is_pure_expr(body, &param_ids, effect_fns, mutable_vars)
 }
 
+/// `IrExprKind::Call` / `IrExprKind::TailCall` case of `is_pure_expr`,
+/// extracted verbatim (cog>30 decomposition, pattern 2 — every arm
+/// independently returns a `bool`, no state shared between arms).
+fn is_pure_call(
+    target: &CallTarget,
+    args: &[IrExpr],
+    local_vars: &std::collections::HashSet<VarId>,
+    effect_fns: &std::collections::HashSet<Sym>,
+    mutable_vars: &std::collections::HashSet<VarId>,
+) -> bool {
+    match target {
+        CallTarget::Named { name } => {
+            if effect_fns.contains(name) { return false; }
+            // Stdlib effect functions (fs, http, etc.)
+            if name.starts_with("almide_rt_") {
+                let rest = &name["almide_rt_".len()..];
+                let module = rest.split('_').next().unwrap_or("");
+                if matches!(module, "fs" | "http" | "env" | "process" | "time") {
+                    return false;
+                }
+            }
+        }
+        CallTarget::Module { module, .. } => {
+            if matches!(&**module, "fs" | "http" | "env" | "process" | "time") {
+                return false;
+            }
+        }
+        _ => {}
+    }
+    args.iter().all(|a| is_pure_expr(a, local_vars, effect_fns, mutable_vars))
+}
+
+/// `IrExprKind::RuntimeCall` case of `is_pure_expr`, extracted verbatim
+/// (cog>30 decomposition).
+fn is_pure_runtime_call(
+    symbol: &Sym,
+    args: &[IrExpr],
+    local_vars: &std::collections::HashSet<VarId>,
+    effect_fns: &std::collections::HashSet<Sym>,
+    mutable_vars: &std::collections::HashSet<VarId>,
+) -> bool {
+    let name = symbol.as_str();
+    if let Some(rest) = name.strip_prefix("almide_rt_") {
+        let module = rest.split('_').next().unwrap_or("");
+        if matches!(module, "fs" | "http" | "env" | "process" | "time") {
+            return false;
+        }
+    }
+    args.iter().all(|a| is_pure_expr(a, local_vars, effect_fns, mutable_vars))
+}
+
+/// `IrExprKind::Match` case of `is_pure_expr`, extracted verbatim (cog>30
+/// decomposition).
+fn is_pure_match(
+    subject: &IrExpr,
+    arms: &[IrMatchArm],
+    local_vars: &std::collections::HashSet<VarId>,
+    effect_fns: &std::collections::HashSet<Sym>,
+    mutable_vars: &std::collections::HashSet<VarId>,
+) -> bool {
+    is_pure_expr(subject, local_vars, effect_fns, mutable_vars) &&
+    arms.iter().all(|arm| {
+        let mut arm_vars = local_vars.clone();
+        collect_pattern_bindings(&arm.pattern, &mut arm_vars);
+        arm.guard.as_ref().map_or(true, |g| is_pure_expr(g, &arm_vars, effect_fns, mutable_vars)) &&
+        is_pure_expr(&arm.body, &arm_vars, effect_fns, mutable_vars)
+    })
+}
+
+/// `IrExprKind::Block` case of `is_pure_expr`, extracted verbatim (cog>30
+/// decomposition). The mid-loop `return false` only exits this helper (the
+/// same "one arm, one value" shape as the original inlined arm), not the
+/// caller — safe, matches the `check_needs_ownership`-style guard.
+fn is_pure_block(
+    stmts: &[IrStmt],
+    expr: &Option<Box<IrExpr>>,
+    local_vars: &std::collections::HashSet<VarId>,
+    effect_fns: &std::collections::HashSet<Sym>,
+    mutable_vars: &std::collections::HashSet<VarId>,
+) -> bool {
+    let mut block_vars = local_vars.clone();
+    for stmt in stmts {
+        if !is_pure_stmt(stmt, &block_vars, effect_fns, mutable_vars) {
+            return false;
+        }
+        collect_stmt_bindings(stmt, &mut block_vars);
+    }
+    expr.as_ref().map_or(true, |e| is_pure_expr(e, &block_vars, effect_fns, mutable_vars))
+}
+
 /// Recursively check expression purity.
 /// A pure expression:
 /// - Contains no calls to effect functions
@@ -117,42 +221,14 @@ fn is_pure_expr(
         }
 
         // Calls: check if the target is an effect fn
-        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
-            match target {
-                CallTarget::Named { name } => {
-                    if effect_fns.contains(name) { return false; }
-                    // Stdlib effect functions (fs, http, etc.)
-                    if name.starts_with("almide_rt_") {
-                        let rest = &name["almide_rt_".len()..];
-                        let module = rest.split('_').next().unwrap_or("");
-                        if matches!(module, "fs" | "http" | "env" | "process" | "time") {
-                            return false;
-                        }
-                    }
-                }
-                CallTarget::Module { module, .. } => {
-                    if matches!(&**module, "fs" | "http" | "env" | "process" | "time") {
-                        return false;
-                    }
-                }
-                _ => {}
-            }
-            args.iter().all(|a| is_pure_expr(a, local_vars, effect_fns, mutable_vars))
-        }
+        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } =>
+            is_pure_call(target, args, local_vars, effect_fns, mutable_vars),
 
         // Resolved runtime call: purity follows the same effect-module
         // rules as Module calls. `almide_rt_fs_*` / `almide_rt_http_*` /
         // etc. are effects and block parallelization.
-        IrExprKind::RuntimeCall { symbol, args } => {
-            let name = symbol.as_str();
-            if let Some(rest) = name.strip_prefix("almide_rt_") {
-                let module = rest.split('_').next().unwrap_or("");
-                if matches!(module, "fs" | "http" | "env" | "process" | "time") {
-                    return false;
-                }
-            }
-            args.iter().all(|a| is_pure_expr(a, local_vars, effect_fns, mutable_vars))
-        }
+        IrExprKind::RuntimeCall { symbol, args } =>
+            is_pure_runtime_call(symbol, args, local_vars, effect_fns, mutable_vars),
 
         // Literals: always pure
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } |
@@ -174,33 +250,12 @@ fn is_pure_expr(
             is_pure_expr(then, local_vars, effect_fns, mutable_vars) &&
             is_pure_expr(else_, local_vars, effect_fns, mutable_vars)
         }
-        IrExprKind::Match { subject, arms } => {
-            is_pure_expr(subject, local_vars, effect_fns, mutable_vars) &&
-            arms.iter().all(|arm| {
-                let mut arm_vars = local_vars.clone();
-                collect_pattern_bindings(&arm.pattern, &mut arm_vars);
-                arm.guard.as_ref().map_or(true, |g| is_pure_expr(g, &arm_vars, effect_fns, mutable_vars)) &&
-                is_pure_expr(&arm.body, &arm_vars, effect_fns, mutable_vars)
-            })
-        }
-        IrExprKind::Block { stmts, expr } => {
-            let mut block_vars = local_vars.clone();
-            for stmt in stmts {
-                if !is_pure_stmt(stmt, &block_vars, effect_fns, mutable_vars) {
-                    return false;
-                }
-                collect_stmt_bindings(stmt, &mut block_vars);
-            }
-            expr.as_ref().map_or(true, |e| is_pure_expr(e, &block_vars, effect_fns, mutable_vars))
-        }
+        IrExprKind::Match { subject, arms } => is_pure_match(subject, arms, local_vars, effect_fns, mutable_vars),
+        IrExprKind::Block { stmts, expr } => is_pure_block(stmts, expr, local_vars, effect_fns, mutable_vars),
 
         // Collections
-        IrExprKind::List { elements } => {
-            elements.iter().all(|e| is_pure_expr(e, local_vars, effect_fns, mutable_vars))
-        }
-        IrExprKind::Tuple { elements } => {
-            elements.iter().all(|e| is_pure_expr(e, local_vars, effect_fns, mutable_vars))
-        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } =>
+            elements.iter().all(|e| is_pure_expr(e, local_vars, effect_fns, mutable_vars)),
         IrExprKind::Record { fields, .. } => {
             fields.iter().all(|(_, e)| is_pure_expr(e, local_vars, effect_fns, mutable_vars))
         }
