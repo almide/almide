@@ -444,7 +444,7 @@ impl LowerCtx {
     fn lower_tail_heap_call_computed(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
         let IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } = &tail.kind else { unreachable!() };
         let mark = self.live_heap_handles.len();
-        let blk = self.closure_value_of(callee).unwrap();
+        let blk = self.closure_value_of(callee).expect("the caller's match guard already proved closure_value_of(callee).is_some() for the same callee");
         let lowered = self.lower_call_args(args)?;
         let dst = self.fresh_value();
         let repr = repr_of(&tail.ty)?;

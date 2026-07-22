@@ -329,10 +329,10 @@ mod tests {
     /// another's binary.
     fn compile_and_run(label: &str, src: &str) -> String {
         let dir = std::env::temp_dir().join(format!("almide_mir_render_{label}"));
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).expect("failed to create the test scratch dir");
         let src_path = dir.join("m.rs");
         let bin_path = dir.join("m");
-        std::fs::write(&src_path, src).unwrap();
+        std::fs::write(&src_path, src).expect("failed to write the test scratch source file");
         let build = Command::new("rustc")
             .args(["--edition", "2021", "-O"])
             .arg(&src_path)

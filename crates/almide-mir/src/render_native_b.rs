@@ -416,7 +416,7 @@ fn render_call_witness(
             if !t.is_stringy() {
                 return Err(wall("native: print_str of a non-String"));
             }
-            used_shims.push(shim("print_str").unwrap().2);
+            used_shims.push(shim("print_str").expect("\"print_str\" is a literal shim() match arm, always Some").2);
             line!("rt_print_str({});", as_str_arg(&code, t));
         }
         (RtFn::PrintInt, [a]) => {
@@ -592,11 +592,11 @@ fn render_int_binop(
         // Div/Mod carry the C-001/C-002 abort discipline — route through the
         // same checked shims the CallFn path uses (one definition of the abort).
         IntOp::Div => {
-            used_shims.push(shim("__chk_div").unwrap().2);
+            used_shims.push(shim("__chk_div").expect("\"__chk_div\" is a literal shim() match arm, always Some").2);
             format!("rt_chk_div({l}, {r})")
         }
         IntOp::Mod => {
-            used_shims.push(shim("__chk_mod").unwrap().2);
+            used_shims.push(shim("__chk_mod").expect("\"__chk_mod\" is a literal shim() match arm, always Some").2);
             format!("rt_chk_mod({l}, {r})")
         }
         IntOp::Eq => format!("({l} == {r}) as i64"),

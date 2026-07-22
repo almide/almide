@@ -71,7 +71,7 @@ fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
         }
         for (base, ks) in owners {
             if ks.len() == 1 && !record_layouts.contains_key(&base) {
-                let v = record_layouts.get(&ks[0]).cloned().unwrap();
+                let v = record_layouts.get(&ks[0]).cloned().expect("ks[0] came from record_layouts.keys() above, so the key is guaranteed present");
                 record_layouts.insert(base, v);
             }
         }
@@ -94,7 +94,7 @@ fn collect_pipeline_layouts(ir: &almide_ir::IrProgram) -> PipelineLayouts {
         }
         for (base, ks) in owners {
             if ks.len() == 1 && !variant_layouts.by_type.contains_key(&base) {
-                let v = variant_layouts.by_type.get(&ks[0]).cloned().unwrap();
+                let v = variant_layouts.by_type.get(&ks[0]).cloned().expect("ks[0] came from variant_layouts.by_type.keys() above, so the key is guaranteed present");
                 variant_layouts.by_type.insert(base, v);
             }
         }

@@ -480,7 +480,7 @@ fn main() {
         eprintln!("usage: classify_corpus --out DIR <file.almd | dir> ...");
         std::process::exit(2);
     }
-    let out_dir = out_dir.unwrap();
+    let out_dir = out_dir.expect("checked non-None by the usage-error exit(2) branch above");
 
     // The sweep catches panics deliberately; silence the default hook so a
     // walled-off panic does not spray a backtrace over the honest report.

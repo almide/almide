@@ -369,7 +369,7 @@ fn generate_record_repr_sources_into(
                 format!("{decl_name} {{ "),
                 decl_order
                     .iter()
-                    .map(|dn| fields.iter().position(|(n, _)| n.as_str() == dn.as_str()).unwrap())
+                    .map(|dn| fields.iter().position(|(n, _)| n.as_str() == dn.as_str()).expect("resolve_nominal only returns a decl whose (sorted) field-name set equals fields' (sorted) field-name set"))
                     .collect(),
             ),
             None => {

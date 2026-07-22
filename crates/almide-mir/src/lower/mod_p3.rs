@@ -605,7 +605,7 @@ impl LowerCtx {
                             IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
                                 if self.closure_value_of(callee).is_some() =>
                             {
-                                let blk = self.closure_value_of(callee).unwrap();
+                                let blk = self.closure_value_of(callee).expect("this arm's guard already proved closure_value_of(callee).is_some() for the same callee");
                                 match (repr_of(&value.ty), self.lower_call_args(args)) {
                                     (Ok(repr), Ok(lowered)) => {
                                         let new = self.fresh_value();

@@ -41,7 +41,7 @@ impl Streams {
             self.stream.insert(o, String::new());
             self.order.push(o);
         }
-        self.stream.get_mut(&o).unwrap().push_str(seg);
+        self.stream.get_mut(&o).expect("o was just inserted above if it was not already present").push_str(seg);
     }
     /// Record a +1/−1/+0 event (`'i'`/`'d'`/`'b'`…) on object `o`.
     fn event(&mut self, o: ValueId, c: char) {

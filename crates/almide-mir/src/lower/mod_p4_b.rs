@@ -286,7 +286,7 @@ fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr
         IrStringPart::Expr { expr }
             if container_repr_name(&expr.ty, registry).is_some() =>
         {
-            let name = container_repr_name(&expr.ty, registry).unwrap();
+            let name = container_repr_name(&expr.ty, registry).expect("this arm's guard already proved container_repr_name(..).is_some() for the same &expr.ty");
             Some(IrExpr {
                 kind: IrExprKind::Call {
                     target: CallTarget::Named { name: sym(&name) },
@@ -316,7 +316,7 @@ fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr
         {
             let Ty::Applied(_, a) = &expr.ty else { unreachable!() };
             let Ty::Tuple(ts) = &a[0] else { unreachable!() };
-            let key = crate::lower::tuple_repr_ident(ts).unwrap();
+            let key = crate::lower::tuple_repr_ident(ts).expect("this arm's guard already proved tuple_repr_ident(ts).is_some() for the same ts");
             Some(IrExpr {
                 kind: IrExprKind::Call {
                     target: CallTarget::Named { name: sym(&format!("__repr_list_tup_{key}")) },
@@ -337,7 +337,7 @@ fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr
         {
             let Ty::Applied(_, a) = &expr.ty else { unreachable!() };
             let Ty::Tuple(ts) = &a[0] else { unreachable!() };
-            let key = crate::lower::tuple_repr_ident(ts).unwrap();
+            let key = crate::lower::tuple_repr_ident(ts).expect("this arm's guard already proved tuple_repr_ident(ts).is_some() for the same ts");
             Some(IrExpr {
                 kind: IrExprKind::Call {
                     target: CallTarget::Named { name: sym(&format!("__repr_opt_tup_{key}")) },

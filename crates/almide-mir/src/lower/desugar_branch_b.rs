@@ -578,7 +578,7 @@ pub fn desugar_unit_if_heap_reassign(body: &IrExpr, next_var: &mut u32) -> Optio
         if assigned.len() != 1 {
             continue;
         }
-        let r = *assigned.iter().next().unwrap();
+        let r = *assigned.iter().next().expect("assigned.len() == 1, checked immediately above");
         // `r` must be bound earlier in THIS block.
         let Some(rty) = stmts[..i].iter().find_map(|b| match &b.kind {
             IrStmtKind::Bind { var, ty, .. } if *var == r => Some(ty.clone()),

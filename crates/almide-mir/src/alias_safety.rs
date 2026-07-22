@@ -270,7 +270,7 @@ pub fn elide_unaliased_make_unique(functions: &mut [MirFunction]) {
             })
             .collect();
         let mut it = keep.into_iter();
-        func.ops.retain(|_| it.next().unwrap());
+        func.ops.retain(|_| it.next().expect("keep has exactly func.ops.len() entries: it was built via .map() over the same ops"));
     }
 }
 
