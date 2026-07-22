@@ -164,6 +164,20 @@ pub fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
 
 /// Return all stdlib modules that contain a given method name.
 pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
+    let r = resolve_ufcs_exclusive(method);
+    if !r.is_empty() {
+        return r;
+    }
+    let r = resolve_ufcs_ambiguous(method);
+    if !r.is_empty() {
+        return r;
+    }
+    resolve_ufcs_sized_numeric(method)
+}
+
+/// Methods owned by exactly one stdlib module (or a small closed set of
+/// module-native container methods: list/map/set, list/map).
+fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
     match method {
         // ── string-only ──
         "trim" | "split" | "pad_start"
@@ -230,6 +244,14 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         // ── datetime-only ──
         "is_before" | "is_after" => vec!["datetime"],
 
+        _ => vec![],
+    }
+}
+
+/// Methods shared by more than one stdlib module where the caller's type
+/// disambiguates (string/list overlap, numeric overlap, etc).
+fn resolve_ufcs_ambiguous(method: &str) -> Vec<&'static str> {
+    match method {
         // ── ambiguous: string + list ──
         "first" | "last" => vec!["string", "list"],
         "take" | "drop" | "take_end" | "drop_end" => vec!["string", "list"],
@@ -273,10 +295,15 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         // ── ambiguous: math + float ──
         "sign" => vec!["math", "float"],
 
-        // ── sized numeric conversion methods (Stage 3) ──
-        // Every sized int / float provides these UFCS methods. The
-        // concrete module (int32, uint8, float32, ...) is picked by
-        // the receiver's type at codegen (`resolve_module_from_ty`).
+        _ => vec![],
+    }
+}
+
+/// Sized numeric conversion methods (Stage 3). Every sized int / float
+/// provides these UFCS methods. The concrete module (int32, uint8, float32,
+/// ...) is picked by the receiver's type at codegen (`resolve_module_from_ty`).
+fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
+    match method {
         "to_int8" | "to_int16" | "to_int32" | "to_int64"
         | "to_uint8" | "to_uint16" | "to_uint32" | "to_uint64"
         | "to_float32" | "to_float64" => vec![
