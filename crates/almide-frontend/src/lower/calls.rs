@@ -219,54 +219,77 @@ fn lower_call_fill_defaults(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, args:
 /// codegen mismatch. Verbatim text move; mutates `ir_args` in place.
 fn lower_call_coerce_args(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, target: &CallTarget) {
     if let CallTarget::Named { name } = target {
-        // Builtin comparison macros (assert_eq / assert_ne) aren't
-        // registered in env.functions, but their semantics demand
-        // width-matched operands on both targets. Coerce literal-side
-        // args toward their typed peer here, before the target-specific
-        // lowering picks up a Macro / RustMacro / direct-emit path.
-        if matches!(name.as_str(), "assert_eq" | "assert_ne") && ir_args.len() == 2 {
-            let l_ty = ir_args[0].ty.clone();
-            let r_ty = ir_args[1].ty.clone();
-            super::statements::coerce_literal_to_sized(&mut ir_args[1], &l_ty, ctx.env);
-            super::statements::coerce_literal_to_sized(&mut ir_args[0], &r_ty, ctx.env);
-        }
-        if let Some(sig) = ctx.env.functions.get(name).cloned() {
-            for (i, (_, param_ty)) in sig.params.iter().enumerate() {
-                if let Some(arg) = ir_args.get_mut(i) {
-                    super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
-                }
-            }
-        } else if let Some((_, case)) = ctx.env.lookup_ctor(&almide_base::intern::sym(name)) {
-            // Tuple-payload variant constructor (`Click(Int32, Int)`): narrow each
-            // bare-literal arg to its declared payload type so `Click(42, 9)` emits
-            // `Click(42i32, 9i64)` — without this the `42` stays `i64`, which native
-            // rustc rejects (E0308) and WASM writes at the wrong byte width,
-            // corrupting the next payload field. Mirrors the record-construction
-            // coercion in `expressions.rs` (`declared_record_ty` path).
-            if let crate::types::VariantPayload::Tuple(param_tys) = &case.payload {
-                for (i, param_ty) in param_tys.iter().enumerate() {
-                    if let Some(arg) = ir_args.get_mut(i) {
-                        super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
-                    }
-                }
-            }
-        } else if let Some((module, func)) = name.as_str().split_once('.') {
-            if let Some(sig) = crate::stdlib::lookup_sig(module, func) {
-                for (i, (_, param_ty)) in sig.params.iter().enumerate() {
-                    if let Some(arg) = ir_args.get_mut(i) {
-                        super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
-                    }
-                }
-            }
-        }
+        lower_call_coerce_args_named(ctx, ir_args, name);
     } else if let CallTarget::Module { module, func, .. } = target {
-        if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
-            for (i, (_, param_ty)) in sig.params.iter().enumerate() {
-                if let Some(arg) = ir_args.get_mut(i) {
-                    super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
-                }
+        lower_call_coerce_args_module(ctx, ir_args, module, func);
+    }
+}
+
+/// `CallTarget::Named` branch of [`lower_call_coerce_args`]: the
+/// assert_eq/assert_ne width-matching special case, then coercion sourced
+/// from a user fn's signature, a variant constructor's tuple payload, or a
+/// dotted stdlib fn's signature. Verbatim text move.
+fn lower_call_coerce_args_named(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, name: &Sym) {
+    lower_call_coerce_assert_macro(ctx, ir_args, name);
+    if let Some(sig) = ctx.env.functions.get(name).cloned() {
+        lower_call_coerce_from_sig(ctx, ir_args, &sig);
+    } else if let Some((_, case)) = ctx.env.lookup_ctor(&almide_base::intern::sym(name)) {
+        lower_call_coerce_from_ctor(ctx, ir_args, &case);
+    } else if let Some((module, func)) = name.as_str().split_once('.') {
+        if let Some(sig) = crate::stdlib::lookup_sig(module, func) {
+            lower_call_coerce_from_sig(ctx, ir_args, &sig);
+        }
+    }
+}
+
+/// Builtin comparison macros (assert_eq / assert_ne) aren't registered in
+/// env.functions, but their semantics demand width-matched operands on
+/// both targets. Coerce literal-side args toward their typed peer here,
+/// before the target-specific lowering picks up a Macro / RustMacro /
+/// direct-emit path. Verbatim text move out of [`lower_call_coerce_args_named`].
+fn lower_call_coerce_assert_macro(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, name: &Sym) {
+    if matches!(name.as_str(), "assert_eq" | "assert_ne") && ir_args.len() == 2 {
+        let l_ty = ir_args[0].ty.clone();
+        let r_ty = ir_args[1].ty.clone();
+        super::statements::coerce_literal_to_sized(&mut ir_args[1], &l_ty, ctx.env);
+        super::statements::coerce_literal_to_sized(&mut ir_args[0], &r_ty, ctx.env);
+    }
+}
+
+/// Coerce each arg to its corresponding declared param type from a fn
+/// signature. Shared by the by-name and dotted-stdlib branches of
+/// [`lower_call_coerce_args_named`] (identical logic, two lookup sources)
+/// and by [`lower_call_coerce_args_module`]. Verbatim text move.
+fn lower_call_coerce_from_sig(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, sig: &crate::types::FnSig) {
+    for (i, (_, param_ty)) in sig.params.iter().enumerate() {
+        if let Some(arg) = ir_args.get_mut(i) {
+            super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
+        }
+    }
+}
+
+/// Tuple-payload variant constructor (`Click(Int32, Int)`): narrow each
+/// bare-literal arg to its declared payload type so `Click(42, 9)` emits
+/// `Click(42i32, 9i64)` — without this the `42` stays `i64`, which native
+/// rustc rejects (E0308) and WASM writes at the wrong byte width,
+/// corrupting the next payload field. Mirrors the record-construction
+/// coercion in `expressions.rs` (`declared_record_ty` path). Verbatim text
+/// move out of [`lower_call_coerce_args_named`].
+fn lower_call_coerce_from_ctor(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, case: &crate::types::VariantCase) {
+    if let crate::types::VariantPayload::Tuple(param_tys) = &case.payload {
+        for (i, param_ty) in param_tys.iter().enumerate() {
+            if let Some(arg) = ir_args.get_mut(i) {
+                super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
             }
         }
+    }
+}
+
+/// `CallTarget::Module` branch of [`lower_call_coerce_args`]. Verbatim
+/// text move.
+fn lower_call_coerce_args_module(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, module: &Sym, func: &Sym) {
+    if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
+        lower_call_coerce_from_sig(ctx, ir_args, &sig);
     }
 }
 
@@ -453,15 +476,54 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
 
 /// The `Member { object, field }` arm of [`lower_call_target`] — resolves
 /// `object.field(...)` to a module call, UFCS method, convention method,
-/// protocol dispatch, or cross-module UFCS. Verbatim text move: each check is
-/// an independent guard that either returns a resolved `CallTarget` or falls
-/// through to the next, with no state shared across checks (codopsy pass,
-/// mirrors `resolve_static_member`'s guard-chain shape).
+/// protocol dispatch, or cross-module UFCS. Each check below is an
+/// independent guard that either resolves a `CallTarget` or falls through to
+/// the next, with no state shared across checks (mirrors
+/// `resolve_static_member`'s guard-chain shape) — split into one helper per
+/// guard so each stays independently readable.
 fn lower_call_target_member(ctx: &mut LowerCtx, callee: &ast::Expr, object: &ast::Expr, field: &Sym) -> CallTarget {
-    // `module.Type.method(...)` — a cross-module type's convention/Codec
-    // method (`shapes.Dot.encode`). Resolve to the bare `Type.method` Named
-    // call; the module prefix is reattached at codegen (#411-B). Mirrors the
-    // checker's `resolve_static_member` (新①).
+    if let Some(t) = lower_call_target_cross_module_type(ctx, object, field) {
+        return t;
+    }
+    if let Some(t) = lower_call_target_module_call(ctx, object, field) {
+        return t;
+    }
+    // Dot-chain submodule fallback: still resolve so codegen doesn't break
+    // (checker emits error for these, but lowering must still produce valid IR)
+    if let Some(dotted) = ctx.env.import_table.resolve_dotted_path(&object.kind) {
+        return CallTarget::Module { module: sym(&dotted), func: *field, def_id: ctx.def_map.get(&sym(&format!("{}.{}", dotted, field))).copied() };
+    }
+    if let Some(t) = lower_call_target_typename(ctx, object, field) {
+        return t;
+    }
+    // Record field call: h.run("hello") where run is a Fn-typed field
+    // Must check before UFCS so field-access + call takes priority
+    let obj_ty = ctx.expr_ty(object);
+    if let Some(t) = lower_call_target_record_field(ctx, callee, object, field, &obj_ty) {
+        return t;
+    }
+    if let Some(t) = lower_call_target_builtin_module(ctx, object, field, &obj_ty) {
+        return t;
+    }
+    if let Some(t) = lower_call_target_convention_method(ctx, object, field, &obj_ty) {
+        return t;
+    }
+    if let Some(t) = lower_call_target_protocol_typevar(ctx, object, field, &obj_ty) {
+        return t;
+    }
+    if let Some(t) = lower_call_target_cross_module_ufcs(ctx, object, field, &obj_ty) {
+        return t;
+    }
+    // Generic method call: obj.method(args) → UFCS
+    let ir_obj = lower_expr(ctx, object);
+    CallTarget::Method { object: Box::new(ir_obj), method: *field }
+}
+
+/// `module.Type.method(...)` — a cross-module type's convention/Codec
+/// method (`shapes.Dot.encode`). Resolve to the bare `Type.method` Named
+/// call; the module prefix is reattached at codegen (#411-B). Mirrors the
+/// checker's `resolve_static_member` (新①).
+fn lower_call_target_cross_module_type(ctx: &mut LowerCtx, object: &ast::Expr, field: &Sym) -> Option<CallTarget> {
     if let ast::ExprKind::Member { object: inner, field: type_name } = &object.kind {
         if let ast::ExprKind::Ident { name: module, .. } = &inner.kind {
             if ctx.lookup_var(module).is_none()
@@ -469,12 +531,17 @@ fn lower_call_target_member(ctx: &mut LowerCtx, callee: &ast::Expr, object: &ast
             {
                 let key = sym(&format!("{}.{}", type_name, field));
                 if ctx.env.functions.contains_key(&key) {
-                    return CallTarget::Named { name: key };
+                    return Some(CallTarget::Named { name: key });
                 }
             }
         }
     }
-    // Check if this is a module call (e.g., string.trim, list.map)
+    None
+}
+
+/// Module call (`string.trim`, `list.map`) and `Type.method` on a bare
+/// ident (protocol impl, e.g. `Val.double`).
+fn lower_call_target_module_call(ctx: &mut LowerCtx, object: &ast::Expr, field: &Sym) -> Option<CallTarget> {
     if let ast::ExprKind::Ident { name: module, .. } = &object.kind {
         // Local variables take precedence over module names
         if ctx.lookup_var(module).is_none() && (module == "fan"
@@ -488,12 +555,12 @@ fn lower_call_target_member(ctx: &mut LowerCtx, callee: &ast::Expr, object: &ast
                     .unwrap_or(*module);
                 let qualified = format!("{}.{}", resolved.as_str(), type_name.as_str());
                 if ctx.env.types.contains_key(&sym(&qualified)) {
-                    return CallTarget::Named { name: *field };
+                    return Some(CallTarget::Named { name: *field });
                 }
             }
             let resolved = ctx.env.import_table.aliases.get(module).copied()
                 .unwrap_or(*module);
-            return CallTarget::Module { module: resolved, func: *field, def_id: ctx.def_map.get(&sym(&format!("{}.{}", resolved, field))).copied() };
+            return Some(CallTarget::Module { module: resolved, func: *field, def_id: ctx.def_map.get(&sym(&format!("{}.{}", resolved, field))).copied() });
         }
         // Ident that's not a module: check if Type.method (protocol impl, e.g. Val.double)
         if ctx.lookup_var(module).is_none() {
@@ -501,45 +568,48 @@ fn lower_call_target_member(ctx: &mut LowerCtx, callee: &ast::Expr, object: &ast
             if ctx.env.functions.contains_key(&sym(&key))
                 || ctx.find_convention_fn(&Ty::Named(sym(module), vec![]), field).is_some()
             {
-                return CallTarget::Named { name: sym(&key) };
+                return Some(CallTarget::Named { name: sym(&key) });
             }
         }
     }
-    // Dot-chain submodule fallback: still resolve so codegen doesn't break
-    // (checker emits error for these, but lowering must still produce valid IR)
-    if let Some(dotted) = ctx.env.import_table.resolve_dotted_path(&object.kind) {
-        return CallTarget::Module { module: sym(&dotted), func: *field, def_id: ctx.def_map.get(&sym(&format!("{}.{}", dotted, field))).copied() };
-    }
-    // TypeName.method(args) → direct named call (not UFCS, no object prepend)
+    None
+}
+
+/// `TypeName.method(args)` → direct named call (not UFCS, no object prepend).
+fn lower_call_target_typename(ctx: &mut LowerCtx, object: &ast::Expr, field: &Sym) -> Option<CallTarget> {
     if let ast::ExprKind::TypeName { name: type_name, .. } = &object.kind {
         let key = format!("{}.{}", type_name, field);
         if ctx.env.functions.contains_key(&sym(&key))
             || ctx.find_convention_fn(&Ty::Named(sym(type_name), vec![]), field).is_some()
         {
-            return CallTarget::Named { name: sym(&key) };
+            return Some(CallTarget::Named { name: sym(&key) });
         }
     }
-    // Record field call: h.run("hello") where run is a Fn-typed field
-    // Must check before UFCS so field-access + call takes priority
-    let obj_ty = ctx.expr_ty(object);
-    {
-        let resolved = ctx.env.resolve_named(&obj_ty);
-        let fn_field = match &resolved {
-            Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                fields.iter().find(|(n, _)| *n == *field)
-                    .and_then(|(_, t)| if matches!(t, Ty::Fn { .. }) { Some(()) } else { None })
-            }
-            _ => None,
-        };
-        if fn_field.is_some() {
-            let ir_obj = lower_expr(ctx, object);
-            let field_ty = ctx.expr_ty(callee);
-            let member = ctx.mk(IrExprKind::Member { object: Box::new(ir_obj), field: *field }, field_ty, callee.span);
-            return CallTarget::Computed { callee: Box::new(member) };
+    None
+}
+
+/// Record field call: `h.run("hello")` where `run` is a Fn-typed field.
+fn lower_call_target_record_field(ctx: &mut LowerCtx, callee: &ast::Expr, object: &ast::Expr, field: &Sym, obj_ty: &Ty) -> Option<CallTarget> {
+    let resolved = ctx.env.resolve_named(obj_ty);
+    let fn_field = match &resolved {
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            fields.iter().find(|(n, _)| *n == *field)
+                .and_then(|(_, t)| if matches!(t, Ty::Fn { .. }) { Some(()) } else { None })
         }
+        _ => None,
+    };
+    if fn_field.is_some() {
+        let ir_obj = lower_expr(ctx, object);
+        let field_ty = ctx.expr_ty(callee);
+        let member = ctx.mk(IrExprKind::Member { object: Box::new(ir_obj), field: *field }, field_ty, callee.span);
+        return Some(CallTarget::Computed { callee: Box::new(member) });
     }
-    // Built-in generic types: xs.len() → list.len(xs) for List, Map, etc.
-    let builtin_module = match &obj_ty {
+    None
+}
+
+/// Built-in generic types: `xs.len()` → `list.len(xs)` for List, Map, etc.
+fn lower_call_target_builtin_module(ctx: &mut LowerCtx, object: &ast::Expr, field: &Sym, obj_ty: &Ty) -> Option<CallTarget> {
+    let builtin_module = match obj_ty {
         Ty::Applied(TypeConstructorId::List, _) => Some("list"),
         Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
         Ty::Applied(TypeConstructorId::Set, _) => Some("set"),
@@ -565,15 +635,19 @@ fn lower_call_target_member(ctx: &mut LowerCtx, callee: &ast::Expr, object: &ast
             || crate::stdlib::resolve_ufcs_candidates(field).contains(&module)
         {
             let ir_obj = lower_expr(ctx, object);
-            return CallTarget::Method { object: Box::new(ir_obj), method: sym(&key) };
+            return Some(CallTarget::Method { object: Box::new(ir_obj), method: sym(&key) });
         }
     }
-    // Check for convention method: dog.repr() → Dog.repr(dog)
-    let type_name_opt = match &obj_ty {
+    None
+}
+
+/// Convention method: `dog.repr()` → `Dog.repr(dog)`.
+fn lower_call_target_convention_method(ctx: &mut LowerCtx, object: &ast::Expr, field: &Sym, obj_ty: &Ty) -> Option<CallTarget> {
+    let type_name_opt = match obj_ty {
         Ty::Named(name, _) => Some(name.to_string()),
         Ty::Record { .. } | Ty::Variant { .. } => {
             ctx.env.types.iter().find_map(|(name, ty)| {
-                if ty == &obj_ty && name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                if ty == obj_ty && name.chars().next().map_or(false, |c| c.is_uppercase()) {
                     Some(name.to_string())
                 } else { None }
             })
@@ -586,52 +660,60 @@ fn lower_call_target_member(ctx: &mut LowerCtx, callee: &ast::Expr, object: &ast
             || ctx.find_convention_fn(&Ty::Named(sym(&type_name), vec![]), field).is_some()
         {
             let ir_obj = lower_expr(ctx, object);
-            return CallTarget::Method { object: Box::new(ir_obj), method: sym(&convention_key) };
+            return Some(CallTarget::Method { object: Box::new(ir_obj), method: sym(&convention_key) });
         }
     }
-    // Protocol method on TypeVar: item.show() where item: T, T: Showable
-    // Lower as "T.show" convention key — monomorphizer will substitute T → ConcreteType
-    // Also check variable's declared type: inside lambdas, the type checker may
-    // resolve the expression type to Fn (partial application), but the variable's
-    // declared type retains the TypeVar.
-    // Also check for TypeVar behind Fn wrapper: inside lambdas, the type checker
-    // may assign Fn type to the parameter (partial application of protocol method),
-    // but the generic function's param list may have the real TypeVar.
-    let tv_from_obj = match &obj_ty {
-        Ty::TypeVar(tv) => Some(tv.clone()),
-        _ => {
-            // Check all protocol bounds to see if this method belongs to one,
-            // and identify which TypeVar it corresponds to.
-            let mut found = None;
-            for (tv, protos) in ctx.protocol_bounds.iter() {
-                for proto_name in protos {
-                    if let Some(proto_def) = ctx.env.protocols.get(&sym(proto_name)) {
-                        if proto_def.methods.iter().any(|m| m.name == *field) {
-                            found = Some(tv.clone());
-                            break;
-                        }
-                    }
-                }
-                if found.is_some() { break; }
-            }
-            found
-        }
-    };
-    if let Some(tv) = tv_from_obj {
-        if let Some(proto_names) = ctx.protocol_bounds.get(&tv).cloned() {
-            for proto_name in &proto_names {
-                if let Some(proto_def) = ctx.env.protocols.get(&sym(proto_name)) {
-                    if proto_def.methods.iter().any(|m| m.name == *field) {
-                        let ir_obj = lower_expr(ctx, object);
-                        let convention_key = sym(&format!("{}.{}", tv, field));
-                        return CallTarget::Method { object: Box::new(ir_obj), method: convention_key };
-                    }
+    None
+}
+
+/// Identify which TypeVar `field` might be a protocol method of: either
+/// `obj_ty` IS a bare TypeVar, or (for a TypeVar hidden behind an Fn
+/// wrapper — see [`lower_call_target_protocol_typevar`]) scan all protocol
+/// bounds in scope for one whose protocol declares `field` as a method.
+/// Verbatim text move out of [`lower_call_target_protocol_typevar`].
+fn lower_call_target_typevar_for_field(ctx: &mut LowerCtx, field: &Sym, obj_ty: &Ty) -> Option<Sym> {
+    if let Ty::TypeVar(tv) = obj_ty {
+        return Some(*tv);
+    }
+    // Check all protocol bounds to see if this method belongs to one,
+    // and identify which TypeVar it corresponds to.
+    for (tv, protos) in ctx.protocol_bounds.iter() {
+        for proto_name in protos {
+            if let Some(proto_def) = ctx.env.protocols.get(&sym(proto_name)) {
+                if proto_def.methods.iter().any(|m| m.name == *field) {
+                    return Some(*tv);
                 }
             }
         }
     }
-    // Cross-module UFCS: object type is Named → find defining module
-    if let Ty::Named(type_name, _) = &obj_ty {
+    None
+}
+
+/// Protocol method on TypeVar: `item.show()` where `item: T, T: Showable`.
+/// Lowered as a `T.show` convention key — the monomorphizer substitutes
+/// `T` → concrete type. Also checks for a TypeVar behind an Fn wrapper:
+/// inside lambdas, the type checker may assign Fn type to the parameter
+/// (partial application of a protocol method), but the generic function's
+/// param list may still carry the real TypeVar.
+fn lower_call_target_protocol_typevar(ctx: &mut LowerCtx, object: &ast::Expr, field: &Sym, obj_ty: &Ty) -> Option<CallTarget> {
+    let tv_from_obj = lower_call_target_typevar_for_field(ctx, field, obj_ty)?;
+    if let Some(proto_names) = ctx.protocol_bounds.get(&tv_from_obj).cloned() {
+        for proto_name in &proto_names {
+            if let Some(proto_def) = ctx.env.protocols.get(&sym(proto_name)) {
+                if proto_def.methods.iter().any(|m| m.name == *field) {
+                    let ir_obj = lower_expr(ctx, object);
+                    let convention_key = sym(&format!("{}.{}", tv_from_obj, field));
+                    return Some(CallTarget::Method { object: Box::new(ir_obj), method: convention_key });
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Cross-module UFCS: object type is `Named` → find the defining module.
+fn lower_call_target_cross_module_ufcs(ctx: &mut LowerCtx, object: &ast::Expr, field: &Sym, obj_ty: &Ty) -> Option<CallTarget> {
+    if let Ty::Named(type_name, _) = obj_ty {
         // A pinned QUALIFIED name (`box.Box`) carries its defining
         // module directly (same repair as the checker's UFCS arm —
         // the suffix scan only matched historical bare names).
@@ -650,13 +732,11 @@ fn lower_call_target_member(ctx: &mut LowerCtx, callee: &ast::Expr, object: &ast
             if ctx.env.functions.contains_key(&sym(&key)) {
                 let ir_obj = lower_expr(ctx, object);
                 // Return Method with "module.func" key — lower_call converts to Module target
-                return CallTarget::Method { object: Box::new(ir_obj), method: sym(&key) };
+                return Some(CallTarget::Method { object: Box::new(ir_obj), method: sym(&key) });
             }
         }
     }
-    // Generic method call: obj.method(args) → UFCS
-    let ir_obj = lower_expr(ctx, object);
-    CallTarget::Method { object: Box::new(ir_obj), method: *field }
+    None
 }
 
 /// Replace each `Ident { name }` that names a call parameter with the AST of the

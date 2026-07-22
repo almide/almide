@@ -241,175 +241,193 @@ impl Checker {
 
     fn infer_expr_g2_binary(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::Binary { op, left, right, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_binary called on the wrong ExprKind") };
-                let lt = self.infer_expr(left);
-                let rt = self.infer_expr(right);
-                // E024, binop-operand edition (fuzz seed-20260718 index 114): a
-                // bare int literal meeting a SIZED operand adopts its width at
-                // lowering — pin that width as the literal's range context so
-                // the post-solve check fires (`(x - x) - 256` with x: Int8 —
-                // native rustc rejected `256i8` while check passed). Every
-                // literal has a site now (the liberal enqueue), so this only
-                // sets context_ty.
-                if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "^") {
-                    let lit_id = |e: &ast::Expr| match &e.kind {
-                        ExprKind::Int { .. } => Some(e.id),
-                        ExprKind::Unary { op, operand, .. }
-                            if op.as_str() == "-"
-                                && matches!(&operand.kind, ExprKind::Int { .. }) =>
-                        {
-                            Some(operand.id)
-                        }
-                        ExprKind::Paren { expr }
-                            if matches!(&expr.kind, ExprKind::Int { .. }) =>
-                        {
-                            Some(expr.id)
-                        }
-                        _ => None,
-                    };
-                    let is_sized_int = |t: &Ty| matches!(
-                        t,
-                        Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
-                            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                    );
-                    let lc0 = resolve_ty(&lt, &self.uf);
-                    let rc0 = resolve_ty(&rt, &self.uf);
-                    let l_lit = lit_id(left);
-                    let r_lit = lit_id(right);
-                    if is_sized_int(&lc0) {
-                        if let Some(id) = r_lit {
-                            self.pin_int_literal_context(id, &lc0);
-                        }
-                    }
-                    if is_sized_int(&rc0) {
-                        if let Some(id) = l_lit {
-                            self.pin_int_literal_context(id, &rc0);
-                        }
-                    }
+        let lt = self.infer_expr(left);
+        let rt = self.infer_expr(right);
+        self.pin_binop_literal_context(op, left, right, &lt, &rt);
+        match op.as_str() {
+            "+" => {
+                let lc = resolve_ty(&lt, &self.uf);
+                let rc = resolve_ty(&rt, &self.uf);
+                self.infer_plus_op(&lc, &rc, lt)
+            }
+            "-" | "*" | "/" | "%" | "^" => self.infer_binop_arith(op, &lt, &rt),
+            "++" => {
+                self.emit(super::err(
+                    format!("operator '++' has been removed. Use '+' for concatenation"),
+                    "Replace ++ with +", "operator ++"));
+                lt
+            }
+            "==" | "!=" | "<" | ">" | "<=" | ">=" => self.infer_binop_compare(op, left, right, &lt, &rt),
+            "and" | "or" => self.infer_binop_logical(op, &lt, &rt),
+            _ => lt,
+        }
+    }
+
+    /// E024, binop-operand edition (fuzz seed-20260718 index 114): a bare
+    /// int literal meeting a SIZED operand adopts its width at lowering —
+    /// pin that width as the literal's range context so the post-solve
+    /// check fires (`(x - x) - 256` with x: Int8 — native rustc rejected
+    /// `256i8` while check passed). Every literal has a site now (the
+    /// liberal enqueue), so this only sets context_ty. Verbatim text move
+    /// out of [`Self::infer_expr_g2_binary`].
+    fn pin_binop_literal_context(&mut self, op: &Sym, left: &ast::Expr, right: &ast::Expr, lt: &Ty, rt: &Ty) {
+        if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "^") {
+            let lit_id = |e: &ast::Expr| match &e.kind {
+                ExprKind::Int { .. } => Some(e.id),
+                ExprKind::Unary { op, operand, .. }
+                    if op.as_str() == "-"
+                        && matches!(&operand.kind, ExprKind::Int { .. }) =>
+                {
+                    Some(operand.id)
                 }
-                match op.as_str() {
-                    "+" => {
-                        let lc = resolve_ty(&lt, &self.uf);
-                        let rc = resolve_ty(&rt, &self.uf);
-                        self.infer_plus_op(&lc, &rc, lt)
-                    }
-                    "-" | "*" | "/" | "%" | "^" => {
-                        let lc = resolve_ty(&lt, &self.uf);
-                        let rc = resolve_ty(&rt, &self.uf);
-                        // Matrix operators: *, +, - on Matrix types
-                        if lc == Ty::Matrix || rc == Ty::Matrix {
-                            Ty::Matrix
-                        } else {
-                            // Sized Numeric Types (Stage 1c): same-width
-                            // arithmetic accepts every sized numeric variant.
-                            let is_numeric = |t: &Ty| matches!(
-                                t,
-                                Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_)
-                                    | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
-                                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                                    | Ty::Float32 | Ty::Float64
-                                    | Ty::Matrix
-                                    // GPU vector/matrix types (Vec2, Vec3, Vec4, Mat3, Mat4)
-                                    // support arithmetic ops; emitted as WGSL builtins.
-                                    | Ty::Named(..)
-                            );
-                            let is_sized_scalar = |t: &Ty| matches!(
-                                t,
-                                Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
-                                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                                    | Ty::Float32 | Ty::Float64
-                            );
-                            if !is_numeric(&lc) || !is_numeric(&rc) {
-                                self.emit(super::err(
-                                    format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
-                                    "Use numeric types (Int or Float)", format!("operator {}", op)));
-                            }
-                            // Stage 1c: reject mixed-sized-width arithmetic.
-                            // See `infer_plus_op` for rationale.
-                            if is_sized_scalar(&lc) && is_sized_scalar(&rc) && lc != rc {
-                                self.emit(super::err(
-                                    format!(
-                                        "operator '{}' mixes sized numeric types {} and {} — \
-                                         explicit conversion required (e.g. `.to_{}()`)",
-                                        op, lc.display(), rc.display(),
-                                        lc.display().to_lowercase()),
-                                    "Convert one side with `.to_intN()` / `.to_floatN()` before the op",
-                                    format!("operator {}", op)));
-                                lc
-                            } else if lc.compatible(&rc) && is_sized_scalar(&lc) {
-                                lc
-                            } else if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
-                        }
-                    }
-                    "++" => {
-                        self.emit(super::err(
-                            format!("operator '++' has been removed. Use '+' for concatenation"),
-                            "Replace ++ with +", "operator ++"));
-                        lt
-                    }
-                    "==" | "!=" | "<" | ">" | "<=" | ">=" => {
-                        // Check none comparison: only valid with Option types
-                        let left_is_none = matches!(left.kind, ExprKind::None);
-                        let right_is_none = matches!(right.kind, ExprKind::None);
-                        if right_is_none && !left_is_none {
-                            let lc = resolve_ty(&lt, &self.uf);
-                            if !lc.is_option() && !matches!(lc, Ty::Unknown | Ty::TypeVar(_)) {
-                                self.emit(super::err(
-                                    format!("cannot compare {} with none — only Option types support none comparison", lc.display()),
-                                    "Use Option type or check with is_ok()/is_err() for Result", "comparison with none"));
-                            }
-                        }
-                        if left_is_none && !right_is_none {
-                            let rc = resolve_ty(&rt, &self.uf);
-                            if !rc.is_option() && !matches!(rc, Ty::Unknown | Ty::TypeVar(_)) {
-                                self.emit(super::err(
-                                    format!("cannot compare none with {} — only Option types support none comparison", rc.display()),
-                                    "Use Option type or check with is_ok()/is_err() for Result", "comparison with none"));
-                            }
-                        }
-                        // Unify left/right types so TypeVars in none/err/constructors get resolved
-                        self.unify_infer(&lt, &rt);
-                        // Ordering (< <= > >=) is defined ONLY on scalar orderable
-                        // types. On a compound operand (Tuple/Option/Result/List/
-                        // Map/Set/Record/custom) the checker used to pass while
-                        // codegen diverged: native silently relied on Rust's derive
-                        // (and FAILED on records, E0369) and WASM ICEd
-                        // (equality.rs no-comparison arm). Reject uniformly so check
-                        // matches codegen on both targets; equality (== !=) still
-                        // works (deep structural). #652
-                        if matches!(op.as_str(), "<" | ">" | "<=" | ">=") {
-                            let lc = resolve_ty(&lt, &self.uf);
-                            let orderable = matches!(lc,
-                                Ty::Int | Ty::Float | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
-                                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                                | Ty::Float32 | Ty::Float64 | Ty::String | Ty::Bool
-                                | Ty::Unknown | Ty::TypeVar(_) | Ty::Never);
-                            if !orderable {
-                                self.emit(super::err(
-                                    format!("operator '{}' is not defined for {} — ordering applies to Int, Float, String, and Bool", op, lc.display()),
-                                    "Compare scalar fields explicitly, or use list.sort / list.min / list.max for ordered collections",
-                                    format!("operator {}", op)));
-                            }
-                        }
-                        Ty::Bool
-                    }
-                    "and" | "or" => {
-                        let lc = resolve_ty(&lt, &self.uf);
-                        let rc = resolve_ty(&rt, &self.uf);
-                        let is_bool = |t: &Ty| matches!(t, Ty::Bool | Ty::Unknown | Ty::TypeVar(_));
-                        if !is_bool(&lc) {
-                            self.emit(super::err(
-                                format!("operator '{}' requires Bool but got {}", op, lc.display()),
-                                "Use Bool values with logical operators", format!("operator {}", op)));
-                        }
-                        if !is_bool(&rc) {
-                            self.emit(super::err(
-                                format!("operator '{}' requires Bool but got {}", op, rc.display()),
-                                "Use Bool values with logical operators", format!("operator {}", op)));
-                        }
-                        Ty::Bool
-                    }
-                    _ => lt,
+                ExprKind::Paren { expr }
+                    if matches!(&expr.kind, ExprKind::Int { .. }) =>
+                {
+                    Some(expr.id)
                 }
+                _ => None,
+            };
+            let is_sized_int = |t: &Ty| matches!(
+                t,
+                Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            );
+            let lc0 = resolve_ty(lt, &self.uf);
+            let rc0 = resolve_ty(rt, &self.uf);
+            let l_lit = lit_id(left);
+            let r_lit = lit_id(right);
+            if is_sized_int(&lc0) {
+                if let Some(id) = r_lit {
+                    self.pin_int_literal_context(id, &lc0);
+                }
+            }
+            if is_sized_int(&rc0) {
+                if let Some(id) = l_lit {
+                    self.pin_int_literal_context(id, &rc0);
+                }
+            }
+        }
+    }
+
+    /// `-`/`*`/`/`/`%`/`^` arm of [`Self::infer_expr_g2_binary`]: Matrix
+    /// arithmetic, numeric-operand and mixed-sized-width diagnostics, and
+    /// same-width/Float-promotion result-type resolution. Verbatim text move.
+    fn infer_binop_arith(&mut self, op: &Sym, lt: &Ty, rt: &Ty) -> Ty {
+        let lc = resolve_ty(lt, &self.uf);
+        let rc = resolve_ty(rt, &self.uf);
+        // Matrix operators: *, +, - on Matrix types
+        if lc == Ty::Matrix || rc == Ty::Matrix {
+            Ty::Matrix
+        } else {
+            // Sized Numeric Types (Stage 1c): same-width
+            // arithmetic accepts every sized numeric variant.
+            let is_numeric = |t: &Ty| matches!(
+                t,
+                Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_)
+                    | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                    | Ty::Float32 | Ty::Float64
+                    | Ty::Matrix
+                    // GPU vector/matrix types (Vec2, Vec3, Vec4, Mat3, Mat4)
+                    // support arithmetic ops; emitted as WGSL builtins.
+                    | Ty::Named(..)
+            );
+            let is_sized_scalar = |t: &Ty| matches!(
+                t,
+                Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                    | Ty::Float32 | Ty::Float64
+            );
+            if !is_numeric(&lc) || !is_numeric(&rc) {
+                self.emit(super::err(
+                    format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
+                    "Use numeric types (Int or Float)", format!("operator {}", op)));
+            }
+            // Stage 1c: reject mixed-sized-width arithmetic.
+            // See `infer_plus_op` for rationale.
+            if is_sized_scalar(&lc) && is_sized_scalar(&rc) && lc != rc {
+                self.emit(super::err(
+                    format!(
+                        "operator '{}' mixes sized numeric types {} and {} — \
+                         explicit conversion required (e.g. `.to_{}()`)",
+                        op, lc.display(), rc.display(),
+                        lc.display().to_lowercase()),
+                    "Convert one side with `.to_intN()` / `.to_floatN()` before the op",
+                    format!("operator {}", op)));
+                lc
+            } else if lc.compatible(&rc) && is_sized_scalar(&lc) {
+                lc
+            } else if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt.clone() }
+        }
+    }
+
+    /// `==`/`!=`/`<`/`>`/`<=`/`>=` arm of [`Self::infer_expr_g2_binary`]:
+    /// none-comparison validity, TypeVar unification, and the ordering
+    /// (`<`/`>`/`<=`/`>=`) scalar-orderable-types restriction (#652).
+    /// Verbatim text move.
+    fn infer_binop_compare(&mut self, op: &Sym, left: &ast::Expr, right: &ast::Expr, lt: &Ty, rt: &Ty) -> Ty {
+        // Check none comparison: only valid with Option types
+        let left_is_none = matches!(left.kind, ExprKind::None);
+        let right_is_none = matches!(right.kind, ExprKind::None);
+        if right_is_none && !left_is_none {
+            let lc = resolve_ty(lt, &self.uf);
+            if !lc.is_option() && !matches!(lc, Ty::Unknown | Ty::TypeVar(_)) {
+                self.emit(super::err(
+                    format!("cannot compare {} with none — only Option types support none comparison", lc.display()),
+                    "Use Option type or check with is_ok()/is_err() for Result", "comparison with none"));
+            }
+        }
+        if left_is_none && !right_is_none {
+            let rc = resolve_ty(rt, &self.uf);
+            if !rc.is_option() && !matches!(rc, Ty::Unknown | Ty::TypeVar(_)) {
+                self.emit(super::err(
+                    format!("cannot compare none with {} — only Option types support none comparison", rc.display()),
+                    "Use Option type or check with is_ok()/is_err() for Result", "comparison with none"));
+            }
+        }
+        // Unify left/right types so TypeVars in none/err/constructors get resolved
+        self.unify_infer(lt, rt);
+        // Ordering (< <= > >=) is defined ONLY on scalar orderable
+        // types. On a compound operand (Tuple/Option/Result/List/
+        // Map/Set/Record/custom) the checker used to pass while
+        // codegen diverged: native silently relied on Rust's derive
+        // (and FAILED on records, E0369) and WASM ICEd
+        // (equality.rs no-comparison arm). Reject uniformly so check
+        // matches codegen on both targets; equality (== !=) still
+        // works (deep structural). #652
+        if matches!(op.as_str(), "<" | ">" | "<=" | ">=") {
+            let lc = resolve_ty(lt, &self.uf);
+            let orderable = matches!(lc,
+                Ty::Int | Ty::Float | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                | Ty::Float32 | Ty::Float64 | Ty::String | Ty::Bool
+                | Ty::Unknown | Ty::TypeVar(_) | Ty::Never);
+            if !orderable {
+                self.emit(super::err(
+                    format!("operator '{}' is not defined for {} — ordering applies to Int, Float, String, and Bool", op, lc.display()),
+                    "Compare scalar fields explicitly, or use list.sort / list.min / list.max for ordered collections",
+                    format!("operator {}", op)));
+            }
+        }
+        Ty::Bool
+    }
+
+    /// `and`/`or` arm of [`Self::infer_expr_g2_binary`]. Verbatim text move.
+    fn infer_binop_logical(&mut self, op: &Sym, lt: &Ty, rt: &Ty) -> Ty {
+        let lc = resolve_ty(lt, &self.uf);
+        let rc = resolve_ty(rt, &self.uf);
+        let is_bool = |t: &Ty| matches!(t, Ty::Bool | Ty::Unknown | Ty::TypeVar(_));
+        if !is_bool(&lc) {
+            self.emit(super::err(
+                format!("operator '{}' requires Bool but got {}", op, lc.display()),
+                "Use Bool values with logical operators", format!("operator {}", op)));
+        }
+        if !is_bool(&rc) {
+            self.emit(super::err(
+                format!("operator '{}' requires Bool but got {}", op, rc.display()),
+                "Use Bool values with logical operators", format!("operator {}", op)));
+        }
+        Ty::Bool
     }
 
     fn infer_expr_g2_index_access(&mut self, expr: &mut ast::Expr) -> Ty {
