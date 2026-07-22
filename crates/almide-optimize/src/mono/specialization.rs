@@ -600,19 +600,65 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
             // mismatch.
             *op = repair_binop_for_types(*op, &left.ty, &right.ty);
         }
+        IrExprKind::UnOp { .. } | IrExprKind::If { .. }
+        | IrExprKind::ForIn { .. } | IrExprKind::While { .. } => substitute_control_types(expr, bindings),
+        IrExprKind::Match { .. } => substitute_match_types(expr, bindings),
+        IrExprKind::Block { .. } => substitute_block_types(expr, bindings),
+        IrExprKind::Call { .. } => substitute_call_types(expr, bindings),
+        IrExprKind::List { .. } | IrExprKind::Tuple { .. } | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::RustMacro { .. } => substitute_container_literal_types(expr, bindings),
+        IrExprKind::Range { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::StringInterp { .. } => substitute_container_access_types(expr, bindings),
+        IrExprKind::Lambda { body, params, .. } => {
+            for (_, ty) in params { *ty = substitute_ty(ty, bindings); }
+            substitute_expr_types(body, bindings);
+        }
+        IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::Try { .. }
+        | IrExprKind::Await { .. }
+        | IrExprKind::Unwrap { .. } | IrExprKind::ToOption { .. }
+        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
+        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::ToVec { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::UnwrapOr { .. } => substitute_wrap_types(expr, bindings),
+        _ => {}
+    }
+}
+
+/// UnOp/If/ForIn/While: substitute in operand, condition, and bodies.
+fn substitute_control_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
+    match &mut expr.kind {
         IrExprKind::UnOp { operand, .. } => substitute_expr_types(operand, bindings),
         IrExprKind::If { cond, then, else_ } => {
             substitute_expr_types(cond, bindings);
             substitute_expr_types(then, bindings);
             substitute_expr_types(else_, bindings);
         }
-        IrExprKind::Match { .. } => substitute_match_types(expr, bindings),
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { substitute_stmt_types(s, bindings); }
-            if let Some(e) = expr { substitute_expr_types(e, bindings); }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            substitute_expr_types(iterable, bindings);
+            for s in body { substitute_stmt_types(s, bindings); }
         }
-        IrExprKind::Call { .. } => substitute_call_types(expr, bindings),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+        IrExprKind::While { cond, body } => {
+            substitute_expr_types(cond, bindings);
+            for s in body { substitute_stmt_types(s, bindings); }
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Block: substitute in statements and tail.
+fn substitute_block_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
+    let IrExprKind::Block { stmts, expr } = &mut expr.kind else { unreachable!() };
+    for s in stmts { substitute_stmt_types(s, bindings); }
+    if let Some(e) = expr { substitute_expr_types(e, bindings); }
+}
+
+/// List/Tuple/Record/SpreadRecord/MapLiteral/Fan/RustMacro: substitute in each child expression.
+fn substitute_container_literal_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
+    match &mut expr.kind {
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
             for e in elements { substitute_expr_types(e, bindings); }
         }
         IrExprKind::Record { fields, .. } => {
@@ -628,6 +674,16 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
                 substitute_expr_types(v, bindings);
             }
         }
+        IrExprKind::RustMacro { args, .. } => {
+            for a in args { substitute_expr_types(a, bindings); }
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Range/Member/TupleIndex/IndexAccess/MapAccess/StringInterp: substitute in each accessed sub-expression.
+fn substitute_container_access_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
+    match &mut expr.kind {
         IrExprKind::Range { start, end, .. } => {
             substitute_expr_types(start, bindings);
             substitute_expr_types(end, bindings);
@@ -643,18 +699,6 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
             substitute_expr_types(object, bindings);
             substitute_expr_types(key, bindings);
         }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            substitute_expr_types(iterable, bindings);
-            for s in body { substitute_stmt_types(s, bindings); }
-        }
-        IrExprKind::While { cond, body } => {
-            substitute_expr_types(cond, bindings);
-            for s in body { substitute_stmt_types(s, bindings); }
-        }
-        IrExprKind::Lambda { body, params, .. } => {
-            for (_, ty) in params { *ty = substitute_ty(ty, bindings); }
-            substitute_expr_types(body, bindings);
-        }
         IrExprKind::StringInterp { parts } => {
             for part in parts {
                 if let IrStringPart::Expr { expr } = part {
@@ -662,6 +706,14 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
                 }
             }
         }
+        _ => unreachable!(),
+    }
+}
+
+/// ResultOk/ResultErr/OptionSome/Try/Await/Unwrap/ToOption/Clone/Deref/Borrow/BoxNew/RcWrap/
+/// ToVec/OptionalChain/UnwrapOr: substitute in the wrapped expression(s).
+fn substitute_wrap_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
+    match &mut expr.kind {
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
         | IrExprKind::Await { expr }
@@ -674,13 +726,7 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
             substitute_expr_types(expr, bindings);
             substitute_expr_types(fallback, bindings);
         }
-        IrExprKind::Fan { exprs } => {
-            for e in exprs { substitute_expr_types(e, bindings); }
-        }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { substitute_expr_types(a, bindings); }
-        }
-        _ => {}
+        _ => unreachable!(),
     }
 }
 
