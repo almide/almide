@@ -113,6 +113,67 @@ pub fn cmd_ide_outline(target: &str, filter: Option<&str>, json: bool) {
     }
 }
 
+/// `cmd_ide_doc`'s `module.fn` stdlib-signature lookup. Extracted verbatim —
+/// prints and returns `true` on a hit; `false` falls through to the next
+/// check, matching the original nested-if's fallthrough exactly.
+fn try_print_stdlib_doc(resolved: &str) -> bool {
+    let Some((module, fname)) = resolved.split_once('.') else { return false; };
+    let Some(sig) = almide::stdlib::lookup_sig(module, fname) else { return false; };
+    let params = sig.params.iter()
+        .map(|(n, t)| format!("{}: {}", n.as_str(), t.display()))
+        .collect::<Vec<_>>().join(", ");
+    let effect = if sig.is_effect { "effect fn " } else { "fn " };
+    out(&format!("{}{}.{}({}) -> {}", effect, module, fname, params, sig.ret.display()));
+    true
+}
+
+/// `cmd_ide_doc`'s user-function lookup. Extracted verbatim.
+fn try_print_user_fn_doc(iface: &almide::interface::ModuleInterface, symbol: &str) -> bool {
+    let Some(f) = iface.functions.iter().find(|f| f.name == symbol) else { return false; };
+    let params = f.params.iter()
+        .map(|p| format!("{}: {}", p.name, format_tref(&p.ty)))
+        .collect::<Vec<_>>().join(", ");
+    let effect_kw = if f.effect { "effect fn " } else { "fn " };
+    out(&format!("{}{}({}) -> {}", effect_kw, f.name, params, format_tref(&f.ret)));
+    if let Some(doc) = &f.doc {
+        out("");
+        for line in doc.lines() { out(&format!("{}", line)); }
+    }
+    true
+}
+
+/// `cmd_ide_doc`'s user-type lookup. Extracted verbatim.
+fn try_print_user_type_doc(iface: &almide::interface::ModuleInterface, symbol: &str) -> bool {
+    let Some(t) = iface.types.iter().find(|t| t.name == symbol) else { return false; };
+    let generics = t.generics.as_ref()
+        .filter(|g| !g.is_empty())
+        .map(|g| format!("[{}]", g.join(", ")))
+        .unwrap_or_default();
+    match &t.kind {
+        almide::interface::TypeKindExport::Record { fields } => {
+            out(&format!("type {}{} {{", t.name, generics));
+            for f in fields {
+                out(&format!("    {}: {}", f.name, format_tref(&f.ty)));
+            }
+            out(&format!("}}"));
+        }
+        almide::interface::TypeKindExport::Variant { cases } => {
+            out(&format!("type {}{}", t.name, generics));
+            for c in cases {
+                out(&format!("    | {}", c.name));
+            }
+        }
+        almide::interface::TypeKindExport::Alias { target } => {
+            out(&format!("type {}{} = {}", t.name, generics, format_tref(target)));
+        }
+    }
+    if let Some(doc) = &t.doc {
+        out("");
+        for line in doc.lines() { out(&format!("{}", line)); }
+    }
+    true
+}
+
 /// Show signature + doc for one symbol.
 /// Handles:
 ///   `module.fn`              — stdlib lookup (e.g. `string.to_upper`)
@@ -124,62 +185,14 @@ pub fn cmd_ide_doc(symbol: &str, file: &str) {
     // `almide ide doc @stdlib/string.to_upper` and `almide ide doc
     // string.to_upper` now behave identically.
     let resolved = symbol.strip_prefix(STDLIB_PREFIX).unwrap_or(symbol);
-    if let Some((module, fname)) = resolved.split_once('.') {
-        if let Some(sig) = almide::stdlib::lookup_sig(module, fname) {
-            let params = sig.params.iter()
-                .map(|(n, t)| format!("{}: {}", n.as_str(), t.display()))
-                .collect::<Vec<_>>().join(", ");
-            let effect = if sig.is_effect { "effect fn " } else { "fn " };
-            out(&format!("{}{}.{}({}) -> {}", effect, module, fname, params, sig.ret.display()));
-            return;
-        }
-    }
+    if try_print_stdlib_doc(resolved) { return; }
 
     let iface = match build_interface(file) {
         Ok(i) => i,
         Err(e) => { err(&format!("{}", e)); std::process::exit(1); }
     };
-    if let Some(f) = iface.functions.iter().find(|f| f.name == symbol) {
-        let params = f.params.iter()
-            .map(|p| format!("{}: {}", p.name, format_tref(&p.ty)))
-            .collect::<Vec<_>>().join(", ");
-        let effect_kw = if f.effect { "effect fn " } else { "fn " };
-        out(&format!("{}{}({}) -> {}", effect_kw, f.name, params, format_tref(&f.ret)));
-        if let Some(doc) = &f.doc {
-            out("");
-            for line in doc.lines() { out(&format!("{}", line)); }
-        }
-        return;
-    }
-    if let Some(t) = iface.types.iter().find(|t| t.name == symbol) {
-        let generics = t.generics.as_ref()
-            .filter(|g| !g.is_empty())
-            .map(|g| format!("[{}]", g.join(", ")))
-            .unwrap_or_default();
-        match &t.kind {
-            almide::interface::TypeKindExport::Record { fields } => {
-                out(&format!("type {}{} {{", t.name, generics));
-                for f in fields {
-                    out(&format!("    {}: {}", f.name, format_tref(&f.ty)));
-                }
-                out(&format!("}}"));
-            }
-            almide::interface::TypeKindExport::Variant { cases } => {
-                out(&format!("type {}{}", t.name, generics));
-                for c in cases {
-                    out(&format!("    | {}", c.name));
-                }
-            }
-            almide::interface::TypeKindExport::Alias { target } => {
-                out(&format!("type {}{} = {}", t.name, generics, format_tref(target)));
-            }
-        }
-        if let Some(doc) = &t.doc {
-            out("");
-            for line in doc.lines() { out(&format!("{}", line)); }
-        }
-        return;
-    }
+    if try_print_user_fn_doc(&iface, symbol) { return; }
+    if try_print_user_type_doc(&iface, symbol) { return; }
 
     err(&format!("error: symbol '{}' not found", symbol));
     err(&format!("  hint: try `almide ide outline {}` to list available symbols", file));
