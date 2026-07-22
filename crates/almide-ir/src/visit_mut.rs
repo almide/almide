@@ -48,37 +48,19 @@ pub fn walk_expr_mut<V: IrMutVisitor>(v: &mut V, expr: &mut IrExpr) {
             v.visit_expr_mut(then);
             v.visit_expr_mut(else_);
         }
-        IrExprKind::Match { subject, arms } => {
-            v.visit_expr_mut(subject);
-            for arm in arms {
-                v.visit_pattern_mut(&mut arm.pattern);
-                if let Some(g) = &mut arm.guard { v.visit_expr_mut(g); }
-                v.visit_expr_mut(&mut arm.body);
-            }
-        }
+        IrExprKind::Match { subject, arms } => walk_expr_mut_match(v, subject, arms),
         IrExprKind::Block { stmts, expr } => {
             for s in stmts { v.visit_stmt_mut(s); }
             if let Some(e) = expr { v.visit_expr_mut(e); }
         }
 
         // ── Loops ──
-        IrExprKind::ForIn { iterable, body, .. } => {
-            v.visit_expr_mut(iterable);
-            for s in body { v.visit_stmt_mut(s); }
-        }
-        IrExprKind::While { cond, body } => {
-            v.visit_expr_mut(cond);
-            for s in body { v.visit_stmt_mut(s); }
-        }
+        IrExprKind::ForIn { iterable, body, .. } => walk_expr_mut_loop_body(v, iterable, body),
+        IrExprKind::While { cond, body } => walk_expr_mut_loop_body(v, cond, body),
 
         // ── Calls ──
         IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
-            match target {
-                CallTarget::Method { object, .. } => v.visit_expr_mut(object),
-                CallTarget::Computed { callee } => v.visit_expr_mut(callee),
-                _ => {}
-            }
-            for a in args { v.visit_expr_mut(a); }
+            walk_expr_mut_call(v, target, args)
         }
         IrExprKind::RuntimeCall { args, .. } => {
             for a in args { v.visit_expr_mut(a); }
@@ -89,12 +71,10 @@ pub fn walk_expr_mut<V: IrMutVisitor>(v: &mut V, expr: &mut IrExpr) {
         | IrExprKind::Fan { exprs: elements } => {
             for e in elements { v.visit_expr_mut(e); }
         }
-        IrExprKind::Record { fields, .. } => {
-            for (_, val) in fields { v.visit_expr_mut(val); }
-        }
+        IrExprKind::Record { fields, .. } => walk_expr_mut_fields(v, fields),
         IrExprKind::SpreadRecord { base, fields } => {
             v.visit_expr_mut(base);
-            for (_, val) in fields { v.visit_expr_mut(val); }
+            walk_expr_mut_fields(v, fields);
         }
         IrExprKind::MapLiteral { entries } => {
             for (k, val) in entries { v.visit_expr_mut(k); v.visit_expr_mut(val); }
@@ -124,11 +104,7 @@ pub fn walk_expr_mut<V: IrMutVisitor>(v: &mut V, expr: &mut IrExpr) {
         }
 
         // ── Strings ──
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let IrStringPart::Expr { expr } = p { v.visit_expr_mut(expr); }
-            }
-        }
+        IrExprKind::StringInterp { parts } => walk_expr_mut_string_interp(v, parts),
 
         // ── Wrappers (single child) ──
         IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
@@ -152,24 +128,74 @@ pub fn walk_expr_mut<V: IrMutVisitor>(v: &mut V, expr: &mut IrExpr) {
             for (_, a) in args { v.visit_expr_mut(a); }
         }
         IrExprKind::IterChain { source, steps, collector, .. } => {
-            v.visit_expr_mut(source);
-            for step in steps {
-                match step {
-                    IterStep::Map { lambda } | IterStep::Filter { lambda }
-                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
-                        v.visit_expr_mut(lambda);
-                    }
-                }
-            }
-            match collector {
-                IterCollector::Collect => {}
-                IterCollector::Fold { init, lambda } => { v.visit_expr_mut(init); v.visit_expr_mut(lambda); }
-                IterCollector::Any { lambda } | IterCollector::All { lambda }
-                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
-                    v.visit_expr_mut(lambda);
-                }
+            walk_expr_mut_iter_chain(v, source, steps, collector)
+        }
+    }
+}
+
+/// `Match` arm of [`walk_expr_mut`]: subject + per-arm pattern/guard/body.
+fn walk_expr_mut_match<V: IrMutVisitor>(v: &mut V, subject: &mut IrExpr, arms: &mut [IrMatchArm]) {
+    v.visit_expr_mut(subject);
+    for arm in arms {
+        v.visit_pattern_mut(&mut arm.pattern);
+        if let Some(g) = &mut arm.guard { v.visit_expr_mut(g); }
+        v.visit_expr_mut(&mut arm.body);
+    }
+}
+
+/// `Call`/`TailCall` arm of [`walk_expr_mut`]: resolve the call target, then args.
+fn walk_expr_mut_call<V: IrMutVisitor>(v: &mut V, target: &mut CallTarget, args: &mut [IrExpr]) {
+    match target {
+        CallTarget::Method { object, .. } => v.visit_expr_mut(object),
+        CallTarget::Computed { callee } => v.visit_expr_mut(callee),
+        _ => {}
+    }
+    for a in args { v.visit_expr_mut(a); }
+}
+
+/// `IterChain` arm of [`walk_expr_mut`]: source, then each step's lambda, then the collector.
+fn walk_expr_mut_iter_chain<V: IrMutVisitor>(
+    v: &mut V,
+    source: &mut IrExpr,
+    steps: &mut [IterStep],
+    collector: &mut IterCollector,
+) {
+    v.visit_expr_mut(source);
+    for step in steps {
+        match step {
+            IterStep::Map { lambda } | IterStep::Filter { lambda }
+            | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                v.visit_expr_mut(lambda);
             }
         }
+    }
+    match collector {
+        IterCollector::Collect => {}
+        IterCollector::Fold { init, lambda } => { v.visit_expr_mut(init); v.visit_expr_mut(lambda); }
+        IterCollector::Any { lambda } | IterCollector::All { lambda }
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+            v.visit_expr_mut(lambda);
+        }
+    }
+}
+
+/// `ForIn`/`While` arms of [`walk_expr_mut`]: both are "visit the
+/// loop-controlling expression (iterable / cond), then walk every body
+/// statement" — identical shape, so they share one helper.
+fn walk_expr_mut_loop_body<V: IrMutVisitor>(v: &mut V, lead: &mut IrExpr, body: &mut [IrStmt]) {
+    v.visit_expr_mut(lead);
+    for s in body { v.visit_stmt_mut(s); }
+}
+
+/// `Record`/`SpreadRecord` field-value loop shared by [`walk_expr_mut`].
+fn walk_expr_mut_fields<V: IrMutVisitor>(v: &mut V, fields: &mut [(Sym, IrExpr)]) {
+    for (_, val) in fields { v.visit_expr_mut(val); }
+}
+
+/// `StringInterp` arm of [`walk_expr_mut`]: visit each interpolated sub-expression.
+fn walk_expr_mut_string_interp<V: IrMutVisitor>(v: &mut V, parts: &mut [IrStringPart]) {
+    for p in parts {
+        if let IrStringPart::Expr { expr } = p { v.visit_expr_mut(expr); }
     }
 }
 
