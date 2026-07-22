@@ -369,26 +369,10 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
     }
 
     // Collect from all types AND expressions in the program
-    for func in &program.functions {
-        for p in &func.params { collect_anon_from_ty(&p.ty, &named_set, &mut seen); }
-        collect_anon_from_ty(&func.ret_ty, &named_set, &mut seen);
-        collect_anon_from_expr(&func.body, &named_set, &mut seen);
-    }
-    for tl in &program.top_lets {
-        collect_anon_from_ty(&tl.ty, &named_set, &mut seen);
-        collect_anon_from_expr(&tl.value, &named_set, &mut seen);
-    }
+    collect_anon_from_fns_and_lets(&program.functions, &program.top_lets, &named_set, &mut seen);
     // Also collect from module functions and top_lets
     for module in &program.modules {
-        for func in &module.functions {
-            for p in &func.params { collect_anon_from_ty(&p.ty, &named_set, &mut seen); }
-            collect_anon_from_ty(&func.ret_ty, &named_set, &mut seen);
-            collect_anon_from_expr(&func.body, &named_set, &mut seen);
-        }
-        for tl in &module.top_lets {
-            collect_anon_from_ty(&tl.ty, &named_set, &mut seen);
-            collect_anon_from_expr(&tl.value, &named_set, &mut seen);
-        }
+        collect_anon_from_fns_and_lets(&module.functions, &module.top_lets, &named_set, &mut seen);
     }
 
     let mut map = HashMap::new();
@@ -401,6 +385,22 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
     map
 }
 
+/// Shared body of `collect_anon_records`'s program-level and per-module
+/// loops, extracted (cog>30 decomposition, sequential-phase pattern — was
+/// duplicated verbatim once for `program.functions`/`program.top_lets` and
+/// once for each `module.functions`/`module.top_lets`).
+fn collect_anon_from_fns_and_lets(functions: &[IrFunction], top_lets: &[IrTopLet], named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    for func in functions {
+        for p in &func.params { collect_anon_from_ty(&p.ty, named, seen); }
+        collect_anon_from_ty(&func.ret_ty, named, seen);
+        collect_anon_from_expr(&func.body, named, seen);
+    }
+    for tl in top_lets {
+        collect_anon_from_ty(&tl.ty, named, seen);
+        collect_anon_from_expr(&tl.value, named, seen);
+    }
+}
+
 /// Descend a type declaration's field / variant-payload types, registering any
 /// anonymous record reachable only from the declaration (never constructed).
 fn collect_anon_from_type_decl(td: &IrTypeDecl, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
@@ -409,19 +409,23 @@ fn collect_anon_from_type_decl(td: &IrTypeDecl, named: &HashSet<Vec<String>>, se
             for f in fields { collect_anon_from_ty(&f.ty, named, seen); }
         }
         IrTypeDeclKind::Variant { cases, .. } => {
-            for c in cases {
-                match &c.kind {
-                    IrVariantKind::Unit => {}
-                    IrVariantKind::Tuple { fields } => {
-                        for t in fields { collect_anon_from_ty(t, named, seen); }
-                    }
-                    IrVariantKind::Record { fields } => {
-                        for f in fields { collect_anon_from_ty(&f.ty, named, seen); }
-                    }
-                }
-            }
+            for c in cases { collect_anon_from_variant_case(&c.kind, named, seen); }
         }
         _ => {}
+    }
+}
+
+/// `IrVariantKind` case of `collect_anon_from_type_decl`'s `Variant` arm,
+/// extracted verbatim (cog>30 decomposition).
+fn collect_anon_from_variant_case(kind: &IrVariantKind, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    match kind {
+        IrVariantKind::Unit => {}
+        IrVariantKind::Tuple { fields } => {
+            for t in fields { collect_anon_from_ty(t, named, seen); }
+        }
+        IrVariantKind::Record { fields } => {
+            for f in fields { collect_anon_from_ty(&f.ty, named, seen); }
+        }
     }
 }
 
