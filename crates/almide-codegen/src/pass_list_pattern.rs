@@ -177,17 +177,18 @@ fn lower_list_match(subject: IrExpr, arms: Vec<IrMatchArm>, result_ty: &Ty, _vt:
     build_list_if_chain(&subject, &arms, result_ty, _vt).kind
 }
 
-fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mut VarTable) -> IrExpr {
-    if arms.is_empty() {
-        return IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None, def_id: None };
-    }
-
-    let arm = &arms[0];
-    let rest = &arms[1..];
-
-    match &arm.pattern {
-        IrPattern::List { elements } => {
-            // Build condition: list.len(subject) == N
+/// `IrPattern::List` case of `build_list_if_chain`, extracted verbatim
+/// (cog>30 decomposition, pattern 2: uniform match arms, mirrors the
+/// `lower_expr`/`infer_expr_inner` extraction shape).
+fn build_list_if_chain_list_pattern(
+    subject: &IrExpr,
+    elements: &[IrPattern],
+    arm: &IrMatchArm,
+    rest: &[IrMatchArm],
+    result_ty: &Ty,
+    vt: &mut VarTable,
+) -> IrExpr {
+    // Build condition: list.len(subject) == N
             let len_call = IrExpr {
                 kind: IrExprKind::Call {
                     target: CallTarget::Module { module: sym("list"), func: sym("len"), def_id: None },
@@ -313,20 +314,29 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                 }
             };
 
-            let else_body = build_list_if_chain(subject, rest, result_ty, vt);
-            IrExpr {
-                kind: IrExprKind::If {
-                    cond: Box::new(combined_cond),
-                    then: Box::new(then_body),
-                    else_: Box::new(else_body),
-                },
-                ty: result_ty.clone(),
-                span: None, def_id: None,
-            }
-        }
-        // Tuple containing list patterns: extract list checks from tuple elements
-        IrPattern::Tuple { elements } if elements.iter().any(pattern_contains_list) => {
-            // Build conditions for list elements within the tuple
+    let else_body = build_list_if_chain(subject, rest, result_ty, vt);
+    IrExpr {
+        kind: IrExprKind::If {
+            cond: Box::new(combined_cond),
+            then: Box::new(then_body),
+            else_: Box::new(else_body),
+        },
+        ty: result_ty.clone(),
+        span: None, def_id: None,
+    }
+}
+
+/// `IrPattern::Tuple { .. }` (containing a list pattern) case of
+/// `build_list_if_chain`, extracted verbatim. Extract conditions for list
+/// elements within the tuple.
+fn build_list_if_chain_tuple_pattern(
+    subject: &IrExpr,
+    elements: &[IrPattern],
+    arm: &IrMatchArm,
+    rest: &[IrMatchArm],
+    result_ty: &Ty,
+    vt: &mut VarTable,
+) -> IrExpr {
             let tuple_tys = match &subject.ty {
                 Ty::Tuple(tys) => tys.clone(),
                 _ => vec![Ty::Unknown; elements.len()],
@@ -434,17 +444,31 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                 }
             };
 
-            let else_body = build_list_if_chain(subject, rest, result_ty, vt);
-            IrExpr {
-                kind: IrExprKind::If {
-                    cond: Box::new(combined_cond),
-                    then: Box::new(body),
-                    else_: Box::new(else_body),
-                },
-                ty: result_ty.clone(),
-                span: None, def_id: None,
-            }
-        }
+    let else_body = build_list_if_chain(subject, rest, result_ty, vt);
+    IrExpr {
+        kind: IrExprKind::If {
+            cond: Box::new(combined_cond),
+            then: Box::new(body),
+            else_: Box::new(else_body),
+        },
+        ty: result_ty.clone(),
+        span: None, def_id: None,
+    }
+}
+
+fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mut VarTable) -> IrExpr {
+    if arms.is_empty() {
+        return IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None, def_id: None };
+    }
+
+    let arm = &arms[0];
+    let rest = &arms[1..];
+
+    match &arm.pattern {
+        IrPattern::List { elements } => build_list_if_chain_list_pattern(subject, elements, arm, rest, result_ty, vt),
+        // Tuple containing list patterns: extract list checks from tuple elements
+        IrPattern::Tuple { elements } if elements.iter().any(pattern_contains_list) =>
+            build_list_if_chain_tuple_pattern(subject, elements, arm, rest, result_ty, vt),
         // Non-list patterns: re-wrap into a match with remaining arms
         IrPattern::Wildcard if arm.guard.is_none() => arm.body.clone(),
         IrPattern::Bind { var, .. } if arm.guard.is_none() => {
