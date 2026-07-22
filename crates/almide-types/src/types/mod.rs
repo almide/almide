@@ -213,9 +213,13 @@ impl Ty {
     /// Never/Unknown. Returns `None` for every variant that carries data and
     /// needs the full match in `display()`.
     fn display_leaf(&self) -> Option<&'static str> {
+        self.display_leaf_sized_numeric().or_else(|| self.display_leaf_core())
+    }
+
+    /// `display_leaf` sub-case: the sized integer/float family (Int8..UInt64,
+    /// Float32, Float64).
+    fn display_leaf_sized_numeric(&self) -> Option<&'static str> {
         Some(match self {
-            Ty::Int => "Int",
-            Ty::Float => "Float",
             Ty::Int8 => "Int8",
             Ty::Int16 => "Int16",
             Ty::Int32 => "Int32",
@@ -226,6 +230,16 @@ impl Ty {
             Ty::UInt64 => "UInt64",
             Ty::Float32 => "Float32",
             Ty::Float64 => "Float64",
+            _ => return None,
+        })
+    }
+
+    /// `display_leaf` sub-case: the remaining unit-like scalars (canonical
+    /// Int/Float, String, Bool, Unit, Bytes, Matrix, RawPtr, Never, Unknown).
+    fn display_leaf_core(&self) -> Option<&'static str> {
+        Some(match self {
+            Ty::Int => "Int",
+            Ty::Float => "Float",
             Ty::String => "String",
             Ty::Bool => "Bool",
             Ty::Unit => "Unit",
