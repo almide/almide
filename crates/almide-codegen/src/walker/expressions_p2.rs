@@ -144,118 +144,13 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
 }
 
 /// Render a generic call expression (Named, Method, or Computed target).
-fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr], result_ty: &almide_lang::types::Ty) -> String {
-    let callee = match target {
-        CallTarget::Named { name } => {
-            // Invariant: NormalizeRuntimeCallsPass collapses every
-            // `Named { "almide_rt_*" }` into `RuntimeCall { symbol }`.
-            // A `Named` target reaching the walker therefore must
-            // refer to a user-defined or external function — never
-            // a runtime helper. If this assertion fires, a generator
-            // produced a `Named { "almide_rt_*" }` after the
-            // normalize pass, or the pass was removed from the
-            // pipeline.
-            assert!(
-                !name.as_str().starts_with("almide_rt_"),
-                "walker received Named call with reserved runtime prefix: {} \
-                 (expected RuntimeCall — see pass_normalize_runtime_calls)",
-                name.as_str()
-            );
-            if let Some(mapped) = ctx.ann.ctor_to_enum.get(name.as_str()) {
-                // `name` is a variant constructor. The global `ctor_to_enum` map
-                // collapses a constructor name shared across packages to the
-                // last-registered enum (#413). When the construction's RESOLVED
-                // type (`.ty`, disambiguated by the type checker) names a DIFFERENT
-                // but valid enum, prefer it; otherwise keep the mapped enum (no
-                // change for the common, non-colliding case — and for non-variant
-                // ctors like newtypes where `.ty` isn't a known enum).
-                let enum_name = match result_ty {
-                    almide_lang::types::Ty::Named(n, _)
-                        if n.as_str() != mapped.as_str()
-                           && ctx.ann.ctor_to_enum.values().any(|e| e.as_str() == n.as_str())
-                        => n.to_string(),
-                    _ => mapped.clone(),
-                };
-                return render_enum_constructor(ctx, name, &enum_name, args);
-            }
-            // Convention methods: "Type.method" → "Type_method" (free functions in all targets)
-            if name.contains('.') {
-                name.replace('.', "_")
-            } else {
-                // A user fn named `box`/`move`/`dyn`/… is escaped at its
-                // definition; the call site must match or rustc rejects `box(…)`
-                // as a reserved keyword (#659).
-                super::escape_rust_ident(name.as_str(), ctx.templates)
-            }
-        }
-        CallTarget::Method { object, method } => {
-            if let Some(full) = render_method_call_full(ctx, object, method, args) {
-                return full;
-            }
-            // Val-wrapped var: mutating method calls need .make_mut()
-            if let IrExprKind::Var { id } = &object.kind {
-                if ctx.ann.is_rc_cow(id) {
-                    let is_mutating_method = matches!(method.as_str(),
-                        "push" | "pop" | "clear" | "extend" | "insert" | "remove"
-                        | "sort" | "sort_by" | "reverse" | "truncate" | "retain");
-                    if is_mutating_method {
-                        let var_name = ctx.var_name(*id).to_string();
-                        let args_str = args.iter().map(|a| render_expr(ctx, a))
-                            .collect::<Vec<_>>().join(", ");
-                        if args_str.is_empty() {
-                            return format!("{}.make_mut().{}()", var_name, method);
-                        } else {
-                            return format!("{}.make_mut().{}({})", var_name, method, args_str);
-                        }
-                    }
-                }
-            }
-            {
-                let obj_str = render_expr(ctx, object);
-                // Wrap in parens if the object expression needs it for method call precedence
-                let needs_parens = matches!(&object.kind,
-                    IrExprKind::UnOp { .. } | IrExprKind::BinOp { .. }
-                    | IrExprKind::If { .. } | IrExprKind::Match { .. }
-                ) || matches!(&object.kind, IrExprKind::LitFloat { value } if *value < 0.0)
-                  || matches!(&object.kind, IrExprKind::LitInt { value } if *value < 0);
-                if needs_parens {
-                    format!("({}).{}", obj_str, method)
-                } else {
-                    format!("{}.{}", obj_str, method)
-                }
-            }
-        }
-        CallTarget::Computed { callee } => {
-            // Pipe terminus case: `expr |> (lambda)` lowers to `(lambda)(expr)`.
-            // The lambda is the computed callee. Here — and ONLY here — we
-            // annotate the lambda's params so rustc can infer types.
-            // (Lambda elsewhere, e.g. as arg to `.filter(...)`, must stay
-            // unannotated because iterator adapters want `&T` not `T`.)
-            if let IrExprKind::Lambda { params, body, .. } = &callee.kind {
-                let params_str = params.iter()
-                    .map(|(id, ty)| {
-                        let name = ctx.var_name(*id).to_string();
-                        if ty.has_unresolved_deep() {
-                            name
-                        } else {
-                            let ty_str = super::types::render_type(ctx, ty);
-                            format!("{}: {}", name, ty_str)
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let body_str = render_expr(ctx, body);
-                format!("(move |{}| {})", params_str, body_str)
-            } else {
-                // Parenthesize ANY computed callee: a `Member` (h.run)("x"), a
-                // `??`/`match`/`if` that yields a closure — `match … {}(x)` is
-                // invalid Rust ("expected ;"), `(match … {})(x)` is correct — and a
-                // bare `(f)(x)` is harmless.
-                format!("({})", render_expr(ctx, callee))
-            }
-        }
-        CallTarget::Module { .. } => unreachable!(),
-    };
+/// Shared trailing step of every `render_generic_call` arm: given a
+/// fully-resolved callee expression string, render `callee(args...)` via
+/// the `call_expr` template. Extracted from `render_generic_call`'s
+/// post-match tail (cog>30 decomposition): each arm below now calls this
+/// itself instead of falling through to one shared tail, since several
+/// arms also need to bypass it entirely via an early `return`.
+fn render_call_expr(ctx: &RenderContext, callee: &str, args: &[IrExpr]) -> String {
     // A closure ARG is already `Rc<dyn Fn>`: the box-by-default pass boxed every
     // closure literal where it sits — including a Named user-HOF arg, whose param
     // is `Rc<dyn Fn>` under the uniform repr (top-level fns no longer take
@@ -263,8 +158,136 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
     // `{ let __cap; lambda }` arg (kind `Block`, not `RcWrap`) double-boxed it.
     let args_str = args.iter().map(|a| render_expr_owned(ctx, a))
         .collect::<Vec<_>>().join(", ");
-    ctx.templates.render_with("call_expr", None, &[], &[("callee", callee.as_str()), ("args", args_str.as_str())])
+    ctx.templates.render_with("call_expr", None, &[], &[("callee", callee), ("args", args_str.as_str())])
         .unwrap_or_else(|| format!("call(...)"))
+}
+
+/// `CallTarget::Named` case of `render_generic_call`, extracted verbatim
+/// (cog>30 decomposition, pattern 2: uniform match arms on `CallTarget`,
+/// mirrors the `lower_expr`/`infer_expr_inner` extraction shape).
+fn render_generic_call_named(ctx: &RenderContext, name: almide_base::intern::Sym, args: &[IrExpr], result_ty: &almide_lang::types::Ty) -> String {
+    // Invariant: NormalizeRuntimeCallsPass collapses every
+    // `Named { "almide_rt_*" }` into `RuntimeCall { symbol }`.
+    // A `Named` target reaching the walker therefore must
+    // refer to a user-defined or external function — never
+    // a runtime helper. If this assertion fires, a generator
+    // produced a `Named { "almide_rt_*" }` after the
+    // normalize pass, or the pass was removed from the
+    // pipeline.
+    assert!(
+        !name.as_str().starts_with("almide_rt_"),
+        "walker received Named call with reserved runtime prefix: {} \
+         (expected RuntimeCall — see pass_normalize_runtime_calls)",
+        name.as_str()
+    );
+    if let Some(mapped) = ctx.ann.ctor_to_enum.get(name.as_str()) {
+        // `name` is a variant constructor. The global `ctor_to_enum` map
+        // collapses a constructor name shared across packages to the
+        // last-registered enum (#413). When the construction's RESOLVED
+        // type (`.ty`, disambiguated by the type checker) names a DIFFERENT
+        // but valid enum, prefer it; otherwise keep the mapped enum (no
+        // change for the common, non-colliding case — and for non-variant
+        // ctors like newtypes where `.ty` isn't a known enum).
+        let enum_name = match result_ty {
+            almide_lang::types::Ty::Named(n, _)
+                if n.as_str() != mapped.as_str()
+                   && ctx.ann.ctor_to_enum.values().any(|e| e.as_str() == n.as_str())
+                => n.to_string(),
+            _ => mapped.clone(),
+        };
+        return render_enum_constructor(ctx, &name, &enum_name, args);
+    }
+    // Convention methods: "Type.method" → "Type_method" (free functions in all targets)
+    let callee = if name.contains('.') {
+        name.replace('.', "_")
+    } else {
+        // A user fn named `box`/`move`/`dyn`/… is escaped at its
+        // definition; the call site must match or rustc rejects `box(…)`
+        // as a reserved keyword (#659).
+        super::escape_rust_ident(name.as_str(), ctx.templates)
+    };
+    render_call_expr(ctx, &callee, args)
+}
+
+/// `CallTarget::Method` case of `render_generic_call`, extracted verbatim.
+fn render_generic_call_method(ctx: &RenderContext, object: &IrExpr, method: almide_base::intern::Sym, args: &[IrExpr]) -> String {
+    if let Some(full) = render_method_call_full(ctx, object, &method, args) {
+        return full;
+    }
+    // Val-wrapped var: mutating method calls need .make_mut()
+    if let IrExprKind::Var { id } = &object.kind {
+        if ctx.ann.is_rc_cow(id) {
+            let is_mutating_method = matches!(method.as_str(),
+                "push" | "pop" | "clear" | "extend" | "insert" | "remove"
+                | "sort" | "sort_by" | "reverse" | "truncate" | "retain");
+            if is_mutating_method {
+                let var_name = ctx.var_name(*id).to_string();
+                let args_str = args.iter().map(|a| render_expr(ctx, a))
+                    .collect::<Vec<_>>().join(", ");
+                if args_str.is_empty() {
+                    return format!("{}.make_mut().{}()", var_name, method);
+                } else {
+                    return format!("{}.make_mut().{}({})", var_name, method, args_str);
+                }
+            }
+        }
+    }
+    let callee = {
+        let obj_str = render_expr(ctx, object);
+        // Wrap in parens if the object expression needs it for method call precedence
+        let needs_parens = matches!(&object.kind,
+            IrExprKind::UnOp { .. } | IrExprKind::BinOp { .. }
+            | IrExprKind::If { .. } | IrExprKind::Match { .. }
+        ) || matches!(&object.kind, IrExprKind::LitFloat { value } if *value < 0.0)
+          || matches!(&object.kind, IrExprKind::LitInt { value } if *value < 0);
+        if needs_parens {
+            format!("({}).{}", obj_str, method)
+        } else {
+            format!("{}.{}", obj_str, method)
+        }
+    };
+    render_call_expr(ctx, &callee, args)
+}
+
+/// `CallTarget::Computed` case of `render_generic_call`, extracted verbatim.
+fn render_generic_call_computed(ctx: &RenderContext, callee_expr: &IrExpr, args: &[IrExpr]) -> String {
+    // Pipe terminus case: `expr |> (lambda)` lowers to `(lambda)(expr)`.
+    // The lambda is the computed callee. Here — and ONLY here — we
+    // annotate the lambda's params so rustc can infer types.
+    // (Lambda elsewhere, e.g. as arg to `.filter(...)`, must stay
+    // unannotated because iterator adapters want `&T` not `T`.)
+    let callee = if let IrExprKind::Lambda { params, body, .. } = &callee_expr.kind {
+        let params_str = params.iter()
+            .map(|(id, ty)| {
+                let name = ctx.var_name(*id).to_string();
+                if ty.has_unresolved_deep() {
+                    name
+                } else {
+                    let ty_str = super::types::render_type(ctx, ty);
+                    format!("{}: {}", name, ty_str)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let body_str = render_expr(ctx, body);
+        format!("(move |{}| {})", params_str, body_str)
+    } else {
+        // Parenthesize ANY computed callee: a `Member` (h.run)("x"), a
+        // `??`/`match`/`if` that yields a closure — `match … {}(x)` is
+        // invalid Rust ("expected ;"), `(match … {})(x)` is correct — and a
+        // bare `(f)(x)` is harmless.
+        format!("({})", render_expr(ctx, callee_expr))
+    };
+    render_call_expr(ctx, &callee, args)
+}
+
+fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr], result_ty: &almide_lang::types::Ty) -> String {
+    match target {
+        CallTarget::Named { name } => render_generic_call_named(ctx, *name, args, result_ty),
+        CallTarget::Method { object, method } => render_generic_call_method(ctx, object, *method, args),
+        CallTarget::Computed { callee } => render_generic_call_computed(ctx, callee, args),
+        CallTarget::Module { .. } => unreachable!(),
+    }
 }
 
 /// Render a method call as a full expression for UFCS and module.func patterns.
