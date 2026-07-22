@@ -640,68 +640,81 @@ pub fn merge_dst_i_credits(func: &MirFunction) -> usize {
         .count()
 }
 
-pub fn ownership_certificate(func: &MirFunction) -> String {
-    let (feeder_to_slot, slots, line_slots) = loop_carried_slots(func);
-    let mut depth: u32 = 0;
-    let mut s = Streams::new();
-
-    // A branch-MERGE dst (`Op::IfThen {{ dst }}`) that is later RELEASED — consumed
-    // by an OUTER frame (the nested monadic-`!` chain: the inner match's merged
-    // Result moves into the outer merge) or returned — RECEIVES the arm value each
-    // arm moved in (the arm's `m`). Record that move-in as the merge object's `i`
-    // so its later `m`/`d` balances ("im", the physical rc: the arm's −1 and the
-    // merge's +1 are the same reference changing hands). An UNUSED merge dst stays
-    // event-free exactly as before. Without this the chained-`!` witness read as a
-    // bare `m` and the proven checker REJECTED it (flight-evidence-gaps F8).
+/// Extracted from `ownership_certificate` (codopsy8 complexity sweep, pre-scan phase 1 of
+/// 2, verbatim — the original code already scoped this as its own `{ .. }` block): a
+/// branch-MERGE dst (`Op::IfThen { dst }`) that is later RELEASED — consumed by an OUTER
+/// frame (the nested monadic-`!` chain: the inner match's merged Result moves into the
+/// outer merge) or returned — RECEIVES the arm value each arm moved in (the arm's `m`).
+/// Record that move-in as the merge object's `i` so its later `m`/`d` balances ("im", the
+/// physical rc: the arm's −1 and the merge's +1 are the same reference changing hands). An
+/// UNUSED merge dst stays event-free exactly as before. Without this the chained-`!`
+/// witness read as a bare `m` and the proven checker REJECTED it (flight-evidence-gaps F8).
+fn ownership_certificate_released_merge_dsts(
+    func: &MirFunction,
+) -> std::collections::HashSet<crate::ValueId> {
     let mut released_merge_dsts: std::collections::HashSet<crate::ValueId> =
         std::collections::HashSet::new();
-    {
-        let mut merge_dsts: std::collections::HashSet<crate::ValueId> =
-            std::collections::HashSet::new();
-        for op in &func.ops {
-            match op {
-                Op::IfThen { dst: Some(d), .. } => {
-                    merge_dsts.insert(*d);
-                }
-                Op::Consume { v } | Op::Drop { v } | Op::DropListStr { v } => {
-                    if merge_dsts.contains(v) {
-                        released_merge_dsts.insert(*v);
-                    }
-                }
-                // An INNER merge flowing out as an OUTER arm value (`Else/EndIf {{ val }}`
-                // — the effect-TCO nested-if chain) is released the same way: the val-move
-                // rule below emits its `m`.
-                Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } => {
-                    if merge_dsts.contains(v) {
-                        released_merge_dsts.insert(*v);
-                    }
-                }
-                _ => {}
+    let mut merge_dsts: std::collections::HashSet<crate::ValueId> = std::collections::HashSet::new();
+    for op in &func.ops {
+        match op {
+            Op::IfThen { dst: Some(d), .. } => {
+                merge_dsts.insert(*d);
             }
-        }
-        if let Some(r) = func.ret {
-            if merge_dsts.contains(&r) {
-                released_merge_dsts.insert(r);
+            Op::Consume { v } | Op::Drop { v } | Op::DropListStr { v } => {
+                if merge_dsts.contains(v) {
+                    released_merge_dsts.insert(*v);
+                }
             }
+            // An INNER merge flowing out as an OUTER arm value (`Else/EndIf { val }`
+            // — the effect-TCO nested-if chain) is released the same way: the val-move
+            // rule below emits its `m`.
+            Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } => {
+                if merge_dsts.contains(v) {
+                    released_merge_dsts.insert(*v);
+                }
+            }
+            _ => {}
         }
     }
+    if let Some(r) = func.ret {
+        if merge_dsts.contains(&r) {
+            released_merge_dsts.insert(r);
+        }
+    }
+    released_merge_dsts
+}
 
-    // The set of values EXPLICITLY moved out by an `Op::Consume` — the arm-value move
-    // for the LitStr/Var/concat arms (`lower_heap_result_arm`). Such a value's `m` is
-    // ALREADY on its object's stream, so the `Else/EndIf {val}` val-move rule below must
-    // NOT emit a SECOND `m` for it. The per-object `balance > 0` guard alone cannot catch
-    // this when the value ALIASES a still-live scope local (`else base` — the Var arm
-    // Dups base, so the shared object keeps balance 1 after the Consume, and the val-move
-    // double-`m`'d it → the `iammd` REJECT). Only the val-move-ONLY style (the effect-TCO
-    // declared-Result tail-if, whose arms never Consume) should reach the rule.
-    let consumed_values: std::collections::HashSet<crate::ValueId> = func
-        .ops
+/// Extracted from `ownership_certificate` (codopsy8 complexity sweep, pre-scan phase 2 of
+/// 2, verbatim): the set of values EXPLICITLY moved out by an `Op::Consume` — the arm-value
+/// move for the LitStr/Var/concat arms (`lower_heap_result_arm`). Such a value's `m` is
+/// ALREADY on its object's stream, so the `Else/EndIf {val}` val-move rule in `CertScan::step`
+/// must NOT emit a SECOND `m` for it. The per-object `balance > 0` guard alone cannot catch
+/// this when the value ALIASES a still-live scope local (`else base` — the Var arm Dups
+/// base, so the shared object keeps balance 1 after the Consume, and the val-move
+/// double-`m`'d it → the `iammd` REJECT). Only the val-move-ONLY style (the effect-TCO
+/// declared-Result tail-if, whose arms never Consume) should reach the rule.
+fn ownership_certificate_consumed_values(func: &MirFunction) -> std::collections::HashSet<crate::ValueId> {
+    func.ops
         .iter()
         .filter_map(|op| match op {
             Op::Consume { v } => Some(*v),
             _ => None,
         })
-        .collect();
+        .collect()
+}
+
+pub fn ownership_certificate(func: &MirFunction) -> String {
+    // Sequential-phase split (codopsy8 complexity sweep): the two pre-scan sets below are
+    // each an independent, self-contained computation over `func.ops` (the original code
+    // already delineated the first as its own `{ .. }` scope) — extracted verbatim as their
+    // own named functions. `CertScan::step` (protected, unchanged) and the rest of the
+    // emission pipeline below are untouched.
+    let (feeder_to_slot, slots, line_slots) = loop_carried_slots(func);
+    let mut depth: u32 = 0;
+    let mut s = Streams::new();
+
+    let released_merge_dsts = ownership_certificate_released_merge_dsts(func);
+    let consumed_values = ownership_certificate_consumed_values(func);
 
     // Heap params are BORROWED (the v1 calling convention): the CALLER owns the
     // reference and releases it, so a param contributes NO `i` event — that `+1`
